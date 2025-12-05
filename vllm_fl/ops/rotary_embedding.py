@@ -3,7 +3,7 @@ import torch
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
 from flag_gems.modules.rotary_embedding import gems_rope_forward
 
-class FlagOSRotaryEmbedding(RotaryEmbedding):
+class RotaryEmbeddingFL(RotaryEmbedding):
     def __init__(
         self,
         head_size: int,
@@ -58,4 +58,4 @@ class FlagOSRotaryEmbedding(RotaryEmbedding):
 
         return query, key
     
-__all__ = ["FlagOSRotaryEmbedding"]
+__all__ = ["RotaryEmbeddingFL"]

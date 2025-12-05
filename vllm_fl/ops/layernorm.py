@@ -3,7 +3,7 @@ import torch
 from vllm.model_executor.layers.layernorm import RMSNorm
 from flag_gems.modules.normalization import gems_rms_forward
 
-class FlagOSRMSNorm(RMSNorm):
+class RMSNormFL(RMSNorm):
     def __init__(self,
         hidden_size: int,
         eps: float = 1e-6,
@@ -20,5 +20,5 @@ class FlagOSRMSNorm(RMSNorm):
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         return gems_rms_forward(x, residual, self.weight, self.variance_epsilon)
     
-__all__ = ["FlagOSRMSNorm"]
+__all__ = ["RMSNormFL"]
         

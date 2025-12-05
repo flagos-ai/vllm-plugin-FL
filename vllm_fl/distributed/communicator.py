@@ -4,9 +4,9 @@ import torch.distributed as dist
 from torch.distributed import ProcessGroup, ReduceOp
 from vllm.distributed.device_communicators.base_device_communicator import \
     DeviceCommunicatorBase
-from vllm_flagos.distributed.device_communicators.flagcx import PyFlagcxCommunicator
+from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 
-class FlagOSCommunicator(DeviceCommunicatorBase):
+class CommunicatorFL(DeviceCommunicatorBase):
     def __init__(
         self,
         cpu_group: ProcessGroup,

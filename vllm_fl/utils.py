@@ -4,7 +4,7 @@ from flag_gems.runtime import backend
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.support_device = ["nvidia", "ascend"]
+        self.supported_device = ["nvidia", "ascend"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
@@ -29,8 +29,8 @@ class DeviceInfo:
         # torch_backend_device is like 'torch.backend.cuda' object
         return backend.get_torch_backend_device_fn()
     
-    def get_support_device(self):
-        if self.vendor_name in self.support_device:
+    def get_supported_device(self):
+        if self.vendor_name in self.supported_device:
             raise NotImplementedError(f"{self.vendor_name} is not support now!")
         return True
 

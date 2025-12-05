@@ -46,13 +46,13 @@ def get_requirements() -> List[str]:
 
 
 setup(
-    name='vllm_flagos',
+    name='vllm_fl',
     # Follow:
     # https://packaging.python.org/en/latest/specifications/version-specifiers
     version=VERSION,
-    author="vLLM-FlagOS team",
+    author="vLLM-FL team",
     license="Apache 2.0",
-    description=("vLLM FlagOS backend plugin"),
+    description=("vLLM FL backend plugin"),
     # long_description=read_readme(),
     long_description_content_type="text/markdown",
     url="https://github.com/flagos-ai/vllm-plugin-FL",
@@ -75,6 +75,6 @@ setup(
     python_requires=">=3.9",
     install_requires=get_requirements(),
     extras_require={},
-    entry_points={'vllm.platform_plugins': ["flagos = vllm_flagos:register"]}
+    entry_points={'vllm.platform_plugins': ["fl = vllm_fl:register"]}
 )
 

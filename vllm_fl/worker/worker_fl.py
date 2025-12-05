@@ -37,13 +37,13 @@ if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.core.sched.output import SchedulerOutput
 
-from vllm_flagos.worker.flagos_model_runner import FlagOSModelRunner
-from vllm_flagos.ops.custom_ops import register_oot_ops
+from vllm_fl.worker.model_runner_fl import ModelRunnerFL
+from vllm_fl.ops.custom_ops import register_oot_ops
 
 import flag_gems
 
 
-class FlagOSWorker(WorkerBase):
+class WorkerFL(WorkerBase):
 
     def __init__(
         self,
@@ -197,7 +197,7 @@ class FlagOSWorker(WorkerBase):
             )
 
         # Construct the model runner
-        self.model_runner: FlagOSModelRunner = FlagOSModelRunner(
+        self.model_runner = ModelRunnerFL(
             self.vllm_config, self.device)
 
         if self.rank == 0:
@@ -403,7 +403,6 @@ class FlagOSWorker(WorkerBase):
         if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
             return output
 
-        # print(f"========== lms debug: {output=}")
         assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
         assert parallel_config.distributed_executor_backend != (

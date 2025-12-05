@@ -116,8 +116,8 @@ if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.core.sched.output import SchedulerOutput
 
-from vllm_flagos.compilation.graph import GraphWrapper
-from vllm_flagos.attention.attention import AttentionMetadata
+from vllm_fl.compilation.graph import GraphWrapper
+from vllm_fl.attention.attention import AttentionMetadata
 
 
 logger = init_logger(__name__)
@@ -206,7 +206,7 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
         return output
 
 
-class FlagOSModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+class ModelRunnerFL(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def __init__(
         self,

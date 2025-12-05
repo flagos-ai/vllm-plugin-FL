@@ -19,18 +19,18 @@ from flag_gems import flash_attn_varlen_func, flash_mla
 logger = init_logger(__name__)
 
 
-class FlagOSMLABackend(MLACommonBackend):
+class MLAFLBackend(MLACommonBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "FlagOSMLA"
+        return "MLAFL"
 
     @staticmethod
-    def get_impl_cls() -> type["FlagOSMLAImpl"]:
-        return FlagOSMLAImpl
+    def get_impl_cls() -> type["MLAFLImpl"]:
+        return MLAFLImpl
 
 
-class FlagOSMLAImpl(MLACommonImpl[MLACommonMetadata]):
+class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
     can_return_lse_for_decode: bool = True
 
     def __init__(
@@ -111,7 +111,7 @@ class FlagOSMLAImpl(MLACommonImpl[MLACommonMetadata]):
         assert attn_metadata.decode is not None
 
         if self.kv_cache_dtype.startswith("fp8"):
-            raise NotImplementedError("FP8 FlagOS MLA not yet supported")
+            raise NotImplementedError("FP8 MLA FL not yet supported")
 
         head_dim_v = 0
         if type(q) is tuple:

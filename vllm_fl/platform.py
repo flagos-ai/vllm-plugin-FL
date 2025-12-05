@@ -16,11 +16,11 @@ if TYPE_CHECKING:
 else:
     _Backend = None
 
-from vllm_flagos.utils import DeviceInfo
+from vllm_fl.utils import DeviceInfo
 
 logger = init_logger(__name__)
 
-class FlagOSPlatform(Platform):
+class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
     device_name = device_info.device_type 
@@ -96,7 +96,7 @@ class FlagOSPlatform(Platform):
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
-        parallel_config.worker_cls = "vllm_flagos.worker.flagos_worker.FlagOSWorker"
+        parallel_config.worker_cls = "vllm_fl.worker.worker_fl.WorkerFL"
 
         cache_config = vllm_config.cache_config
         if cache_config and cache_config.block_size is None:
@@ -208,30 +208,30 @@ class FlagOSPlatform(Platform):
         if use_mla:
             ### TODO(lms): support mla
             raise NotImplementedError
-            # logger.info_once("Using FlagOS MLA Attention backend.")
+            # logger.info_once("Using FL MLA Attention backend.")
             # return (
-            #         "vllm_flagos.attention.backends.mla.flagos_mla.FlagOSMLABackend"
+            #         "vllm_fl.attention.backends.mla.MLAFLBackend"
             #     )
         else:
-            logger.info_once("Using FlagOS Attention backend.")
+            logger.info_once("Using FL Attention backend.")
             return (
-                    "vllm_flagos.attention.attention.FlagOSAttentionBackend"
+                    "vllm_fl.attention.attention.AttentionFLBackend"
                 )
 
     @classmethod
     def get_punica_wrapper(cls) -> str:
-        # TODO(lms): support flagos PunicaWrapper
+        # TODO(lms): support fl PunicaWrapper
         return "vllm.lora.punica_wrapper.punica_gpu.PunicaWrapperGPU"
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         return (
-            "vllm_flagos.distributed.communicator.FlagOSCommunicator"  # noqa
+            "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         )
 
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
-        return "vllm_flagos.compilation.graph.GraphWrapper"
+        return "vllm_fl.compilation.graph.GraphWrapper"
     
     @classmethod
     def support_static_graph_mode(cls) -> bool:

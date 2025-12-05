@@ -24,7 +24,7 @@ from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
 logger = init_logger(__name__)
 
 
-class FlagOSAttentionBackend(AttentionBackend):
+class AttentionFLBackend(AttentionBackend):
     accept_output_buffer: bool = True
     supports_quant_query_input: bool = True
 
@@ -49,19 +49,19 @@ class FlagOSAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "FLAGOS"
+        return "FL"
 
     @staticmethod
-    def get_impl_cls() -> type["FlagOSAttentionImpl"]:
-        return FlagOSAttentionImpl
+    def get_impl_cls() -> type["AttentionFLImpl"]:
+        return AttentionFLImpl
 
     @staticmethod
     def get_metadata_cls() -> type["AttentionMetadata"]:
-        return FlagOSAttentionMetadata
+        return AttentionFLMetadata
 
     @staticmethod
-    def get_builder_cls() -> type["FlagOSAttentionMetadataBuilder"]:
-        return FlagOSAttentionMetadataBuilder
+    def get_builder_cls() -> type["AttentionFLMetadataBuilder"]:
+        return AttentionFLMetadataBuilder
 
     @staticmethod
     def get_kv_cache_shape(
@@ -91,7 +91,7 @@ class FlagOSAttentionBackend(AttentionBackend):
     ### TODO(lms): support int8/int4 kv cache
 
 @dataclass
-class FlagOSAttentionMetadata:
+class AttentionFLMetadata:
     # NOTE(sang): Definition of context_len, query_len, and seq_len.
     # |---------- N-1 iteration --------|
     # |---------------- N iteration ---------------------|
@@ -130,13 +130,13 @@ def _get_sliding_window_configs(
     sliding_window_configs: set[tuple[int, int] | None] = set()
     layers = get_layers_from_vllm_config(vllm_config, Attention)
     for layer in layers.values():
-        assert isinstance(layer.impl, FlagOSAttentionImpl)
+        assert isinstance(layer.impl, AttentionFLImpl)
         sliding_window_configs.add(layer.impl.sliding_window)
     return sliding_window_configs
 
 
 ### TODO(lms): only support FA2 now
-class FlagOSAttentionMetadataBuilder(AttentionMetadataBuilder[FlagOSAttentionMetadata]):
+class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
     # FA3:
     # Supports full cudagraphs for all cases.
     #
@@ -213,7 +213,7 @@ class FlagOSAttentionMetadataBuilder(AttentionMetadataBuilder[FlagOSAttentionMet
         common_prefix_len: int,
         common_attn_metadata: CommonAttentionMetadata,
         fast_build: bool = False,
-    ) -> FlagOSAttentionMetadata:
+    ) -> AttentionFLMetadata:
         """
         fast_build disables AOT scheduling, used when there will be few
         iterations i.e. spec-decode
@@ -307,7 +307,7 @@ class FlagOSAttentionMetadataBuilder(AttentionMetadataBuilder[FlagOSAttentionMet
             self.scheduler_metadata[n:] = 0
             scheduler_metadata = self.scheduler_metadata[:n]
 
-        attn_metadata = FlagOSAttentionMetadata(
+        attn_metadata = AttentionFLMetadata(
             num_actual_tokens=num_actual_tokens,
             max_query_len=max_query_len,
             query_start_loc=query_start_loc,
@@ -331,7 +331,7 @@ class FlagOSAttentionMetadataBuilder(AttentionMetadataBuilder[FlagOSAttentionMet
         return use_cascade_attention(*args, **kwargs)
 
 
-class FlagOSAttentionImpl(AttentionImpl):
+class AttentionFLImpl(AttentionImpl):
     can_return_lse_for_decode: bool = True
 
     def __init__(
@@ -370,7 +370,7 @@ class FlagOSAttentionImpl(AttentionImpl):
 
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
-        FlagOSAttentionBackend.validate_head_size(head_size)
+        AttentionFLBackend.validate_head_size(head_size)
 
         self.attn_type = attn_type
         self.vllm_flash_attn_version = 2 #get_flash_attn_version()
@@ -378,7 +378,7 @@ class FlagOSAttentionImpl(AttentionImpl):
 
         if is_quantized_kv_cache(self.kv_cache_dtype):
             raise NotImplementedError(
-                "FlagOSAttention does not support quantization kv-cache on this device."
+                "AttentionFL does not support quantization kv-cache on this device."
             )
 
         self.sinks = None
@@ -394,12 +394,12 @@ class FlagOSAttentionImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: torch.Tensor,
-        attn_metadata: FlagOSAttentionMetadata,
+        attn_metadata: AttentionFLMetadata,
         output: torch.Tensor | None = None,
         output_scale: torch.Tensor | None = None,
         output_block_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Forward pass with FlagOSAttention.
+        """Forward pass with AttentionFL.
 
         Args:
             query: shape = [num_tokens, num_heads, head_size]
@@ -548,7 +548,7 @@ class FlagOSAttentionImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         output: torch.Tensor,
-        attn_metadata: FlagOSAttentionMetadata,
+        attn_metadata: AttentionFLMetadata,
         layer: torch.nn.Module,
     ) -> torch.Tensor:
         """Forward pass for encoder attention without KV cache.

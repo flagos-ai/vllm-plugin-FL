@@ -1,7 +1,7 @@
 def register():
-    """Register the FlagOS platform."""
+    """Register the FL platform."""
 
-    return "vllm_flagos.platform.FlagOSPlatform"
+    return "vllm_fl.platform.PlatformFL"
 
 
 # def register_connector():

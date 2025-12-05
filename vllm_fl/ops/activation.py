@@ -2,7 +2,7 @@ import torch
 from vllm.model_executor.layers.activation import SiluAndMul
 from flag_gems.modules.activation import gems_silu_and_mul
 
-class FlagOSSiluAndMul(SiluAndMul):
+class SiluAndMulFL(SiluAndMul):
     def __init__(self):
         super().__init__()
 
@@ -12,4 +12,4 @@ class FlagOSSiluAndMul(SiluAndMul):
         return gems_silu_and_mul(x1, x2)
     
 
-__all__ = ["FlagOSSiluAndMul"]
+__all__ = ["SiluAndMulFL"]
