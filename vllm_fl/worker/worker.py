@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.core.sched.output import SchedulerOutput
 
-from vllm_fl.worker.model_runner_fl import ModelRunnerFL
+from vllm_fl.worker.model_runner import ModelRunnerFL
 from vllm_fl.ops.custom_ops import register_oot_ops
 
 import flag_gems
