@@ -113,56 +113,11 @@ class PlatformFL(Platform):
             and model_config.use_mla
             and cache_config.block_size is not None
         ):
-            use_sparse = hasattr(vllm_config.model_config.hf_config, "index_topk")
-            # If `VLLM_ATTENTION_BACKEND` is not set and we are using MLA,
-            # then we default to FlashMLA backend for non-blackwell GPUs,
-            # else we default to CutlassMLA. For each case, we force the
-            # required block_size.
-            use_flashmla = False
-            use_cutlass_mla = False
-            use_flashinfer_mla = False
-
-            if envs.VLLM_ATTENTION_BACKEND is None:
-                # Default case
-                use_flashmla = True
-            else:
-                # Forced case
-                use_flashmla = envs.VLLM_ATTENTION_BACKEND == "FLASHMLA"
-                use_cutlass_mla = envs.VLLM_ATTENTION_BACKEND == "CUTLASS_MLA"
-                use_flashinfer_mla = envs.VLLM_ATTENTION_BACKEND == "FLASHINFER_MLA"
-
-            from vllm.attention.ops.flashmla import is_flashmla_dense_supported
-
-            if (
-                use_flashmla
-                and is_flashmla_dense_supported()[0]
-                and cache_config.block_size % 64 != 0
-            ):
+            if cache_config.block_size % 64 != 0:
                 cache_config.block_size = 64
-                logger.info("Forcing kv cache block size to 64 for FlashMLA backend.")
+                logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
 
-            if use_cutlass_mla and cache_config.block_size % 128 != 0:
-                cache_config.block_size = 128
-                logger.info(
-                    "Forcing kv cache block size to 128 for CUTLASS_MLA backend."
-                )
 
-            if (
-                use_flashinfer_mla
-                and cache_config.block_size != 32
-                and cache_config.block_size % 64 != 0
-            ):
-                cache_config.block_size = 64
-                logger.info(
-                    "Forcing kv cache block size to 64 for FlashInferMLA backend."
-                )
-
-            # TODO(Chen): remove this hacky code
-            if use_sparse and cache_config.block_size != 64:
-                cache_config.block_size = 64
-                logger.info(
-                    "Forcing kv cache block size to 64 for FlashMLASparse backend."
-                )
         # lazy import to avoid circular import
         from vllm.config import CUDAGraphMode
 

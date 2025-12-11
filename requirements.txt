@@ -3,4 +3,7 @@ pyyaml
 scipy
 setuptools
 setuptools-scm
-flagcx==0.3.0
+scikit-build-core==0.11
+pybind11 
+ninja 
+cmake
