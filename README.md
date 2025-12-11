@@ -2,17 +2,19 @@
 A vLLM plugin built on the FlagOS unified multi-chip backend.
 
 ## Quick Start
-vllm-plugin-fl based on FlagGems and FlagCX.
+vllm-plugin-fl based on FlagGems and FlagCX. This repo develop based on https://github.com/flagos-ai/vllm-FL in tag v0.11.0.
 
 
 ### Setup
 
 1. Clone the repository:
+
     ```sh
     git clone https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
 2. install FlagGems
+
     2.1 Install Build Dependencies
 
     ```sh
@@ -30,6 +32,7 @@ vllm-plugin-fl based on FlagGems and FlagCX.
     ```
 
 3. install FlagCX
+
     3.1 Clone the repository:
     ```sh
     git clone https://github.com/flagos-ai/FlagCX
@@ -48,6 +51,7 @@ vllm-plugin-fl based on FlagGems and FlagCX.
     ```
 
 4. install vllm-plugin-fl
+
 ```sh
 pip install --no-build-isolation -e .
 ```
