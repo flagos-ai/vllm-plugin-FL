@@ -2,10 +2,12 @@
 A vLLM plugin built on the FlagOS unified multi-chip backend.
 
 ## Quick Start
-vllm-plugin-fl based on FlagGems and FlagCX. This repo develop based on https://github.com/flagos-ai/vllm-FL in tag v0.11.0.
+vllm-plugin-fl based on FlagGems and FlagCX. 
 
 
 ### Setup
+
+0. Install vllm from the official v0.11.0 (optional if the correct version is installed) or from the fork vllm-FL(https://github.com/flagos-ai/vllm-FL).
 
 1. Clone the repository:
 
