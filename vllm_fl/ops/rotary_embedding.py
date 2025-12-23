@@ -1,7 +1,9 @@
 from typing import Optional, Union
+
 import torch
-from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
 from flag_gems.modules.rotary_embedding import gems_rope_forward
+from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
+
 
 class RotaryEmbeddingFL(RotaryEmbedding):
     def __init__(
@@ -13,9 +15,10 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         is_neox_style: bool,
         dtype: torch.dtype,
     ) -> None:
-        super().__init__(head_size, rotary_dim, max_position_embeddings, base,
-                         is_neox_style, dtype)
-        
+        super().__init__(
+            head_size, rotary_dim, max_position_embeddings, base, is_neox_style, dtype
+        )
+
     def forward_oot(
         self,
         positions: torch.Tensor,
@@ -57,5 +60,6 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             key = k_embed.reshape(key_shape)
 
         return query, key
-    
+
+
 __all__ = ["RotaryEmbeddingFL"]

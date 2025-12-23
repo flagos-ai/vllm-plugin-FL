@@ -71,4 +71,3 @@ class TestPlatformFLCUDA:
         assert PlatformFL.support_static_graph_mode() is True
         assert PlatformFL.support_hybrid_kv_cache() is False
         assert PlatformFL.opaque_attention_op() is True
-

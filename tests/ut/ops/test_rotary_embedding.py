@@ -1,9 +1,10 @@
-import torch
-import pytest
 from typing import Optional
 
-from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
+import pytest
+import torch
 from flag_gems.modules.rotary_embedding import gems_rope_forward
+from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
+
 
 class RotaryEmbeddingFL(RotaryEmbedding):
     def __init__(
@@ -15,9 +16,10 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         is_neox_style: bool,
         dtype: torch.dtype,
     ) -> None:
-        super().__init__(head_size, rotary_dim, max_position_embeddings, base,
-                         is_neox_style, dtype)
-        
+        super().__init__(
+            head_size, rotary_dim, max_position_embeddings, base, is_neox_style, dtype
+        )
+
     def forward_oot(
         self,
         positions: torch.Tensor,
@@ -40,7 +42,7 @@ class RotaryEmbeddingFL(RotaryEmbedding):
 
         query_rot = query[..., : self.rotary_dim]
         key_rot = key[..., : self.rotary_dim]
-        
+
         if self.rotary_dim < self.head_size:
             query_pass = query[..., self.rotary_dim :]
             key_pass = key[..., self.rotary_dim :]
@@ -66,9 +68,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
 
         return query, key
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="Rotary Embedding test requires CUDA")
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="Rotary Embedding test requires CUDA"
+)
 class TestRotaryEmbeddingFL:
-    
+
     @pytest.fixture(autouse=True)
     def setup_seed(self):
         torch.manual_seed(42)
@@ -93,19 +98,27 @@ class TestRotaryEmbeddingFL:
             max_position_embeddings=max_position_embeddings,
             base=base,
             is_neox_style=is_neox_style,
-            dtype=dtype
+            dtype=dtype,
         ).to(device)
 
         num_tokens = batch_size * seq_len
-        positions = torch.randint(0, max_position_embeddings, (num_tokens,), device=device)
-        q_input = torch.randn(num_tokens, num_heads * head_size, device=device, dtype=dtype)
-        k_input = torch.randn(num_tokens, num_heads * head_size, device=device, dtype=dtype)
+        positions = torch.randint(
+            0, max_position_embeddings, (num_tokens,), device=device
+        )
+        q_input = torch.randn(
+            num_tokens, num_heads * head_size, device=device, dtype=dtype
+        )
+        k_input = torch.randn(
+            num_tokens, num_heads * head_size, device=device, dtype=dtype
+        )
 
         q_ref, k_ref = q_input.clone(), k_input.clone()
         q_dut, k_dut = q_input.clone(), k_input.clone()
 
         with torch.no_grad():
-            q_out_ref, k_out_ref = super(RotaryEmbeddingFL, model).forward(positions, q_ref, k_ref)
+            q_out_ref, k_out_ref = super(RotaryEmbeddingFL, model).forward(
+                positions, q_ref, k_ref
+            )
 
         with torch.no_grad():
             q_out_dut, k_out_dut = model.forward_oot(positions, q_dut, k_dut)
@@ -132,9 +145,10 @@ class TestRotaryEmbeddingFL:
             print(f"Key rotary mismatch! max_diff={max_diff}, mean_diff={mean_diff}")
             assert False, f"Key rotary output mismatch"
 
-        print(f"PASS: dtype={dtype}, neox={is_neox_style}, rotary_dim={rotary_dim}/{head_size}")
+        print(
+            f"PASS: dtype={dtype}, neox={is_neox_style}, rotary_dim={rotary_dim}/{head_size}"
+        )
 
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
-

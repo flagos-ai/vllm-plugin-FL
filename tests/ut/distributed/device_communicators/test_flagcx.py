@@ -1,12 +1,11 @@
+import ctypes
 import sys
 import types
-import ctypes
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 from torch.distributed import ReduceOp
-
 from vllm.distributed.utils import StatelessProcessGroup
 
 fake_wrapper = types.ModuleType("plugin.interservice.flagcx_wrapper")
@@ -18,9 +17,7 @@ class FakeUniqueId(ctypes.Structure):
 
 class FakeFLAGCXLibrary:
     def __init__(self, *args, **kwargs):
-        self.flagcxGetUniqueId = MagicMock(
-            return_value=ctypes.pointer(FakeUniqueId())
-        )
+        self.flagcxGetUniqueId = MagicMock(return_value=ctypes.pointer(FakeUniqueId()))
         self.flagcxCommInitRank = MagicMock(return_value="fake_comm")
 
         # collectives
@@ -83,9 +80,7 @@ def group():
 
 @pytest.fixture
 def communicator(group, device):
-    from vllm_fl.distributed.device_communicators.flagcx import (
-        PyFlagcxCommunicator,
-    )
+    from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 
     return PyFlagcxCommunicator(
         group=group,
@@ -93,10 +88,9 @@ def communicator(group, device):
         library_path="dummy.so",
     )
 
+
 def test_world_size_one_disables(device):
-    from vllm_fl.distributed.device_communicators.flagcx import (
-        PyFlagcxCommunicator,
-    )
+    from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 
     group = DummyStatelessProcessGroup(rank=0, world_size=1)
     comm = PyFlagcxCommunicator(group=group, device=device)
@@ -109,7 +103,6 @@ def test_init(communicator):
     assert communicator.available
     assert communicator.comm == "fake_comm"
     communicator.flagcx.flagcxCommInitRank.assert_called_once()
-
 
     y = communicator.all_reduce(x, op=ReduceOp.SUM)
 
@@ -192,4 +185,3 @@ def test_device_mismatch_raises(communicator):
 
     with pytest.raises(AssertionError):
         communicator.all_reduce(cpu_tensor)
-

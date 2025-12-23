@@ -1,0 +1,89 @@
+name: UT & E2E (Label Driven)
+
+on:
+  pull_request:
+    branches: ["test_ut"]
+    types: [opened, synchronize, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run pre-commit
+        run: |
+          pre-commit run --all-files
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ut_changed: ${{ steps.filter.outputs.ut }}
+      e2e_changed: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ut:
+              - 'vllm_fl/**'
+              - 'tests/ut/**'
+              - 'setup.py'
+              - 'requirements.txt'
+            e2e:
+              - 'tests/e2e/**'
+              - 'examples/**'
+              - 'vllm_fl/**'
+
+  ut:
+    name: Unit Tests
+    needs: [lint, changes]
+    if: |
+      needs.lint.result == 'success' &&
+      needs.changes.outputs.ut_changed == 'true' &&
+      contains(github.event.pull_request.labels.*.name, 'ut')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run UT (docker)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            localhost:5000/vllm-plugin-fl:ci \
+            pytest tests/ut
+
+  e2e:
+    name: E2E Tests
+    needs: [lint, changes]
+    if: |
+      needs.lint.result == 'success' &&
+      needs.changes.outputs.e2e_changed == 'true' &&
+      contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run E2E (docker)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -v /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
+            -w /workspace \
+            localhost:5000/vllm-plugin-fl:ci \
+            pytest tests/e2e
+

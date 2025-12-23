@@ -2,14 +2,15 @@ import os
 
 import pytest
 import vllm  # noqa: F401
-from conftest import VllmRunner
 import vllm_flagos
+from conftest import VllmRunner
 
 MODELS = [
     # "Qwen/Qwen3-0.6B",
     "/share/project/lms/Qwen3-4B",
 ]
 os.environ["VLLM_USE_MODELSCOPE"] = "True"
+
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["bfloat16"])
@@ -21,14 +22,18 @@ def test_models(
     max_tokens: int,
     enforce_eager: bool,
 ) -> None:
-    prompt = "The following numbers of the sequence " + ", ".join(
-        str(i) for i in range(1024)) + " are:"
+    prompt = (
+        "The following numbers of the sequence "
+        + ", ".join(str(i) for i in range(1024))
+        + " are:"
+    )
     example_prompts = [prompt]
 
-    with VllmRunner(model,
-                    max_model_len=8192,
-                    dtype=dtype,
-                    enforce_eager=enforce_eager,
-                    gpu_memory_utilization=0.7) as vllm_model:
+    with VllmRunner(
+        model,
+        max_model_len=8192,
+        dtype=dtype,
+        enforce_eager=enforce_eager,
+        gpu_memory_utilization=0.7,
+    ) as vllm_model:
         vllm_model.generate_greedy(example_prompts, max_tokens)
-

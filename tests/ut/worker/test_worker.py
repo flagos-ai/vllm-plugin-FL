@@ -1,6 +1,7 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
 import torch
-from unittest.mock import MagicMock, patch
 
 pytestmark = pytest.mark.cuda
 
@@ -55,17 +56,15 @@ def mock_model_runner():
 
 @pytest.fixture
 def worker_fl(cuda_available, fake_vllm_config, mock_model_runner):
-    with patch(
-        "vllm_fl.worker.worker.init_worker_distributed_environment"
-    ), patch(
-        "vllm_fl.worker.worker.ModelRunnerFL",
-        return_value=mock_model_runner,
-    ), patch(
-        "vllm_fl.worker.worker.register_oot_ops"
-    ), patch(
-        "vllm_fl.worker.worker.flag_gems.enable"
-    ), patch(
-        "vllm_fl.worker.worker.report_usage_stats"
+    with (
+        patch("vllm_fl.worker.worker.init_worker_distributed_environment"),
+        patch(
+            "vllm_fl.worker.worker.ModelRunnerFL",
+            return_value=mock_model_runner,
+        ),
+        patch("vllm_fl.worker.worker.register_oot_ops"),
+        patch("vllm_fl.worker.worker.flag_gems.enable"),
+        patch("vllm_fl.worker.worker.report_usage_stats"),
     ):
         from vllm_fl.worker.worker import WorkerFL
 
@@ -112,4 +111,3 @@ def test_supported_tasks(worker_fl):
 def test_shutdown(worker_fl):
     worker_fl.shutdown()
     worker_fl.model_runner.ensure_kv_transfer_shutdown.assert_called_once()
-

@@ -1,9 +1,11 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
 import torch
-from unittest.mock import patch, MagicMock
+from vllm.attention.backends.abstract import AttentionType
 
 from vllm_fl.attention.mla import MLAFLBackend, MLAFLImpl
-from vllm.attention.backends.abstract import AttentionType
+
 
 @pytest.fixture
 def dummy_qkv():
@@ -14,6 +16,7 @@ def dummy_qkv():
     v = torch.randn(B, H, N, D, device=device)
     kv_cache = torch.randn(B, N, D, device=device)
     return q, v, kv_cache
+
 
 @pytest.fixture
 def dummy_metadata():
@@ -26,13 +29,16 @@ def dummy_metadata():
     metadata.decode = DummyDecode()
     return metadata
 
+
 def test_backend_name():
     backend_name = MLAFLBackend.get_name()
     assert backend_name == "MLAFL"
 
+
 def test_impl_cls():
     impl_cls = MLAFLBackend.get_impl_cls()
     assert impl_cls == MLAFLImpl
+
 
 def test_flash_attn_varlen_diff_headdims(dummy_qkv):
     q, v, _ = dummy_qkv
@@ -49,6 +55,7 @@ def test_flash_attn_varlen_diff_headdims(dummy_qkv):
     assert out.shape[0] == q.shape[0]
     assert out.shape[1] == q.shape[1]
     assert out.device.type == "cuda"
+
 
 def test_forward_decode(dummy_qkv, dummy_metadata):
     q, _, kv_cache = dummy_qkv
@@ -73,4 +80,3 @@ def test_forward_decode(dummy_qkv, dummy_metadata):
     assert lse.shape[0] == q.shape[0]
     assert out.device.type == "cuda"
     assert lse.device.type == "cuda"
-
