@@ -1,13 +1,7 @@
-import os
-from datetime import timedelta
-from functools import cache, wraps
-from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Optional
 
 import torch
-
-import vllm.envs as envs
 from vllm.logger import init_logger
-
 from vllm.platforms import Platform, PlatformEnum
 
 if TYPE_CHECKING:
@@ -20,11 +14,12 @@ from vllm_fl.utils import DeviceInfo
 
 logger = init_logger(__name__)
 
+
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
-    device_name = device_info.device_type 
-    device_type = device_info.device_type 
+    device_name = device_info.device_type
+    device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "flagos"
@@ -48,9 +43,9 @@ class PlatformFL(Platform):
         pass
 
     @classmethod
-    def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
-                                 ) -> float:
+    def get_current_memory_usage(
+        cls, device: Optional[torch.types.Device] = None
+    ) -> float:
         cls.torch_device_fn.empty_cache()
         cls.torch_device_fn.reset_peak_memory_stats(device)
         return cls.torch_device_fn.max_memory_allocated(device)
@@ -61,7 +56,7 @@ class PlatformFL(Platform):
         Set the device for the current platform.
         """
         cls.torch_device_fn.set_device(device)
-    
+
     @classmethod
     def empty_cache(cls) -> None:
         cls.torch_device_fn.empty_cache()
@@ -83,7 +78,7 @@ class PlatformFL(Platform):
             raise ValueError(
                 f"{quant} quantization is currently not supported in {cls.device_name}."
             )
-        
+
     ### TODO(lms): change pin_memory depend device
     @classmethod
     def is_pin_memory_available(cls):
@@ -117,7 +112,6 @@ class PlatformFL(Platform):
                 cache_config.block_size = 64
                 logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
 
-
         # lazy import to avoid circular import
         from vllm.config import CUDAGraphMode
 
@@ -125,7 +119,8 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
-        if (parallel_config.data_parallel_size > 1
+        if (
+            parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
             # TODO: Piecewise Cuda graph might be enabled
@@ -169,9 +164,7 @@ class PlatformFL(Platform):
             #     )
         else:
             logger.info_once("Using FL Attention backend.")
-            return (
-                    "vllm_fl.attention.attention.AttentionFLBackend"
-                )
+            return "vllm_fl.attention.attention.AttentionFLBackend"
 
     @classmethod
     def get_punica_wrapper(cls) -> str:
@@ -180,18 +173,16 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        return (
-            "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
-        )
+        return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
 
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
         return "vllm_fl.compilation.graph.GraphWrapper"
-    
+
     @classmethod
     def support_static_graph_mode(cls) -> bool:
         return True
-    
+
     ### TODO(lms): support hybrid kv cache
     @classmethod
     def support_hybrid_kv_cache(cls) -> bool:
@@ -201,4 +192,3 @@ class PlatformFL(Platform):
     @classmethod
     def opaque_attention_op(cls) -> bool:
         return True
-    

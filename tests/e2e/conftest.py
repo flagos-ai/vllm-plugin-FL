@@ -11,22 +11,21 @@ import threading
 from collections.abc import Generator
 from contextlib import nullcontext
 from enum import Enum
-from typing import Any, Callable, Optional, TypedDict, TypeVar, Union, cast, List
+from typing import Any, Callable, List, Optional, TypedDict, TypeVar, Union, cast
 
 import numpy as np
 import pytest
 import torch
 import torch.nn as nn
 from PIL import Image
-
 from vllm import LLM, SamplingParams
-from vllm.config.model import (ConvertOption, RunnerOption)
+from vllm.config.model import ConvertOption, RunnerOption
 from vllm.distributed import cleanup_dist_env_and_memory
 from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
+from vllm.logprobs import Logprob, PromptLogprobs, SampleLogprobs
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import BeamSearchParams
-from vllm.logprobs import Logprob, PromptLogprobs, SampleLogprobs
 
 logger = init_logger(__name__)
 
@@ -44,9 +43,9 @@ PromptVideoInput = _PromptMultiModalInput[np.ndarray]
 # * List of top sample logprobs for each sampled token
 #
 # Assumes prompt logprobs were not requested.
-TokensTextLogprobs = tuple[list[int], str, Optional[Union[list[dict[int,
-                                                                    float]],
-                                                          SampleLogprobs]]]
+TokensTextLogprobs = tuple[
+    list[int], str, Optional[Union[list[dict[int, float]], SampleLogprobs]]
+]
 
 # Representation of generated sequence as a tuple of
 # * Token ID list
@@ -56,8 +55,11 @@ TokensTextLogprobs = tuple[list[int], str, Optional[Union[list[dict[int,
 #
 # Allows prompt logprobs to be requested.
 TokensTextLogprobsPromptLogprobs = tuple[
-    list[int], str, Optional[Union[list[dict[int, float]], SampleLogprobs]],
-    Optional[Union[list[Optional[dict[int, float]]], PromptLogprobs]]]
+    list[int],
+    str,
+    Optional[Union[list[dict[int, float]], SampleLogprobs]],
+    Optional[Union[list[Optional[dict[int, float]]], PromptLogprobs]],
+]
 
 _R = TypeVar("_R")
 
@@ -123,11 +125,12 @@ class VllmRunner:
         audios: Optional[PromptAudioInput] = None,
     ) -> list[TextPrompt]:
 
-        if any(x is not None and len(x) != len(prompts)
-               for x in [images, videos, audios]):
+        if any(
+            x is not None and len(x) != len(prompts) for x in [images, videos, audios]
+        ):
             raise ValueError(
-                "All non-None multimodal inputs must have the same length as "
-                "prompts")
+                "All non-None multimodal inputs must have the same length as " "prompts"
+            )
 
         inputs = []
         for i, prompt in enumerate(prompts):
@@ -162,14 +165,11 @@ class VllmRunner:
         audios: Optional[PromptAudioInput] = None,
         **kwargs: Any,
     ) -> list[tuple[list[list[int]], list[str]]]:
-        inputs = self.get_inputs(prompts,
-                                 images=images,
-                                 videos=videos,
-                                 audios=audios)
+        inputs = self.get_inputs(prompts, images=images, videos=videos, audios=audios)
 
-        req_outputs = self.llm.generate(inputs,
-                                        sampling_params=sampling_params,
-                                        **kwargs)
+        req_outputs = self.llm.generate(
+            inputs, sampling_params=sampling_params, **kwargs
+        )
 
         outputs: list[tuple[list[list[int]], list[str]]] = []
         for req_output in req_outputs:
@@ -196,8 +196,9 @@ class VllmRunner:
                 output_str = sample.text
                 output_ids = list(sample.token_ids)
                 output_logprobs = sample.logprobs
-            outputs.append((output_ids, output_str, output_logprobs,
-                            req_output.prompt_logprobs))
+            outputs.append(
+                (output_ids, output_str, output_logprobs, req_output.prompt_logprobs)
+            )
         return outputs
 
     def generate_w_logprobs(
@@ -208,23 +209,22 @@ class VllmRunner:
         audios: Optional[PromptAudioInput] = None,
         videos: Optional[PromptVideoInput] = None,
         **kwargs: Any,
-    ) -> Union[list[TokensTextLogprobs],
-               list[TokensTextLogprobsPromptLogprobs]]:
-        inputs = self.get_inputs(prompts,
-                                 images=images,
-                                 videos=videos,
-                                 audios=audios)
+    ) -> Union[list[TokensTextLogprobs], list[TokensTextLogprobsPromptLogprobs]]:
+        inputs = self.get_inputs(prompts, images=images, videos=videos, audios=audios)
 
-        req_outputs = self.llm.generate(inputs,
-                                        sampling_params=sampling_params,
-                                        **kwargs)
+        req_outputs = self.llm.generate(
+            inputs, sampling_params=sampling_params, **kwargs
+        )
 
-        toks_str_logsprobs_prompt_logprobs = (
-            self._final_steps_generate_w_logprobs(req_outputs))
+        toks_str_logsprobs_prompt_logprobs = self._final_steps_generate_w_logprobs(
+            req_outputs
+        )
         # Omit prompt logprobs if not required by sampling params
-        return ([x[0:-1] for x in toks_str_logsprobs_prompt_logprobs]
-                if sampling_params.prompt_logprobs is None else
-                toks_str_logsprobs_prompt_logprobs)
+        return (
+            [x[0:-1] for x in toks_str_logsprobs_prompt_logprobs]
+            if sampling_params.prompt_logprobs is None
+            else toks_str_logsprobs_prompt_logprobs
+        )
 
     def generate_greedy(
         self,
@@ -236,14 +236,15 @@ class VllmRunner:
         **kwargs: Any,
     ) -> list[tuple[list[int], str]]:
         greedy_params = SamplingParams(temperature=0.0, max_tokens=max_tokens)
-        outputs = self.generate(prompts,
-                                greedy_params,
-                                images=images,
-                                videos=videos,
-                                audios=audios,
-                                **kwargs)
-        return [(output_ids[0], output_str[0])
-                for output_ids, output_str in outputs]
+        outputs = self.generate(
+            prompts,
+            greedy_params,
+            images=images,
+            videos=videos,
+            audios=audios,
+            **kwargs,
+        )
+        return [(output_ids[0], output_str[0]) for output_ids, output_str in outputs]
 
     def generate_greedy_logprobs(
         self,
@@ -257,22 +258,24 @@ class VllmRunner:
         stop_token_ids: Optional[list[int]] = None,
         stop: Optional[list[str]] = None,
         **kwargs: Any,
-    ) -> Union[list[TokensTextLogprobs],
-               list[TokensTextLogprobsPromptLogprobs]]:
+    ) -> Union[list[TokensTextLogprobs], list[TokensTextLogprobsPromptLogprobs]]:
         greedy_logprobs_params = SamplingParams(
             temperature=0.0,
             max_tokens=max_tokens,
             logprobs=num_logprobs,
             prompt_logprobs=num_prompt_logprobs,
             stop_token_ids=stop_token_ids,
-            stop=stop)
+            stop=stop,
+        )
 
-        return self.generate_w_logprobs(prompts,
-                                        greedy_logprobs_params,
-                                        images=images,
-                                        audios=audios,
-                                        videos=videos,
-                                        **kwargs)
+        return self.generate_w_logprobs(
+            prompts,
+            greedy_logprobs_params,
+            images=images,
+            audios=audios,
+            videos=videos,
+            **kwargs,
+        )
 
     def generate_prompt_perplexity(self, prompts: list[str]) -> list[float]:
         """
@@ -281,10 +284,9 @@ class VllmRunner:
         :param prompts: list of prompts to score
         :return: perplexity score of each prompt
         """
-        outputs = self.generate_greedy_logprobs(prompts,
-                                                max_tokens=1,
-                                                num_logprobs=None,
-                                                num_prompt_logprobs=0)
+        outputs = self.generate_greedy_logprobs(
+            prompts, max_tokens=1, num_logprobs=None, num_prompt_logprobs=0
+        )
 
         perplexities = []
         for output in outputs:
@@ -313,15 +315,13 @@ class VllmRunner:
         audios: Optional[PromptAudioInput] = None,
         concurrency_limit: Optional[int] = None,
     ) -> list[tuple[list[list[int]], list[str]]]:
-        inputs = self.get_inputs(prompts,
-                                 images=images,
-                                 videos=videos,
-                                 audios=audios)
+        inputs = self.get_inputs(prompts, images=images, videos=videos, audios=audios)
 
-        outputs = self.llm.beam_search(inputs,
-                                       BeamSearchParams(beam_width=beam_width,
-                                                        max_tokens=max_tokens),
-                                       concurrency_limit=concurrency_limit)
+        outputs = self.llm.beam_search(
+            inputs,
+            BeamSearchParams(beam_width=beam_width, max_tokens=max_tokens),
+            concurrency_limit=concurrency_limit,
+        )
         returned_outputs = []
         for output in outputs:
             token_ids = [x.tokens for x in output.sequences]
@@ -333,17 +333,16 @@ class VllmRunner:
         req_outputs = self.llm.classify(prompts)
         return [req_output.outputs.probs for req_output in req_outputs]
 
-    def embed(self,
-              prompts: list[str],
-              images: Optional[PromptImageInput] = None,
-              videos: Optional[PromptVideoInput] = None,
-              audios: Optional[PromptAudioInput] = None,
-              *args,
-              **kwargs) -> list[list[float]]:
-        inputs = self.get_inputs(prompts,
-                                 images=images,
-                                 videos=videos,
-                                 audios=audios)
+    def embed(
+        self,
+        prompts: list[str],
+        images: Optional[PromptImageInput] = None,
+        videos: Optional[PromptVideoInput] = None,
+        audios: Optional[PromptAudioInput] = None,
+        *args,
+        **kwargs,
+    ) -> list[list[float]]:
+        inputs = self.get_inputs(prompts, images=images, videos=videos, audios=audios)
 
         req_outputs = self.llm.embed(inputs, *args, **kwargs)
         return [req_output.outputs.embedding for req_output in req_outputs]

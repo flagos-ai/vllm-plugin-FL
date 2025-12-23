@@ -1,0 +1,43 @@
+[flake8]
+max-line-length = 88
+
+extend-ignore =
+    E203,
+    W503,
+
+    E266,
+    E402,
+
+    E731,
+    E741,
+
+    B006,
+    B007,
+    B008,
+    B011,
+
+    C402,
+    C408,
+    C420,
+
+    F403,
+    F405,
+
+    F541,
+    E501,
+
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    .venv
+
+per-file-ignores =
+    tests/*: F401,F841,F821,E501
+    tests/**/*: F401,F841,F821,E501
+    examples/*: F401,E402
+    vllm_fl/ops/*: F401,F403,F405
+    vllm_fl/worker/*: F401,F841,E501
+    vllm_fl/attention/*: F401,F841
+    vllm_fl/compilation/*: F401,F841

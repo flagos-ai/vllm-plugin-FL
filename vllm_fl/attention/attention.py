@@ -3,23 +3,27 @@ from typing import Optional
 
 import numpy as np
 import torch
-
+from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
 from vllm import envs
-from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
-                                              AttentionMetadata, AttentionType,
-                                              is_quantized_kv_cache)
+from vllm.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionMetadata,
+    AttentionType,
+    is_quantized_kv_cache,
+)
 from vllm.attention.layer import Attention
 from vllm.attention.ops.merge_attn_states import merge_attn_states
-
 from vllm.config import VllmConfig, get_layers_from_vllm_config
 from vllm.logger import init_logger
 from vllm.utils import cdiv
-from vllm.v1.attention.backends.utils import (AttentionCGSupport,
-                                              AttentionMetadataBuilder,
-                                              CommonAttentionMetadata,
-                                              get_kv_cache_layout)
+from vllm.v1.attention.backends.utils import (
+    AttentionCGSupport,
+    AttentionMetadataBuilder,
+    CommonAttentionMetadata,
+    get_kv_cache_layout,
+)
 from vllm.v1.kv_cache_interface import AttentionSpec
-from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
 
 logger = init_logger(__name__)
 
@@ -45,7 +49,8 @@ class AttentionFLBackend(AttentionBackend):
                 f"Head size {head_size} is not supported by {attn_type}. "
                 f"Supported head sizes are: {supported_head_sizes}. "
                 "Set VLLM_ATTENTION_BACKEND=FLEX_ATTENTION to use "
-                "FlexAttention backend which supports all head sizes.")
+                "FlexAttention backend which supports all head sizes."
+            )
 
     @staticmethod
     def get_name() -> str:
@@ -89,6 +94,7 @@ class AttentionFLBackend(AttentionBackend):
         return stride_order
 
     ### TODO(lms): support int8/int4 kv cache
+
 
 @dataclass
 class AttentionFLMetadata:
@@ -179,7 +185,7 @@ class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
         self.block_size = kv_cache_spec.block_size
 
         self.max_num_splits = 0  # No upper bound on the number of splits.
-        self.aot_schedule = False #get_flash_attn_version() == 3
+        self.aot_schedule = False  # get_flash_attn_version() == 3
 
         self.use_full_cuda_graph = (
             self.compilation_config.cudagraph_mode.has_full_cudagraphs()
@@ -259,14 +265,15 @@ class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
         use_cascade = common_prefix_len > 0
 
         if use_cascade:
-            cu_prefix_query_lens = torch.tensor([0, num_actual_tokens],
-                                                dtype=torch.int32,
-                                                device=self.device)
-            prefix_kv_lens = torch.tensor([common_prefix_len],
-                                          dtype=torch.int32,
-                                          device=self.device)
+            cu_prefix_query_lens = torch.tensor(
+                [0, num_actual_tokens], dtype=torch.int32, device=self.device
+            )
+            prefix_kv_lens = torch.tensor(
+                [common_prefix_len], dtype=torch.int32, device=self.device
+            )
             suffix_kv_lens = (seq_lens_cpu[:num_reqs] - common_prefix_len).to(
-                self.device, non_blocking=True)
+                self.device, non_blocking=True
+            )
             prefix_scheduler_metadata = None
             scheduler_metadata = None
             # prefix_scheduler_metadata = schedule(
@@ -373,7 +380,7 @@ class AttentionFLImpl(AttentionImpl):
         AttentionFLBackend.validate_head_size(head_size)
 
         self.attn_type = attn_type
-        self.vllm_flash_attn_version = 2 #get_flash_attn_version()
+        self.vllm_flash_attn_version = 2  # get_flash_attn_version()
         # Cache the batch invariant result for use in forward passes
 
         if is_quantized_kv_cache(self.kv_cache_dtype):
@@ -383,7 +390,7 @@ class AttentionFLImpl(AttentionImpl):
 
         self.sinks = None
 
-    ### TODO(lms): support int8/int4 attention compute 
+    ### TODO(lms): support int8/int4 attention compute
     def supports_quant_query_input(self) -> bool:
         return False
 
@@ -564,7 +571,8 @@ class AttentionFLImpl(AttentionImpl):
         # For encoder attention, process FP8 quantization if needed
         if self.kv_cache_dtype.startswith("fp8"):
             raise NotImplementedError(
-                "quantization is not supported for encoder attention")
+                "quantization is not supported for encoder attention"
+            )
 
         # Use encoder-specific metadata for sequence information
         cu_seqlens_q = attn_metadata.query_start_loc
@@ -574,7 +582,8 @@ class AttentionFLImpl(AttentionImpl):
 
         descale_shape = (
             cu_seqlens_q.shape[0] - 1,  # type: ignore[union-attr]
-            self.num_kv_heads)
+            self.num_kv_heads,
+        )
 
         # Call flash attention directly on Q, K, V tensors
         flash_attn_varlen_func(
@@ -598,6 +607,7 @@ class AttentionFLImpl(AttentionImpl):
         )
 
         return output
+
 
 def use_cascade_attention(
     common_prefix_len: int,
@@ -699,9 +709,10 @@ def cascade_attention(
 ) -> torch.Tensor:
     assert alibi_slopes is None, "Cascade attention does not support ALiBi."
     # TODO: Support sliding window.
-    assert sliding_window == (-1, -1), (
-        "Cascade attention does not support sliding window."
-    )
+    assert sliding_window == (
+        -1,
+        -1,
+    ), "Cascade attention does not support sliding window."
 
     num_tokens = query.shape[0]
     block_size = key_cache.shape[-3]

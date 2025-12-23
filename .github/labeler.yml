@@ -1,0 +1,20 @@
+examples:
+  - 'examples/**'
+
+tests:
+  - 'tests/e2e'
+  - 'tests/ut'
+
+core:
+  - 'vllm_fl/**'
+  - 'vllm_fl/attention/**'
+  - 'vllm_fl/compilation/**'
+  - 'vllm_fl/distributed/**'
+  - 'vllm_fl/ops/**'
+  - 'vllm_fl/worker/**'
+
+docs:
+  - 'README.md'
+  - 'requirements*.txt'
+  - 'setup.py'
+

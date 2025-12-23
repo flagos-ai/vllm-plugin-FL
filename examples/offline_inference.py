@@ -1,9 +1,8 @@
-from vllm import LLM, SamplingParams
 import torch
+from vllm import LLM, SamplingParams
 from vllm.config.compilation import CompilationConfig
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]
@@ -20,4 +19,3 @@ if __name__ == '__main__':
         prompt = output.prompt
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
-
