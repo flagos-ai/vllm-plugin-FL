@@ -1,3 +1,9 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/v1/worker/gpu_model_runner.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import copy
 import gc
 import os

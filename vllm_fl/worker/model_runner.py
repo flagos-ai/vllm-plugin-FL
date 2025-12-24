@@ -1,3 +1,8 @@
+# Mainly adopted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/v1/worker/gpu_model_runner.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import gc
 import itertools
 import time

@@ -1,3 +1,9 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/examples/offline_inference/basic/basic.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import os
 os.environ["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
 from vllm import LLM, SamplingParams

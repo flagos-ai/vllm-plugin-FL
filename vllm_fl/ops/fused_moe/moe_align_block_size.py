@@ -1,3 +1,9 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/model_executor/layers/fused_moe/moe_align_block_size.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 from typing import Optional
 
 import torch
@@ -79,10 +85,10 @@ def moe_align_block_size(
                                       dtype=torch.int32,
                                       device=topk_ids.device)
 
-    # flag_gems.moe_align_block_size_triton(topk_ids, num_experts, block_size, sorted_ids,
-    #                          expert_ids, num_tokens_post_pad)
-    ops.moe_align_block_size(topk_ids, num_experts, block_size, sorted_ids,
+    flag_gems.moe_align_block_size_triton(topk_ids, num_experts, block_size, sorted_ids,
                              expert_ids, num_tokens_post_pad)
+    # ops.moe_align_block_size(topk_ids, num_experts, block_size, sorted_ids,
+    #                          expert_ids, num_tokens_post_pad)
     if expert_map is not None:
         expert_ids = expert_map[expert_ids]
 

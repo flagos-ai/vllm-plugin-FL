@@ -1,3 +1,5 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
 from vllm.model_executor.custom_op import CustomOp
 from .layernorm import *
 from .activation import *

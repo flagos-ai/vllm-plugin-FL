@@ -1,3 +1,9 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/model_executor/layers/fused_moe/fused_moe.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 from typing import Callable, Literal, Optional, Union
 import functools
 import torch
@@ -191,26 +197,10 @@ def fused_experts_impl(
             per_act_token_quant=per_channel_quant,
             block_shape=block_shape)
 
-        # print(f"{curr_topk_ids=}, {config['BLOCK_SIZE_M']=}, {global_num_experts=}, {expert_map=}")
-        # print("=====================")
         sorted_token_ids, expert_ids, num_tokens_post_padded = (
             moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
                                  global_num_experts, expert_map))
 
-        # print(f"{qcurr_hidden_states.shape=}")
-        # print(f"{w1.shape=}")
-        # print(f"{intermediate_cache1.shape=}")
-        # print(f"{a1q_scale=}")
-        # print(f"{w1_scale=}")
-        # print(f"{w1_zp=}")
-        # print(f"{curr_topk_weights.shape=}")
-        # print(f"{sorted_token_ids.shape=}")
-        # print(f"{expert_ids.shape=}")
-        # print(f"{num_tokens_post_padded.shape=}")
-        # print(f"{apply_router_weight_on_input=}")
-        # print(f"{top_k_num=}")
-        # print(f"{w1_bias=}")
-        # print("========================= lms debug ================")
         invoke_fused_moe_kernel(qcurr_hidden_states,
                                 w1,
                                 intermediate_cache1,

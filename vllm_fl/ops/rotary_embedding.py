@@ -1,3 +1,5 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
 from typing import Optional, Union
 import torch
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding

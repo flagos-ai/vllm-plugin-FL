@@ -1,3 +1,5 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
 import torch
 from vllm.model_executor.layers.activation import SiluAndMul
 from flag_gems.modules.activation import gems_silu_and_mul

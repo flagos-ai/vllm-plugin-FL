@@ -1,3 +1,9 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/platforms/cuda.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import os
 from datetime import timedelta
 from functools import cache, wraps
@@ -171,7 +177,6 @@ class PlatformFL(Platform):
             return (
                     "vllm_fl.attention.attention.AttentionFLBackend"
                 )
-            # return "vllm.v1.attention.backends.flash_attn.FlashAttentionBackend"
 
     @classmethod
     def get_punica_wrapper(cls) -> str:
