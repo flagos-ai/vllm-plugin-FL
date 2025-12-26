@@ -3,14 +3,14 @@ import subprocess
 import os
 from datetime import datetime
 
-# ====== 配置区 ======
+# ====== configs ======
 HOST = "0.0.0.0"
 PORT = 8000
 ENDPOINT = "/v1/chat/completions"
 BACKEND = "openai-chat"
 SERVED_MODEL_NAME = "Qwen3-Next"
 
-# 新的 7 组评测场景: (name, input_len, output_len, concurrency)
+# scenarios (name, input_len, output_len, concurrency)
 SCENARIOS = [
     ("p128d128",     128,    128,   100),
     ("p6144d128",    6144,   128,   100),
@@ -24,7 +24,7 @@ SCENARIOS = [
 LOG_DIR = "vllm_bench_logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-NUM_RUNS = 4  # 改为运行 4 次：run1 ~ run4
+NUM_RUNS = 4 
 # ====================
 
 def run_benchmark(name, input_len, output_len, concurrency, run_id):
