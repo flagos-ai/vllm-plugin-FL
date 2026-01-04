@@ -61,7 +61,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
 
     3.2 install
     ```sh
-    cd /path/to/vllm-plugin-fl
+    cd vllm-plugin-fl
     pip install --no-build-isolation -e .
     ```
 
