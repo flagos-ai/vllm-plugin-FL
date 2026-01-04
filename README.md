@@ -32,7 +32,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     ```sh
     git clone https://github.com/flagos-ai/FlagCX.git
     cd FlagCX
-    git checkout -b v0.3.0
+    git checkout v0.3.0
     ```
 
     2.2 Build the library with different flags targeting to different platforms:
