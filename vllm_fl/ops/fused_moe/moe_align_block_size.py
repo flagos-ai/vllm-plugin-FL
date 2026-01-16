@@ -7,12 +7,9 @@
 from typing import Optional
 
 import torch
-
-from vllm import _custom_ops as ops
 from vllm.triton_utils import triton
-from vllm.utils import round_up
-
-import flag_gems
+from vllm.utils.math_utils import round_up
+from vllm_fl.ops._fl_ops import FLOps as fl_ops
 
 
 def moe_align_block_size(
@@ -20,7 +17,8 @@ def moe_align_block_size(
     block_size: int,
     num_experts: int,
     expert_map: Optional[torch.Tensor] = None,
-    pad_sorted_ids: bool = False
+    pad_sorted_ids: bool = False,
+    ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Aligns the token distribution across experts to be compatible with block
@@ -84,9 +82,11 @@ def moe_align_block_size(
     num_tokens_post_pad = torch.empty((1),
                                       dtype=torch.int32,
                                       device=topk_ids.device)
-
-    flag_gems.moe_align_block_size_triton(topk_ids, num_experts, block_size, sorted_ids,
-                             expert_ids, num_tokens_post_pad)
+    # TODO(lms): ignore_invalid_experts not effective now
+    # moe_align_block_size has optimize version to filtered out
+    # all invalid experts directly when counting the number of experts
+    fl_ops.moe_align_block_size(topk_ids, num_experts, block_size, sorted_ids,
+                             expert_ids, num_tokens_post_pad,)
     # ops.moe_align_block_size(topk_ids, num_experts, block_size, sorted_ids,
     #                          expert_ids, num_tokens_post_pad)
     if expert_map is not None:

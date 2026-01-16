@@ -6,6 +6,10 @@ def register():
     return "vllm_fl.platform.PlatformFL"
 
 
-# def register_connector():
-#     from vllm_ascend.distributed import register_connector
-#     register_connector()
+def register_model():
+    """Register the FL model."""
+    from vllm import ModelRegistry
+    from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM
+    ModelRegistry.register_model(
+        "Qwen3NextForCausalLM",
+        "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM")

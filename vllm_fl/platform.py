@@ -8,23 +8,45 @@ import os
 from datetime import timedelta
 from functools import cache, wraps
 from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 
-import vllm.envs as envs
+from vllm.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.logger import init_logger
 
 from vllm.platforms import Platform, PlatformEnum
+from vllm.platforms.interface import DeviceCapability
 
 if TYPE_CHECKING:
-    from vllm.attention.backends.registry import _Backend
+    from vllm.attention.selector import AttentionSelectorConfig
     from vllm.config import VllmConfig
+    from vllm.config.cache import CacheDType
 else:
-    _Backend = None
+    VllmConfig = None
+    CacheDType = None
 
 from vllm_fl.utils import DeviceInfo
 
 logger = init_logger(__name__)
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+@cache
+def _get_backend(
+    use_mla: bool,
+    device_info: Optional[DeviceInfo] = None,
+) -> list[str]:
+    """Get backend priorities with lazy import to avoid circular dependency."""
+    if use_mla:
+        raise NotImplementedError("NOT support mla now!")
+        # return "vllm_fl.attention.backends.mla.MLAFLBackend"
+    else:
+        if "USE_FLAGGEMS" in os.environ and os.environ["USE_FLAGGEMS"] == "1":
+            return [AttentionBackendEnum.TRITON_ATTN] #"vllm_fl.attention.attention.AttentionFLBackend"
+        return [AttentionBackendEnum.FLASH_ATTN] 
+        
 
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
@@ -34,11 +56,15 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "flagos"
-    dist_backend: str = "flagcx"
+    dist_backend: str = "flagcx" if "FLAGCX_PATH" in os.environ else "nccl"
     ### TODO(lms): dispatch device_control_env_var
     # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     def is_cuda_alike(self) -> bool:
+        """Stateless version of [torch.cuda.is_available][]."""
+        return self.device_type == "cuda"
+    
+    def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda"
 
@@ -79,16 +105,6 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
         return cls.device_name
-
-    @classmethod
-    def verify_quantization(cls, quant: str) -> None:
-        """
-        Verify whether the quantization is supported by the current platform.
-        """
-        if cls.supported_quantization and quant not in cls.supported_quantization:
-            raise ValueError(
-                f"{quant} quantization is currently not supported in {cls.device_name}."
-            )
         
     ### TODO(lms): change pin_memory depend device
     @classmethod
@@ -149,34 +165,57 @@ class PlatformFL(Platform):
     @classmethod
     def get_attn_backend_cls(
         cls,
-        selected_backend,
-        head_size,
-        dtype,
-        kv_cache_dtype,
-        block_size,
-        use_v1,
-        use_mla,
-        has_sink,
-        use_sparse,
-    ) -> str:
-
-        ### TODO(lms): support int8 kv cache
-        # use_fp8_kv_cache = kv_cache_dtype is not None and kv_cache_dtype.startswith(
-        #     "fp8"
-        # )
-
-        if use_mla:
-            ### TODO(lms): support mla
-            raise NotImplementedError
-            # logger.info_once("Using FL MLA Attention backend.")
-            # return (
-            #         "vllm_fl.attention.backends.mla.MLAFLBackend"
-            #     )
+        selected_backend: "AttentionBackendEnum",
+        attn_selector_config: "AttentionSelectorConfig",
+    ) -> list[str]:
+        # from vllm_fl.attention.custom_attention import register_attention
+        # register_attention()
+        device_capability = cls.get_device_capability()
+        
+        if selected_backend is None:
+            backend = _get_backend(
+                use_mla=False,
+                device_info=cls.device_info,
+            )[0]  # get the highest priority backend
         else:
-            logger.info_once("Using FL Attention backend.")
-            return (
-                    "vllm_fl.attention.attention.AttentionFLBackend"
+            backend = selected_backend
+        
+        backend_class = backend.get_class()
+        invalid_reasons = backend_class.validate_configuration(
+                    device_capability=device_capability,
+                    **attn_selector_config._asdict(),
                 )
+        reasons_str = (
+            "{"
+            + ", ".join(
+                f"{backend.name}: [{', '.join(invalid_reasons)}]"
+            )
+            + "}"
+        )
+        config_str = attn_selector_config.__repr__()
+        logger.debug_once(
+            f"Some attention backends are not valid for {cls.device_name} with "
+            f"{config_str}. Reasons: {reasons_str}."
+        )
+
+        logger.info_once(
+            "Using %s attention backend out of potential backends: %s",
+            backend.name,
+            tuple(backend.name),
+            scope="local",
+        )
+        return backend.get_path()
+
+    @classmethod
+    def get_vit_attn_backend(
+        cls,
+        head_size: int,
+        dtype: torch.dtype,
+        backend: Optional["AttentionBackendEnum"] = None,
+    ) -> list[str]:
+        return [
+            "vllm_fl.attention.attention.AttentionFLBackend"
+        ]
 
     @classmethod
     def get_punica_wrapper(cls) -> str:
@@ -185,9 +224,16 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        return (
-            "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
-        )
+        if cls.dist_backend == "flagcx":
+            logger.info("Using CommunicatorFL for communication.")
+            return (
+                "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
+            )
+        else:
+            logger.info("Using CudaCommunicator for communication.")
+            return (
+                "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator" # noqa
+            )
 
     
     @classmethod
@@ -196,8 +242,34 @@ class PlatformFL(Platform):
     
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        return True
+        if cls.device_name in ["cuda", "npu"]:
+            return True
+        return False
     
+    @classmethod
+    def insert_blocks_to_device(
+        cls,
+        src_cache: torch.Tensor,
+        dst_cache: torch.Tensor,
+        src_block_indices: torch.Tensor,
+        dst_block_indices: torch.Tensor,
+    ) -> None:
+        """Copy blocks from src_cache to dst_cache device ."""
+        _src_cache = src_cache[:, src_block_indices]
+        dst_cache[:, dst_block_indices] = _src_cache.to(dst_cache.device)
+
+    @classmethod
+    def swap_out_blocks_to_host(
+        cls,
+        src_cache: torch.Tensor,
+        dst_cache: torch.Tensor,
+        src_block_indices: torch.Tensor,
+        dst_block_indices: torch.Tensor,
+    ) -> None:
+        """Copy blocks from device to host (CPU)."""
+        _src_cache = src_cache[:, src_block_indices]
+        dst_cache[:, dst_block_indices] = _src_cache.cpu()
+
     @classmethod
     def support_hybrid_kv_cache(cls) -> bool:
         return True
@@ -206,4 +278,45 @@ class PlatformFL(Platform):
     @classmethod
     def opaque_attention_op(cls) -> bool:
         return True
+    
+    @classmethod
+    def use_custom_allreduce(cls) -> bool:
+        if cls.dist_backend == "flagcx":
+            return False
+        return True
+
+    @classmethod
+    def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
+        major, minor = torch.cuda.get_device_capability(device_id)
+        return DeviceCapability(major=major, minor=minor)
+    
+    @classmethod
+    def is_fully_connected(cls, physical_device_ids: list[int]) -> bool:
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            """
+            query if the set of gpus are fully connected by nvlink (1 hop)
+            """
+            handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in physical_device_ids]
+            for i, handle in enumerate(handles):
+                for j, peer_handle in enumerate(handles):
+                    if i < j:
+                        try:
+                            p2p_status = pynvml.nvmlDeviceGetP2PStatus(
+                                handle,
+                                peer_handle,
+                                pynvml.NVML_P2P_CAPS_INDEX_NVLINK,
+                            )
+                            if p2p_status != pynvml.NVML_P2P_STATUS_OK:
+                                return False
+                        except pynvml.NVMLError:
+                            logger.exception(
+                                "NVLink detection failed. This is normal if"
+                                " your machine has no NVLink equipped."
+                            )
+                            return False
+            return True
+        except:
+            return False
     

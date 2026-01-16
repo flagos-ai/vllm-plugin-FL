@@ -5,7 +5,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
 
 ### Setup
 
-0. Install vllm from the official [v0.11.0](https://github.com/vllm-project/vllm/tree/v0.11.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
+0. Install vllm from the official [v0.13.0](https://github.com/vllm-project/vllm/tree/v0.13.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
 
 
 1. Install FlagGems
@@ -18,7 +18,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
 
     1.2 Installation FlagGems
 
-    ```shell
+    ```sh
     git clone https://github.com/flagos-ai/FlagGems
     cd FlagGems
     pip install --no-build-isolation .
@@ -26,13 +26,18 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     pip install --no-build-isolation -e .
     ```
 
-2. Install FlagCX
+    2.4 Using FlagGems operators
+
+    ```sh
+    export USE_FLAGGEMS=1
+    ```
+
+3. Install FlagCX
 
     2.1 Clone the repository:
     ```sh
     git clone https://github.com/flagos-ai/FlagCX.git
-    cd FlagCX
-    git checkout v0.3.0
+    git checkout -b v0.7.0
     ```
 
     2.2 Build the library with different flags targeting to different platforms:
@@ -45,7 +50,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     export FLAGCX_PATH="$pwd"
     ```
 
-    2.4 Installation FlagGems
+    3.4 Installation FlagCX
     ```sh
     cd plugin/torch/
     python setup.py develop --adaptor nvidia/ascend
@@ -91,4 +96,18 @@ if __name__ == '__main__':
         prompt = output.prompt
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+```
 
+## Advanced use
+
+### Using CudaCommunication library
+If you want to use the original CudaCommunication, you can unset the following environment variables.
+```sh
+unset FLAGCX_PATH
+```
+
+### Using native CUDA operators
+If you want to use the original CUDA operators, you can unset the following environment variables.
+```sh
+unset USE_FLAGGEMS
+```

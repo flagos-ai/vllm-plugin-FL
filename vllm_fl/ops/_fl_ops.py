@@ -17,7 +17,7 @@ class FLOps:
         d = x.shape[-1] // 2
         x1, x2 = x[..., :d], x[..., d:]
         return flag_gems.fused.gelu_and_mul(x1, x2, approximate)
-    
+
     ### moe 
     @staticmethod
     def topk_softmax(topk_weights, topk_indices, token_expert_indices, gating_output, renormalize=False):
@@ -31,5 +31,12 @@ class FLOps:
             topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
         return topk_weights, topk_indices
     
+    @staticmethod
     def moe_sum(input, output):
         flag_gems.moe_sum(input, output)
+
+    @staticmethod
+    def moe_align_block_size(topk_ids, num_experts, block_size, sorted_ids,
+                             expert_ids, num_tokens_post_pad,):
+        flag_gems.moe_align_block_size_triton(topk_ids, num_experts, block_size, sorted_ids,
+                             expert_ids, num_tokens_post_pad,)

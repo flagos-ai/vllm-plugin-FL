@@ -5,19 +5,19 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
+from collections import Counter
+from collections.abc import Callable
 from contextlib import ExitStack
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from unittest.mock import patch
 
 import torch
 
 import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
-from vllm.compilation.cuda_graph import CUDAGraphOptions
 from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
 from vllm.config import CUDAGraphMode, VllmConfig
-from vllm.distributed.device_communicators.pynccl_allocator import (
-    set_graph_pool_id)
+from vllm.distributed.device_communicators.pynccl_allocator import set_graph_pool_id
 from vllm.forward_context import BatchDescriptor, get_forward_context
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
@@ -27,7 +27,7 @@ logger = init_logger(__name__)
 
 def weak_ref_tensors(tensor: Any) -> Any:
     if current_platform.device_type == "cuda":
-        from vllm.utils import weak_ref_tensors
+        from vllm.utils.torch_utils import weak_ref_tensors
         return weak_ref_tensors(tensor)
     else:
         ### TODO: add csrc npu custom op
@@ -41,8 +41,7 @@ class Graph:
         graph = torch.npu.NPUGraph
     else:
         raise NotImplementedError("not support graph")
-
-
+    
 @dataclasses.dataclass
 class GraphEntry:
     batch_descriptor: BatchDescriptor
@@ -53,14 +52,18 @@ class GraphEntry:
     # during capture, and check if they are the same during replay
     input_addresses: Optional[list[int]] = None
 
+@dataclasses.dataclass
+class GraphOptions:
+    debug_log_enable: bool = True
+    gc_disable: bool = False
+    weak_ref_output: bool = True
 
 class GraphWrapper:
     def __init__(self,
                  runnable: Callable,
                  vllm_config: VllmConfig,
                  runtime_mode: CUDAGraphMode,
-                 graph_pool: Any = None,
-                 cudagraph_options: Optional[CUDAGraphOptions] = None):
+                 cudagraph_options: Optional[GraphOptions] = None):
         self.runnable = runnable
         self.vllm_config = vllm_config
         self.runtime_mode = runtime_mode
@@ -78,7 +81,7 @@ class GraphWrapper:
         self.graph_pool = current_platform.get_global_graph_pool()
 
         if cudagraph_options is None:
-            cudagraph_options = CUDAGraphOptions()
+            cudagraph_options = GraphOptions()
         self.graph_options = cudagraph_options
         # the entries for different batch descriptors that we need to capture
         # cudagraphs for.
@@ -153,6 +156,14 @@ class GraphWrapper:
             with current_platform.torch_device_fn.graph(graph, pool=self.graph_pool):
                 # `output` is managed by pytorch's cudagraph pool
                 output = self.runnable(*args, **kwargs)
+                if self.graph_options.weak_ref_output:
+                        # by converting it to weak ref,
+                        # the original `output` will immediately be released
+                        # to save memory. It is only safe to do this for
+                        # the last graph in piecewise cuadgraph mode, because
+                        # the output of the last graph will not be used by
+                        # any other cuda graph.
+                        output = weak_ref_tensors(output)
 
             entry.output = weak_ref_tensors(output)
             entry.graph = graph
