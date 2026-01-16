@@ -1,3 +1,9 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/platforms/cuda.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import os
 from datetime import timedelta
 from functools import cache, wraps
@@ -117,7 +123,6 @@ class PlatformFL(Platform):
                 cache_config.block_size = 64
                 logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
 
-
         # lazy import to avoid circular import
         from vllm.config import CUDAGraphMode
 
@@ -184,6 +189,7 @@ class PlatformFL(Platform):
             "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         )
 
+    
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
         return "vllm_fl.compilation.graph.GraphWrapper"
@@ -192,10 +198,9 @@ class PlatformFL(Platform):
     def support_static_graph_mode(cls) -> bool:
         return True
     
-    ### TODO(lms): support hybrid kv cache
     @classmethod
     def support_hybrid_kv_cache(cls) -> bool:
-        return False
+        return True
 
     ### NOTE(lms): will effect compile result
     @classmethod

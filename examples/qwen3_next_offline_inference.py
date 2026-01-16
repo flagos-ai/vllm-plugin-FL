@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
+os.environ["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
 from vllm import LLM, SamplingParams
 import torch
 from vllm.config.compilation import CompilationConfig
@@ -17,7 +19,7 @@ if __name__ == '__main__':
     # Create a sampling params object.
     sampling_params = SamplingParams(max_tokens=10, temperature=0.0)
     # Create an LLM.
-    llm = LLM(model="Qwen/Qwen3-4B", max_num_batched_tokens=16384, max_num_seqs=2048)
+    llm = LLM(model="Qwen/Qwen3-Next-80B-A3B-Instruct", tensor_parallel_size=4, max_model_len=262144)
 
     # Generate texts from the prompts.
     outputs = llm.generate(prompts, sampling_params)

@@ -1,3 +1,5 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
 from flag_gems.runtime.backend.device import DeviceDetector
 from flag_gems.runtime import backend
 

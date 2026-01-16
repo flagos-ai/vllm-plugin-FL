@@ -1,3 +1,9 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/distributed/device_communicators/pynccl.py
+# Below is the original copyright:
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 from typing import List, Optional, Tuple, Union
 import ctypes
 
@@ -15,7 +21,6 @@ sys.path.append(os.getenv('FLAGCX_PATH'))
 from plugin.interservice.flagcx_wrapper import (
     FLAGCXLibrary,
     buffer_type,
-    cudaStream_t,
     flagcxComm_t,
     flagcxDataTypeEnum,
     flagcxUniqueId,
