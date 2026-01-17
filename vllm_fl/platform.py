@@ -99,10 +99,6 @@ class PlatformFL(Platform):
         cls.torch_device_fn.empty_cache()
 
     @classmethod
-    def get_device_capability(cls, device_id: int = 0):
-        pass
-
-    @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
         return cls.device_name
         
@@ -205,6 +201,13 @@ class PlatformFL(Platform):
             scope="local",
         )
         return backend.get_path()
+    
+    @classmethod
+    def get_supported_vit_attn_backends(cls) -> list["AttentionBackendEnum"]:
+        return [
+            AttentionBackendEnum.TORCH_SDPA,
+            AttentionBackendEnum.FLASH_ATTN,
+        ]
 
     @classmethod
     def get_vit_attn_backend(
@@ -213,9 +216,26 @@ class PlatformFL(Platform):
         dtype: torch.dtype,
         backend: Optional["AttentionBackendEnum"] = None,
     ) -> list[str]:
-        return [
-            "vllm_fl.attention.attention.AttentionFLBackend"
-        ]
+        if backend is not None:
+            assert backend in cls.get_supported_vit_attn_backends(), (
+                f"Backend {backend} is not supported for vit attention. "
+                f"Supported backends are: {cls.get_supported_vit_attn_backends()}"
+            )
+            logger.info_once(f"Using backend {backend} for vit attention")
+            return backend
+
+        # Try FlashAttention first
+        if (cc := cls.get_device_capability()) and cc.major >= 8:
+            try:
+                backend_class = AttentionBackendEnum.FLASH_ATTN.get_class()
+                if backend_class.supports_head_size(
+                    head_size
+                ) and backend_class.supports_dtype(dtype):
+                    return AttentionBackendEnum.FLASH_ATTN
+            except ImportError:
+                pass
+
+        return AttentionBackendEnum.TORCH_SDPA
 
     @classmethod
     def get_punica_wrapper(cls) -> str:
@@ -287,7 +307,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
-        major, minor = torch.cuda.get_device_capability(device_id)
+        major, minor = cls.torch_device_fn.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
     
     @classmethod
