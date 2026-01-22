@@ -55,6 +55,7 @@ from vllm.v1.worker.utils import is_residual_scattered_for_sp
 from vllm.v1.worker.worker_base import WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 from vllm.v1.core.sched.output import SchedulerOutput
+import vllm_fl.envs as fl_envs
 
 logger = init_logger(__name__)
 
@@ -211,7 +212,7 @@ class WorkerFL(WorkerBase):
         else:
             self.profiler = None
         
-        if "USE_FLAGGEMS" in os.environ and os.environ["USE_FLAGGEMS"] == "1":
+        if fl_envs.USE_FLAGGEMS:
             from vllm_fl.ops.custom_ops import register_oot_ops
             import flag_gems
             register_oot_ops()

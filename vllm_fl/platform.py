@@ -27,6 +27,7 @@ else:
     CacheDType = None
 
 from vllm_fl.utils import DeviceInfo
+import vllm_fl.envs as fl_envs
 
 logger = init_logger(__name__)
 
@@ -42,7 +43,7 @@ def _get_backend(
     if use_mla:
         raise NotImplementedError("NOT support mla now!")
     else:
-        if "USE_FLAGGEMS" in os.environ and os.environ["USE_FLAGGEMS"] == "1":
+        if fl_envs.USE_FLAGGEMS:
             return [AttentionBackendEnum.TRITON_ATTN]
         return [AttentionBackendEnum.FLASH_ATTN] 
         
