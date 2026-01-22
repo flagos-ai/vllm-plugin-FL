@@ -39,7 +39,3 @@ repos:
 #         entry: python ./tools/codestyle/check_header.py
 #         language: python
 #         types: [python]
-#         exclude: |
-#             (?x)^(
-#                 .*\.sh$  # Exclude all .sh files
-#             )$
