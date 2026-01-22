@@ -1,11 +1,5 @@
 exclude: |
     (?x)^(
-        flagscale/train/megatron/.*|
-        flagscale/train/train.*\.py|
-        flagscale/models/megatron/.*|
-        tools/checkpoint/loader.*\.py|
-        tools/checkpoint/saver.*\.py|
-        examples/aquila/tokenizer*|
     )$
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
@@ -50,13 +44,5 @@ repos:
 #         types: [python]
 #         exclude: |
 #             (?x)^(
-#                 flagscale/backends/.*|
-#                 megatron-energon/.*|
-#                 hardware/.*\.patch|
-#                 flagscale/train/train.*\.py|
-#                 flagscale/train/models/.*|
-#                 flagscale/train/hetero/.*|
-#                 tools/checkpoint/loader.*\.py|
-#                 tools/checkpoint/saver.*\.py|
 #                 .*\.sh$  # Exclude all .sh files
 #             )$
