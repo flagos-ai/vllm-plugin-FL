@@ -8,7 +8,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
 0. Install vllm from the official [v0.13.0](https://github.com/vllm-project/vllm/tree/v0.13.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
 
 
-1. Install FlagGems
+1. Install [FlagGems](https://github.com/flagos-ai/FlagGems)
 
     1.1 Install Build Dependencies
 
@@ -32,12 +32,13 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     export USE_FLAGGEMS=1
     ```
 
-3. Install FlagCX
+3. Install [FlagCX](https://github.com/flagos-ai/FlagCX.git)
 
     2.1 Clone the repository:
     ```sh
     git clone https://github.com/flagos-ai/FlagCX.git
     git checkout -b v0.7.0
+    git submodule update --init --recursive
     ```
 
     2.2 Build the library with different flags targeting to different platforms:
@@ -47,7 +48,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
 
     2.3 Set environment
     ```sh
-    export FLAGCX_PATH="$pwd"
+    export FLAGCX_PATH="$PWD"
     ```
 
     3.4 Installation FlagCX
@@ -67,6 +68,8 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     3.2 install
     ```sh
     cd vllm-plugin-fl
+    pip install --no-build-isolation .
+    # or editble install
     pip install --no-build-isolation -e .
     ```
 
