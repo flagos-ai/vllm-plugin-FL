@@ -1,0 +1,62 @@
+exclude: |
+    (?x)^(
+        flagscale/train/megatron/.*|
+        flagscale/train/train.*\.py|
+        flagscale/models/megatron/.*|
+        tools/checkpoint/loader.*\.py|
+        tools/checkpoint/saver.*\.py|
+        examples/aquila/tokenizer*|
+    )$
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    -   id: check-merge-conflict
+    -   id: check-symlinks
+    -   id: detect-private-key
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.14.0
+  hooks:
+  - id: ruff-check
+    args: [--output-format, github, --fix]
+  - id: ruff-format
+- repo: https://github.com/crate-ci/typos
+  rev: v1.38.1
+  hooks:
+  - id: typos
+    args: [--force-exclude]
+# - repo: https://github.com/pre-commit/mirrors-mypy
+#   rev: v1.11.1
+#   hooks:
+#     - id: mypy
+#       args: [--python-version=3.10]
+#       additional_dependencies:
+#         - regex
+#         - types-cachetools
+#         - types-setuptools
+#         - types-PyYAML
+#         - types-requests
+#         - types-torch
+#         - pydantic
+
+# -   repo: local
+#     hooks:
+#     -   id: check-header
+#         name: check-header
+#         entry: python ./tools/codestyle/check_header.py
+#         language: python
+#         types: [python]
+#         exclude: |
+#             (?x)^(
+#                 flagscale/backends/.*|
+#                 megatron-energon/.*|
+#                 hardware/.*\.patch|
+#                 flagscale/train/train.*\.py|
+#                 flagscale/train/models/.*|
+#                 flagscale/train/hetero/.*|
+#                 tools/checkpoint/loader.*\.py|
+#                 tools/checkpoint/saver.*\.py|
+#                 .*\.sh$  # Exclude all .sh files
+#             )$
