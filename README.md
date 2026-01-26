@@ -26,7 +26,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     pip install --no-build-isolation -e .
     ```
 
-3. Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
+2. Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
     2.1 Clone the repository:
     ```sh
