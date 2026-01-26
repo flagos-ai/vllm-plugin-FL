@@ -27,7 +27,7 @@ def register_model():
             "Qwen3NextForCausalLM", "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
         )
     except ImportError:
-        logger.warning(
+        logger.info(
             "From vllm_fl.models.qwen3_next cannot import Qwen3NextForCausalLM, skipped"
         )
     except Exception as e:

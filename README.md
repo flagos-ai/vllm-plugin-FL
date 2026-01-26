@@ -31,6 +31,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     2.1 Clone the repository:
     ```sh
     git clone https://github.com/flagos-ai/FlagCX.git
+    cd FlagCX
     git checkout -b v0.7.0
     git submodule update --init --recursive
     ```
@@ -48,8 +49,10 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     2.4 Installation FlagCX
     ```sh
     cd plugin/torch/
-    python setup.py develop --adaptor nvidia/ascend
+    python setup.py develop --adaptor [xxx]
     ```
+    Note: [xxx] should be selected according to the current platform, e.g., nvidia, ascend, etc.
+
 
 3. Install vllm-plugin-fl
 
@@ -61,7 +64,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
 
     3.2 install
     ```sh
-    cd vllm-plugin-fl
+    cd vllm-plugin-FL
     pip install --no-build-isolation .
     # or editble install
     pip install --no-build-isolation -e .
