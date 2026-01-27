@@ -1,5 +1,5 @@
 decorator
 pyyaml
 scipy
-setuptools
+setuptools <= 79.0.1
 setuptools-scm

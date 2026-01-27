@@ -4,7 +4,6 @@
 
 from collections.abc import Iterable
 from itertools import islice
-import nvtx
 
 import torch
 from einops import rearrange
