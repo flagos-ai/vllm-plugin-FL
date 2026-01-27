@@ -8,36 +8,36 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
 0. Install vllm from the official [v0.13.0](https://github.com/vllm-project/vllm/tree/v0.13.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
 
 
-1. Install [FlagGems](https://github.com/flagos-ai/FlagGems/blob/master/docs/getting-started.md#quick-installation)
+1. Install vllm-plugin-FL
 
-    1.1 Install Build Dependencies
-
-    ```sh
-    pip install -U scikit-build-core==0.11 pybind11 ninja cmake
-    ```
-
-    1.2 Installation FlagGems
-
-    ```sh
-    git clone https://github.com/flagos-ai/FlagGems
-    cd FlagGems
-    pip install --no-build-isolation .
-    # or editble install
-    pip install --no-build-isolation -e .
-    ```
-
-2. Install vllm-plugin-fl
-
-    2.1 Clone the repository:
+    1.1 Clone the repository:
 
     ```sh
     git clone https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
-    2.2 install
+    1.2 install
     ```sh
     cd vllm-plugin-FL
     pip install -r requirements.txt
+    pip install --no-build-isolation .
+    # or editble install
+    pip install --no-build-isolation -e .
+    ```
+
+2. Install [FlagGems](https://github.com/flagos-ai/FlagGems/blob/master/docs/getting-started.md#quick-installation)
+
+    2.1 Install Build Dependencies
+
+    ```sh
+    pip install -U scikit-build-core==0.11 pybind11 ninja cmake
+    ```
+
+    2.2 Installation FlagGems
+
+    ```sh
+    git clone https://github.com/flagos-ai/FlagGems
+    cd FlagGems
     pip install --no-build-isolation .
     # or editble install
     pip install --no-build-isolation -e .
