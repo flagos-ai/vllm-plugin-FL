@@ -76,6 +76,6 @@ setup(
     install_requires=get_requirements(),
     extras_require={},
     entry_points={'vllm.platform_plugins': ["fl = vllm_fl:register"],
-                  'vllm.general_plugins': ["fl_model = vllm_fl:register_model"]}
+                  'vllm.general_plugins': ["fl = vllm_fl:register_model"]}
 )
 
