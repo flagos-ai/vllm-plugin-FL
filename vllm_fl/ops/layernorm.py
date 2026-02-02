@@ -3,10 +3,12 @@
 from typing import Optional, Union
 import torch
 from vllm.model_executor.layers.layernorm import RMSNorm
-from flag_gems.modules.normalization import gems_rms_forward
+from vllm_fl.dispatch import call_op
+
 
 class RMSNormFL(RMSNorm):
-    def __init__(self,
+    def __init__(
+        self,
         hidden_size: int,
         eps: float = 1e-6,
         var_hidden_size: Optional[int] = None,
@@ -20,7 +22,8 @@ class RMSNormFL(RMSNorm):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        return gems_rms_forward(x, residual, self.weight, self.variance_epsilon)
-    
+        return call_op("rmsnorm", x, residual, self.weight, self.variance_epsilon)
+
+
 __all__ = ["RMSNormFL"]
         

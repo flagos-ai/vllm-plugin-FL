@@ -1,4 +1,3 @@
-
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/tests/conftest.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0

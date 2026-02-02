@@ -1,9 +1,10 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-from typing import Optional, Union
+from typing import Optional
 import torch
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
-from flag_gems.modules.rotary_embedding import gems_rope_forward
+from vllm_fl.dispatch import call_op
+
 
 class RotaryEmbeddingFL(RotaryEmbedding):
     def __init__(
@@ -15,9 +16,11 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         is_neox_style: bool,
         dtype: torch.dtype,
     ) -> None:
-        super().__init__(head_size, rotary_dim, max_position_embeddings, base,
-                         is_neox_style, dtype)
-        
+        super().__init__(
+            head_size, rotary_dim, max_position_embeddings, base,
+            is_neox_style, dtype
+        )
+
     def forward_oot(
         self,
         positions: torch.Tensor,
@@ -36,19 +39,20 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query_rot = query[..., : self.rotary_dim]
         key_rot = key[..., : self.rotary_dim]
         if self.rotary_dim < self.head_size:
-            query_pass = query[..., self.rotary_dim :]
-            key_pass = key[..., self.rotary_dim :]
+            query_pass = query[..., self.rotary_dim:]
+            key_pass = key[..., self.rotary_dim:]
 
         cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
 
-        q_embed, k_embed = gems_rope_forward(
+        q_embed, k_embed = call_op(
+            "rotary_embedding",
             query_rot,
             key_rot,
             cos,
             sin,
-            position_ids=positions,
-            rotary_interleaved=not self.is_neox_style,
-            inplace=True,  # set inplace to True for vLLM compatibility
+            positions,
+            not self.is_neox_style,  # rotary_interleaved
+            True,  # inplace
         )
 
         if self.rotary_dim < self.head_size:
@@ -59,5 +63,6 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             key = k_embed.reshape(key_shape)
 
         return query, key
-    
+
+
 __all__ = ["RotaryEmbeddingFL"]

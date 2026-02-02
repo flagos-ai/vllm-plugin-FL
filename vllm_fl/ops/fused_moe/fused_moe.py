@@ -119,14 +119,14 @@ def fused_experts_impl(
     config_dtype = _get_config_dtype_str(use_fp8_w8a8=use_fp8_w8a8,
                                          use_int8_w8a16=use_int8_w8a16,
                                          use_int4_w4a16=use_int4_w4a16,
-                                         use_mxfp4_w4a4=False, ## dont support mxfp4
+                                         ocp_mx_scheme=None, ## dont support mxfp4
                                          dtype=hidden_states.dtype)
 
     # Note: for use_int8_w8a16 or use_int4_w4a16, the activations are
     # quantized prior to calling fused_experts.
     quant_dtype = _get_config_quant_dtype(use_fp8_w8a8=use_fp8_w8a8,
                                           use_int8_w8a8=use_int8_w8a8,
-                                          use_mxfp4_w4a4=False)
+                                          ocp_mx_scheme=None)
 
     get_config_func = functools.partial(
         try_get_optimal_moe_config,
@@ -199,7 +199,7 @@ def fused_experts_impl(
 
         sorted_token_ids, expert_ids, num_tokens_post_padded = (
             moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
-                                 global_num_experts, expert_map))
+                                 global_num_experts, expert_map, ignore_invalid_experts=True,))
 
         invoke_fused_moe_kernel(qcurr_hidden_states,
                                 w1,
@@ -280,12 +280,10 @@ def fused_experts(
     topk_weights: torch.Tensor,
     topk_ids: torch.Tensor,
     activation: str = "silu",
+    quant_config: Optional[FusedMoEQuantConfig] = None,
     apply_router_weight_on_input: bool = False,
     global_num_experts: int = -1,
     expert_map: Optional[torch.Tensor] = None,
-    quant_config: Optional[FusedMoEQuantConfig] = None,
-    allow_deep_gemm: bool = False,
-    allow_cutlass_block_scaled_grouped_gemm: bool = False,
 ) -> torch.Tensor:
     if quant_config is None:
         quant_config = FUSED_MOE_UNQUANTIZED_CONFIG

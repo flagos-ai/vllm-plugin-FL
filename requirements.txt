@@ -1,5 +1,9 @@
 decorator
 pyyaml
 scipy
-setuptools
+setuptools <= 79.0.1
 setuptools-scm
+scikit-build-core==0.11
+pybind11
+ninja
+cmake
