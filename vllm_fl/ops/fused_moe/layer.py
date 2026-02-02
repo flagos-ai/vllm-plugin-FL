@@ -156,15 +156,7 @@ class FusedMoEFL(FusedMoE):
         elif self.use_grouped_topk and valid_grouping():
             assert self.topk_group is not None
             assert self.num_expert_group is not None
-            if rocm_aiter_ops.is_fused_moe_enabled():
-                if not rocm_aiter_ops.is_fusion_moe_shared_experts_enabled():
-                    assert self.num_fused_shared_experts == 0
-                grouped_topk_impl = partial(
-                    rocm_aiter_grouped_topk,
-                    num_fused_shared_experts=self.num_fused_shared_experts,
-                )
-            else:
-                grouped_topk_impl = grouped_topk
+            grouped_topk_impl = grouped_topk
 
             topk_weights, topk_ids = grouped_topk_impl(
                 hidden_states=hidden_states,
