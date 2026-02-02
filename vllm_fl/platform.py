@@ -201,7 +201,7 @@ class PlatformFL(Platform):
                 # For CUDA and other devices, use vLLM native backend
                 from vllm.attention.backends.registry import AttentionBackendEnum
                 if use_mla:
-                    backend_path = AttentionBackendEnum.MLA.get_path()
+                    backend_path = AttentionBackendEnum.FLASHMLA.get_path()
                 else:
                     backend_path = AttentionBackendEnum.FLASH_ATTN.get_path()
 

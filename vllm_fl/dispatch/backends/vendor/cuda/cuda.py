@@ -115,7 +115,7 @@ class CudaBackend(Backend):
         from vllm.attention.backends.registry import AttentionBackendEnum
 
         if use_mla:
-            return AttentionBackendEnum.MLA.get_path()
+            return AttentionBackendEnum.FLASHMLA.get_path()
 
         # Check for TRITON_ATTN preference via environment variable
         if os.environ.get("USE_FLAGGEMS", "0") == "1":

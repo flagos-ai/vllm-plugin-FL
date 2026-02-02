@@ -135,5 +135,5 @@ class ReferenceBackend(Backend):
         from vllm.attention.backends.registry import AttentionBackendEnum
         if use_mla:
             # vLLM native MLA backend
-            return AttentionBackendEnum.MLA.get_path()
+            return AttentionBackendEnum.FLASHMLA.get_path()
         return AttentionBackendEnum.FLASH_ATTN.get_path()
