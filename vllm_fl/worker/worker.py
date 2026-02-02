@@ -36,7 +36,7 @@ from vllm.distributed.parallel_state import (
 )
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
-from vllm.model_executor import set_random_seed
+from vllm.utils.torch_utils import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 from vllm.platforms import current_platform
@@ -189,11 +189,6 @@ class WorkerFL(WorkerBase):
                          distributed_init_method=distributed_init_method,
                          is_driver_worker=is_driver_worker)
 
-        if self.model_config.trust_remote_code:
-            # note: lazy import to avoid importing torch before initializing
-            from vllm.utils.import_utils import init_cached_hf_modules
-            init_cached_hf_modules()
-
         # Buffers saved before sleep
         self._sleep_saved_buffers: dict[str, torch.Tensor] = {}
 
@@ -212,10 +207,13 @@ class WorkerFL(WorkerBase):
         else:
             self.profiler = None
         
+        # Always register OOT ops for FL platform
+        from vllm_fl.ops.custom_ops import register_oot_ops
+        register_oot_ops()
+
+        # Only enable FlagGems if requested
         if fl_envs.USE_FLAGGEMS:
-            from vllm_fl.ops.custom_ops import register_oot_ops
             import flag_gems
-            register_oot_ops()
             flag_gems.enable(record=False) #, unused=["index", "index_put_"])
 
     # def sleep(self, level: int = 1) -> None:

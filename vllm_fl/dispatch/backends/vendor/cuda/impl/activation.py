@@ -21,9 +21,10 @@ def silu_and_mul_cuda(x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
-    from vllm._custom_ops import silu_and_mul as vllm_silu_and_mul
+    # vLLM v0.15.0: silu_and_mul is in torch.ops._C, not vllm._custom_ops
+    import vllm._C  # Ensure C extensions are loaded
 
     d = x.shape[-1] // 2
     out = torch.empty(*x.shape[:-1], d, dtype=x.dtype, device=x.device)
-    vllm_silu_and_mul(out, x)
+    torch.ops._C.silu_and_mul(out, x)
     return out

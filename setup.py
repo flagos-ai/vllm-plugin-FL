@@ -2,7 +2,6 @@ import os
 from typing import List
 
 from setuptools import find_packages, setup
-from setuptools_scm import get_version
 
 ROOT_DIR = os.path.dirname(__file__)
 VERSION = "0.0.0"
@@ -76,6 +75,7 @@ setup(
     install_requires=get_requirements(),
     extras_require={},
     entry_points={'vllm.platform_plugins': ["fl = vllm_fl:register"],
-                  'vllm.general_plugins': ["fl = vllm_fl:register_model"]}
+                  'vllm.general_plugins': ["fl = vllm_fl:register_model",
+                                           "fl_ops = vllm_fl:register_ops"]}
 )
 

@@ -10,27 +10,53 @@ import torch.nn.functional as F
 import vllm.envs as envs
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.fused_moe.layer import UnquantizedFusedMoEMethod
-from vllm.model_executor.layers.fused_moe.routing_simulator import (
-    RoutingSimulator)
-from vllm.model_executor.layers.fused_moe.fused_moe import grouped_topk
+# RoutingSimulator removed in vLLM 0.15.0 - make import optional
+try:
+    from vllm.model_executor.layers.fused_moe.routing_simulator import (
+        RoutingSimulator)
+except ImportError:
+    RoutingSimulator = None
+# grouped_topk moved to router module in vLLM 0.15.0
+try:
+    from vllm.model_executor.layers.fused_moe.fused_moe import grouped_topk
+except ImportError:
+    from vllm.model_executor.layers.fused_moe.router import grouped_topk_router as grouped_topk
 from vllm.platforms import current_platform
 
-if current_platform.is_cuda_alike():
+# eplb_map_to_physical_and_record moved to router.base_router in vLLM 0.15.0
+try:
     from vllm.model_executor.layers.fused_moe.fused_moe import eplb_map_to_physical_and_record
-else:
-    def _eplb_map_to_physical_and_record(
-            topk_ids: torch.Tensor, expert_load_view: torch.Tensor,
-            logical_to_physical_map: torch.Tensor,
-            logical_replica_count: torch.Tensor,
-            indices_type: Optional[torch.dtype]) -> torch.Tensor:
-        # CPU fallback: no EPLB so just return as is
-        return topk_ids
-
-    eplb_map_to_physical_and_record = _eplb_map_to_physical_and_record
+except ImportError:
+    try:
+        from vllm.model_executor.layers.fused_moe.router.base_router import eplb_map_to_physical_and_record
+    except ImportError:
+        def eplb_map_to_physical_and_record(
+                topk_ids: torch.Tensor, expert_load_view: torch.Tensor,
+                logical_to_physical_map: torch.Tensor,
+                logical_replica_count: torch.Tensor,
+                indices_type: Optional[torch.dtype] = None) -> torch.Tensor:
+            # Fallback: no EPLB so just return as is
+            return topk_ids
 
 from vllm.model_executor.layers.fused_moe.fused_moe import (
     zero_experts_compute_triton)
 
+# ROCm aiter ops - optional for non-AMD platforms
+try:
+    from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
+        rocm_aiter_ops, rocm_aiter_grouped_topk)
+    from functools import partial
+except ImportError:
+    class _DummyRocmOps:
+        @staticmethod
+        def is_fused_moe_enabled():
+            return False
+        @staticmethod
+        def is_fusion_moe_shared_experts_enabled():
+            return False
+    rocm_aiter_ops = _DummyRocmOps()
+    rocm_aiter_grouped_topk = None
+    partial = None
 
 from vllm_fl.ops.fused_moe.fused_moe import fused_experts
 
@@ -40,12 +66,10 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
         self,
         layer: "FusedMoE",  # type: ignore[name-defined] # noqa: F821
         x: torch.Tensor,
-        router_logits: torch.Tensor,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        topk_weights, topk_ids, zero_expert_result = layer.select_experts(
-            hidden_states=x,
-            router_logits=router_logits,
-        )
+        # vLLM 0.15.0 API: topk_weights and topk_ids are pre-computed
         result = fused_experts(
                 hidden_states=x,
                 w1=layer.w13_weight,
@@ -58,13 +82,7 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
                 global_num_experts=layer.global_num_experts,
                 expert_map=layer.expert_map,
             )
-
-        if layer.zero_expert_num != 0 and layer.zero_expert_type is not None:
-            assert not isinstance(result, tuple), \
-                "Shared + zero experts are mutually exclusive not yet supported"
-            return result, zero_expert_result
-        else:
-            return result
+        return result
     forward_native = forward_oot
         
 
@@ -110,7 +128,11 @@ class FusedMoEFL(FusedMoE):
             plain MoE implementations without redundant experts.
         """
         from vllm_fl.ops.fused_moe.fused_moe import fused_topk
-        from vllm.model_executor.layers.fused_moe.fused_moe import fused_topk_bias
+        # fused_topk_bias moved to router module in vLLM 0.15.0
+        try:
+            from vllm.model_executor.layers.fused_moe.fused_moe import fused_topk_bias
+        except ImportError:
+            from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import fused_topk_bias
 
         if self.enable_eplb:
             if self.quant_method.supports_eplb:
@@ -143,7 +165,7 @@ class FusedMoEFL(FusedMoE):
 
         # Check if we should use a routing simulation strategy
         routing_strategy = envs.VLLM_MOE_ROUTING_SIMULATION_STRATEGY
-        if routing_strategy != "":
+        if routing_strategy != "" and RoutingSimulator is not None:
             topk_weights, topk_ids = RoutingSimulator.simulate_routing(
                 hidden_states=hidden_states,
                 router_logits=router_logits,

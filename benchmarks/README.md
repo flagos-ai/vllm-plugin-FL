@@ -1,3 +1,17 @@
+# vLLM-FL Benchmarks
+
+## Available Benchmark Suites
+
+### Kimi-K2.5 Optimization Benchmark
+See `kimi_k25/README.md` for comprehensive benchmarks comparing SELECTIVE vs FP8 strategies.
+
+```bash
+cd kimi_k25
+./run_benchmark.sh
+```
+
+### FlagOS Throughput Benchmark
+
 To use the benchmark_throughput_flagos feature from vllm-plugin-fl, you must first complete the following preliminary steps:
 
 1. Start an LLM inference service compliant with the OpenAI API protocol using the --served-model-name Qwen3-Next argument, or use a different name and update the string on line 11 of benchmark_throughput_flagos.py to match your chosen --served-model-name exactly (character-for-character).

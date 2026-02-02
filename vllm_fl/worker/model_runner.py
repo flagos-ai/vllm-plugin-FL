@@ -22,10 +22,11 @@ import torch.nn as nn
 from tqdm import tqdm
 
 import vllm.envs as envs
-from vllm.attention.backends.abstract import(
+# vLLM 0.15.0 moved attention backends to v1
+from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionMetadata,
-    AttentionType, 
+    AttentionType,
     MultipleOf)
 from vllm.attention.layer import Attention, MLAAttention
 from vllm.compilation.counter import compilation_counter
@@ -133,18 +134,29 @@ else:
 from vllm.utils.torch_utils import (
     get_dtype_size,
     kv_cache_dtype_str_to_dtype,
-    supports_dynamo,
 )
+# supports_dynamo removed in vLLM 0.15.0, provide fallback
+try:
+    from vllm.utils.torch_utils import supports_dynamo
+except ImportError:
+    def supports_dynamo() -> bool:
+        try:
+            import torch._dynamo
+            return True
+        except ImportError:
+            return False
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadataBuilder
+from vllm.v1.attention.backend import AttentionCGSupport, AttentionMetadataBuilder, CommonAttentionMetadata
 from vllm.v1.attention.backends.utils import (
-    AttentionCGSupport,
-    AttentionMetadataBuilder,
-    CommonAttentionMetadata,
     create_fast_prefill_custom_backend,
     get_dcp_local_seq_lens,
     reorder_batch_to_split_decodes_and_prefills,
-    split_attn_metadata,
 )
+# split_attn_metadata may be renamed/removed in vLLM 0.15.0
+try:
+    from vllm.v1.attention.backends.utils import split_attn_metadata
+except ImportError:
+    split_attn_metadata = None
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 from vllm.v1.kv_cache_interface import (
     AttentionSpec,
@@ -3058,6 +3070,7 @@ class ModelRunnerFL(
                     num_scheduled_tokens_np,
                     num_tokens_padded,
                     num_reqs_padded,
+                    self.parallel_config.num_ubatches,
                 )
 
                 pad_attn = cudagraph_mode == CUDAGraphMode.FULL
@@ -4129,7 +4142,8 @@ class ModelRunnerFL(
             batch_desc.num_reqs if batch_desc.num_reqs is not None else num_reqs
         )
         ubatch_slices, ubatch_slices_padded = maybe_create_ubatch_slices(
-            should_ubatch, num_scheduled_tokens, num_tokens_padded, num_reqs_padded
+            should_ubatch, num_scheduled_tokens, num_tokens_padded, num_reqs_padded,
+            self.parallel_config.num_ubatches,
         )
 
         attn_metadata: PerLayerAttnMetadata | None = None

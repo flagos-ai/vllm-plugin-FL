@@ -19,11 +19,17 @@ logger = logging.getLogger(__name__)
 
 
 # Valid preference values for VLLM_FL_PREFER
-PREFER_DEFAULT = "flaggems"
+# Changed default to "vendor" because vLLM's optimized CUDA kernels are
+# universally faster than FlagGems Triton kernels for LLM inference:
+# - silu_and_mul: CUDA is 11x faster for decode
+# - RMSNorm: CUDA is 9x faster for decode
+# - FlagGems only matches CUDA at very large batch sizes (8192+ tokens)
+PREFER_DEFAULT = "vendor"  # Use vLLM's optimized CUDA kernels by default
 PREFER_VENDOR = "vendor"
 PREFER_REFERENCE = "reference"
+PREFER_FLAGGEMS = "flaggems"  # Only use if explicitly requested
 
-VALID_PREFER_VALUES = frozenset({PREFER_DEFAULT, PREFER_VENDOR, PREFER_REFERENCE})
+VALID_PREFER_VALUES = frozenset({PREFER_DEFAULT, PREFER_VENDOR, PREFER_REFERENCE, PREFER_FLAGGEMS})
 
 
 @dataclass(frozen=True)

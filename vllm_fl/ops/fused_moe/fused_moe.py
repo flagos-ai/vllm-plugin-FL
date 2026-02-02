@@ -11,8 +11,13 @@ import torch.nn.functional as F
 import vllm.envs as envs
 from vllm.model_executor.layers.fused_moe.config import (FUSED_MOE_UNQUANTIZED_CONFIG, 
                                                          FusedMoEQuantConfig, _get_config_dtype_str)
-from vllm.model_executor.layers.fused_moe.fused_moe import (_get_config_quant_dtype, 
-                                                            try_get_optimal_moe_config, invoke_fused_moe_kernel)
+from vllm.model_executor.layers.fused_moe.fused_moe import (_get_config_quant_dtype,
+                                                            try_get_optimal_moe_config)
+# invoke_fused_moe_kernel renamed in vLLM 0.15.0
+try:
+    from vllm.model_executor.layers.fused_moe.fused_moe import invoke_fused_moe_kernel
+except ImportError:
+    from vllm.model_executor.layers.fused_moe.fused_moe import invoke_fused_moe_triton_kernel as invoke_fused_moe_kernel
 from vllm.model_executor.layers.fused_moe.utils import moe_kernel_quantize_input
 from vllm.triton_utils import tl, triton
 from vllm_fl.ops.fused_moe.moe_align_block_size import moe_align_block_size
@@ -81,8 +86,6 @@ def fused_experts_impl(
     expert_map: Optional[torch.Tensor] = None,
     w1_scale: Optional[torch.Tensor] = None,
     w2_scale: Optional[torch.Tensor] = None,
-    w1_zp: Optional[torch.Tensor] = None,
-    w2_zp: Optional[torch.Tensor] = None,
     a1_scale: Optional[torch.Tensor] = None,
     a2_scale: Optional[torch.Tensor] = None,
     block_shape: Optional[list[int]] = None,
@@ -201,12 +204,12 @@ def fused_experts_impl(
             moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
                                  global_num_experts, expert_map, ignore_invalid_experts=True,))
 
+        # vLLM 0.15.0 removed B_zp parameter from invoke_fused_moe_triton_kernel
         invoke_fused_moe_kernel(qcurr_hidden_states,
                                 w1,
                                 intermediate_cache1,
                                 a1q_scale,
                                 w1_scale,
-                                w1_zp,
                                 curr_topk_weights,
                                 sorted_token_ids,
                                 expert_ids,
@@ -214,14 +217,14 @@ def fused_experts_impl(
                                 apply_router_weight_on_input,
                                 top_k_num,
                                 config,
-                                compute_type=compute_type,
-                                use_fp8_w8a8=use_fp8_w8a8,
-                                use_int8_w8a8=use_int8_w8a8,
-                                use_int8_w8a16=use_int8_w8a16,
-                                use_int4_w4a16=use_int4_w4a16,
-                                per_channel_quant=per_channel_quant,
-                                block_shape=block_shape,
-                                B_bias=w1_bias)
+                                compute_type,
+                                use_fp8_w8a8,
+                                use_int8_w8a8,
+                                use_int8_w8a16,
+                                use_int4_w4a16,
+                                per_channel_quant,
+                                block_shape,
+                                w1_bias)
 
         # Activation function with multiplication
         if activation == "silu":
@@ -251,7 +254,6 @@ def fused_experts_impl(
                                 intermediate_cache3,
                                 a2q_scale,
                                 w2_scale,
-                                w2_zp,
                                 curr_topk_weights,
                                 sorted_token_ids,
                                 expert_ids,
@@ -259,14 +261,14 @@ def fused_experts_impl(
                                 not apply_router_weight_on_input,
                                 1,
                                 config,
-                                compute_type=compute_type,
-                                use_fp8_w8a8=use_fp8_w8a8,
-                                use_int8_w8a8=use_int8_w8a8,
-                                use_int8_w8a16=use_int8_w8a16,
-                                use_int4_w4a16=use_int4_w4a16,
-                                per_channel_quant=per_channel_quant,
-                                block_shape=block_shape,
-                                B_bias=w2_bias)
+                                compute_type,
+                                use_fp8_w8a8,
+                                use_int8_w8a8,
+                                use_int8_w8a16,
+                                use_int4_w4a16,
+                                per_channel_quant,
+                                block_shape,
+                                w2_bias)
 
         fl_ops.moe_sum(intermediate_cache3.view(*intermediate_cache3.size()),
                     out_hidden_states[begin_chunk_idx:end_chunk_idx])
@@ -289,6 +291,7 @@ def fused_experts(
         quant_config = FUSED_MOE_UNQUANTIZED_CONFIG
 
     ###NOTE: weight per_channel_quant same as act per_act_token_quant
+    # vLLM 0.15.0 removed w1_zp and w2_zp parameters
     return fused_experts_impl(hidden_states=hidden_states,
             w1=w1,
             w2=w2,
@@ -305,8 +308,6 @@ def fused_experts(
             expert_map=expert_map,
             w1_scale=quant_config.w1_scale,
             w2_scale=quant_config.w2_scale,
-            w1_zp=quant_config.w1_zp,
-            w2_zp=quant_config.w2_zp,
             a1_scale=quant_config.a1_scale,
             a2_scale=quant_config.a2_scale,
             block_shape=quant_config.block_shape,

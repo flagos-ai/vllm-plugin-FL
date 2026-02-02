@@ -12,7 +12,7 @@ from typing_extensions import ParamSpec
 
 import torch
 
-from vllm.attention.backends.registry import AttentionBackendEnum, register_backend
+from vllm.v1.attention.backends.registry import AttentionBackendEnum
 from vllm.logger import init_logger
 
 from vllm.platforms import Platform, PlatformEnum
@@ -114,7 +114,9 @@ class PlatformFL(Platform):
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
-        parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+        # Use vLLM's native GPU worker for v0.15.0 compatibility
+        # Custom ops are registered via register_ops() entry point
+        parallel_config.worker_cls = "vllm.v1.worker.gpu_worker.Worker"
 
         cache_config = vllm_config.cache_config
         if cache_config and cache_config.block_size is None:
@@ -199,9 +201,10 @@ class PlatformFL(Platform):
                     backend_path = "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
             else:
                 # For CUDA and other devices, use vLLM native backend
-                from vllm.attention.backends.registry import AttentionBackendEnum
+                from vllm.v1.attention.backends.registry import AttentionBackendEnum
                 if use_mla:
-                    backend_path = AttentionBackendEnum.MLA.get_path()
+                    # MLA renamed to TRITON_MLA in vLLM 0.15.0
+                    backend_path = AttentionBackendEnum.TRITON_MLA.get_path()
                 else:
                     backend_path = AttentionBackendEnum.FLASH_ATTN.get_path()
 
@@ -353,4 +356,86 @@ class PlatformFL(Platform):
             return True
         except:
             return False
-    
+
+
+def _register_oot_quantization_kernels():
+    """Register quantization kernel mappings for OOT platform.
+
+    vLLM's quantization kernel selection uses platform-specific mappings:
+        - _POSSIBLE_FP8_KERNELS: dict[PlatformEnum, list[FP8ScaledMMLinearKernel]]
+        - _POSSIBLE_INT8_KERNELS: dict[PlatformEnum, list[Int8ScaledMMLinearKernel]]
+        - _POSSIBLE_KERNELS (mixed_precision): dict[PlatformEnum, list[MPLinearKernel]]
+
+    These mappings only include CUDA, ROCM, CPU, XPU platforms by default.
+    When using PlatformFL (PlatformEnum.OOT), vLLM raises KeyError.
+
+    This function patches the global mappings to include OOT platform,
+    using CUDA kernels when the OOT platform is CUDA-alike.
+
+    Call this when PlatformFL module is loaded to fix FP8 compatibility.
+    """
+    try:
+        from vllm.platforms import PlatformEnum
+
+        # Import kernel mapping modules
+        from vllm.model_executor.layers.quantization.kernels import scaled_mm
+
+        # Check if OOT is already registered
+        if PlatformEnum.OOT in scaled_mm._POSSIBLE_FP8_KERNELS:
+            logger.debug("OOT platform FP8 kernels already registered")
+            return
+
+        # Get device info to determine which kernels to use
+        device_info = DeviceInfo()
+
+        # Register FP8 kernels
+        if device_info.device_type == "cuda":
+            if PlatformEnum.CUDA in scaled_mm._POSSIBLE_FP8_KERNELS:
+                scaled_mm._POSSIBLE_FP8_KERNELS[PlatformEnum.OOT] = \
+                    scaled_mm._POSSIBLE_FP8_KERNELS[PlatformEnum.CUDA].copy()
+                logger.info(
+                    "Registered OOT platform FP8 kernels (using CUDA): %s",
+                    [k.__name__ for k in scaled_mm._POSSIBLE_FP8_KERNELS[PlatformEnum.OOT]]
+                )
+        elif PlatformEnum.CPU in scaled_mm._POSSIBLE_FP8_KERNELS:
+            scaled_mm._POSSIBLE_FP8_KERNELS[PlatformEnum.OOT] = \
+                scaled_mm._POSSIBLE_FP8_KERNELS[PlatformEnum.CPU].copy()
+            logger.info("Registered OOT platform FP8 kernels (using CPU fallback)")
+        else:
+            scaled_mm._POSSIBLE_FP8_KERNELS[PlatformEnum.OOT] = []
+            logger.warning("No FP8 kernels available for OOT platform")
+
+        # Register INT8 kernels
+        if PlatformEnum.OOT not in scaled_mm._POSSIBLE_INT8_KERNELS:
+            if device_info.device_type == "cuda" and PlatformEnum.CUDA in scaled_mm._POSSIBLE_INT8_KERNELS:
+                scaled_mm._POSSIBLE_INT8_KERNELS[PlatformEnum.OOT] = \
+                    scaled_mm._POSSIBLE_INT8_KERNELS[PlatformEnum.CUDA].copy()
+                logger.debug("Registered OOT platform INT8 kernels (using CUDA)")
+            elif PlatformEnum.CPU in scaled_mm._POSSIBLE_INT8_KERNELS:
+                scaled_mm._POSSIBLE_INT8_KERNELS[PlatformEnum.OOT] = \
+                    scaled_mm._POSSIBLE_INT8_KERNELS[PlatformEnum.CPU].copy()
+
+        # Register mixed_precision kernels (W4A8, Marlin, etc.)
+        try:
+            from vllm.model_executor.layers.quantization.kernels import mixed_precision
+            if PlatformEnum.OOT not in mixed_precision._POSSIBLE_KERNELS:
+                if device_info.device_type == "cuda" and PlatformEnum.CUDA in mixed_precision._POSSIBLE_KERNELS:
+                    mixed_precision._POSSIBLE_KERNELS[PlatformEnum.OOT] = \
+                        mixed_precision._POSSIBLE_KERNELS[PlatformEnum.CUDA].copy()
+                    logger.debug("Registered OOT platform mixed_precision kernels (using CUDA)")
+                elif PlatformEnum.CPU in mixed_precision._POSSIBLE_KERNELS:
+                    mixed_precision._POSSIBLE_KERNELS[PlatformEnum.OOT] = \
+                        mixed_precision._POSSIBLE_KERNELS[PlatformEnum.CPU].copy()
+        except ImportError:
+            pass
+
+    except ImportError as e:
+        logger.debug(f"OOT quantization kernel registration skipped (import error): {e}")
+    except Exception as e:
+        logger.warning(f"Failed to register OOT quantization kernels: {e}")
+
+
+# Register OOT quantization kernels when this module is loaded
+# This ensures FP8/INT8 quantization works with PlatformFL
+_register_oot_quantization_kernels()
+
