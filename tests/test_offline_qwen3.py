@@ -1,11 +1,13 @@
 import pytest
 from vllm import LLM, SamplingParams
 
+MODEL_PATH = "/models/Qwen3-Next-80B-A3B-Instruct"
+
 
 @pytest.fixture(scope="session")
 def llm_instance(request):
     return LLM(
-        model="/models/Qwen3-Next-80B-A3B-Instruct",
+        model=MODEL_PATH,
         max_num_batched_tokens=16384,
         max_num_seqs=2048,
         tensor_parallel_size=4,

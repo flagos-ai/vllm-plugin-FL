@@ -4,7 +4,7 @@ import subprocess
 import time
 import json
 
-MODEL_PATH = "/workspace/MiniCMP/MiniCPMO45_0121"
+MODEL_PATH = "/models/MiniCMP"
 API_KEY = "token-abc123"
 HOST = "127.0.0.1"
 PORT = 8000

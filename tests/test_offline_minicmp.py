@@ -6,6 +6,8 @@ from transformers import AutoTokenizer
 from vllm import LLM, EngineArgs, SamplingParams
 from vllm.assets.audio import AudioAsset
 
+MODEL_PATH = "/models/MiniCMP"
+
 audio_assets = [AudioAsset("mary_had_lamb"), AudioAsset("winning_call")]
 question_per_audio_count = {
     0: "What is 1+1?",
@@ -24,7 +26,7 @@ class ModelRequestData(NamedTuple):
 
 
 def get_minicpmo_request(question: str, audio_count: int) -> ModelRequestData:
-    model_name = "/workspace/MiniCMP/MiniCPMO45_0121"
+    model_name = MODEL_PATH
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
     engine_args = EngineArgs(
