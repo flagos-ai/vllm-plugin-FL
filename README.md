@@ -101,6 +101,8 @@ if __name__ == '__main__':
 
 ## Advanced use
 
+For dispatch environment variable usage, see [environment variables usage](./vllm_fl/dispatch/README.md#environment-variables).
+
 ### Using CudaCommunication library
 If you want to use the original CudaCommunication, you can unset the following environment variables.
 ```sh

@@ -22,8 +22,7 @@ class RMSNormFL(RMSNorm):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        return call_op("rmsnorm", x, residual, self.weight, self.variance_epsilon)
+        return call_op("rms_norm", x, residual, self.weight, self.variance_epsilon)
 
 
 __all__ = ["RMSNormFL"]
-        

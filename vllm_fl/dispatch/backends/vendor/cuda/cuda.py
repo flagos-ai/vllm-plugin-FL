@@ -8,7 +8,6 @@ This backend provides operator implementations for NVIDIA CUDA GPUs.
 
 from __future__ import annotations
 
-import os
 from typing import Optional, Union
 
 import torch
@@ -59,7 +58,7 @@ class CudaBackend(Backend):
 
         return silu_and_mul_cuda(x)
 
-    def rmsnorm(
+    def rms_norm(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor],
@@ -69,9 +68,9 @@ class CudaBackend(Backend):
         """
         RMS normalization using vLLM's CUDA implementation.
         """
-        from .impl.normalization import rmsnorm_cuda
+        from .impl.normalization import rms_norm_cuda
 
-        return rmsnorm_cuda(x, residual, weight, epsilon)
+        return rms_norm_cuda(x, residual, weight, epsilon)
 
     def rotary_embedding(
         self,
@@ -104,7 +103,7 @@ class CudaBackend(Backend):
 
         Supports:
         - FLASH_ATTN (default)
-        - TRITON_ATTN (when USE_FLAGGEMS=1)
+        - TRITON_ATTN (when use_flaggems_op("triton_attn") is True)
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
@@ -113,13 +112,10 @@ class CudaBackend(Backend):
             Fully qualified class path string
         """
         from vllm.attention.backends.registry import AttentionBackendEnum
+        from vllm_fl.utils import use_flaggems_op
 
         if use_mla:
             return AttentionBackendEnum.FLASHMLA.get_path()
-
-        # Check for TRITON_ATTN preference via environment variable
-        if os.environ.get("USE_FLAGGEMS", "0") == "1":
-            return AttentionBackendEnum.TRITON_ATTN.get_path()
 
         # Default to FLASH_ATTN
         return AttentionBackendEnum.FLASH_ATTN.get_path()

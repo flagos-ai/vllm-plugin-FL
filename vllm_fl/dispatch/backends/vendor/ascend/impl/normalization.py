@@ -11,7 +11,7 @@ from typing import Optional, Union
 import torch
 
 
-def rmsnorm_ascend(
+def rms_norm_ascend(
     x: torch.Tensor,
     residual: Optional[torch.Tensor],
     weight: torch.Tensor,

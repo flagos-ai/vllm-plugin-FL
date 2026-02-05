@@ -27,13 +27,13 @@ class FlagGemsBackend(Backend):
 
     @property
     def name(self) -> str:
-        return "flaggems"
+        return "flagos"
 
     def is_available(self) -> bool:
         """Check if FlagGems is available."""
         if FlagGemsBackend._available is None:
             try:
-                import flag_gems
+                import flag_gems  # noqa F401
 
                 FlagGemsBackend._available = True
             except ImportError:
@@ -56,7 +56,7 @@ class FlagGemsBackend(Backend):
 
         return silu_and_mul_flaggems(x)
 
-    def rmsnorm(
+    def rms_norm(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor],
@@ -75,9 +75,9 @@ class FlagGemsBackend(Backend):
         Returns:
             Normalized tensor, or tuple of (normalized, residual) if residual is provided
         """
-        from .impl.normalization import rmsnorm_flaggems
+        from .impl.normalization import rms_norm_flaggems
 
-        return rmsnorm_flaggems(x, residual, weight, epsilon)
+        return rms_norm_flaggems(x, residual, weight, epsilon)
 
     def rotary_embedding(
         self,
@@ -126,6 +126,16 @@ class FlagGemsBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        from vllm.attention.backends.registry import AttentionBackendEnum
+
+        # TritonAttentionBackend requires CUDA, check if available
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "TritonAttentionBackend requires CUDA but CUDA is not available. "
+                "Falling back to vendor implementation."
+            )
+
         if use_mla:
-            return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
-        return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+            raise NotImplementedError("NOT support mla now!")
+
+        return AttentionBackendEnum.TRITON_ATTN.get_path()

@@ -4,6 +4,7 @@
 FlagGems backend operator registrations.
 
 This module registers all DEFAULT (FlagGems) implementations.
+Only impls for which use_flaggems_op(op_name) is True are passed to the registry.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import functools
 
 from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.utils import use_flaggems_op
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -40,7 +42,7 @@ def register_builtins(registry) -> None:
         # Activation
         OpImpl(
             op_name="silu_and_mul",
-            impl_id="default.flaggems",
+            impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.silu_and_mul, is_avail),
             vendor=None,
@@ -48,31 +50,32 @@ def register_builtins(registry) -> None:
         ),
         # Normalization
         OpImpl(
-            op_name="rmsnorm",
-            impl_id="default.flaggems",
+            op_name="rms_norm",
+            impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.rmsnorm, is_avail),
+            fn=_bind_is_available(backend.rms_norm, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
         # Rotary Embedding
         OpImpl(
             op_name="rotary_embedding",
-            impl_id="default.flaggems",
+            impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.rotary_embedding, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
         # Attention Backend
-        # OpImpl(
-        #     op_name="attention_backend",
-        #     impl_id="default.flaggems",
-        #     kind=BackendImplKind.DEFAULT,
-        #     fn=_bind_is_available(backend.attention_backend, is_avail),
-        #     vendor=None,
-        #     priority=BackendPriority.DEFAULT,
-        # ),
+        OpImpl(
+            op_name="attention_backend",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.attention_backend, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
     ]
 
-    registry.register_many(impls)
+    filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
+    registry.register_many(filtered)

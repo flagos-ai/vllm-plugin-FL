@@ -1,0 +1,106 @@
+# vLLM-FL Dispatch Configuration for Ascend NPU
+# Auto-loaded when running on Ascend hardware
+
+# Preferred default backend type: flaggems, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Vendor Whitelist (Optional, allows all if not set)
+# allow_vendors:
+#  - ascend
+#  - cuda
+
+# Vendor Blacklist (Optional)
+# deny_vendors:
+#   - cuda
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flaggems      : Default FlagGems implementation
+#   - reference     : PyTorch reference implementation
+#   - vendor        : Any available vendor backend (auto-detected)
+#   - vendor:ascend : Ascend-specific vendor backend
+op_backends:
+  # attention_backend: prioritize vendor as FlagGems implementation is incomplete
+  attention_backend:
+    - vendor
+    - flagos
+    - reference
+
+  # rms_norm: prioritize vendor (torch_npu) implementation
+  rms_norm:
+    - vendor
+    - flagos
+    - reference
+
+  # silu_and_mul: prioritize vendor implementation
+  silu_and_mul:
+    - flagos
+    - vendor
+    - reference
+
+  # rotary_embedding: prioritize vendor (torch_npu._npu_rotary_embedding)
+  rotary_embedding:
+    - vendor
+    - flagos
+    - reference
+
+# FlagOS operator blacklist
+# These operators will NOT use FlagOS implementation even if FlagOS is enabled.
+flagos_blacklist:
+  - to_copy
+  - _to_copy
+  - zeros
+  - acos
+  - copy_
+  - fill_scalar_
+  - sum_dim
+  - exponential_
+  - mm
+  - resolve_neg
+  - resolve_conj
+  - eq_scalar
+  - floor_divide
+  - cumsum
+  - cumsum_out
+  - mul
+  - reciprocal
+  - repeat
+  - randn
+  - add
+  - ge_scalar
+  - sub
+  - bitwise_and
+  - bitwise_not
+  - slice_scatter
+  - fill_tensor_
+  - conv1d
+  - conv2d
+  - uniform_
+  - prod
+  - max
+  - amax
+  - cat
+  - stack
+  - flatten
+  - reshape
+  - view
+  - tensor
+  - rand
+  - rand_like
+  - gather
+  - _log_softmax
+  - _flash_attention_forward
+  - scatter
+  - scatter_
+
+# OOT (Out-of-Tree) operator blacklist
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe

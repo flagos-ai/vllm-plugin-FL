@@ -75,7 +75,7 @@ class VLLMFLBackendBase(ABC):
     # ==================== Normalization Operators ====================
 
     @abstractmethod
-    def rmsnorm(
+    def rms_norm(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor],

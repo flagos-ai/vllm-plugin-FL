@@ -5,7 +5,7 @@ Ascend operator implementations.
 """
 
 from .activation import silu_and_mul_ascend
-from .normalization import rmsnorm_ascend
+from .normalization import rms_norm_ascend
 from .rotary import rotary_embedding_ascend
 from .attention import (
     AscendAttentionBackend,
@@ -23,7 +23,7 @@ from .attention_mask import (
 
 __all__ = [
     "silu_and_mul_ascend",
-    "rmsnorm_ascend",
+    "rms_norm_ascend",
     "rotary_embedding_ascend",
     "AscendAttentionBackend",
     "AscendAttentionBackendImpl",

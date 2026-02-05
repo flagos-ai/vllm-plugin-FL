@@ -58,7 +58,7 @@ class ReferenceBackend(Backend):
 
         return silu_and_mul_torch(x)
 
-    def rmsnorm(
+    def rms_norm(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor],
@@ -77,9 +77,9 @@ class ReferenceBackend(Backend):
         Returns:
             Normalized tensor, or tuple of (normalized, residual) if residual is provided
         """
-        from .impl.normalization import rmsnorm_torch
+        from .impl.normalization import rms_norm_torch
 
-        return rmsnorm_torch(x, residual, weight, epsilon)
+        return rms_norm_torch(x, residual, weight, epsilon)
 
     def rotary_embedding(
         self,
@@ -133,6 +133,7 @@ class ReferenceBackend(Backend):
         """
         # Return vLLM's native flash attention backend as reference
         from vllm.attention.backends.registry import AttentionBackendEnum
+
         if use_mla:
             # vLLM native MLA backend
             return AttentionBackendEnum.FLASHMLA.get_path()

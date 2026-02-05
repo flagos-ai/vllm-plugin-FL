@@ -48,10 +48,10 @@ def register_builtins(registry) -> None:
         ),
         # Normalization
         OpImpl(
-            op_name="rmsnorm",
+            op_name="rms_norm",
             impl_id="reference.torch",
             kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.rmsnorm, is_avail),
+            fn=_bind_is_available(backend.rms_norm, is_avail),
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),

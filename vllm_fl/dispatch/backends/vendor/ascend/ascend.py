@@ -65,7 +65,7 @@ class AscendBackend(Backend):
 
         return silu_and_mul_ascend(x)
 
-    def rmsnorm(
+    def rms_norm(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor],
@@ -84,9 +84,9 @@ class AscendBackend(Backend):
         Returns:
             Normalized tensor, or tuple of (normalized, residual) if residual is provided
         """
-        from .impl.normalization import rmsnorm_ascend
+        from .impl.normalization import rms_norm_ascend
 
-        return rmsnorm_ascend(x, residual, weight, epsilon)
+        return rms_norm_ascend(x, residual, weight, epsilon)
 
     def rotary_embedding(
         self,

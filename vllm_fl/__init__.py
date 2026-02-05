@@ -3,6 +3,8 @@
 
 import os
 import logging
+from vllm_fl.utils import get_op_config as _get_op_config
+
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,7 @@ def register():
     multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
     if multiproc_method is None:
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+    _get_op_config()
     return "vllm_fl.platform.PlatformFL"
 
 

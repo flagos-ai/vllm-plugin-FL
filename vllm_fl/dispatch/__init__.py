@@ -15,12 +15,12 @@ Usage:
 
     # Or use the manager directly
     manager = get_default_manager()
-    fn = manager.resolve("rmsnorm")
+    fn = manager.resolve("rms_norm")
     result = fn(x, residual, weight, epsilon)
 
 Environment Variables:
     VLLM_FL_CONFIG: Path to YAML configuration file (highest priority, overrides env vars)
-    VLLM_FL_PREFER: Preferred backend ("flaggems", "vendor", "reference")
+    VLLM_FL_PREFER: Preferred backend ("flagos", "vendor", "reference")
     VLLM_FL_STRICT: Enable strict mode ("1" or "0")
     VLLM_FL_DENY_VENDORS: Comma-separated list of denied vendors
     VLLM_FL_ALLOW_VENDORS: Comma-separated list of allowed vendors
@@ -38,7 +38,7 @@ Configuration File (YAML):
 
         # vllm_fl_dispatch.yaml
 
-        # Preferred backend type: flaggems, vendor, or reference
+        # Preferred backend type: flagos, vendor, or reference
         prefer: vendor
 
         # Strict mode:
@@ -59,20 +59,20 @@ Configuration File (YAML):
         # If you only list 2 options, only those 2 will be attempted.
         #
         # Supported tokens:
-        #   - flaggems      : FlagGems default implementation
+        #   - flagos        : FlagOS default implementation
         #   - reference     : PyTorch reference implementation
         #   - vendor        : Any available vendor backend (auto-detect)
         #   - vendor:cuda   : Only CUDA vendor backend
         #   - vendor:ascend : Only Ascend vendor backend
         op_backends:
-          rmsnorm:
+          rms_norm:
             - vendor        # Try any available vendor first
-            - flaggems      # Then try flaggems
+            - flagos        # Then try flagos
             # reference not listed, so it won't be used
 
           silu_and_mul:
             - vendor:cuda   # Only try CUDA, not other vendors
-            - flaggems
+            - flagos
             - reference
 """
 

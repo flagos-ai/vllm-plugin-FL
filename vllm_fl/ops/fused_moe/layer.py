@@ -4,38 +4,47 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from typing import Callable, Literal, Optional, Union
+from typing import Optional, Union
 import torch
 import torch.nn.functional as F
+from functools import partial
 import vllm.envs as envs
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.fused_moe.layer import UnquantizedFusedMoEMethod
-from vllm.model_executor.layers.fused_moe.routing_simulator import (
-    RoutingSimulator)
+from vllm.model_executor.layers.fused_moe.routing_simulator import RoutingSimulator
 from vllm.model_executor.layers.fused_moe.fused_moe import grouped_topk
 from vllm.platforms import current_platform
+from vllm._aiter_ops import rocm_aiter_ops
+from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
+    rocm_aiter_grouped_topk,
+)
+
 
 if current_platform.is_cuda_alike():
-    from vllm.model_executor.layers.fused_moe.fused_moe import eplb_map_to_physical_and_record
+    from vllm.model_executor.layers.fused_moe.fused_moe import (
+        eplb_map_to_physical_and_record,
+    )
 else:
+
     def _eplb_map_to_physical_and_record(
-            topk_ids: torch.Tensor, expert_load_view: torch.Tensor,
-            logical_to_physical_map: torch.Tensor,
-            logical_replica_count: torch.Tensor,
-            indices_type: Optional[torch.dtype]) -> torch.Tensor:
+        topk_ids: torch.Tensor,
+        expert_load_view: torch.Tensor,
+        logical_to_physical_map: torch.Tensor,
+        logical_replica_count: torch.Tensor,
+        indices_type: Optional[torch.dtype],
+    ) -> torch.Tensor:
         # CPU fallback: no EPLB so just return as is
         return topk_ids
 
     eplb_map_to_physical_and_record = _eplb_map_to_physical_and_record
 
-from vllm.model_executor.layers.fused_moe.fused_moe import (
-    zero_experts_compute_triton)
+from vllm.model_executor.layers.fused_moe.fused_moe import zero_experts_compute_triton
 
 
 from vllm_fl.ops.fused_moe.fused_moe import fused_experts
 
-class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
 
+class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
     def forward_oot(
         self,
         layer: "FusedMoE",  # type: ignore[name-defined] # noqa: F821
@@ -47,49 +56,57 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
             router_logits=router_logits,
         )
         result = fused_experts(
-                hidden_states=x,
-                w1=layer.w13_weight,
-                w2=layer.w2_weight,
-                topk_weights=topk_weights,
-                topk_ids=topk_ids,
-                activation=layer.activation,
-                quant_config=self.moe_quant_config,
-                apply_router_weight_on_input=layer.apply_router_weight_on_input,
-                global_num_experts=layer.global_num_experts,
-                expert_map=layer.expert_map,
-            )
+            hidden_states=x,
+            w1=layer.w13_weight,
+            w2=layer.w2_weight,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            activation=layer.activation,
+            quant_config=self.moe_quant_config,
+            apply_router_weight_on_input=layer.apply_router_weight_on_input,
+            global_num_experts=layer.global_num_experts,
+            expert_map=layer.expert_map,
+        )
 
         if layer.zero_expert_num != 0 and layer.zero_expert_type is not None:
-            assert not isinstance(result, tuple), \
+            assert not isinstance(result, tuple), (
                 "Shared + zero experts are mutually exclusive not yet supported"
+            )
             return result, zero_expert_result
         else:
             return result
+
     forward_native = forward_oot
-        
+
 
 class FusedMoEFL(FusedMoE):
-    
-    def forward_oot(self,
+    def forward_oot(
+        self,
         hidden_states: torch.Tensor,
         router_logits: torch.Tensor,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         og_hidden_states = hidden_states.shape[-1]
         if self.hidden_size != og_hidden_states:
-            hidden_states = F.pad(hidden_states,
-                                  (0, self.hidden_size - og_hidden_states),
-                                  mode='constant',
-                                  value=0.0)
-            
+            hidden_states = F.pad(
+                hidden_states,
+                (0, self.hidden_size - og_hidden_states),
+                mode="constant",
+                value=0.0,
+            )
+
         if self.shared_experts is None:
             fused_output = torch.ops.vllm.moe_forward(
-                hidden_states, router_logits, self.layer_name)
+                hidden_states, router_logits, self.layer_name
+            )
             return fused_output[..., :og_hidden_states]
         else:
             shared_output, fused_output = torch.ops.vllm.moe_forward_shared(
-                hidden_states, router_logits, self.layer_name)
-            return (shared_output[..., :og_hidden_states],
-                    fused_output[..., :og_hidden_states])
+                hidden_states, router_logits, self.layer_name
+            )
+            return (
+                shared_output[..., :og_hidden_states],
+                fused_output[..., :og_hidden_states],
+            )
 
     def select_experts(
         self,
@@ -116,15 +133,15 @@ class FusedMoEFL(FusedMoE):
             if self.quant_method.supports_eplb:
                 if self.expert_load_view is None:
                     raise ValueError(
-                        "enable_eplb=True requiere expert_load_view != None"
+                        "enable_eplb=True requires expert_load_view != None"
                     )
                 if self.logical_to_physical_map is None:
                     raise ValueError(
-                        "enable_eplb=True requiere logical_to_physical_map != None"
+                        "enable_eplb=True requires logical_to_physical_map != None"
                     )
                 if self.logical_replica_count is None:
                     raise ValueError(
-                        "enable_eplb=True requiere logical_replica_count != None"
+                        "enable_eplb=True requires logical_replica_count != None"
                     )
             else:
                 raise NotImplementedError(
@@ -225,4 +242,5 @@ class FusedMoEFL(FusedMoE):
         else:
             zero_expert_result = None
         return topk_weights, topk_ids, zero_expert_result
+
     FusedMoE.select_experts = select_experts

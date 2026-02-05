@@ -11,7 +11,8 @@ repos:
   rev: v0.14.0
   hooks:
   - id: ruff-check
-    args: [--output-format, github, --fix]
+    args: ["--ignore=E731", --output-format, github, --fix]
+    # E731 : Do not assign a lambda expression, use a def
   - id: ruff-format
 - repo: https://github.com/crate-ci/typos
   rev: v1.38.1

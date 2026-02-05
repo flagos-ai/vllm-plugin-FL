@@ -11,7 +11,7 @@ from typing import Optional, Union
 import torch
 
 
-def rmsnorm_flaggems(
+def rms_norm_flaggems(
     x: torch.Tensor,
     residual: Optional[torch.Tensor],
     weight: torch.Tensor,
