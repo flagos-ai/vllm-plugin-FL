@@ -42,7 +42,7 @@ def vllm_server():
             response = requests.get(f"{BASE_URL}/models", timeout=2)
             if response.status_code == 200:
                 ready = True
-                print(f"\n[Setup] vLLM service is ready (耗时 {i * 5}s)")
+                print(f"\n[Setup] vLLM service is ready (take time {i * 5}s)")
                 break
         except Exception:
             pass
