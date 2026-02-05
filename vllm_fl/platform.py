@@ -5,12 +5,22 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
+<<<<<<< HEAD
 from typing import TYPE_CHECKING, Optional, TypeVar
+=======
+from datetime import timedelta
+from functools import cache, wraps
+from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 from typing_extensions import ParamSpec
 
 import torch
 
+<<<<<<< HEAD
 from vllm.attention.backends.registry import AttentionBackendEnum
+=======
+from vllm.attention.backends.registry import AttentionBackendEnum, register_backend
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 from vllm.logger import init_logger
 
 from vllm.platforms import Platform, PlatformEnum
@@ -31,7 +41,6 @@ logger = init_logger(__name__)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
@@ -45,6 +54,10 @@ class PlatformFL(Platform):
     # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     def is_cuda_alike(self) -> bool:
+        """Stateless version of [torch.cuda.is_available][]."""
+        return self.device_type == "cuda"
+    
+    def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda"
 
@@ -177,6 +190,7 @@ class PlatformFL(Platform):
             AttentionBackendEnum.FLASH_ATTN,
         ]
 
+
     @classmethod
     def get_vit_attn_backend(
         cls,
@@ -205,6 +219,7 @@ class PlatformFL(Platform):
 
         return AttentionBackendEnum.TORCH_SDPA
 
+
     @classmethod
     def get_punica_wrapper(cls) -> str:
         # TODO(lms): support fl PunicaWrapper
@@ -228,6 +243,30 @@ class PlatformFL(Platform):
         if cls.device_name in ["cuda", "npu"]:
             return True
         return False
+
+    @classmethod
+    def insert_blocks_to_device(
+        cls,
+        src_cache: torch.Tensor,
+        dst_cache: torch.Tensor,
+        src_block_indices: torch.Tensor,
+        dst_block_indices: torch.Tensor,
+    ) -> None:
+        """Copy blocks from src_cache to dst_cache device ."""
+        _src_cache = src_cache[:, src_block_indices]
+        dst_cache[:, dst_block_indices] = _src_cache.to(dst_cache.device)
+
+    @classmethod
+    def swap_out_blocks_to_host(
+        cls,
+        src_cache: torch.Tensor,
+        dst_cache: torch.Tensor,
+        src_block_indices: torch.Tensor,
+        dst_block_indices: torch.Tensor,
+    ) -> None:
+        """Copy blocks from device to host (CPU)."""
+        _src_cache = src_cache[:, src_block_indices]
+        dst_cache[:, dst_block_indices] = _src_cache.cpu()
 
     @classmethod
     def insert_blocks_to_device(
@@ -281,7 +320,6 @@ class PlatformFL(Platform):
     def is_fully_connected(cls, physical_device_ids: list[int]) -> bool:
         try:
             import pynvml
-
             pynvml.nvmlInit()
             """
             query if the set of gpus are fully connected by nvlink (1 hop)

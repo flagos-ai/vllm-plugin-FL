@@ -43,6 +43,7 @@ A vLLM plugin built on the FlagOS unified multi-chip backend.
     pip install --no-build-isolation -e .
     ```
 
+
 3. Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
     3.1 Clone the repository:
@@ -100,8 +101,6 @@ if __name__ == '__main__':
 ```
 
 ## Advanced use
-
-For dispatch environment variable usage, see [environment variables usage](./vllm_fl/dispatch/README.md#environment-variables).
 
 ### Using CudaCommunication library
 If you want to use the original CudaCommunication, you can unset the following environment variables.

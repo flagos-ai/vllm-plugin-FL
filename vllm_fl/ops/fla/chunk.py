@@ -52,7 +52,6 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel
         return o.to(q.dtype), final_state
 
-
 @CustomOp.register("chunk_gated_delta_rule")
 class ChunkGatedDeltaRuleOp(CustomOp):
     def __init__(

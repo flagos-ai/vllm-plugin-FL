@@ -1,5 +1,6 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+
 import torch
 
 from vllm.model_executor.custom_op import CustomOp
@@ -47,7 +48,6 @@ class FusedRecurrentFunction(torch.autograd.Function):
         )
 
         return o, final_state
-
 
 @CustomOp.register("fused_recurrent_gated_delta_rule")
 class FusedRecurrentGatedDeltaRuleOp(CustomOp):

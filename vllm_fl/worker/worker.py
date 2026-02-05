@@ -6,22 +6,36 @@
 
 import gc
 import os
+<<<<<<< HEAD
 from contextlib import nullcontext, contextmanager
 from types import NoneType
 from typing import TYPE_CHECKING, Any, Optional, cast, Generator
 from dataclasses import dataclass
+=======
+from contextlib import AbstractContextManager, nullcontext
+from types import NoneType
+from typing import TYPE_CHECKING, Any, Optional, cast
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 
 import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
 
+<<<<<<< HEAD
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.config.compilation import CompilationMode
 from vllm.distributed import (
     ensure_model_parallel_initialized,
     init_distributed_environment,
 )
+=======
+import vllm.envs as envs
+from vllm.config import CUDAGraphMode,VllmConfig
+from vllm.config.compilation import CompilationMode
+from vllm.distributed import (ensure_model_parallel_initialized,
+                              init_distributed_environment)
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 from vllm.distributed.ec_transfer import ensure_ec_transfer_initialized
 from vllm.distributed.kv_transfer import (
     ensure_kv_transfer_initialized,
@@ -38,12 +52,20 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
+<<<<<<< HEAD
+=======
+from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 from vllm.platforms import current_platform
 from vllm.profiler.wrapper import TorchProfilerWrapper
 
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
+<<<<<<< HEAD
 from vllm.utils.mem_utils import GiB_bytes  # , MemorySnapshot, memory_profiling
+=======
+from vllm.utils.mem_utils import GiB_bytes, MemorySnapshot, memory_profiling
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
@@ -52,15 +74,20 @@ from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
 from vllm.v1.worker.worker_base import WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
+<<<<<<< HEAD
 import vllm_fl.envs as fl_envs
 
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 from vllm_fl.ops.custom_ops import register_oot_ops
+=======
+from vllm.v1.core.sched.output import SchedulerOutput
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 
 logger = init_logger(__name__)
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
+<<<<<<< HEAD
 
 
 @dataclass
@@ -176,6 +203,10 @@ def memory_profiling_fl(
     result.non_kv_cache_memory = (
         non_torch_memory + peak_activation_memory + result.weights_memory
     )
+=======
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
 
 
 class WorkerFL(WorkerBase):
@@ -198,7 +229,6 @@ class WorkerFL(WorkerBase):
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils.import_utils import init_cached_hf_modules
-
             init_cached_hf_modules()
 
         # Buffers saved before sleep
@@ -334,6 +364,7 @@ class WorkerFL(WorkerBase):
 
             # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
             self.local_rank += dp_local_rank * tp_pp_world_size
+<<<<<<< HEAD
             device_count = (
                 current_platform.torch_device_fn.device_count()
                 if current_platform.torch_device_fn.is_available()
@@ -347,6 +378,13 @@ class WorkerFL(WorkerBase):
                 current_platform.torch_device_fn.device_count()
                 if current_platform.torch_device_fn.is_available()
                 else 0
+=======
+            assert self.local_rank < torch.cuda.device_count(), (
+                f"DP adjusted local rank {self.local_rank} is out of bounds. "
+            )
+            visible_device_count = (
+                current_platform.torch_device_fn.device_count() if current_platform.torch_device_fn.is_available() else 0
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
             )
             assert self.parallel_config.local_world_size <= visible_device_count, (
                 f"local_world_size ({self.parallel_config.local_world_size}) must "
@@ -399,7 +437,6 @@ class WorkerFL(WorkerBase):
         init_workspace_manager(self.device, num_ubatches)
 
         from vllm_fl.worker.model_runner import ModelRunnerFL
-
         # Construct the model runner
         self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
 
@@ -523,7 +560,6 @@ class WorkerFL(WorkerBase):
 
         tp_rank = get_tp_group().rank_in_group
         return {tp_rank: metadata}
-
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
 
@@ -677,6 +713,27 @@ class WorkerFL(WorkerBase):
 
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         return self.model_runner.get_supported_tasks()
+    
+    def annotate_profile(self, scheduler_output):
+        # add trace annotation so that we can easily distinguish
+        # new/cached request numbers in each iteration
+        if not self.profiler:
+            return nullcontext()
+
+        self.profiler.step()
+
+        num_new = len(scheduler_output.scheduled_new_reqs)
+        num_cached = len(scheduler_output.scheduled_cached_reqs.req_ids)
+
+        return self.profiler.annotate_context_manager(
+            f"execute_new_{num_new}_cached_{num_cached}"
+        )
+    @torch.inference_mode()
+    def sample_tokens(
+        self, grammar_output: "GrammarOutput | None"
+    ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
+        return self.model_runner.sample_tokens(grammar_output)
+
 
     def annotate_profile(self, scheduler_output):
         # add trace annotation so that we can easily distinguish
@@ -809,8 +866,8 @@ class WorkerFL(WorkerBase):
             for old_ep_rank in range(old_ep_size)
         }
         assert self.model_runner.eplb_state is not None
+
         self.model_runner.eplb_state.rearrange(
-            self.model_runner.model,
             execute_shuffle=True,
             global_expert_loads=None,
             rank_mapping=rank_mapping,
@@ -951,6 +1008,7 @@ class WorkerFL(WorkerBase):
                 group=get_ep_group().cpu_group,
                 group_src=0,
             )
+
             num_local_physical_experts = int(num_local_physical_experts_tensor.item())
             new_physical_experts = num_local_physical_experts * new_ep_size
             assert self.model_runner.eplb_state is not None

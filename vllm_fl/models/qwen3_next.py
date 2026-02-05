@@ -5,6 +5,7 @@
 from collections.abc import Iterable
 from itertools import islice
 
+
 import torch
 from einops import rearrange
 from torch import nn

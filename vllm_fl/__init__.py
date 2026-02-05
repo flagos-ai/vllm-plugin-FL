@@ -22,6 +22,7 @@ def register():
 def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
+<<<<<<< HEAD
 
     try:
         from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM  # noqa: F401
@@ -48,3 +49,9 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register KimiK25 model error: {str(e)}")
+=======
+    from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM
+    ModelRegistry.register_model(
+        "Qwen3NextForCausalLM",
+        "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM")
+>>>>>>> d8d02633f3bb5d08166ad032ed0150009279f0f4
