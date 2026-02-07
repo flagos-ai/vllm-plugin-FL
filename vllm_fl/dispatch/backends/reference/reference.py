@@ -134,7 +134,14 @@ class ReferenceBackend(Backend):
         # Return vLLM's native flash attention backend as reference
         from vllm.attention.backends.registry import AttentionBackendEnum
 
+        import os
+
+        env_backend = os.environ.get("VLLM_ATTENTION_BACKEND", "FLASH_ATTN").upper()
+
         if use_mla:
             # vLLM native MLA backend
             return AttentionBackendEnum.MLA.get_path()
-        return AttentionBackendEnum.FLASH_ATTN.get_path()
+        if env_backend == "FLASHINFER":
+            return AttentionBackendEnum.FLASHINFER.get_path()
+        else:
+            return AttentionBackendEnum.FLASH_ATTN.get_path()
