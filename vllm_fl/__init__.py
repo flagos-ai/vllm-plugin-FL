@@ -22,9 +22,12 @@ def register():
 def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
+    import vllm.model_executor.models.qwen3_next as qwen3_next_module
 
     try:
         from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM  # noqa: F401
+
+        qwen3_next_module.Qwen3NextForCausalLM = Qwen3NextForCausalLM
 
         ModelRegistry.register_model(
             "Qwen3NextForCausalLM", "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"

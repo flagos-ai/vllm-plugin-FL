@@ -21,6 +21,7 @@ from vllm.config.compilation import CompilationMode
 from vllm.distributed import (
     ensure_model_parallel_initialized,
     init_distributed_environment,
+    set_custom_all_reduce,
 )
 from vllm.distributed.ec_transfer import ensure_ec_transfer_initialized
 from vllm.distributed.kv_transfer import (
@@ -1055,6 +1056,7 @@ def init_worker_distributed_environment(
     """Initialize the distributed environment."""
     attention_config = vllm_config.attention_config
     parallel_config = vllm_config.parallel_config
+    set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
     init_batch_invariance(attention_config.backend)
