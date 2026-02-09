@@ -112,5 +112,5 @@ unset FLAGCX_PATH
 ### Using native CUDA operators
 If you want to use the original CUDA operators, you can set the following environment variables.
 ```sh
-export USE_FLAGGEMS=1
+export USE_FLAGGEMS=0
 ```
