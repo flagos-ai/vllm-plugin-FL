@@ -1,5 +1,5 @@
-# PR Labeler 配置文件
-# 根据修改的文件路径自动添加标签
+# PR Labeler configuratoin file
+# Automatically add labels based on modified file paths
 
 docs:
   - changed-files:

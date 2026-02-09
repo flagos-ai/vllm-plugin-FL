@@ -1,7 +1,8 @@
 name: "Pull Request Labeler"
 
 on:
-  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -12,8 +13,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Apply labels
         uses: actions/labeler@v5
+        continue-on-error: true  # Don't fail if config not yet on main branch
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           sync-labels: true
