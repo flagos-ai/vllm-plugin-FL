@@ -15,6 +15,14 @@ from dataclasses import dataclass
 pytestmark = pytest.mark.gpu
 
 
+def has_weak_ref_tensor_op():
+    """Check if vllm C++ extension weak_ref_tensor is available."""
+    try:
+        return hasattr(torch.ops._C, 'weak_ref_tensor')
+    except Exception:
+        return False
+
+
 class TestGraphClasses:
     """Test graph-related class functionality."""
 
@@ -120,6 +128,8 @@ class TestWeakRefTensors:
             pytest.skip("weak_ref_tensors not available")
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
+    @pytest.mark.skipif(not has_weak_ref_tensor_op(),
+                        reason="vllm C++ extension weak_ref_tensor not available")
     def test_weak_ref_tensors_with_cuda_tensor(self):
         """Test weak_ref_tensors with CUDA tensor."""
         try:
