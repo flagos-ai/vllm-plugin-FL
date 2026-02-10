@@ -110,7 +110,7 @@ unset FLAGCX_PATH
 ```
 
 ### Using native CUDA operators
-If you want to use the original CUDA operators, you can unset the following environment variables.
+If you want to use the original CUDA operators, you can set the following environment variables.
 ```sh
-unset USE_FLAGGEMS
+export USE_FLAGGEMS=0
 ```
