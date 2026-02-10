@@ -70,15 +70,15 @@ def test_use_flaggems_op_blacklist_only_listed_disallowed(monkeypatch):
     assert use_flaggems_op("other_op") is True
 
 
-def test_use_flaggems_op_whitelist_and_blacklist_same_op_raises(monkeypatch):
-    """When same op is in both whitelist and blacklist, ValueError is raised."""
+def test_use_flaggems_op_whitelist_and_blacklist_both_set_raises(monkeypatch):
+    """When both whitelist and blacklist are set, ValueError is raised."""
     _env_for_flaggems_enabled(monkeypatch)
     monkeypatch.setenv("VLLM_FL_FLAGOS_WHITELIST", "silu_and_mul,rms_norm")
     monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST", "rms_norm,other")
 
     with pytest.raises(ValueError) as exc_info:
-        use_flaggems_op("rms_norm")
-    assert "rms_norm" in str(exc_info.value)
+        use_flaggems_op("silu_and_mul")
+    # Implementation disallows setting both whitelist and blacklist simultaneously
     assert "VLLM_FL_FLAGOS_WHITELIST" in str(exc_info.value)
     assert "VLLM_FL_FLAGOS_BLACKLIST" in str(exc_info.value)
 
