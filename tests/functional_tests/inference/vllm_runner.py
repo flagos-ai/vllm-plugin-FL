@@ -3,23 +3,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+"""
+VllmRunner - A test utility for running vLLM inference tests.
+"""
+
 # ruff: noqa
 
-import http.server
-import json
 import math
-import mimetypes
-import os
-import socket
-import tempfile
-import threading
-from collections.abc import Generator
-from contextlib import nullcontext
-from enum import Enum
-from typing import Any, Callable, Optional, TypedDict, TypeVar, Union, cast, List
+from typing import Any, Callable, Optional, TypeVar, Union, cast
 
 import numpy as np
-import pytest
 import torch
 import torch.nn as nn
 from PIL import Image
@@ -383,8 +376,3 @@ class VllmRunner:
     def __exit__(self, exc_type, exc_value, traceback):
         del self.llm
         cleanup_dist_env_and_memory()
-
-
-@pytest.fixture(scope="session")
-def vllm_runner():
-    return VllmRunner

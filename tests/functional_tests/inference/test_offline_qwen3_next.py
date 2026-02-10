@@ -1,3 +1,10 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
+"""
+Offline inference tests for Qwen3-Next model.
+Tests basic generation and knowledge validation with tensor parallelism.
+"""
+
 import pytest
 from vllm import LLM, SamplingParams
 

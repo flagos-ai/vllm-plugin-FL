@@ -1,3 +1,10 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
+"""
+Offline inference tests for MiniCPM multimodal model.
+Tests audio input processing with various audio counts.
+"""
+
 import pytest
 from dataclasses import asdict
 from typing import Any, NamedTuple
@@ -6,7 +13,7 @@ from transformers import AutoTokenizer
 from vllm import LLM, EngineArgs, SamplingParams
 from vllm.assets.audio import AudioAsset
 
-MODEL_PATH = "/models/MiniCMP"
+MODEL_PATH = "/flagops/models/MiniCPM"
 
 audio_assets = [AudioAsset("mary_had_lamb"), AudioAsset("winning_call")]
 question_per_audio_count = {

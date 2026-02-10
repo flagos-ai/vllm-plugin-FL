@@ -1,3 +1,10 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
+"""
+vLLM serving tests for Qwen3-Next model.
+Tests HTTP API with tensor parallelism (TP=4).
+"""
+
 import pytest
 import subprocess
 import requests

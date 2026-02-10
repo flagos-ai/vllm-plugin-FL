@@ -1,3 +1,10 @@
+# Copyright (c) 2025 BAAI. All rights reserved.
+
+"""
+vLLM serving tests for MiniCPM model.
+Tests HTTP API with MiniCPM multimodal model.
+"""
+
 import pytest
 import requests
 import subprocess
