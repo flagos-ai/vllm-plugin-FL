@@ -3,117 +3,19 @@
 """
 Functional tests for graph capture and replay.
 Tests CUDA/NPU graph functionality for model optimization.
+
+Note: Unit tests for GraphOptions, GraphEntry, and GraphWrapper are in
+unit_tests/compilation/test_graph.py. This file only contains functional
+tests that require actual GPU execution.
 """
 
 import pytest
 import torch
-from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
 
 # Mark all tests as requiring GPU
 pytestmark = pytest.mark.gpu
-
-
-def has_weak_ref_tensor_op():
-    """Check if vllm C++ extension weak_ref_tensor is available."""
-    try:
-        return hasattr(torch.ops._C, 'weak_ref_tensor')
-    except Exception:
-        return False
-
-
-class TestGraphClasses:
-    """Test graph-related class functionality."""
-
-    def test_graph_options_defaults(self):
-        """Test GraphOptions default values."""
-        try:
-            from vllm_fl.compilation.graph import GraphOptions
-        except ImportError:
-            pytest.skip("GraphOptions not available")
-
-        options = GraphOptions()
-        assert options.debug_log_enable is True
-        assert options.gc_disable is False
-        assert options.weak_ref_output is True
-
-    def test_graph_options_custom(self):
-        """Test GraphOptions with custom values."""
-        try:
-            from vllm_fl.compilation.graph import GraphOptions
-        except ImportError:
-            pytest.skip("GraphOptions not available")
-
-        options = GraphOptions(
-            debug_log_enable=False,
-            gc_disable=True,
-            weak_ref_output=False,
-        )
-        assert options.debug_log_enable is False
-        assert options.gc_disable is True
-        assert options.weak_ref_output is False
-
-    def test_graph_entry_creation(self):
-        """Test GraphEntry dataclass."""
-        try:
-            from vllm_fl.compilation.graph import GraphEntry
-        except ImportError:
-            pytest.skip("GraphEntry not available")
-
-        mock_batch_desc = MagicMock()
-        entry = GraphEntry(batch_descriptor=mock_batch_desc)
-
-        assert entry.batch_descriptor is mock_batch_desc
-        assert entry.graph is None
-        assert entry.output is None
-        assert entry.input_addresses is None
-
-
-class TestGraphWrapper:
-    """Test GraphWrapper functionality."""
-
-    @pytest.fixture
-    def mock_vllm_config(self):
-        """Create mock VllmConfig."""
-        config = MagicMock()
-        config.compilation_config = MagicMock()
-        config.compilation_config.cudagraph_capture_sizes = [1, 2, 4, 8]
-        return config
-
-    def test_graph_wrapper_import(self):
-        """Test GraphWrapper can be imported."""
-        try:
-            from vllm_fl.compilation.graph import GraphWrapper
-            assert GraphWrapper is not None
-        except ImportError:
-            pytest.skip("GraphWrapper not available")
-
-    def test_graph_wrapper_unwrap(self):
-        """Test GraphWrapper.unwrap returns original runnable."""
-        try:
-            from vllm_fl.compilation.graph import GraphWrapper, GraphOptions
-            from vllm.config import CUDAGraphMode
-        except ImportError:
-            pytest.skip("Required imports not available")
-
-        def simple_runnable(x):
-            return x * 2
-
-        mock_config = MagicMock()
-        mock_config.compilation_config = MagicMock()
-
-        # Mock the platform
-        with patch("vllm_fl.compilation.graph.current_platform") as mock_platform:
-            mock_platform.get_global_graph_pool.return_value = MagicMock()
-
-            wrapper = GraphWrapper(
-                runnable=simple_runnable,
-                vllm_config=mock_config,
-                runtime_mode=CUDAGraphMode.FULL,
-            )
-
-            assert wrapper.unwrap() is simple_runnable
 
 
 class TestWeakRefTensors:
@@ -128,8 +30,6 @@ class TestWeakRefTensors:
             pytest.skip("weak_ref_tensors not available")
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
-    @pytest.mark.skipif(not has_weak_ref_tensor_op(),
-                        reason="vllm C++ extension weak_ref_tensor not available")
     def test_weak_ref_tensors_with_cuda_tensor(self):
         """Test weak_ref_tensors with CUDA tensor."""
         try:
