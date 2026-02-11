@@ -28,6 +28,10 @@ def register_model():
         from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM  # noqa: F401
 
         qwen3_next_module.Qwen3NextForCausalLM = Qwen3NextForCausalLM
+        logger.warning(
+            "Qwen3NextForCausalLM has been patched to use vllm_fl.models.qwen3_next, "
+            "original vLLM implementation is overridden"
+        )
 
         ModelRegistry.register_model(
             "Qwen3NextForCausalLM", "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
