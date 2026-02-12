@@ -13,7 +13,7 @@ import torch
 # import custom ops, trigger op registration (CUDA only)
 try:
     import vllm._C  # noqa
-except ImportError:
+except (ImportError, OSError):
     pass  # NPU or other platforms may not have vllm._C
 
 from vllm.attention.backends.registry import AttentionBackendEnum
