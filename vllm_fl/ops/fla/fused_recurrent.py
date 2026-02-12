@@ -32,9 +32,9 @@ class FusedRecurrentFunction(torch.autograd.Function):
         use_qk_l2norm_in_kernel: bool = False,
     ):
         o, final_state = fused_recurrent_gated_delta_rule_fwd(
-            q=q.contiguous(),
-            k=k.contiguous(),
-            v=v.contiguous(),
+            q=q,
+            k=k,
+            v=v,
             g=g.contiguous(),
             beta=beta.contiguous(),
             scale=scale,
