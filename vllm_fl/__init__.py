@@ -32,22 +32,23 @@ def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
 
+    # Register Qwen3Next model
     try:
-        from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM  # noqa: F401
-
         ModelRegistry.register_model(
-            "Qwen3NextForCausalLM", "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
-        )
-    except ImportError:
-        logger.info(
-            "From vllm_fl.models.qwen3_next cannot import Qwen3NextForCausalLM, skipped"
+            "Qwen3NextForCausalLM", 
+            "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
         )
     except Exception as e:
-        logger.error(f"Register model error: {str(e)}")
+        logger.error(f"Register Qwen3Next model error: {str(e)}")
 
-    ModelRegistry.register_model(
-        "MiniCPMO",
-        "vllm_fl.models.minicpmo:MiniCPMO")
+    # Register MiniCPMO model
+    try:
+        ModelRegistry.register_model(
+            "MiniCPMO",
+            "vllm_fl.models.minicpmo:MiniCPMO"
+        )
+    except Exception as e:
+        logger.error(f"Register MiniCPMO model error: {str(e)}")
 
     # Register Kimi-K2.5 model
     try:

@@ -1319,12 +1319,13 @@ def gdn_attention_core_fake(
     return
 
 
-direct_register_custom_op(
-    op_name="gdn_attention_core",
-    op_func=gdn_attention_core,
-    mutates_args=["core_attn_out"],
-    fake_impl=gdn_attention_core_fake,
-)
+if not hasattr(torch.ops.vllm, "gdn_attention_core"):
+    direct_register_custom_op(
+        op_name="gdn_attention_core",
+        op_func=gdn_attention_core,
+        mutates_args=["core_attn_out"],
+        fake_impl=gdn_attention_core_fake,
+    )
 
 
 @triton.jit

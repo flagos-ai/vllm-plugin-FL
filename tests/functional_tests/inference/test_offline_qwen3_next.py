@@ -5,19 +5,25 @@ Offline inference tests for Qwen3-Next model.
 Tests basic generation and knowledge validation with tensor parallelism.
 """
 
+import os
+
 import pytest
 from vllm import LLM, SamplingParams
 
-MODEL_PATH = "/models/Qwen3-Next-80B-A3B-Instruct"
+MODEL_PATH = "/data/models/Qwen/Qwen3-Next-80B-A3B-Instruct"
+pytestmark = pytest.mark.skipif(
+    not os.path.exists(MODEL_PATH), reason=f"Model not found: {MODEL_PATH}"
+)
 
 
-@pytest.fixture(scope="session")
-def llm_instance(request):
+@pytest.fixture(scope="module")
+def llm_instance():
     return LLM(
         model=MODEL_PATH,
         max_num_batched_tokens=16384,
-        max_num_seqs=2048,
-        tensor_parallel_size=4,
+        max_num_seqs=1024,
+        gpu_memory_utilization=0.85,
+        tensor_parallel_size=8,
         trust_remote_code=True,
     )
 
