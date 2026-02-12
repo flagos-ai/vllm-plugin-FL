@@ -19,6 +19,18 @@ import torch.nn.functional as F
 
 
 # =============================================================================
+# Helpers
+# =============================================================================
+
+class _FakeNorm:
+    """Minimal stand-in for an RMSNorm layer, providing weight and epsilon."""
+
+    def __init__(self, weight: torch.Tensor, epsilon: float = 1e-5):
+        self.weight = weight
+        self.variance_epsilon = epsilon
+
+
+# =============================================================================
 # Reference Implementations (PyTorch baseline)
 # =============================================================================
 
@@ -116,7 +128,7 @@ class TestSiluAndMulNumerical:
 
         x = torch.randn(2, 16, device=device, dtype=torch.float32)
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
         expected = reference_silu_and_mul(x)
 
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
@@ -128,7 +140,7 @@ class TestSiluAndMulNumerical:
         batch, hidden = hidden_size_config
         x = torch.randn(batch, hidden * 2, device=device)
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
 
         assert result.shape == (batch, hidden)
 
@@ -138,7 +150,7 @@ class TestSiluAndMulNumerical:
 
         x = torch.randn(2, 16, device=device, dtype=dtype)
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
 
         assert result.dtype == dtype
 
@@ -148,7 +160,7 @@ class TestSiluAndMulNumerical:
 
         x = torch.zeros(2, 16, device=device)
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
         expected = reference_silu_and_mul(x)
 
         torch.testing.assert_close(result, expected)
@@ -159,7 +171,7 @@ class TestSiluAndMulNumerical:
 
         x = torch.randn(2, 16, device=device) * 100
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
         expected = reference_silu_and_mul(x)
 
         torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
@@ -170,7 +182,7 @@ class TestSiluAndMulNumerical:
 
         x = -torch.abs(torch.randn(2, 16, device=device))
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
         expected = reference_silu_and_mul(x)
 
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
@@ -181,7 +193,7 @@ class TestSiluAndMulNumerical:
 
         x = torch.randn(2, 4, 16, device=device)
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
         expected = reference_silu_and_mul(x)
 
         assert result.shape == (2, 4, 8)
@@ -203,8 +215,9 @@ class TestRMSNormNumerical:
         x = torch.randn(2, hidden_size, device=device, dtype=torch.float32)
         weight = torch.ones(hidden_size, device=device, dtype=torch.float32)
         epsilon = 1e-5
+        obj = _FakeNorm(weight, epsilon)
 
-        result = rms_norm_torch(x, None, weight, epsilon)
+        result = rms_norm_torch(obj, x)
         expected = reference_rms_norm(x, weight, epsilon)
 
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
@@ -218,8 +231,9 @@ class TestRMSNormNumerical:
         residual = torch.randn(2, hidden_size, device=device, dtype=torch.float32)
         weight = torch.ones(hidden_size, device=device, dtype=torch.float32)
         epsilon = 1e-5
+        obj = _FakeNorm(weight, epsilon)
 
-        result_out, result_res = rms_norm_torch(x, residual, weight, epsilon)
+        result_out, result_res = rms_norm_torch(obj, x, residual)
         expected_out, expected_res = reference_rms_norm(x, weight, epsilon, residual)
 
         torch.testing.assert_close(result_out, expected_out, rtol=1e-5, atol=1e-5)
@@ -233,8 +247,9 @@ class TestRMSNormNumerical:
         x = torch.randn(batch, hidden, device=device)
         weight = torch.ones(hidden, device=device)
         epsilon = 1e-5
+        obj = _FakeNorm(weight, epsilon)
 
-        result = rms_norm_torch(x, None, weight, epsilon)
+        result = rms_norm_torch(obj, x)
 
         assert result.shape == x.shape
 
@@ -246,8 +261,9 @@ class TestRMSNormNumerical:
         x = torch.randn(2, hidden_size, device=device, dtype=dtype)
         weight = torch.ones(hidden_size, device=device, dtype=dtype)
         epsilon = 1e-5
+        obj = _FakeNorm(weight, epsilon)
 
-        result = rms_norm_torch(x, None, weight, epsilon)
+        result = rms_norm_torch(obj, x)
 
         assert result.dtype == dtype
 
@@ -260,8 +276,9 @@ class TestRMSNormNumerical:
         x = torch.randn(2, hidden_size, device=device) * 10
         weight = torch.ones(hidden_size, device=device)
         epsilon = 1e-5
+        obj = _FakeNorm(weight, epsilon)
 
-        result = rms_norm_torch(x, None, weight, epsilon)
+        result = rms_norm_torch(obj, x)
 
         # After RMS norm, the RMS should be approximately 1
         rms = result.pow(2).mean(-1).sqrt()
@@ -280,9 +297,10 @@ class TestRMSNormNumerical:
         x = torch.zeros(2, hidden_size, device=device)
         weight = torch.ones(hidden_size, device=device)
         epsilon = 1e-5
+        obj = _FakeNorm(weight, epsilon)
 
         # Should not raise or produce NaN/Inf
-        result = rms_norm_torch(x, None, weight, epsilon)
+        result = rms_norm_torch(obj, x)
 
         assert not torch.isnan(result).any()
         assert not torch.isinf(result).any()
@@ -296,9 +314,11 @@ class TestRMSNormNumerical:
         weight1 = torch.ones(hidden_size, device=device)
         weight2 = torch.ones(hidden_size, device=device) * 2
         epsilon = 1e-5
+        obj1 = _FakeNorm(weight1, epsilon)
+        obj2 = _FakeNorm(weight2, epsilon)
 
-        result1 = rms_norm_torch(x, None, weight1, epsilon)
-        result2 = rms_norm_torch(x, None, weight2, epsilon)
+        result1 = rms_norm_torch(obj1, x)
+        result2 = rms_norm_torch(obj2, x)
 
         # Result with weight=2 should be twice result with weight=1
         torch.testing.assert_close(result2, result1 * 2, rtol=1e-5, atol=1e-5)
@@ -310,8 +330,9 @@ class TestRMSNormNumerical:
         x = torch.randn(2, 4, 128, device=device)
         weight = torch.ones(128, device=device)
         epsilon = 1e-5
+        obj = _FakeNorm(weight, epsilon)
 
-        result = rms_norm_torch(x, None, weight, epsilon)
+        result = rms_norm_torch(obj, x)
         expected = reference_rms_norm(x, weight, epsilon)
 
         assert result.shape == x.shape
@@ -347,7 +368,7 @@ class TestRotaryEmbeddingNumerical:
         positions = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch, -1)
 
         result_q, result_k = rotary_embedding_torch(
-            query, key, cos, sin,
+            None, query, key, cos, sin,
             position_ids=positions,
             rotary_interleaved=False,
             inplace=False,
@@ -377,7 +398,7 @@ class TestRotaryEmbeddingNumerical:
         sin = torch.randn(max_seq_len, rotary_dim, device=device)
 
         result_q, result_k = rotary_embedding_torch(
-            query, key, cos, sin,
+            None, query, key, cos, sin,
             position_ids=positions,
             rotary_interleaved=False,
             inplace=False,
@@ -404,7 +425,7 @@ class TestRotaryEmbeddingNumerical:
         sin = torch.randn(max_seq_len, rotary_dim, device=device)
 
         result_q, result_k = rotary_embedding_torch(
-            query, key, cos, sin,
+            None, query, key, cos, sin,
             position_ids=positions,
             rotary_interleaved=False,
             inplace=False,
@@ -430,7 +451,7 @@ class TestRotaryEmbeddingNumerical:
         sin = torch.randn(max_seq_len, rotary_dim, device=device, dtype=dtype)
 
         result_q, result_k = rotary_embedding_torch(
-            query, key, cos, sin,
+            None, query, key, cos, sin,
             position_ids=positions,
             rotary_interleaved=False,
             inplace=False,
@@ -457,7 +478,7 @@ class TestRotaryEmbeddingNumerical:
 
         # Test neox style (default)
         result_q_neox, result_k_neox = rotary_embedding_torch(
-            query, key, cos, sin,
+            None, query, key, cos, sin,
             position_ids=positions,
             rotary_interleaved=False,
             inplace=False,
@@ -465,7 +486,7 @@ class TestRotaryEmbeddingNumerical:
 
         # Test interleaved style
         result_q_interleaved, result_k_interleaved = rotary_embedding_torch(
-            query, key, cos, sin,
+            None, query, key, cos, sin,
             position_ids=positions,
             rotary_interleaved=True,
             inplace=False,
@@ -498,7 +519,7 @@ class TestRotaryEmbeddingNumerical:
 
         # With cos=1 and sin=0, output should equal input (no rotation)
         result_q, result_k = rotary_embedding_torch(
-            query, key, cos, sin,
+            None, query, key, cos, sin,
             position_ids=positions,
             rotary_interleaved=False,
             inplace=False,
@@ -521,7 +542,7 @@ class TestCrossImplementationConsistency:
 
         x = torch.randn(4, 32, device=device)
 
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
         expected = reference_silu_and_mul(x)
 
         # Should be exactly equal (same implementation)
@@ -534,8 +555,9 @@ class TestCrossImplementationConsistency:
         x = torch.randn(4, 64, device=device)
         weight = torch.randn(64, device=device)
         epsilon = 1e-6
+        obj = _FakeNorm(weight, epsilon)
 
-        result = rms_norm_torch(x, None, weight, epsilon)
+        result = rms_norm_torch(obj, x)
         expected = reference_rms_norm(x, weight, epsilon)
 
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
@@ -553,7 +575,7 @@ class TestEdgeCases:
         from vllm_fl.dispatch.backends.reference.impl.activation import silu_and_mul_torch
 
         x = torch.randn(1, 4, device=device)
-        result = silu_and_mul_torch(x)
+        result = silu_and_mul_torch(None, x)
 
         assert result.shape == (1, 2)
         assert not torch.isnan(result).any()
@@ -564,8 +586,9 @@ class TestEdgeCases:
 
         x = torch.randn(1, 64, device=device)
         weight = torch.ones(64, device=device)
+        obj = _FakeNorm(weight, 1e-5)
 
-        result = rms_norm_torch(x, None, weight, 1e-5)
+        result = rms_norm_torch(obj, x)
 
         assert result.shape == (1, 64)
         assert not torch.isnan(result).any()
@@ -578,9 +601,10 @@ class TestEdgeCases:
         x_silu = torch.randn(2, 8, device=device) * 1e-7
         x_norm = torch.randn(2, 32, device=device) * 1e-7
         weight = torch.ones(32, device=device)
+        obj = _FakeNorm(weight, 1e-5)
 
-        result_silu = silu_and_mul_torch(x_silu)
-        result_norm = rms_norm_torch(x_norm, None, weight, 1e-5)
+        result_silu = silu_and_mul_torch(None, x_silu)
+        result_norm = rms_norm_torch(obj, x_norm)
 
         assert not torch.isnan(result_silu).any()
         assert not torch.isnan(result_norm).any()

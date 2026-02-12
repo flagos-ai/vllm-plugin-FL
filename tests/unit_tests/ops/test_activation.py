@@ -32,5 +32,5 @@ class TestSiluAndMulFL:
 
         result = layer.forward_oot(x)
 
-        mock_call_op.assert_called_once_with("silu_and_mul", x)
+        mock_call_op.assert_called_once_with("silu_and_mul", layer, x)
         assert result.shape == (2, 4)

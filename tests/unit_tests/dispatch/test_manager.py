@@ -13,7 +13,7 @@ This module tests the core OpManager class which handles:
 import os
 import pytest
 import threading
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from vllm_fl.dispatch.manager import (
     OpManager,
@@ -27,7 +27,6 @@ from vllm_fl.dispatch.policy import (
     SelectionPolicy,
     set_global_policy,
     reset_global_policy,
-    PREFER_DEFAULT,
     PREFER_VENDOR,
     PREFER_REFERENCE,
 )

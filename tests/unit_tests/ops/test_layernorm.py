@@ -38,13 +38,14 @@ class TestRMSNormFL:
         layer = RMSNormFL(hidden_size=hidden_size)
         x = torch.randn(2, hidden_size)
 
-        result = layer.forward_oot(x)
+        layer.forward_oot(x)
 
         mock_call_op.assert_called_once()
         call_args = mock_call_op.call_args
         assert call_args[0][0] == "rms_norm"
-        assert torch.equal(call_args[0][1], x)
-        assert call_args[0][2] is None  # residual should be None
+        assert call_args[0][1] is layer  # self
+        assert torch.equal(call_args[0][2], x)
+        assert call_args[0][3] is None  # residual should be None
 
     def test_forward_oot_dispatches_with_residual(self, mock_call_op):
         """Test forward_oot passes residual to dispatch system."""
@@ -57,9 +58,11 @@ class TestRMSNormFL:
         x = torch.randn(2, hidden_size)
         residual = torch.randn(2, hidden_size)
 
-        result = layer.forward_oot(x, residual=residual)
+        layer.forward_oot(x, residual=residual)
 
         mock_call_op.assert_called_once()
         call_args = mock_call_op.call_args
         assert call_args[0][0] == "rms_norm"
-        assert torch.equal(call_args[0][2], residual)
+        assert call_args[0][1] is layer  # self
+        assert torch.equal(call_args[0][2], x)
+        assert torch.equal(call_args[0][3], residual)

@@ -47,7 +47,7 @@ class TestRotaryEmbeddingFL:
         query = torch.randn(4, 8, 64)
         key = torch.randn(4, 8, 64)
 
-        result = layer.forward_oot(positions, query, key)
+        layer.forward_oot(positions, query, key)
 
         mock_call_op.assert_called_once()
         call_args = mock_call_op.call_args

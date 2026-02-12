@@ -60,7 +60,7 @@ class TestGraphCaptureFlow:
         x = torch.randn(4, 8, device=device)
 
         # Warmup
-        y = computation(x)
+        computation(x)
 
         # Capture graph
         g = torch.cuda.CUDAGraph()

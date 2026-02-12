@@ -4,7 +4,6 @@
 Tests for compilation graph module.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
 

@@ -11,7 +11,7 @@ They are designed to be run with pytest-mpi or similar multi-process test runner
 import pytest
 import torch
 from typing import List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # Mark all tests as requiring multiple GPUs

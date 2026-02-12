@@ -10,23 +10,20 @@ works correctly from call_op -> manager -> registry -> implementation.
 
 import os
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from vllm_fl.dispatch import (
     call_op,
     resolve_op,
     get_default_manager,
     reset_default_manager,
-    OpRegistry,
     OpImpl,
     BackendImplKind,
     BackendPriority,
     SelectionPolicy,
     set_global_policy,
     reset_global_policy,
-    policy_context,
     with_preference,
-    PREFER_DEFAULT,
     PREFER_VENDOR,
     PREFER_REFERENCE,
 )
