@@ -31,14 +31,25 @@ class CudaBackend(Backend):
 
     @property
     def vendor(self) -> Optional[str]:
-        return "cuda"
+        return "nvidia"
 
     def is_available(self) -> bool:
-        """Check if CUDA hardware and libraries are available."""
+        """
+        Check if CUDA hardware and libraries are available.
+
+        This method uses the platform's vendor information from FlagGems
+        to determine if the device is a real NVIDIA GPU, decoupling from
+        CUDA-alike devices (MACA, MUSA, etc.) which have their own vendor names.
+        """
         if CudaBackend._available is None:
             try:
                 # Check if CUDA device is available
-                if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+                if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+                    CudaBackend._available = False
+                    return False
+
+                from vllm.platforms import current_platform
+                if hasattr(current_platform, 'vendor_name') and current_platform.vendor_name == "nvidia":
                     CudaBackend._available = True
                 else:
                     CudaBackend._available = False
@@ -48,32 +59,47 @@ class CudaBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
-    def silu_and_mul(self, x: torch.Tensor) -> torch.Tensor:
+    def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
 
         Uses vLLM's native CUDA implementation.
+
+        Args:
+            obj: The calling obj (for interface consistency)
+            x: Input tensor of shape [..., 2*d]
+
+        Returns:
+            Output tensor of shape [..., d]
         """
         from .impl.activation import silu_and_mul_cuda
 
-        return silu_and_mul_cuda(x)
+        return silu_and_mul_cuda(obj, x)
 
     def rms_norm(
         self,
+        obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor],
-        weight: torch.Tensor,
-        epsilon: float,
+        residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """
         RMS normalization using vLLM's CUDA implementation.
+
+        Args:
+            obj: The calling obj (e.g., RMSNorm layer)
+            x: Input tensor
+            residual: Optional residual tensor
+
+        Returns:
+            Normalized tensor, or tuple of (normalized, residual) if residual is provided
         """
         from .impl.normalization import rms_norm_cuda
 
-        return rms_norm_cuda(x, residual, weight, epsilon)
+        return rms_norm_cuda(obj, x, residual)
 
     def rotary_embedding(
         self,
+        obj,
         query: torch.Tensor,
         key: torch.Tensor,
         cos: torch.Tensor,
@@ -84,10 +110,24 @@ class CudaBackend(Backend):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply rotary position embedding using vLLM's CUDA implementation.
+
+        Args:
+            obj: The calling obj (for interface consistency)
+            query: Query tensor
+            key: Key tensor
+            cos: Cosine cache
+            sin: Sine cache
+            position_ids: Position indices
+            rotary_interleaved: Whether to use interleaved rotary
+            inplace: Whether to modify tensors in-place
+
+        Returns:
+            Tuple of (embedded_query, embedded_key)
         """
         from .impl.rotary import rotary_embedding_cuda
 
         return rotary_embedding_cuda(
+            obj,
             query,
             key,
             cos,

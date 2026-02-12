@@ -51,11 +51,12 @@ class AscendBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
-    def silu_and_mul(self, x: torch.Tensor) -> torch.Tensor:
+    def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
 
         Args:
+            obj: The calling obj (for interface consistency)
             x: Input tensor of shape [..., 2*d]
 
         Returns:
@@ -63,33 +64,32 @@ class AscendBackend(Backend):
         """
         from .impl.activation import silu_and_mul_ascend
 
-        return silu_and_mul_ascend(x)
+        return silu_and_mul_ascend(obj, x)
 
     def rms_norm(
         self,
+        obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor],
-        weight: torch.Tensor,
-        epsilon: float,
+        residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """
         RMS normalization.
 
         Args:
+            obj: The calling obj (e.g., RMSNorm layer)
             x: Input tensor
             residual: Optional residual tensor
-            weight: Normalization weight
-            epsilon: Small constant for numerical stability
 
         Returns:
             Normalized tensor, or tuple of (normalized, residual) if residual is provided
         """
         from .impl.normalization import rms_norm_ascend
 
-        return rms_norm_ascend(x, residual, weight, epsilon)
+        return rms_norm_ascend(obj, x, residual)
 
     def rotary_embedding(
         self,
+        obj,
         query: torch.Tensor,
         key: torch.Tensor,
         cos: torch.Tensor,
@@ -102,6 +102,7 @@ class AscendBackend(Backend):
         Apply rotary position embedding.
 
         Args:
+            obj: The calling obj (for interface consistency)
             query: Query tensor
             key: Key tensor
             cos: Cosine cache
@@ -116,6 +117,7 @@ class AscendBackend(Backend):
         from .impl.rotary import rotary_embedding_ascend
 
         return rotary_embedding_ascend(
+            obj,
             query,
             key,
             cos,
