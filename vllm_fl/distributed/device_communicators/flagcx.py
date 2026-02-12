@@ -19,7 +19,7 @@ import os
 import sys
 
 _flagcx_path = os.getenv('FLAGCX_PATH')
-if _flagcx_path is not None:
+if _flagcx_path and os.path.isdir(_flagcx_path):
     sys.path.append(_flagcx_path)
 
 from plugin.interservice.flagcx_wrapper import (
