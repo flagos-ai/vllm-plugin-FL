@@ -8,22 +8,22 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 ### Supported Models
 
-| Model | Status |
-|-------|--------|
-| Qwen3-4B | Supported |
-| Qwen3-Next | Supported |
-| Qwen3.5 | Supported |
-| MiniCPM | Supported |
+| Model | Status | Reference |
+|-------|--------|-----------|
+| Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
+| Qwen3-Next | Supported | [example](./examples/qwen3_next_offline_inference.py) |
+| MiniCPM | Supported | [example](./examples/minicpm/) |
+| Qwen3.5 | Merging | [PR #56](https://github.com/flagos-ai/vllm-plugin-FL/pull/56) |
 
 ### Supported Chips
 
-| Chip Vendor | Status |
-|-------------|--------|
-| NVIDIA | Supported |
-| Ascend | Supported |
-| MetaX | Supported |
-| Pingtouge | Supported |
-| Tsingmicro | Supported |
+| Chip Vendor | Status | Reference |
+|-------------|--------|-----------|
+| NVIDIA | Supported | - |
+| Ascend | Merging | [PR #55](https://github.com/flagos-ai/vllm-plugin-FL/pull/55) |
+| MetaX | Merging | [PR #47](https://github.com/flagos-ai/vllm-plugin-FL/pull/47) |
+| Pingtouge | Merging | - |
+| Tsingmicro | Merging | [PR #52](https://github.com/flagos-ai/vllm-plugin-FL/pull/52) |
 
 ## Quick Start
 
