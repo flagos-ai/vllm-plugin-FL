@@ -28,8 +28,7 @@ from vllm.distributed.kv_transfer import (
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
-
-#from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
+# from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 try:
     from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 except ImportError:
@@ -235,7 +234,7 @@ class WorkerFL(WorkerBase):
         for k, v in sorted(os.environ.items()):
             logger.debug("%s=%r", k, v)
 
-        register_oot_ops()
+        #register_oot_ops()
 
         if fl_envs.USE_FLAGGEMS:
             import flag_gems

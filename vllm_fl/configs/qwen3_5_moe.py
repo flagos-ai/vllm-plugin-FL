@@ -50,15 +50,14 @@ class Qwen3_5MoeTextConfig(PretrainedConfig):
         output_router_logits=False,
         router_aux_loss_coef=0.001,
         layer_types=None,
+        full_attention_interval=4,
+        attn_output_gate=True,
         pad_token_id=None,
         bos_token_id=None,
         eos_token_id=None,
         **kwargs,
     ):
-        kwargs["ignore_keys_at_rope_validation"] = [
-            "mrope_section",
-            "mrope_interleaved",
-        ]
+        kwargs.pop("ignore_keys_at_rope_validation", None)
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size
@@ -73,20 +72,18 @@ class Qwen3_5MoeTextConfig(PretrainedConfig):
         self.attention_dropout = attention_dropout
         self.head_dim = head_dim
         self.rope_parameters = rope_parameters
-        kwargs.setdefault("partial_rotary_factor", 0.25)
+        self.attn_output_gate = attn_output_gate
 
         self.layer_types = layer_types
         if self.layer_types is None:
-            interval_pattern = kwargs.get("full_attention_interval", 4)
             self.layer_types = [
                 "linear_attention"
-                if bool((i + 1) % interval_pattern)
+                if bool((i + 1) % full_attention_interval)
                 else "full_attention"
                 for i in range(self.num_hidden_layers)
             ]
         _layer_type_validation(self.layer_types, self.num_hidden_layers)
 
-        # linear attention part
         self.linear_conv_kernel_dim = linear_conv_kernel_dim
         self.linear_key_head_dim = linear_key_head_dim
         self.linear_value_head_dim = linear_value_head_dim
@@ -99,11 +96,12 @@ class Qwen3_5MoeTextConfig(PretrainedConfig):
         self.norm_topk_prob = norm_topk_prob
         self.output_router_logits = output_router_logits
         self.router_aux_loss_coef = router_aux_loss_coef
+        self.full_attention_interval = full_attention_interval
+
+        # partial_rotary_factor is needed by rope
+        kwargs.setdefault("partial_rotary_factor", 0.25)
+
         super().__init__(**kwargs)
-        # Set these AFTER super().__init__() because transformers v4's
-        # PretrainedConfig.__init__ has these as explicit params with different
-        # defaults (e.g. tie_word_embeddings=True) that would overwrite our
-        # values.
         self.pad_token_id = pad_token_id
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
@@ -128,6 +126,7 @@ class Qwen3_5MoeVisionConfig(PretrainedConfig):
         out_hidden_size=3584,
         num_position_embeddings=2304,
         initializer_range=0.02,
+        deepstack_visual_indexes=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -143,6 +142,7 @@ class Qwen3_5MoeVisionConfig(PretrainedConfig):
         self.out_hidden_size = out_hidden_size
         self.num_position_embeddings = num_position_embeddings
         self.initializer_range = initializer_range
+        self.deepstack_visual_indexes = deepstack_visual_indexes or []
 
 
 class Qwen3_5MoeConfig(PretrainedConfig):
@@ -165,9 +165,7 @@ class Qwen3_5MoeConfig(PretrainedConfig):
         **kwargs,
     ):
         if isinstance(vision_config, dict):
-            self.vision_config = self.sub_configs["vision_config"](
-                **vision_config
-            )
+            self.vision_config = self.sub_configs["vision_config"](**vision_config)
         elif vision_config is None:
             self.vision_config = self.sub_configs["vision_config"]()
 
@@ -181,7 +179,6 @@ class Qwen3_5MoeConfig(PretrainedConfig):
         self.vision_start_token_id = vision_start_token_id
         self.vision_end_token_id = vision_end_token_id
         super().__init__(**kwargs)
-        # Set after super().__init__() to avoid v4 PretrainedConfig overwrite
         self.tie_word_embeddings = tie_word_embeddings
 
 
