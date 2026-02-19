@@ -4,7 +4,7 @@ vllm-plugin-FL is a plugin for the [vLLM](https://github.com/vllm-project/vllm) 
 
 ## Supported Models and Chips
 
-In theory, vllm-plugin-FL can support all models available in vLLM, as long as no unsupported operators are involved. The tables below list the models and chips that have been verified.
+In theory, vllm-plugin-FL can support all models available in vLLM, as long as no unsupported operators are involved. The tables below summarize the current support status of models and chips, including both fully supported and in-progress ("Merging") entries.
 
 ### Supported Models
 
