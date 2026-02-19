@@ -1,5 +1,29 @@
 # vllm-FL
-A vLLM plugin built on the FlagOS unified multi-chip backend.
+
+vllm-plugin-FL is a plugin for the [vLLM](https://github.com/vllm-project/vllm) inference/serving framework, built on FlagOS's unified multi-chip backend — including the unified operator library [FlagGems](https://github.com/flagos-ai/FlagGems) and the unified communication library [FlagCX](https://github.com/flagos-ai/FlagCX). It extends vLLM's capabilities and performance across diverse hardware environments. Without changing vLLM's original interfaces or usage patterns, the same command can run model inference on different chips.
+
+## Supported Models and Chips
+
+In theory, vllm-plugin-FL can support all models available in vLLM, as long as no unsupported operators are involved. The tables below list the models and chips that have been verified.
+
+### Supported Models
+
+| Model | Status |
+|-------|--------|
+| Qwen3-4B | Supported |
+| Qwen3-Next | Supported |
+| Qwen3.5 | Supported |
+| MiniCPM | Supported |
+
+### Supported Chips
+
+| Chip Vendor | Status |
+|-------------|--------|
+| NVIDIA | Supported |
+| Ascend | Supported |
+| MetaX | Supported |
+| Pingtouge | Supported |
+| Tsingmicro | Supported |
 
 ## Quick Start
 
