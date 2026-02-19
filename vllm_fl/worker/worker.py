@@ -234,7 +234,7 @@ class WorkerFL(WorkerBase):
         for k, v in sorted(os.environ.items()):
             logger.debug("%s=%r", k, v)
 
-        #register_oot_ops()
+        register_oot_ops()
 
         if fl_envs.USE_FLAGGEMS:
             import flag_gems

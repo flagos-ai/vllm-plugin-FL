@@ -50,14 +50,14 @@ def register_model():
     except Exception as e:
         logger.error(f"Register Qwen3.5 MoE config error: {str(e)}")
 
-    ## Register Qwen3Next model
-    #try:
-    #    ModelRegistry.register_model(
-    #        "Qwen3NextForCausalLM",
-    #        "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
-    #    )
-    #except Exception as e:
-    #    logger.error(f"Register Qwen3Next model error: {str(e)}")
+    # Register Qwen3Next model
+    try:
+        ModelRegistry.register_model(
+            "Qwen3NextForCausalLM",
+            "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
+        )
+    except Exception as e:
+        logger.error(f"Register Qwen3Next model error: {str(e)}")
 
     # Register Qwen3.5 MoE model
     try:
