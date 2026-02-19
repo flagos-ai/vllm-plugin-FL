@@ -10,10 +10,10 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 | Model | Status | Reference |
 |-------|--------|-----------|
-| Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
-| Qwen3-Next | Supported | [example](./examples/qwen3_next_offline_inference.py) |
-| MiniCPM | Supported | [example](./examples/minicpm/) |
 | Qwen3.5 | Merging | [PR #56](https://github.com/flagos-ai/vllm-plugin-FL/pull/56) |
+| Qwen3-Next | Supported | [example](./examples/qwen3_next_offline_inference.py) |
+| Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
+| MiniCPM | Supported | [example](./examples/minicpm/) |
 
 ### Supported Chips
 
