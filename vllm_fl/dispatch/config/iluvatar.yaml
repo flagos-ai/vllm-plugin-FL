@@ -1,0 +1,60 @@
+# vLLM-FL Dispatch Configuration for Iluvatar GPU
+# Auto-loaded when running on Iluvatar hardware
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Vendor Whitelist (Optional, allows all if not set)
+# allow_vendors:
+#   - iluvatar
+
+# Vendor Blacklist (Optional)
+# deny_vendors:
+#   - ascend
+#   - cuda
+#   - metax
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos      : Default FlagGems implementation (Triton)
+#   - reference   : PyTorch reference implementation
+#   - vendor      : Any available vendor backend (auto-detected)
+#   - vendor:iluvatar : Iluvatar-specific vendor backend
+op_backends:
+  # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
+  attention_backend:
+    - flagos
+    - vendor:iluvatar
+    - reference
+
+  rms_norm:
+    - flagos
+    - vendor:iluvatar
+    - reference
+
+  silu_and_mul:
+    - flagos
+    - vendor:iluvatar
+    - reference
+
+  rotary_embedding:
+    - flagos
+    - vendor:iluvatar
+    - reference
+
+# FlagOS operator blacklist
+# Iluvatar is CUDA-compatible, so most FlagGems ops should work
+# Blacklist only ops that are known to have issues
+flagos_blacklist: []
+
+# OOT (Out-of-Tree) operator blacklist
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe
