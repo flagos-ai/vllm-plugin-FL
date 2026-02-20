@@ -41,8 +41,6 @@ def rotary_embedding_iluvatar(
     Returns:
         Tuple of (embedded_query, embedded_key)
     """
-    #TODO(chen.chen): replace with iluvatar kernel impl
-
     # Get cos/sin for the positions
     # position_ids can be [batch, seq_len] or [seq_len]
     if position_ids.dim() == 1:
@@ -98,15 +96,3 @@ def rotary_embedding_iluvatar(
         k_embed = (key * cos_selected) + (rotate_half(key) * sin_selected)
 
     return q_embed, k_embed
-
-    # from vllm._custom_ops import rotary_embedding as vllm_rotary_embedding
-
-    # vllm_rotary_embedding(
-    #     position_ids,
-    #     query,
-    #     key,
-    #     cos,
-    #     sin,
-    #     rotary_interleaved,
-    # )
-    # return query, key

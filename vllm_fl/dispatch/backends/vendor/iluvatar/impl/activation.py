@@ -21,14 +21,6 @@ def silu_and_mul_iluvatar(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
-    #TODO(chen.chen): replace with iluvatar kernel impl
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
     return F.silu(x1) * x2
-
-    # from vllm._custom_ops import silu_and_mul as vllm_silu_and_mul
-    # raise ValueError("should not reach")
-    # d = x.shape[-1] // 2
-    # out = torch.empty(*x.shape[:-1], d, dtype=x.dtype, device=x.device)
-    # vllm_silu_and_mul(out, x)
-    # return out

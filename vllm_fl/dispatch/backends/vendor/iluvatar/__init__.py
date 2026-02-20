@@ -1,7 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-ILUVATAR (天数智芯) backend for vllm-plugin-FL dispatch.
+ILUVATAR backend for vllm-plugin-FL dispatch.
 """
 
 from .iluvatar import IluvatarBackend

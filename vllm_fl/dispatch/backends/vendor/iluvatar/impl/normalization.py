@@ -27,7 +27,6 @@ def rms_norm_iluvatar(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    #TODO(chen.chen): replace with iluvatar kernel impl
     # Get weight and epsilon from obj
     weight = obj.weight
     epsilon = obj.variance_epsilon
@@ -43,18 +42,3 @@ def rms_norm_iluvatar(
     if residual is not None:
         return output, residual
     return output
-
-    # from vllm._custom_ops import rms_norm as vllm_rms_norm
-    # from vllm._custom_ops import fused_add_rms_norm as vllm_fused_add_rms_norm
-
-    # # Get weight and epsilon from obj
-    # weight = obj.weight
-    # epsilon = obj.variance_epsilon
-
-    # if residual is not None:
-    #     vllm_fused_add_rms_norm(x, residual, weight, epsilon)
-    #     return x, residual
-    # else:
-    #     out = torch.empty_like(x)
-    #     vllm_rms_norm(out, x, weight, epsilon)
-    #     return out

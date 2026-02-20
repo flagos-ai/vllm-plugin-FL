@@ -3,8 +3,8 @@
 """
 ILUVATAR backend implementation.
 
-This backend provides operator implementations for Iluvatar (天数智芯) GPUs.
-Iluvatar uses a CUDA-compatible architecture similar to METAX/MACA.
+This backend provides operator implementations for Iluvatar GPUs.
+Iluvatar uses a CUDA-compatible architecture.
 """
 
 from __future__ import annotations
@@ -153,25 +153,9 @@ class IluvatarBackend(Backend):
         Returns:
             Fully qualified class path string
         """
-        #TODO(chen.chen): replace with iluvatar kernel impl
-
         from vllm.attention.backends.registry import AttentionBackendEnum
-        # from vllm_fl.utils import use_flaggems_op
 
         if use_mla:
             return AttentionBackendEnum.FLASHMLA.get_path()
 
         return AttentionBackendEnum.FLASH_ATTN.get_path()
-
-        # from vllm.attention.backends.registry import (
-        #     AttentionBackendEnum,
-        #     register_backend,
-        # )
-        # register_backend(
-        #     AttentionBackendEnum.FLASH_ATTN,
-        #     class_path="vllm_iluvatar.v1.attention.backends.flash_attn.IluvatarFlashAttentionBackend",
-        # )
-        # import torch
-        # import vllm_iluvatar._C  # noqa: F401
-        # print(f"{AttentionBackendEnum.FLASH_ATTN.get_path() = }")
-

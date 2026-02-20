@@ -53,14 +53,12 @@ class PlatformFL(Platform):
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        # FIXME(chen.chen): need an abstract layer for different backends
         if self.vendor_name == "iluvatar":
             return False
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        # FIXME(chen.chen): need an abstract layer for different backends
         if self.vendor_name == "iluvatar":
             return False
         return self.device_type == "cuda"
