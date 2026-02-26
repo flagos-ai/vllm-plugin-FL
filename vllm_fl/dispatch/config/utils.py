@@ -44,12 +44,14 @@ def get_platform_name() -> str:
     Detect the current hardware platform.
 
     Returns:
-        Platform name string: 'ascend', 'cuda', or 'unknown'
+        Platform name string: 'ascend', 'iluvatar', 'cuda', or 'unknown'
     """
     try:
         import torch
         if hasattr(torch, 'npu') and torch.npu.is_available():
             return 'ascend'
+        if "iluvatar" in torch.cuda.get_device_name().lower():
+            return 'iluvatar'
         if torch.cuda.is_available():
             return 'cuda'
     except ImportError:

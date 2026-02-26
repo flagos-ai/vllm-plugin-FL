@@ -44,11 +44,12 @@ class ReferenceBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
-    def silu_and_mul(self, x: torch.Tensor) -> torch.Tensor:
+    def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
 
         Args:
+            obj: The calling obj (for interface consistency)
             x: Input tensor of shape [..., 2*d]
 
         Returns:
@@ -56,33 +57,32 @@ class ReferenceBackend(Backend):
         """
         from .impl.activation import silu_and_mul_torch
 
-        return silu_and_mul_torch(x)
+        return silu_and_mul_torch(obj, x)
 
     def rms_norm(
         self,
+        obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor],
-        weight: torch.Tensor,
-        epsilon: float,
+        residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """
         RMS normalization.
 
         Args:
+            obj: The calling obj (e.g., RMSNorm layer)
             x: Input tensor
             residual: Optional residual tensor
-            weight: Normalization weight
-            epsilon: Small constant for numerical stability
 
         Returns:
             Normalized tensor, or tuple of (normalized, residual) if residual is provided
         """
         from .impl.normalization import rms_norm_torch
 
-        return rms_norm_torch(x, residual, weight, epsilon)
+        return rms_norm_torch(obj, x, residual)
 
     def rotary_embedding(
         self,
+        obj,
         query: torch.Tensor,
         key: torch.Tensor,
         cos: torch.Tensor,
@@ -95,6 +95,7 @@ class ReferenceBackend(Backend):
         Apply rotary position embedding.
 
         Args:
+            obj: The calling obj (for interface consistency)
             query: Query tensor
             key: Key tensor
             cos: Cosine cache
@@ -109,6 +110,7 @@ class ReferenceBackend(Backend):
         from .impl.rotary import rotary_embedding_torch
 
         return rotary_embedding_torch(
+            obj,
             query,
             key,
             cos,
