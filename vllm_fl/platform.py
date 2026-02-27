@@ -10,6 +10,12 @@ from typing_extensions import ParamSpec
 
 import torch
 
+# import custom ops, trigger op registration (CUDA only)
+try:
+    import vllm._C  # noqa
+except (ImportError, OSError):
+    pass  # NPU or other platforms may not have vllm._C
+
 from vllm.attention.backends.registry import AttentionBackendEnum
 from vllm.logger import init_logger
 
@@ -39,6 +45,7 @@ class PlatformFL(Platform):
     device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
+    vendor_name = device_info.vendor_name
     ray_device_key: str = "flagos"
     dist_backend: str = "flagcx" if "FLAGCX_PATH" in os.environ else "nccl"
     ### TODO(lms): dispatch device_control_env_var
@@ -46,10 +53,14 @@ class PlatformFL(Platform):
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
+        if self.vendor_name == "iluvatar":
+            return False
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
+        if self.vendor_name == "iluvatar":
+            return False
         return self.device_type == "cuda"
 
     @property

@@ -1,0 +1,35 @@
+# PR Labeler configuratoin file
+# Automatically add labels based on modified file paths
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file: '**/*.md'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**/*'
+          - '.pre-commit-config.yaml'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: 'tests/**/*'
+
+core:
+  - changed-files:
+      - any-glob-to-any-file: 'vllm_fl/**/*'
+
+examples:
+  - changed-files:
+      - any-glob-to-any-file: 'examples/**/*'
+
+benchmarks:
+  - changed-files:
+      - any-glob-to-any-file: 'benchmarks/**/*'
+
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'setup.py'
+          - 'requirements*.txt'
+          - 'pyproject.toml'

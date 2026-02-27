@@ -12,10 +12,9 @@ import torch
 
 
 def rms_norm_cuda(
+    obj,
     x: torch.Tensor,
-    residual: Optional[torch.Tensor],
-    weight: torch.Tensor,
-    epsilon: float,
+    residual: Optional[torch.Tensor] = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """
     RMS normalization using CUDA.
@@ -23,16 +22,19 @@ def rms_norm_cuda(
     Uses vLLM's optimized CUDA kernel when available.
 
     Args:
+        obj: The calling obj (e.g., RMSNorm layer)
         x: Input tensor
         residual: Optional residual tensor to add before normalization
-        weight: Normalization weight
-        epsilon: Small constant for numerical stability
 
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
     from vllm._custom_ops import rms_norm as vllm_rms_norm
     from vllm._custom_ops import fused_add_rms_norm as vllm_fused_add_rms_norm
+
+    # Get weight and epsilon from obj
+    weight = obj.weight
+    epsilon = obj.variance_epsilon
 
     if residual is not None:
         vllm_fused_add_rms_norm(x, residual, weight, epsilon)

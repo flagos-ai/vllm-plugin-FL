@@ -143,23 +143,23 @@ class AttentionMaskBuilder:
         cls._pcp_mla_mask_dtype = None
 
 
-# Global instance cache for convenience
+# Global obj cache for convenience
 _builder_instance: Optional[AttentionMaskBuilder] = None
 _builder_device: Optional[torch.device] = None
 
 
 def get_attention_mask_builder(device: torch.device) -> AttentionMaskBuilder:
     """
-    Get or create a global AttentionMaskBuilder instance.
+    Get or create a global AttentionMaskBuilder obj.
 
     This function provides a convenient way to access the mask builder
-    without managing instance lifecycle.
+    without managing obj lifecycle.
 
     Args:
         device: The device for the mask builder.
 
     Returns:
-        AttentionMaskBuilder instance.
+        AttentionMaskBuilder obj.
     """
     global _builder_instance, _builder_device
     if _builder_instance is None or _builder_device != device:

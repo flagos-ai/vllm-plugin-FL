@@ -170,7 +170,7 @@ class DeviceInfo:
         return backend.get_torch_backend_device_fn()
 
     def get_supported_device(self):
-        if self.vendor_name in self.supported_device:
+        if self.vendor_name not in self.supported_device:
             raise NotImplementedError(f"{self.vendor_name} is not support now!")
         return True
 
@@ -180,12 +180,12 @@ def get_flaggems_all_ops() -> list[str]:
     Get all FlagGems operator names from flag_gems._FULL_CONFIG.
     """
     try:
-        pass
+        # _FULL_CONFIG is a tuple of (op_name, function, ...) tuples
+        # Some entries have 2 elements, some have 3
+        ops = [entry[0] for entry in flag_gems._FULL_CONFIG]
+        return ops
     except Exception:
         return []
-    ops = flag_gems.all_registered_ops()
-
-    return ops
 
 
 # OOT operator names as registered in custom_ops.py (op_name lowercase)

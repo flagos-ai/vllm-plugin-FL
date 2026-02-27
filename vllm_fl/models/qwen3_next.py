@@ -438,7 +438,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             (query, key),
         )
         value = rearrange(value, "l (h d) -> 1 l h d", d=self.head_v_dim)
-        return query.contiguous(), key.contiguous(), value.contiguous()
+        return query, key, value
 
     def forward(
         self,
@@ -649,9 +649,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 core_attn_out_non_spec,
                 last_recurrent_state,
             ) = self.chunk_gated_delta_rule(
-                q=query_non_spec,
-                k=key_non_spec,
-                v=value_non_spec,
+                q=query_non_spec.contiguous(),
+                k=key_non_spec.contiguous(),
+                v=value_non_spec.contiguous(),
                 g=g_non_spec,
                 beta=beta_non_spec,
                 initial_state=initial_state,
@@ -1319,12 +1319,13 @@ def gdn_attention_core_fake(
     return
 
 
-direct_register_custom_op(
-    op_name="gdn_attention_core",
-    op_func=gdn_attention_core,
-    mutates_args=["core_attn_out"],
-    fake_impl=gdn_attention_core_fake,
-)
+if not hasattr(torch.ops.vllm, "gdn_attention_core"):
+    direct_register_custom_op(
+        op_name="gdn_attention_core",
+        op_func=gdn_attention_core,
+        mutates_args=["core_attn_out"],
+        fake_impl=gdn_attention_core_fake,
+    )
 
 
 @triton.jit

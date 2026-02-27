@@ -10,6 +10,6 @@ class SiluAndMulFL(SiluAndMul):
         super().__init__()
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
-        return call_op("silu_and_mul", x)
+        return call_op("silu_and_mul", self, x)
 
 __all__ = ["SiluAndMulFL"]
