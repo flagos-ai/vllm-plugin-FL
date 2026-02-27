@@ -134,9 +134,16 @@ class ReferenceBackend(Backend):
             Fully qualified class path string (vLLM native backend)
         """
         # Return vLLM's native flash attention backend as reference
+        import os
+
         from vllm.attention.backends.registry import AttentionBackendEnum
+
+        env_backend = os.environ.get("VLLM_ATTENTION_BACKEND", "FLASH_ATTN").upper()
 
         if use_mla:
             # vLLM native MLA backend
             return AttentionBackendEnum.FLASHMLA.get_path()
-        return AttentionBackendEnum.FLASH_ATTN.get_path()
+        if env_backend == "FLASHINFER":
+            return AttentionBackendEnum.FLASHINFER.get_path()
+        else:
+            return AttentionBackendEnum.FLASH_ATTN.get_path()
