@@ -26,18 +26,6 @@ def _patch_transformers_compat():
             cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ()
         )
 
-#def _patch_transformers_compat():
-#    """Patch transformers to provide ALLOWED_LAYER_TYPES if missing.
-
-#    vLLM 0.13.0 imports ``ALLOWED_LAYER_TYPES`` from
-#   ``transformers.configuration_utils`` but newer transformers versions
- #   renamed it to ``ALLOWED_MLP_LAYER_TYPES``.  We add the alias so that
- #   vLLM's config module can be imported successfully.
- #   """
- #   import transformers.configuration_utils as _tu
- #   if not hasattr(_tu, "ALLOWED_LAYER_TYPES"):
- #       _tu.ALLOWED_LAYER_TYPES = getattr(_tu, "ALLOWED_MLP_LAYER_TYPES", ())
-
 
 def _patch_is_deepseek_mla():
     """Patch ``ModelConfig.is_deepseek_mla`` to recognise ``glm_moe_dsa``."""
