@@ -4,6 +4,7 @@
 import os
 import logging
 from vllm_fl.utils import get_op_config as _get_op_config
+from vllm_fl.utils import patch_is_deepseek_mla
 
 
 logger = logging.getLogger(__name__)
@@ -27,25 +28,6 @@ def _patch_transformers_compat():
         )
 
 
-def _patch_is_deepseek_mla():
-    """Patch ``ModelConfig.is_deepseek_mla`` to recognise ``glm_moe_dsa``."""
-    from vllm.config.model import ModelConfig
-
-    _orig = ModelConfig.is_deepseek_mla.fget
-
-    @property  # type: ignore[misc]
-    def _patched(self):
-        if (
-            hasattr(self.hf_text_config, "model_type")
-            and self.hf_text_config.model_type == "glm_moe_dsa"
-            and getattr(self.hf_text_config, "kv_lora_rank", None) is not None
-        ):
-            return True
-        return _orig(self)
-
-    ModelConfig.is_deepseek_mla = _patched
-
-
 def register():
     """Register the FL platform."""
     _patch_transformers_compat()
@@ -61,7 +43,7 @@ def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
 
-    _patch_is_deepseek_mla()
+    patch_is_deepseek_mla()
 
     # Register Qwen3.5 MoE config
     try:
