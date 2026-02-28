@@ -42,9 +42,6 @@ def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
 
-    from vllm_fl.models.glm_moe_dsa import patch_is_deepseek_mla
-    patch_is_deepseek_mla()
-
     # Register Qwen3.5 MoE config
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
@@ -91,6 +88,9 @@ def register_model():
 
     # Register GLM-5 (GlmMoeDsa) model
     try:
+        from vllm_fl.models.glm_moe_dsa import patch_is_deepseek_mla
+        patch_is_deepseek_mla()
+
         ModelRegistry.register_model(
             "GlmMoeDsaForCausalLM",
             "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM"
