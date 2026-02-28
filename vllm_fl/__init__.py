@@ -4,7 +4,6 @@
 import os
 import logging
 from vllm_fl.utils import get_op_config as _get_op_config
-from vllm_fl.utils import patch_is_deepseek_mla
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +42,7 @@ def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
 
+    from vllm_fl.models.glm_moe_dsa import patch_is_deepseek_mla
     patch_is_deepseek_mla()
 
     # Register Qwen3.5 MoE config

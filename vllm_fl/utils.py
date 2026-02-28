@@ -134,25 +134,6 @@ def _load_op_config_from_env() -> None:
     _OP_CONFIG = normalized
 
 
-def patch_is_deepseek_mla():
-    """Patch ``ModelConfig.is_deepseek_mla`` to recognise ``glm_moe_dsa``."""
-    from vllm.config.model import ModelConfig
-
-    _orig = ModelConfig.is_deepseek_mla.fget
-
-    @property  # type: ignore[misc]
-    def _patched(self):
-        if (
-            hasattr(self.hf_text_config, "model_type")
-            and self.hf_text_config.model_type == "glm_moe_dsa"
-            and getattr(self.hf_text_config, "kv_lora_rank", None) is not None
-        ):
-            return True
-        return _orig(self)
-
-    ModelConfig.is_deepseek_mla = _patched
-
-
 def get_op_config() -> Optional[dict[str, str]]:
     return _OP_CONFIG
 
