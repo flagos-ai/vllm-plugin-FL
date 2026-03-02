@@ -10,8 +10,7 @@ os.environ["VLLM_ALLOW_LONG_MAX_MODEL_LEN"] = "1"
 
 from vllm import LLM, SamplingParams
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]
@@ -19,7 +18,12 @@ if __name__ == '__main__':
     # Create a sampling params object.
     sampling_params = SamplingParams(max_tokens=10, temperature=0.0)
     # Create an LLM.
-    llm = LLM(model="/models/Qwen3.5-397B-A17B", tensor_parallel_size=8, pipeline_parallel_size=2, enforce_eager=False)
+    llm = LLM(
+        model="/models/Qwen3.5-397B-A17B",
+        tensor_parallel_size=8,
+        pipeline_parallel_size=2,
+        enforce_eager=False,
+    )
 
     # Generate texts from the prompts.
     outputs = llm.generate(prompts, sampling_params)
@@ -28,4 +32,3 @@ if __name__ == '__main__':
         prompt = output.prompt
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
-
