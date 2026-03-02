@@ -46,7 +46,7 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     vendor_name = device_info.vendor_name
-    ray_device_key: str = "flagos"
+    ray_device_key: str = "GPU"
     dist_backend: str = "flagcx" if "FLAGCX_PATH" in os.environ else "nccl"
     ### TODO(lms): dispatch device_control_env_var
     # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
