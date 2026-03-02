@@ -34,7 +34,7 @@ jobs:
         --cap-add=SYS_PTRACE
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install FlagGems
         run: |
