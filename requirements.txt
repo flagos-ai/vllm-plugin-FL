@@ -1,4 +1,4 @@
-vllm[audio]==0.13.0
+vllm[audio]==0.16.0
 decorator
 pyyaml
 scipy
