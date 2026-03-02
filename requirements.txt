@@ -3,7 +3,7 @@ decorator
 pyyaml
 scipy
 modelscope>=1.18.1
-setuptools <= 79.0.1
+setuptools <= 82.0.0
 setuptools-scm
 scikit-build-core==0.11
 pybind11
