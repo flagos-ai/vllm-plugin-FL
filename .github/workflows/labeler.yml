@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Apply labels
-        uses: actions/labeler@v5
+        uses: actions/labeler@v6
         continue-on-error: true  # Don't fail if config not yet on main branch
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
