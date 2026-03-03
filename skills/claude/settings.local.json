@@ -43,7 +43,10 @@
       "Bash(while:*)",
       "Bash(timeout:*)",
       "Bash(tar:*)",
-      "Bash(CUDA_VISIBLE_DEVICES=*:*)"
+      "Bash(CUDA_VISIBLE_DEVICES=*:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebSearch",
+      "WebFetch(domain:www.anthropic.com)"
     ]
   }
 }
