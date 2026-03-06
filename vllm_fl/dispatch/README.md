@@ -227,14 +227,11 @@ The system automatically detects hardware and loads the corresponding configurat
 
 | Platform | Config File | Auto-Detection |
 |----------|-------------|----------------|
-| Ascend NPU | `config/ascend.yaml` | `torch.npu.is_available()` |
-| NVIDIA GPU | `config/cuda.yaml` | `torch.cuda.is_available()` |
+| Ascend NPU | `config/ascend.yaml` | `platform.vendor_name == 'ascend'` |
+| NVIDIA GPU | `config/nvidia.yaml` | `platform.vendor_name == 'nvidia'` |
+| METAX GPU | `config/metax.yaml` | `platform.vendor_name == 'metax'` |
 
-You can force a specific platform using `VLLM_FL_PLATFORM` environment variable:
-```bash
-export VLLM_FL_PLATFORM=ascend  # Force Ascend config
-export VLLM_FL_PLATFORM=cuda    # Force CUDA config
-```
+Platform detection is automatic based on `current_platform.vendor_name`.
 
 ### User-Specified Configuration File (YAML)
 
@@ -314,7 +311,6 @@ Environment variables can override specific items from platform config. If not s
 |----------|---------|-------------|
 | `VLLM_FL_PREFER_ENABLED` | `true` | Global switch. Set `false` to disable all dispatch features |
 | `VLLM_FL_CONFIG` | (none) | Path to YAML config file (complete override) |
-| `VLLM_FL_PLATFORM` | (auto) | Force platform: `ascend`, `cuda` |
 
 #### Backend Selection
 
@@ -387,9 +383,6 @@ export VLLM_FL_PER_OP="rms_norm=vendor|flagos|reference"
 
 # Use completely custom config file
 export VLLM_FL_CONFIG=/path/to/my_config.yaml
-
-# Force specific platform
-export VLLM_FL_PLATFORM=ascend
 
 # Enable debug logging
 export VLLM_FL_LOG_LEVEL=DEBUG

@@ -10,7 +10,7 @@ import torch
 
 
 def rotary_embedding_torch(
-    obj,
+    self,
     query: torch.Tensor,
     key: torch.Tensor,
     cos: torch.Tensor,
@@ -23,7 +23,7 @@ def rotary_embedding_torch(
     Apply rotary position embedding using PyTorch.
 
     Args:
-        obj: The calling obj (for interface consistency)
+        self: The calling instance (for interface consistency)
         query: Query tensor [batch, num_heads, seq_len, head_dim] or [seq_len, num_heads, head_dim]
         key: Key tensor [batch, num_heads, seq_len, head_dim] or [seq_len, num_heads, head_dim]
         cos: Cosine cache [max_seq_len, rotary_dim] where rotary_dim = head_dim or head_dim // 2

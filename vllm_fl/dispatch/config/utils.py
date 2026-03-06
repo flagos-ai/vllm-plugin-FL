@@ -41,26 +41,21 @@ _CONFIG_DIR = Path(__file__).parent
 
 def get_platform_name() -> str:
     """
-    Detect the current hardware platform.
+    Detect the current hardware platform using platform vendor_name.
+
+    This function uses current_platform.vendor_name to accurately distinguish
+    between different hardware vendors (NVIDIA, METAX, Ascend, etc.).
 
     Returns:
-        Platform name string: 'ascend', 'iluvatar', 'cuda', or 'unknown'
+        Platform name string based on vendor_name: 'nvidia', 'metax', 'ascend', etc.
     """
     try:
-        import torch
-        if hasattr(torch, 'npu') and torch.npu.is_available():
-            return 'ascend'
-        if "iluvatar" in torch.cuda.get_device_name().lower():
-            return 'iluvatar'
-        if torch.cuda.is_available():
-            return 'cuda'
-    except ImportError:
-        pass
+        from vllm.platforms import current_platform
 
-    # Check environment variable override
-    platform_override = os.environ.get('VLLM_FL_PLATFORM', '').strip().lower()
-    if platform_override:
-        return platform_override
+        if hasattr(current_platform, 'vendor_name'):
+            return current_platform.vendor_name
+    except Exception:
+        pass
 
     return 'unknown'
 

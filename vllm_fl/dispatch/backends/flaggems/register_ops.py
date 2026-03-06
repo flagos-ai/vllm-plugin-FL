@@ -34,6 +34,9 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .flaggems import FlagGemsBackend
+    from .impl.activation import silu_and_mul_flaggems
+    from .impl.normalization import rms_norm_flaggems
+    from .impl.rotary import rotary_embedding_flaggems
 
     backend = FlagGemsBackend()
     is_avail = backend.is_available
@@ -44,7 +47,7 @@ def register_builtins(registry) -> None:
             op_name="silu_and_mul",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            fn=_bind_is_available(silu_and_mul_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -53,7 +56,7 @@ def register_builtins(registry) -> None:
             op_name="rms_norm",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
+            fn=_bind_is_available(rms_norm_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -62,11 +65,11 @@ def register_builtins(registry) -> None:
             op_name="rotary_embedding",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            fn=_bind_is_available(rotary_embedding_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
-        # Attention Backend
+        # Attention Backend (no instance binding needed)
         OpImpl(
             op_name="attention_backend",
             impl_id="default.flagos",

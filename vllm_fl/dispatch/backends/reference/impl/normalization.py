@@ -12,7 +12,7 @@ import torch
 
 
 def rms_norm_torch(
-    obj,
+    self,
     x: torch.Tensor,
     residual: Optional[torch.Tensor] = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
@@ -20,16 +20,16 @@ def rms_norm_torch(
     RMS normalization using PyTorch.
 
     Args:
-        obj: The calling obj (e.g., RMSNorm layer)
+        self: The calling instance (e.g., RMSNorm layer)
         x: Input tensor
         residual: Optional residual tensor
 
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    # Get weight and epsilon from obj
-    weight = obj.weight
-    epsilon = obj.variance_epsilon
+    # Get weight and epsilon from self
+    weight = self.weight
+    epsilon = self.variance_epsilon
 
     if residual is not None:
         x = x + residual

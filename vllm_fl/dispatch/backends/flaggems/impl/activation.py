@@ -9,12 +9,12 @@ from __future__ import annotations
 import torch
 
 
-def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
+def silu_and_mul_flaggems(self, x: torch.Tensor) -> torch.Tensor:
     """
     SiLU activation followed by element-wise multiplication using FlagGems.
 
     Args:
-        obj: The calling obj (for interface consistency)
+        self: The calling instance (for interface consistency)
         x: Input tensor of shape [..., 2*d]
 
     Returns:

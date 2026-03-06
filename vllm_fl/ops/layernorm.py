@@ -1,9 +1,9 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-from typing import Optional, Union
+from typing import Optional
 import torch
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm_fl.dispatch import call_op
+from vllm_fl.dispatch.method_dispatch import dispatch_method
 
 
 class RMSNormFL(RMSNorm):
@@ -17,12 +17,7 @@ class RMSNormFL(RMSNorm):
     ) -> None:
         super().__init__(hidden_size, eps, var_hidden_size, has_weight, dtype)
 
-    def forward_oot(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        return call_op("rms_norm", self, x, residual)
+    forward_oot = dispatch_method("rms_norm")
 
 
 __all__ = ["RMSNormFL"]

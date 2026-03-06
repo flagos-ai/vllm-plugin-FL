@@ -32,6 +32,9 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .cuda import CudaBackend
+    from .impl.activation import silu_and_mul_cuda
+    from .impl.normalization import rms_norm_cuda
+    from .impl.rotary import rotary_embedding_cuda
 
     backend = CudaBackend()
     is_avail = backend.is_available
@@ -42,7 +45,7 @@ def register_builtins(registry) -> None:
             op_name="silu_and_mul",
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            fn=_bind_is_available(silu_and_mul_cuda, is_avail),
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
@@ -51,7 +54,7 @@ def register_builtins(registry) -> None:
             op_name="rms_norm",
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
+            fn=_bind_is_available(rms_norm_cuda, is_avail),
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
@@ -60,11 +63,11 @@ def register_builtins(registry) -> None:
             op_name="rotary_embedding",
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            fn=_bind_is_available(rotary_embedding_cuda, is_avail),
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
-        # Attention Backend
+        # Attention Backend (no instance binding needed)
         OpImpl(
             op_name="attention_backend",
             impl_id="vendor.cuda",

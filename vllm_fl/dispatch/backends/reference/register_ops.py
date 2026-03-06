@@ -32,6 +32,9 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .reference import ReferenceBackend
+    from .impl.activation import silu_and_mul_torch
+    from .impl.normalization import rms_norm_torch
+    from .impl.rotary import rotary_embedding_torch
 
     backend = ReferenceBackend()
     is_avail = backend.is_available
@@ -42,7 +45,7 @@ def register_builtins(registry) -> None:
             op_name="silu_and_mul",
             impl_id="reference.torch",
             kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            fn=_bind_is_available(silu_and_mul_torch, is_avail),
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),
@@ -51,7 +54,7 @@ def register_builtins(registry) -> None:
             op_name="rms_norm",
             impl_id="reference.torch",
             kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
+            fn=_bind_is_available(rms_norm_torch, is_avail),
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),
@@ -60,11 +63,11 @@ def register_builtins(registry) -> None:
             op_name="rotary_embedding",
             impl_id="reference.torch",
             kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            fn=_bind_is_available(rotary_embedding_torch, is_avail),
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),
-        # Attention Backend
+        # Attention Backend (no instance binding needed)
         OpImpl(
             op_name="attention_backend",
             impl_id="reference.torch",

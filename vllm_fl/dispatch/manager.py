@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import types as pytypes
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set, Tuple
 
@@ -516,6 +517,115 @@ class OpManager:
                     )
 
         # All implementations failed
+        raise RuntimeError(
+            f"All {len(available_candidates)} implementation(s) failed for op='{op_name}'. "
+            f"Last error: {last_error}"
+        ) from last_error
+
+    def call_as_method(self, op_name: str, instance, *args, **kwargs):
+        """
+        Resolve and call an operator as a bound method on *instance*.
+
+        Behaves identically to :meth:`call` (fallback, logging, caching)
+        except that the resolved function is bound to *instance* via
+        ``types.MethodType`` before invocation, so the backend function
+        receives *instance* as ``self``.
+        """
+        enable_fallback = os.getenv("VLLM_FL_STRICT", "1") != "0"
+
+        if not enable_fallback:
+            fn = self.resolve(op_name)
+
+            impl_id = self.get_selected_impl_id(op_name)
+            last_impl_id = self._called_ops.get(op_name)
+
+            if last_impl_id != impl_id:
+                with self._lock:
+                    if self._called_ops.get(op_name) != impl_id:
+                        snap = self._registry.snapshot()
+                        for impl in snap.impls_by_op.get(op_name, []):
+                            if impl.impl_id == impl_id:
+                                if last_impl_id is None:
+                                    logger.info(
+                                        f"Op '{op_name}' using '{impl_id}' "
+                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "
+                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                                    )
+                                break
+                        self._called_ops[op_name] = impl_id
+
+            bound = pytypes.MethodType(fn, instance)
+            return bound(*args, **kwargs)
+
+        # Fallback mode: try candidates in priority order
+        candidates = self.resolve_candidates(op_name)
+        last_error = None
+
+        failed_impl_ids = self._failed_impls.get(op_name, set())
+
+        available_candidates = [
+            impl for impl in candidates if impl.impl_id not in failed_impl_ids
+        ]
+
+        if not available_candidates:
+            raise RuntimeError(
+                f"All implementations for op='{op_name}' have failed previously. "
+                f"Failed impl_ids: {failed_impl_ids}"
+            )
+
+        for idx, impl in enumerate(available_candidates):
+            try:
+                if idx == 0:
+                    last_impl_id = self._called_ops.get(op_name)
+                    if last_impl_id != impl.impl_id:
+                        with self._lock:
+                            if self._called_ops.get(op_name) != impl.impl_id:
+                                if last_impl_id is None:
+                                    logger.info(
+                                        f"Op '{op_name}' using '{impl.impl_id}' "
+                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"Op '{op_name}' switched from '{last_impl_id}' to '{impl.impl_id}' "
+                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                                    )
+                                self._called_ops[op_name] = impl.impl_id
+                else:
+                    logger.info(
+                        f"Op '{op_name}' fallback to '{impl.impl_id}' "
+                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                    )
+
+                bound = pytypes.MethodType(impl.fn, instance)
+                result = bound(*args, **kwargs)
+
+                if idx > 0:
+                    with self._lock:
+                        self._called_ops[op_name] = impl.impl_id
+
+                return result
+
+            except Exception as e:
+                last_error = e
+                with self._lock:
+                    if op_name not in self._failed_impls:
+                        self._failed_impls[op_name] = set()
+                    self._failed_impls[op_name].add(impl.impl_id)
+
+                if idx < len(available_candidates) - 1:
+                    logger.warning(
+                        f"Implementation '{impl.impl_id}' failed for op '{op_name}': {e}"
+                    )
+                else:
+                    logger.error(
+                        f"Last implementation '{impl.impl_id}' failed for op '{op_name}': {e}"
+                    )
+
         raise RuntimeError(
             f"All {len(available_candidates)} implementation(s) failed for op='{op_name}'. "
             f"Last error: {last_error}"

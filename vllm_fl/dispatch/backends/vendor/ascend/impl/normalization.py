@@ -12,7 +12,7 @@ import torch
 
 
 def rms_norm_ascend(
-    obj,
+    self,
     x: torch.Tensor,
     residual: Optional[torch.Tensor] = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
@@ -20,7 +20,7 @@ def rms_norm_ascend(
     RMS normalization using Ascend NPU.
 
     Args:
-        obj: The calling obj (e.g., RMSNorm layer)
+        self: The calling instance (e.g., RMSNorm layer)
         x: Input tensor
         residual: Optional residual tensor to add before normalization
 
@@ -29,9 +29,9 @@ def rms_norm_ascend(
     """
     import torch_npu
 
-    # Get weight and epsilon from obj
-    weight = obj.weight
-    epsilon = obj.variance_epsilon
+    # Get weight and epsilon from self
+    weight = self.weight
+    epsilon = self.variance_epsilon
 
     if residual is not None:
         x, _, residual = torch_npu.npu_add_rms_norm(x, residual, weight, epsilon)

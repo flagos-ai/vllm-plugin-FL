@@ -96,6 +96,7 @@ from .policy import (
 )
 from .manager import OpManager, get_default_manager, reset_default_manager
 from .ops import VLLMFLBackendBase
+from .method_dispatch import dispatch_method
 from .discovery import (
     discover_plugins,
     get_discovered_plugins,
@@ -104,6 +105,16 @@ from .discovery import (
     PLUGIN_MODULES_ENV,
 )
 from .logger_manager import get_logger, set_log_level
+
+
+def call_method_op(op_name: str, instance, *args, **kwargs):
+    """
+    Call an operator as a bound method on *instance*.
+
+    The resolved backend function receives *instance* as ``self``,
+    allowing it to freely access instance attributes.
+    """
+    return get_default_manager().call_as_method(op_name, instance, *args, **kwargs)
 
 
 def call_op(op_name: str, *args, **kwargs):
@@ -163,6 +174,9 @@ __all__ = [
     "reset_default_manager",
     # Backend base
     "VLLMFLBackendBase",
+    # Method dispatch
+    "dispatch_method",
+    "call_method_op",
     # Plugin discovery
     "discover_plugins",
     "get_discovered_plugins",

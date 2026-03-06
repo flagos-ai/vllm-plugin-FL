@@ -12,7 +12,7 @@ import torch
 
 
 def rms_norm_flaggems(
-    obj,
+    self,
     x: torch.Tensor,
     residual: Optional[torch.Tensor] = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
@@ -20,7 +20,7 @@ def rms_norm_flaggems(
     RMS normalization using FlagGems.
 
     Args:
-        obj: The calling obj (e.g., RMSNorm layer)
+        self: The calling instance (e.g., RMSNorm layer)
         x: Input tensor
         residual: Optional residual tensor
 
@@ -29,8 +29,8 @@ def rms_norm_flaggems(
     """
     from flag_gems.modules.normalization import gems_rms_forward
 
-    # Get weight and epsilon from obj
-    weight = obj.weight
-    epsilon = obj.variance_epsilon
+    # Get weight and epsilon from self
+    weight = self.weight
+    epsilon = self.variance_epsilon
 
     return gems_rms_forward(x, residual, weight, epsilon)

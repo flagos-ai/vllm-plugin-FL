@@ -9,14 +9,14 @@ from __future__ import annotations
 import torch
 
 
-def silu_and_mul_cuda(obj, x: torch.Tensor) -> torch.Tensor:
+def silu_and_mul_cuda(self, x: torch.Tensor) -> torch.Tensor:
     """
     SiLU activation followed by element-wise multiplication using CUDA.
 
     Uses vLLM's optimized CUDA kernel when available.
 
     Args:
-        obj: The calling obj (for interface consistency)
+        self: The calling instance (for interface consistency)
         x: Input tensor of shape [..., 2*d]
 
     Returns:

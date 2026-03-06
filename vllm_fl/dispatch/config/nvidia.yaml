@@ -1,5 +1,5 @@
-# vLLM-FL Dispatch Configuration for CUDA
-# Auto-loaded when running on NVIDIA GPU hardware
+# vLLM-FL Dispatch Configuration for NVIDIA GPU
+# Auto-loaded when running on NVIDIA GPU hardware (vendor_name: nvidia)
 
 # Preferred default backend type: flaggems, vendor, reference
 prefer: flagos
