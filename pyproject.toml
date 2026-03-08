@@ -28,7 +28,7 @@ test = [
     "torch>=2.7.1",
     "pyyaml",
     "decorator",
-    "vllm[audio]==0.13.0",
+    "vllm[audio]==0.17.0",
 ]
 
 [tool.setuptools.packages.find]
