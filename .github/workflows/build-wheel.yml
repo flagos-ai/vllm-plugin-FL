@@ -30,10 +30,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: pip install build setuptools setuptools-scm
+        run: pip install build
 
       - name: Build package
-        run: python -m build --wheel --no-isolation
+        run: python -m build --wheel
 
       - name: Verify wheel
         run: |
