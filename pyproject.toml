@@ -16,6 +16,36 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "vllm[audio]==0.13.0",
+    "decorator",
+    "pyyaml",
+    "scipy",
+    "modelscope>=1.18.1",
+    "setuptools<=79.0.1",
+    "setuptools-scm",
+    "scikit-build-core==0.11",
+    "pybind11",
+    "ninja",
+    "cmake",
+    "fastsafetensors",
+]
+
+[project.entry-points."vllm.platform_plugins"]
+fl = "vllm_fl:register"
+
+[project.entry-points."vllm.general_plugins"]
+fl = "vllm_fl:register_model"
 
 [project.urls]
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
@@ -34,6 +64,9 @@ test = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["vllm_fl*"]
+
+[tool.setuptools.package-data]
+"vllm_fl.dispatch.config" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
