@@ -6,15 +6,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    labels:
-      - "dependencies"
-      - "github-actions"
+    open-pull-requests-limit: 0
 
   # Python (pip)
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
-    labels:
-      - "dependencies"
-      - "python"
+    open-pull-requests-limit: 0
