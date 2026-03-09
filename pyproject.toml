@@ -5,6 +5,10 @@ requires = [
     "setuptools-scm>=8.0",
     "torch>=2.7.1",
     "wheel",
+    "scikit-build-core==0.11",
+    "pybind11",
+    "ninja",
+    "cmake",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -27,18 +31,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
-    "vllm[audio]==0.13.0",
-    "decorator",
     "pyyaml",
-    "scipy",
-    "modelscope>=1.18.1",
-    "setuptools<=79.0.1",
-    "setuptools-scm",
-    "scikit-build-core==0.11",
-    "pybind11",
-    "ninja",
-    "cmake",
-    "fastsafetensors",
 ]
 
 [project.entry-points."vllm.platform_plugins"]
@@ -56,9 +49,9 @@ test = [
     "pytest-cov",
     "numpy",
     "torch>=2.7.1",
-    "pyyaml",
     "decorator",
     "vllm[audio]==0.13.0",
+    "modelscope>=1.18.1",
 ]
 
 [tool.setuptools.packages.find]

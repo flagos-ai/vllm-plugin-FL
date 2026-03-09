@@ -30,6 +30,4 @@ benchmarks:
 build:
   - changed-files:
       - any-glob-to-any-file:
-          - 'setup.py'
-          - 'requirements*.txt'
           - 'pyproject.toml'
