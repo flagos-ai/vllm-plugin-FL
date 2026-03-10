@@ -113,7 +113,7 @@ class PyFlagcxCommunicator:
         # nccl communicator and stream will use this device
         # `torch.cuda.device` is a context manager that changes the
         # current cuda device to the specified one
-        with torch.cuda.device(device):
+        with torch.musa.device(device):
             self.comm = self.flagcx.flagcxCommInitRank(
                 self.world_size, ctypes.byref(self.unique_id), self.rank)
 

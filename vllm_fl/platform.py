@@ -55,11 +55,15 @@ class PlatformFL(Platform):
         """Stateless version of [torch.cuda.is_available][]."""
         if self.vendor_name == "iluvatar":
             return False
+        if self.vendor_name == "musa":
+            return False
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         if self.vendor_name == "iluvatar":
+            return False
+        if self.vendor_name == "musa":
             return False
         return self.device_type == "cuda"
 
@@ -100,7 +104,7 @@ class PlatformFL(Platform):
     ### TODO(lms): change pin_memory depend device
     @classmethod
     def is_pin_memory_available(cls):
-        if cls.device_type in ["cuda", "xpu", "npu"]:
+        if cls.device_type in ["cuda", "xpu", "npu", "musa"]:
             return True
         return False
 
@@ -118,6 +122,9 @@ class PlatformFL(Platform):
             if cls.device_type == "npu":
                 cache_config.block_size = 128
                 logger.info("Setting kv cache block size to 128 for Ascend NPU.")
+            elif cls.device_type == "musa":
+                cache_config.block_size = 64
+                logger.info("Setting kv cache block size to 64 for MUSA.")
             else:
                 cache_config.block_size = 16
 
@@ -284,7 +291,9 @@ class PlatformFL(Platform):
         # TODO(yxa): For NPU/Ascend devices, return None (no capability version like CUDA)
         if cls.device_type == "npu":
             return None
-        # For CUDA devices
+        if cls.device_type == "musa":
+            major, minor = torch.musa.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 
