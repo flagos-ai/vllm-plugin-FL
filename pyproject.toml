@@ -46,6 +46,7 @@ Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
 test = [
     "pytest",
     "pytest-cov",
+    "pytest-json-report",
     "numpy",
     "torch>=2.7.1",
     "decorator",

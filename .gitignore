@@ -7,3 +7,8 @@ dist/
 .coverage
 .coverage.*
 htmlcov/
+coverage.json
+coverage.xml
+
+# Reports
+report.json
