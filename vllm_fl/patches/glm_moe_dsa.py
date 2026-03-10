@@ -52,12 +52,6 @@ def patch_tokenizer_compat():
         pass
 
 
-## patch_deep_gemm_fallback has been removed.
-## The torch fallback implementations (_torch_fp8_mqa_logits,
-## _torch_fp8_paged_mqa_logits, _torch_get_paged_mqa_logits_metadata)
-## are no longer needed — we always use native deep_gemm kernels.
-
-
 def patch_is_deepseek_mla():
     """Patch ModelConfig.is_deepseek_mla to recognise glm_moe_dsa as MLA."""
     from vllm.config.model import ModelConfig
