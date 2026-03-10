@@ -52,122 +52,10 @@ def patch_tokenizer_compat():
         pass
 
 
-def patch_deep_gemm_fallback():
-    """Patch vllm.utils.deep_gemm to use torch fallback implementations.
-
-    deep_gemm's JIT kernels may fail on certain CUDA versions (e.g. 13.1).
-    This replaces the DSA Indexer's fp8_mqa_logits / fp8_paged_mqa_logits
-    with pure-torch reference implementations so GLM-5 FP8 can run without
-    a working deep_gemm JIT compiler.
-    """
-    import torch
-    import vllm.utils.deep_gemm as dg_mod
-
-    def _torch_fp8_mqa_logits(q, kv, weights, cu_seqlen_ks, cu_seqlen_ke):
-        """Torch fallback for fp8_mqa_logits (prefill DSA Indexer).
-
-        q: [M, H, D] fp8  |  kv: (k_fp8 [N,D], k_scale [N]) | weights: [M,H]
-        Returns: [M, N] float32
-        """
-        k_fp8, k_scale = kv
-        q_f = q.float()
-        k_f = k_fp8.float() * k_scale.view(-1, 1).float()
-        N = k_f.shape[0]
-        # score: [H, M, N]
-        score = torch.einsum("mhd,nd->hmn", q_f, k_f)
-        # weighted sum over heads -> [M, N]
-        logits = (score.relu() * weights.unsqueeze(-1).transpose(0, 1)).sum(dim=0)
-        # mask
-        idx = torch.arange(N, device=q.device).unsqueeze(0)
-        mask = (idx >= cu_seqlen_ks.unsqueeze(1)) & (idx < cu_seqlen_ke.unsqueeze(1))
-        logits = logits.masked_fill(~mask, float("-inf"))
-        return logits
-
-    def _torch_fp8_paged_mqa_logits(
-        q_fp8, kv_cache_fp8, weights, context_lens, block_tables,
-        schedule_metadata, max_model_len, clean_logits=True,
-    ):
-        """Torch fallback for fp8_paged_mqa_logits (decode DSA Indexer).
-
-        q_fp8: [B, next_n, H, D] fp8
-        kv_cache_fp8: [num_blocks, block_size, 1, D+4] uint8
-          (last 4 bytes = float scale per position)
-        weights: [B*next_n, H] float32
-        context_lens: [B] int32
-        block_tables: [B, max_blocks] int32
-        Returns: [B*next_n, max_model_len] float32
-        """
-        B, next_n, H, D = q_fp8.shape
-        block_size = kv_cache_fp8.shape[1]
-        kv_D = kv_cache_fp8.shape[-1]  # D+4
-        feat_D = kv_D - 4  # actual feature dim
-
-        # Vectorized: gather all blocks for all batches at once
-        max_blocks = block_tables.shape[1]
-        # Flatten block_tables to gather all physical blocks
-        flat_blocks = block_tables.reshape(-1)  # [B * max_blocks]
-        # Gather all block data: [B * max_blocks, block_size, 1, D+4]
-        all_blk_data = kv_cache_fp8[flat_blocks].squeeze(2)  # [B*max_blocks, block_size, D+4]
-        # Reshape to [B, max_blocks * block_size, D+4]
-        all_blk_data = all_blk_data.reshape(B, max_blocks * block_size, kv_D)
-        # Split FP8 features and scales
-        k_fp8_raw = all_blk_data[:, :, :feat_D].contiguous().view(
-            torch.float8_e4m3fn)  # [B, total_pos, feat_D]
-        scale_bytes = all_blk_data[:, :, feat_D:feat_D + 4].contiguous()
-        k_scale = scale_bytes.view(torch.float32).squeeze(-1)  # [B, total_pos]
-        # Dequantize: [B, total_pos, feat_D]
-        k_f = k_fp8_raw.float() * k_scale.unsqueeze(-1)
-
-        # q: [B, next_n, H, D] -> [B*next_n, H, D]
-        q_f = q_fp8.float().view(B * next_n, H, D)
-
-        # Compute scores for all batches vectorized
-        # k_f: [B, total_pos, D] -> expand for next_n
-        # score = einsum('bnhd,bpd->bnhp', q, k)
-        q_4d = q_f.view(B, next_n, H, D)
-        # [B, next_n, H, total_pos]
-        score = torch.einsum('bnhd,bpd->bnhp', q_4d, k_f)
-        # Apply ReLU and weight: weights [B*next_n, H] -> [B, next_n, H, 1]
-        w_4d = weights.view(B, next_n, H, 1)
-        # Weighted sum over heads: [B, next_n, total_pos]
-        vals = (score.relu() * w_4d).sum(dim=2)
-
-        # Build output logits with -inf masking
-        logits = torch.full(
-            (B * next_n, max_model_len), float("-inf"),
-            dtype=torch.float32, device=q_fp8.device,
-        )
-        total_pos = max_blocks * block_size
-        # Create position mask: [B, total_pos]
-        pos_idx = torch.arange(total_pos, device=q_fp8.device).unsqueeze(0)
-        mask = pos_idx < context_lens.unsqueeze(1)  # [B, total_pos]
-        # Expand mask for next_n: [B, next_n, total_pos]
-        mask = mask.unsqueeze(1).expand_as(vals)
-        # Apply mask
-        vals = vals.masked_fill(~mask, float("-inf"))
-        # Write to logits: only up to total_pos columns
-        out_cols = min(total_pos, max_model_len)
-        logits_view = logits.view(B, next_n, max_model_len)
-        logits_view[:, :, :out_cols] = vals[:, :, :out_cols]
-        return logits
-
-    def _torch_get_paged_mqa_logits_metadata(context_lens, block_size, num_sms):
-        """No-op metadata for torch fallback (not needed)."""
-        return torch.empty(0, dtype=torch.int32, device=context_lens.device)
-
-    # Force _lazy_init to run first so we can override its results
-    dg_mod._lazy_init()
-
-    # Patch the module-level impl functions
-    dg_mod._fp8_mqa_logits_impl = _torch_fp8_mqa_logits
-    dg_mod._fp8_paged_mqa_logits_impl = _torch_fp8_paged_mqa_logits
-    dg_mod._get_paged_mqa_logits_metadata_impl = _torch_get_paged_mqa_logits_metadata
-
-    # Replace _lazy_init with no-op to prevent deep_gemm from
-    # overwriting our patches on subsequent calls
-    dg_mod._lazy_init = lambda: None
-    logger.info("Patched vllm.utils.deep_gemm with torch fallback for "
-                "fp8_mqa_logits / fp8_paged_mqa_logits")
+## patch_deep_gemm_fallback has been removed.
+## The torch fallback implementations (_torch_fp8_mqa_logits,
+## _torch_fp8_paged_mqa_logits, _torch_get_paged_mqa_logits_metadata)
+## are no longer needed — we always use native deep_gemm kernels.
 
 
 def patch_is_deepseek_mla():
@@ -189,12 +77,83 @@ def patch_is_deepseek_mla():
     ModelConfig.is_deepseek_mla = _patched_is_mla
 
 
+def patch_fp8_mqa_logits_dim():
+    """Fix k_scale dim mismatch for deep_gemm fp8_mqa_logits.
+
+    vLLM 0.13.0 passes k_scale as [N, 1] but deep_gemm 2.3.0 expects [N].
+    Upstream fix: https://github.com/vllm-project/vllm/pull/32652
+    We wrap fp8_mqa_logits to flatten k_scale before calling the native impl.
+    """
+    import vllm.utils.deep_gemm as dg_mod
+
+    dg_mod._lazy_init()
+    _orig_impl = dg_mod._fp8_mqa_logits_impl
+    if _orig_impl is None:
+        return
+
+    def _fixed_fp8_mqa_logits(q, kv, weights, cu_seqlen_ks, cu_seqlen_ke):
+        k_fp8, k_scale = kv
+        return _orig_impl(
+            q, (k_fp8, k_scale.flatten()), weights,
+            cu_seqlen_ks, cu_seqlen_ke,
+        )
+
+    dg_mod._fp8_mqa_logits_impl = _fixed_fp8_mqa_logits
+    dg_mod._lazy_init = lambda: None
+    logger.info("Patched fp8_mqa_logits: flatten k_scale [N,1] -> [N] "
+                "for deep_gemm 2.3.0 compat")
+
+
+def patch_indexer_schedule_metadata():
+    """Fix schedule_metadata not computed when VLLM_USE_DEEP_GEMM=0.
+
+    In vLLM 0.13.0, the indexer metadata builder gates schedule_metadata
+    computation behind ``is_deep_gemm_supported()`` which checks
+    ``VLLM_USE_DEEP_GEMM``. But the DSA kernel (fp8_paged_mqa_logits)
+    only checks ``has_deep_gemm()`` — so when VLLM_USE_DEEP_GEMM=0 and
+    deep_gemm is installed, the kernel runs with uninitialised metadata,
+    causing CUDA_ERROR_ILLEGAL_ADDRESS.
+
+    Fix: patch the builder's ``build`` method to always compute
+    schedule_metadata when ``has_deep_gemm()`` is True.
+    """
+    from vllm.utils.import_utils import has_deep_gemm
+    if not has_deep_gemm():
+        return
+
+    from vllm.v1.attention.backends.mla.indexer import (
+        DeepseekV32IndexerMetadataBuilder,
+    )
+    from vllm.utils.deep_gemm import get_paged_mqa_logits_metadata
+
+    _orig_build = DeepseekV32IndexerMetadataBuilder.build
+
+    def _patched_build(self, common_prefix_len, common_attn_metadata,
+                       fast_build=False):
+        result = _orig_build(self, common_prefix_len,
+                             common_attn_metadata, fast_build)
+        if (result.decode is not None
+                and result.decode.schedule_metadata is not None):
+            seq_lens = common_attn_metadata.seq_lens[:result.num_decodes]
+            self.scheduler_metadata_buffer[:] = (
+                get_paged_mqa_logits_metadata(
+                    seq_lens, self.kv_cache_spec.block_size, self.num_sms
+                )
+            )
+        return result
+
+    DeepseekV32IndexerMetadataBuilder.build = _patched_build
+    logger.info("Patched indexer: schedule_metadata always computed "
+                "when deep_gemm is available")
+
+
 def apply_platform_patches():
     """All GLM-5 patches needed at platform registration time."""
     patch_tokenizer_compat()
-    patch_deep_gemm_fallback()
+    patch_fp8_mqa_logits_dim()
 
 
 def apply_model_patches():
     """All GLM-5 patches needed at model registration time."""
     patch_is_deepseek_mla()
+    patch_indexer_schedule_metadata()
