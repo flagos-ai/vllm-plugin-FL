@@ -147,7 +147,81 @@ def apply_platform_patches():
     patch_fp8_mqa_logits_dim()
 
 
+def patch_indexer_rope_reshape():
+    """Fix RoPE output shape in Indexer.forward for DSA models.
+
+    vLLM 0.13.0 uses squeeze(0) / squeeze((0, 2)) on RoPE outputs, which
+    can fail when the RoPE implementation introduces extra leading dims.
+    Replace squeeze with explicit reshape for robustness.
+    """
+    import torch
+    from vllm.model_executor.models.deepseek_v2 import (
+        Indexer,
+        per_token_group_quant_fp8,
+    )
+
+    def _patched_forward(self, hidden_states, qr, positions, rotary_emb):
+        q, _ = self.wq_b(qr)
+        q = q.view(-1, self.n_head, self.head_dim)
+        q_pe, q_nope = torch.split(
+            q, [self.rope_dim, self.head_dim - self.rope_dim], dim=-1
+        )
+
+        k, _ = self.wk(hidden_states)
+        k = self.k_norm(k)
+        k_pe, k_nope = torch.split(
+            k, [self.rope_dim, self.head_dim - self.rope_dim], dim=-1
+        )
+
+        q_pe, k_pe = rotary_emb(positions, q_pe, k_pe.unsqueeze(1))
+        # Use reshape instead of squeeze to handle extra leading dims
+        q_pe = q_pe.reshape(-1, self.n_head, self.rope_dim)
+        k_pe = k_pe.reshape(-1, 1, self.rope_dim)
+
+        q = torch.cat([q_pe, q_nope], dim=-1)
+        k = torch.cat([k_pe.squeeze(-2), k_nope], dim=-1)
+
+        # quant q (k quant is fused with cache insertion)
+        q = q.view(-1, self.head_dim)
+        q_fp8, q_scale = per_token_group_quant_fp8(
+            q,
+            self.quant_block_size,
+            column_major_scales=False,
+            use_ue8m0=self.scale_fmt is not None,
+        )
+        q_fp8 = q_fp8.view(-1, self.n_head, self.head_dim)
+        q_scale = q_scale.view(-1, self.n_head, 1)
+
+        weights, _ = self.weights_proj(hidden_states)
+        weights = (
+            weights.unsqueeze(-1) * q_scale * self.softmax_scale
+            * self.n_head**-0.5
+        )
+        weights = weights.squeeze(-1)
+
+        return torch.ops.vllm.sparse_attn_indexer(
+            hidden_states,
+            self.k_cache.prefix,
+            self.k_cache.kv_cache[0],
+            q_fp8,
+            k,
+            weights,
+            self.quant_block_size,
+            self.scale_fmt,
+            self.topk_tokens,
+            self.head_dim,
+            self.max_model_len,
+            self.max_total_seq_len,
+            self.topk_indices_buffer,
+        )
+
+    Indexer.forward = _patched_forward
+    logger.info("Patched Indexer.forward: reshape RoPE outputs to ensure "
+                "correct dims")
+
+
 def apply_model_patches():
     """All GLM-5 patches needed at model registration time."""
     patch_is_deepseek_mla()
     patch_indexer_schedule_metadata()
+    patch_indexer_rope_reshape()
