@@ -28,7 +28,7 @@ strict: false
 #   - vendor      : Any available vendor backend (auto-detected)
 #   - vendor:musa : Musa-specific vendor backend
 op_backends:
-  # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
+  # attention_backends: prioritize vendor, fallback to FlagGems (Triton), then reference, others: prioritize FlagGems (Triton), fallback to vendor, then reference
   attention_backend:
     - vendor:musa
     - flagos

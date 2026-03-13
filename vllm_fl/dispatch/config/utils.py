@@ -50,7 +50,7 @@ def get_platform_name() -> str:
         import torch
         if hasattr(torch, 'npu') and torch.npu.is_available():
             return 'ascend'
-        if torch.musa.is_available():
+        if hasattr(torch, 'musa') and torch.musa.is_available():
             return 'musa'
         if "iluvatar" in torch.cuda.get_device_name().lower():
             return 'iluvatar'
