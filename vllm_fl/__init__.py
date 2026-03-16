@@ -44,6 +44,7 @@ def register():
 def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
+    import vllm.model_executor.models.qwen3_next as qwen3_next_module
 
     # Register Qwen3.5 MoE config
     try:
@@ -55,6 +56,14 @@ def register_model():
 
     # Register Qwen3Next model
     try:
+        from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM  # noqa: F401
+
+        qwen3_next_module.Qwen3NextForCausalLM = Qwen3NextForCausalLM
+        logger.warning(
+            "Qwen3NextForCausalLM has been patched to use vllm_fl.models.qwen3_next, "
+            "original vLLM implementation is overridden"
+        )
+
         ModelRegistry.register_model(
             "Qwen3NextForCausalLM",
             "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
