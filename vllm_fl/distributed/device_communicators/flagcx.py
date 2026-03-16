@@ -111,12 +111,12 @@ class PyFlagcxCommunicator:
         assert isinstance(device, torch.device)
         self.device = device
         # nccl communicator and stream will use this device
-        # `torch.cuda.device` is a context manager that changes the
-        # current cuda device to the specified one
-        if "musa" in str(self.device).lower():
-            device_ctx = torch.musa.device(device)
+        # `torch.cuda.device` / `torch.musa.device` are context managers that
+        # change the current device to the specified one
+        if self.device.type == "musa":
+            device_ctx = torch.musa.device(self.device)
         else:
-            device_ctx = torch.cuda.device(device)
+            device_ctx = torch.cuda.device(self.device)
 
         with device_ctx:
             self.comm = self.flagcx.flagcxCommInitRank(
