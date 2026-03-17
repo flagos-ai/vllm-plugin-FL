@@ -69,7 +69,7 @@ jobs:
           cd /tmp/DeepGEMM
           git checkout 35c4bc8
           git submodule update --init --recursive
-          pip install .
+          pip install --no-build-isolation .
 
       - name: Run functional ops tests
         run: |
