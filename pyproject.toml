@@ -31,7 +31,6 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml",
-    "deep_gemm>=2.3.0",
 ]
 
 [project.entry-points."vllm.platform_plugins"]
