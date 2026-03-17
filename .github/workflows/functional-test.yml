@@ -79,8 +79,14 @@ jobs:
 
       - name: Run inference tests
         run: |
-          pytest tests/functional_tests/inference/ \
-            -v --tb=short -s
+          exit_code=0
+          for f in tests/functional_tests/inference/test_*.py; do
+            echo "========== Running $f =========="
+            if ! pytest "$f" -v --tb=short -s; then
+              exit_code=1
+            fi
+          done
+          exit $exit_code
 
       - name: Run serving tests
         run: |
