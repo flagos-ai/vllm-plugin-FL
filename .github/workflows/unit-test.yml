@@ -53,6 +53,11 @@ jobs:
           cd plugin/torch/
           FLAGCX_ADAPTOR=nvidia pip install --no-build-isolation .
 
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[test]"
+
       - name: Install DeepGEMM
         run: |
           git clone https://github.com/deepseek-ai/DeepGEMM.git /tmp/DeepGEMM
@@ -60,11 +65,6 @@ jobs:
           git checkout 35c4bc8
           git submodule update --init --recursive
           pip install .
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -e ".[test]"
 
       - name: Run unit tests
         run: |
