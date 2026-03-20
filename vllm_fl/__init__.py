@@ -116,3 +116,14 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+        
+    try:
+        from vllm.distributed.kv_transfer.kv_connector.factory import KVConnectorFactory
+        KVConnectorFactory._registry.pop("P2pNcclConnector", None)
+        KVConnectorFactory.register_connector(
+            "P2pNcclConnector",
+            "vllm_fl.distributed.kv_transfer.p2p_nccl_connector",
+            "P2pNcclConnector",
+        )
+    except Exception as e:
+        logger.error(f"Register P2pNcclConnector error: {str(e)}")
