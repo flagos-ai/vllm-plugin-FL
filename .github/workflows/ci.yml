@@ -52,7 +52,26 @@ jobs:
     outputs:
       platforms: ${{ steps.detect.outputs.platforms }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
         with:
           sparse-checkout: |
             .github/configs

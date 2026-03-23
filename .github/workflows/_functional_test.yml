@@ -48,7 +48,18 @@ jobs:
       options: ${{ inputs.container_options }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
