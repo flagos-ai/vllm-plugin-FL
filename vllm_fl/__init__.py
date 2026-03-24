@@ -3,7 +3,7 @@
 import os
 import logging
 
-from vllm_fl.utils import get_op_config as _get_op_config
+# from vllm_fl.utils import get_op_config as _get_op_config
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
@@ -122,8 +122,8 @@ def register_model():
         KVConnectorFactory._registry.pop("P2pNcclConnector", None)
         KVConnectorFactory.register_connector(
             "P2pNcclConnector",
-            "vllm_fl.distributed.kv_transfer.p2p_nccl_connector",
+            "vllm_fl.distributed.kv_transfer.p2p_flagcx_connector",
             "P2pNcclConnector",
         )
     except Exception as e:
-        logger.error(f"Register P2pNcclConnector error: {str(e)}")
+        logger.error(f"Register P2pFlagcxConnector error: {str(e)}")
