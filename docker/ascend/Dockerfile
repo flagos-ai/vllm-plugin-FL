@@ -50,6 +50,11 @@ RUN pip install flagtree==0.4.0+ascend3.2 \
         --trusted-host=resource.flagos.net
 
 
+# Initialize CANN Toolkit and ATB environment variables
+RUN source /usr/local/Ascend/ascend-toolkit/set_env.sh \
+    && source /usr/local/Ascend/nnal/atb/set_env.sh
+
+# Set environment variables for vLLM plugins and Triton
 ENV VLLM_PLUGINS=fl
 ENV TRITON_ALL_BLOCKS_PARALLEL=1
 
