@@ -16,7 +16,6 @@ import pytest
 def _attach_caplog_to_dispatch_loggers(caplog):
     """Attach caplog handler to dispatch loggers that have propagate=False."""
     logger_names = [
-        "vllm_fl.dispatch.io_inspect",
         "vllm_fl.dispatch.io_dump",
     ]
     loggers = []

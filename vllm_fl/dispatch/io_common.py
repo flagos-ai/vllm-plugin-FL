@@ -1,16 +1,18 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-Shared utilities for IO inspector and IO dumper.
+Shared utilities for IO dumper.
 
 Provides common formatting, filtering, feature detection,
 re-entrancy guard, execution order tracking, and YAML config
-parsing used by both io_inspector.py and io_dumper.py.
+parsing used by io_dumper.py.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import functools
+import inspect
 import logging
 import os
 import re
@@ -18,6 +20,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
+import torch.nn as nn
 
 _logger = logging.getLogger(__name__)
 
@@ -31,58 +34,133 @@ except ImportError:
     HAS_TORCH_FUNC_MODE = False
 
 try:
-    from torch.nn.modules.module import (
-        register_module_forward_pre_hook,
-        register_module_forward_hook,
-    )
-    HAS_GLOBAL_MODULE_HOOKS = True
+    from torch.utils._python_dispatch import TorchDispatchMode  # type: ignore[attr-defined]
+    HAS_TORCH_DISPATCH_MODE = True
 except ImportError:
-    HAS_GLOBAL_MODULE_HOOKS = False
+    TorchDispatchMode = None  # type: ignore[misc,assignment]
+    HAS_TORCH_DISPATCH_MODE = False
 
 
-_eager_mode_override: Optional[bool] = None
+_io_active: bool = False
 
 
-def set_eager_mode(eager: bool) -> None:
-    """Explicitly set whether the model is running in eager mode.
+def set_io_active(active: bool) -> None:
+    """Set the IO-active flag used by managed_inference_mode.
 
-    Called by model_runner with the actual ``enforce_eager`` config value so
-    that IO hooks know whether torch.compile will be used *before* compilation
-    starts (runtime detection is unreliable at hook-registration time).
+    When True, managed_inference_mode uses torch.no_grad() instead of
+    torch.inference_mode() so that TorchDispatchMode can intercept ops.
     """
-    global _eager_mode_override
-    _eager_mode_override = eager
+    global _io_active
+    _io_active = active
 
 
-def _is_eager_mode() -> bool:
-    """Check whether eager mode (no torch.compile) is active.
+def is_io_active() -> bool:
+    """Return True if the IO dumper is active."""
+    return _io_active
 
-    If ``set_eager_mode()`` was called (by model_runner), use that value.
-    Otherwise fall back to best-effort runtime detection.
+
+# ── Shared dispatch / function mode lifecycle ──
+
+
+class ModeManager:
+    """LIFO-safe manager for PyTorch TorchDispatchMode / TorchFunctionMode.
+
+    The dumper pushes mode instances
+    onto PyTorch's global mode stack.  PyTorch requires these to be exited
+    in strict LIFO (reverse-entry) order — exiting a mode that is not on
+    top of the stack corrupts internal state and segfaults.
+
+    ``ModeManager`` centralises entry/exit of all IO modes so that:
+    * Each subsystem calls ``enter(name, instance)`` / ``request_exit(name)``.
+    * ``request_exit`` marks the mode as *pending*.  If it is on top of the
+      stack it is exited immediately; otherwise it stays entered (the
+      ``__torch_dispatch__`` / ``__torch_function__`` handler short-circuits
+      via ``_enabled=False``).
+    * After every exit the manager *drains* — repeatedly exiting the new
+      top of the stack while it also has a pending exit.  This ensures that
+      disabling the *last* subsystem always cleans up the entire stack
+      regardless of disable order.
+
+    One ``ModeManager`` instance is created for TorchDispatchMode and
+    another for TorchFunctionMode.
     """
-    if _eager_mode_override is not None:
-        return _eager_mode_override
-    # Fall back to checking the VLLM-specific env var / config hint
-    vllm_enforce = os.environ.get("VLLM_TORCH_COMPILE_LEVEL", "")
-    if vllm_enforce and vllm_enforce != "0":
-        return False
-    return True
+
+    def __init__(self) -> None:
+        self._stack: list[tuple[str, Any]] = []   # (name, instance), bottom-first
+        self._pending: set[str] = set()
+        self._lock = threading.Lock()
+
+    # ── public API ──
+
+    def enter(self, name: str, mode_instance: Any) -> None:
+        """Enter *mode_instance* under *name* (idempotent)."""
+        with self._lock:
+            if any(n == name for n, _ in self._stack):
+                return  # already entered
+            mode_instance.__enter__()
+            self._stack.append((name, mode_instance))
+
+    def request_exit(self, name: str) -> None:
+        """Mark *name* for exit and drain from the top while possible."""
+        with self._lock:
+            if not any(n == name for n, _ in self._stack):
+                return
+            self._pending.add(name)
+            self._drain_top()
+
+    def exit_all(self) -> None:
+        """Unconditionally exit every mode in reverse LIFO order."""
+        with self._lock:
+            while self._stack:
+                _name, inst = self._stack.pop()
+                inst.__exit__(None, None, None)
+            self._pending.clear()
+
+    def is_entered(self, name: str) -> bool:
+        """True if *name* has an active (entered) mode on the stack."""
+        return any(n == name for n, _ in self._stack)
+
+    # ── internals ──
+
+    def _drain_top(self) -> None:
+        """Pop and exit modes from the top while they have a pending exit."""
+        while self._stack and self._stack[-1][0] in self._pending:
+            name, inst = self._stack.pop()
+            self._pending.discard(name)
+            inst.__exit__(None, None, None)
 
 
-def warn_if_not_eager(subsystem: str) -> None:
-    """Log a hint if the model doesn't appear to be running in eager mode.
+dispatch_mode_mgr = ModeManager()
+func_mode_mgr = ModeManager()
 
-    Called once when the inspector or dumper is enabled so users know
-    they can get more comprehensive interception with ``enforce_eager=True``.
+
+def managed_inference_mode():
+    """Drop-in replacement for ``@torch.inference_mode()``.
+
+    When IO dispatch modes are enabled, downgrades to ``torch.no_grad()``
+    so that CompositeImplicitAutograd ops (e.g. ``aten.linear``) decompose
+    into leaf ops (``aten.mm``, ``aten.t``) visible to TorchDispatchMode.
+
+    ``torch.no_grad()`` (vs removing inference mode entirely) is critical:
+    it prevents autograd from building computation graphs for every op,
+    which would otherwise exhaust GPU memory and cause segfaults.
+
+    When IO is not enabled, behaves identically to
+    ``@torch.inference_mode()``.
     """
-    if not _is_eager_mode():
-        _logger.warning(
-            "[%s] torch.compile detected. Use enforce_eager=True "
-            "for more comprehensive IO interception (torch function "
-            "tracing and global module hooks may be partially bypassed "
-            "by compiled regions).",
-            subsystem,
-        )
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if is_io_active():
+                with torch.no_grad():
+                    return fn(*args, **kwargs)
+            with torch.inference_mode():
+                return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 # ── Distributed rank ──
@@ -156,7 +234,7 @@ def parse_rank_filter(value: str) -> Optional[Set[int]]:
 
 # ── Re-entrancy guard (per-caller, per-thread) ──
 #
-# Each subsystem (inspector, dumper) creates its own guard via
+# Each subsystem creates its own guard via
 # ``make_guard()`` so they do not block each other.  The guard is
 # thread-local to prevent cross-thread interference.
 
@@ -165,7 +243,7 @@ def make_guard():
     """Create an independent re-entrancy guard (thread-local).
 
     Returns ``(guard_active, set_guard)`` functions.  Each caller gets
-    its own guard so the inspector and dumper do not interfere.
+    its own guard so different subsystems do not interfere.
     """
     _tls = threading.local()
 
@@ -275,7 +353,7 @@ def _reset_per_step_counters() -> Tuple[Set[str], Set[str]]:
     return seen_modules, seen_ops
 
 
-# ── Step tracking (shared by inspector and dumper) ──
+# ── Step tracking ──
 
 _step_counter: int = 0  # first forward pass runs at step 0
 _step_lock = threading.Lock()
@@ -671,7 +749,259 @@ def should_inspect_torch_func(
     return True
 
 
-# ── Tensor statistics (shared by inspector and dumper) ──
+# ── Dispatch op filtering (TorchDispatchMode) ──
+
+def get_dispatch_op_name(func) -> str:
+    """Extract short name from an ATen OpOverload.
+
+    Examples::
+
+        aten::mm           -> mm
+        aten::_softmax     -> _softmax
+        vllm::rms_norm     -> rms_norm
+        mylib::my_add      -> my_add
+    """
+    if hasattr(func, "name"):
+        full = func.name()  # e.g. "aten::mm"
+        return full.split("::")[-1] if "::" in full else full
+    return str(func)
+
+
+def get_dispatch_op_namespace(func) -> str:
+    """Extract namespace from an ATen OpOverload (e.g. 'aten', 'vllm')."""
+    return getattr(func, "namespace", "aten")
+
+
+# ── Dispatch key & backend detection ──
+#
+# Uses ``torch._C._dispatch_dump_table`` as the single source of truth.
+# The table is parsed once per op (cached) to extract all registered
+# ``[kernel]`` and ``[default backend kernel]`` entries as
+# ``(dispatch_key, impl, is_default)`` triples.  Third-party backends
+# like FlagGems are detected from the kernel registration path.
+
+# Cache: op_qualified_name -> List[(dispatch_key, impl, is_default)]
+_dispatch_table_cache: Dict[str, List[Tuple[str, str, bool]]] = {}
+
+
+# Regex to extract backend name from PyTorch C++ registration paths like:
+#   /pytorch/build/aten/src/ATen/RegisterCPU_0.cpp:3456
+#   /pytorch/build/aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional_0.cpp:7805
+_REGISTER_PATTERN = re.compile(r"Register(\w+?)_\d+\.cpp")
+
+# Known third-party package names → display labels.
+# Checked in order; first match wins.  "triton" is intentionally last so that
+# more specific packages (e.g. flag_gems, which *uses* triton) win first.
+_THIRD_PARTY_BACKENDS = {
+    "flag_gems": "FlagGems",
+    "triton": "Triton",
+}
+
+def _infer_backend_from_path(reg_path: str) -> str:
+    """Infer the backend name from a kernel registration path.
+
+    Examples::
+
+        /pytorch/build/.../RegisterCPU_0.cpp:3456           -> "CPU"
+        /pytorch/build/.../RegisterCUDA_0.cpp:16060          -> "CUDA"
+        /pytorch/build/.../RegisterCompositeExplicit..._0.cpp -> "CompositeExplicitAutogradNonFunctional"
+        /.../flag_gems/__init__.py:20                        -> "FlagGems"
+        /.../triton/ops/matmul.py:42                         -> "Triton"
+        /.../torch/_meta_registrations.py:50                 -> "Meta"
+        /.../torch/csrc/autograd/generated/TraceType_3.cpp   -> "Tracer"
+    """
+    path_lower = reg_path.lower()
+
+    # Check third-party packages first
+    for pkg, label in _THIRD_PARTY_BACKENDS.items():
+        if pkg in path_lower:
+            return label
+
+    # Try Register<BackendName>_N.cpp pattern (C++ registrations)
+    # Extract filename from path
+    fname = reg_path.rsplit("/", 1)[-1] if "/" in reg_path else reg_path
+    m = _REGISTER_PATTERN.match(fname)
+    if m:
+        return m.group(1)
+
+    # Python meta registrations
+    if "_meta_registrations" in path_lower:
+        return "Meta"
+
+    return "unknown"
+
+
+def _parse_dispatch_table(func) -> List[Tuple[str, str, bool]]:
+    """Parse ``_dispatch_dump_table`` for an op, returning all registered kernels.
+
+    Returns a cached list of ``(dispatch_key, impl, is_default)`` triples:
+
+    - **dispatch_key**: The dispatch key name (e.g. ``"CUDA"``, ``"CPU"``).
+    - **impl**: The backend implementation inferred from the registration
+      path (e.g. ``"CPU"``, ``"FlagGems"``,
+      ``"CompositeExplicitAutogradNonFunctional"``).
+    - **is_default**: ``True`` when the entry is a ``[default backend kernel]``
+      (fallback), ``False`` for a dedicated ``[kernel]``.
+
+    Excludes fallthrough entries.
+    """
+    op_qname = func.name() if hasattr(func, "name") else None
+    if op_qname is None:
+        return []
+
+    cached = _dispatch_table_cache.get(op_qname)
+    if cached is not None:
+        return cached
+
+    entries: List[Tuple[str, str, bool]] = []
+    try:
+        table = torch._C._dispatch_dump_table(op_qname)
+        for line in table.split("\n"):
+            stripped = line.strip()
+            is_kernel = "[kernel]" in stripped
+            is_default = "[default backend kernel]" in stripped
+            if not is_kernel and not is_default:
+                continue
+            if "fallthrough" in stripped:
+                continue
+            colon_idx = stripped.find(": registered at ")
+            if colon_idx < 0:
+                continue
+            key = stripped[:colon_idx].strip()
+            reg_path = stripped[colon_idx + 16:].split(" [")[0]
+            impl = _infer_backend_from_path(reg_path)
+            entries.append((key, impl, is_default))
+    except Exception:
+        pass
+
+    _dispatch_table_cache[op_qname] = entries
+    return entries
+
+
+def get_dispatch_keys(
+    func, args: tuple = (), kwargs: dict = None,
+) -> List[Tuple[str, str, bool]]:
+    """Return all registered dispatch keys for an op.
+
+    Returns the cached ``(dispatch_key, impl, is_default)`` list from
+    :func:`_parse_dispatch_table`.  See that function for field descriptions.
+
+    Example return value::
+
+        [("CPU", "CPU", False),
+         ("CUDA", "FlagGems", False),
+         ("HIP", "CompositeExplicitAutogradNonFunctional", True),
+         ("Meta", "Meta", False)]
+    """
+    entries = _parse_dispatch_table(func)
+    if not entries:
+        return [("unknown", "unknown", True)]
+    return entries
+
+
+
+def should_inspect_dispatch_op(
+    op_name: str,
+    match_all: bool,
+    op_filter: Set[str],
+) -> bool:
+    """Check if a dispatch op should be intercepted.
+
+    Args:
+        op_name: Short op name (e.g. 'mm', 'rms_norm').
+        match_all: Whether all ops are being captured.
+        op_filter: Specific op names to match (empty means all).
+    """
+    if op_filter and op_name not in op_filter:
+        return False
+    return True
+
+
+# ── Stack-based module context extraction ──
+#
+# Used by TorchDispatchMode to derive module context from the Python call
+# stack, without requiring global module hooks.  Works in both eager and
+# compiled modes.
+
+def get_module_context_from_stack() -> List[Tuple[str, str]]:
+    """Walk the Python call stack to find enclosing nn.Module instances.
+
+    Returns a list of ``(class_name, module_path)`` pairs, innermost first.
+    ``module_path`` is looked up from the module path registry (populated
+    by :func:`register_module_paths`); it is empty string if not found.
+
+    This is a debugging tool — the stack walk has a small performance cost
+    (~0.18ms per call for a 10-layer model).
+    """
+    frame = inspect.currentframe()
+    result: List[Tuple[str, str]] = []
+    seen_ids: Set[int] = set()
+    try:
+        f = frame.f_back if frame is not None else None
+        while f is not None:
+            local_self = f.f_locals.get("self")
+            if (
+                local_self is not None
+                and isinstance(local_self, nn.Module)
+                and f.f_code.co_name in ("forward", "_call_impl")
+                and id(local_self) not in seen_ids
+            ):
+                seen_ids.add(id(local_self))
+                cls_name = type(local_self).__name__
+                path = _module_path_map.get(id(local_self), "")
+                result.append((cls_name, path))
+            f = f.f_back
+    finally:
+        del frame
+    return result
+
+
+def layer_path_matches_from_stack(
+    filter_set: Set[str],
+    module_ctx: Optional[List[Tuple[str, str]]] = None,
+) -> bool:
+    """Check if any module in the given context matches the layer filter.
+
+    Like :func:`layer_path_matches` but uses stack-derived context instead
+    of the global module hook context stack.
+
+    Args:
+        filter_set: Set of layer path patterns (prefix or glob).
+        module_ctx: Output of :func:`get_module_context_from_stack`.
+            If None, derives it automatically.
+    """
+    if module_ctx is None:
+        module_ctx = get_module_context_from_stack()
+    for _cls_name, path in module_ctx:
+        if not path:
+            continue
+        for pattern in filter_set:
+            if _is_glob(pattern):
+                if fnmatch.fnmatch(path, pattern):
+                    return True
+            else:
+                if path == pattern or path.startswith(pattern + "."):
+                    return True
+    return False
+
+
+def module_context_matches_from_stack(
+    filter_set: Set[str],
+    module_ctx: Optional[List[Tuple[str, str]]] = None,
+) -> bool:
+    """Check if any module class name in the stack context matches the filter.
+
+    Like :func:`module_context_matches` but uses stack-derived context.
+    """
+    if module_ctx is None:
+        module_ctx = get_module_context_from_stack()
+    for cls_name, _path in module_ctx:
+        if cls_name in filter_set:
+            return True
+    return False
+
+
+# ── Tensor statistics ──
 #
 # Extensible registry: users can add custom stats via register_tensor_stat().
 
@@ -709,7 +1039,7 @@ def register_tensor_stat(
     fn: Callable[[torch.Tensor], Any],
     float_only: bool = True,
 ) -> None:
-    """Register a custom tensor statistic for both inspector and dumper.
+    """Register a custom tensor statistic for the IO dumper.
 
     The function receives a tensor and should return a JSON-serializable
     value — scalar, list, or dict.  Scalars are displayed inline;
@@ -749,7 +1079,7 @@ def register_tensor_stat(
 def tensor_stats(t: torch.Tensor) -> Dict[str, Any]:
     """Compute shape, dtype, device, and all registered statistics for a tensor.
 
-    Used by both the inspector (text formatting) and the dumper (JSON metadata).
+    Used by the dumper for text formatting and JSON metadata.
     Returns a dict like ``{"shape": [...], "dtype": "...", "min": ..., ...}``.
     """
     meta: Dict[str, Any] = {
@@ -852,28 +1182,95 @@ def make_module_tag() -> str:
     return ""
 
 
+def make_module_tag_from_ctx(
+    mod_name: str, mod_path: str,
+    for_json: bool = False,
+) -> str:
+    """Build a module tag from stack-derived module context.
+
+    Args:
+        mod_name: Module class name (e.g. ``"Linear"``).
+        mod_path: Full dotted path (e.g. ``"model.layers.0.self_attn.q_proj"``).
+        for_json: If True, return bare ``"ClassName:path"`` for JSON fields.
+            If False, return ``"[ClassName:path]"`` for log display.
+
+    Returns:
+        Empty string if *mod_name* is empty.
+
+    Examples::
+
+        make_module_tag_from_ctx("Linear", "model.layers.0.self_attn.q_proj", for_json=True)
+        # => "Linear:model.layers.0.self_attn.q_proj"
+
+        make_module_tag_from_ctx("Linear", "model.layers.0.self_attn.q_proj")
+        # => "[Linear:model.layers.0.self_attn.q_proj]"
+
+        make_module_tag_from_ctx("Linear", "")
+        # => "[Linear]" or "Linear"
+    """
+    if not mod_name:
+        return ""
+    tag = f"{mod_name}:{mod_path}" if mod_path else mod_name
+    if for_json:
+        return tag
+    return f"[{tag}]"
+
+
 def make_op_tag(op_name: str) -> str:
     """Build ``[op=X,Y]``, incrementing the per-step op counter."""
     idx, count = next_op_counter(op_name)
     return f"[op={idx},{count}]"
 
 
-def make_label(op_name: str, args: tuple = ()) -> str:
-    """Build a display label like ``rms_norm (module=Linear, layer=model.layers.0)``."""
-    module_name = get_module_class_name(args) or get_current_module()
-    path = get_current_module_path()
+def make_label(
+    op_name: str,
+    args: tuple = (),
+    module_name: Optional[str] = None,
+    layer_path: Optional[str] = None,
+    dispatch_keys: Optional[List[Tuple[str, str, bool]]] = None,
+) -> str:
+    """Build a display label for an op call.
+
+    Example output::
+
+        mm (module=Linear, layer=model.layers.0, dispatch_keys=[(CUDA, FlagGems), (CPU, CPU)])
+
+    Args:
+        op_name: Operator name.
+        args: Operator args (used to detect module from args[0] via old hooks).
+        module_name: Explicit module class name (from stack-based context).
+        layer_path: Explicit layer path (from stack-based context).
+        dispatch_keys: Full ``(key, impl, is_default)`` list from
+            :func:`get_dispatch_keys`.
+    """
+    if module_name is None:
+        module_name = get_module_class_name(args) or get_current_module()
+    if layer_path is None:
+        layer_path = get_current_module_path()
     parts = [f"module={module_name or ''}"]
-    if path:
-        parts.append(f"layer={path}")
+    if layer_path:
+        parts.append(f"layer={layer_path}")
+    if dispatch_keys is not None:
+        dk_items = [f"({k}, {impl})" for k, impl, _default in dispatch_keys]
+        parts.append(f"dispatch_keys=[{', '.join(dk_items)}]")
     return f"{op_name} ({', '.join(parts)})"
 
 
-def record_seen(op_name: str, args: tuple = ()) -> None:
+def record_seen(
+    op_name: str,
+    args: tuple = (),
+    module_name: Optional[str] = None,
+) -> None:
     """Record an op and its enclosing module as seen this step (for summary).
 
-    Detects the module name from args[0] (if nn.Module) or the module context.
+    Args:
+        op_name: Operator name.
+        args: Operator args (used to detect module from args[0] via old hooks).
+        module_name: Explicit module class name (from stack-based context).
+            Overrides args-based and global-hook-based detection.
     """
-    module_name = get_module_class_name(args) or get_current_module()
+    if module_name is None:
+        module_name = get_module_class_name(args) or get_current_module()
     with _counter_lock:
         _seen_ops.add(op_name)
         if module_name:
@@ -882,12 +1279,11 @@ def record_seen(op_name: str, args: tuple = ()) -> None:
 
 # ── Torch func tag management ──
 #
-# When both inspector and dumper TorchFunctionMode handlers are active,
-# they are stacked: the outer handler calls func() which enters the inner.
-# Without coordination, both would call make_op_tag() / next_exec_order(),
-# double-incrementing the shared counters.  These helpers ensure that tags
-# and exec_order are generated once (by the first handler) and reused by
-# the nested handler.
+# When multiple TorchFunctionMode handlers are stacked, the outer handler
+# calls func() which enters the inner.  Without coordination, both would
+# call make_op_tag() / next_exec_order(), double-incrementing the shared
+# counters.  These helpers ensure that tags and exec_order are generated
+# once (by the first handler) and reused by the nested handler.
 
 _tf_tags = threading.local()
 
@@ -932,89 +1328,31 @@ def release_torch_func_tags() -> None:
         _tf_tags.exec_order = None
 
 
-# ── Global module hooks (context tracking only) ──
-#
-# Shared by inspector and dumper.  These hooks push/pop the module class
-# name onto a thread-local context stack so op hooks and TorchFunctionMode
-# know which module(s) are currently executing.  They do NOT log or dump.
-#
-# Refcounted: when both inspector and dumper are active, hooks are
-# registered only once and removed when the last user releases.
-
-_global_hook_lock = threading.Lock()
-_global_hook_refcount = 0
-_global_hook_handles: List[Any] = []
-
-
-def _global_forward_pre_hook(module, args):
-    """Push module onto the context stack before forward."""
-    if torch.compiler.is_compiling():
-        return
-    push_module_context(type(module).__name__, module)
-
-
-def _global_forward_post_hook(module, args, output):
-    """Pop module from the context stack after forward."""
-    if torch.compiler.is_compiling():
-        return
-    pop_module_context()
-
-
-def acquire_global_module_hooks() -> None:
-    """Register global module hooks (refcounted, safe to call multiple times)."""
-    global _global_hook_refcount
-    with _global_hook_lock:
-        _global_hook_refcount += 1
-        if _global_hook_refcount == 1 and HAS_GLOBAL_MODULE_HOOKS:
-            h1 = register_module_forward_pre_hook(_global_forward_pre_hook)
-            h2 = register_module_forward_hook(_global_forward_post_hook)
-            _global_hook_handles.extend([h1, h2])
-
-
-def release_global_module_hooks() -> None:
-    """Unregister global module hooks when the last user releases."""
-    global _global_hook_refcount
-    with _global_hook_lock:
-        _global_hook_refcount = max(0, _global_hook_refcount - 1)
-        if _global_hook_refcount == 0:
-            for h in _global_hook_handles:
-                h.remove()
-            _global_hook_handles.clear()
-
-
 # ── YAML config parsing ──
 
 
 def parse_io_config_from_yaml(config_path: str) -> Dict[str, Any]:
     """
-    Parse IO inspect/dump settings from a YAML config file.
+    Parse IO dump settings from a YAML config file.
 
     Expected YAML structure (all fields optional)::
 
-        io_inspect:
-          enabled: true           # boolean: true/false
-          ops:
-            - rms_norm
-            - silu_and_mul
-          modules:
-            - Linear
-            - RMSNormFL
-          torch_funcs: true       # or list ["matmul", "softmax"]
-
         io_dump:
           dir: /tmp/io_dump
+          with_print: true        # enable console logging
           ops:
             - rms_norm
           modules:
             - Linear
           max_calls: 100
           step_range: "5-15"      # inclusive "start-end"
-          torch_funcs: true
+          with_torch_funcs: true
+          with_metas: true        # write per-op JSON files
+          with_values: true       # write per-call .pt files
 
     Returns:
-        Dict with keys "io_inspect" and/or "io_dump", each a dict
-        of parsed settings.  Returns empty dict if file not found
-        or has no io_inspect/io_dump sections.
+        Dict with key "io_dump" containing parsed settings.
+        Returns empty dict if file not found or has no io_dump section.
     """
     if not os.path.isfile(config_path):
         return {}
@@ -1027,10 +1365,6 @@ def parse_io_config_from_yaml(config_path: str) -> Dict[str, Any]:
         return {}
 
     result: Dict[str, Any] = {}
-
-    inspect_cfg = config.get("io_inspect")
-    if isinstance(inspect_cfg, dict):
-        result["io_inspect"] = _parse_inspect_section(inspect_cfg)
 
     dump_cfg = config.get("io_dump")
     if isinstance(dump_cfg, dict):
@@ -1061,34 +1395,6 @@ def _parse_step_range_yaml(cfg: Dict[str, Any]) -> Optional[Tuple[int, int]]:
     return parse_step_range(step_range)
 
 
-def _parse_inspect_section(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse the io_inspect section of a YAML config."""
-    parsed: Dict[str, Any] = {}
-
-    enabled = cfg.get("enabled", False)
-    if isinstance(enabled, bool):
-        parsed["enabled"] = enabled
-    elif isinstance(enabled, str):
-        parsed["enabled"] = enabled.strip() not in ("", "0", "false", "False")
-    elif isinstance(enabled, int):
-        parsed["enabled"] = bool(enabled)
-    else:
-        parsed["enabled"] = False
-
-    parsed["ops"] = _parse_string_list(cfg.get("ops"))
-    parsed["modules"] = _parse_string_list(cfg.get("modules"))
-    parsed["layers"] = expand_layer_specs(_parse_string_list(cfg.get("layers")))
-    parsed["step_range"] = _parse_step_range_yaml(cfg)
-
-    # Only include torch_funcs when explicitly set in YAML so that
-    # _init_from_env can apply the match-all default for absent keys.
-    if "torch_funcs" in cfg:
-        parsed["torch_funcs"] = _parse_torch_funcs_yaml(cfg["torch_funcs"])
-    parsed["ranks"] = _parse_ranks_yaml(cfg.get("ranks"))
-
-    return parsed
-
-
 def _parse_dump_section(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Parse the io_dump section of a YAML config."""
     parsed: Dict[str, Any] = {}
@@ -1108,12 +1414,16 @@ def _parse_dump_section(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     parsed["step_range"] = _parse_step_range_yaml(cfg)
 
-    # Only include torch_funcs when explicitly set in YAML so that
+    # Only include with_torch_funcs when explicitly set in YAML so that
     # _init_from_env can apply the match-all default for absent keys.
-    if "torch_funcs" in cfg:
-        parsed["torch_funcs"] = _parse_torch_funcs_yaml(cfg["torch_funcs"])
+    if "with_torch_funcs" in cfg:
+        parsed["with_torch_funcs"] = _parse_torch_funcs_yaml(cfg["with_torch_funcs"])
     parsed["ranks"] = _parse_ranks_yaml(cfg.get("ranks"))
-    parsed["meta_only"] = bool(cfg.get("meta_only", True))
+    parsed["with_values"] = bool(cfg.get("with_values", False))
+    if "with_metas" in cfg:
+        parsed["with_metas"] = bool(cfg["with_metas"])
+    if "with_print" in cfg:
+        parsed["with_print"] = bool(cfg["with_print"])
 
     return parsed
 

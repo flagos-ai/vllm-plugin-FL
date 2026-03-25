@@ -66,6 +66,7 @@ from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
 
 from vllm_fl.ops.custom_ops import register_oot_ops
+from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
@@ -441,7 +442,7 @@ class WorkerFL(WorkerBase):
     def reload_weights(self) -> None:
         self.model_runner.reload_weights()
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def determine_available_memory(self) -> int:
         """Profiles the peak memory usage of the model to determine how much
         memory can be used for KV cache without OOMs.
@@ -711,13 +712,13 @@ class WorkerFL(WorkerBase):
             f"execute_new_{num_new}_cached_{num_cached}"
         )
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         return self.model_runner.sample_tokens(grammar_output)
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",

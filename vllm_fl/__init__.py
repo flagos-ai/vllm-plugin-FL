@@ -2,7 +2,10 @@
 
 import os
 import logging
+
 from vllm_fl.utils import get_op_config as _get_op_config
+
+from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 
 logger = logging.getLogger(__name__)
