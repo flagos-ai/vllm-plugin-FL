@@ -2,6 +2,7 @@
 __pycache__/
 build/
 dist/
+vllm_fl/_version.py
 
 # Coverage
 .coverage

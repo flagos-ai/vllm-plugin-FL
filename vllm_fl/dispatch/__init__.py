@@ -104,10 +104,6 @@ from .discovery import (
     PLUGIN_MODULES_ENV,
 )
 from .logger_manager import get_logger, set_log_level
-from .io_inspector import (
-    enable_io_inspect,
-    disable_io_inspect,
-)
 from .io_dumper import (
     enable_io_dump,
     disable_io_dump,
@@ -182,9 +178,7 @@ __all__ = [
     # Logging
     "get_logger",
     "set_log_level",
-    # IO Inspect & Dump
-    "enable_io_inspect",
-    "disable_io_inspect",
+    # IO Dump
     "enable_io_dump",
     "disable_io_dump",
     "io_dump_step",
