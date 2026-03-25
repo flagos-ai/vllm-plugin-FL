@@ -5,6 +5,11 @@ FROM quay.io/ascend/vllm-ascend:v${VLLM_VERSION}rc1-a3 AS base
 
 RUN pip install --upgrade pip setuptools
 
+# Initialize CANN Toolkit and ATB environment variables at runtime
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["entrypoint.sh"]
+
 # ---------- dev stage ----------
 FROM base AS dev
 
@@ -48,11 +53,6 @@ RUN pip install -U scikit-build-core==0.11 pybind11 \
 RUN pip install flagtree==0.4.0+ascend3.2 \
         --index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
         --trusted-host=resource.flagos.net
-
-
-# Initialize CANN Toolkit and ATB environment variables
-RUN source /usr/local/Ascend/ascend-toolkit/set_env.sh \
-    && source /usr/local/Ascend/nnal/atb/set_env.sh
 
 # Set environment variables for vLLM plugins and Triton
 ENV VLLM_PLUGINS=fl
