@@ -56,7 +56,7 @@ class PlatformFL(Platform):
         if self.vendor_name == "iluvatar":
             return False
         if self.vendor_name == "musa":
-            return False
+            return True
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
@@ -64,9 +64,13 @@ class PlatformFL(Platform):
         if self.vendor_name == "iluvatar":
             return False
         if self.vendor_name == "musa":
-            return False
+            return True
         return self.device_type == "cuda"
 
+    def is_musa(self) -> bool:
+        if hasattr(torch, 'musa') and torch.musa.is_available():
+            return True
+        return False
     @property
     def supported_dtypes(self) -> list[torch.dtype]:
         return [torch.bfloat16, torch.float16, torch.float32]
