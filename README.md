@@ -16,7 +16,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/glm_5_offline_inference.py)  |
-| BAAI/bge-m3 (vLLM 0.13 backport) | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
+| BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 
 ### Supported Chips
 
@@ -103,22 +103,6 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 
 If there are multiple plugins in the current environment, you can specify use vllm-plugin-fl via VLLM_PLUGINS='fl'.
-
-### BGE-M3 on vLLM 0.13.x
-
-`vllm-plugin-FL` includes a backport of `BgeM3EmbeddingModel` for official vLLM `0.13.x`, so `BAAI/bge-m3` can expose dense, sparse, and ColBERT multi-vector pooling without upgrading to vLLM `0.15`.
-
-```sh
-export VLLM_PLUGINS=fl
-vllm serve BAAI/bge-m3 --runner pooling \
-  --hf-overrides '{"architectures":["BgeM3EmbeddingModel"]}'
-```
-
-Supported tasks:
-
-- `embed`
-- `token_classify`
-- `token_embed`
 
 ### Additional Steps for Ascend
 
