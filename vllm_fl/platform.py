@@ -29,7 +29,7 @@ else:
     VllmConfig = None
     CacheDType = None
 
-from vllm_fl.utils import DeviceInfo
+from vllm_fl.utils import DeviceInfo, get_device_name, get_device_type
 
 logger = init_logger(__name__)
 
@@ -46,12 +46,8 @@ class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
     vendor_name = device_info.vendor_name
-    # cuda_alike (nvidia/metax): device_name = vendor_name (not used in torch.device)
-    # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
-    device_name = device_info.vendor_name if (
-        device_info.device_type == "cuda" and device_info.vendor_name != "iluvatar"
-    ) else device_info.device_type
-    device_type = device_info.device_type
+    device_type = get_device_type(vendor_name)
+    device_name = get_device_name(vendor_name)
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"

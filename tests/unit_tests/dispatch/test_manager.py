@@ -487,7 +487,7 @@ class TestOpManagerCall:
         result = manager.call("args_op", 1, 2, c=3)
         assert result == 6
 
-    @patch.dict(os.environ, {"VLLM_FL_STRICT": "1"})
+    @patch.dict(os.environ, {"VLLM_FL_STRICT": "0"})
     def test_call_fallback_on_failure(self, manager, registry):
         call_order = []
 
@@ -522,7 +522,7 @@ class TestOpManagerCall:
         assert result == 10
         assert call_order == ["failing", "fallback"]
 
-    @patch.dict(os.environ, {"VLLM_FL_STRICT": "1"})
+    @patch.dict(os.environ, {"VLLM_FL_STRICT": "0"})
     def test_call_tracks_failed_impls(self, manager, registry):
         def failing_fn(x):
             raise RuntimeError("Failed")
@@ -555,7 +555,7 @@ class TestOpManagerCall:
         failed = manager.get_failed_impls("track_op")
         assert "default.failing" in failed["track_op"]
 
-    @patch.dict(os.environ, {"VLLM_FL_STRICT": "1"})
+    @patch.dict(os.environ, {"VLLM_FL_STRICT": "0"})
     def test_call_all_impls_fail_raises(self, manager, registry):
         def failing_fn1(x):
             raise RuntimeError("Failed 1")
@@ -583,8 +583,8 @@ class TestOpManagerCall:
         with pytest.raises(RuntimeError, match="implementation.*failed"):
             manager.call("allfail_op", 1)
 
-    @patch.dict(os.environ, {"VLLM_FL_STRICT": "0"})
-    def test_call_no_fallback_when_disabled(self, manager, registry):
+    @patch.dict(os.environ, {"VLLM_FL_STRICT": "1"})
+    def test_call_no_fallback_when_strict(self, manager, registry):
         def failing_fn(x):
             raise RuntimeError("Primary failed")
 
@@ -621,6 +621,7 @@ class TestOpManagerResolveCandidates:
     @pytest.fixture(autouse=True)
     def reset_policy(self):
         reset_global_policy()
+        set_global_policy(SelectionPolicy())
         yield
         reset_global_policy()
 
@@ -656,7 +657,7 @@ class TestOpManagerResolveCandidates:
                 kind=BackendImplKind.VENDOR,
                 fn=fn2,
                 priority=BackendPriority.VENDOR,
-                vendor="CUDA",
+                vendor="cuda",
             )
         )
         registry.register_impl(

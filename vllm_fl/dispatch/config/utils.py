@@ -11,7 +11,7 @@ Configuration Priority (highest to lowest):
 1. VLLM_FL_CONFIG: User-specified config file path (complete override)
 2. Environment variables: Override specific items from platform config
    - VLLM_FL_PREFER: Backend preference (flagos, vendor, reference)
-   - VLLM_FL_STRICT: Strict mode (1 or 0)
+   - VLLM_FL_STRICT: Strict mode: 1 = fail immediately on error (no fallback), 0 = try fallback (default)
    - VLLM_FL_PER_OP: Per-operator backend order
    - VLLM_FL_FLAGOS_BLACKLIST: FlagOS operator blacklist
    - VLLM_FL_OOT_BLACKLIST: OOT operator blacklist
@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
+from vllm_fl.utils import VENDOR_DEVICE_MAP
 
 # Directory containing config files (config/)
 _CONFIG_DIR = Path(__file__).parent
@@ -207,3 +208,32 @@ def get_effective_config() -> dict[str, Any]:
     # Return empty config
     return {}
 
+
+def get_vendor_device_map() -> dict[str, dict[str, str]]:
+    """Load vendor mapping from Python config module.
+
+    Returns:
+        Mapping where key is vendor_name and value is
+        {"device_type": ..., "device_name": ...}.
+    """
+    if not isinstance(VENDOR_DEVICE_MAP, dict):
+        return {}
+
+    result: dict[str, dict[str, str]] = {}
+    for vendor_name, value in VENDOR_DEVICE_MAP.items():
+        if not isinstance(vendor_name, str) or not isinstance(value, dict):
+            continue
+
+        device_type = value.get("device_type")
+        device_name = value.get("device_name")
+        if not isinstance(device_type, str) or not device_type:
+            continue
+        if not isinstance(device_name, str) or not device_name:
+            continue
+
+        result[vendor_name] = {
+            "device_type": device_type,
+            "device_name": device_name,
+        }
+
+    return result

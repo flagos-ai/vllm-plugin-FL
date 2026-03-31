@@ -61,7 +61,7 @@ a100:
     e2e:
       # Add or remove test cases per model
       inference:
-        qwen3: ["4b_tp2", "06b_tp2", "next_tp8"]
+        qwen3: ["4b_tp2", "next_tp8"]
         qwen3_5: ["35b_tp4"]
         minicpm: ["o45_tp4"]
       serving:

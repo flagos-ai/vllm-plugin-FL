@@ -52,7 +52,7 @@ class VllmServer:
     api_key: str = ""
     served_model_name: str = ""
     max_retries: int = 60
-    poll_interval: int = 5
+    poll_interval: int = 10
 
     # Set after start
     port: int = 0

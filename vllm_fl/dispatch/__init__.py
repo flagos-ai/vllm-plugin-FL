@@ -21,7 +21,7 @@ Usage:
 Environment Variables:
     VLLM_FL_CONFIG: Path to YAML configuration file (highest priority, overrides env vars)
     VLLM_FL_PREFER: Preferred backend ("flagos", "vendor", "reference")
-    VLLM_FL_STRICT: Enable strict mode ("1" or "0")
+    VLLM_FL_STRICT: Strict mode: "1" = fail immediately on error (no fallback), "0" = try fallback (default)
     VLLM_FL_DENY_VENDORS: Comma-separated list of denied vendors
     VLLM_FL_ALLOW_VENDORS: Comma-separated list of allowed vendors
     VLLM_FL_PER_OP: Per-operator order (format: op1=a|b|c;op2=x|y)
