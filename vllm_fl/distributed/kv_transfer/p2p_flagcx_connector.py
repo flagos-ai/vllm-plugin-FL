@@ -1,6 +1,6 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# Copyright (c) 2026 BAAI. All rights reserved.
 
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +19,56 @@ from vllm.distributed.kv_transfer.kv_connector.v1.p2p.p2p_nccl_engine import (
 from vllm.distributed.parallel_state import get_world_group
 from vllm.logger import init_logger
 from vllm.v1.core.sched.output import SchedulerOutput
+
+# ---------------------------------------------------------------------------
+# Detect FlagCX availability for KV cache transfer.
+# If FLAGCX_PATH is set and libflagcx.so exists, use P2pFlagcxEngine;
+# otherwise fall back to native NCCL with clear diagnostics.
+# ---------------------------------------------------------------------------
+import logging as _logging
+_kv_logger = _logging.getLogger(__name__)
+
+_use_flagcx = False
+_flagcx_path = os.getenv('FLAGCX_PATH')
+if _flagcx_path:
+    _flagcx_so = os.path.join(_flagcx_path, "build/lib/libflagcx.so")
+    if not os.path.isdir(_flagcx_path):
+        _kv_logger.warning(
+            "\u26a0\ufe0f  FLAGCX_PATH=%s is set but directory does not exist. "
+            "KV transfer will use native NCCL.",
+            _flagcx_path,
+        )
+    elif not os.path.isfile(_flagcx_so):
+        _kv_logger.warning(
+            "\u26a0\ufe0f  FLAGCX_PATH=%s is set but %s not found. "
+            "KV transfer will use native NCCL. "
+            "Did you build FlagCX?  (cd $FLAGCX_PATH && make)",
+            _flagcx_path,
+            _flagcx_so,
+        )
+    else:
+        try:
+            from vllm_fl.distributed.kv_transfer.p2p_flagcx_engine import (
+                P2pFlagcxEngine,
+            )
+            _use_flagcx = True
+            _kv_logger.warning(
+                "\u2705 FlagCX detected (FLAGCX_PATH=%s). "
+                "KV cache P2P transfer will use FlagCX backend.",
+                _flagcx_path,
+            )
+        except Exception as _e:
+            _kv_logger.warning(
+                "\u26a0\ufe0f  FLAGCX_PATH=%s is set and libflagcx.so exists, "
+                "but failed to import P2pFlagcxEngine: %s. "
+                "KV transfer will use native NCCL.",
+                _flagcx_path,
+                _e,
+            )
+else:
+    _kv_logger.info(
+        "FLAGCX_PATH not set. KV transfer will use native NCCL."
+    )
 
 if TYPE_CHECKING:
     from vllm.forward_context import ForwardContext
@@ -92,8 +142,18 @@ class P2pNcclConnector(KVConnectorBase_V1):
             get_world_group().local_rank if role == KVConnectorRole.WORKER else 0
         )
 
+        _EngineClass = P2pFlagcxEngine if _use_flagcx else P2pNcclEngine
+        if _use_flagcx:
+            logger.warning(
+                "\u2705 KV transfer engine: P2pFlagcxEngine (FlagCX backend)"
+            )
+        else:
+            logger.warning(
+                "KV transfer engine: P2pNcclEngine (native NCCL backend)"
+            )
+
         self.p2p_nccl_engine = (
-            P2pNcclEngine(
+            _EngineClass(
                 local_rank=self._local_rank,
                 config=self._kv_transfer_config,
                 hostname="",

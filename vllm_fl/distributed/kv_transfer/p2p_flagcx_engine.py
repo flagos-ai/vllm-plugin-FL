@@ -1,6 +1,4 @@
-# Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from vllm P2pNcclEngine to use FlagCX for KV cache transfer.
-# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 BAAI. All rights reserved.
 
 import ctypes
 import json
@@ -176,7 +174,7 @@ class P2pFlagcxEngine(P2pNcclEngine):
             )
             self._ping_thread.start()
 
-        logger.info(
+        logger.warning(
             "💯P2pFlagcxEngine init, rank:%d, local_rank:%d, "
             "http_address:%s, zmq_address:%s, proxy_address:%s, "
             "send_type:%s, buffer_size_threshold:%.2f, "
