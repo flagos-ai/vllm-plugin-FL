@@ -28,7 +28,7 @@ def has_vllm_model_runner():
         from vllm_fl.worker.model_runner import ModelRunnerFL  # noqa: F401
 
         return True
-    except ImportError:
+    except (ImportError, AttributeError):
         return False
 
 

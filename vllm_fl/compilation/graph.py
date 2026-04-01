@@ -43,7 +43,7 @@ class Graph:
         graph = torch.musa.MUSAGraph
     else:
         raise NotImplementedError("not support graph")
-    
+
 @dataclasses.dataclass
 class GraphEntry:
     batch_descriptor: BatchDescriptor
@@ -59,6 +59,7 @@ class GraphOptions:
     debug_log_enable: bool = True
     gc_disable: bool = False
     weak_ref_output: bool = True
+
 
 class GraphWrapper:
     def __init__(self,
@@ -87,15 +88,16 @@ class GraphWrapper:
         self.graph_options = cudagraph_options
         # the entries for different batch descriptors that we need to capture
         # cudagraphs for.
-        self.concrete_graph_entries: dict[BatchDescriptor, GraphEntry]\
-                                                                        = {}
-        
+        self.concrete_graph_entries: dict[BatchDescriptor, GraphEntry] = {}
+
     def __getattr__(self, key: str):
         # allow accessing the attributes of the runnable.
         if hasattr(self.runnable, key):
             return getattr(self.runnable, key)
-        raise AttributeError(f"Attribute {key} not exists in the runnable of "
-                             f"cudagraph wrapper: {self.runnable}")
+        raise AttributeError(
+            f"Attribute {key} not exists in the runnable of "
+            f"cudagraph wrapper: {self.runnable}"
+        )
 
     def unwrap(self) -> Callable:
         # in case we need to access the original runnable.
@@ -106,8 +108,10 @@ class GraphWrapper:
         batch_descriptor = forward_context.batch_descriptor
         graph_runtime_mode = forward_context.cudagraph_runtime_mode
 
-        if graph_runtime_mode == CUDAGraphMode.NONE or \
-                            graph_runtime_mode != self.runtime_mode:
+        if (
+            graph_runtime_mode == CUDAGraphMode.NONE
+            or graph_runtime_mode != self.runtime_mode
+        ):
             # CUDAGraphMode.NONE could mean the profile run, a warmup run, or
             # running without cudagraphs.
             # We do not trigger capture/replay if the runtime mode is not
@@ -115,12 +119,13 @@ class GraphWrapper:
             # CUDAGraphWrapper when nesting multiple instances with different
             # runtime modes.
             return self.runnable(*args, **kwargs)
-        
+
         if batch_descriptor not in self.concrete_graph_entries:
             # create a new entry for this batch descriptor
-            self.concrete_graph_entries[batch_descriptor] = \
-                GraphEntry(batch_descriptor=batch_descriptor)
-            
+            self.concrete_graph_entries[batch_descriptor] = GraphEntry(
+                batch_descriptor=batch_descriptor
+            )
+
         entry = self.concrete_graph_entries[batch_descriptor]
 
         if entry.graph is None:
@@ -129,8 +134,11 @@ class GraphWrapper:
                 # capturing is fast, we don't need to log it for every
                 # shape. E.g. we only log it for the first subgraph in
                 # piecewise mode.
-                logger.debug("Capturing a cudagraph on (%s,%s)",
-                             self.runtime_mode.name, entry.batch_descriptor)
+                logger.debug(
+                    "Capturing a cudagraph on (%s,%s)",
+                    self.runtime_mode.name,
+                    entry.batch_descriptor,
+                )
             # validate that cudagraph capturing is legal at this point.
             validate_cudagraph_capturing_enabled()
 
@@ -150,7 +158,8 @@ class GraphWrapper:
                     # and disable gc for the rest of the graphs.
                     stack.enter_context(patch("gc.collect", lambda: None))
                     stack.enter_context(
-                        patch("vllm_fl.platform.PlatformFL.empty_cache", lambda: None))
+                        patch("vllm_fl.platform.PlatformFL.empty_cache", lambda: None)
+                    )
 
             set_graph_pool_id(self.graph_pool)
 
@@ -176,7 +185,7 @@ class GraphWrapper:
             # the weak ref of the output, so that pytorch can correctly
             # manage the memory during graph capture
             return output
-        
+
         if self.is_debugging_mode:
             # check if the input addresses are the same
             new_input_addresses = [
@@ -185,10 +194,9 @@ class GraphWrapper:
             assert new_input_addresses == entry.input_addresses, (
                 f"Input addresses for cudagraphs are different "
                 f"during replay. Expected {entry.input_addresses}, "
-                f"got {new_input_addresses}")
+                f"got {new_input_addresses}"
+            )
 
         current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
         return entry.output
-
-

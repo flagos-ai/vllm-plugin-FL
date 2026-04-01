@@ -1,0 +1,124 @@
+
+# Per-platform test workflow, invoked by ci.yml via workflow_call (one job per platform).
+#
+# Main steps:
+# 1. setup:      Load platform config and generate test matrices
+# 2. unit:       Run unit tests with platform-specific include/exclude patterns
+# 3. functional: Run component-level GPU tests (ops, compilation, distributed) — fast
+# 4. e2e:        Run end-to-end model tests (inference, serving) — slow, needs model files
+#
+# Users can modify test settings in tests/platforms/*.yaml:
+# - e2e: Add/remove model test cases in the support lists
+# - functional: Adjust include/exclude patterns for component tests
+# - unit: Add/remove paths in include and exclude lists
+# - tolerance: Adjust numerical comparison tolerance for result validation
+# - unsupported_features: Exclude test cases matching specific feature tags
+#
+# Notes:
+# - This workflow only defines the orchestration; actual test logic lives in
+#   _unit_test.yml, _functional_test.yml, and _e2e_test.yml.
+# - The discover job in ci.yml auto-scans tests/platforms/*.yaml to determine
+#   which platforms to test, then invokes this workflow for each one.
+name: Platform Test
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+
+jobs:
+  setup:
+    name: "Setup (${{ inputs.platform }})"
+    runs-on: ubuntu-latest
+    outputs:
+      config: ${{ steps.load.outputs.config }}
+      e2e_matrix: ${{ steps.matrix.outputs.e2e }}
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: load
+        run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
+      - id: changes
+        name: Detect changed files (PR only)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.sha }} > /tmp/changed_files.txt
+            echo "file=/tmp/changed_files.txt" >> "$GITHUB_OUTPUT"
+            echo "Changed files:"
+            cat /tmp/changed_files.txt
+          else
+            echo "file=" >> "$GITHUB_OUTPUT"
+            echo "Push event — no filtering"
+          fi
+      - id: matrix
+        run: |
+          CHANGED_ARG=""
+          if [ -n "${{ steps.changes.outputs.file }}" ]; then
+            CHANGED_ARG="--changed-files ${{ steps.changes.outputs.file }}"
+          fi
+          python .github/scripts/generate_matrix.py \
+            --platform ${{ inputs.platform }} \
+            $CHANGED_ARG
+
+  unit:
+    needs: setup
+    uses: ./.github/workflows/_unit_test.yml
+    with:
+      platform: ${{ inputs.platform }}
+      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
+      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+
+  # Fast component-level GPU tests (ops, compilation, distributed).
+  # Runs all tests under tests/functional_tests/ in one job. No model files needed.
+  # Runs once per platform (not per device) — functional tests are device-agnostic.
+  functional:
+    needs: [setup, unit]
+    uses: ./.github/workflows/_functional_test.yml
+    with:
+      platform: ${{ inputs.platform }}
+      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
+      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+
+  # Slow end-to-end model tests (inference, serving).
+  # Grouped by (task, device) — all model/case combos for the same task
+  # run inside a single job to avoid repeated container startup.
+  e2e:
+    needs: [setup, functional]
+    if: needs.setup.outputs.e2e_matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.setup.outputs.e2e_matrix) }}
+    uses: ./.github/workflows/_e2e_test.yml
+    with:
+      platform: ${{ inputs.platform }}
+      task: ${{ matrix.test.task }}
+      device: ${{ matrix.test.device }}
+      cases: ${{ matrix.test.cases }}
+      ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
+      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      timeout: ${{ matrix.test.timeout || 60 }}

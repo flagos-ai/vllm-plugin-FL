@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # note: cannot control inner gems op of UnquantizedFusedMoEMethodFL via env variable.
 OOT_OPS = {
     "silu_and_mul": (SiluAndMulFL, "SiluAndMul"),  # noqa F405
+    "gelu_and_mul": (GeluAndMulFL, "GeluAndMul"),  # noqa F405
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
     "fused_moe": (FusedMoEFL, "FusedMoE"),  # noqa F405
@@ -75,3 +76,10 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
         op_cls, registration_name = OOT_OPS[op_name]
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
         CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
+        # Apply Ascend NPU monkey-patches if running on NPU.
+        # These replace upstream module-level functions (e.g. in qwen3_next) with
+        # Ascend implementations that bypass the CustomOp/dispatch path.
+        from vllm.platforms import current_platform
+        if current_platform.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
+            apply_ascend_patches()

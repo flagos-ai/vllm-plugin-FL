@@ -18,7 +18,6 @@ except (ImportError, OSError):
 
 from vllm.attention.backends.registry import AttentionBackendEnum
 from vllm.logger import init_logger
-
 from vllm.platforms import Platform, PlatformEnum
 from vllm.platforms.interface import DeviceCapability
 
@@ -30,24 +29,31 @@ else:
     VllmConfig = None
     CacheDType = None
 
-from vllm_fl.utils import DeviceInfo
+from vllm_fl.utils import DeviceInfo, get_device_name, get_device_type
 
 logger = init_logger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
+dist_backend_dict = {
+    "npu": "hccl",
+    "cuda": "nccl",
+}
+
 
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
-    device_name = device_info.device_type
-    device_type = device_info.device_type
+    vendor_name = device_info.vendor_name
+    device_type = get_device_type(vendor_name)
+    device_name = get_device_name(vendor_name)
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
-    vendor_name = device_info.vendor_name
     ray_device_key: str = "GPU"
-    dist_backend: str = "flagcx" if "FLAGCX_PATH" in os.environ else "nccl"
+    dist_backend: str = (
+        "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
+    )
     ### TODO(lms): dispatch device_control_env_var
     # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
@@ -61,11 +67,9 @@ class PlatformFL(Platform):
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "iluvatar":
-            return False
         if self.vendor_name == "musa":
             return True
-        return self.device_type == "cuda"
+        return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
     def is_musa(self) -> bool:
         if hasattr(torch, 'musa') and torch.musa.is_available():
@@ -111,6 +115,26 @@ class PlatformFL(Platform):
         if cls.device_type in ["cuda", "xpu", "npu", "musa"]:
             return True
         return False
+
+    @classmethod
+    def import_kernels(cls) -> None:
+        """Import device-specific kernels."""
+        logger.info(f"current vendor_name is: {cls.vendor_name}")
+        if cls.vendor_name == "metax":
+            try:
+                import mcoplib._C  # noqa: F401
+            except ImportError:
+                logger.warning("Failed to import mcoplib._C")
+
+            try:
+                import mcoplib._moe_C  # noqa: F401
+            except ImportError:
+                logger.warning("Failed to import mcoplib._moe_C")
+
+            try:
+                import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
+            except Exception as e:
+                logger.warning(f"Failed to import maca patches: {e}")
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
@@ -171,6 +195,17 @@ class PlatformFL(Platform):
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
+        # --------------------------------------------------------
+        # maca specific config updates
+        if cls.vendor_name == "metax":
+            if model_config is not None:
+                model_config.disable_cascade_attn = True
+            if attention_config := vllm_config.attention_config:
+                attention_config.use_cudnn_prefill = False
+                attention_config.use_trtllm_ragged_deepseek_prefill = False
+                attention_config.use_trtllm_attention = False
+                attention_config.disable_flashinfer_prefill = True
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -181,14 +216,20 @@ class PlatformFL(Platform):
         from vllm_fl.dispatch import call_op
 
         use_mla = attn_selector_config.use_mla
+        use_sparse = attn_selector_config.use_sparse
 
-        backend_path = call_op("attention_backend", use_mla=use_mla)
+        backend_path = call_op("attention_backend", use_mla=use_mla, use_sparse=use_sparse)
 
         logger.info_once(
-            "Using attention backend via dispatch (use_mla=%s): %s",
+            "Using attention backend via dispatch (use_mla=%s, use_sparse=%s): %s",
             use_mla,
+            use_sparse,
             backend_path,
             scope="local",
+        )
+        logger.info(
+            "Using attention backend via dispatch (use_mla=%s): %s"
+            % (use_mla, backend_path)
         )
         return backend_path
 
@@ -206,6 +247,9 @@ class PlatformFL(Platform):
         dtype: torch.dtype,
         backend: Optional["AttentionBackendEnum"] = None,
     ) -> list[str]:
+        from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+        patch_mm_encoder_attention()
         if backend is not None:
             assert backend in cls.get_supported_vit_attn_backends(), (
                 f"Backend {backend} is not supported for vit attention. "
@@ -247,7 +291,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.device_name in ["cuda", "npu"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax"]:
             return True
         return False
 
@@ -289,6 +333,12 @@ class PlatformFL(Platform):
         if cls.dist_backend == "flagcx":
             return False
         return True
+
+    @classmethod
+    def pre_register_and_update(cls, parser = None) -> None:
+        if cls.device_name == "npu":
+            import vllm_fl.dispatch.backends.vendor.ascend
+
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:

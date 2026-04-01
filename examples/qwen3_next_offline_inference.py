@@ -20,8 +20,8 @@ if __name__ == "__main__":
     # Create an LLM.
     llm = LLM(
         model="Qwen/Qwen3-Next-80B-A3B-Instruct",
-        tensor_parallel_size=4,
-        max_model_len=262144,
+        tensor_parallel_size=8,
+        max_model_len=32768,
     )
 
     # Generate texts from the prompts.

@@ -72,6 +72,20 @@ class VLLMFLBackendBase(ABC):
         """
         pass
 
+    @abstractmethod
+    def gelu_and_mul(self, x: torch.Tensor, approximate: str = "none") -> torch.Tensor:
+        """
+        GELU activation followed by element-wise multiplication.
+
+        Args:
+            x: Input tensor of shape [..., 2*d]
+            approximate: GELU approximation mode ("none" or "tanh")
+
+        Returns:
+            Output tensor of shape [..., d]
+        """
+        pass
+
     # ==================== Normalization Operators ====================
 
     @abstractmethod
@@ -129,7 +143,7 @@ class VLLMFLBackendBase(ABC):
     # ==================== Attention Backend ====================
 
     @abstractmethod
-    def attention_backend(self, use_mla: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for this platform.
 
@@ -138,6 +152,7 @@ class VLLMFLBackendBase(ABC):
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
+            use_sparse: Whether to use sparse attention
 
         Returns:
             Fully qualified class path string, e.g.:

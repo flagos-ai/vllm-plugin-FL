@@ -39,7 +39,7 @@ from vllm.v1.attention.backends.utils import (
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.platforms.interface import DeviceCapability
 from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
-# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash, 
+# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash,
 # from flag_gems import reshape_and_cache_flash
 
 logger = init_logger(__name__)
@@ -86,11 +86,10 @@ class AttentionFLBackend(AttentionBackend):
     def get_impl_cls() -> type["AttentionFLImpl"]:
         return AttentionFLImpl
 
-
     @staticmethod
     def get_builder_cls() -> type["AttentionFLMetadataBuilder"]:
         return AttentionFLMetadataBuilder
-    
+
     @classmethod
     def supports_sink(cls) -> bool:
         return False
@@ -101,7 +100,6 @@ class AttentionFLBackend(AttentionBackend):
         if kv_cache_dtype is None:
             return True
         return kv_cache_dtype in ["auto"]
-    
     @staticmethod
     def get_kv_cache_shape(
         num_blocks: int,
@@ -248,7 +246,7 @@ class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
         self.block_size = kv_cache_spec.block_size
 
         self.max_num_splits = 0  # No upper bound on the number of splits.
-        self.aot_schedule = False #get_flash_attn_version() == 3
+        self.aot_schedule = False  #get_flash_attn_version() == 3
 
         try:
             from vllm.distributed.parallel_state import get_dcp_group
@@ -465,7 +463,7 @@ class AttentionFLImpl(AttentionImpl):
             raise NotImplementedError(
                 "AttentionFL does not support quantization kv-cache on this device."
             )
-        ### TODO(lms): support quant to int8/int4 each query input and low precision compute 
+        ### TODO(lms): support quant to int8/int4 each query input and low precision compute
         self.supports_quant_query_input = False
 
     def forward(
@@ -741,7 +739,8 @@ class AttentionFLImpl(AttentionImpl):
         # For encoder attention, process FP8 quantization if needed
         if self.kv_cache_dtype.startswith("fp8"):
             raise NotImplementedError(
-                "quantization is not supported for encoder attention")
+                "quantization is not supported for encoder attention"
+            )
 
         # Use encoder-specific metadata for sequence information
         cu_seqlens_q = attn_metadata.query_start_loc
@@ -777,6 +776,7 @@ class AttentionFLImpl(AttentionImpl):
         )
 
         return output
+
 
 def use_cascade_attention(
     common_prefix_len: int,

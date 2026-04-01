@@ -49,7 +49,11 @@ class CudaBackend(Backend):
                     return False
 
                 from vllm.platforms import current_platform
-                if hasattr(current_platform, 'vendor_name') and current_platform.vendor_name == "nvidia":
+
+                if (
+                    hasattr(current_platform, "device_name")
+                    and current_platform.device_name == "nvidia"
+                ):
                     CudaBackend._available = True
                 else:
                     CudaBackend._available = False
@@ -75,6 +79,23 @@ class CudaBackend(Backend):
         from .impl.activation import silu_and_mul_cuda
 
         return silu_and_mul_cuda(obj, x)
+
+    def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
+        """
+        GELU activation followed by element-wise multiplication.
+
+        Uses vLLM's native CUDA implementation.
+
+        Args:
+            obj: The calling obj (for interface consistency)
+            x: Input tensor of shape [..., 2*d]
+
+        Returns:
+            Output tensor of shape [..., d]
+        """
+        from .impl.activation import gelu_and_mul_cuda
+
+        return gelu_and_mul_cuda(obj, x)
 
     def rms_norm(
         self,
@@ -137,25 +158,67 @@ class CudaBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for CUDA.
 
         Supports:
         - FLASH_ATTN (default)
         - TRITON_ATTN (when use_flaggems_op("triton_attn") is True)
+        - FLASHMLA_SPARSE (when use_mla and use_sparse are both True)
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
+            use_sparse: Whether to use Deepseek Sparse Attention (DSA)
 
         Returns:
             Fully qualified class path string
         """
         from vllm.attention.backends.registry import AttentionBackendEnum
-        from vllm_fl.utils import use_flaggems_op
 
         if use_mla:
+            if use_sparse:
+                return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
             return AttentionBackendEnum.FLASHMLA.get_path()
 
         # Default to FLASH_ATTN
         return AttentionBackendEnum.FLASH_ATTN.get_path()
+
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: Optional[torch.Tensor] = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ):
+        from .impl.fused_moe import moe_align_block_size_cuda
+
+        return moe_align_block_size_cuda(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map,
+            pad_sorted_ids,
+            ignore_invalid_experts,
+        )
+
+    def moe_sum(self, inp, out):
+        from .impl.fused_moe import moe_sum_cuda
+
+        moe_sum_cuda(inp, out)
+
+    def topk_softmax(
+        self,
+        topk_weights,
+        topk_indices,
+        token_expert_indices,
+        gating_output,
+        renormalize=False,
+    ):
+        from .impl.fused_moe import topk_softmax_cuda
+
+        return topk_softmax_cuda(
+            topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
+        )

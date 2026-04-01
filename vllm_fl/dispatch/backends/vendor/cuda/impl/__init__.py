@@ -4,12 +4,13 @@
 CUDA operator implementations.
 """
 
-from .activation import silu_and_mul_cuda
+from .activation import silu_and_mul_cuda, gelu_and_mul_cuda
 from .normalization import rms_norm_cuda
 from .rotary import rotary_embedding_cuda
 
 __all__ = [
     "silu_and_mul_cuda",
+    "gelu_and_mul_cuda",
     "rms_norm_cuda",
     "rotary_embedding_cuda",
 ]

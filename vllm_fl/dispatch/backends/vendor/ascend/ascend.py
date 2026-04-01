@@ -25,6 +25,9 @@ class AscendBackend(Backend):
 
     _available: Optional[bool] = None
 
+    def __init__(self) -> None:
+        super().__init__()
+
     @property
     def name(self) -> str:
         return "ascend"
@@ -36,21 +39,14 @@ class AscendBackend(Backend):
     def is_available(self) -> bool:
         """Check if Ascend hardware and libraries are available."""
         if AscendBackend._available is None:
-            try:
-                # Check for torch_npu (Ascend PyTorch extension)
-                import torch_npu
-
-                # Check if NPU device is available
-                if torch.npu.is_available() and torch.npu.device_count() > 0:
-                    AscendBackend._available = True
-                else:
-                    AscendBackend._available = False
-            except (ImportError, AttributeError):
+            # Check if NPU device is available
+            if torch.npu.is_available() and torch.npu.device_count() > 0:
+                AscendBackend._available = True
+            else:
                 AscendBackend._available = False
         return AscendBackend._available
 
     # ==================== Operator Implementations ====================
-
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
@@ -127,7 +123,7 @@ class AscendBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for Ascend NPU.
 
@@ -140,10 +136,13 @@ class AscendBackend(Backend):
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
+            use_sparse: Whether to use Deepseek Sparse Attention (DSA)
 
         Returns:
             Fully qualified class path string
         """
         if use_mla:
+            if use_sparse:
+                raise NotImplementedError("MLA with sparse attention is not implemented for Ascend yet.")
             return "vllm_fl.dispatch.backends.vendor.ascend.impl.attention.AscendMLABackend"
         return "vllm_fl.dispatch.backends.vendor.ascend.impl.attention.AscendAttentionBackend"

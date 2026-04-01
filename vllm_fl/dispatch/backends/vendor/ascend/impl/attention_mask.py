@@ -120,17 +120,15 @@ class AttentionMaskBuilder:
             Causal attention mask tensor.
         """
         # Create lower triangle matrix (True for valid positions)
-        mask_flag = torch.ones(
-            (max_seq_len, max_seq_len), dtype=torch.bool
-        ).tril_()
+        mask_flag = torch.ones((max_seq_len, max_seq_len), dtype=torch.bool).tril_()
         # Invert to get mask positions (True for masked positions)
         mask_flag = ~mask_flag
         # For fp16, use -inf; otherwise use 1
-        mask_value = float('-inf') if dtype == torch.float16 else 1
-        attn_mask = torch.zeros(
-            size=(max_seq_len, max_seq_len), dtype=dtype
-        ).masked_fill_(mask_flag, mask_value)
-        return attn_mask.to(self.device)
+        mask_value = float("-inf") if dtype == torch.float16 else 1
+        attn_mask = torch.zeros(size=(max_seq_len, max_seq_len), dtype=dtype).masked_fill_(
+            mask_flag, mask_value
+        )
+        return attn_mask.contiguous().to(self.device)
 
     @classmethod
     def clear_cache(cls) -> None:

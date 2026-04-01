@@ -1,0 +1,26 @@
+# Qwen3-Next-80B-A3B-Instruct model configuration (TP=8)
+
+llm:
+  model: "/data/models/Qwen/Qwen3-Next-80B-A3B-Instruct"
+  tensor_parallel_size: 8
+  max_model_len: 16384
+  max_num_batched_tokens: 16384
+  max_num_seqs: 512
+  gpu_memory_utilization: 0.7
+  enforce_eager: true
+  trust_remote_code: true
+
+generate:
+  prompts:
+    - "Hello, my name is"
+    - text: "The capital of France is"
+      expected: "Paris"
+  sampling:
+    max_tokens: 10
+    temperature: 0.0
+
+serve:
+  # Endpoints to validate (completion and/or chat)
+  endpoints: [completion]
+  completion_prompt: "please introduce yourself"
+  max_tokens: 20

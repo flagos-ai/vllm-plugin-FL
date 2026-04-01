@@ -1,4 +1,4 @@
-# vLLM-FL Dispatch Configuration for METAX (Moore Threads)
+# vLLM-FL Dispatch Configuration for METAX
 # Auto-loaded when running on METAX GPU hardware
 
 # Preferred default backend type: flaggems, vendor, reference
@@ -24,32 +24,38 @@ strict: false
 #   - flaggems      : Default FlagGems implementation (Triton)
 #   - reference     : PyTorch reference implementation
 #   - vendor        : Any available vendor backend (auto-detected)
-#   - vendor:metax  : METAX-specific vendor backend
+#   - vendor:metax   : METAX-specific vendor backend
 op_backends:
-  # Prefer vendor implementation for all operators
-  silu_and_mul:
-    - vendor
-    - flaggems
-    - reference
-
-  rms_norm:
-    - vendor
-    - flaggems
-    - reference
-
-  rotary_embedding:
-    - vendor
-    - flaggems
-    - reference
-
+  # attention_backend: prioritize flaggems (Triton attention)
   attention_backend:
-    - vendor
-    - flaggems
+    - vendor:metax
 
-# FlagOS operator blacklist (Optional)
-# These operators will not use FlagGems implementation
-# flagos_blacklist: []
+  topk_softmax:
+    - vendor:metax
 
-# OOT operator blacklist (Optional)
-# These OOT operators will not be registered
-# oot_blacklist: []
+  # rms_norm: prioritize flaggems (Triton)
+  rms_norm:
+    - flagos
+    - vendor:metax
+    - reference
+
+  # silu_and_mul: prioritize flaggems
+  silu_and_mul:
+    - vendor:metax
+    - reference
+
+  # rotary_embedding: prioritize flaggems
+  rotary_embedding:
+    - flagos
+    - vendor:metax
+    - reference
+
+# FlagOS operator blacklist
+flagos_blacklist:
+  - masked_fill
+  - masked_fill_
+
+# OOT (Out-of-Tree) operator blacklist
+oot_blacklist:
+  - masked_fill
+  - masked_fill_

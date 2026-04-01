@@ -21,7 +21,7 @@ Usage:
 Environment Variables:
     VLLM_FL_CONFIG: Path to YAML configuration file (highest priority, overrides env vars)
     VLLM_FL_PREFER: Preferred backend ("flagos", "vendor", "reference")
-    VLLM_FL_STRICT: Enable strict mode ("1" or "0")
+    VLLM_FL_STRICT: Strict mode: "1" = fail immediately on error (no fallback), "0" = try fallback (default)
     VLLM_FL_DENY_VENDORS: Comma-separated list of denied vendors
     VLLM_FL_ALLOW_VENDORS: Comma-separated list of allowed vendors
     VLLM_FL_PER_OP: Per-operator order (format: op1=a|b|c;op2=x|y)
@@ -104,6 +104,12 @@ from .discovery import (
     PLUGIN_MODULES_ENV,
 )
 from .logger_manager import get_logger, set_log_level
+from .io_dumper import (
+    enable_io_dump,
+    disable_io_dump,
+    io_dump_step,
+)
+from .io_common import list_model_layers, register_tensor_stat, tensor_stats
 
 
 def call_op(op_name: str, *args, **kwargs):
@@ -172,6 +178,13 @@ __all__ = [
     # Logging
     "get_logger",
     "set_log_level",
+    # IO Dump
+    "enable_io_dump",
+    "disable_io_dump",
+    "io_dump_step",
+    "list_model_layers",
+    "register_tensor_stat",
+    "tensor_stats",
     # Convenience functions
     "call_op",
     "resolve_op",

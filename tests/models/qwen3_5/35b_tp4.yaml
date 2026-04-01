@@ -1,0 +1,19 @@
+# Qwen3.5-35B-A3B model configuration (TP=4)
+
+llm:
+  model: "/data/models/Qwen/Qwen3.5-35B-A3B"
+  tensor_parallel_size: 4
+  max_num_batched_tokens: 16384
+  max_num_seqs: 1024
+  gpu_memory_utilization: 0.7
+  enforce_eager: true
+  trust_remote_code: true
+
+generate:
+  prompts:
+    - "Hello, my name is"
+    - text: "The capital of France is"
+      expected: "Paris"
+  sampling:
+    max_tokens: 10
+    temperature: 0.0

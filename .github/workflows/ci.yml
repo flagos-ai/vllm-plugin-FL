@@ -1,3 +1,6 @@
+# CI Workflow for VLLM Plugin FL
+# This workflow defines the CI process for the VLLM Plugin FL project.
+# It includes linting and platform-specific testing stages.
 name: CI
 
 on:
@@ -17,6 +20,7 @@ on:
       - "LICENSE"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,29 +32,64 @@ jobs:
   # Runs on every push/PR. Fast, no special requirements.
   # ============================================================
   lint:
-    uses: ./.github/workflows/lint.yml
+    uses: ./.github/workflows/_lint.yml
 
   # ============================================================
-  # Job 2: Unit tests (no GPU required)
-  # Tests dispatch, ops logic, mocks, etc.
-  # ============================================================
-  unit-tests:
-    needs: lint
-    uses: ./.github/workflows/unit-test.yml
-
-  # ============================================================
-  # Job 3: Build & install check
+  # Job 2: Build & install check
   # Verify the package can be built and installed cleanly.
   # ============================================================
   build:
     needs: lint
-    uses: ./.github/workflows/build-wheel.yml
+    uses: ./.github/workflows/_build_wheel.yml
 
   # ============================================================
-  # Job 4: Functional tests (GPU required)
-  # Runs on self-hosted GPU runners. Only on main branch push
-  # or PRs labeled 'gpu-test'.
+  # Job 3: Discover which platforms to test
   # ============================================================
-  functional-tests:
-    needs: unit-tests
-    uses: ./.github/workflows/functional-test.yml
+  discover:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      platforms: ${{ steps.detect.outputs.platforms }}
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - id: detect
+        run: python3 .github/scripts/detect_platforms.py
+
+  # ============================================================
+  # Job 4: Per-platform parallel testing
+  # ============================================================
+  test:
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.discover.outputs.platforms) }}
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: ${{ matrix.platform }}

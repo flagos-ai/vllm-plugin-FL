@@ -1,0 +1,18 @@
+# Qwen3-0.6B model configuration (TP=2 not needed, single GPU)
+
+llm:
+  model: "/data/models/Qwen/Qwen3-0.6B"
+  max_model_len: 8192
+  gpu_memory_utilization: 0.7
+  trust_remote_code: true
+
+generate:
+  prompts:
+    - "Hello, my name is"
+    - "The capital of France is"
+  sampling:
+    max_tokens: 5
+    temperature: 0.0
+  parametrize:
+    enforce_eager: [true, false]
+    dtype: ["bfloat16"]

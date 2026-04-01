@@ -1,9 +1,11 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-
 import os
 import logging
+
 from vllm_fl.utils import get_op_config as _get_op_config
+
+from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 
 logger = logging.getLogger(__name__)
@@ -19,7 +21,7 @@ def __getattr__(name):
 
 
 def _patch_transformers_compat():
-    """Patch transformers compatibility for ALLOWED_LAYER_TYPES."""
+    """Patch transformers compatibility for ALLOWED_LAYER_TYPES and tokenizer."""
     import transformers.configuration_utils as cfg
     if not hasattr(cfg, "ALLOWED_LAYER_TYPES"):
         cfg.ALLOWED_LAYER_TYPES = getattr(
@@ -31,6 +33,10 @@ def register():
     """Register the FL platform."""
     _patch_transformers_compat()
 
+    # Model-specific platform patches
+    from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
+    glm5_platform()
+
     multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
     if multiproc_method is None:
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
@@ -41,6 +47,7 @@ def register():
 def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
+    import vllm.model_executor.models.qwen3_next as qwen3_next_module
 
     # Register Qwen3.5 MoE config
     try:
@@ -52,6 +59,14 @@ def register_model():
 
     # Register Qwen3Next model
     try:
+        from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM  # noqa: F401
+
+        qwen3_next_module.Qwen3NextForCausalLM = Qwen3NextForCausalLM
+        logger.warning(
+            "Qwen3NextForCausalLM has been patched to use vllm_fl.models.qwen3_next, "
+            "original vLLM implementation is overridden"
+        )
+
         ModelRegistry.register_model(
             "Qwen3NextForCausalLM",
             "vllm_fl.models.qwen3_next:Qwen3NextForCausalLM"
@@ -81,15 +96,19 @@ def register_model():
     try:
         ModelRegistry.register_model(
             "KimiK25ForConditionalGeneration",
-            "vllm_fl.models.kimi_k25:KimiK25ForConditionalGeneration"
+            "vllm_fl.models.kimi_k25:KimiK25ForConditionalGeneration",
         )
     except Exception as e:
         logger.error(f"Register KimiK25 model error: {str(e)}")
 
     # Register GLM-5 (GlmMoeDsa) model
     try:
-        from vllm_fl.models.glm_moe_dsa import patch_is_deepseek_mla
-        patch_is_deepseek_mla()
+        from vllm.transformers_utils.config import _CONFIG_REGISTRY
+        from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
+        _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
+
+        from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
+        glm5_model()
 
         ModelRegistry.register_model(
             "GlmMoeDsaForCausalLM",

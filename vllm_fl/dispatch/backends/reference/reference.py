@@ -59,6 +59,21 @@ class ReferenceBackend(Backend):
 
         return silu_and_mul_torch(obj, x)
 
+    def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
+        """
+        GELU activation followed by element-wise multiplication.
+
+        Args:
+            obj: The calling obj (for interface consistency)
+            x: Input tensor of shape [..., 2*d]
+
+        Returns:
+            Output tensor of shape [..., d]
+        """
+        from .impl.activation import gelu_and_mul_torch
+
+        return gelu_and_mul_torch(obj, x)
+
     def rms_norm(
         self,
         obj,
@@ -120,7 +135,7 @@ class ReferenceBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for reference (vLLM native).
 
@@ -129,6 +144,7 @@ class ReferenceBackend(Backend):
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
+            use_sparse: Whether to use Deepseek Sparse Attention (DSA)
 
         Returns:
             Fully qualified class path string (vLLM native backend)
@@ -138,5 +154,7 @@ class ReferenceBackend(Backend):
 
         if use_mla:
             # vLLM native MLA backend
+            if use_sparse:
+                return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
             return AttentionBackendEnum.FLASHMLA.get_path()
         return AttentionBackendEnum.FLASH_ATTN.get_path()

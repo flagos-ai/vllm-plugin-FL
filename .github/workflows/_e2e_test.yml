@@ -1,0 +1,101 @@
+# Reusable E2E test workflow — slow, end-to-end model validation.
+#
+# Runs inference or serving tests that require real model files on disk
+# and substantial GPU memory. Each invocation tests all model/case combos
+# for a single (task, device) group, avoiding repeated container startup.
+# Called by _platform_test.yml for each entry in the E2E test matrix.
+
+name: E2E Test
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: "Platform name (e.g., cuda, ascend)"
+        required: true
+        type: string
+      task:
+        description: "Test task category (e.g., inference, serving)"
+        required: true
+        type: string
+      device:
+        description: "Device type (e.g., a100, 910b)"
+        required: false
+        type: string
+        default: ""
+      ci_image:
+        description: "Docker image for the test container"
+        required: true
+        type: string
+      runner_labels:
+        description: "JSON array of runner labels"
+        required: true
+        type: string
+      container_volumes:
+        description: "JSON array of volume mounts"
+        required: false
+        type: string
+        default: "[]"
+      container_options:
+        description: "Docker container options string"
+        required: false
+        type: string
+        default: ""
+      timeout:
+        description: "Timeout for the job in minutes"
+        required: false
+        type: number
+        default: 60
+      cases:
+        description: "JSON array of {model,case} dicts to run (from generate_matrix). Empty string means run all cases for the task."
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  e2e-test:
+    name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})"
+    runs-on: ${{ fromJson(inputs.runner_labels) }}
+    timeout-minutes: ${{ inputs.timeout }}
+    container:
+      image: ${{ inputs.ci_image }}
+      volumes: ${{ fromJson(inputs.container_volumes) }}
+      options: ${{ inputs.container_options }}
+
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+
+      - name: Check device availability
+        run: bash .github/scripts/${{ inputs.platform }}/check.sh
+
+      - name: Install project
+        run: bash .github/scripts/${{ inputs.platform }}/setup.sh
+
+      - name: Run E2E test
+        run: |
+          python tests/run.py \
+            --platform ${{ inputs.platform }} \
+            --device "${{ inputs.device }}" \
+            --scope e2e \
+            --task ${{ inputs.task }} \
+            --cases '${{ inputs.cases }}'
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}
+          path: |
+            test-results-${{ inputs.platform }}.xml
+            test-results-${{ inputs.platform }}.json

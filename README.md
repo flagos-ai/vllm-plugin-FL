@@ -14,51 +14,54 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
+| GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
+| Qwen3.5-35B-A3B | Supported | [example](./examples/glm_5_offline_inference.py)  |
 
 ### Supported Chips
 
 | Chip Vendor | Status | Reference |
 |-------------|--------|-----------|
 | NVIDIA | Supported | - |
-| Ascend | Merging | [PR #55](https://github.com/flagos-ai/vllm-plugin-FL/pull/55) |
-| MetaX | Merging | [PR #47](https://github.com/flagos-ai/vllm-plugin-FL/pull/47) |
+| Ascend | Supported | - |
+| MetaX | Merging | [PR #90](https://github.com/flagos-ai/vllm-plugin-FL/pull/90) |
 | Pingtouge-Zhenwu | Supported | - |
-| Iluvatar | Merging | [PR #58](https://github.com/flagos-ai/vllm-plugin-FL/pull/58) |
+| Iluvatar | Supported | - |
 | Tsingmicro | Merging | [PR #52](https://github.com/flagos-ai/vllm-plugin-FL/pull/52) |
+| Moore Threads | Merging | [PR #97](https://github.com/flagos-ai/vllm-plugin-FL/pull/97) |
+| Hygon | Merging | [PR #78](https://github.com/flagos-ai/vllm-plugin-FL/pull/78) |
 
 ## Quick Start
 
 ### Setup
 
-0. Install vllm from the official [v0.13.0](https://github.com/vllm-project/vllm/tree/v0.13.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
+1. Install vllm from the official [v0.13.0](https://github.com/vllm-project/vllm/tree/v0.13.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
 
 
-1. Install vllm-plugin-FL
+2. Install vllm-plugin-FL
 
-    1.1 Clone the repository:
+    2.1 Clone the repository:
 
     ```sh
     git clone https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
-    1.2 install
+    2.2 install
     ```sh
     cd vllm-plugin-FL
-    pip install -r requirements.txt
     pip install --no-build-isolation .
     # or editble install
     pip install --no-build-isolation -e .
     ```
 
-2. Install [FlagGems](https://github.com/flagos-ai/FlagGems/blob/master/docs/getting-started.md#quick-installation)
+3. Install [FlagGems](https://github.com/flagos-ai/FlagGems/blob/master/docs/getting-started.md#quick-installation)
 
-    2.1 Install Build Dependencies
+    3.1 Install Build Dependencies
 
     ```sh
     pip install -U scikit-build-core==0.11 pybind11 ninja cmake
     ```
 
-    2.2 Installation FlagGems
+    3.2 Installation FlagGems
 
     ```sh
     git clone https://github.com/flagos-ai/FlagGems
@@ -68,9 +71,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
-3. Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
+4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
-    3.1 Clone the repository:
+    4.1 Clone the repository:
     ```sh
     git clone https://github.com/flagos-ai/FlagCX.git
     cd FlagCX
@@ -78,17 +81,17 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     git submodule update --init --recursive
     ```
 
-    3.2 Build the library with different flags targeting to different platforms:
+    4.2 Build the library with different flags targeting to different platforms:
     ```sh
     make USE_NVIDIA=1
     ```
 
-    3.3 Set environment
+    4.3 Set environment
     ```sh
     export FLAGCX_PATH="$PWD"
     ```
 
-    3.4 Installation FlagCX
+    4.4 Installation FlagCX
     ```sh
     cd plugin/torch/
     FLAGCX_ADAPTOR=[xxx] pip install . --no-build-isolation
@@ -99,6 +102,26 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 
 If there are multiple plugins in the current environment, you can specify use vllm-plugin-fl via VLLM_PLUGINS='fl'.
+
+### Additional Steps for Ascend
+
+1. Install [FlagTree](https://resource.flagos.net)
+
+    ```sh
+    RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple --trusted-host=https://resource.flagos.net"
+    python3 -m pip install flagtree==0.4.0+ascend3.2 $RES
+    ```
+
+2. Set required environment variable
+
+    ```sh
+    export TRITON_ALL_BLOCKS_PARALLEL=1
+    ```
+
+3. Enable eager execution
+
+    Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
+
 
 ### Run a Task
 

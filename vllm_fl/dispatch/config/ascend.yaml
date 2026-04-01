@@ -54,9 +54,20 @@ op_backends:
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
 flagos_blacklist:
+  - masked_scatter_
+  - masked_scatter
   - scatter_add_
   - ones
   - ones_like
+  - isclose
+  - allclose
+  - mean_dim
+  - chunk_gated_delta_rule_fwd
+  - rsqrt # performance loss
+  - index_select
+  - true_divide
+  - silu
+  - silu_and_mul # performance loss end
   - to_copy
   - _to_copy
   - zeros

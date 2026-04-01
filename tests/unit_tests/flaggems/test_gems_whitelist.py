@@ -6,9 +6,18 @@ Unit tests for FlagGems operator whitelist/blacklist functionality.
 Tests use_flaggems_op() and get_flag_gems_whitelist_blacklist() from vllm_fl.utils.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist, use_flaggems_op
+
+# Patch out the platform config fallback so tests exercise only env-var logic.
+# On some platforms (e.g. Ascend), get_flagos_blacklist() returns a non-empty
+# default blacklist which would interfere with env-var-only assertions.
+_no_platform_blacklist = patch(
+    "vllm_fl.dispatch.config.get_flagos_blacklist", return_value=None
+)
 
 
 def _env_for_flaggems_enabled(monkeypatch):
@@ -23,6 +32,7 @@ def _env_for_flaggems_enabled(monkeypatch):
 # -----------------------------------------------------------------------------
 
 
+@_no_platform_blacklist
 def test_use_flaggems_op_no_whitelist_no_blacklist_all_allowed(monkeypatch):
     """When neither whitelist nor blacklist is set, all ops are allowed."""
     _env_for_flaggems_enabled(monkeypatch)
@@ -95,6 +105,7 @@ def test_use_flaggems_op_flaggems_disabled_returns_false(monkeypatch):
     assert use_flaggems_op("rms_norm") is False
 
 
+@_no_platform_blacklist
 def test_use_flaggems_op_default_when_flaggems_unset(monkeypatch):
     """When USE_FLAGGEMS is unset, default parameter is used for use_flaggems."""
     monkeypatch.setenv("VLLM_FL_PREFER_ENABLED", "True")
@@ -112,6 +123,7 @@ def test_use_flaggems_op_default_when_flaggems_unset(monkeypatch):
 # -----------------------------------------------------------------------------
 
 
+@_no_platform_blacklist
 def test_get_flag_gems_whitelist_blacklist_neither_set(monkeypatch):
     """When neither env is set, returns (None, None)."""
     monkeypatch.delenv("VLLM_FL_FLAGOS_WHITELIST", raising=False)
@@ -167,6 +179,7 @@ def test_get_flag_gems_whitelist_blacklist_both_set_raises(monkeypatch):
     )
 
 
+@_no_platform_blacklist
 def test_get_flag_gems_whitelist_blacklist_empty_strings(monkeypatch):
     """Empty or whitespace-only env values yield None / empty list handling."""
     monkeypatch.setenv("VLLM_FL_FLAGOS_WHITELIST", "")

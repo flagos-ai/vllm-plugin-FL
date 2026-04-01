@@ -143,12 +143,13 @@ class IluvatarBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for Iluvatar.
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
+            use_sparse: Whether to use Deepseek Sparse Attention (DSA)
 
         Returns:
             Fully qualified class path string
@@ -156,6 +157,8 @@ class IluvatarBackend(Backend):
         from vllm.attention.backends.registry import AttentionBackendEnum
 
         if use_mla:
+            if use_sparse:
+                return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
             return AttentionBackendEnum.FLASHMLA.get_path()
 
         return AttentionBackendEnum.FLASH_ATTN.get_path()

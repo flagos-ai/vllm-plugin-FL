@@ -21,6 +21,7 @@ from vllm.config.compilation import CompilationMode
 from vllm.distributed import (
     ensure_model_parallel_initialized,
     init_distributed_environment,
+    set_custom_all_reduce,
 )
 from vllm.distributed.ec_transfer import ensure_ec_transfer_initialized
 from vllm.distributed.kv_transfer import (
@@ -28,7 +29,6 @@ from vllm.distributed.kv_transfer import (
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
-# from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 try:
     from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 except ImportError:
@@ -65,8 +65,9 @@ from vllm.v1.worker.worker_base import WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
 
-from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 from vllm_fl.ops.custom_ops import register_oot_ops
+from vllm_fl.dispatch.io_common import managed_inference_mode
+from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
 
@@ -205,7 +206,6 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils.import_utils import init_cached_hf_modules
@@ -381,6 +381,15 @@ class WorkerFL(WorkerBase):
             current_platform.dist_backend,
         )
 
+        if current_platform.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe.ascend_config import (
+                init_ascend_config,
+            )
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.triton_utils import (
+                    init_device_properties_triton,
+            )
+            init_ascend_config(self.vllm_config)
+            init_device_properties_triton()
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -433,7 +442,7 @@ class WorkerFL(WorkerBase):
     def reload_weights(self) -> None:
         self.model_runner.reload_weights()
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def determine_available_memory(self) -> int:
         """Profiles the peak memory usage of the model to determine how much
         memory can be used for KV cache without OOMs.
@@ -505,8 +514,7 @@ class WorkerFL(WorkerBase):
             GiB(self.requested_memory),
         )
         logger.debug(
-            "Free memory after profiling: %.2f GiB (total), "
-            "%.2f GiB (within requested)",
+            "Free memory after profiling: %.2f GiB (total), %.2f GiB (within requested)",
             GiB(free_gpu_memory),
             GiB(free_gpu_memory - unrequested_memory),
         )
@@ -704,13 +712,13 @@ class WorkerFL(WorkerBase):
             f"execute_new_{num_new}_cached_{num_cached}"
         )
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         return self.model_runner.sample_tokens(grammar_output)
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
@@ -1066,6 +1074,7 @@ def init_worker_distributed_environment(
     """Initialize the distributed environment."""
     attention_config = vllm_config.attention_config
     parallel_config = vllm_config.parallel_config
+    set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
     init_batch_invariance(attention_config.backend)

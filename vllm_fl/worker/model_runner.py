@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
 import functools
 import gc
 import itertools
@@ -25,7 +26,7 @@ import vllm.envs as envs
 from vllm.attention.backends.abstract import(
     AttentionBackend,
     AttentionMetadata,
-    AttentionType, 
+    AttentionType,
     MultipleOf)
 from vllm.attention.layer import Attention, MLAAttention
 from vllm.compilation.counter import compilation_counter
@@ -84,6 +85,7 @@ from vllm.multimodal.inputs import (
     PlaceholderRange,
 )
 from vllm.multimodal.utils import group_mm_kwargs_by_modality
+from vllm.platforms import current_platform
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
@@ -213,9 +215,15 @@ if TYPE_CHECKING:
     from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 
 from vllm_fl.compilation.graph import GraphWrapper
-
+from vllm_fl.dispatch.io_common import managed_inference_mode
+from vllm_fl.dispatch.io_dumper import (
+    advance_io_step,
+    init_io_dump_from_env,
+    register_io_module_hooks,
+)
 
 logger = init_logger(__name__)
+
 
 AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
 # list when ubatching is enabled
@@ -224,7 +232,6 @@ PerLayerAttnMetadata: TypeAlias = list[AttnMetadataDict] | AttnMetadataDict
 
 # Wrapper for ModelRunnerOutput to support overlapped execution.
 class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
-
     def __init__(
         self,
         model_runner_output: ModelRunnerOutput,
@@ -262,7 +269,7 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
 
     def get_output(self) -> ModelRunnerOutput:
         """Copy the device tensors to the host and return a ModelRunnerOutput.
-        
+
         This function blocks until the copy is finished.
         """
         max_gen_len = self.sampled_token_ids_cpu.shape[-1]
@@ -283,7 +290,6 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
                 self._invalid_req_indices,
                 return_cu_num_tokens=self._logprobs_tensors_cpu is not None,
             )
-
 
         output = self._model_runner_output
         output.sampled_token_ids = valid_sampled_token_ids
@@ -646,7 +652,7 @@ class ModelRunnerFL(
         if self.mm_budget:
             self.mm_budget.reset_cache()
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def init_fp8_kv_scales(self) -> None:
         """
         Re-initialize the KV cache and FP8 scales after waking from sleep.
@@ -1454,7 +1460,6 @@ class ModelRunnerFL(
         self.seq_lens.np[num_reqs:].fill(0)
         self.seq_lens.copy_to_gpu()
 
-
         num_tokens = [self.requests[r].num_tokens for r in self.input_batch.req_ids]
         num_tokens_np = np.array(num_tokens, dtype=np.int32)
 
@@ -1573,7 +1578,7 @@ class ModelRunnerFL(
 
         attn_metadata: PerLayerAttnMetadata = {}
         if ubatch_slices is not None:
-            attn_metadata = [dict() for _ in range(len(ubatch_slices))]
+            attn_metadata = [{} for _ in range(len(ubatch_slices))]
 
         if for_cudagraph_capture:
             # For some attention backends (e.g. FA) with sliding window models we need
@@ -2934,12 +2939,13 @@ class ModelRunnerFL(
                 pyt_hooks.register_hooks(self.model, self.model.__class__.__name__)
                 self.layerwise_nvtx_hooks_registered = True
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> ModelRunnerOutput | IntermediateTensors | None:
+
         if self.execute_model_state is not None:
             raise RuntimeError(
                 "State error: sample_tokens() must be called "
@@ -3191,9 +3197,10 @@ class ModelRunnerFL(
             cudagraph_stats,
         )
         self.kv_connector_output = kv_connector_output
+
         return None
 
-    @torch.inference_mode
+    @managed_inference_mode()
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | IntermediateTensors:
@@ -3342,6 +3349,10 @@ class ModelRunnerFL(
                 num_nans_in_logits=num_nans_in_logits,
                 cudagraph_stats=cudagraph_stats,
             )
+
+        # Advance IO step after the full inference cycle (forward + sampling)
+        # so that one step encompasses both execute_model and sample_tokens.
+        advance_io_step()
 
         ### TODO(lms): abstract async schedule for all hardware
         if not self.use_async_scheduling:
@@ -3603,6 +3614,12 @@ class ModelRunnerFL(
         if self.parallel_config.enable_eplb:
             self.eplb_state = EplbState(self.parallel_config, self.device)
             eplb_models = 0
+
+        # IO dumper is only supported in eager mode.  In graph mode (torch.compile)
+        # TorchDispatchMode and the module forward hooks are incompatible with
+        # Dynamo tracing, so IO dumping is silently skipped.
+        init_io_dump_from_env(getattr(self.model_config, "enforce_eager", False))
+
         try:
             with DeviceMemoryProfiler() as m:
                 time_before_load = time.perf_counter()
@@ -3694,6 +3711,10 @@ class ModelRunnerFL(
             time_after_load - time_before_load,
             scope="local",
         )
+
+        # IO dumper: register module paths and install module context hooks.
+        register_io_module_hooks(self.model)
+
         prepare_communication_buffer_for_model(self.model)
         if (drafter := getattr(self, "drafter", None)) and (
             drafter_model := getattr(drafter, "model", None)
@@ -3911,7 +3932,7 @@ class ModelRunnerFL(
     ) -> dict[str, int]:
         try:
             if logits is None:
-                return {req_id: 0 for req_id in self.input_batch.req_ids}
+                return dict.fromkeys(self.input_batch.req_ids, 0)
 
             num_nans_in_logits = {}
             num_nans_for_index = logits.isnan().sum(dim=-1).cpu().numpy()
@@ -4000,7 +4021,7 @@ class ModelRunnerFL(
             )
         )
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def _dummy_run(
         self,
         num_tokens: int,
@@ -4216,7 +4237,6 @@ class ModelRunnerFL(
                 num_tokens_padded = ubatch_slices_padded[0].num_tokens
                 if num_tokens_across_dp is not None:
                     num_tokens_across_dp[:] = num_tokens_padded
-
             with (
                 self.maybe_randomize_inputs(input_ids, inputs_embeds),
                 set_forward_context(
@@ -4298,7 +4318,7 @@ class ModelRunnerFL(
         )
         return hidden_states, hidden_states[logit_indices_device]
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def _dummy_sampler_run(
         self,
         hidden_states: torch.Tensor,
@@ -4429,7 +4449,7 @@ class ModelRunnerFL(
             else:
                 raise e
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def _dummy_pooler_run(
         self,
         hidden_states: torch.Tensor,
@@ -5232,8 +5252,7 @@ class ModelRunnerFL(
                     )
                     # Maintain original KV shape view.
                     inv_order = [
-                        kv_cache_stride_order.index(i)
-                        for i in range(len(kv_cache_stride_order))
+                        kv_cache_stride_order.index(i) for i in range(len(kv_cache_stride_order))
                     ]
                     kv_caches[layer_name] = (
                         kv_cache_raw_tensors[layer_name]

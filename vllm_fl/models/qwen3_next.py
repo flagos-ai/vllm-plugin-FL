@@ -9,7 +9,6 @@ import torch
 from einops import rearrange
 from torch import nn
 from transformers.activations import ACT2FN
-
 from vllm.attention.backends.abstract import AttentionMetadata
 from vllm.attention.layer import Attention
 from vllm.compilation.decorators import support_torch_compile
@@ -63,16 +62,6 @@ from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader,
     sharded_weight_loader,
 )
-from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
-from vllm.model_executor.models.utils import sequence_parallel_chunk
-from vllm.model_executor.utils import set_weight_attrs
-from vllm.platforms import current_platform
-from vllm.sequence import IntermediateTensors
-from vllm.transformers_utils.configs import Qwen3NextConfig
-from vllm.triton_utils import tl, triton
-from vllm.utils.torch_utils import direct_register_custom_op
-from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
-
 from vllm.model_executor.models.interfaces import (
     HasInnerState,
     IsHybrid,
@@ -80,6 +69,7 @@ from vllm.model_executor.models.interfaces import (
     SupportsLoRA,
     SupportsPP,
 )
+from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm.model_executor.models.utils import (
     AutoWeightsLoader,
     PPMissingLayer,
@@ -88,8 +78,15 @@ from vllm.model_executor.models.utils import (
     make_empty_intermediate_tensors_factory,
     make_layers,
     maybe_prefix,
+    sequence_parallel_chunk,
 )
-
+from vllm.model_executor.utils import set_weight_attrs
+from vllm.platforms import current_platform
+from vllm.sequence import IntermediateTensors
+from vllm.transformers_utils.configs import Qwen3NextConfig
+from vllm.triton_utils import tl, triton
+from vllm.utils.torch_utils import direct_register_custom_op
+from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
 from vllm_fl.ops.fla import ChunkGatedDeltaRuleOp, FusedRecurrentGatedDeltaRuleOp
 
 logger = init_logger(__name__)
@@ -802,7 +799,6 @@ class Qwen3NextAttention(nn.Module):
         )
 
         q, k = self.rotary_emb(positions, q, k)
-
         attn_output = self.attn(q, k, v)
 
         if self.attn_output_gate:

@@ -1,0 +1,65 @@
+# Platform Configuration Template
+# Copy and customize for your specific hardware platform.
+#
+# To create a new platform configuration:
+# 1. Copy this file: cp template.yaml my_platform.yaml
+# 2. Update platform-level settings (tolerance, unsupported_features, env_defaults)
+# 3. Update device_types with your hardware
+# 4. Configure device-specific test settings
+# 5. Run tests: python tests/run.py --platform my_platform
+#
+# Existing platforms: cuda.yaml (NVIDIA GPU), ascend.yaml (Huawei NPU)
+#
+# Users can modify:
+# - functional tests: Add/remove model cases in the support lists
+# - unit tests: Add/remove paths in include and exclude lists
+# - tolerance: Adjust numerical comparison tolerance for result validation
+# - unsupported_features: Exclude test cases matching specific feature tags
+
+# ---- Platform-level settings ------------------------------------------------
+platform: my_platform
+vendor: my_vendor
+
+device_types:
+  my_device:
+    memory_gb: 80
+    tags: [bf16]
+
+# Default numerical tolerance for result comparison.
+# Different chips may produce different numerical results due to hardware precision.
+# Resolution order: test-case override > device-level > platform-level (here)
+tolerance:
+  inference:
+    default: {rtol: 1e-5, atol: 1e-8}
+    bfloat16: {rtol: 1e-3, atol: 1e-3}
+
+# Device-level overrides for specific test cases (optional)
+device_overrides: {}
+
+# Features not supported on this platform.
+# Test cases whose model name contains any of these strings will be skipped.
+# Common values: ["flaggems", "transformer_engine"]
+unsupported_features: []
+
+# Default environment variables for this platform
+env_defaults: {}
+
+# ---- Device-specific test configurations ------------------------------------
+my_device:
+  name: "my_device"
+  tests:
+    e2e:
+      # E2E tests (inference/serving) — require model files, slow
+      inference:
+        qwen3: ["4b_tp2"]
+      serving:
+        qwen2_5: ["0.5b"]
+    functional:
+      # Component tests (ops/compilation/distributed) — run all by default
+      include: "*"
+      exclude: []
+    unit:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []

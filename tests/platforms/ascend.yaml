@@ -1,0 +1,63 @@
+# Ascend Platform Configuration
+# Flexible test selection mechanism for Huawei Ascend NPU environments
+#
+# This platform configuration supports multiple device types (910b, 910c, etc.)
+# Users can modify the following:
+# - functional: Add/remove test case names in the support lists
+#   Example: qwen3: ["4b_tp2"] -> add or remove items
+#
+# - unit: Add/remove paths in include and exclude lists
+#   Example: include: "*" or ["test_basic.py", "runner/*"]
+#            exclude: [] or ["test_spiky_loss_detector.py"]
+#
+# - tolerance: Adjust numerical comparison tolerance for result validation
+#
+# - unsupported_features: Exclude test cases matching specific feature tags
+#
+# ---- Platform-level settings ------------------------------------------------
+platform: ascend
+vendor: huawei
+
+device_types:
+  910b:
+    memory_gb: 64
+    tags: [ascend, bf16]
+
+# Default numerical tolerance for result comparison (used when device doesn't override)
+tolerance:
+  inference:
+    default:  {rtol: 1e-3, atol: 1e-3}
+    float32:  {rtol: 1e-4, atol: 1e-5}
+    bfloat16: {rtol: 1e-2, atol: 1e-2}
+    float16:  {rtol: 1e-2, atol: 1e-2}
+
+# Device-level overrides for specific test cases (optional)
+device_overrides: {}
+
+# Features not supported on this platform.
+# Test cases whose model name contains any of these strings will be skipped.
+# Example: ["flaggems"] would skip "qwen3_flaggems", "robobrain2_flaggems", etc.
+unsupported_features: []
+
+# Default environment variables for this platform (applied by run.py before tests start)
+env_defaults: {}
+
+# ---- Device-specific test configurations ------------------------------------
+910b:
+  name: "910b"
+  tests:
+    e2e:
+      # Add or remove test cases per model
+      inference: {}
+      serving:
+        qwen3: ["4b_tp2"]
+    functional:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []
+    unit:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []

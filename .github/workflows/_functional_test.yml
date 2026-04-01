@@ -1,0 +1,83 @@
+# Reusable functional test workflow — fast, component-level GPU tests.
+#
+# Runs ops correctness, compilation (graph capture), and distributed tests.
+# These tests do NOT require model files and finish in seconds to minutes.
+# Called by _platform_test.yml for each entry in the functional test matrix.
+
+name: Functional Test
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: "Platform name (e.g., cuda, ascend)"
+        required: true
+        type: string
+      ci_image:
+        description: "Docker image for the test container"
+        required: true
+        type: string
+      runner_labels:
+        description: "JSON array of runner labels"
+        required: true
+        type: string
+      container_volumes:
+        description: "JSON array of volume mounts"
+        required: false
+        type: string
+        default: "[]"
+      container_options:
+        description: "Docker container options string"
+        required: false
+        type: string
+        default: ""
+      timeout:
+        description: "Timeout for the job in minutes"
+        required: false
+        type: number
+        default: 15
+
+jobs:
+  functional-test:
+    name: "Functional (${{ inputs.platform }})"
+    runs-on: ${{ fromJson(inputs.runner_labels) }}
+    timeout-minutes: ${{ inputs.timeout }}
+    container:
+      image: ${{ inputs.ci_image }}
+      volumes: ${{ fromJson(inputs.container_volumes) }}
+      options: ${{ inputs.container_options }}
+
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+
+      - name: Check device availability
+        run: bash .github/scripts/${{ inputs.platform }}/check.sh
+
+      - name: Install project
+        run: bash .github/scripts/${{ inputs.platform }}/setup.sh
+
+      - name: Run functional tests
+        run: |
+          python tests/run.py \
+            --platform ${{ inputs.platform }} \
+            --scope functional
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-${{ inputs.platform }}
+          path: |
+            test-results-${{ inputs.platform }}.xml
+            test-results-${{ inputs.platform }}.json

@@ -1,0 +1,12 @@
+# Platform registry — controls which platforms are tested in CI.
+#
+# Each key under `platforms` must match a config file name in this directory
+# (e.g., "cuda" -> cuda.yml, "ascend" -> ascend.yml).
+#
+# Set `enabled: false` to skip a platform without removing its config file.
+
+platforms:
+  cuda:
+    enabled: true
+  ascend:
+    enabled: true

@@ -49,10 +49,6 @@ class TestAllReduceCorrectness:
         """Reference implementation of all_reduce (sum)."""
         return sum(tensors)
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available() or torch.cuda.device_count() < 2,
-        reason="Multiple GPUs not available",
-    )
     def test_all_reduce_sum_correctness(self):
         """Test all_reduce sum produces correct results."""
         # This test would need actual distributed setup
@@ -126,10 +122,6 @@ class TestAllGatherCorrectness:
 class TestSendRecvCorrectness:
     """Test point-to-point send/recv operations."""
 
-    @pytest.mark.skipif(
-        not torch.cuda.is_available() or torch.cuda.device_count() < 2,
-        reason="Multiple GPUs not available",
-    )
     def test_send_recv_mock(self):
         """Test send/recv with mocked communicator."""
         # Create mock communicator

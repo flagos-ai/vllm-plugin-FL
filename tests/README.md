@@ -1,312 +1,372 @@
 # Tests
 
-This directory contains unit tests and functional tests for the vllm-plugin-FL project.
+Platform-agnostic test suite for the vllm-plugin-FL project. All tests are designed to run on both NVIDIA CUDA and Huawei Ascend NPU without modification.
+
+## Architecture Overview
+
+```
+                          ┌──────────────┐
+                          │  tests/run.py │  ← Unified entry point
+                          └──────┬───────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                   │
+        ┌─────▼─────┐   ┌───────▼───────┐   ┌──────▼──────┐
+        │ Unit Tests │   │  Functional   │   │  E2E Tests  │
+        │ (no GPU)   │   │  (GPU, no     │   │ (GPU +      │
+        │            │   │   models)     │   │  models)    │
+        └────────────┘   └───────────────┘   └──────┬──────┘
+                                                     │
+                                              ┌──────┴──────┐
+                                              │             │
+                                        ┌─────▼────┐ ┌─────▼─────┐
+                                        │Inference │ │ Serving   │
+                                        │(LLM API) │ │(HTTP API) │
+                                        └──────────┘ └───────────┘
+```
+
+**Key design principles:**
+
+- **YAML-driven E2E tests**: Model configs in `tests/models/` drive both inference and serving smoke tests — no per-model test files needed.
+- **Platform-aware orchestration**: Platform YAML configs (`tests/platforms/`) control which tests run on which hardware.
+- **Process isolation**: Each E2E test case runs in its own subprocess via `run.py`, with device cleanup between cases.
+- **Backend-agnostic fixtures**: The `device` fixture returns the correct device (`cuda:0` or `npu:0`) based on detected hardware.
 
 ## Directory Structure
 
 ```
 tests/
-├── unit_tests/                  # Fast, isolated tests (no GPU/model required)
-│   ├── conftest.py              # Shared fixtures (mock tensors, devices, etc.)
-│   ├── dispatch/                # Op dispatch system tests
+├── run.py                          # Unified test runner (wraps pytest)
+├── conftest.py                     # Root fixtures: device, tolerance, markers
+├── __init__.py
+│
+├── models/                         # Model YAML configs (drive E2E tests)
+│   ├── qwen3/
+│   │   ├── 4b_tp2.yaml
+│   │   ├── 06b_tp2.yaml
+│   │   └── next_tp8.yaml
+│   ├── qwen3_5/
+│   │   └── 35b_tp4.yaml
+│   └── minicpm/
+│       └── o45_tp4.yaml
+│
+├── platforms/                      # Platform-specific test configs
+│   ├── cuda.yaml                   # NVIDIA GPU: device types, tolerance, test matrix
+│   ├── ascend.yaml                 # Huawei NPU: device types, tolerance, test matrix
+│   └── template.yaml               # Template for adding new platforms
+│
+├── e2e_tests/                      # End-to-end tests (require GPU + model files)
+│   ├── inference/
+│   │   └── test_inference_smoke.py # Unified inference test (YAML-driven)
+│   └── serving/
+│       ├── test_serving_smoke.py   # Unified serving test (YAML-driven)
+│       └── server_helper.py        # VllmServer lifecycle manager
+│
+├── functional_tests/               # Component-level GPU tests (no model files)
+│   ├── conftest.py
+│   ├── ops/
+│   │   └── test_ops_correctness.py # Operator correctness vs reference impls
+│   ├── compilation/
+│   │   └── test_graph_capture.py   # Graph capture & replay (CUDA + NPU)
+│   └── distributed/
+│       └── test_collective_ops.py  # Collective ops (all_reduce, etc.)
+│
+├── unit_tests/                     # Fast isolated tests (no GPU required)
+│   ├── conftest.py
+│   ├── dispatch/                   # Op dispatch system
 │   │   ├── test_call_op.py
 │   │   ├── test_discovery.py
 │   │   ├── test_manager.py
 │   │   ├── test_policy.py
 │   │   ├── test_registry.py
-│   │   └── test_types.py
-│   ├── distributed/             # Distributed communication tests
+│   │   ├── test_types.py
+│   │   ├── test_io_dumper.py
+│   │   └── test_io_inspector.py
+│   ├── distributed/                # Distributed communication
 │   │   ├── test_communicator.py
 │   │   └── test_flagcx.py
-│   ├── compilation/             # Graph compilation tests
+│   ├── compilation/                # Graph compilation
 │   │   └── test_graph.py
-│   ├── ops/                     # Operator unit tests
+│   ├── ops/                        # Operator unit tests
 │   │   ├── test_activation.py
 │   │   ├── test_layernorm.py
 │   │   ├── test_numerical.py
 │   │   └── test_rotary_embedding.py
-│   ├── worker/                  # Worker tests
+│   ├── worker/                     # Worker & model runner
+│   │   ├── test_worker.py
 │   │   ├── test_model_runner.py
-│   │   └── test_worker.py
-│   └── flaggems/                # FlagGems integration tests
+│   │   └── test_model_imports.py
+│   └── flaggems/                   # FlagGems integration
 │       ├── test_gems_whitelist.py
 │       └── test_flaggems_get_ops.py
 │
-└── functional_tests/            # End-to-end tests (require GPU and models)
-    ├── conftest.py              # Shared fixtures (device, markers)
-    ├── inference/               # Offline inference tests
-    │   ├── vllm_runner.py       # VllmRunner test utility
-    │   ├── test_offline_qwen3_06b.py
-    │   ├── test_offline_qwen3_next.py
-    │   └── test_offline_minicpm.py
-    ├── serving/                 # HTTP API serving tests
-    │   ├── test_vllm_serve_qwen3_next.py
-    │   └── test_vllm_serve_minicpm.py
-    ├── ops/                     # Operator correctness tests
-    │   └── test_ops_correctness.py
-    ├── compilation/             # CUDA graph capture tests
-    │   └── test_graph_capture.py
-    └── distributed/             # Multi-GPU collective ops tests
-        └── test_collective_ops.py
-```
-
-## Prerequisites
-
-```bash
-# Install the project in development mode
-pip install -e .
-
-# For MiniCPM audio tests
-pip install vllm[audio]
+└── utils/                          # Shared test utilities
+    ├── device_utils.py             # Backend detection & device abstraction
+    ├── model_config.py             # YAML model config loader
+    ├── platform_config.py          # Platform YAML config loader
+    ├── cleanup.py                  # Device cleanup between E2E cases
+    ├── gold.py                     # Gold-value comparison
+    └── report.py                   # Test result reporting (JUnit XML + JSON)
 ```
 
 ## Running Tests
 
-### Run all unit tests (no GPU required)
+### Via `run.py` (recommended for CI and full runs)
+
+`run.py` is the unified entry point that handles platform config, tolerance injection, test discovery, and structured reporting.
 
 ```bash
-pytest tests/unit_tests/
+# Run all tests for a platform/device
+python tests/run.py --platform cuda --device a100
+
+# Run only unit tests
+python tests/run.py --platform cuda --device a100 --scope unit
+
+# Run only functional tests (ops, compilation, distributed)
+python tests/run.py --platform cuda --device a100 --scope functional
+
+# Run only E2E tests (inference + serving)
+python tests/run.py --platform cuda --device a100 --scope e2e
+
+# Run a specific E2E test case
+python tests/run.py --platform cuda --device a100 \
+    --scope e2e --task inference --model qwen3 --case 06b_tp2
+
+# Dry-run — show what would be executed
+python tests/run.py --platform cuda --device a100 --dry-run
+
+# Ascend NPU
+python tests/run.py --platform ascend --device 910b --scope unit
 ```
 
-### Run all functional tests (requires GPU and models)
+### Via `pytest` directly (for development)
 
 ```bash
-pytest tests/functional_tests/
-```
+# Unit tests (no GPU required)
+pytest tests/unit_tests/ -v
 
-### Run specific test categories
+# Functional tests (requires GPU)
+pytest tests/functional_tests/ -v -s
 
-```bash
-# Inference tests only
-pytest tests/functional_tests/inference/
+# Single E2E inference test (requires env vars)
+FL_TEST_MODEL=qwen3 FL_TEST_CASE=06b_tp2 \
+    pytest tests/e2e_tests/inference/test_inference_smoke.py -v -s
 
-# Serving tests only
-pytest tests/functional_tests/serving/
-
-# A single test file
-pytest tests/functional_tests/inference/test_offline_qwen3_next.py
-
-# A single test function
-pytest tests/functional_tests/inference/test_offline_qwen3_next.py::test_basic_generation
+# Single E2E serving test
+FL_TEST_MODEL=qwen3 FL_TEST_CASE=next_tp8 \
+    pytest tests/e2e_tests/serving/test_serving_smoke.py -v -s
 ```
 
 ### Filter by markers
 
 ```bash
-# Only GPU tests
-pytest -m gpu
-
-# Skip slow tests
-pytest -m "not slow"
+pytest -m gpu               # Only GPU tests
+pytest -m "not slow"        # Skip slow tests
+pytest -m e2e               # Only E2E tests
+pytest -m multi_gpu         # Only multi-GPU tests
 ```
 
-### Useful options
+## Model YAML Config Format
 
-```bash
-# Verbose output with print statements visible
-pytest -v -s tests/functional_tests/inference/
+E2E tests are driven by YAML configs under `tests/models/<model>/<case>.yaml`. Each config defines the LLM engine parameters and test behavior.
 
-# Stop on first failure
-pytest -x tests/unit_tests/
+### Text model example
 
-# Run tests matching a keyword
-pytest -k "minicpm" tests/
+```yaml
+# tests/models/qwen3/06b_tp2.yaml
+llm:
+  model: "/data/models/Qwen/Qwen3-0.6B"
+  tensor_parallel_size: 2
+  max_model_len: 8192
+  gpu_memory_utilization: 0.7
+  enforce_eager: true
+  trust_remote_code: true
 
-# Show coverage report
-pytest --cov=vllm_fl tests/unit_tests/
+generate:
+  prompts:
+    - "Hello, my name is"
+    - text: "The capital of France is"
+      expected: "Paris"                    # Optional: substring validation
+  sampling:
+    max_tokens: 10
+    temperature: 0.0
+  parametrize:                             # Optional: Cartesian product of engine overrides
+    enforce_eager: [true, false]
+
+serve:                                     # Optional: serving test config
+  endpoints: [completion]
+  completion_prompt: "please introduce yourself"
+  max_tokens: 20
 ```
 
-## Model Path Requirements
+### Multimodal model example
 
-Functional tests require model weights at specific paths. Tests will be **automatically skipped** if the model path does not exist.
+```yaml
+# tests/models/minicpm/o45_tp4.yaml
+llm:
+  model: "/data/models/MiniCPM"
+  tensor_parallel_size: 4
+  max_model_len: 2048
+  enforce_eager: true
+  trust_remote_code: true
 
-| Test File | Model Path | GPU Requirement |
-|---|---|---|
-| `test_offline_qwen3_06b.py` | `/data/models/Qwen/Qwen3-0.6B` | 1 GPU |
-| `test_offline_qwen3_next.py` | `/data/models/Qwen/Qwen3-Next-80B-A3B-Instruct` | 8 GPUs (TP=8) |
-| `test_offline_minicpm.py` | `/data/models/MiniCPM` | 2 GPUs (TP=2) |
-| `test_vllm_serve_qwen3_next.py` | `/data/models/Qwen/Qwen3-Next-80B-A3B-Instruct` | 8 GPUs (TP=8) |
-| `test_vllm_serve_minicpm.py` | `/data/models/MiniCPM` | 8 GPUs (TP=8) |
+generate:
+  modality: audio                          # text (default) | audio | image | video
+  prompts:
+    - question: "What is 1+1?"
+      asset_count: 0
+    - question: "What is recited in the audio?"
+      asset_count: 1
+  assets:                                  # vllm built-in asset names
+    - mary_had_lamb
+    - winning_call
+  sampling:
+    max_tokens: 128
+    temperature: 0.2
+```
+
+### Config fields reference
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `llm.model` | str | Yes | Model path (auto-skips if not found) |
+| `llm.*` | dict | Yes | Arguments passed to `LLM()` constructor |
+| `generate.modality` | str | No | `text` (default), `audio`, `image`, `video` |
+| `generate.prompts` | list | Yes | Strings or dicts with `text`/`expected` (text) or `question`/`asset_count` (multimodal) |
+| `generate.assets` | list | No | vllm built-in asset names (required for multimodal) |
+| `generate.sampling` | dict | Yes | Arguments passed to `SamplingParams()` |
+| `generate.parametrize` | dict | No | Key=engine param, value=list of values (Cartesian product) |
+| `serve.endpoints` | list | No | Endpoints to test: `completion`, `chat` |
+| `serve.completion_prompt` | str | No | Prompt for `/v1/completions` |
+| `serve.chat_messages` | list | No | Messages for `/v1/chat/completions` |
+| `serve.max_tokens` | int | No | Max tokens for serving requests (default: 50) |
+| `serve.api_key` | str | No | API key for authenticated endpoints |
+| `serve.extra_engine` | dict | No | Engine param overrides for serving only |
+
+## Platform Config Format
+
+Platform configs (`tests/platforms/<platform>.yaml`) define which tests to run per device type, tolerance settings, and environment defaults.
+
+```yaml
+# tests/platforms/cuda.yaml
+platform: cuda
+vendor: nvidia
+
+device_types:
+  a100:
+    compute_capability: "8.0"
+    memory_gb: 80
+    tags: [ampere, fp64, bf16]
+
+tolerance:
+  inference:
+    default: {exact: true}
+
+unsupported_features: []        # Strings to match against model names for skipping
+
+env_defaults:
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+
+a100:
+  name: "a100"
+  tests:
+    e2e:
+      inference:
+        qwen3: ["4b_tp2", "06b_tp2", "next_tp8"]
+        qwen3_5: ["35b_tp4"]
+        minicpm: ["o45_tp4"]
+      serving:
+        qwen3: ["next_tp8"]
+        minicpm: ["o45_tp4"]
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []
+```
 
 ## Writing New Tests
 
+### Adding a new E2E model test
+
+1. Create a YAML config: `tests/models/<model>/<case>.yaml`
+2. Register it in the platform config: `tests/platforms/cuda.yaml` (and/or `ascend.yaml`)
+3. Done — no Python code needed. The unified smoke tests handle the rest.
+
 ### Adding a unit test
 
-Unit tests should be fast, isolated, and not require GPU or model weights. Place them under `tests/unit_tests/` in the appropriate subdirectory.
+Unit tests should be fast, isolated, and not require GPU or model weights. Use the `device` fixture for any tensor operations.
 
 ```python
 # tests/unit_tests/ops/test_my_op.py
-
 import pytest
 import torch
 
-
 class TestMyOp:
     def test_basic(self, device):
-        """The `device` fixture is provided by conftest.py."""
+        """The `device` fixture returns cuda:0 or npu:0 automatically."""
         x = torch.randn(4, 8, device=device)
         # ... test logic ...
         assert result.shape == expected_shape
-
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
-    def test_gpu_specific(self):
-        """Test that requires GPU."""
-        # ...
 ```
 
-### Adding an inference test
+### Adding a functional test
 
-Inference tests validate offline model generation. Place them under `tests/functional_tests/inference/`.
+Functional tests validate component correctness on real hardware. They require GPU but not model files.
 
 ```python
-# tests/functional_tests/inference/test_offline_my_model.py
-
-import os
-
+# tests/functional_tests/ops/test_my_kernel.py
 import pytest
-from vllm import LLM, SamplingParams
+import torch
 
-MODEL_PATH = "/data/models/MyModel"
-pytestmark = pytest.mark.skipif(
-    not os.path.exists(MODEL_PATH), reason=f"Model not found: {MODEL_PATH}"
-)
+pytestmark = pytest.mark.gpu
 
-
-@pytest.fixture(scope="module")
-def llm_instance():
-    """Create LLM once per module to avoid repeated initialization."""
-    return LLM(
-        model=MODEL_PATH,
-        trust_remote_code=True,
-        tensor_parallel_size=1,
-        gpu_memory_utilization=0.85,
-    )
-
-
-@pytest.fixture
-def default_params():
-    return SamplingParams(max_tokens=10, temperature=0.0)
-
-
-def test_basic_generation(llm_instance, default_params):
-    outputs = llm_instance.generate(["Hello, world"], default_params)
-    assert len(outputs) > 0
-    generated_text = outputs[0].outputs[0].text
-    assert len(generated_text) > 0
+def test_my_kernel(device):
+    x = torch.randn(16, 256, device=device)
+    result = my_kernel(x)
+    reference = reference_impl(x)
+    assert torch.allclose(result, reference, rtol=1e-3, atol=1e-3)
 ```
 
-Key conventions:
-- Use `pytestmark` with `os.path.exists()` to skip when model is unavailable
-- Use `scope="module"` fixtures for expensive objects like `LLM` instances
-- Use `SamplingParams(temperature=0.0)` for deterministic output in assertions
+### Adding a new platform
 
-### Adding a serving test
+1. Copy `tests/platforms/template.yaml` to `tests/platforms/<platform>.yaml`
+2. Fill in device types, tolerance, env defaults, and test matrix
+3. Add a cleanup function in `tests/utils/cleanup.py` if needed
+4. Add backend detection in `tests/utils/device_utils.py`
 
-Serving tests start a vLLM HTTP server and validate API endpoints. Place them under `tests/functional_tests/serving/`.
+## Test Scopes
 
-```python
-# tests/functional_tests/serving/test_vllm_serve_my_model.py
+| Scope | Directory | GPU | Models | Runs via |
+|---|---|---|---|---|
+| `unit` | `tests/unit_tests/` | No | No | `pytest` directly |
+| `functional` | `tests/functional_tests/` | Yes | No | `pytest` directly |
+| `e2e` | `tests/e2e_tests/` | Yes | Yes | Subprocess per case (via `run.py`) |
 
-import os
-import signal
-import socket
-import subprocess
-import tempfile
-import time
+## Available Markers
 
-import pytest
-import requests
+| Marker | Description |
+|---|---|
+| `@pytest.mark.gpu` | Requires a single GPU/accelerator |
+| `@pytest.mark.multi_gpu` | Requires multiple GPUs/accelerators |
+| `@pytest.mark.slow` | Long-running test |
+| `@pytest.mark.e2e` | End-to-end test |
+| `@pytest.mark.functional` | Functional test |
+| `@pytest.mark.flaggems` | Requires FlagGems library |
+| `@pytest.mark.flagcx` | Requires FlagCX library |
 
-MODEL_PATH = "/data/models/MyModel"
-pytestmark = pytest.mark.skipif(
-    not os.path.exists(MODEL_PATH), reason=f"Model not found: {MODEL_PATH}"
-)
-HOST = "127.0.0.1"
+## Shared Fixtures (from `tests/conftest.py`)
 
-
-def _get_free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
-
-
-@pytest.fixture(scope="module", autouse=True)
-def vllm_server():
-    port = _get_free_port()
-    base_url = f"http://{HOST}:{port}/v1"
-
-    cmd = [
-        "vllm", "serve", MODEL_PATH,
-        "--host", HOST,
-        "--port", str(port),
-        "--gpu-memory-utilization", "0.85",
-    ]
-
-    log_file = tempfile.NamedTemporaryFile(
-        prefix="vllm_my_model_", suffix=".log", delete=False
-    )
-    process = subprocess.Popen(
-        cmd, stdout=log_file, stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid,
-    )
-
-    # Wait for server to be ready
-    max_retries = 60
-    ready = False
-    for i in range(max_retries):
-        if process.poll() is not None:
-            log_file.flush()
-            with open(log_file.name) as f:
-                logs = f.read()
-            pytest.fail(
-                f"vLLM process exited unexpectedly (code={process.returncode}).\n"
-                f"Full log: {log_file.name}\n"
-                f"Logs (last 8000 chars):\n{logs[-8000:]}"
-            )
-        try:
-            resp = requests.get(f"{base_url}/models", timeout=5)
-            if resp.status_code == 200:
-                ready = True
-                break
-        except requests.exceptions.ConnectionError:
-            pass
-        time.sleep(5)
-
-    if not ready:
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        pytest.fail("vLLM service startup timed out.")
-
-    yield {"base_url": base_url, "process": process}
-
-    # Teardown
-    try:
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        process.wait(timeout=30)
-    except Exception:
-        process.kill()
-    finally:
-        log_file.close()
-        os.unlink(log_file.name)
-
-
-@pytest.fixture
-def base_url(vllm_server):
-    return vllm_server["base_url"]
-
-
-def test_completions(base_url):
-    payload = {
-        "model": MODEL_PATH,
-        "prompt": "Hello",
-        "max_tokens": 10,
-    }
-    response = requests.post(f"{base_url}/completions", json=payload)
-    assert response.status_code == 200
-    assert "choices" in response.json()
-```
-
-Key conventions:
-- Use `_get_free_port()` to avoid port conflicts
-- Use `preexec_fn=os.setsid` + `os.killpg()` for reliable process cleanup
-- Capture logs to a temp file; print on failure for debugging
-- Use `scope="module"` so the server starts once per test file
+| Fixture | Scope | Description |
+|---|---|---|
+| `device` | session | `torch.device` for current backend (`cuda:0` / `npu:0`) |
+| `backend` | session | Backend string (`"nvidia"` / `"ascend"` / `"cpu"`) |
+| `has_accelerator` | session | Whether any GPU/NPU is available |
+| `device_count` | session | Number of available accelerators |
+| `cpu_device` | function | Always `torch.device("cpu")` |
+| `mock_tensor` | function | `torch.randn(2, 4, 8)` on test device |
+| `platform_config` | session | Loaded `PlatformConfig` (when `--platform` is set) |
+| `tolerance` | session | Tolerance lookup helper from platform config |
+| `model_config` | session | `ModelConfig.load` callable |
+| `save_gold_mode` | session | Whether `--save-gold` was passed |

@@ -48,6 +48,14 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        OpImpl(
+            op_name="gelu_and_mul",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.gelu_and_mul, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # Normalization
         OpImpl(
             op_name="rms_norm",
@@ -72,6 +80,33 @@ def register_builtins(registry) -> None:
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.attention_backend, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        # MoE align
+        OpImpl(
+            op_name="moe_align_block_size",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        # MoE sum
+        OpImpl(
+            op_name="moe_sum",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.moe_sum, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        # topk softmax
+        OpImpl(
+            op_name="topk_softmax",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.topk_softmax, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
