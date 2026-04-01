@@ -156,6 +156,7 @@ class TestCallOpWithPolicy:
     def reset_all(self):
         reset_default_manager()
         reset_global_policy()
+        set_global_policy(SelectionPolicy())
         yield
         reset_default_manager()
         reset_global_policy()
@@ -197,7 +198,7 @@ class TestCallOpWithPolicy:
                 kind=BackendImplKind.VENDOR,
                 fn=vendor_fn,
                 priority=BackendPriority.VENDOR,
-                vendor="CUDA",
+                vendor="cuda",
             )
         )
         manager.registry.register_impl(
@@ -337,7 +338,7 @@ class TestCallOpIntegration:
 
         assert result1 == result2 == 50
 
-    @patch.dict(os.environ, {"VLLM_FL_STRICT": "1"})
+    @patch.dict(os.environ, {"VLLM_FL_STRICT": "0"})
     def test_fallback_chain(self):
         """Test fallback from failed impl to successful one."""
         manager = get_default_manager()
@@ -378,6 +379,48 @@ class TestCallOpIntegration:
         assert result == 10
         assert call_sequence == ["failing", "success"]
 
+    @patch.dict(os.environ, {"VLLM_FL_STRICT": "1"})
+    def test_strict_mode_fail_fast(self):
+        """Test that VLLM_FL_STRICT=1 fails immediately without trying fallback."""
+        manager = get_default_manager()
+        manager._state.initialized = True
+        manager._state.init_pid = os.getpid()
+
+        call_sequence = []
+
+        def failing_impl(x):
+            call_sequence.append("failing")
+            raise RuntimeError("Primary failed")
+
+        def fallback_impl(x):
+            call_sequence.append("fallback")
+            return x * 2
+
+        manager.registry.register_impl(
+            OpImpl(
+                op_name="strict_fail_op",
+                impl_id="default.failing",
+                kind=BackendImplKind.DEFAULT,
+                fn=failing_impl,
+                priority=200,
+            )
+        )
+        manager.registry.register_impl(
+            OpImpl(
+                op_name="strict_fail_op",
+                impl_id="reference.fallback",
+                kind=BackendImplKind.REFERENCE,
+                fn=fallback_impl,
+                priority=100,
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="Primary failed"):
+            call_op("strict_fail_op", 5)
+
+        # Fallback must not have been attempted
+        assert call_sequence == ["failing"]
+
     def test_vendor_filtering(self):
         """Test that vendor filtering works through call_op."""
         manager = get_default_manager()
@@ -390,7 +433,7 @@ class TestCallOpIntegration:
                 impl_id="vendor.cuda",
                 kind=BackendImplKind.VENDOR,
                 fn=lambda x: x * 2,
-                vendor="CUDA",
+                vendor="cuda",
             )
         )
         manager.registry.register_impl(

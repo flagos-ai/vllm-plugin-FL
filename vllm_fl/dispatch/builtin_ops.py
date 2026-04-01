@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 import os
 
+from .config import get_vendor_device_map
 from .registry import OpRegistry
 from .logger_manager import get_logger
 
@@ -19,6 +20,46 @@ logger = get_logger()
 
 # Directory containing vendor backends
 _VENDOR_BACKENDS_DIR = os.path.join(os.path.dirname(__file__), "backends", "vendor")
+
+
+def _find_vendor_backend_dir(
+    vendor_name: str,
+    available_vendor_dirs: set[str],
+) -> str | None:
+    """Return the backend directory for *vendor_name*, or None if not found.
+
+    Resolves *vendor_name* against get_vendor_device_map() and picks the first
+    candidate directory that exists in *available_vendor_dirs*. The "maca" alias
+    is treated as "metax" for MetaX runtime compatibility.
+    """
+    # Keep compatibility with MetaX runtime naming.
+    if vendor_name == "maca":
+        vendor_name = "metax"
+    vendor_map = get_vendor_device_map()
+    if vendor_name not in vendor_map:
+        return None
+    value = vendor_map[vendor_name]
+    device_type = value.get("device_type")
+    device_name = value.get("device_name")
+    return next(
+        (c for c in (vendor_name, device_name, device_type) if c in available_vendor_dirs),
+        None,
+    )
+
+
+def _get_current_vendor_backend_dirs(available_vendor_dirs: set[str]) -> set[str]:
+    """Detect current platform vendor name and return its backend directory."""
+    try:
+        from vllm.platforms import current_platform
+
+        vendor_name = getattr(current_platform, "vendor_name", None)
+        if not isinstance(vendor_name, str) or not vendor_name:
+            return None
+        return _find_vendor_backend_dir(vendor_name, available_vendor_dirs)
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to detect current vendor backend from current_platform."
+        ) from exc
 
 
 def _register_vendor_backends(registry: OpRegistry) -> None:
@@ -35,11 +76,33 @@ def _register_vendor_backends(registry: OpRegistry) -> None:
         logger.debug(f"Vendor backends directory not found: {_VENDOR_BACKENDS_DIR}")
         return
 
-    for vendor_name in os.listdir(_VENDOR_BACKENDS_DIR):
+    available_vendor_dirs = {
+        vendor_name
+        for vendor_name in os.listdir(_VENDOR_BACKENDS_DIR)
+        if os.path.isdir(os.path.join(_VENDOR_BACKENDS_DIR, vendor_name))
+        and not vendor_name.startswith("_")
+    }
+
+    current_vendor_dir = _get_current_vendor_backend_dirs(available_vendor_dirs)
+    if not current_vendor_dir:
+        logger.warning(
+            "Unable to detect current vendor backend; skipping vendor backend registration"
+        )
+        return
+
+    logger.info(
+        "Registering vendor backends for current platform: %s",
+        current_vendor_dir,
+    )
+
+    for vendor_name in available_vendor_dirs:
         vendor_path = os.path.join(_VENDOR_BACKENDS_DIR, vendor_name)
 
-        # Skip non-directories and special files
-        if not os.path.isdir(vendor_path) or vendor_name.startswith("_"):
+        if vendor_name != current_vendor_dir:
+            logger.debug(
+                "Skipping vendor backend '%s' for current platform",
+                vendor_name,
+            )
             continue
 
         # Skip if no register_ops.py exists

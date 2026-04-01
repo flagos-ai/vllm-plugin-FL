@@ -8,6 +8,10 @@ This package contains vendor-specific backend implementations.
 Available vendor backends:
 - ascend: Huawei Ascend NPU backend
 
+This package intentionally avoids eager imports of vendor subpackages.
+Importing a specific backend such as ``vllm_fl.dispatch.backends.vendor.ascend``
+should not pull in other vendor branches.
+
 To add a new vendor backend:
 1. Create a subdirectory: vendor/<vendor_name>/
 2. Implement the backend class inheriting from Backend
@@ -18,34 +22,3 @@ See the "Adding Vendor Backends" section in dispatch/README.md for detailed inst
 """
 
 __all__ = []
-
-# Import Ascend backend
-try:
-    from .ascend import AscendBackend
-
-    __all__.append("AscendBackend")
-except ImportError:
-    pass
-
-# Import CUDA backend
-try:
-    from .cuda import CudaBackend
-
-    __all__.append("CudaBackend")
-except ImportError:
-    pass
-
-# Import MACA backend
-try:
-    from .maca import MacaBackend
-
-    __all__.append("MacaBackend")
-except ImportError:
-    pass
-
-# Add more vendor backends here as they become available:
-# try:
-#     from .rocm import RocmBackend
-#     __all__.append("RocmBackend")
-# except ImportError:
-#     pass

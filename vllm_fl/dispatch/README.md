@@ -480,7 +480,7 @@ export VLLM_FL_FLAGOS_BLACKLIST="custom_op1,custom_op2"
 - **Environment variables override, not merge**: Setting an env var replaces the config value entirely
 - **`VLLM_FL_PREFER` sets preference, not exclusivity**: It defines the selection order but will fall back to other backends if the preferred one is unavailable
 - **To force a specific backend**: Combine `PREFER` with `DENY_VENDORS` or use `PER_OP` to exclude unwanted backends
-- **`VLLM_FL_STRICT=1`**: Enables automatic fallback when the primary implementation fails at runtime
+- **`VLLM_FL_STRICT=1`**: Enables strict mode — fails immediately if the primary implementation fails, no fallback is attempted
 
 #### Backend Priority Values
 
@@ -536,7 +536,7 @@ Currently supported operators:
 
 ## Fallback Mechanism
 
-When `VLLM_FL_STRICT=1`, if the primary implementation fails, the system automatically tries other available implementations:
+When `VLLM_FL_STRICT=0` (default), if the primary implementation fails, the system automatically tries other available implementations:
 
 ```
 Op 'rms_norm' using 'default.flagos' (kind=flagos, vendor=None)

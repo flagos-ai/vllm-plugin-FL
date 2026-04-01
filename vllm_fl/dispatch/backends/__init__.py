@@ -2,6 +2,10 @@
 
 """
 Backend implementations for vllm-plugin-FL dispatch.
+
+Vendor backends are dynamically discovered and loaded by builtin_ops.py
+based on the current platform. This package does not eagerly import vendor
+backends to avoid loading unnecessary dependencies at startup.
 """
 
 from .base import Backend
@@ -9,27 +13,3 @@ from .flaggems import FlagGemsBackend
 from .reference import ReferenceBackend
 
 __all__ = ["Backend", "FlagGemsBackend", "ReferenceBackend"]
-
-# Try to import vendor backends
-try:
-    from .vendor.ascend import AscendBackend
-
-    __all__.append("AscendBackend")
-except ImportError:
-    AscendBackend = None
-
-# Add more vendor backends here as they become available
-try:
-    from .vendor.cuda import CudaBackend
-
-    __all__.append("CudaBackend")
-except ImportError:
-    CudaBackend = None
-
-# Import MACA backend
-try:
-    from .vendor.maca import MacaBackend
-
-    __all__.append("MacaBackend")
-except ImportError:
-    pass

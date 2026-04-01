@@ -14,6 +14,7 @@ from vllm_fl.dispatch.config.utils import (
     get_oot_blacklist,
     get_per_op_order,
     get_platform_name,
+    get_vendor_device_map,
     load_platform_config,
 )
 
@@ -25,4 +26,5 @@ __all__ = [
     'get_flagos_blacklist',
     'get_oot_blacklist',
     'get_effective_config',
+    'get_vendor_device_map',
 ]
