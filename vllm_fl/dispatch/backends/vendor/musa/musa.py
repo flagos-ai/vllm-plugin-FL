@@ -134,6 +134,6 @@ class MusaBackend(Backend):
         from vllm.attention.backends.registry import AttentionBackendEnum
 
         if use_mla:
-            return AttentionBackendEnum.FLASH_ATTN.get_path()
+            return AttentionBackendEnum.TRITON_MLA.get_path()
 
         return AttentionBackendEnum.FLASH_ATTN.get_path()
