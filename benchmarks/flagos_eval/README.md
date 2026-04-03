@@ -39,6 +39,10 @@ cd benchmarks/flagos_eval
 
 # Performance Benchmark
 ./run_benchmark.sh /path/to/model/
+
+# Mixed-Length Benchmark (Vendor Acceptance)
+./run_mixed_benchmark.sh /path/to/model/         # default seed=42
+./run_mixed_benchmark.sh /path/to/model/ 123      # custom seed
 ```
 
 ## Evaluation Tasks
@@ -65,16 +69,41 @@ Output Files:
 - `bench_summary.csv` - Summary
 - `bench_results/*.json` - Detailed results
 
+### Mixed-Length Benchmark
+
+Runs throughput tests with mixed input lengths in shuffled order for vendor performance acceptance testing. Uses a seed to ensure reproducible shuffle results.
+
+Configuration (1610 samples total):
+
+| Input/Output | Samples |
+|--------------|---------|
+| 1k/1k       | 500     |
+| 2k/1k       | 300     |
+| 4k/1k       | 300     |
+| 6k/1k       | 300     |
+| 12k/1k      | 200     |
+| 32k/1k      | 10      |
+
+Output Files:
+- `mixed_bench_summary.csv` - Summary
+- `mixed_bench_summary.json` - Summary (JSON)
+- `mixed_bench_results/*.json` - Detailed results
+
 ## Project Structure
 
 ```
 flagos_eval/
-├── run_eval.sh                  # LM evaluation script
-├── run_benchmark.sh             # Performance benchmark script
-├── collect_eval_results.py           # LM evaluation result collector
+├── run_eval.sh                      # LM evaluation script
+├── run_benchmark.sh                 # Performance benchmark script
+├── run_mixed_benchmark.sh           # Mixed-length benchmark script
+├── collect_eval_results.py          # LM evaluation result collector
 ├── collect_benchmark_results.py     # Performance benchmark result collector
-├── output/                      # LM evaluation results
-├── bench_results/               # Performance benchmark results
-├── results_summary.csv          # LM evaluation summary
-└── bench_summary.csv            # Performance benchmark summary
+├── collect_mixed_benchmark_results.py # Mixed-length result collector
+├── output/                          # LM evaluation results
+├── bench_results/                   # Performance benchmark results
+├── mixed_bench_results/             # Mixed-length benchmark results
+├── results_summary.csv              # LM evaluation summary
+├── bench_summary.csv                # Performance benchmark summary
+├── mixed_bench_summary.csv          # Mixed-length benchmark summary
+└── mixed_bench_summary.json         # Mixed-length benchmark summary (JSON)
 ```
