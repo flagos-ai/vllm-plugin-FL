@@ -60,7 +60,7 @@ def test_dense():
     diffs = [[abs(sim[i][j] - ref[i][j]) for j in range(2)] for i in range(2)]
     max_diff = max(max(row) for row in diffs)
 
-    print(f"  similarity matrix:")
+    print("  similarity matrix:")
     print(f"    vLLM:     {sim[0][0]:.4f}, {sim[0][1]:.4f}")
     print(f"             {sim[1][0]:.4f}, {sim[1][1]:.4f}")
     print(f"  reference: {ref[0][0]:.4f}, {ref[0][1]:.4f}")
