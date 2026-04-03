@@ -6,7 +6,7 @@ Evaluation toolkit for large language models with LM Eval and vLLM Benchmark.
 
 ### 1. Dependencies
 
-* **[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)** 
+* **[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)**
     ```bash
     git clone https://github.com/EleutherAI/lm-evaluation-harness.git
     cd lm-evaluation-harness

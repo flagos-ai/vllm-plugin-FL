@@ -89,4 +89,3 @@ git_info: dict[str, str] = {
     "id": git_version,
     "date": _scm_date or _git_commit_date_from_repo() or "Unknown",
 }
-

@@ -205,7 +205,7 @@ if __name__ == "__main__":
         print(
             "  Please start with: vllm serve BAAI/bge-m3 "
             "--hf-overrides "
-            "'{\"architectures\":[\"BgeM3EmbeddingModel\"]}'"
+            '\'{"architectures":["BgeM3EmbeddingModel"]}\''
         )
         sys.exit(1)
 
