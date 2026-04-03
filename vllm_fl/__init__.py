@@ -96,7 +96,7 @@ def register_model():
     try:
         ModelRegistry.register_model(
             "KimiK25ForConditionalGeneration",
-            "vllm_fl.models.kimi_k25:KimiK25ForConditionalGeneration",
+            "vllm_fl.models.kimi_k25:KimiK25ForConditionalGeneration"
         )
     except Exception as e:
         logger.error(f"Register KimiK25 model error: {str(e)}")
@@ -116,3 +116,16 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+
+    # Register GLM-4.7-Flash (Glm4MoeLite) model
+    try:
+        from vllm.transformers_utils.config import _CONFIG_REGISTRY
+        from vllm_fl.configs.glm4_moe_lite import Glm4MoeLiteConfig
+        _CONFIG_REGISTRY["glm4_moe_lite"] = Glm4MoeLiteConfig
+
+        ModelRegistry.register_model(
+            "Glm4MoeLiteForCausalLM",
+            "vllm_fl.models.glm4_moe_lite:Glm4MoeLiteForCausalLM"
+        )
+    except Exception as e:
+        logger.error(f"Register Glm4MoeLite model error: {str(e)}")
