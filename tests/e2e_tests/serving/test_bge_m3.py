@@ -48,8 +48,14 @@ def test_dense():
     print("1. Dense Embedding (cosine similarity)")
     print("=" * 60)
 
-    emb1 = post("/v1/embeddings", {"model": MODEL_NAME, "input": SENTENCES_1})["data"]
-    emb2 = post("/v1/embeddings", {"model": MODEL_NAME, "input": SENTENCES_2})["data"]
+    emb1 = post(
+        "/v1/embeddings",
+        {"model": MODEL_NAME, "input": SENTENCES_1},
+    )["data"]
+    emb2 = post(
+        "/v1/embeddings",
+        {"model": MODEL_NAME, "input": SENTENCES_2},
+    )["data"]
 
     sim = cosine_sim(
         [e["embedding"] for e in emb1],
@@ -80,11 +86,23 @@ def test_lexical():
     print("2. Lexical Sparse (BM25-style score)")
     print("=" * 60)
 
-    tokens1 = [post("/tokenize", {"model": MODEL_NAME, "prompt": s})["tokens"] for s in SENTENCES_1]
-    tokens2 = [post("/tokenize", {"model": MODEL_NAME, "prompt": s})["tokens"] for s in SENTENCES_2]
+    tokens1 = [
+        post("/tokenize", {"model": MODEL_NAME, "prompt": s})["tokens"]
+        for s in SENTENCES_1
+    ]
+    tokens2 = [
+        post("/tokenize", {"model": MODEL_NAME, "prompt": s})["tokens"]
+        for s in SENTENCES_2
+    ]
 
-    sparse1 = post("/pooling", {"model": MODEL_NAME, "input": SENTENCES_1, "task": "token_classify"})["data"]
-    sparse2 = post("/pooling", {"model": MODEL_NAME, "input": SENTENCES_2, "task": "token_classify"})["data"]
+    sparse1 = post(
+        "/pooling",
+        {"model": MODEL_NAME, "input": SENTENCES_1, "task": "token_classify"},
+    )["data"]
+    sparse2 = post(
+        "/pooling",
+        {"model": MODEL_NAME, "input": SENTENCES_2, "task": "token_classify"},
+    )["data"]
 
     def merge(tokens, vals_per_token):
         # vals_per_token: list of [val] (from /pooling data field)
@@ -109,8 +127,14 @@ def test_lexical():
     diff1 = abs(score_1_0_x_2_0 - LEXICAL_SCORE_REFERENCE[0])
     diff2 = abs(score_1_0_x_1_1 - LEXICAL_SCORE_REFERENCE[1])
 
-    print(f"  sent1[0] vs sent2[0]: vLLM={score_1_0_x_2_0:.6f}  ref={LEXICAL_SCORE_REFERENCE[0]:.6f}  diff={diff1:.6f}")
-    print(f"  sent1[0] vs sent1[1]: vLLM={score_1_0_x_1_1:.6f}  ref={LEXICAL_SCORE_REFERENCE[1]:.6f}  diff={diff2:.6f}")
+    print(
+        f"  sent1[0] vs sent2[0]: vLLM={score_1_0_x_2_0:.6f}  "
+        f"ref={LEXICAL_SCORE_REFERENCE[0]:.6f}  diff={diff1:.6f}"
+    )
+    print(
+        f"  sent1[0] vs sent1[1]: vLLM={score_1_0_x_1_1:.6f}  "
+        f"ref={LEXICAL_SCORE_REFERENCE[1]:.6f}  diff={diff2:.6f}"
+    )
 
     passed = diff1 < 0.05 * LEXICAL_SCORE_REFERENCE[0] and diff2 < 0.05
     print(f"  {'✓ PASS' if passed else '✗ FAIL'}")
@@ -125,8 +149,14 @@ def test_colbert():
     print("3. Multi-Vector ColBERT (MaxSim score)")
     print("=" * 60)
 
-    emb1 = post("/pooling", {"model": MODEL_NAME, "input": SENTENCES_1, "task": "token_embed"})["data"]
-    emb2 = post("/pooling", {"model": MODEL_NAME, "input": SENTENCES_2, "task": "token_embed"})["data"]
+    emb1 = post(
+        "/pooling",
+        {"model": MODEL_NAME, "input": SENTENCES_1, "task": "token_embed"},
+    )["data"]
+    emb2 = post(
+        "/pooling",
+        {"model": MODEL_NAME, "input": SENTENCES_2, "task": "token_embed"},
+    )["data"]
 
     def colbert(q_data, p_data):
         # token_embed: data is [[f1,f2,...,f1024], ...] — list of token vectors
@@ -144,10 +174,19 @@ def test_colbert():
     diff1 = abs(score_1_0_x_2_0 - COLBERT_SCORE_REFERENCE[0])
     diff2 = abs(score_1_0_x_2_1 - COLBERT_SCORE_REFERENCE[1])
 
-    print(f"  sent1[0] vs sent2[0]: vLLM={score_1_0_x_2_0:.6f}  ref={COLBERT_SCORE_REFERENCE[0]:.6f}  diff={diff1:.6f}")
-    print(f"  sent1[0] vs sent2[1]: vLLM={score_1_0_x_2_1:.6f}  ref={COLBERT_SCORE_REFERENCE[1]:.6f}  diff={diff2:.6f}")
+    print(
+        f"  sent1[0] vs sent2[0]: vLLM={score_1_0_x_2_0:.6f}  "
+        f"ref={COLBERT_SCORE_REFERENCE[0]:.6f}  diff={diff1:.6f}"
+    )
+    print(
+        f"  sent1[0] vs sent2[1]: vLLM={score_1_0_x_2_1:.6f}  "
+        f"ref={COLBERT_SCORE_REFERENCE[1]:.6f}  diff={diff2:.6f}"
+    )
 
-    passed = diff1 < 0.01 * COLBERT_SCORE_REFERENCE[0] and diff2 < 0.01 * COLBERT_SCORE_REFERENCE[1]
+    passed = (
+        diff1 < 0.01 * COLBERT_SCORE_REFERENCE[0]
+        and diff2 < 0.01 * COLBERT_SCORE_REFERENCE[1]
+    )
     print(f"  {'✓ PASS' if passed else '✗ FAIL'}")
     if not passed:
         all_passed = False
@@ -163,7 +202,11 @@ if __name__ == "__main__":
         print(f"Server status: {r.status_code} OK\n")
     except Exception:
         print("✗ Server is not running at localhost:8000")
-        print("  Please start with: vllm serve BAAI/bge-m3 --hf-overrides '{\"architectures\":[\"BgeM3EmbeddingModel\"]}'")
+        print(
+            "  Please start with: vllm serve BAAI/bge-m3 "
+            "--hf-overrides "
+            "'{\"architectures\":[\"BgeM3EmbeddingModel\"]}'"
+        )
         sys.exit(1)
 
     test_dense()
