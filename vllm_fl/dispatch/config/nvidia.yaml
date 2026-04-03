@@ -10,8 +10,8 @@ prefer: flagos
 strict: false
 
 # Vendor Whitelist (Optional, allows all if not set)
-# allow_vendors:
-#  - cuda
+allow_vendors:
+  - cuda
 
 # Vendor Blacklist (Optional)
 # deny_vendors:

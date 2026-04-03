@@ -116,3 +116,42 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+
+    # Register Roberta models (override v0.13.0 built-in with upstream fixes)
+    try:
+        import vllm.model_executor.models.roberta as roberta_module
+        from vllm_fl.models.roberta import (
+            RobertaEmbeddingModel,
+            BgeM3EmbeddingModel,
+            RobertaForSequenceClassification,
+        )
+
+        roberta_module.RobertaEmbeddingModel = RobertaEmbeddingModel
+        roberta_module.RobertaForSequenceClassification = RobertaForSequenceClassification
+
+        ModelRegistry.register_model(
+            "RobertaForMaskedLM",
+            "vllm_fl.models.roberta:RobertaEmbeddingModel",
+        )
+        ModelRegistry.register_model(
+            "RobertaModel",
+            "vllm_fl.models.roberta:RobertaEmbeddingModel",
+        )
+        ModelRegistry.register_model(
+            "XLMRobertaModel",
+            "vllm_fl.models.roberta:RobertaEmbeddingModel",
+        )
+        ModelRegistry.register_model(
+            "BgeM3EmbeddingModel",
+            "vllm_fl.models.roberta:BgeM3EmbeddingModel",
+        )
+        ModelRegistry.register_model(
+            "RobertaForSequenceClassification",
+            "vllm_fl.models.roberta:RobertaForSequenceClassification",
+        )
+        ModelRegistry.register_model(
+            "XLMRobertaForSequenceClassification",
+            "vllm_fl.models.roberta:RobertaForSequenceClassification",
+        )
+    except Exception as e:
+        logger.error(f"Register Roberta models error: {str(e)}")
