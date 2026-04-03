@@ -20,6 +20,7 @@ container_volumes:
 
 # Container options (hardware-specific settings)
 container_options: >-
+  --privileged
   --gpus all
   --shm-size=500g
   --hostname vllm-plugin-fl
