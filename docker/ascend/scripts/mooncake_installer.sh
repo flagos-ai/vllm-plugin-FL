@@ -15,8 +15,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# This file is a part of the vllm-ascend project.
-# This is script is inspired from https://github.com/kvcache-ai/Mooncake/blob/main/dependencies.sh
+# Originally from: https://github.com/vllm-project/vllm-ascend/blob/main/tools/mooncake_installer.sh
+# Inspired by: https://github.com/kvcache-ai/Mooncake/blob/main/dependencies.sh
 #
 
 # Color definitions
