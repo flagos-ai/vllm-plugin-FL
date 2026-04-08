@@ -6,7 +6,7 @@ FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
 
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.7.12
-ARG VLLM_VERSION=0.18.0
+ARG VLLM_VERSION=0.19.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -47,7 +47,7 @@ FROM base AS dev
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.18.0
+ARG VLLM_VERSION=0.19.0
 
 # Install vLLM
 RUN uv pip install --system \
@@ -70,7 +70,7 @@ FROM base AS ci
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.18.0
+ARG VLLM_VERSION=0.19.0
 
 # Install vLLM
 RUN uv pip install --system \
@@ -124,7 +124,7 @@ FROM base AS release
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.18.0
+ARG VLLM_VERSION=0.19.0
 
 # Install vLLM
 RUN uv pip install --system \
