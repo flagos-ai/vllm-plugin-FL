@@ -9,4 +9,4 @@ platforms:
   cuda:
     enabled: true
   ascend:
-    enabled: true
+    enabled: false

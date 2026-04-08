@@ -4,7 +4,7 @@
 platform: cuda
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.2.0-cuda-ci
+ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.3.0-cuda-ci
 
 # Runner labels for this hardware
 runner_labels:
