@@ -135,53 +135,57 @@ class TestGetCumsumAndArange:
     def test_multi_sequence_batch(self, mock_model_runner):
         """Test cumsum and per-sequence arange for typical multi-sequence batch."""
         num_tokens = np.array([2, 5, 3])
+        arange_out = np.zeros(10, dtype=np.int64)
 
-        cu_num_tokens, arange = mock_model_runner._get_cumsum_and_arange(num_tokens)
+        cu_num_tokens = mock_model_runner._get_cumsum_and_arange(num_tokens, arange_out)
 
         # Cumsum: [2, 7, 10] - used for indexing into flattened batch
         np.testing.assert_array_equal(cu_num_tokens, np.array([2, 7, 10]))
 
         # Arange: per-sequence position indices [0,1 | 0,1,2,3,4 | 0,1,2]
         expected_arange = np.array([0, 1, 0, 1, 2, 3, 4, 0, 1, 2])
-        np.testing.assert_array_equal(arange, expected_arange)
+        np.testing.assert_array_equal(arange_out, expected_arange)
 
     def test_single_sequence(self, mock_model_runner):
         """Test with single sequence (common in generation phase)."""
         num_tokens = np.array([5])
+        arange_out = np.zeros(5, dtype=np.int64)
 
-        cu_num_tokens, arange = mock_model_runner._get_cumsum_and_arange(num_tokens)
+        cu_num_tokens = mock_model_runner._get_cumsum_and_arange(num_tokens, arange_out)
 
         np.testing.assert_array_equal(cu_num_tokens, np.array([5]))
-        np.testing.assert_array_equal(arange, np.array([0, 1, 2, 3, 4]))
+        np.testing.assert_array_equal(arange_out, np.array([0, 1, 2, 3, 4]))
 
     def test_all_single_token_sequences(self, mock_model_runner):
         """Test batch where each sequence has 1 token (decode phase)."""
         num_tokens = np.array([1, 1, 1, 1])
+        arange_out = np.zeros(4, dtype=np.int64)
 
-        cu_num_tokens, arange = mock_model_runner._get_cumsum_and_arange(num_tokens)
+        cu_num_tokens = mock_model_runner._get_cumsum_and_arange(num_tokens, arange_out)
 
         np.testing.assert_array_equal(cu_num_tokens, np.array([1, 2, 3, 4]))
-        np.testing.assert_array_equal(arange, np.array([0, 0, 0, 0]))
+        np.testing.assert_array_equal(arange_out, np.array([0, 0, 0, 0]))
 
     def test_large_sequences(self, mock_model_runner):
         """Test with larger sequences to verify correct boundary handling."""
         num_tokens = np.array([10, 20, 30])
+        arange_out = np.zeros(60, dtype=np.int64)
 
-        cu_num_tokens, arange = mock_model_runner._get_cumsum_and_arange(num_tokens)
+        cu_num_tokens = mock_model_runner._get_cumsum_and_arange(num_tokens, arange_out)
 
         assert cu_num_tokens[-1] == 60
-        assert len(arange) == 60
         # Verify boundaries: first seq 0-9, second seq 0-19, third seq 0-29
-        np.testing.assert_array_equal(arange[:10], np.arange(10))
-        np.testing.assert_array_equal(arange[10:30], np.arange(20))
-        np.testing.assert_array_equal(arange[30:60], np.arange(30))
+        np.testing.assert_array_equal(arange_out[:10], np.arange(10))
+        np.testing.assert_array_equal(arange_out[10:30], np.arange(20))
+        np.testing.assert_array_equal(arange_out[30:60], np.arange(30))
 
     def test_dtype_preservation(self, mock_model_runner):
         """Test that dtype is correctly applied to cumsum output."""
         num_tokens = np.array([2, 3])
+        arange_out = np.zeros(5, dtype=np.int64)
 
-        cu_num_tokens, _ = mock_model_runner._get_cumsum_and_arange(
-            num_tokens, cumsum_dtype=np.int64
+        cu_num_tokens = mock_model_runner._get_cumsum_and_arange(
+            num_tokens, arange_out, cumsum_dtype=np.int64
         )
 
         assert cu_num_tokens.dtype == np.int64
@@ -264,9 +268,8 @@ class TestGetPositions:
 
         mock_runner = MagicMock(spec=ModelRunnerFL)
 
-        # Standard positions buffer
-        mock_runner.positions = MagicMock()
-        mock_runner.positions.gpu = torch.arange(100)
+        # Standard positions buffer (used directly, not .gpu)
+        mock_runner.positions = torch.arange(100)
 
         # MRoPE positions (3D for temporal, height, width)
         mock_runner.mrope_positions = MagicMock()
@@ -293,7 +296,7 @@ class TestGetPositions:
         """Standard RoPE: tensor indices for selective position lookup."""
         indices = torch.tensor([0, 5, 10, 15])
         result = mock_model_runner._get_positions(indices)
-        expected = mock_model_runner.positions.gpu[indices]
+        expected = mock_model_runner.positions[indices]
         torch.testing.assert_close(result, expected)
 
     def test_mrope_returns_3d_positions(self, mock_model_runner):
