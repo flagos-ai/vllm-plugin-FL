@@ -37,6 +37,16 @@ def register():
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
     glm5_platform()
 
+    # Register FlagCX KV connector
+    from vllm.distributed.kv_transfer.kv_connector.factory import (
+        KVConnectorFactory,
+    )
+    KVConnectorFactory.register_connector(
+        "FlagCXConnector",
+        "vllm_fl.distributed.kv_transfer.flagcx_connector",
+        "FlagCXConnector",
+    )
+
     multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
     if multiproc_method is None:
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
