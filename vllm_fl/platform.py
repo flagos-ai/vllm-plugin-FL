@@ -356,6 +356,24 @@ class PlatformFL(Platform):
         return False
 
     @classmethod
+    def get_device_uuid(cls, device_id: int = 0) -> str:
+        if cls.device_type == "cuda":
+            import pynvml
+            pynvml.nvmlInit()
+            physical_device_id = cls.device_id_to_physical_device_id(device_id)
+            handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
+            uuid = pynvml.nvmlDeviceGetUUID(handle)
+            pynvml.nvmlShutdown()
+            return uuid
+        elif cls.device_type == "npu":
+            if os.getenv("ASCEND_RT_VISIBLE_DEVICES") is not None:
+                npu_visible_devices = os.environ["ASCEND_RT_VISIBLE_DEVICES"].split(",")
+                return "NPU-" + npu_visible_devices[device_id]
+            return f"NPU-{device_id}"
+        else:
+            return f"{cls.device_type}-{device_id}"
+
+    @classmethod
     def get_device_total_memory(cls, device_id: int = 0) -> int:
         return cls.torch_device_fn.get_device_properties(
             device_id
