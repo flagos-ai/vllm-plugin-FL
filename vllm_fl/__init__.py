@@ -29,6 +29,20 @@ def _patch_transformers_compat():
         )
 
 
+def _register_flagcx_connector():
+    from vllm.distributed.kv_transfer.kv_connector.factory import (
+        KVConnectorFactory,
+    )
+
+    for _alias in ("FlagCXConnector", "FlagcxConnector"):
+        if _alias not in KVConnectorFactory._registry:
+            KVConnectorFactory.register_connector(
+                _alias,
+                "vllm_fl.distributed.kv_transfer.flagcx_connector",
+                "FlagCXConnector",
+            )
+
+
 def register():
     """Register the FL platform."""
     _patch_transformers_compat()
@@ -37,15 +51,8 @@ def register():
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
     glm5_platform()
 
-    # Register FlagCX KV connector
-    from vllm.distributed.kv_transfer.kv_connector.factory import (
-        KVConnectorFactory,
-    )
-    KVConnectorFactory.register_connector(
-        "FlagCXConnector",
-        "vllm_fl.distributed.kv_transfer.flagcx_connector",
-        "FlagCXConnector",
-    )
+    # Register FlagCX KV connector (idempotent across processes).
+    _register_flagcx_connector()
 
     multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
     if multiproc_method is None:
@@ -56,6 +63,8 @@ def register():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+    _register_flagcx_connector()
+
     # Models now upstream in vLLM v0.18.1 (no longer need plugin registration):
     #   BGE-M3, Qwen3NextForCausalLM, Qwen3_5MoeForConditionalGeneration,
     #   MiniCPMO, KimiK25ForConditionalGeneration, Qwen3_5MoeConfig
@@ -70,4 +79,3 @@ def register_model():
         #glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
-
