@@ -231,6 +231,10 @@ class WorkerFL(WorkerBase):
 
         register_oot_ops()
 
+        # Apply MoE backend patch in worker process (spawned separately)
+        from vllm_fl.platform import PlatformFL
+        PlatformFL._patch_moe_backend_selection()
+
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
 

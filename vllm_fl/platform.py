@@ -146,8 +146,38 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to import maca patches: {e}")
 
+    _moe_backend_patched = False
+
+    @classmethod
+    def _patch_moe_backend_selection(cls):
+        if cls._moe_backend_patched:
+            return
+        cls._moe_backend_patched = True
+        if not cls.is_cuda_alike(cls):
+            return
+        from vllm.model_executor.layers.fused_moe.oracle import (
+            unquantized as _uq,
+        )
+        import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as _ufm
+        _orig = _uq.select_unquantized_moe_backend
+
+        def _patched(moe_config, use_ep, use_dp):
+            backend = _orig(moe_config, use_ep, use_dp)
+            if backend == _uq.UnquantizedMoeBackend.OOT:
+                return _uq.UnquantizedMoeBackend.TRITON
+            return backend
+
+        _uq.select_unquantized_moe_backend = _patched
+        _ufm.select_unquantized_moe_backend = _patched
+
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        # Fix: vLLM's select_unquantized_moe_backend uses non-exclusive
+        # `if` checks, so is_out_of_tree() overrides the TRITON backend
+        # set by is_cuda(). Patch it to fall back to TRITON on CUDA-alike
+        # OOT platforms so the modular MoE kernel is created correctly.
+        cls._patch_moe_backend_selection()
+
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
