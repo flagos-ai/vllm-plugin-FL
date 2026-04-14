@@ -150,4 +150,3 @@ jobs:
                && 'cancelled'
                || 'failure' }}
     secrets: inherit
-    continue-on-error: true

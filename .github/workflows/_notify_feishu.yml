@@ -25,6 +25,7 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    continue-on-error: true
     steps:
       - name: Checkout scripts
         uses: actions/checkout@v4
