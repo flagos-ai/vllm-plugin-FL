@@ -18,7 +18,6 @@ import torch
 import zmq
 import zmq.asyncio
 
-from vllm import envs
 from vllm.attention.backends.abstract import AttentionMetadata
 from vllm.attention.selector import get_attn_backend
 from vllm.config import VllmConfig
@@ -130,6 +129,9 @@ class PairCommInfo:
     signal_counter: int = 0
     # GPU signal buffer – per-pair to avoid cross-pair RDMA write races.
     signal_buffer: Optional[torch.Tensor] = None
+    # Serialises counter-increment + PutSignal enqueue so that signal
+    # values always land in monotonic order on the remote signal buffer.
+    send_lock: threading.Lock = field(default_factory=threading.Lock)
 
 class FlagCXConnectorMetadata(KVConnectorMetadata):
     def __init__(self):
@@ -415,6 +417,9 @@ class FlagCXConnectorWorker:
                 daemon=True,
             )
             self._receiver_t.start()
+            # Persistent PUSH sockets keyed by Prefill ZMQ path.
+            # Avoids per-request socket creation + linger=0 message loss.
+            self._push_sockets: dict[str, zmq.asyncio.Socket] = {}
 
         self.finished_sending_reqs = FinishedSendReqSet(
             set(), threading.Lock()
@@ -585,42 +590,24 @@ class FlagCXConnectorWorker:
         self, ready_event: threading.Event, base_port: int, tp_rank: int
     ):
         frontend_path = make_zmq_path("tcp", self.hostname, base_port + tp_rank)
-        frontend = make_zmq_socket(self.zmq_ctx, frontend_path, zmq.ROUTER)
-
-        backend_path = make_zmq_path("inproc", str(uuid.uuid4()))
-        backend = make_zmq_socket(self.zmq_ctx, backend_path, zmq.PULL)
-
-        poller = zmq.Poller()
-        poller.register(frontend, zmq.POLLIN)
-        poller.register(backend, zmq.POLLIN)
+        frontend = make_zmq_socket(self.zmq_ctx, frontend_path, zmq.PULL)
 
         ready_event.set()
 
         try:
             while True:
-                sockets = dict(poller.poll())
-                if frontend in sockets:
-                    identity, _, metadata_bytes = frontend.recv_multipart()
-                    self._sender_executor.submit(
-                        self._sender_worker, identity, metadata_bytes,
-                        backend_path,
-                    )
-                if backend in sockets:
-                    identity, status = backend.recv_multipart()
-                    frontend.send_multipart((identity, b"", status))
+                metadata_bytes = frontend.recv()
+                self._sender_executor.submit(
+                    self._sender_worker, metadata_bytes,
+                )
         except zmq.ContextTerminated:
             pass
         except Exception as e:
             logger.error("FlagCX sender thread error: %s", e)
         finally:
             frontend.close()
-            backend.close()
 
-    def _sender_worker(
-        self, identity: bytes, metadata_bytes: bytes,
-        worker_channel_path: str,
-    ):
-        status = TRANS_ERROR
+    def _sender_worker(self, metadata_bytes: bytes):
         try:
             metadata = self._decoder.decode(metadata_bytes)
             # First contact from this Decode TP rank: init pair comm before
@@ -634,33 +621,38 @@ class FlagCXConnectorWorker:
                 self._init_pair_comm_responder(
                     metadata.uid_bytes, remote_zmq_addr
                 )
-            signal = self._send_kv_to_decode(metadata)
-            status = TRANS_DONE + signal.to_bytes(8, 'little')
+            self._send_kv_to_decode(metadata)
         except Exception as e:
             logger.error("FlagCX sender worker error: %s", e)
-        finally:
-            pusher = make_zmq_socket(
-                self.zmq_ctx, worker_channel_path, zmq.PUSH
-            )
-            try:
-                pusher.send_multipart((identity, status))
-            except zmq.ZMQError as e:
-                logger.warning("ZMQ push error: %s", e)
-            finally:
-                pusher.close()
 
     def _send_kv_to_decode(self, meta: FlagCXAgentMetadata):
         send_reqs: list[tuple[ReqId, SendBlockMeta]] = []
-        with self.reqs_need_send.lock:
-            for req_id in meta.request_ids:
-                send_meta = self.reqs_need_send.reqs.get(req_id)
-                if send_meta is None:
-                    logger.warning("Request %s not in reqs_need_send", req_id)
-                    return 0
-                send_meta.expire_time = float("inf")
-                send_reqs.append((req_id, send_meta))
+        # The Decode ZMQ request may arrive before the scheduler metadata
+        # reaches start_load_kv(), so poll with a timeout instead of
+        # returning immediately.
+        deadline = time.perf_counter() + 30  # 30s timeout
+        while True:
+            with self.reqs_need_send.lock:
+                all_found = True
+                for req_id in meta.request_ids:
+                    if req_id not in self.reqs_need_send.reqs:
+                        all_found = False
+                        break
+                if all_found:
+                    for req_id in meta.request_ids:
+                        send_meta = self.reqs_need_send.reqs[req_id]
+                        send_meta.expire_time = float("inf")
+                        send_reqs.append((req_id, send_meta))
+                    break
+            if time.perf_counter() > deadline:
+                logger.warning(
+                    "Timed out waiting for reqs_need_send: %s",
+                    meta.request_ids,
+                )
+                return 0
+            time.sleep(0.01)
 
-        signal = self._send_blocks(send_reqs, meta)
+        self._send_blocks(send_reqs, meta)
 
         with self.reqs_need_send.lock:
             for req_id in meta.request_ids:
@@ -668,8 +660,6 @@ class FlagCXConnectorWorker:
 
         with self.finished_sending_reqs.lock:
             self.finished_sending_reqs.set.update(meta.request_ids)
-
-        return signal
 
     def _send_blocks(
         self,
@@ -742,38 +732,41 @@ class FlagCXConnectorWorker:
         if not xfer_list:
             return 0
 
-        # Issue PutSignal calls; only the last one carries a signal bump.
-        # PutSignal is async (queued to rmaProxy); the Decode side will
-        # call flagcxWaitSignal to GPU-wait for the final signal value.
-        pair_info.signal_counter += 1
-        expected_signal = pair_info.signal_counter
+        # Serialise counter-increment AND all PutSignal enqueues under the
+        # per-pair send_lock.  This guarantees that RDMA signal writes land
+        # in monotonic order on the remote signal buffer — otherwise a
+        # higher signal value could be overwritten by a lower one from a
+        # concurrent thread, causing cuStreamWaitValue64(GEQ) to deadlock.
+        with pair_info.send_lock:
+            pair_info.signal_counter += 1
+            expected_signal = pair_info.signal_counter
 
-        start_time = time.perf_counter()
-        for i, (
-            local_layer_addr, remote_layer_addr,
-            local_start, remote_start, n_blocks
-        ) in enumerate(xfer_list):
-            src_offset = local_start * block_len
-            dst_offset = remote_start * block_len
-            size = n_blocks * block_len
-            is_last = (i == len(xfer_list) - 1)
+            start_time = time.perf_counter()
+            for i, (
+                local_layer_addr, remote_layer_addr,
+                local_start, remote_start, n_blocks
+            ) in enumerate(xfer_list):
+                src_offset = local_start * block_len
+                dst_offset = remote_start * block_len
+                size = n_blocks * block_len
+                is_last = (i == len(xfer_list) - 1)
 
-            # signal_offset = 0: per-pair signal buffer has a single uint64 slot
-            signal_offset = 0
-            signal_value = expected_signal if is_last else 0
+                # signal_offset = 0: per-pair signal buffer has a single uint64 slot
+                signal_offset = 0
+                signal_value = expected_signal if is_last else 0
 
-            # For PutSignal we need to express offsets relative to the
-            # registered MR base. Since each layer is a separate MR slot,
-            # we find its mr_index.
-            src_mr_idx = local_base_addr.index(local_layer_addr)
-            dst_mr_idx = remote_base_addr.index(remote_layer_addr)
+                # For PutSignal we need to express offsets relative to the
+                # registered MR base. Since each layer is a separate MR slot,
+                # we find its mr_index.
+                src_mr_idx = local_base_addr.index(local_layer_addr)
+                dst_mr_idx = remote_base_addr.index(remote_layer_addr)
 
-            self.flagcx.flagcxPutSignal(
-                comm, peer_rank,
-                src_offset, dst_offset, size,
-                signal_offset, src_mr_idx, dst_mr_idx,
-                signal_value,
-            )
+                self.flagcx.flagcxPutSignal(
+                    comm, peer_rank,
+                    src_offset, dst_offset, size,
+                    signal_offset, src_mr_idx, dst_mr_idx,
+                    signal_value,
+                )
 
         logger.debug(
             "Queued %d async xfers to rank %d (signal=%d), took %.4f s",
@@ -823,10 +816,16 @@ class FlagCXConnectorWorker:
 
         encoded_data = self._encoder.encode(metadata)
 
-        sock: zmq.asyncio.Socket = make_zmq_socket(
-            self.async_zmq_ctx, path, zmq.REQ, bind=False, linger=0
-        )
-        sock.setsockopt(zmq.RCVTIMEO, 60000)
+        # Use a persistent PUSH socket per Prefill peer.  Creating a new
+        # socket per request with linger=0 risks dropping messages if the
+        # TCP connection hasn't been established before the socket is closed.
+        sock = self._push_sockets.get(path)
+        if sock is None:
+            sock = make_zmq_socket(
+                self.async_zmq_ctx, path, zmq.PUSH, bind=False
+            )
+            self._push_sockets[path] = sock
+
         comm_future = None
         try:
             await sock.send(encoded_data)
@@ -841,32 +840,23 @@ class FlagCXConnectorWorker:
                     uid,
                     path,
                 )
-            ret_msg = await sock.recv()
-            if not ret_msg.startswith(TRANS_DONE):
-                logger.error(
-                    "KV transfer error for %s, see prefiller logs", req_ids
-                )
-                return
-            # Parse expected signal value appended by sender
-            signal_bytes = ret_msg[len(TRANS_DONE):]
-            expected_signal = (
-                int.from_bytes(signal_bytes, "little") if signal_bytes else 0
-            )
             if comm_future is not None:
                 await comm_future  # ensure Decode side also finished registering
-            # Fill pending wait so wait_for_layer_load can issue WaitSignal
+            # Decode tracks signal counter locally — no need to wait for
+            # Prefill's ZMQ reply.  flagcxWaitSignal on the GPU side will
+            # block until the RDMA PutSignal from Prefill lands.
             pair_info = self.pair_comms.get(path)
-            if pair_info and expected_signal > 0:
+            if pair_info:
+                pair_info.signal_counter += 1
                 pending_wait.comm = pair_info.comm
                 pending_wait.peer_rank = 1 - pair_info.my_rank
-                pending_wait.signal_value = expected_signal
+                pending_wait.signal_value = pair_info.signal_counter
         except zmq.ContextTerminated:
             return
         except Exception as e:
             logger.error("FlagCX receive_kv failed for %s: %s", req_ids, e)
             return
         finally:
-            sock.close()
             pending_wait.ready.set()
 
         async with self.finished_recving_reqs.lock:
@@ -895,7 +885,7 @@ class FlagCXConnectorWorker:
                         send_meta.ready.set()
                         send_meta.expire_time = (
                             time.perf_counter()
-                            + envs.VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT
+                            + 480
                         )
                     else:
                         self.reqs_need_send.reqs[req_id] = SendBlockMeta(
@@ -977,6 +967,9 @@ class FlagCXConnectorWorker:
         self.shutdown()
 
     def shutdown(self):
+        if self.kv_role != "kv_producer":
+            for sock in getattr(self, '_push_sockets', {}).values():
+                sock.close()
         self.zmq_ctx.term()
         self.async_zmq_ctx.term()
         if self.kv_role != "kv_consumer":
@@ -1001,7 +994,7 @@ def _group_contiguous(
 
 
 def _get_side_channel_port(vllm_config: VllmConfig) -> int:
-    base_port = int(os.getenv("FLAGCX_BOOTSTRAP_PORT", "9998"))
+    base_port = int(os.getenv("FLAGCX_BOOTSTRAP_PORT", "8998"))
     return (
         base_port
         + vllm_config.parallel_config.data_parallel_rank
