@@ -36,6 +36,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "metax": {"device_type": "cuda", "device_name": "metax"},
     # Registered backend: vendor/musa
     "mthreads": {"device_type": "musa", "device_name": "musa"},
+    # Registered backend: vendor/sunrise
+    "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
 }
 
 
