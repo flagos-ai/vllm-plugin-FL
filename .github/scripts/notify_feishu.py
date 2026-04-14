@@ -6,12 +6,11 @@ import os
 import sys
 import urllib.request
 
-# Required environment variables (script exits if any are missing)
+# Feishu credentials — skip gracefully if not configured
+FEISHU_VARS = ["FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_CHAT_ID"]
+
+# Required environment variables (script exits with error if any are missing)
 REQUIRED_VARS = [
-    # Feishu credentials & target
-    "FEISHU_APP_ID",
-    "FEISHU_APP_SECRET",
-    "FEISHU_CHAT_ID",
     # CI status (computed by the calling workflow)
     "CI_STATUS",
     # GitHub default env vars (available automatically on every runner)
@@ -32,7 +31,17 @@ OPTIONAL_VARS = [
 
 
 def check_env_vars() -> bool:
-    """Validate that all required env vars are set and non-empty. Return True if valid."""
+    """Validate environment variables. Return True if valid, False to skip."""
+    # Check Feishu credentials first — missing means "not configured", not an error
+    missing_feishu = [v for v in FEISHU_VARS if not os.environ.get(v, "").strip()]
+    if missing_feishu:
+        print(
+            f"::notice::Feishu notification skipped — "
+            f"missing credentials: {', '.join(missing_feishu)}"
+        )
+        return False
+
+    # Check remaining required vars — these should always be present
     invalid = [v for v in REQUIRED_VARS if not os.environ.get(v, "").strip()]
 
     for v in OPTIONAL_VARS:
@@ -42,7 +51,7 @@ def check_env_vars() -> bool:
     if invalid:
         for v in invalid:
             print(
-                f"::error::Required environment variable '{v}' is missing or empty",
+                f"::warning::Required environment variable '{v}' is missing or empty",
                 file=sys.stderr,
             )
         return False
@@ -52,7 +61,8 @@ def check_env_vars() -> bool:
 
 def main():
     if not check_env_vars():
-        sys.exit(1)
+        # Exit 0 — missing config is not a workflow failure
+        return
 
     app_id = os.environ["FEISHU_APP_ID"]
     app_secret = os.environ["FEISHU_APP_SECRET"]
@@ -85,7 +95,7 @@ def main():
     tenant_token = token_data.get("tenant_access_token", "")
     if not tenant_token:
         print(
-            f"::error::Failed to obtain tenant_access_token: {token_data}",
+            f"::warning::Failed to obtain tenant_access_token: {token_data}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -181,7 +191,7 @@ def main():
         result = json.loads(resp.read())
 
     if result.get("code", -1) != 0:
-        print(f"::error::Feishu API returned error: {result}", file=sys.stderr)
+        print(f"::warning::Feishu API returned error: {result}", file=sys.stderr)
         sys.exit(1)
 
     print("Feishu notification sent successfully.")
