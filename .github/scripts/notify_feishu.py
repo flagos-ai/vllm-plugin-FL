@@ -32,36 +32,19 @@ OPTIONAL_VARS = [
 
 
 def check_env_vars() -> bool:
-    """Validate that all required env vars are set. Return True if valid."""
-    missing = [v for v in REQUIRED_VARS if not os.environ.get(v)]
-    empty = [
-        v
-        for v in REQUIRED_VARS
-        if os.environ.get(v) is not None and not os.environ[v].strip()
-    ]
+    """Validate that all required env vars are set and non-empty. Return True if valid."""
+    invalid = [v for v in REQUIRED_VARS if not os.environ.get(v, "").strip()]
 
     for v in OPTIONAL_VARS:
-        if not os.environ.get(v):
+        if not os.environ.get(v, "").strip():
             print(f"::warning::Optional environment variable '{v}' is not set")
 
-    if empty:
-        for v in empty:
+    if invalid:
+        for v in invalid:
             print(
-                f"::error::Environment variable '{v}' is set but empty", file=sys.stderr
-            )
-
-    if missing:
-        for v in missing:
-            print(
-                f"::error::Required environment variable '{v}' is not set",
+                f"::error::Required environment variable '{v}' is missing or empty",
                 file=sys.stderr,
             )
-
-    if missing or empty:
-        print(
-            f"::error::Missing or empty variables: {', '.join(missing + empty)}",
-            file=sys.stderr,
-        )
         return False
 
     return True
