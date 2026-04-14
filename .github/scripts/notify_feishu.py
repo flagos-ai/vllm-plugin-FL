@@ -6,21 +6,86 @@ import os
 import sys
 import urllib.request
 
+# Required environment variables (script exits if any are missing)
+REQUIRED_VARS = [
+    # Feishu credentials & target
+    "FEISHU_APP_ID",
+    "FEISHU_APP_SECRET",
+    "FEISHU_CHAT_ID",
+    # CI status (computed by the calling workflow)
+    "CI_STATUS",
+    # GitHub default env vars (available automatically on every runner)
+    "GITHUB_WORKFLOW",
+    "GITHUB_REPOSITORY",
+    "GITHUB_REF_NAME",
+    "GITHUB_SHA",
+    "GITHUB_ACTOR",
+    "GITHUB_RUN_ID",
+    "GITHUB_SERVER_URL",
+    "GITHUB_EVENT_NAME",
+]
+
+# Optional environment variables (logged as warning if missing)
+OPTIONAL_VARS = [
+    "PLATFORM",
+]
+
+
+def check_env_vars() -> bool:
+    """Validate that all required env vars are set. Return True if valid."""
+    missing = [v for v in REQUIRED_VARS if not os.environ.get(v)]
+    empty = [
+        v
+        for v in REQUIRED_VARS
+        if os.environ.get(v) is not None and not os.environ[v].strip()
+    ]
+
+    for v in OPTIONAL_VARS:
+        if not os.environ.get(v):
+            print(f"::warning::Optional environment variable '{v}' is not set")
+
+    if empty:
+        for v in empty:
+            print(
+                f"::error::Environment variable '{v}' is set but empty", file=sys.stderr
+            )
+
+    if missing:
+        for v in missing:
+            print(
+                f"::error::Required environment variable '{v}' is not set",
+                file=sys.stderr,
+            )
+
+    if missing or empty:
+        print(
+            f"::error::Missing or empty variables: {', '.join(missing + empty)}",
+            file=sys.stderr,
+        )
+        return False
+
+    return True
+
 
 def main():
+    if not check_env_vars():
+        sys.exit(1)
+
     app_id = os.environ["FEISHU_APP_ID"]
     app_secret = os.environ["FEISHU_APP_SECRET"]
     chat_id = os.environ["FEISHU_CHAT_ID"]
     ci_status = os.environ["CI_STATUS"].strip()
-    workflow = os.environ["WORKFLOW_NAME"]
     platform = os.environ.get("PLATFORM", "")
-    repo = os.environ["REPO"]
-    ref = os.environ["REF"]
-    sha = os.environ["SHA"]
-    actor = os.environ["ACTOR"]
-    run_id = os.environ["RUN_ID"]
-    server_url = os.environ["SERVER_URL"]
-    event_name = os.environ["EVENT_NAME"]
+
+    # GitHub default environment variables (always available on runners)
+    workflow = os.environ["GITHUB_WORKFLOW"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    ref = os.environ["GITHUB_REF_NAME"]
+    sha = os.environ["GITHUB_SHA"]
+    actor = os.environ["GITHUB_ACTOR"]
+    run_id = os.environ["GITHUB_RUN_ID"]
+    server_url = os.environ["GITHUB_SERVER_URL"]
+    event_name = os.environ["GITHUB_EVENT_NAME"]
 
     short_sha = sha[:7]
     run_url = f"{server_url}/{repo}/actions/runs/{run_id}"
