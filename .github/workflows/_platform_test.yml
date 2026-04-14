@@ -27,6 +27,13 @@ on:
       platform:
         required: true
         type: string
+    secrets:
+      FEISHU_APP_ID:
+        required: false
+      FEISHU_APP_SECRET:
+        required: false
+      FEISHU_CHAT_ID:
+        required: false
 
 jobs:
   setup:
