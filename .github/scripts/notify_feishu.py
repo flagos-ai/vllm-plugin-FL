@@ -13,6 +13,7 @@ def main():
     chat_id = os.environ["FEISHU_CHAT_ID"]
     ci_status = os.environ["CI_STATUS"].strip()
     workflow = os.environ["WORKFLOW_NAME"]
+    platform = os.environ.get("PLATFORM", "")
     repo = os.environ["REPO"]
     ref = os.environ["REF"]
     sha = os.environ["SHA"]
@@ -48,10 +49,14 @@ def main():
     }
     emoji, text, color = status_map.get(ci_status, ("\u274c", "Failed", "red"))
 
+    title = f"CI {text} \u2014 {repo}"
+    if platform:
+        title = f"CI {text} [{platform}] \u2014 {repo}"
+
     card_content = {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": f"CI {text} \u2014 {repo}"},
+            "title": {"tag": "plain_text", "content": title},
             "template": color,
         },
         "elements": [

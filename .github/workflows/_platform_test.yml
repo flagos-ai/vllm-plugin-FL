@@ -27,6 +27,13 @@ on:
       platform:
         required: true
         type: string
+    secrets:
+      FEISHU_APP_ID:
+        required: false
+      FEISHU_APP_SECRET:
+        required: false
+      FEISHU_CHAT_ID:
+        required: false
 
 jobs:
   setup:
@@ -122,3 +129,42 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
+
+  # ============================================================
+  # Feishu notification — per-platform status
+  # ============================================================
+  notify:
+    needs: [setup, unit, functional, e2e]
+    if: always() && secrets.FEISHU_APP_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - name: Send Feishu notification
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_CHAT_ID: ${{ secrets.FEISHU_CHAT_ID }}
+          PLATFORM: ${{ inputs.platform }}
+          CI_STATUS: >
+            ${{ (needs.unit.result == 'success' &&
+                 needs.functional.result == 'success' &&
+                 (needs.e2e.result == 'success' || needs.e2e.result == 'skipped'))
+                && 'success'
+                || (needs.unit.result == 'cancelled' ||
+                    needs.functional.result == 'cancelled' ||
+                    needs.e2e.result == 'cancelled')
+                   && 'cancelled'
+                   || 'failure' }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: python .github/scripts/notify_feishu.py
