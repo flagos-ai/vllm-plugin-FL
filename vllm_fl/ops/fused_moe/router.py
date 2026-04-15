@@ -3,7 +3,6 @@
 
 import torch
 from functools import partial
-import sys
 
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
