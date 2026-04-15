@@ -43,12 +43,23 @@ def register():
     _get_op_config()
     return "vllm_fl.platform.PlatformFL"
 
+def register_quant_linear():
+    from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
+    add_oot_quant_kernel()
+
+def register_router():
+    from vllm_fl.ops.fused_moe.router import replace_router_with_fl
+    replace_router_with_fl()
 
 def register_model():
-    """Register FL-specific models not yet upstream."""
+    """Register FL-specific models and OOT quant kernels."""
     # Models now upstream in vLLM v0.18.1 (no longer need plugin registration):
     #   BGE-M3, Qwen3NextForCausalLM, Qwen3_5MoeForConditionalGeneration,
     #   MiniCPMO, KimiK25ForConditionalGeneration, Qwen3_5MoeConfig
+
+    # Register OOT quant kernels so kernel selection can find them
+    register_quant_linear()
+    register_router()
 
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:

@@ -16,49 +16,10 @@ from vllm.model_executor.layers.fused_moe.config import (
 from vllm.model_executor.layers.fused_moe.fused_moe import (
     _get_config_quant_dtype,
     try_get_optimal_moe_config,
-    dispatch_fused_moe_kernel,
 )
 from vllm.model_executor.layers.fused_moe.utils import moe_kernel_quantize_input
 from vllm.triton_utils import tl
 from vllm_fl.dispatch import call_op
-
-
-def fused_topk(
-    hidden_states: torch.Tensor,
-    gating_output: torch.Tensor,
-    topk: int,
-    renormalize: bool,
-    indices_type: torch.dtype | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
-
-    M, _ = hidden_states.size()
-
-    topk_weights = torch.empty(
-        M, topk, dtype=torch.float32, device=hidden_states.device
-    )
-    topk_ids = torch.empty(
-        M,
-        topk,
-        dtype=torch.int32 if indices_type is None else indices_type,
-        device=hidden_states.device,
-    )
-    token_expert_indices = torch.empty(
-        M, topk, dtype=torch.int32, device=hidden_states.device
-    )
-
-    # topk_weights, topk_ids = vllm_topk_softmax(
-    topk_weights, topk_ids = call_op(
-        "topk_softmax",
-        topk_weights,
-        topk_ids,
-        token_expert_indices,
-        gating_output,
-        renormalize,
-    )
-
-    return topk_weights, topk_ids, token_expert_indices
-
 
 def fused_experts_impl(
     hidden_states: torch.Tensor,
@@ -210,7 +171,8 @@ def fused_experts_impl(
             ignore_invalid_experts=True,
         )
 
-        dispatch_fused_moe_kernel(
+        call_op(
+            "dispatch_fused_moe_kernel",
             qcurr_hidden_states,
             w1,
             intermediate_cache1,
@@ -266,7 +228,8 @@ def fused_experts_impl(
             block_shape=block_shape,
         )
 
-        dispatch_fused_moe_kernel(
+        call_op(
+            "dispatch_fused_moe_kernel",
             qintermediate_cache2,
             w2,
             intermediate_cache3,

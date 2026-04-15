@@ -73,6 +73,80 @@ def topk_softmax_flaggems(
     return topk_weights, topk_indices
 
 
+def dispatch_fused_moe_kernel_flaggems(
+    A,
+    B,
+    C,
+    A_scale,
+    B_scale,
+    B_zp,
+    topk_weights,
+    sorted_token_ids,
+    expert_ids,
+    num_tokens_post_padded,
+    mul_routed_weight,
+    top_k,
+    config,
+    compute_type,
+    use_fp8_w8a8,
+    use_int8_w8a8,
+    use_int8_w8a16,
+    use_int4_w4a16,
+    per_channel_quant,
+    block_shape=None,
+    B_bias=None,
+):
+    from flag_gems import dispatch_fused_moe_kernel
+
+    dispatch_fused_moe_kernel(
+        A,
+        B,
+        C,
+        A_scale,
+        B_scale,
+        B_zp,
+        topk_weights,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        mul_routed_weight,
+        top_k,
+        config,
+        compute_type,
+        use_fp8_w8a8,
+        use_int8_w8a8,
+        use_int8_w8a16,
+        use_int4_w4a16,
+        per_channel_quant,
+        block_shape=block_shape,
+        B_bias=B_bias,
+    )
+
+
+def grouped_topk_flaggems(
+    scores,
+    n_group,
+    topk_group,
+    topk,
+    renormalize,
+    routed_scaling_factor,
+    bias,
+    scoring_func=0,
+):
+    from flag_gems import grouped_topk
+
+    return grouped_topk(
+        scores,
+        n_group,
+        topk_group,
+        topk,
+        renormalize,
+        routed_scaling_factor,
+        bias,
+        scoring_func,
+    )
+
+
 def moe_sum_flaggems(inp, out):
     from flag_gems import moe_sum
 

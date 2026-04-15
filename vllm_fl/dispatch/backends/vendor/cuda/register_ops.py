@@ -108,6 +108,24 @@ def register_builtins(registry) -> None:
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
+        # dispatch fused moe kernel
+        OpImpl(
+            op_name="dispatch_fused_moe_kernel",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.dispatch_fused_moe_kernel, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
+        # grouped topk
+        OpImpl(
+            op_name="grouped_topk",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.grouped_topk, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
     ]
 
     registry.register_many(impls)
