@@ -39,7 +39,7 @@ on:
 
 jobs:
   unit-tests:
-    name: Unit Tests (${{ inputs.platform }})
+    name: Unit tests (${{ inputs.platform }})
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     container:
       image: ${{ inputs.ci_image }}

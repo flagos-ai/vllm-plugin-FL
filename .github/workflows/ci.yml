@@ -86,14 +86,23 @@ jobs:
         run: python3 .github/scripts/detect_platforms.py
 
   # ============================================================
-  # Job 4: Per-platform parallel testing
+  # Job 4a: CUDA platform testing
   # ============================================================
-  test:
+  test-cuda:
     needs: discover
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: ${{ fromJson(needs.discover.outputs.platforms) }}
+    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
     uses: ./.github/workflows/_platform_test.yml
     with:
-      platform: ${{ matrix.platform }}
+      platform: cuda
+    secrets: inherit
+
+  # ============================================================
+  # Job 4b: Ascend platform testing
+  # ============================================================
+  test-ascend:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: ascend
+    secrets: inherit
