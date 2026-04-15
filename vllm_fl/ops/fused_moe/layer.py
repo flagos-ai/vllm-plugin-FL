@@ -26,15 +26,6 @@ from vllm_fl.ops.fused_moe.router import (
     GroupedTopKRouterFL,
 )
 
-# Mapping from upstream router classes to FL router subclasses.
-# Order matters: check subclasses before base classes.
-_ROUTER_CLASS_MAP = {
-    GroupedTopKRouter: GroupedTopKRouterFL,
-    FusedTopKBiasRouter: FusedTopKBiasRouterFL,
-    FusedTopKRouter: FusedTopKRouterFL,
-}
-
-
 class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
     def forward_oot(
         self,
@@ -58,31 +49,3 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
         )
 
 
-class FusedMoEFL(FusedMoE):
-    def forward_oot(
-        self,
-        hidden_states: torch.Tensor,
-        router_logits: torch.Tensor,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        og_hidden_states = hidden_states.shape[-1]
-        if self.hidden_size != og_hidden_states:
-            hidden_states = F.pad(
-                hidden_states,
-                (0, self.hidden_size - og_hidden_states),
-                mode="constant",
-                value=0.0,
-            )
-
-        if self.shared_experts is None:
-            fused_output = torch.ops.vllm.moe_forward(
-                hidden_states, router_logits, None, self.layer_name
-            )
-            return fused_output[..., :og_hidden_states]
-        else:
-            shared_output, fused_output = torch.ops.vllm.moe_forward_shared(
-                hidden_states, router_logits, None, self.layer_name
-            )
-            return (
-                shared_output[..., :og_hidden_states],
-                fused_output[..., :og_hidden_states],
-            )
