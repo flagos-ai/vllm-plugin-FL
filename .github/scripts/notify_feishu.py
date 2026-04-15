@@ -6,21 +6,79 @@ import os
 import sys
 import urllib.request
 
+# Feishu credentials — skip gracefully if not configured
+FEISHU_VARS = ["FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_CHAT_ID"]
+
+# Required environment variables (script exits with error if any are missing)
+REQUIRED_VARS = [
+    # CI status (computed by the calling workflow)
+    "CI_STATUS",
+    # GitHub default env vars (available automatically on every runner)
+    "GITHUB_WORKFLOW",
+    "GITHUB_REPOSITORY",
+    "GITHUB_REF_NAME",
+    "GITHUB_SHA",
+    "GITHUB_ACTOR",
+    "GITHUB_RUN_ID",
+    "GITHUB_SERVER_URL",
+    "GITHUB_EVENT_NAME",
+]
+
+# Optional environment variables (logged as warning if missing)
+OPTIONAL_VARS = [
+    "PLATFORM",
+]
+
+
+def check_env_vars() -> bool:
+    """Validate environment variables. Return True if valid, False to skip."""
+    # Check Feishu credentials first — missing means "not configured", not an error
+    missing_feishu = [v for v in FEISHU_VARS if not os.environ.get(v, "").strip()]
+    if missing_feishu:
+        print(
+            f"::notice::Feishu notification skipped — "
+            f"missing credentials: {', '.join(missing_feishu)}"
+        )
+        return False
+
+    # Check remaining required vars — these should always be present
+    invalid = [v for v in REQUIRED_VARS if not os.environ.get(v, "").strip()]
+
+    for v in OPTIONAL_VARS:
+        if not os.environ.get(v, "").strip():
+            print(f"::warning::Optional environment variable '{v}' is not set")
+
+    if invalid:
+        for v in invalid:
+            print(
+                f"::warning::Required environment variable '{v}' is missing or empty",
+                file=sys.stderr,
+            )
+        return False
+
+    return True
+
 
 def main():
+    if not check_env_vars():
+        # Exit 0 — missing config is not a workflow failure
+        return
+
     app_id = os.environ["FEISHU_APP_ID"]
     app_secret = os.environ["FEISHU_APP_SECRET"]
     chat_id = os.environ["FEISHU_CHAT_ID"]
     ci_status = os.environ["CI_STATUS"].strip()
-    workflow = os.environ["WORKFLOW_NAME"]
     platform = os.environ.get("PLATFORM", "")
-    repo = os.environ["REPO"]
-    ref = os.environ["REF"]
-    sha = os.environ["SHA"]
-    actor = os.environ["ACTOR"]
-    run_id = os.environ["RUN_ID"]
-    server_url = os.environ["SERVER_URL"]
-    event_name = os.environ["EVENT_NAME"]
+
+    # GitHub default environment variables (always available on runners)
+    workflow = os.environ["GITHUB_WORKFLOW"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    ref = os.environ["GITHUB_REF_NAME"]
+    sha = os.environ["GITHUB_SHA"]
+    actor = os.environ["GITHUB_ACTOR"]
+    run_id = os.environ["GITHUB_RUN_ID"]
+    server_url = os.environ["GITHUB_SERVER_URL"]
+    event_name = os.environ["GITHUB_EVENT_NAME"]
 
     short_sha = sha[:7]
     run_url = f"{server_url}/{repo}/actions/runs/{run_id}"
@@ -37,7 +95,7 @@ def main():
     tenant_token = token_data.get("tenant_access_token", "")
     if not tenant_token:
         print(
-            f"::error::Failed to obtain tenant_access_token: {token_data}",
+            f"::warning::Failed to obtain tenant_access_token: {token_data}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -133,7 +191,7 @@ def main():
         result = json.loads(resp.read())
 
     if result.get("code", -1) != 0:
-        print(f"::error::Feishu API returned error: {result}", file=sys.stderr)
+        print(f"::warning::Feishu API returned error: {result}", file=sys.stderr)
         sys.exit(1)
 
     print("Feishu notification sent successfully.")
