@@ -66,9 +66,6 @@ except ImportError as e:
 EngineId = str
 ReqId = str
 
-TRANS_DONE = b"trans_done"
-TRANS_ERROR = b"trans_error"
-
 logger = init_logger(__name__)
 
 class FlagCXAgentMetadata(
@@ -371,11 +368,17 @@ class FlagCXConnectorWorker:
             flagcx_path = os.getenv("FLAGCX_PATH", "")
             library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
         self.flagcx = FLAGCXLibrary(library_path)
+        self.cuda_device_index = torch.cuda.current_device()
 
         # ---- Per-pair comms (lazily created on first transfer with each peer) ----
         # key: remote ZMQ address "host:port+tp_rank", value: PairCommInfo
         self.pair_comms: dict[str, PairCommInfo] = {}
         self.pair_comms_lock = threading.Lock()
+        # Guards against concurrent pair-comm init for the same path.
+        # Prefill (sync threads) uses threading.Event barriers;
+        # Decode (async coroutines) uses asyncio.Event barriers.
+        self._pair_comm_init_barriers: dict[str, threading.Event] = {}
+        self._pair_comm_init_events: dict[str, asyncio.Event] = {}
         # KV tensor metadata (base_addr, size) — collected in register_kv_caches,
         # used to call flagcxOneSideRegister once per pair comm creation.
         self.kv_tensors_meta: list[tuple[int, int]] = []
@@ -467,6 +470,27 @@ class FlagCXConnectorWorker:
         self._encoder = msgspec.msgpack.Encoder()
         self._decoder = msgspec.msgpack.Decoder(FlagCXAgentMetadata)
 
+    def _ensure_cuda_device(self) -> None:
+        """Background threads start with their own CUDA current-device state.
+
+        Pair-comm init and signal-buffer allocation must happen on the same
+        device as the worker process, otherwise later stream waits may target a
+        signal address from another GPU.
+        """
+        current = torch.cuda.current_device()
+        if current != self.cuda_device_index:
+            logger.warning(
+                "Switching CUDA device in background thread: current=%d target=%d",
+                current,
+                self.cuda_device_index,
+            )
+            torch.cuda.set_device(self.cuda_device_index)
+
+    @staticmethod
+    def _comm_repr(comm: Any) -> str:
+        value = getattr(comm, "value", None)
+        return hex(value) if value is not None else "0x0"
+
     def _register_kv_for_comm(self, comm: Any) -> torch.Tensor:
         """Register all KV tensors + a fresh per-pair signal buffer with a
         newly created pair comm.  Both sides call this right after
@@ -475,6 +499,7 @@ class FlagCXConnectorWorker:
 
         Returns the newly allocated per-pair GPU signal buffer (caller must
         keep a reference to prevent GC)."""
+        self._ensure_cuda_device()
         for base_addr, size in self.kv_tensors_meta:
             self.flagcx.flagcxOneSideRegister(comm, base_addr, size)
         # Allocate a *per-pair* signal buffer so different Prefill peers
@@ -484,8 +509,13 @@ class FlagCXConnectorWorker:
             comm, signal_buffer.data_ptr(), signal_buffer.nbytes
         )
         logger.info(
-            "Registered %d KV MRs + per-pair signal buffer for pair comm",
+            "Registered %d KV MRs + per-pair signal buffer for pair comm=%s "
+            "(signal_ptr=%s, signal_device=%s, current_device=%d)",
             len(self.kv_tensors_meta),
+            self._comm_repr(comm),
+            hex(signal_buffer.data_ptr()),
+            signal_buffer.device,
+            torch.cuda.current_device(),
         )
         return signal_buffer
 
@@ -493,20 +523,44 @@ class FlagCXConnectorWorker:
         self, uid_bytes: bytes, remote_zmq_addr: str
     ) -> Any:
         """Prefill side: given uid_bytes from Decode, init pair comm as rank=1.
-        Blocks until both sides have completed CommInitRank + OneSideRegister."""
+        Blocks until both sides have completed CommInitRank + OneSideRegister.
+        Only the first caller per remote_zmq_addr creates the comm; concurrent
+        callers block on a barrier until init finishes."""
         with self.pair_comms_lock:
             if remote_zmq_addr in self.pair_comms:
                 return self.pair_comms[remote_zmq_addr].comm
-        uid = self.flagcx.unique_id_from_bytes(uid_bytes)
-        uid_ptr = ctypes.POINTER(flagcxUniqueId)(uid)
-        comm = self.flagcx.flagcxCommInitRank(2, uid_ptr, 1)
-        signal_buffer = self._register_kv_for_comm(comm)
-        with self.pair_comms_lock:
-            self.pair_comms[remote_zmq_addr] = PairCommInfo(
-                comm=comm, my_rank=1, signal_buffer=signal_buffer,
+            barrier = self._pair_comm_init_barriers.get(remote_zmq_addr)
+            if barrier is not None:
+                # Another thread is already initializing — wait for it.
+                is_initializer = False
+            else:
+                is_initializer = True
+                barrier = threading.Event()
+                self._pair_comm_init_barriers[remote_zmq_addr] = barrier
+
+        if not is_initializer:
+            barrier.wait()
+            with self.pair_comms_lock:
+                return self.pair_comms[remote_zmq_addr].comm
+
+        try:
+            self._ensure_cuda_device()
+            uid = self.flagcx.unique_id_from_bytes(uid_bytes)
+            uid_ptr = ctypes.POINTER(flagcxUniqueId)(uid)
+            comm = self.flagcx.flagcxCommInitRank(2, uid_ptr, 1)
+            signal_buffer = self._register_kv_for_comm(comm)
+            with self.pair_comms_lock:
+                self.pair_comms[remote_zmq_addr] = PairCommInfo(
+                    comm=comm, my_rank=1, signal_buffer=signal_buffer,
+                )
+            logger.info(
+                "Pair comm ready (responder/rank=1) ↔ %s", remote_zmq_addr
             )
-        logger.info("Pair comm ready (responder/rank=1) ↔ %s", remote_zmq_addr)
-        return comm
+            return comm
+        finally:
+            barrier.set()
+            with self.pair_comms_lock:
+                self._pair_comm_init_barriers.pop(remote_zmq_addr, None)
 
     def _finalize_pair_comm_initiator(
         self, uid: Any, remote_zmq_addr: str
@@ -514,6 +568,7 @@ class FlagCXConnectorWorker:
         """Decode side: called in executor thread after uid has been sent to
         Prefill.  Blocks on CommInitRank(rank=0) + OneSideRegister so both
         sides rendezvous before any PutSignal is issued."""
+        self._ensure_cuda_device()
         comm = self.flagcx.flagcxCommInitRank(2, uid, 0)
         signal_buffer = self._register_kv_for_comm(comm)
         with self.pair_comms_lock:
@@ -610,17 +665,25 @@ class FlagCXConnectorWorker:
     def _sender_worker(self, metadata_bytes: bytes):
         try:
             metadata = self._decoder.decode(metadata_bytes)
-            # First contact from this Decode TP rank: init pair comm before
-            # transferring.  CommInitRank(rank=1) blocks until Decode (rank=0)
-            # also enters it — they rendezvous naturally.
+            remote_zmq_addr = (
+                f"{metadata.remote_hostname}:"
+                f"{metadata.remote_port + self.tp_rank}"
+            )
             if metadata.uid_bytes is not None:
-                remote_zmq_addr = (
-                    f"{metadata.remote_hostname}:"
-                    f"{metadata.remote_port + self.tp_rank}"
-                )
+                # First contact from this Decode TP rank: init pair comm.
+                # _init_pair_comm_responder deduplicates concurrent callers
+                # via barriers — only the first one creates the comm.
                 self._init_pair_comm_responder(
                     metadata.uid_bytes, remote_zmq_addr
                 )
+            else:
+                # Subsequent message — wait for any in-progress init to finish.
+                with self.pair_comms_lock:
+                    barrier = self._pair_comm_init_barriers.get(
+                        remote_zmq_addr
+                    )
+                if barrier is not None:
+                    barrier.wait()
             self._send_kv_to_decode(metadata)
         except Exception as e:
             logger.error("FlagCX sender worker error: %s", e)
@@ -673,6 +736,7 @@ class FlagCXConnectorWorker:
         The last call carries a signal increment so the receiver's
         flagcxWaitSignal unblocks.
         """
+        self._ensure_cuda_device()
         local_base_addr = self.kv_caches_base_addr
         remote_base_addr = agent_meta.kv_caches_base_addr
         block_len = self.block_len
@@ -732,11 +796,12 @@ class FlagCXConnectorWorker:
         if not xfer_list:
             return 0
 
-        # Serialise counter-increment AND all PutSignal enqueues under the
-        # per-pair send_lock.  This guarantees that RDMA signal writes land
-        # in monotonic order on the remote signal buffer — otherwise a
-        # higher signal value could be overwritten by a lower one from a
-        # concurrent thread, causing cuStreamWaitValue64(GEQ) to deadlock.
+        # Serialise PutSignal enqueues under the per-pair send_lock so that
+        # the atomic-add signals land in order on the remote signal buffer.
+        # flagcxPutSignal does an atomic ADD of signal_value on the remote
+        # signal slot, so we always pass 1 for the last transfer in a batch
+        # (and 0 for all others).  The remote signal thus accumulates as
+        # 1, 2, 3, ... matching the Decode side's monotonic expected values.
         with pair_info.send_lock:
             pair_info.signal_counter += 1
             expected_signal = pair_info.signal_counter
@@ -751,13 +816,10 @@ class FlagCXConnectorWorker:
                 size = n_blocks * block_len
                 is_last = (i == len(xfer_list) - 1)
 
-                # signal_offset = 0: per-pair signal buffer has a single uint64 slot
                 signal_offset = 0
-                signal_value = expected_signal if is_last else 0
+                # Atomic add: always +1 on the last xfer, 0 on others.
+                signal_value = 1 if is_last else 0
 
-                # For PutSignal we need to express offsets relative to the
-                # registered MR base. Since each layer is a separate MR slot,
-                # we find its mr_index.
                 src_mr_idx = local_base_addr.index(local_layer_addr)
                 dst_mr_idx = remote_base_addr.index(remote_layer_addr)
 
@@ -789,19 +851,34 @@ class FlagCXConnectorWorker:
         """Send metadata to Prefiller via ZMQ, requesting it to RDMA-write
         the KV blocks.  On first contact, includes uid_bytes so Prefill can
         init the per-pair comm; Decode concurrently calls CommInitRank in an
-        executor so both sides rendezvous without blocking the event loop."""
+        executor so both sides rendezvous without blocking the event loop.
+
+        Concurrent first-contact coroutines for the same path are serialised
+        via _pair_comm_init_events: only the first one generates a uid and
+        creates the comm; the rest wait for that to finish."""
         req_ids, block_ids = map(list, zip(*req_blocks))
 
-        # Check if this is the first contact with this Prefill TP rank.
+        # Determine init responsibility under lock.
+        need_init = False
+        must_wait_init = False
         with self.pair_comms_lock:
-            need_init = path not in self.pair_comms
+            if path not in self.pair_comms:
+                gate = self._pair_comm_init_events.get(path)
+                if gate is not None:
+                    # Another coroutine is already initializing.
+                    must_wait_init = True
+                else:
+                    need_init = True
+                    gate = asyncio.Event()
+                    self._pair_comm_init_events[path] = gate
+
+        if must_wait_init:
+            # Wait for the initializer to finish, then send without uid.
+            await gate  # type: ignore[arg-type]
 
         uid: Any = None
         uid_bytes_to_send: Optional[bytes] = None
         if need_init:
-            # Generate uid BEFORE sending — Prefill needs it to enter
-            # CommInitRank.  The uid is embedded in the metadata message;
-            # we then immediately kick off CommInitRank(rank=0) in an executor.
             uid = self.flagcx.flagcxGetUniqueId()
             uid_bytes_to_send = bytes(uid.contents.internal)
 
@@ -816,9 +893,6 @@ class FlagCXConnectorWorker:
 
         encoded_data = self._encoder.encode(metadata)
 
-        # Use a persistent PUSH socket per Prefill peer.  Creating a new
-        # socket per request with linger=0 risks dropping messages if the
-        # TCP connection hasn't been established before the socket is closed.
         sock = self._push_sockets.get(path)
         if sock is None:
             sock = make_zmq_socket(
@@ -826,25 +900,21 @@ class FlagCXConnectorWorker:
             )
             self._push_sockets[path] = sock
 
-        comm_future = None
         try:
             await sock.send(encoded_data)
             if need_init:
-                # Kick off CommInitRank(rank=0) in a thread pool so the event
-                # loop stays responsive while Prefill's worker thread also
-                # enters CommInitRank(rank=1) upon receiving the message above.
                 loop = asyncio.get_event_loop()
-                comm_future = loop.run_in_executor(
+                await loop.run_in_executor(
                     None,
                     self._finalize_pair_comm_initiator,
                     uid,
                     path,
                 )
-            if comm_future is not None:
-                await comm_future  # ensure Decode side also finished registering
-            # Decode tracks signal counter locally — no need to wait for
-            # Prefill's ZMQ reply.  flagcxWaitSignal on the GPU side will
-            # block until the RDMA PutSignal from Prefill lands.
+                # Unblock waiters and clean up the gate.
+                with self.pair_comms_lock:
+                    self._pair_comm_init_events.pop(path, None)
+                gate.set()  # type: ignore[union-attr]
+
             pair_info = self.pair_comms.get(path)
             if pair_info:
                 pair_info.signal_counter += 1
@@ -855,6 +925,11 @@ class FlagCXConnectorWorker:
             return
         except Exception as e:
             logger.error("FlagCX receive_kv failed for %s: %s", req_ids, e)
+            # If we were the initializer, unblock waiters even on failure.
+            if need_init:
+                with self.pair_comms_lock:
+                    self._pair_comm_init_events.pop(path, None)
+                gate.set()  # type: ignore[union-attr]
             return
         finally:
             pending_wait.ready.set()
@@ -903,16 +978,32 @@ class FlagCXConnectorWorker:
             self._active_signal_waits = []
         if not waits:
             return
+        self._ensure_cuda_device()
         torch_stream = torch.cuda.current_stream()
         flagcx_stream = self.flagcx.adaptor_stream_copy(torch_stream)
         try:
             for w in waits:
                 w.ready.wait(timeout=60)
                 if w.comm is not None and w.signal_value > 0:
-                    self.flagcx.flagcxWaitSignal(
-                        w.comm, w.peer_rank, 0,
-                        w.signal_value, flagcx_stream,
-                    )
+                    try:
+                        self.flagcx.flagcxWaitSignal(
+                            w.comm, w.peer_rank, 0,
+                            w.signal_value, flagcx_stream,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "flagcxWaitSignal failed: comm=%s peer=%d "
+                            "signal_offset=0 expected=%d current_device=%d "
+                            "torch_stream=%s flagcx_stream=%s reqs=%s",
+                            self._comm_repr(w.comm),
+                            w.peer_rank,
+                            w.signal_value,
+                            torch.cuda.current_device(),
+                            hex(torch_stream.cuda_stream),
+                            self._comm_repr(flagcx_stream),
+                            w.req_ids,
+                        )
+                        raise
         finally:
             self.flagcx.adaptor_stream_free(flagcx_stream)
 
