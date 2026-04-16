@@ -27,6 +27,14 @@ REQUIRED_VARS = [
 # Optional environment variables (logged as warning if missing)
 OPTIONAL_VARS = [
     "PLATFORM",
+    # Override vars for workflow_run context — when set, these take precedence
+    # over the GitHub default env vars (which reflect the notification workflow,
+    # not the original CI run).
+    "OVERRIDE_REF",  # e.g. github.event.workflow_run.head_branch
+    "OVERRIDE_SHA",  # e.g. github.event.workflow_run.head_sha
+    "OVERRIDE_RUN_URL",  # e.g. github.event.workflow_run.html_url
+    "OVERRIDE_WORKFLOW",  # e.g. github.event.workflow_run.name
+    "PR_NUMBER",  # e.g. github.event.workflow_run.pull_requests[0].number
 ]
 
 
@@ -71,17 +79,22 @@ def main():
     platform = os.environ.get("PLATFORM", "")
 
     # GitHub default environment variables (always available on runners)
-    workflow = os.environ["GITHUB_WORKFLOW"]
+    # Override vars take precedence — used when called from workflow_run context
+    workflow = os.environ.get("OVERRIDE_WORKFLOW") or os.environ["GITHUB_WORKFLOW"]
     repo = os.environ["GITHUB_REPOSITORY"]
-    ref = os.environ["GITHUB_REF_NAME"]
-    sha = os.environ["GITHUB_SHA"]
+    ref = os.environ.get("OVERRIDE_REF") or os.environ["GITHUB_REF_NAME"]
+    sha = os.environ.get("OVERRIDE_SHA") or os.environ["GITHUB_SHA"]
     actor = os.environ["GITHUB_ACTOR"]
     run_id = os.environ["GITHUB_RUN_ID"]
     server_url = os.environ["GITHUB_SERVER_URL"]
     event_name = os.environ["GITHUB_EVENT_NAME"]
+    pr_number = os.environ.get("PR_NUMBER", "")
 
     short_sha = sha[:7]
-    run_url = f"{server_url}/{repo}/actions/runs/{run_id}"
+    run_url = (
+        os.environ.get("OVERRIDE_RUN_URL")
+        or f"{server_url}/{repo}/actions/runs/{run_id}"
+    )
 
     # --- 1. Obtain tenant_access_token ---
     token_req = urllib.request.Request(
@@ -153,7 +166,20 @@ def main():
                             "content": f"**Commit:** {short_sha}",
                         },
                     },
-                ],
+                ]
+                + (
+                    [
+                        {
+                            "is_short": False,
+                            "text": {
+                                "tag": "lark_md",
+                                "content": f"**PR:** [{repo}#{pr_number}]({server_url}/{repo}/pull/{pr_number})",
+                            },
+                        },
+                    ]
+                    if pr_number
+                    else []
+                ),
             },
             {"tag": "hr"},
             {
