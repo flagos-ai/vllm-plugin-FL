@@ -398,6 +398,7 @@ class PlatformFL(Platform):
         if cls.device_type == "musa":
             major, minor = torch.musa.get_device_capability(device_id)
             return DeviceCapability(major=major, minor=minor)
+        # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
             return None        
         major, minor = torch.cuda.get_device_capability(device_id)

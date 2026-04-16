@@ -83,3 +83,8 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
         if current_platform.device_type == "npu":
             from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
             apply_ascend_patches()
+
+        # Apply Sunrise/PTPU monkey-patches if running on PTPU.
+        if current_platform.device_type == "ptpu":
+            from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
+            apply_sunrise_patches()
