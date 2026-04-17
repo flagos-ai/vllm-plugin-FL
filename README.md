@@ -43,7 +43,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     2.1 Clone the repository:
 
     ```sh
-    git clone https://github.com/flagos-ai/vllm-plugin-FL
+    git clone --branch v0.1.0 --depth 1 https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
     2.2 install
