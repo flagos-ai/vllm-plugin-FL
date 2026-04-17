@@ -16,6 +16,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           sparse-checkout: .github/scripts
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # workflow_run.pull_requests is empty for fork PRs, so fall back to API lookup by SHA
+          PR_NUM="${{ github.event.workflow_run.pull_requests[0].number }}"
+          if [ -z "$PR_NUM" ]; then
+            HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+            PR_NUM=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/pulls" \
+              --jq '.[0].number // empty' 2>/dev/null || true)
+          fi
+          echo "number=${PR_NUM}" >> "$GITHUB_OUTPUT"
       - name: Send Feishu notification
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
@@ -26,5 +39,5 @@ jobs:
           OVERRIDE_REF: ${{ github.event.workflow_run.head_branch }}
           OVERRIDE_SHA: ${{ github.event.workflow_run.head_sha }}
           OVERRIDE_RUN_URL: ${{ github.event.workflow_run.html_url }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: python .github/scripts/notify_feishu.py
