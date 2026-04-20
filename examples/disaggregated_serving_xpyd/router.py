@@ -135,7 +135,8 @@ async def _handle_completions(api, request):
 
         return StreamingResponse(generate(), media_type="application/json")
     except Exception as e:
-        import sys, traceback
+        import sys
+        import traceback
         print(f"Error in proxy [{api}]: {e}")
         print("".join(traceback.format_exception(*sys.exc_info())))
         raise
