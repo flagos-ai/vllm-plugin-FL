@@ -27,6 +27,13 @@ on:
       platform:
         required: true
         type: string
+    secrets:
+      FEISHU_APP_ID:
+        required: false
+      FEISHU_APP_SECRET:
+        required: false
+      FEISHU_CHAT_ID:
+        required: false
 
 jobs:
   setup:
@@ -122,3 +129,24 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
+
+  # ============================================================
+  # Feishu notification — per-platform status
+  # ============================================================
+  notify:
+    needs: [setup, unit, functional, e2e]
+    if: always()
+    uses: ./.github/workflows/_notify_feishu.yml
+    with:
+      platform: ${{ inputs.platform }}
+      status: >-
+        ${{ (needs.unit.result == 'success' &&
+             needs.functional.result == 'success' &&
+             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped'))
+            && 'success'
+            || (needs.unit.result == 'cancelled' ||
+                needs.functional.result == 'cancelled' ||
+                needs.e2e.result == 'cancelled')
+               && 'cancelled'
+               || 'failure' }}
+    secrets: inherit
