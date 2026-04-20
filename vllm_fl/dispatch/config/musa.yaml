@@ -33,17 +33,14 @@ op_backends:
     - vendor:musa
     - flagos
     - reference
-
   rms_norm:
     - flagos
     - vendor:musa
     - reference
-
   silu_and_mul:
     - flagos
     - vendor:musa
     - reference
-
   rotary_embedding:
     - flagos
     - vendor:musa

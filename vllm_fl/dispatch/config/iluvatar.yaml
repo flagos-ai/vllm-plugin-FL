@@ -33,17 +33,14 @@ op_backends:
     - flagos
     - vendor:iluvatar
     - reference
-
   rms_norm:
     - flagos
     - vendor:iluvatar
     - reference
-
   silu_and_mul:
     - flagos
     - vendor:iluvatar
     - reference
-
   rotary_embedding:
     - flagos
     - vendor:iluvatar

@@ -26,25 +26,18 @@ allow_vendors:
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:cuda   : CUDA-specific vendor backend
 op_backends:
-  # attention_backend: prioritize flagos (Triton attention)
   attention_backend:
     - flagos
     - vendor
     - reference
-
-  # rms_norm: prioritize flagos (Triton)
   rms_norm:
     - flagos
     - vendor
     - reference
-
-  # silu_and_mul: prioritize flagos
   silu_and_mul:
     - flagos
     - vendor
     - reference
-
-  # rotary_embedding: prioritize flagos
   rotary_embedding:
     - flagos
     - vendor

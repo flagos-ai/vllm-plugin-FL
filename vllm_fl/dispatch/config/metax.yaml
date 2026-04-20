@@ -29,22 +29,15 @@ op_backends:
   # attention_backend: prioritize vendor (MACA attention)
   attention_backend:
     - vendor:metax
-
   topk_softmax:
     - vendor:metax
-
-  # rms_norm: prioritize flagos (Triton)
   rms_norm:
     - flagos
     - vendor:metax
     - reference
-
-  # silu_and_mul: prioritize vendor
   silu_and_mul:
     - vendor:metax
     - reference
-
-  # rotary_embedding: prioritize flagos
   rotary_embedding:
     - flagos
     - vendor:metax
