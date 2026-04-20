@@ -53,9 +53,6 @@ if _flagcx_path and os.path.isdir(_flagcx_path):
 try:
     from plugin.interservice.flagcx_wrapper import (
         FLAGCXLibrary,
-        buffer_type,
-        flagcxComm_t,
-        flagcxStream_t,
         flagcxUniqueId,
     )
 except ImportError as e:
@@ -541,11 +538,6 @@ class FlagCXConnectorWorker:
         )
         return signal_buffer
 
-    # ------------------------------------------------------------------
-    # Comm init: Prefill side (initiator, rank=0)
-    # Called from _sender_worker on first send to a Decode peer.
-    # Pattern: P2pNcclEngine.create_connect
-    # ------------------------------------------------------------------
     def _create_pair_comm(self, decode_listener_addr: str) -> PairCommInfo:
         """Prefill side: create pair comm to a Decode peer.
         Sends uid via ZMQ DEALER→ROUTER, then both sides call
@@ -567,6 +559,10 @@ class FlagCXConnectorWorker:
         )
         sock = self.zmq_ctx.socket(zmq.DEALER)
         sock.setsockopt_string(zmq.IDENTITY, my_identity)
+        # Fail fast if the Decode listener isn't reachable / hangs, so a
+        # ThreadPoolExecutor worker doesn't get stuck forever.
+        sock.setsockopt(zmq.RCVTIMEO, 120000)  # 120s
+        sock.setsockopt(zmq.LINGER, 0)
         sock.connect(f"tcp://{decode_listener_addr}")
         sock.send(msgspec.msgpack.encode({
             "cmd": "NEW",
@@ -578,8 +574,22 @@ class FlagCXConnectorWorker:
         signal_buffer = self._register_kv_for_comm(comm)
 
         # 4. Wait for Decode to confirm registration is done
-        reply = sock.recv()
-        sock.close()
+        try:
+            reply = sock.recv()
+        except zmq.Again as e:
+            sock.close()
+            raise RuntimeError(
+                f"Timed out waiting for Decode registration reply "
+                f"from {decode_listener_addr}"
+            ) from e
+        finally:
+            sock.close()
+
+        if reply != b"OK":
+            raise RuntimeError(
+                f"Decode handshake with {decode_listener_addr} failed: "
+                f"unexpected reply {reply!r}"
+            )
 
         pair_info = PairCommInfo(
             comm=comm, my_rank=0, signal_buffer=signal_buffer,
@@ -592,11 +602,6 @@ class FlagCXConnectorWorker:
         )
         return pair_info
 
-    # ------------------------------------------------------------------
-    # Comm init: Decode side (responder, rank=1)
-    # Runs in _decode_listener_thread, handles NEW from Prefill.
-    # Pattern: P2pNcclEngine.listen_for_requests (NEW branch)
-    # ------------------------------------------------------------------
     def _decode_listener_thread(
         self, ready_event: threading.Event, base_port: int, tp_rank: int
     ):
@@ -625,8 +630,11 @@ class FlagCXConnectorWorker:
                     self._ensure_cuda_device()
 
                     uid = self.flagcx.unique_id_from_bytes(uid_bytes)
-                    uid_ptr = ctypes.POINTER(flagcxUniqueId)(uid)
-                    comm = self.flagcx.flagcxCommInitRank(2, uid_ptr, 1)
+                    # Match style used by device_communicators/flagcx.py:
+                    # pass a pointer via ctypes.byref to flagcxCommInitRank.
+                    comm = self.flagcx.flagcxCommInitRank(
+                        2, ctypes.byref(uid), 1
+                    )
                     signal_buffer = self._register_kv_for_comm(comm)
 
                     remote_addr = identity.decode()
@@ -686,6 +694,11 @@ class FlagCXConnectorWorker:
                 self.kv_tensors_meta.append((base_addr, curr_size))
 
         self.kv_caches_base_addr = seen_base_addresses
+        # Precompute addr→layer-index map to avoid O(L) list.index() in the
+        # per-transfer inner loop of _send_blocks.
+        self._local_mr_idx: dict[int, int] = {
+            addr: i for i, addr in enumerate(seen_base_addresses)
+        }
 
         assert tensor_size_bytes is not None
         assert self.num_blocks != 0
@@ -855,6 +868,10 @@ class FlagCXConnectorWorker:
         local_base_addr = self.kv_caches_base_addr
         remote_base_addr = agent_meta.kv_caches_base_addr
         block_len = self.block_len
+        local_mr_idx = self._local_mr_idx
+        remote_mr_idx = {
+            addr: i for i, addr in enumerate(remote_base_addr)
+        }
 
         decode_listener_addr = (
             f"{agent_meta.remote_hostname}:"
@@ -923,8 +940,8 @@ class FlagCXConnectorWorker:
                 is_last = (i == len(xfer_list) - 1)
                 signal_value = 1 if is_last else 0
 
-                src_mr_idx = local_base_addr.index(local_layer_addr)
-                dst_mr_idx = remote_base_addr.index(remote_layer_addr)
+                src_mr_idx = local_mr_idx[local_layer_addr]
+                dst_mr_idx = remote_mr_idx[remote_layer_addr]
 
                 self.flagcx.flagcxPutSignal(
                     comm, peer_rank,
@@ -991,15 +1008,20 @@ class FlagCXConnectorWorker:
 
             # Look up pair comm (created by Decode listener thread
             # during Prefill's _create_pair_comm handshake).
-            pair_info = None
+            # The pair_comms key is the Prefill identity, which is
+            # "{prefill_host}:{prefill_side_channel_port + prefill_tp_rank}".
+            # Since we connect symmetrically (same tp_rank on both sides),
+            # stripping the tcp:// prefix from `path` yields that key.
+            prefill_key = path[len("tcp://"):] if path.startswith(
+                "tcp://"
+            ) else path
             with self.pair_comms_lock:
-                if self.pair_comms:
-                    pair_info = next(iter(self.pair_comms.values()))
+                pair_info = self.pair_comms.get(prefill_key)
 
             if pair_info is None:
                 logger.error(
-                    "Pair comm not found after Prefill reply for %s",
-                    req_ids,
+                    "Pair comm not found for %s after Prefill reply for %s",
+                    prefill_key, req_ids,
                 )
                 return
 

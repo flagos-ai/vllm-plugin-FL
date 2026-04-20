@@ -4,10 +4,10 @@
 # Usage:
 #   python3 router.py \
 #     --host 0.0.0.0 --port 8000 \
-#     --prefill http://<prefill_host>:<vllm_port> <VLLM_FLAGCX_BOOTSTRAP_PORT> \
+#     --prefill http://<prefill_host>:<vllm_port> <FLAGCX_BOOTSTRAP_PORT> \
 #     --decode  http://<decode_host>:<vllm_port>
 #
-# VLLM_FLAGCX_BOOTSTRAP_PORT is the ZMQ side-channel BASE port (default 8998).
+# FLAGCX_BOOTSTRAP_PORT is the ZMQ side-channel BASE port (default 8998).
 
 import argparse
 import asyncio
@@ -158,7 +158,7 @@ def parse_args():
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--prefill", nargs="+", action="append", dest="prefill_raw",
         metavar=("URL", "ZMQ_PORT"),
-        help="Prefill URL and ZMQ side-channel base port (= VLLM_FLAGCX_BOOTSTRAP_PORT, default 8998)")
+        help="Prefill URL and ZMQ side-channel base port (= FLAGCX_BOOTSTRAP_PORT, default 8998)")
     parser.add_argument("--decode", nargs=1, action="append", dest="decode_raw",
         metavar="URL", help="Decode vllm URL")
 
