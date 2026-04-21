@@ -397,10 +397,8 @@ class FlagCXConnectorWorker:
         self.hostname = get_ip()
 
         # ---- FlagCX library ----
-        library_path = os.getenv("FLAGCX_LIB_PATH")
-        if library_path is None:
-            flagcx_path = os.getenv("FLAGCX_PATH", "")
-            library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
+        flagcx_path = os.getenv("FLAGCX_PATH", "")
+        library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
         self.flagcx = FLAGCXLibrary(library_path)
         self.cuda_device_index = torch.cuda.current_device()
 
