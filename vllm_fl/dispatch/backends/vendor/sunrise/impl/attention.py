@@ -634,8 +634,7 @@ class AttentionFLImpl(AttentionImpl):
             suffix_scheduler_metadata=attn_metadata.scheduler_metadata,
             q_descale=layer._q_scale,
             k_descale=layer._k_scale,
-            v_descale=layer._v_scale,
-            s_aux=None, ## sink is None
+            v_descale=layer._v_scale
         )
         return output
 

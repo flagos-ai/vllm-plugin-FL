@@ -52,7 +52,7 @@ class SunriseVocabParallelEmbedding(VocabParallelEmbedding):
                 self.shard_indices.added_vocab_end_index,
             )
         else:
-            masked_input = input_
+            masked_input, input_mask = input_, None
 
         output_parallel = self.quant_method.embedding(self, masked_input.long())
         if self.tp_size > 1:
