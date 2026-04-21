@@ -24,7 +24,7 @@ from fastapi.responses import StreamingResponse
 global_args = None
 
 
-async def wait_for_prefill_health(prefill_clients, ready):
+async def wait_for_health(prefill_clients, decode_clients, ready):
     for client_info in prefill_clients:
         while True:
             try:
@@ -35,8 +35,18 @@ async def wait_for_prefill_health(prefill_clients, ready):
                 print(f"Waiting for prefill {client_info['url']}/health: {exc}")
                 await asyncio.sleep(1)
         print(f"Prefill {client_info['url']} is healthy.")
+    for client_info in decode_clients:
+        while True:
+            try:
+                response = await client_info["client"].get("/health")
+                response.raise_for_status()
+                break
+            except Exception as exc:
+                print(f"Waiting for decode {client_info['url']}/health: {exc}")
+                await asyncio.sleep(1)
+        print(f"Decode {client_info['url']} is healthy.")
     ready.set()
-    print("All prefill instances are ready.")
+    print("All prefill and decode instances are ready.")
 
 
 @asynccontextmanager
@@ -47,28 +57,45 @@ async def lifespan(app):
 
     for url, side_channel_port in global_args.prefill:
         parsed_url = urllib.parse.urlparse(url)
-        app.state.prefill_clients.append({
-            "client": httpx.AsyncClient(
-                timeout=None, base_url=url,
-                limits=httpx.Limits(max_connections=None, max_keepalive_connections=None),
-            ),
-            "url": url,
-            "remote_host": parsed_url.hostname,
-            "side_channel_port": side_channel_port,
-        })
+        app.state.prefill_clients.append(
+            {
+                "client": httpx.AsyncClient(
+                    timeout=None,
+                    base_url=url,
+                    limits=httpx.Limits(
+                        max_connections=None, max_keepalive_connections=None
+                    ),
+                ),
+                "url": url,
+                "remote_host": parsed_url.hostname,
+                "side_channel_port": side_channel_port,
+            }
+        )
 
     for url in global_args.decode:
-        app.state.decode_clients.append({
-            "client": httpx.AsyncClient(
-                timeout=None, base_url=url,
-                limits=httpx.Limits(max_connections=None, max_keepalive_connections=None),
-            ),
-        })
+        app.state.decode_clients.append(
+            {
+                "client": httpx.AsyncClient(
+                    timeout=None,
+                    base_url=url,
+                    limits=httpx.Limits(
+                        max_connections=None, max_keepalive_connections=None
+                    ),
+                ),
+                "url": url,
+            }
+        )
 
-    asyncio.create_task(wait_for_prefill_health(app.state.prefill_clients, app.state.ready))
+    asyncio.create_task(
+        wait_for_health(
+            app.state.prefill_clients, app.state.decode_clients, app.state.ready
+        )
+    )
     app.state.prefill_iterator = itertools.cycle(range(len(app.state.prefill_clients)))
     app.state.decode_iterator = itertools.cycle(range(len(app.state.decode_clients)))
-    print(f"Got {len(app.state.prefill_clients)} prefill clients and {len(app.state.decode_clients)} decode clients.")
+    print(
+        f"Got {len(app.state.prefill_clients)} prefill clients and {len(app.state.decode_clients)} decode clients."
+    )
 
     yield
 
@@ -94,14 +121,18 @@ async def send_to_prefill(prefill_client, endpoint, req_data, request_id):
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     try:
-        response = await prefill_client["client"].post(endpoint, json=data, headers=headers)
+        response = await prefill_client["client"].post(
+            endpoint, json=data, headers=headers
+        )
         response.raise_for_status()
         await response.aclose()
     except Exception as exc:
         print(f"Prefill request {request_id} error: {exc}")
 
 
-async def stream_from_decode(prefill_client, decode_client, endpoint, req_data, request_id):
+async def stream_from_decode(
+    prefill_client, decode_client, endpoint, req_data, request_id
+):
     data = req_data.copy()
     data["kv_transfer_params"] = {
         "do_remote_prefill": True,
@@ -113,7 +144,9 @@ async def stream_from_decode(prefill_client, decode_client, endpoint, req_data, 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    async with decode_client["client"].stream("POST", endpoint, json=data, headers=headers) as response:
+    async with decode_client["client"].stream(
+        "POST", endpoint, json=data, headers=headers
+    ) as response:
         response.raise_for_status()
         async for chunk in response.aiter_bytes():
             yield chunk
@@ -130,13 +163,16 @@ async def _handle_completions(api, request):
         asyncio.create_task(send_to_prefill(prefill_client, api, req_data, request_id))
 
         async def generate():
-            async for chunk in stream_from_decode(prefill_client, decode_client, api, req_data, request_id):
+            async for chunk in stream_from_decode(
+                prefill_client, decode_client, api, req_data, request_id
+            ):
                 yield chunk
 
         return StreamingResponse(generate(), media_type="application/json")
     except Exception as e:
         import sys
         import traceback
+
         print(f"Error in proxy [{api}]: {e}")
         print("".join(traceback.format_exception(*sys.exc_info())))
         raise
@@ -153,18 +189,31 @@ async def handle_chat_completions(request: Request):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="1P1D proxy for FlagcxConnector (ZMQ side-channel)")
+    parser = argparse.ArgumentParser(
+        description="1P1D proxy for FlagcxConnector (ZMQ side-channel)"
+    )
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--prefill", nargs="+", action="append", dest="prefill_raw",
+    parser.add_argument(
+        "--prefill",
+        nargs="+",
+        action="append",
+        dest="prefill_raw",
         metavar=("URL", "ZMQ_PORT"),
-        help="Prefill URL and ZMQ side-channel base port (= FLAGCX_BOOTSTRAP_PORT, default 8998)")
-    parser.add_argument("--decode", nargs=1, action="append", dest="decode_raw",
-        metavar="URL", help="Decode vllm URL")
+        help="Prefill URL and ZMQ side-channel base port (= FLAGCX_BOOTSTRAP_PORT, default 8998)",
+    )
+    parser.add_argument(
+        "--decode",
+        nargs=1,
+        action="append",
+        dest="decode_raw",
+        metavar="URL",
+        help="Decode vllm URL",
+    )
 
     args = parser.parse_args()
     args.prefill = []
-    for item in (args.prefill_raw or []):
+    for item in args.prefill_raw or []:
         url = item[0]
         port = int(item[1]) if len(item) >= 2 else 8998
         args.prefill.append((url, port))
@@ -180,4 +229,5 @@ def parse_args():
 if __name__ == "__main__":
     global_args = parse_args()
     import uvicorn
+
     uvicorn.run(app, host=global_args.host, port=global_args.port)
