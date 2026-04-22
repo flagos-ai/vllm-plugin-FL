@@ -36,8 +36,9 @@ c550:
   name: "c550"
   tests:
     e2e:
-      inference: {}
-        qwen3_5: ["35b_tp4"]
+      inference:
+        #qwen3_5: ["35b_tp4"]
+        minicpm: ["o45_tp4"]
       serving:
         qwen3: ["4b_tp2"]
     functional:

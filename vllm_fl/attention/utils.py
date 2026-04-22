@@ -14,6 +14,7 @@ def patch_mm_encoder_attention():
     fallback to flash_attn.
     """
     import vllm.attention.layers.mm_encoder_attention as mm_mod
+    import vllm.attention.layer as layer_mod
     from vllm.attention.backends.registry import AttentionBackendEnum
 
     def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
@@ -35,3 +36,4 @@ def patch_mm_encoder_attention():
             return None
 
     mm_mod.maybe_get_vit_flash_attn_backend = _patched_maybe_get_vit_flash_attn_backend
+    layer_mod.maybe_get_vit_flash_attn_backend = _patched_maybe_get_vit_flash_attn_backend
