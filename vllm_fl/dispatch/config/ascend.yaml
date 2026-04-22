@@ -32,20 +32,14 @@ op_backends:
     - vendor
     - flagos
     - reference
-
-  # rms_norm: prioritize vendor (torch_npu) implementation
   rms_norm:
     - vendor
     - flagos
     - reference
-
-  # silu_and_mul: prioritize vendor implementation
   silu_and_mul:
     - flagos
     - vendor
     - reference
-
-  # rotary_embedding: prioritize vendor (torch_npu._npu_rotary_embedding)
   rotary_embedding:
     - vendor
     - flagos

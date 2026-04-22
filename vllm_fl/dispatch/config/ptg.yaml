@@ -31,20 +31,14 @@ op_backends:
     - flagos
     - vendor
     - reference
-
-  # rms_norm: prioritize flagos
   rms_norm:
     - flagos
     - vendor
     - reference
-
-  # silu_and_mul: prioritize flagos
   silu_and_mul:
     - flagos
     - vendor
     - reference
-
-  # rotary_embedding: prioritize flagos
   rotary_embedding:
     - flagos
     - vendor

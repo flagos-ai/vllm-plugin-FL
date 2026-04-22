@@ -31,23 +31,16 @@ op_backends:
     - vendor:metax
     - flagos
     - reference
-
   topk_softmax:
     - vendor:metax
-
-  # rms_norm: prioritize flagos
   rms_norm:
     - flagos
     - vendor:metax
     - reference
-
-  # silu_and_mul: prioritize vendor (metax)
   silu_and_mul:
     - vendor:metax
     - flagos
     - reference
-
-  # rotary_embedding: prioritize flagos
   rotary_embedding:
     - flagos
     - vendor:metax
@@ -57,6 +50,10 @@ op_backends:
 flagos_blacklist:
   - masked_fill
   - masked_fill_
+  - to_copy
+  - copy_
+  - sort
+  - sort_stable
 
 # OOT (Out-of-Tree) operator blacklist
 oot_blacklist:
