@@ -10,8 +10,9 @@ ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-maca-ci
 runner_labels:
   - self-hosted
   - Linux
-  - ARM64
-  - maca
+  - X64
+  - metax
+  - gpu-8
 
 # Container volumes (hardware-specific paths)
 container_volumes:
