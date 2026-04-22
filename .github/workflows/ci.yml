@@ -4,16 +4,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main, devops]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "examples/**"
-      - "docker/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
+  schedule:
+    - cron: '0 18 * * *'  # daily at 2:00 AM CST (UTC+8)
   pull_request:
     branches: [main, devops]
     paths-ignore:
