@@ -17,6 +17,9 @@ import torch
 
 from vllm.platforms import current_platform
 
+# Ensure platform-specific custom ops (e.g. mcoplib._C) are registered
+current_platform.import_kernels()
+
 # Mark all tests as requiring GPU
 pytestmark = pytest.mark.gpu
 
