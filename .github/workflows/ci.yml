@@ -106,3 +106,14 @@ jobs:
     with:
       platform: ascend
     secrets: inherit
+
+  # ============================================================
+  # Job 4c: MACA platform testing
+  # ============================================================
+  test-maca:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'maca')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: maca
+    secrets: inherit
