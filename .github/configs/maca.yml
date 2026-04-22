@@ -25,9 +25,9 @@ container_options: >-
   --ipc=host
   --privileged
   --device=/dev/dri
-  -device=/dev/mxcd
-  -device=/dev/mem
-  -security-opt seccomp=unconfined
+  --device=/dev/mxcd
+  --device=/dev/mem
+  --security-opt seccomp=unconfined
   --security-opt apparmor=unconfined
   --shm-size=500g
   --ulimit memlock=-1
