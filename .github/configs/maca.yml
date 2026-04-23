@@ -1,5 +1,5 @@
-# Maca Hardware Configuration
-# This file defines CI/CD settings for Maca NPU testing
+# Metax Hardware Configuration
+# This file defines CI/CD settings for Metax GPU testing
 
 platform: maca
 

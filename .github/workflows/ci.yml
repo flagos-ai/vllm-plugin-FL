@@ -4,16 +4,6 @@
 name: CI
 
 on:
-  push:
-    branches: [v0.1.0]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "examples/**"
-      - "docker/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
   pull_request:
     branches: [v0.1.0]
     paths-ignore:
