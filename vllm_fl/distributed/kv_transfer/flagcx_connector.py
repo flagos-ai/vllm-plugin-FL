@@ -83,6 +83,20 @@ class FlagCXAgentMetadata(
     block_ids: list[list[int]]
 
 
+class FlagCXXferResponse(
+    msgspec.Struct,
+    omit_defaults=True,  # type: ignore[call-arg]
+    dict=True,
+):
+    """Sent from Prefill → Decode after one partial KV transfer batch."""
+    status: str
+    ok_reqs: list[ReqId] | None = None
+    err_reqs: list[ReqId] | None = None
+    err_msg: str | None = None
+    base_signal: int = 0
+    num_layers: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -123,8 +137,11 @@ class PendingSignalWait:
     req_ids: list[ReqId]
     comm: Any = None
     peer_rank: int = -1
-    signal_value: int = 0
+    base_signal: int = 0
+    num_layers: int = 0
     ready: threading.Event = field(default_factory=threading.Event)
+    child_waits: list["PendingSignalWait"] = field(default_factory=list)
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 @dataclass
@@ -133,6 +150,7 @@ class PairCommInfo:
     comm: Any
     my_rank: int
     signal_counter: int = 0
+    total_puts: int = 0
     signal_buffer: Optional[torch.Tensor] = None
     send_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -397,8 +415,10 @@ class FlagCXConnectorWorker:
         self.hostname = get_ip()
 
         # ---- FlagCX library ----
-        flagcx_path = os.getenv("FLAGCX_PATH", "")
-        library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
+        library_path = os.getenv("FLAGCX_LIB_PATH")
+        if library_path is None:
+            flagcx_path = os.getenv("FLAGCX_PATH", "")
+            library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
         self.flagcx = FLAGCXLibrary(library_path)
         self.cuda_device_index = torch.cuda.current_device()
 
@@ -462,6 +482,31 @@ class FlagCXConnectorWorker:
         self._active_signal_waits: list[PendingSignalWait] = []
         self._active_signal_waits_lock = threading.Lock()
 
+        self._current_layer_idx: int = 0
+        self._step_valid_waits: list[PendingSignalWait] | None = None
+
+        self._host_wait = os.getenv(
+            "FLAGCX_CONNECTOR_HOST_WAIT", "0"
+        ).lower() in ("1", "true", "yes")
+        if self._host_wait:
+            logger.info(
+                "FLAGCX_CONNECTOR_HOST_WAIT enabled: using host-side "
+                "flagcxWaitCounter instead of GPU-side flagcxWaitSignal"
+            )
+        self._abort_request_timeout = int(os.getenv(
+            "FLAGCX_CONNECTOR_ABORT_REQUEST_TIMEOUT", "480"
+        ))
+        self._put_slice_size = int(os.getenv(
+            "FLAGCX_CONNECTOR_SLICE_SIZE", "65536"
+        ))
+        self._put_batch_size = int(os.getenv(
+            "FLAGCX_CONNECTOR_BATCH_PUTS", "256"
+        ))
+        if self._put_slice_size < 0:
+            self._put_slice_size = 0
+        if self._put_batch_size <= 0:
+            self._put_batch_size = 1
+
         # ---- Attention backend detection ----
         self.block_size = vllm_config.cache_config.block_size
         self.model_config = vllm_config.model_config
@@ -496,6 +541,7 @@ class FlagCXConnectorWorker:
         self.async_zmq_ctx = zmq.asyncio.Context()
         self._encoder = msgspec.msgpack.Encoder()
         self._decoder = msgspec.msgpack.Decoder(FlagCXAgentMetadata)
+        self._response_decoder = msgspec.msgpack.Decoder(FlagCXXferResponse)
 
     # ------------------------------------------------------------------
     # Utility
@@ -667,6 +713,8 @@ class FlagCXConnectorWorker:
 
         seen_base_addresses: list[int] = []
         split_k_and_v = self.kv_topo.split_k_and_v
+        self.num_attn_layers = len(kv_caches)
+        self.per_layer_mrs = 2 if split_k_and_v else 1
         tensor_size_bytes = None
 
         for layer_name, cache_or_caches in kv_caches.items():
@@ -743,7 +791,7 @@ class FlagCXConnectorWorker:
         self, ready_event: threading.Event, base_port: int, tp_rank: int
     ):
         """Prefill sender: ROUTER socket receives requests from Decode,
-        dispatches to thread pool, and relays replies (signal value)."""
+        dispatches to thread pool, and relays partial replies."""
         frontend_path = make_zmq_path(
             "tcp", self.hostname, base_port + tp_rank
         )
@@ -765,7 +813,14 @@ class FlagCXConnectorWorker:
                 sockets = dict(poller.poll())
 
                 if frontend in sockets:
-                    identity, _, metadata_bytes = frontend.recv_multipart()
+                    frames = frontend.recv_multipart()
+                    if len(frames) < 2:
+                        logger.warning(
+                            "Ignoring malformed FlagCX request: %s", frames
+                        )
+                        continue
+                    identity = frames[0]
+                    metadata_bytes = frames[-1]
                     self._sender_executor.submit(
                         self._sender_worker,
                         identity,
@@ -776,7 +831,7 @@ class FlagCXConnectorWorker:
                 if backend in sockets:
                     # Relay reply from worker thread back to Decode
                     identity, reply = backend.recv_multipart()
-                    frontend.send_multipart([identity, b"", reply])
+                    frontend.send_multipart([identity, reply])
 
         except zmq.ContextTerminated:
             pass
@@ -792,7 +847,13 @@ class FlagCXConnectorWorker:
         metadata_bytes: bytes,
         worker_channel_path: str,
     ):
-        reply = b"ERR"
+        pusher = make_zmq_socket(
+            self.zmq_ctx, worker_channel_path, zmq.PUSH
+        )
+
+        def send_response(response: FlagCXXferResponse) -> None:
+            pusher.send_multipart([identity, self._encoder.encode(response)])
+
         try:
             metadata = self._decoder.decode(metadata_bytes)
             decode_listener_addr = (
@@ -806,44 +867,128 @@ class FlagCXConnectorWorker:
             if pair_info is None:
                 self._create_pair_comm(decode_listener_addr)
 
-            expected_signal = self._send_kv_to_decode(metadata)
-            # Reply with the signal value so Decode knows what to wait for
-            reply = str(expected_signal).encode()
+            self._send_kv_to_decode(metadata, send_response)
         except Exception as e:
             logger.error("FlagCX sender worker error: %s", e)
-        finally:
-            pusher = make_zmq_socket(
-                self.zmq_ctx, worker_channel_path, zmq.PUSH
-            )
             try:
-                pusher.send_multipart([identity, reply])
-            except zmq.ZMQError as e:
-                logger.warning("Internal reply error: %s", e)
-            finally:
-                pusher.close()
+                send_response(FlagCXXferResponse(
+                    status="ERROR", err_msg=str(e)
+                ))
+            except Exception:
+                logger.warning("Failed to send FlagCX error response")
+        finally:
+            pusher.close()
 
-    def _send_kv_to_decode(self, meta: FlagCXAgentMetadata):
-        send_reqs: list[tuple[ReqId, SendBlockMeta]] = []
+    def _send_kv_to_decode(
+        self,
+        meta: FlagCXAgentMetadata,
+        send_response: Any,
+    ) -> None:
+        pending: dict[ReqId, list[int]] = {
+            req_id: block_ids
+            for req_id, block_ids in zip(meta.request_ids, meta.block_ids)
+        }
+        deadline = time.perf_counter() + self._abort_request_timeout
+
+        while pending:
+            ready_reqs: list[tuple[ReqId, SendBlockMeta, list[int]]] = []
+            with self.reqs_need_send.lock:
+                for req_id, remote_block_ids in list(pending.items()):
+                    send_meta = self.reqs_need_send.reqs.get(req_id)
+                    if send_meta is not None and send_meta.ready.is_set():
+                        send_meta.expire_time = float("inf")
+                        ready_reqs.append((
+                            req_id, send_meta, remote_block_ids,
+                        ))
+
+            if not ready_reqs:
+                if time.perf_counter() > deadline:
+                    err_reqs = list(pending)
+                    logger.warning(
+                        "Timed out waiting for reqs_need_send ready: %s",
+                        err_reqs,
+                    )
+                    send_response(FlagCXXferResponse(
+                        status="FINISH",
+                        err_reqs=err_reqs,
+                        err_msg="Timeout waiting for P side ready.",
+                    ))
+                    return
+                time.sleep(0.01)
+                continue
+
+            base_signal, num_layers, wait_counter_target = self._send_blocks(
+                ready_reqs, meta
+            )
+
+            if self._host_wait and wait_counter_target > 0:
+                decode_listener_addr = (
+                    f"{meta.remote_hostname}:"
+                    f"{meta.remote_port + self.tp_rank}"
+                )
+                try:
+                    with self.pair_comms_lock:
+                        pair_info = self.pair_comms.get(decode_listener_addr)
+                    if pair_info is not None:
+                        self.flagcx.flagcxWaitCounter(
+                            pair_info.comm, wait_counter_target
+                        )
+                except Exception:
+                    logger.exception(
+                        "flagcxWaitCounter failed: addr=%s target=%d",
+                        decode_listener_addr, wait_counter_target,
+                    )
+                    raise
+
+            ok_reqs = [req_id for req_id, _, _ in ready_reqs]
+            with self.reqs_need_send.lock:
+                for req_id in ok_reqs:
+                    self.reqs_need_send.reqs.pop(req_id, None)
+                    pending.pop(req_id, None)
+
+            with self.finished_sending_reqs.lock:
+                self.finished_sending_reqs.set.update(ok_reqs)
+
+            response_status = "FINISH" if not pending else "CONTINUE"
+            send_response(FlagCXXferResponse(
+                status=response_status,
+                ok_reqs=ok_reqs,
+                base_signal=base_signal,
+                num_layers=num_layers,
+            ))
+
+        if not meta.request_ids:
+            send_response(FlagCXXferResponse(status="FINISH"))
+
+    def _send_kv_to_decode_legacy(
+        self, meta: FlagCXAgentMetadata
+    ) -> tuple[int, int, int]:
+        send_reqs: list[tuple[ReqId, SendBlockMeta, list[int]]] = []
         deadline = time.perf_counter() + 30
         while True:
             with self.reqs_need_send.lock:
                 all_found = True
                 for req_id in meta.request_ids:
-                    if req_id not in self.reqs_need_send.reqs:
+                    send_meta = self.reqs_need_send.reqs.get(req_id)
+                    if send_meta is None or not send_meta.ready.is_set():
                         all_found = False
                         break
                 if all_found:
-                    for req_id in meta.request_ids:
+                    for req_id, remote_block_ids in zip(
+                        meta.request_ids, meta.block_ids
+                    ):
                         send_meta = self.reqs_need_send.reqs[req_id]
                         send_meta.expire_time = float("inf")
-                        send_reqs.append((req_id, send_meta))
+                        send_reqs.append((
+                            req_id, send_meta, remote_block_ids,
+                        ))
                     break
             if time.perf_counter() > deadline:
                 logger.warning(
                     "Timed out waiting for reqs_need_send: %s",
                     meta.request_ids,
                 )
-                return 0
+                return 0, 0, 0
             time.sleep(0.01)
 
         expected_signal = self._send_blocks(send_reqs, meta)
@@ -859,9 +1004,9 @@ class FlagCXConnectorWorker:
 
     def _send_blocks(
         self,
-        send_reqs: list[tuple[ReqId, SendBlockMeta]],
+        send_reqs: list[tuple[ReqId, SendBlockMeta, list[int]]],
         agent_meta: FlagCXAgentMetadata,
-    ):
+    ) -> tuple[int, int, int]:
         self._ensure_cuda_device()
         local_base_addr = self.kv_caches_base_addr
         remote_base_addr = agent_meta.kv_caches_base_addr
@@ -884,78 +1029,155 @@ class FlagCXConnectorWorker:
         my_rank = pair_info.my_rank
         peer_rank = 1 - my_rank
 
-        xfer_list: list[tuple[int, int, int, int, int]] = []
-
-        assert len(send_reqs) == len(agent_meta.block_ids)
-        for (req_id, send_meta), remote_block_ids in zip(
-            send_reqs, agent_meta.block_ids
-        ):
-            send_meta.ready.wait()
-
-            num_remote_blocks = len(remote_block_ids)
-            if num_remote_blocks == 0:
+        req_groups: list[tuple[list[list[int]], list[list[int]]]] = []
+        for req_id, send_meta, remote_block_ids in send_reqs:
+            if not remote_block_ids:
                 continue
-
             local_block_ids = send_meta.local_block_ids
-            num_local_blocks = len(local_block_ids)
-            assert num_local_blocks >= num_remote_blocks
-            if num_local_blocks > num_remote_blocks:
-                local_block_ids = local_block_ids[-num_remote_blocks:]
+            num_remote = len(remote_block_ids)
+            assert len(local_block_ids) >= num_remote
+            if len(local_block_ids) > num_remote:
+                local_block_ids = local_block_ids[-num_remote:]
+            gl, gr = _group_contiguous(local_block_ids, remote_block_ids)
+            if gl:
+                req_groups.append((gl, gr))
 
-            group_local, group_remote = _group_contiguous(
-                local_block_ids, remote_block_ids
-            )
+        if not req_groups:
+            return 0, 0, 0
 
-            for local_layer_addr, remote_layer_addr in zip(
-                local_base_addr, remote_base_addr
-            ):
-                for grp_local, grp_remote in zip(
-                    group_local, group_remote
-                ):
-                    xfer_list.append((
-                        local_layer_addr,
-                        remote_layer_addr,
-                        grp_local[0],
-                        grp_remote[0],
-                        len(grp_local),
-                    ))
-
-        if not xfer_list:
-            return 0
+        per_layer_mrs = self.per_layer_mrs
+        num_layers = self.num_attn_layers
+        # Sanity: registered MRs must match num_layers × per_layer_mrs.
+        assert len(local_base_addr) == num_layers * per_layer_mrs, (
+            f"MR count mismatch: {len(local_base_addr)} vs "
+            f"{num_layers}×{per_layer_mrs}"
+        )
 
         with pair_info.send_lock:
-            pair_info.signal_counter += 1
-            expected_signal = pair_info.signal_counter
-
+            use_remote_signal = not self._host_wait
+            base_signal = pair_info.signal_counter if use_remote_signal else 0
             start_time = time.perf_counter()
-            for i, (
-                local_layer_addr, remote_layer_addr,
-                local_start, remote_start, n_blocks
-            ) in enumerate(xfer_list):
-                src_offset = local_start * block_len
-                dst_offset = remote_start * block_len
-                size = n_blocks * block_len
-                is_last = (i == len(xfer_list) - 1)
-                signal_value = 1 if is_last else 0
+            total_xfers = 0
+            batch_src_offsets: list[int] = []
+            batch_dst_offsets: list[int] = []
+            batch_sizes: list[int] = []
+            batch_src_mrs: list[int] = []
+            batch_dst_mrs: list[int] = []
 
-                src_mr_idx = local_mr_idx[local_layer_addr]
-                dst_mr_idx = remote_mr_idx[remote_layer_addr]
-
-                self.flagcx.flagcxPutSignal(
+            def flush_batch_puts() -> None:
+                nonlocal total_xfers
+                if not batch_sizes:
+                    return
+                self.flagcx.flagcxBatchPut(
                     comm, peer_rank,
-                    src_offset, dst_offset, size,
-                    0, src_mr_idx, dst_mr_idx,
-                    signal_value,
+                    batch_src_offsets,
+                    batch_dst_offsets,
+                    batch_sizes,
+                    batch_src_mrs,
+                    batch_dst_mrs,
                 )
+                total_xfers += len(batch_sizes)
+                batch_src_offsets.clear()
+                batch_dst_offsets.clear()
+                batch_sizes.clear()
+                batch_src_mrs.clear()
+                batch_dst_mrs.clear()
+
+            def enqueue_batch_put(
+                src_mr: int, dst_mr: int,
+                src_off: int, dst_off: int, size: int,
+            ) -> None:
+                slice_size = self._put_slice_size
+                remaining = size
+                offset = 0
+                while remaining > 0:
+                    part = (
+                        min(slice_size, remaining)
+                        if slice_size > 0 else remaining
+                    )
+                    batch_src_offsets.append(src_off + offset)
+                    batch_dst_offsets.append(dst_off + offset)
+                    batch_sizes.append(part)
+                    batch_src_mrs.append(src_mr)
+                    batch_dst_mrs.append(dst_mr)
+                    if len(batch_sizes) >= self._put_batch_size:
+                        flush_batch_puts()
+                    remaining -= part
+                    offset += part
+
+            for layer_idx in range(num_layers):
+                # Collect every (src_off, dst_off, size, src_mr, dst_mr)
+                # for this attention layer across both K and V MRs and
+                # across all reqs in this batch.
+                layer_xfers: list[tuple[int, int, int, int, int]] = []
+                for mr_in_layer in range(per_layer_mrs):
+                    mr_global = layer_idx * per_layer_mrs + mr_in_layer
+                    la = local_base_addr[mr_global]
+                    ra = remote_base_addr[mr_global]
+                    src_mr = local_mr_idx[la]
+                    dst_mr = remote_mr_idx[ra]
+                    for gl, gr in req_groups:
+                        for grp_l, grp_r in zip(gl, gr):
+                            layer_xfers.append((
+                                src_mr, dst_mr,
+                                grp_l[0], grp_r[0], len(grp_l),
+                            ))
+
+                if not layer_xfers:
+                    # No blocks for this layer (shouldn't happen if KV is
+                    # uniform across layers). Still bump the counter via
+                    # a no-op is not possible; skip and break the invariant
+                    # — treat as fatal in debug builds, warn otherwise.
+                    logger.warning(
+                        "Layer %d has no xfers; signal sequence will be "
+                        "short. base_signal=%d num_layers=%d",
+                        layer_idx, base_signal, num_layers,
+                    )
+                    continue
+
+                last_i = len(layer_xfers) - 1
+                for i, (src_mr, dst_mr, ls, rs, n) in enumerate(
+                    layer_xfers
+                ):
+                    src_off = ls * block_len
+                    dst_off = rs * block_len
+                    size = n * block_len
+                    if use_remote_signal:
+                        sig = 1 if i == last_i else 0
+                        self.flagcx.flagcxPutSignal(
+                            comm, peer_rank, src_off, dst_off, size,
+                            0, src_mr, dst_mr, sig,
+                        )
+                    else:
+                        enqueue_batch_put(
+                            src_mr, dst_mr, src_off, dst_off, size,
+                        )
+                if use_remote_signal:
+                    total_xfers += len(layer_xfers)
+
+            if not use_remote_signal:
+                flush_batch_puts()
+
+            if use_remote_signal:
+                pair_info.signal_counter += num_layers
+            pair_info.total_puts += total_xfers
+            wait_counter_target = pair_info.total_puts
 
         logger.debug(
-            "Queued %d xfers to rank %d (signal=%d), took %.4f s",
-            len(xfer_list),
+            "Queued %d xfers across %d layers to rank %d "
+            "(base_signal=%d host_wait=%s), took %.4f s",
+            total_xfers,
+            num_layers,
             peer_rank,
-            expected_signal,
+            base_signal,
+            self._host_wait,
             time.perf_counter() - start_time,
         )
-        return expected_signal
+        return (
+            base_signal,
+            num_layers if use_remote_signal else 0,
+            wait_counter_target,
+        )
 
     # ------------------------------------------------------------------
     # Decode receiver
@@ -968,11 +1190,12 @@ class FlagCXConnectorWorker:
         self, path: str, req_blocks: list[tuple[str, list[int]]],
         pending_wait: PendingSignalWait,
     ):
-        """Send block metadata to Prefill via ZMQ REQ, wait for Prefill
-        to complete RDMA write and reply with the signal value.
+        """Send block metadata to Prefill and process partial replies.
 
-        The signal value comes from Prefill (the single source of truth),
-        so Decode never maintains its own counter — no desync possible."""
+        Prefill may reply multiple times for one Decode request. Each response
+        contains the requests whose KV has been transferred in that partial
+        batch, matching Mooncake's CONTINUE/FINISH protocol shape.
+        """
         req_ids, block_ids = map(list, zip(*req_blocks))
 
         metadata = FlagCXAgentMetadata(
@@ -984,54 +1207,128 @@ class FlagCXConnectorWorker:
         )
 
         encoded_data = self._encoder.encode(metadata)
+        pending_req_ids = set(req_ids)
 
-        # Use REQ socket (per-request, with timeout) so we get a reply
-        # containing the signal value from Prefill.
+        prefill_key = path[len("tcp://"):] if path.startswith(
+            "tcp://"
+        ) else path
+
+        async def process_ok_reqs(
+            ok_reqs: list[ReqId], base_signal: int, num_layers: int
+        ) -> None:
+            if not ok_reqs:
+                return
+
+            if num_layers > 0:
+                with self.pair_comms_lock:
+                    pair_info = self.pair_comms.get(prefill_key)
+
+                if pair_info is None:
+                    logger.error(
+                        "Pair comm not found for %s after Prefill reply "
+                        "for %s",
+                        prefill_key, ok_reqs,
+                    )
+                    return
+
+                child_wait = PendingSignalWait(
+                    req_ids=ok_reqs,
+                    comm=pair_info.comm,
+                    peer_rank=1 - pair_info.my_rank,
+                    base_signal=base_signal,
+                    num_layers=num_layers,
+                )
+                child_wait.ready.set()
+                with self._active_signal_waits_lock:
+                    self._active_signal_waits.append(child_wait)
+
+            async with self.finished_recving_reqs.lock:
+                self.finished_recving_reqs.set.update(ok_reqs)
+
+        # DEALER allows Prefill to send multiple partial responses for one
+        # request, unlike REQ's strict single send/recv alternation.
         sock: zmq.asyncio.Socket = make_zmq_socket(
-            self.async_zmq_ctx, path, zmq.REQ, bind=False, linger=0
+            self.async_zmq_ctx, path, zmq.DEALER, bind=False, linger=0
         )
-        sock.setsockopt(zmq.RCVTIMEO, 120000)  # 120s timeout
+        sock.setsockopt(
+            zmq.RCVTIMEO, (self._abort_request_timeout + 60) * 1000
+        )
 
         try:
             await sock.send(encoded_data)
-            reply = await sock.recv()
 
-            if reply == b"ERR":
-                logger.error(
-                    "Prefill reported error for %s", req_ids
+            while pending_req_ids:
+                frames = await sock.recv_multipart()
+                reply = frames[-1]
+
+                try:
+                    response = self._response_decoder.decode(reply)
+                except msgspec.DecodeError:
+                    # Backward-compatible fallback for older Prefill workers
+                    # that returned "base:num_layers" once for the whole batch.
+                    if reply == b"ERR":
+                        logger.error("Prefill reported error for %s", req_ids)
+                        return
+                    reply_str = reply.decode()
+                    if ":" in reply_str:
+                        base_str, nlayers_str = reply_str.split(":", 1)
+                        base_signal = int(base_str)
+                        num_layers = int(nlayers_str)
+                    else:
+                        base_signal = 0
+                        num_layers = int(reply_str)
+                    await process_ok_reqs(
+                        list(pending_req_ids), base_signal, num_layers
+                    )
+                    pending_req_ids.clear()
+                    break
+
+                ok_reqs = [
+                    req_id for req_id in (response.ok_reqs or [])
+                    if req_id in pending_req_ids
+                ]
+                await process_ok_reqs(
+                    ok_reqs, response.base_signal, response.num_layers
                 )
-                return
+                pending_req_ids.difference_update(ok_reqs)
 
-            expected_signal = int(reply)
+                if response.err_reqs:
+                    err_reqs = [
+                        req_id for req_id in response.err_reqs
+                        if req_id in pending_req_ids
+                    ]
+                    pending_req_ids.difference_update(err_reqs)
+                    logger.error(
+                        "Prefill failed KV transfer for %s: %s",
+                        err_reqs,
+                        response.err_msg,
+                    )
 
-            # Look up pair comm (created by Decode listener thread
-            # during Prefill's _create_pair_comm handshake).
-            # The pair_comms key is the Prefill identity, which is
-            # "{prefill_host}:{prefill_side_channel_port + prefill_tp_rank}".
-            # Since we connect symmetrically (same tp_rank on both sides),
-            # stripping the tcp:// prefix from `path` yields that key.
-            prefill_key = path[len("tcp://"):] if path.startswith(
-                "tcp://"
-            ) else path
-            with self.pair_comms_lock:
-                pair_info = self.pair_comms.get(prefill_key)
+                if response.status == "ERROR":
+                    logger.error(
+                        "Prefill reported error for %s: %s",
+                        req_ids,
+                        response.err_msg,
+                    )
+                    return
+                if response.status == "FINISH":
+                    break
 
-            if pair_info is None:
+            if pending_req_ids:
                 logger.error(
-                    "Pair comm not found for %s after Prefill reply for %s",
-                    prefill_key, req_ids,
+                    "Prefill finished before all reqs were transferred. "
+                    "remaining=%s all=%s",
+                    sorted(pending_req_ids),
+                    req_ids,
                 )
-                return
-
-            pending_wait.comm = pair_info.comm
-            pending_wait.peer_rank = 1 - pair_info.my_rank
-            pending_wait.signal_value = expected_signal
 
         except zmq.ContextTerminated:
             return
         except zmq.Again:
             logger.error(
-                "Timeout waiting for Prefill reply for %s", req_ids
+                "Timeout waiting for Prefill reply for %s; pending=%s",
+                req_ids,
+                sorted(pending_req_ids),
             )
             return
         except Exception as e:
@@ -1043,21 +1340,19 @@ class FlagCXConnectorWorker:
             sock.close()
             pending_wait.ready.set()
 
-        async with self.finished_recving_reqs.lock:
-            self.finished_recving_reqs.set.update(req_ids)
-
     # ------------------------------------------------------------------
     # start_load_kv / wait_for_layer_load
     # ------------------------------------------------------------------
     def start_load_kv(self, metadata: FlagCXConnectorMetadata):
+        self._current_layer_idx = 0
+        self._step_valid_waits = None
+
         if self.kv_role != "kv_producer":
             kv_pulls = self._group_kv_pull(metadata)
             for path, req_blocks in kv_pulls.items():
                 pending_wait = PendingSignalWait(
                     req_ids=[rb[0] for rb in req_blocks],
                 )
-                with self._active_signal_waits_lock:
-                    self._active_signal_waits.append(pending_wait)
                 asyncio.run_coroutine_threadsafe(
                     self._receive_kv(path, req_blocks, pending_wait),
                     self.receiver_loop,
@@ -1079,44 +1374,52 @@ class FlagCXConnectorWorker:
                         )
 
     def wait_for_layer_load(self) -> None:
-        with self._active_signal_waits_lock:
-            waits = self._active_signal_waits
-            self._active_signal_waits = []
-        if not waits:
-            return
+        if self._step_valid_waits is None:
+            with self._active_signal_waits_lock:
+                waits = self._active_signal_waits
+                self._active_signal_waits = []
+            valid_waits: list[PendingSignalWait] = []
+            for w in waits:
+                if w.comm is not None and w.num_layers > 0:
+                    valid_waits.append(w)
+            self._step_valid_waits = valid_waits
 
-        for w in waits:
-            w.ready.wait(timeout=60)
+        layer_idx = self._current_layer_idx
+        self._current_layer_idx = layer_idx + 1
 
-        # Filter out waits that have no valid comm/signal (e.g. errors).
-        valid_waits = [
-            w for w in waits
-            if w.comm is not None and w.signal_value > 0
-        ]
+        valid_waits = self._step_valid_waits
         if not valid_waits:
             return
-        valid_waits.sort(key=lambda w: w.signal_value)
-        max_wait = valid_waits[-1]
+
+        if self._host_wait:
+            return
 
         self._ensure_cuda_device()
         torch_stream = current_stream()
         flagcx_stream = self.flagcx.adaptor_stream_copy(torch_stream)
         try:
-            self.flagcx.flagcxWaitSignal(
-                max_wait.comm, max_wait.peer_rank, 0,
-                max_wait.signal_value, flagcx_stream,
-            )
-        except Exception:
-            logger.exception(
-                "flagcxWaitSignal failed: comm=%s peer=%d "
-                "expected=%d device=%d reqs=%s",
-                self._comm_repr(max_wait.comm),
-                max_wait.peer_rank,
-                max_wait.signal_value,
-                torch.cuda.current_device(),
-                [r for w in valid_waits for r in w.req_ids],
-            )
-            raise
+            for w in valid_waits:
+                # Cap at the last signal of this transfer so extra
+                # decode layers (shouldn't normally happen) don't hang.
+                layers_to_wait = min(layer_idx + 1, w.num_layers)
+                expected = w.base_signal + layers_to_wait
+                try:
+                    self.flagcx.flagcxWaitSignal(
+                        w.comm, w.peer_rank, 0,
+                        expected, flagcx_stream,
+                    )
+                except Exception:
+                    logger.exception(
+                        "flagcxWaitSignal failed: comm=%s peer=%d "
+                        "layer=%d expected=%d device=%d reqs=%s",
+                        self._comm_repr(w.comm),
+                        w.peer_rank,
+                        layer_idx,
+                        expected,
+                        torch.cuda.current_device(),
+                        w.req_ids,
+                    )
+                    raise
         finally:
             self.flagcx.adaptor_stream_free(flagcx_stream)
 
