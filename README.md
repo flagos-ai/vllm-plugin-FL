@@ -55,7 +55,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
-3. Install [FlagGems](https://github.com/flagos-ai/FlagGems/blob/master/docs/getting-started.md#quick-installation)
+3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/)
 
     3.1 Install Build Dependencies
 

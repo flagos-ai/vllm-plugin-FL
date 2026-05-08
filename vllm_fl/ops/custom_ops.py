@@ -3,7 +3,7 @@
 import logging
 from typing import Optional, List
 
-from vllm.model_executor.custom_op import CustomOp
+from vllm.model_executor.custom_op import CustomOp, PluggableLayer
 from .layernorm import *  # noqa F403 F401
 from .activation import *  # noqa F403 F401
 from .rotary_embedding import *  # noqa F403 F401
@@ -23,12 +23,12 @@ OOT_OPS = {
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
     "fused_moe": (FusedMoEFL, "FusedMoE"),  # noqa F405
+    "shared_fused_moe": (SharedFusedMoEFL, "SharedFusedMoE"),  # noqa F405
     "unquantized_fused_moe_method": (
         UnquantizedFusedMoEMethodFL,  # noqa F405
         "UnquantizedFusedMoEMethod",
     ),
 }
-
 
 def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     """
@@ -75,7 +75,10 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
 
         op_cls, registration_name = OOT_OPS[op_name]
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
-        CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
+        if issubclass(op_cls, PluggableLayer):
+            PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)
+        else:
+            CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
         # Apply Ascend NPU monkey-patches if running on NPU.
         # These replace upstream module-level functions (e.g. in qwen3_next) with
         # Ascend implementations that bypass the CustomOp/dispatch path.

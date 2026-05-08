@@ -110,6 +110,24 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        # dispatch fused moe kernel
+        OpImpl(
+            op_name="dispatch_fused_moe_kernel",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.dispatch_fused_moe_kernel, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        # grouped topk
+        OpImpl(
+            op_name="grouped_topk",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.grouped_topk, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
     ]
 
     filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]

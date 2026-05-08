@@ -70,3 +70,79 @@ def moe_sum_cuda(inp, out):
     from vllm._custom_ops import moe_sum
 
     moe_sum(inp, out)
+
+
+def grouped_topk_cuda(
+    scores,
+    n_group,
+    topk_group,
+    topk,
+    renormalize,
+    routed_scaling_factor,
+    bias,
+    scoring_func=0,
+):
+    from vllm._custom_ops import grouped_topk
+
+    return grouped_topk(
+        scores,
+        n_group,
+        topk_group,
+        topk,
+        renormalize,
+        routed_scaling_factor,
+        bias,
+        scoring_func,
+    )
+
+
+def dispatch_fused_moe_kernel_cuda(
+    A,
+    B,
+    C,
+    A_scale,
+    B_scale,
+    B_zp,
+    topk_weights,
+    sorted_token_ids,
+    expert_ids,
+    num_tokens_post_padded,
+    mul_routed_weight,
+    top_k,
+    config,
+    compute_type,
+    use_fp8_w8a8,
+    use_int8_w8a8,
+    use_int8_w8a16,
+    use_int4_w4a16,
+    per_channel_quant,
+    block_shape=None,
+    B_bias=None,
+):
+    from vllm.model_executor.layers.fused_moe.fused_moe import (
+        dispatch_fused_moe_kernel,
+    )
+
+    dispatch_fused_moe_kernel(
+        A,
+        B,
+        C,
+        A_scale,
+        B_scale,
+        B_zp,
+        topk_weights,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        mul_routed_weight,
+        top_k,
+        config,
+        compute_type,
+        use_fp8_w8a8,
+        use_int8_w8a8,
+        use_int8_w8a16,
+        use_int4_w4a16,
+        per_channel_quant,
+        block_shape=block_shape,
+        B_bias=B_bias,
+    )

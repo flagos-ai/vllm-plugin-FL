@@ -35,6 +35,7 @@ OPTIONAL_VARS = [
     "OVERRIDE_RUN_URL",  # e.g. github.event.workflow_run.html_url
     "OVERRIDE_WORKFLOW",  # e.g. github.event.workflow_run.name
     "PR_NUMBER",  # e.g. github.event.workflow_run.pull_requests[0].number
+    "PR_TITLE",  # PR title from GitHub API
 ]
 
 
@@ -89,6 +90,7 @@ def main():
     server_url = os.environ["GITHUB_SERVER_URL"]
     event_name = os.environ["GITHUB_EVENT_NAME"]
     pr_number = os.environ.get("PR_NUMBER", "")
+    pr_title = os.environ.get("PR_TITLE", "")
 
     short_sha = sha[:7]
     run_url = (
@@ -178,6 +180,19 @@ def main():
                         },
                     ]
                     if pr_number
+                    else []
+                )
+                + (
+                    [
+                        {
+                            "is_short": False,
+                            "text": {
+                                "tag": "lark_md",
+                                "content": f"**Title:** {pr_title}",
+                            },
+                        },
+                    ]
+                    if pr_title
                     else []
                 ),
             },

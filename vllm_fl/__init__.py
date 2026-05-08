@@ -29,6 +29,20 @@ def _patch_transformers_compat():
         )
 
 
+def _register_flagcx_connector():
+    from vllm.distributed.kv_transfer.kv_connector.factory import (
+        KVConnectorFactory,
+    )
+
+    for _alias in ("FlagCXConnector", "FlagcxConnector"):
+        if _alias not in KVConnectorFactory._registry:
+            KVConnectorFactory.register_connector(
+                _alias,
+                "vllm_fl.distributed.kv_transfer.flagcx_connector",
+                "FlagCXConnector",
+            )
+
+
 def register():
     """Register the FL platform."""
     _patch_transformers_compat()
@@ -37,18 +51,32 @@ def register():
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
     glm5_platform()
 
+    # Note: FlagCX connector registration is deferred to register_model()
+    # to avoid circular imports during VllmConfig.__post_init__ in spawned
+    # subprocesses.
+
     multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
     if multiproc_method is None:
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
+
     return "vllm_fl.platform.PlatformFL"
 
+def register_quant_linear():
+    from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
+    add_oot_quant_kernel()
+
+def register_router():
+    from vllm_fl.ops.fused_moe.router import replace_router_with_fl
+    replace_router_with_fl()
 
 def register_model():
     """Register FL-specific models not yet upstream."""
-    # Models now upstream in vLLM v0.18.1 (no longer need plugin registration):
-    #   BGE-M3, Qwen3NextForCausalLM, Qwen3_5MoeForConditionalGeneration,
-    #   MiniCPMO, KimiK25ForConditionalGeneration, Qwen3_5MoeConfig
+    _register_flagcx_connector()
+
+    # Register OOT quant kernels so kernel selection can find them
+    register_quant_linear()
+    register_router()
 
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:
@@ -60,4 +88,3 @@ def register_model():
         #glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
-
