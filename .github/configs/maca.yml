@@ -7,12 +7,16 @@ platform: maca
 ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-maca-ci
 
 # Runner labels for this hardware
+# runner_labels:
+#   - self-hosted
+#   - Linux
+#   - X64
+#   - metax
+#   - gpu-8
+
+# Runner labels for this hardware (platform-hosted)
 runner_labels:
-  - self-hosted
-  - Linux
-  - X64
-  - metax
-  - gpu-8
+  - ci-vllm-plugin-fl-maca
 
 # Container volumes (hardware-specific paths)
 container_volumes:
