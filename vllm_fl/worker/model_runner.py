@@ -444,6 +444,8 @@ class ModelRunnerFL(
         self.cache_config = vllm_config.cache_config
         self.offload_config = vllm_config.offload_config
         self.compilation_config = vllm_config.compilation_config
+        if self.compilation_config.max_cudagraph_capture_size is None:
+            self.compilation_config.max_cudagraph_capture_size = 0
         self.lora_config = vllm_config.lora_config
         self.load_config = vllm_config.load_config
         self.parallel_config = vllm_config.parallel_config

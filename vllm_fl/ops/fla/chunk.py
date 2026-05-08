@@ -4,7 +4,7 @@ import warnings
 import os
 import torch
 
-from vllm.model_executor.custom_op import CustomOp
+from vllm.model_executor.custom_op import CustomOp, op_registry
 from vllm.model_executor.layers.fla.ops.l2norm import l2norm_fwd
 from .utils import input_guard
 from vllm_fl.utils import use_flaggems_op
@@ -13,6 +13,13 @@ if use_flaggems_op("chunk_gated_delta_rule_fwd"):
     from flag_gems.fused.FLA import chunk_gated_delta_rule_fwd
 else:
     from vllm.model_executor.layers.fla.ops.chunk import chunk_gated_delta_rule_fwd
+
+
+def register_chunk_gated_delta_rule_op(op_cls):
+    if "chunk_gated_delta_rule" in op_registry:
+        op_cls.name = "chunk_gated_delta_rule"
+        return op_cls
+    return CustomOp.register("chunk_gated_delta_rule")(op_cls)
 
 
 class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
@@ -51,7 +58,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         return o.to(q.dtype), final_state
 
 
-@CustomOp.register("chunk_gated_delta_rule")
+@register_chunk_gated_delta_rule_op
 class ChunkGatedDeltaRuleOp(CustomOp):
     def __init__(
         self,
@@ -77,7 +84,9 @@ class ChunkGatedDeltaRuleOp(CustomOp):
         beta: torch.Tensor,
         scale: float = None,
         initial_state: torch.Tensor = None,
+        output_final_state: bool | None = None,
         cu_seqlens: torch.LongTensor | None = None,
+        use_qk_l2norm_in_kernel: bool | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Args:
@@ -139,6 +148,10 @@ class ChunkGatedDeltaRuleOp(CustomOp):
                 )
         if scale is None:
             scale = k.shape[-1] ** -0.5
+        if output_final_state is None:
+            output_final_state = self.output_final_state
+        if use_qk_l2norm_in_kernel is None:
+            use_qk_l2norm_in_kernel = self.use_qk_l2norm_in_kernel
         o, final_state = ChunkGatedDeltaRuleFunction.apply(
             q,
             k,
@@ -147,8 +160,8 @@ class ChunkGatedDeltaRuleOp(CustomOp):
             beta,
             scale,
             initial_state,
-            self.output_final_state,
+            output_final_state,
             cu_seqlens,
-            self.use_qk_l2norm_in_kernel,
+            use_qk_l2norm_in_kernel,
         )
         return o, final_state

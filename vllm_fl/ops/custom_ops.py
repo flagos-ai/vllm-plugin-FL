@@ -8,6 +8,8 @@ from .layernorm import *  # noqa F403 F401
 from .activation import *  # noqa F403 F401
 from .rotary_embedding import *  # noqa F403 F401
 from .fused_moe import *  # noqa F403 F401
+from .gdn_chunk import *  # noqa F403 F401
+from .gdn_recurrent import *  # noqa F403 F401
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,8 @@ OOT_OPS = {
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
     "fused_moe": (FusedMoEFL, "FusedMoE"),  # noqa F405
     "shared_fused_moe": (SharedFusedMoEFL, "SharedFusedMoE"),  # noqa F405
+    "chunk_gated_delta_rule": (ChunkGatedDeltaRuleFL, "ChunkGatedDeltaRule"),  # noqa F405
+    "fused_recurrent_gated_delta_rule": (FusedRecurrentGatedDeltaRuleFL, "FusedRecurrentGatedDeltaRuleOp"), # noqa F405
     "unquantized_fused_moe_method": (
         UnquantizedFusedMoEMethodFL,  # noqa F405
         "UnquantizedFusedMoEMethod",
@@ -79,6 +83,10 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
             PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)
         else:
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
+
+        if op_name == "fused_recurrent_gated_delta_rule":
+            patch_gdn_recurrent_decode()  # noqa F405
+
         # Apply Ascend NPU monkey-patches if running on NPU.
         # These replace upstream module-level functions (e.g. in qwen3_next) with
         # Ascend implementations that bypass the CustomOp/dispatch path.
