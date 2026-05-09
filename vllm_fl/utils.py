@@ -4,6 +4,10 @@ import json
 import os
 from typing import Optional, Tuple
 
+import shutil    #patch for hygon device get
+if "GEMS_VENDOR" not in os.environ and shutil.which("hy-smi") and shutil.which("rocm-smi"):
+    os.environ["GEMS_VENDOR"] = "hygon"
+
 import flag_gems
 from flag_gems.runtime.backend.device import DeviceDetector
 from flag_gems.runtime import backend
@@ -206,7 +210,7 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
-        self.device = DeviceDetector()
+        self.device = DeviceDetector()     
         self.supported_device = ["nvidia", "ascend", "metax", "mthreads"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
