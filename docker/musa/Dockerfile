@@ -45,12 +45,7 @@ RUN mkdir -p /root/.cache/vllm/assets/vllm_public_assets \
     && curl -fSL -o /root/.cache/vllm/assets/vllm_public_assets/mary_had_lamb.ogg \
         https://vllm-public-assets.s3.us-west-2.amazonaws.com/multimodal_asset/mary_had_lamb.ogg \
     && curl -fSL -o /root/.cache/vllm/assets/vllm_public_assets/winning_call.ogg \
-        https://vllm-public-assets.s3.us-west-2.amazonaws.com/multimodal_asset/winning_call.ogg \
-    && mkdir -p /github/home/.cache/vllm/assets/vllm_public_assets \
-    && ln -s /root/.cache/vllm/assets/vllm_public_assets/mary_had_lamb.ogg \
-        /github/home/.cache/vllm/assets/vllm_public_assets/mary_had_lamb.ogg \
-    && ln -s /root/.cache/vllm/assets/vllm_public_assets/winning_call.ogg \
-        /github/home/.cache/vllm/assets/vllm_public_assets/winning_call.ogg
+        https://vllm-public-assets.s3.us-west-2.amazonaws.com/multimodal_asset/winning_call.ogg
 
 # Set environment variables for vLLM and MUSA
 # TORCH_COMPILE_DISABLE: torch_musa's inductor backend registration is
@@ -61,7 +56,8 @@ ENV VLLM_PLUGINS=fl \
     USE_FLAGGEMS=1 \
     FLAGCX_PATH=/workspace/FlagCX \
     MTHREADS_VISIBLE_DEVICES=all \
-    TORCH_COMPILE_DISABLE=1
+    TORCH_COMPILE_DISABLE=1 \
+    VLLM_ASSETS_CACHE=/root/.cache/vllm/assets
 
 WORKDIR /workspace
 
