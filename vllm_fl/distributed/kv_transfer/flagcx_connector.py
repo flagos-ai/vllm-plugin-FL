@@ -34,7 +34,6 @@ from vllm.distributed.parallel_state import (
 )
 from vllm.forward_context import ForwardContext
 from vllm.logger import init_logger
-from vllm.platforms import current_platform
 from vllm.utils.network_utils import get_ip, make_zmq_path, make_zmq_socket
 from vllm.v1.attention.backends.utils import get_kv_cache_layout
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -151,10 +150,6 @@ class FlagCXConnectorMetadata(KVConnectorMetadata):
         else:
             self.reqs_to_send[request_id] = local_block_ids
 
-
-# ===================================================================
-# FlagCXConnector  (thin delegation layer — unchanged)
-# ===================================================================
 class FlagCXConnector(KVConnectorBase_V1):
     def __init__(
         self,
@@ -243,10 +238,6 @@ class FlagCXConnector(KVConnectorBase_V1):
     def wait_for_save(self):
         pass
 
-
-# ===================================================================
-# FlagCXConnectorScheduler  (unchanged)
-# ===================================================================
 class FlagCXConnectorScheduler:
     def __init__(self, vllm_config: VllmConfig, engine_id: str):
         self.vllm_config = vllm_config
@@ -382,9 +373,7 @@ class FlagCXConnectorWorker:
             flagcx_path = os.getenv("FLAGCX_PATH", "")
             library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
         self.flagcx = FLAGCXLibrary(library_path)
-        self._device_type: str = current_platform.device_type
-        self._torch_device = current_platform.torch_device_fn
-        self.cuda_device_index = self._torch_device.current_device()
+        self.kv_cache_device: torch.device | None = None
 
         # ---- Per-pair comms (lazily created on first transfer) ----
         self.pair_comms: dict[str, PairCommInfo] = {}
@@ -419,8 +408,6 @@ class FlagCXConnectorWorker:
             self._sender_executor = ThreadPoolExecutor(
                 max_workers=self.num_workers,
                 thread_name_prefix="vllm-flagcx-sender",
-                initializer=self._torch_device.set_device,
-                initargs=(self.cuda_device_index,),
             )
 
         # ---- Decode (receiver) background threads ----
@@ -493,18 +480,6 @@ class FlagCXConnectorWorker:
         self._decoder = msgspec.msgpack.Decoder(FlagCXAgentMetadata)
         self._response_decoder = msgspec.msgpack.Decoder(FlagCXXferResponse)
 
-    def _ensure_cuda_device(self) -> None:
-        current = self._torch_device.current_device()
-        if current != self.cuda_device_index:
-            logger.warning(
-                "Switching %s device in background thread: "
-                "current=%d target=%d",
-                self._device_type,
-                current,
-                self.cuda_device_index,
-            )
-            self._torch_device.set_device(self.cuda_device_index)
-
     @staticmethod
     def _comm_repr(comm: Any) -> str:
         value = getattr(comm, "value", None)
@@ -513,13 +488,13 @@ class FlagCXConnectorWorker:
     def _register_kv_for_comm(self, comm: Any) -> torch.Tensor:
         """Register KV MRs + signal buffer. Both sides must call this
         after flagcxCommInitRank (internal AllGather for rendezvous)."""
-        # self._ensure_cuda_device()
         for base_addr, size in self.kv_tensors_meta:
             self.flagcx.flagcxOneSideRegister(comm, base_addr, size)
+        assert self.kv_cache_device is not None
         signal_buffer = torch.zeros(
             1,
             dtype=torch.int64,
-            device=torch.device(self._device_type, self.cuda_device_index),
+            device=self.kv_cache_device,
         )
         self.flagcx.flagcxOneSideSignalRegister(
             comm, signal_buffer.data_ptr(), signal_buffer.nbytes
@@ -542,8 +517,6 @@ class FlagCXConnectorWorker:
             existing = self.pair_comms.get(decode_listener_addr)
             if existing is not None:
                 return existing
-
-        # self._ensure_cuda_device()
 
         # 1. Generate uid
         uid = self.flagcx.flagcxGetUniqueId()
@@ -623,8 +596,6 @@ class FlagCXConnectorWorker:
 
                 if data.get(b"cmd") == b"NEW" or data.get("cmd") == "NEW":
                     uid_bytes = data.get(b"uid") or data.get("uid")
-                    # self._ensure_cuda_device()
-
                     uid = self.flagcx.unique_id_from_bytes(uid_bytes)
                     # Match style used by device_communicators/flagcx.py:
                     # pass a pointer via ctypes.byref to flagcxCommInitRank.
@@ -657,9 +628,6 @@ class FlagCXConnectorWorker:
         finally:
             router.close()
 
-    # ------------------------------------------------------------------
-    # register_kv_caches
-    # ------------------------------------------------------------------
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
         logger.info("Registering KV caches. use_mla: %s", self.use_mla)
 
@@ -674,6 +642,10 @@ class FlagCXConnectorWorker:
                 cache_or_caches if split_k_and_v else [cache_or_caches]
             )
             for cache in cache_list:
+                if self.kv_cache_device is None:
+                    self.kv_cache_device = cache.device
+                else:
+                    assert self.kv_cache_device == cache.device
                 base_addr = cache.data_ptr()
                 if base_addr in seen_base_addresses:
                     continue
@@ -736,9 +708,6 @@ class FlagCXConnectorWorker:
             self._decode_listener_t.start()
             ready_event.wait()
 
-    # ------------------------------------------------------------------
-    # Prefill sender thread + worker
-    # ------------------------------------------------------------------
     def _sender_thread(
         self, ready_event: threading.Event, base_port: int, tp_rank: int
     ):
@@ -954,7 +923,6 @@ class FlagCXConnectorWorker:
         send_reqs: list[tuple[ReqId, SendBlockMeta, list[int]]],
         agent_meta: FlagCXAgentMetadata,
     ) -> int:
-        # self._ensure_cuda_device()
         local_base_addr = self.kv_caches_base_addr
         remote_base_addr = agent_meta.kv_caches_base_addr
         block_len = self.block_len
@@ -1097,9 +1065,6 @@ class FlagCXConnectorWorker:
         )
         return wait_counter_target
 
-    # ------------------------------------------------------------------
-    # Decode receiver
-    # ------------------------------------------------------------------
     def _receiver_loop_fn(self, loop: asyncio.AbstractEventLoop):
         asyncio.set_event_loop(loop)
         loop.run_forever()
@@ -1204,9 +1169,6 @@ class FlagCXConnectorWorker:
         finally:
             sock.close()
 
-    # ------------------------------------------------------------------
-    # start_load_kv / wait_for_layer_load
-    # ------------------------------------------------------------------
     def start_load_kv(self, metadata: FlagCXConnectorMetadata):
         if self.kv_role != "kv_producer":
             kv_pulls = self._group_kv_pull(metadata)
@@ -1234,9 +1196,6 @@ class FlagCXConnectorWorker:
     def wait_for_layer_load(self) -> None:
         return
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     def _group_kv_pull(self, metadata: FlagCXConnectorMetadata):
         kv_pulls: dict[str, list[tuple[str, list[int]]]] = defaultdict(list)
         for req_id, meta in metadata.reqs_to_recv.items():
@@ -1302,10 +1261,6 @@ class FlagCXConnectorWorker:
                 )
                 self._receiver_t.join(timeout=2)
 
-
-# ===================================================================
-# Module-level helpers (unchanged)
-# ===================================================================
 def _group_contiguous(
     src_indices: list[int], dst_indices: list[int]
 ) -> tuple[list[list[int]], list[list[int]]]:
