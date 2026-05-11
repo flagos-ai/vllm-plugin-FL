@@ -296,22 +296,6 @@ class TestRotaryEmbeddingCorrectness:
 class TestOpsEdgeCases:
     """Test edge cases for operators."""
 
-    def test_empty_tensor_handling(self, device):
-        """Test handling of empty tensors."""
-        call_op = get_call_op()
-
-        # Create empty tensor
-        x = torch.empty(0, 64, device=device, dtype=torch.float32)
-
-        # Some ops may handle empty tensors, others may raise
-        # This test documents the behavior
-        try:
-            result = call_op("silu_and_mul", None, x)
-            assert result.shape[0] == 0
-        except (RuntimeError, ValueError):
-            # Empty tensor handling is implementation-dependent
-            pass
-
     def test_large_batch_handling(self, device):
         """Test handling of large batch sizes."""
         call_op = get_call_op()

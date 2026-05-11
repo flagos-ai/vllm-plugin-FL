@@ -1,0 +1,49 @@
+# MACA Platform Configuration
+# Test selection for MetaX MACA GPU environments
+#
+# Users can modify:
+# - functional: Add/remove test case names in the support lists
+# - unit: Add/remove paths in include and exclude lists
+# - tolerance: Adjust numerical comparison tolerance for result validation
+# - unsupported_features: Exclude test cases matching specific feature tags
+
+# ---- Platform-level settings ------------------------------------------------
+platform: maca
+vendor: metax
+
+device_types:
+  c550:
+    memory_gb: 64
+    tags: [bf16, fp16, fp32]
+
+# Default numerical tolerance for result comparison
+tolerance:
+  inference:
+    default: {rtol: 1e-5, atol: 1e-8}
+    bfloat16: {rtol: 1e-3, atol: 1e-3}
+
+# Device-level overrides for specific test cases (optional)
+device_overrides: {}
+
+# Features not supported on this platform.
+unsupported_features: []
+
+# Default environment variables for this platform
+env_defaults: {}
+
+# ---- Device-specific test configurations ------------------------------------
+c550:
+  name: "c550"
+  tests:
+    e2e:
+      inference:
+        #qwen3_5: ["35b_tp4"]
+        minicpm: ["o45_tp4"]
+      serving:
+        qwen3: ["4b_tp2"]
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []

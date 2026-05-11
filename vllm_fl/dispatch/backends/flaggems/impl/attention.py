@@ -455,7 +455,7 @@ class AttentionFLImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         self.attn_type = attn_type
-        self.vllm_flash_attn_version = 3 # 2 #get_flash_attn_version()
+        self.vllm_flash_attn_version = self._detect_flaggems_fa_version()
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = vllm_is_batch_invariant()
 
@@ -465,6 +465,21 @@ class AttentionFLImpl(AttentionImpl):
             )
         ### TODO(lms): support quant to int8/int4 each query input and low precision compute
         self.supports_quant_query_input = False
+
+    def _detect_flaggems_fa_version(self) -> int:
+        """Detect the maximum FA version supported by FlagGems."""
+        try:
+            import inspect
+            sig = inspect.signature(flash_attn_varlen_func)
+            params = sig.parameters
+            if 'fa_version' not in params:
+                return 2
+            default_val = params['fa_version'].default
+            if default_val is inspect.Parameter.empty:
+                return 2
+            return int(default_val)
+        except Exception:
+            return 2
 
     def forward(
         self,

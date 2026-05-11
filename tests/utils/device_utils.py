@@ -28,7 +28,7 @@ def get_backend() -> str:
     if _BACKEND:
         return _BACKEND
     if torch.cuda.is_available():
-        return "nvidia"
+        return "cuda"
     try:
         import torch_npu  # noqa: F401
 
@@ -36,6 +36,13 @@ def get_backend() -> str:
             return "ascend"
     except ImportError:
         pass  # torch_npu not installed; ascend backend not available
+    try:
+        import torch_musa  # noqa: F401
+
+        if torch.musa.is_available():
+            return "musa"
+    except ImportError:
+        pass  # torch_musa not installed; musa backend not available
     return "cpu"
 
 
@@ -47,19 +54,21 @@ def is_accelerator_available() -> bool:
 def get_device(index: int = 0) -> torch.device:
     """Get torch device for current backend."""
     backend = get_backend()
-    if backend == "nvidia":
+    if backend == "cuda":
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
     elif backend == "tianshu":
         return torch.device(f"cuda:{index}")
+    elif backend == "musa":
+        return torch.device(f"musa:{index}")
     return torch.device("cpu")
 
 
 def get_device_count() -> int:
     """Get the number of available accelerators."""
     backend = get_backend()
-    if backend == "nvidia":
+    if backend == "cuda":
         return torch.cuda.device_count()
     elif backend == "ascend":
         try:
@@ -70,6 +79,13 @@ def get_device_count() -> int:
             return 0
     elif backend == "tianshu":
         return torch.cuda.device_count()
+    elif backend == "musa":
+        try:
+            import torch_musa  # noqa: F401
+
+            return torch.musa.device_count()
+        except ImportError:
+            return 0
     return 0
 
 
@@ -87,6 +103,6 @@ skip_if_not_multi_accelerator = pytest.mark.skipif(
     reason="Multiple accelerators not available",
 )
 
-skip_if_not_nvidia = pytest.mark.skipif(
-    get_backend() != "nvidia", reason="NVIDIA-specific test"
+skip_if_not_cuda = pytest.mark.skipif(
+    get_backend() != "cuda", reason="CUDA-specific test"
 )

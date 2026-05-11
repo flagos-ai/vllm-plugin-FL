@@ -1,0 +1,27 @@
+# MThreads MUSA Hardware Configuration
+# This file defines CI/CD settings for MThreads GPU testing
+
+platform: musa
+
+# Docker image for this hardware
+ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-musa-ci
+
+# Runner labels for this hardware
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - mthreads
+  - gpu-8
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /data:/data
+
+# Container options (hardware-specific settings)
+container_options: >-
+  --hostname vllm-plugin-fl
+  --ipc=host
+  --privileged
+  --shm-size=500g
+  --ulimit memlock=-1

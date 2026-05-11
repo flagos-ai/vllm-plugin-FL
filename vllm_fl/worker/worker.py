@@ -430,6 +430,9 @@ class WorkerFL(WorkerBase):
     # FIXME(youkaichao & ywang96): Use TorchDispatchMode instead of memory pool
     # to hijack tensor allocation.
     def load_model(self) -> None:
+        from vllm_fl.attention.utils import patch_mm_encoder_attention
+        patch_mm_encoder_attention()
+
         eep_scale_up = os.environ.get("VLLM_ELASTIC_EP_SCALE_UP_LAUNCH") == "1"
         ### TODO(lms): support manages a memory pool for device tensors.
         self.model_runner.load_model(eep_scale_up=eep_scale_up)

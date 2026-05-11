@@ -361,7 +361,7 @@ def test_my_kernel(device):
 | Fixture | Scope | Description |
 |---|---|---|
 | `device` | session | `torch.device` for current backend (`cuda:0` / `npu:0`) |
-| `backend` | session | Backend string (`"nvidia"` / `"ascend"` / `"cpu"`) |
+| `backend` | session | Backend string (`"cuda"` / `"ascend"` / `"musa"` / `"cpu"`) |
 | `has_accelerator` | session | Whether any GPU/NPU is available |
 | `device_count` | session | Number of available accelerators |
 | `cpu_device` | function | Always `torch.device("cpu")` |

@@ -232,10 +232,6 @@ class PlatformFL(Platform):
             backend_path,
             scope="local",
         )
-        logger.info(
-            "Using attention backend via dispatch (use_mla=%s): %s"
-            % (use_mla, backend_path)
-        )
         return backend_path
 
     @classmethod
