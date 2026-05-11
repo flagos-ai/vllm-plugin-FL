@@ -4,19 +4,13 @@
 name: CI
 
 on:
-  push:
-    branches: [main, devops]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
   pull_request:
-    branches: [main, devops]
+    branches: [v0.1.0]
     paths-ignore:
       - "**.md"
       - "docs/**"
+      - "examples/**"
+      - "docker/**"
       - "LICENSE"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
@@ -82,14 +76,45 @@ jobs:
         run: python3 .github/scripts/detect_platforms.py
 
   # ============================================================
-  # Job 4: Per-platform parallel testing
+  # Job 4a: CUDA platform testing
   # ============================================================
-  test:
+  test-cuda:
     needs: discover
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: ${{ fromJson(needs.discover.outputs.platforms) }}
+    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
     uses: ./.github/workflows/_platform_test.yml
     with:
-      platform: ${{ matrix.platform }}
+      platform: cuda
+    secrets: inherit
+
+  # ============================================================
+  # Job 4b: Ascend platform testing
+  # ============================================================
+  test-ascend:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: ascend
+    secrets: inherit
+
+  # ============================================================
+  # Job 4c: MACA platform testing
+  # ============================================================
+  test-maca:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'maca')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: maca
+    secrets: inherit
+
+  # ============================================================
+  # Job 4d: MUSA platform testing
+  # ============================================================
+  test-musa:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: musa
+    secrets: inherit

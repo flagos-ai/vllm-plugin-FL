@@ -1,4 +1,6 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
+#
+# 2026 - Modified by Kunlunxin, Inc. All Rights Reserved.
 
 import logging
 from typing import Optional, List
@@ -76,10 +78,16 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
         op_cls, registration_name = OOT_OPS[op_name]
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
         CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
-        # Apply Ascend NPU monkey-patches if running on NPU.
+        # Apply vendor-specific monkey-patches after all OOT ops are registered.
         # These replace upstream module-level functions (e.g. in qwen3_next) with
-        # Ascend implementations that bypass the CustomOp/dispatch path.
+        # vendor implementations that bypass the CustomOp/dispatch path.
+        # Each apply_*_patches() is idempotent (guarded by _patches_applied flag).
         from vllm.platforms import current_platform
         if current_platform.device_type == "npu":
             from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
             apply_ascend_patches()
+
+    from vllm_fl.dispatch.config.utils import get_platform_name
+    if get_platform_name() == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import apply_kunlunxin_patches
+        apply_kunlunxin_patches()

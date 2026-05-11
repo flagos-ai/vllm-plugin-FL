@@ -17,6 +17,9 @@ import torch
 
 from vllm.platforms import current_platform
 
+# Ensure platform-specific custom ops (e.g. mcoplib._C) are registered
+current_platform.import_kernels()
+
 # Mark all tests as requiring GPU
 pytestmark = pytest.mark.gpu
 
@@ -30,6 +33,8 @@ def _new_graph():
     """Create a platform-appropriate graph object."""
     if current_platform.device_type == "cuda":
         return torch.cuda.CUDAGraph()
+    elif current_platform.device_type == "musa":
+        return torch.musa.MUSAGraph()
     elif current_platform.device_type == "npu":
         return torch.npu.NPUGraph()
     else:
@@ -42,6 +47,9 @@ def _graph_capture(graph):
     """Platform-aware context manager for graph capture."""
     if current_platform.device_type == "cuda":
         with torch.cuda.graph(graph):
+            yield
+    elif current_platform.device_type == "musa":
+        with torch.musa.graph(graph):
             yield
     elif current_platform.device_type == "npu":
         with torch.npu.graph(graph):

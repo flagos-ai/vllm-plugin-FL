@@ -1,19 +1,12 @@
 name: Code Scan
 
 on:
-  push:
-    branches: [main, devops]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
   pull_request:
-    branches: [main, devops]
+    branches: [v0.1.0]
     paths-ignore:
       - "**.md"
       - "docs/**"
+      - "docker/**"
       - "LICENSE"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"

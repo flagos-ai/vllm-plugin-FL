@@ -1,0 +1,34 @@
+# Metax Hardware Configuration
+# This file defines CI/CD settings for Metax GPU testing
+
+platform: maca
+
+# Docker image for this hardware
+ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-maca-ci
+
+# Runner labels for this hardware
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - metax
+  - gpu-8
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /dev/infiniband:/dev/infiniband
+  - /data:/data
+
+# Container options (hardware-specific settings)
+container_options: >-
+  --hostname vllm-plugin-fl
+  --ipc=host
+  --privileged
+  --device=/dev/dri
+  --device=/dev/mxcd
+  --device=/dev/mem
+  --security-opt seccomp=unconfined
+  --security-opt apparmor=unconfined
+  --shm-size=500g
+  --ulimit memlock=-1
+  --ulimit nofile=65535:65535
