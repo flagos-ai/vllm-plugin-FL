@@ -30,10 +30,6 @@ def register():
     """Register the FL platform."""
     _patch_transformers_compat()
 
-    # Register Qwen3.5 configs early so they are available in all processes
-    # (including APIServer subprocesses and EngineCore spawned processes).
-    # Register to both _CONFIG_REGISTRY (vLLM custom) and AutoConfig
-    # (Transformers standard) for defense in depth across all code paths.
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
         from vllm_fl.configs.qwen3_5 import Qwen3_5Config
@@ -68,9 +64,7 @@ def register_model():
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
         from vllm_fl.configs.qwen3_5_moe import Qwen3_5MoeConfig
-        from transformers import AutoConfig
         _CONFIG_REGISTRY["qwen3_5_moe"] = Qwen3_5MoeConfig
-        AutoConfig.register("qwen3_5_moe", Qwen3_5MoeConfig)
     except Exception as e:
         logger.error(f"Register Qwen3.5 MoE config error: {str(e)}")
 
@@ -78,9 +72,7 @@ def register_model():
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
         from vllm_fl.configs.qwen3_5 import Qwen3_5Config
-        from transformers import AutoConfig
         _CONFIG_REGISTRY["qwen3_5"] = Qwen3_5Config
-        AutoConfig.register("qwen3_5", Qwen3_5Config)
     except Exception as e:
         logger.error(f"Register Qwen3.5 config error: {str(e)}")
 
