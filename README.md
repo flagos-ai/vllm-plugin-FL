@@ -69,11 +69,12 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     ```sh
     git clone https://github.com/flagos-ai/FlagGems
     cd FlagGems
-    git checkout v5.0.0 # If on Sunrise platform, depends on [PR #2949](https://github.com/flagos-ai/FlagGems/pull/2949)
+    git checkout v5.0.0
     pip install --no-build-isolation .
     # or editble install
     pip install --no-build-isolation -e .
     ```
+If on Sunrize platform, depends on FlagGems [PR #2949](https://github.com/flagos-ai/FlagGems/pull/2949)
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
