@@ -39,6 +39,8 @@ class Graph:
         graph = torch.cuda.CUDAGraph
     elif current_platform.device_type == "npu":
         graph = torch.npu.NPUGraph
+    elif current_platform.device_type == "musa":
+        graph = torch.musa.MUSAGraph
     else:
         raise NotImplementedError("not support graph")
 

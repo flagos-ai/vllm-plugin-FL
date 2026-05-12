@@ -57,6 +57,21 @@ class FlagGemsBackend(Backend):
 
         return silu_and_mul_flaggems(obj, x)
 
+    def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
+        """
+        GELU activation followed by element-wise multiplication.
+
+        Args:
+            obj: The calling obj (for interface consistency)
+            x: Input tensor of shape [..., 2*d]
+
+        Returns:
+            Output tensor of shape [..., d]
+        """
+        from .impl.activation import gelu_and_mul_flaggems
+
+        return gelu_and_mul_flaggems(obj, x)
+
     def rms_norm(
         self,
         obj,
@@ -142,6 +157,45 @@ class FlagGemsBackend(Backend):
             raise NotImplementedError("NOT support mla now!")
 
         if use_sparse:
-            raise ValueError("use_sparse=True requires use_mla=True.")  
+            raise ValueError("use_sparse=True requires use_mla=True.")
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
+
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: Optional[torch.Tensor] = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ):
+        from .impl.fused_moe import moe_align_block_size_flaggems
+
+        return moe_align_block_size_flaggems(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map,
+            pad_sorted_ids,
+            ignore_invalid_experts,
+        )
+
+    def moe_sum(self, inp, out):
+        from .impl.fused_moe import moe_sum_flaggems
+
+        moe_sum_flaggems(inp, out)
+
+    def topk_softmax(
+        self,
+        topk_weights,
+        topk_indices,
+        token_expert_indices,
+        gating_output,
+        renormalize=False,
+    ):
+        from .impl.fused_moe import topk_softmax_flaggems
+
+        return topk_softmax_flaggems(
+            topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
+        )

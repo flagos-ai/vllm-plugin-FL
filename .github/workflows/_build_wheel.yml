@@ -1,0 +1,68 @@
+name: Build Wheel
+
+on:
+  workflow_call:
+    inputs:
+      upload-artifact:
+        description: "Whether to upload the built wheel as an artifact"
+        required: false
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      upload-artifact:
+        description: "Whether to upload the built wheel as an artifact"
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        run: python -m build --wheel
+
+      - name: Verify wheel
+        run: |
+          pip install dist/*.whl
+          # Verify package metadata and file structure (full import requires flag_gems runtime)
+          python -c "
+          from importlib.metadata import metadata, files
+          meta = metadata('vllm-plugin-fl')
+          print(f\"Package: {meta['Name']} {meta['Version']}\")
+          pkg_files = [str(f) for f in files('vllm-plugin-fl')]
+          assert any('vllm_fl' in f for f in pkg_files), 'vllm_fl module not found in wheel'
+          print(f'Installed files: {len(pkg_files)}')
+          print('Wheel verified successfully')
+          "
+
+      - name: Upload wheel
+        if: inputs.upload-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl

@@ -72,6 +72,20 @@ class VLLMFLBackendBase(ABC):
         """
         pass
 
+    @abstractmethod
+    def gelu_and_mul(self, x: torch.Tensor, approximate: str = "none") -> torch.Tensor:
+        """
+        GELU activation followed by element-wise multiplication.
+
+        Args:
+            x: Input tensor of shape [..., 2*d]
+            approximate: GELU approximation mode ("none" or "tanh")
+
+        Returns:
+            Output tensor of shape [..., d]
+        """
+        pass
+
     # ==================== Normalization Operators ====================
 
     @abstractmethod

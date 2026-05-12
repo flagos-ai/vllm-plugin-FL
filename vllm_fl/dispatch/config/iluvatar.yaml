@@ -23,9 +23,9 @@ strict: false
 # Only the backends listed here will be attempted, in the order specified.
 #
 # Supported tokens:
-#   - flagos      : Default FlagGems implementation (Triton)
-#   - reference   : PyTorch reference implementation
-#   - vendor      : Any available vendor backend (auto-detected)
+#   - flagos          : Default FlagGems implementation (Triton)
+#   - reference       : PyTorch reference implementation
+#   - vendor          : Any available vendor backend (auto-detected)
 #   - vendor:iluvatar : Iluvatar-specific vendor backend
 op_backends:
   # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
@@ -33,17 +33,14 @@ op_backends:
     - flagos
     - vendor:iluvatar
     - reference
-
   rms_norm:
     - flagos
     - vendor:iluvatar
     - reference
-
   silu_and_mul:
     - flagos
     - vendor:iluvatar
     - reference
-
   rotary_embedding:
     - flagos
     - vendor:iluvatar

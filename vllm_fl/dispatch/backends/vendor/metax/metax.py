@@ -3,9 +3,7 @@
 """
 METAX backend implementation.
 
-This backend provides operator implementations for Moore Threads METAX GPUs.
-METAX uses MACA (Moore Threads Accelerated Computing Architecture) which is
-CUDA-compatible.
+This backend provides operator implementations for METAX GPUs.
 """
 
 from __future__ import annotations
@@ -16,42 +14,51 @@ import torch
 
 from vllm_fl.dispatch.backends.base import Backend
 
+from vllm.attention.backends.registry import AttentionBackendEnum, register_backend
 
-class MetaxBackend(Backend):
+
+# Register attention backends for MACA
+def register_attention_backends():
+    register_backend(
+        AttentionBackendEnum.FLASHMLA,
+        class_path="vllm_fl.dispatch.backends.vendor.metax.impl.attention.mla.flashmla.MacaFlashMLABackend",
+    )
+    register_backend(
+        AttentionBackendEnum.FLASH_ATTN,
+        class_path="vllm_fl.dispatch.backends.vendor.metax.impl.attention.flash_attn.MacaFlashAttentionBackend",
+    )
+
+
+class MacaBackend(Backend):
     """
     METAX backend for operator implementations.
 
     This backend uses MACA libraries to provide high-performance
-    operator implementations for Moore Threads METAX GPUs.
+    operator implementations for METAX GPUs.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
-        return "metax"
+        return "maca"
 
     @property
     def vendor(self) -> Optional[str]:
         return "metax"
 
     def is_available(self) -> bool:
-        """
-        Check if METAX hardware and libraries are available.
-
-        This method uses the platform's vendor information to determine
-        if the device is a METAX GPU.
-        """
-        if MetaxBackend._available is None:
+        """Check if Metax hardware and libraries are available."""
+        if MacaBackend._available is None:
             try:
-                from vllm.platforms import current_platform
-                if hasattr(current_platform, 'vendor_name') and current_platform.vendor_name == "metax":
-                    MetaxBackend._available = True
+                # Check if Metax device is available
+                if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+                    MacaBackend._available = True
                 else:
-                    MetaxBackend._available = False
+                    MacaBackend._available = False
             except Exception:
-                MetaxBackend._available = False
-        return MetaxBackend._available
+                MacaBackend._available = False
+        return MacaBackend._available
 
     # ==================== Operator Implementations ====================
 
@@ -66,9 +73,24 @@ class MetaxBackend(Backend):
         Returns:
             Output tensor of shape [..., d]
         """
-        from .impl.activation import silu_and_mul_metax
+        from .impl.activation import silu_and_mul_maca
 
-        return silu_and_mul_metax(obj, x)
+        return silu_and_mul_maca(obj, x)
+
+    def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
+        """
+        GELU activation followed by element-wise multiplication.
+
+        Args:
+            obj: The calling obj (for interface consistency)
+            x: Input tensor of shape [..., 2*d]
+
+        Returns:
+            Output tensor of shape [..., d]
+        """
+        from .impl.activation import gelu_and_mul_maca
+
+        return gelu_and_mul_maca(obj, x)
 
     def rms_norm(
         self,
@@ -77,19 +99,11 @@ class MetaxBackend(Backend):
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """
-        RMS normalization.
-
-        Args:
-            obj: The calling obj (e.g., RMSNorm layer)
-            x: Input tensor
-            residual: Optional residual tensor
-
-        Returns:
-            Normalized tensor, or tuple of (normalized, residual) if residual is provided
+        RMS normalization using Maca's CUDA implementation.
         """
-        from .impl.normalization import rms_norm_metax
+        from .impl.layernorm import rms_norm_maca
 
-        return rms_norm_metax(obj, x, residual)
+        return rms_norm_maca(obj, x, residual)
 
     def rotary_embedding(
         self,
@@ -103,24 +117,11 @@ class MetaxBackend(Backend):
         inplace: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Apply rotary position embedding.
-
-        Args:
-            obj: The calling obj (for interface consistency)
-            query: Query tensor
-            key: Key tensor
-            cos: Cosine cache
-            sin: Sine cache
-            position_ids: Position indices
-            rotary_interleaved: Whether to use interleaved rotary
-            inplace: Whether to modify tensors in-place
-
-        Returns:
-            Tuple of (embedded_query, embedded_key)
+        Apply rotary position embedding using vLLM's CUDA implementation.
         """
-        from .impl.rotary import rotary_embedding_metax
+        from .impl.rotary_embedding import rotary_embedding_maca
 
-        return rotary_embedding_metax(
+        return rotary_embedding_maca(
             obj,
             query,
             key,
@@ -133,23 +134,42 @@ class MetaxBackend(Backend):
 
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
-        Get the attention backend class path for METAX.
+        Get the attention backend class path for CUDA.
+
+        Supports:
+        - FLASH_ATTN (default)
+        - TRITON_ATTN (when use_flaggems_op("triton_attn") is True)
+        - FLASHMLA_SPARSE (when use_mla and use_sparse are both True)
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
-            use_sparse: Whether to use Deepseek Sparse Attention (DSA)
 
         Returns:
             Fully qualified class path string
         """
         from vllm.attention.backends.registry import AttentionBackendEnum
 
+        # register before selection
+        register_attention_backends()
+
         if use_mla:
             if use_sparse:
-                # TODO: Implement METAX MLA Sparse backend
                 return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
-            # TODO: Implement METAX MLA backend
             return AttentionBackendEnum.FLASHMLA.get_path()
 
-        # Default to FLASH_ATTN (MACA is CUDA-compatible)
+        # Default to FLASH_ATTN
         return AttentionBackendEnum.FLASH_ATTN.get_path()
+
+    def topk_softmax(
+        self,
+        topk_weights,
+        topk_indices,
+        token_expert_indices,
+        gating_output,
+        renormalize=False,
+    ):
+        from .impl.fused_moe import topk_softmax_maca
+
+        return topk_softmax_maca(
+            topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
+        )

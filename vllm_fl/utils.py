@@ -1,4 +1,6 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
+#
+# 2026 - Modified by Kunlunxin, Inc. All Rights Reserved.
 
 import json
 import os
@@ -9,6 +11,68 @@ from flag_gems.runtime.backend.device import DeviceDetector
 from flag_gems.runtime import backend
 
 _OP_CONFIG: Optional[dict[str, str]] = None
+
+
+# Mapping used by dispatch registration to resolve the current runtime platform
+# into a backend directory under dispatch/backends/vendor.
+#
+# Field definitions and sources:
+# - top-level key (vendor_name): normalized hardware vendor identifier.
+#   Source: runtime platform detection (current_platform.vendor_name) and
+#   fallback device probing (DeviceInfo.vendor_name).
+# - device_type: compute class reported by runtime, such as "cuda" or "npu".
+#   Source: runtime platform detection (current_platform.device_type) and
+#   fallback device probing (DeviceInfo.device_type).
+# - device_name: runtime device family/product alias used by vLLM platform.
+#   Source: runtime platform detection (current_platform.device_name).
+#
+# Values are normalized to lowercase and matched against available backend
+# subdirectories (for example, cuda/ascend/metax/iluvatar/mthreads/kunlunxin).
+VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
+    # Registered backend: vendor/cuda
+    "nvidia": {"device_type": "cuda", "device_name": "nvidia"},
+    # Registered backend: vendor/ascend
+    "ascend": {"device_type": "npu", "device_name": "npu"},
+    # Registered backend: vendor/iluvatar
+    "iluvatar": {"device_type": "cuda", "device_name": "cuda"},
+    # Registered backend: vendor/metax
+    "metax": {"device_type": "cuda", "device_name": "metax"},
+    # Registered backend: vendor/musa
+    "mthreads": {"device_type": "musa", "device_name": "musa"},
+    # Registered backend: vendor/kunlunxin
+    "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
+}
+
+
+def _get_vendor_device_field(vendor_name: str, field: str) -> str:
+    """Get a required field from VENDOR_DEVICE_MAP for the specified vendor."""
+    if not isinstance(vendor_name, str) or not vendor_name.strip():
+        raise ValueError("vendor_name must be a non-empty string.")
+
+    normalized_vendor = vendor_name
+    device_info = VENDOR_DEVICE_MAP.get(normalized_vendor)
+    if not isinstance(device_info, dict):
+        raise ValueError(
+            f"Vendor '{normalized_vendor}' not found in VENDOR_DEVICE_MAP."
+        )
+
+    value = device_info.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"Field '{field}' for vendor '{normalized_vendor}' is missing "
+            "or empty in VENDOR_DEVICE_MAP."
+        )
+    return value
+
+
+def get_device_type(vendor_name: str) -> str:
+    """Return the configured device_type for the given vendor."""
+    return _get_vendor_device_field(vendor_name, "device_type")
+
+
+def get_device_name(vendor_name: str) -> str:
+    """Return the configured device_name for the given vendor."""
+    return _get_vendor_device_field(vendor_name, "device_name")
 
 
 def use_flaggems(default: bool = True) -> bool:
@@ -71,6 +135,7 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     # Priority 3: Blacklist from platform config
     try:
         from vllm_fl.dispatch.config import get_flagos_blacklist
+
         config_blacklist = get_flagos_blacklist()
         if config_blacklist:
             blacklist = config_blacklist
@@ -144,7 +209,7 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend"]
+        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "kunlunxin"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
@@ -191,6 +256,7 @@ def get_flaggems_all_ops() -> list[str]:
 # OOT operator names as registered in custom_ops.py (op_name lowercase)
 OOT_OP_NAMES = [
     "silu_and_mul",
+    "gelu_and_mul",
     "rms_norm",
     "rotary_embedding",
     "fused_moe",
@@ -238,7 +304,10 @@ def get_oot_blacklist() -> Optional[list[str]]:
 
     # Priority 3: Blacklist from platform config
     try:
-        from vllm_fl.dispatch.config import get_oot_blacklist as config_get_oot_blacklist
+        from vllm_fl.dispatch.config import (
+            get_oot_blacklist as config_get_oot_blacklist,
+        )
+
         config_blacklist = config_get_oot_blacklist()
         if config_blacklist:
             return config_blacklist

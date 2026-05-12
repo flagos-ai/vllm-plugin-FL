@@ -1,0 +1,79 @@
+# CUDA-Based Platform Configuration
+# Flexible test selection mechanism for NVIDIA GPU environments
+#
+# This platform configuration supports multiple device types (a100, a800, h100)
+# Users can modify the following:
+# - functional: Add/remove test case names in the support lists
+#   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
+#
+# - unit: Add/remove paths in include and exclude lists
+#   Example: include: "*" or ["test_basic.py", "runner/*"]
+#            exclude: [] or ["test_spiky_loss_detector.py"]
+#
+# - tolerance: Adjust numerical comparison tolerance for result validation
+#
+# - unsupported_features: Exclude test cases matching specific feature tags
+#
+# ---- Platform-level settings ------------------------------------------------
+platform: cuda
+vendor: nvidia
+
+device_types:
+  a100:
+    compute_capability: "8.0"
+    memory_gb: 80
+    tags: [ampere, fp64, bf16]
+  a800:
+    compute_capability: "8.0"
+    memory_gb: 80
+    tags: [ampere, fp64, bf16, china-variant]
+  h100:
+    compute_capability: "9.0"
+    memory_gb: 80
+    tags: [hopper, fp8, bf16]
+
+# Default numerical tolerance for result comparison (used when device doesn't override)
+tolerance:
+  inference:
+    default: {exact: true}
+
+# Device-level overrides for specific test cases (optional)
+device_overrides:
+  h100:
+    tolerance:
+      inference:
+        default: {rtol: 1e-4, atol: 1e-7}
+
+# Features not supported on this platform.
+# Test cases whose model name contains any of these strings will be skipped.
+# Example: ["flaggems"] would skip "qwen3_flaggems", "robobrain2_flaggems", etc.
+unsupported_features: []
+
+# Default environment variables for this platform (informational / used by runners)
+env_defaults:
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  NCCL_ALGO: "Ring"
+
+# ---- Device-specific test configurations ------------------------------------
+a100:
+  name: "a100"
+  tests:
+    e2e:
+      # Add or remove test cases per model
+      inference:
+        qwen3: ["4b_tp2", "next_tp8"]
+        qwen3_5: ["35b_tp4"]
+        minicpm: ["o45_tp4"]
+      serving:
+        qwen3: ["next_tp8"]
+        minicpm: ["o45_tp4"]
+    functional:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []
+    unit:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []

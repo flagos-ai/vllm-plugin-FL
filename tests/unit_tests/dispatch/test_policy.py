@@ -117,9 +117,10 @@ class TestPolicyManager:
     @pytest.fixture(autouse=True)
     def reset_policy(self):
         """Reset global policy before and after each test."""
-        reset_global_policy()
-        yield
-        reset_global_policy()
+        with patch("vllm_fl.dispatch.config.get_config_path", return_value=None):
+            reset_global_policy()
+            yield
+            reset_global_policy()
 
     def test_get_instance_singleton(self):
         manager1 = PolicyManager.get_instance()
@@ -159,9 +160,10 @@ class TestPolicyManager:
 class TestPolicyContext:
     @pytest.fixture(autouse=True)
     def reset_policy(self):
-        reset_global_policy()
-        yield
-        reset_global_policy()
+        with patch("vllm_fl.dispatch.config.get_config_path", return_value=None):
+            reset_global_policy()
+            yield
+            reset_global_policy()
 
     def test_policy_context_override(self):
         original = get_policy()

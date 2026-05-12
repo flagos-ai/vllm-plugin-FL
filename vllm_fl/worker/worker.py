@@ -29,7 +29,6 @@ from vllm.distributed.kv_transfer import (
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
-# from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 try:
     from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 except ImportError:
@@ -67,6 +66,7 @@ from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
 
 from vllm_fl.ops.custom_ops import register_oot_ops
+from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
@@ -382,13 +382,9 @@ class WorkerFL(WorkerBase):
         )
 
         if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe.ascend_config import (
-                init_ascend_config,
-            )
             from vllm_fl.dispatch.backends.vendor.ascend.impl.triton_utils import (
                     init_device_properties_triton,
             )
-            init_ascend_config(self.vllm_config)
             init_device_properties_triton()
         # Set random seed.
         set_random_seed(self.model_config.seed)
@@ -430,6 +426,9 @@ class WorkerFL(WorkerBase):
     # FIXME(youkaichao & ywang96): Use TorchDispatchMode instead of memory pool
     # to hijack tensor allocation.
     def load_model(self) -> None:
+        from vllm_fl.attention.utils import patch_mm_encoder_attention
+        patch_mm_encoder_attention()
+
         eep_scale_up = os.environ.get("VLLM_ELASTIC_EP_SCALE_UP_LAUNCH") == "1"
         ### TODO(lms): support manages a memory pool for device tensors.
         self.model_runner.load_model(eep_scale_up=eep_scale_up)
@@ -442,7 +441,7 @@ class WorkerFL(WorkerBase):
     def reload_weights(self) -> None:
         self.model_runner.reload_weights()
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def determine_available_memory(self) -> int:
         """Profiles the peak memory usage of the model to determine how much
         memory can be used for KV cache without OOMs.
@@ -712,13 +711,13 @@ class WorkerFL(WorkerBase):
             f"execute_new_{num_new}_cached_{num_cached}"
         )
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         return self.model_runner.sample_tokens(grammar_output)
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",

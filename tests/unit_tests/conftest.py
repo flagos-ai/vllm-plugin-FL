@@ -3,7 +3,9 @@
 """
 Unit test fixtures and configuration.
 
-This module provides shared fixtures for all unit tests.
+Note: Common fixtures (device, cpu_device, mock_tensor, has_accelerator,
+markers) are inherited from the root tests/conftest.py.
+Only unit-test-specific fixtures belong here.
 """
 
 import os
@@ -39,31 +41,6 @@ def has_vllm_profiler():
         return True
     except ImportError:
         return False
-
-
-# =============================================================================
-# Basic Fixtures
-# =============================================================================
-
-
-@pytest.fixture
-def mock_tensor():
-    """Create a simple tensor for testing."""
-    return torch.randn(2, 4, 8)
-
-
-@pytest.fixture
-def device():
-    """Get the available device."""
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
-@pytest.fixture
-def cpu_device():
-    """Always return CPU device."""
-    return torch.device("cpu")
 
 
 # =============================================================================
@@ -131,15 +108,3 @@ def dtype_tensors():
         "float16": torch.randn(2, 4, dtype=torch.float16),
         "bfloat16": torch.randn(2, 4, dtype=torch.bfloat16),
     }
-
-
-# =============================================================================
-# Pytest Markers
-# =============================================================================
-
-
-def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line("markers", "gpu: marks tests as requiring GPU")
-    config.addinivalue_line("markers", "flagcx: marks tests as requiring flagcx")
-    config.addinivalue_line("markers", "slow: marks tests as slow")

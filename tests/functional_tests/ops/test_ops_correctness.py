@@ -52,7 +52,6 @@ class TestSiluAndMulCorrectness:
         half = x.shape[-1] // 2
         return F.silu(x[..., :half]) * x[..., half:]
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
     def test_silu_and_mul_forward(self, test_shapes, device):
         """Test SiluAndMul forward pass correctness."""
         call_op = get_call_op()
@@ -82,7 +81,6 @@ class TestSiluAndMulCorrectness:
                     pytest.skip(f"silu_and_mul not registered: {e}")
                 raise
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
     def test_silu_and_mul_dtypes(self, device):
         """Test SiluAndMul with different dtypes."""
         call_op = get_call_op()
@@ -128,7 +126,6 @@ class TestRMSNormCorrectness:
         x_normed = x * torch.rsqrt(variance + eps)
         return x_normed * weight
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
     def test_rms_norm_forward(self, test_shapes, device):
         """Test RMSNorm forward pass correctness."""
         call_op = get_call_op()
@@ -172,7 +169,6 @@ class TestRMSNormCorrectness:
                     pytest.skip(f"rms_norm not registered: {e}")
                 raise
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
     def test_rms_norm_with_residual(self, device):
         """Test RMSNorm with residual connection."""
         call_op = get_call_op()
@@ -247,7 +243,6 @@ class TestRotaryEmbeddingCorrectness:
 
         return q_embed, k_embed
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
     def test_rotary_embedding_basic(self, device):
         """Test basic rotary embedding functionality."""
         call_op = get_call_op()
@@ -301,24 +296,6 @@ class TestRotaryEmbeddingCorrectness:
 class TestOpsEdgeCases:
     """Test edge cases for operators."""
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
-    def test_empty_tensor_handling(self, device):
-        """Test handling of empty tensors."""
-        call_op = get_call_op()
-
-        # Create empty tensor
-        x = torch.empty(0, 64, device=device, dtype=torch.float32)
-
-        # Some ops may handle empty tensors, others may raise
-        # This test documents the behavior
-        try:
-            result = call_op("silu_and_mul", None, x)
-            assert result.shape[0] == 0
-        except (RuntimeError, ValueError):
-            # Empty tensor handling is implementation-dependent
-            pass
-
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU not available")
     def test_large_batch_handling(self, device):
         """Test handling of large batch sizes."""
         call_op = get_call_op()

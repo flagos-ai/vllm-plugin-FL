@@ -1,9 +1,9 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-METAX backend operator registrations.
+Maca backend operator registrations.
 
-This module registers all VENDOR (METAX) implementations.
+This module registers all VENDOR (Metax) implementations.
 """
 
 from __future__ import annotations
@@ -26,14 +26,14 @@ def _bind_is_available(fn, is_available_fn):
 
 def register_builtins(registry) -> None:
     """
-    Register all METAX (VENDOR) operator implementations.
+    Register all CUDA (VENDOR) operator implementations.
 
     Args:
         registry: Registry to register into
     """
-    from .metax import MetaxBackend
+    from .metax import MacaBackend
 
-    backend = MetaxBackend()
+    backend = MacaBackend()
     is_avail = backend.is_available
 
     impls = [
@@ -70,6 +70,15 @@ def register_builtins(registry) -> None:
             impl_id="vendor.metax",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.attention_backend, is_avail),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
+        # topk softmax
+        OpImpl(
+            op_name="topk_softmax",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.topk_softmax, is_avail),
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),

@@ -1,0 +1,34 @@
+# Qwen3-4B model configuration (TP=2)
+
+llm:
+  model: "/data/models/Qwen/Qwen3-4B"
+  tensor_parallel_size: 2
+  max_model_len: 1024
+  gpu_memory_utilization: 0.8
+  trust_remote_code: true
+  enforce_eager: true
+
+generate:
+  prompts:
+    - "Hello, my name is"
+    - "The capital of France is"
+  sampling:
+    max_tokens: 10
+    temperature: 0.7
+
+serve:
+  served_model_name: "qwen"
+  endpoints: ["chat"]
+  stream: true
+  max_tokens: 256
+  chat_messages:
+    - role: "user"
+      content: "Give me a short introduction to large language models."
+  sampling:
+    temperature: 0.7
+    top_p: 0.8
+    presence_penalty: 1.5
+  extra_body:
+    top_k: 20
+    chat_template_kwargs:
+      enable_thinking: false

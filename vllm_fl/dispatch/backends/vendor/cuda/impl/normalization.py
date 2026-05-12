@@ -22,9 +22,9 @@ def rms_norm_cuda(
     Uses vLLM's optimized CUDA kernel when available.
 
     Args:
-        obj: The calling obj (e.g., RMSNorm layer)
         x: Input tensor
         residual: Optional residual tensor to add before normalization
+        obj: The calling obj (e.g., RMSNorm layer)
 
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided

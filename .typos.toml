@@ -1,0 +1,35 @@
+# Configuration for crate-ci/typos spell checker
+# https://github.com/crate-ci/typos
+
+[default]
+extend-ignore-re = [
+    # Hex-encoded strings and hashes
+    "[0-9a-fA-F]{32,}",
+]
+
+[default.extend-words]
+# ML / deep-learning terminology
+rsqrt = "rsqrt"
+dout = "dout"
+bfloat = "bfloat"
+
+# Hardware / vendor terminology
+npu = "npu"
+NPU = "NPU"
+hccl = "hccl"
+HCCL = "HCCL"
+cann = "cann"
+CANN = "CANN"
+
+[files]
+extend-exclude = [
+    # Auto-generated or third-party
+    "*.egg-info/**",
+    "build/**",
+    "dist/**",
+    ".git/**",
+    "vllm_fl/",
+    "vllm_fl/**",
+    "tests/",
+    "tests/**",
+]

@@ -15,12 +15,6 @@ from typing import Callable, Dict, Optional, Set, Tuple
 from .registry import OpRegistry
 from .policy import SelectionPolicy, get_policy
 from .types import OpImpl, BackendImplKind, match_token
-from .io_inspector import (
-    inspect_before,
-    inspect_after,
-    inspect_cleanup,
-    is_inspect_enabled,
-)
 from .io_dumper import (
     dump_before,
     dump_after,
@@ -34,6 +28,48 @@ logger = logging.getLogger(__name__)
 
 # Debug printing control
 _DISPATCH_DEBUG = os.getenv("VLLM_FL_DISPATCH_DEBUG", "0") == "1"
+
+# Record which dispatch-level ops are used into the FlagGems oplist file,
+# so users can inspect runtime op usage in one place.
+_FLAGOS_OPLIST_LOCK = threading.Lock()
+_RECORDED_FLAGOS_OPS: Set[Tuple[str, str]] = set()  # (op_name, impl_id)
+
+
+def _record_default_flagos_op(op_name: str, impl: OpImpl) -> None:
+    """Record dispatch-level op usage into the FlagGems oplist file.
+
+    Writes through the FlagGems logger's file handlers directly so that the
+    record goes via the same file descriptor that FlagGems itself uses.  This
+    avoids a file-position race between two independent file descriptors (the
+    old ``open(path, "a+")`` approach vs FlagGems' ``FileHandler(mode="w")``)
+    that caused dispatch entries to be silently overwritten in short-lived
+    processes such as offline inference.
+    """
+    key = (op_name, impl.impl_id)
+    with _FLAGOS_OPLIST_LOCK:
+        if key in _RECORDED_FLAGOS_OPS:
+            return
+        try:
+            fg_logger = logging.getLogger("flag_gems")
+            line = (
+                f"[DEBUG] vllm_fl.dispatch.ops.{op_name}: {impl.impl_id}"
+            )
+            # Write directly through each FlagGems-owned FileHandler so
+            # that the file position stays synchronised with FlagGems'
+            # own writes.  Using ``logger.debug()`` would prepend an
+            # unwanted ``[DEBUG] flag_gems.<funcName>:`` prefix added by
+            # the handler's formatter.
+            for handler in fg_logger.handlers:
+                if (
+                    isinstance(handler, logging.FileHandler)
+                    and getattr(handler, "_flaggems_owned", False)
+                ):
+                    handler.stream.write(line + "\n")
+                    handler.stream.flush()
+            _RECORDED_FLAGOS_OPS.add(key)
+        except Exception:
+            # Never break inference/serving due to diagnostics I/O.
+            return
 
 
 @dataclass
@@ -402,69 +438,44 @@ class OpManager:
         return unique_candidates
 
     def _call_with_hooks(self, op_name: str, fn, args: tuple, kwargs: dict):
-        """Call fn, wrapping with IO inspect/dump hooks only when enabled.
+        """Call fn, wrapping with IO dump hooks only when enabled.
 
-        A single execution-order number is allocated and shared between
-        the inspector and dumper so that log lines and dump files can be
-        correlated.  If ``fn`` raises, any dump pairing pushed by
-        ``dump_before`` is cleaned up to keep the thread-local stack
-        consistent.
+        A single execution-order number is allocated so that log lines
+        and dump files can be correlated.  If ``fn`` raises, any dump
+        pairing pushed by ``dump_before`` is cleaned up to keep the
+        thread-local stack consistent.
 
         Hook failures are logged and swallowed so that diagnostic hooks
         never break the dispatched operator call.
         """
-        do_inspect = is_inspect_enabled()
         do_dump = is_dump_enabled()
 
-        if not do_inspect and not do_dump:
+        if not do_dump:
             return fn(*args, **kwargs)
 
-        # Allocate a single exec_order, module_tag, and op_tag shared by
-        # inspector and dumper so that log lines and dump files correlate
-        # and shared counters are not double-incremented.
         order = next_exec_order()
         module_tag = make_module_tag()
         op_tag = make_op_tag(op_name)
 
-        if do_inspect:
-            try:
-                inspect_before(op_name, args, kwargs, exec_order=order,
-                               module_tag=module_tag, op_tag=op_tag)
-            except Exception as e:
-                logger.debug(f"inspect_before hook failed for '{op_name}': {e}")
-        if do_dump:
-            try:
-                dump_before(op_name, args, kwargs, exec_order=order,
-                            module_tag=module_tag, op_tag=op_tag)
-            except Exception as e:
-                logger.debug(f"dump_before hook failed for '{op_name}': {e}")
+        try:
+            dump_before(op_name, args, kwargs, exec_order=order,
+                        module_tag=module_tag, op_tag=op_tag)
+        except Exception as e:
+            logger.debug(f"dump_before hook failed for '{op_name}': {e}")
 
         try:
             result = fn(*args, **kwargs)
         except Exception:
-            # Clean up stale pairings so the stacks stay consistent
-            if do_inspect:
-                try:
-                    inspect_cleanup(op_name)
-                except Exception:
-                    pass
-            if do_dump:
-                try:
-                    dump_cleanup(op_name)
-                except Exception:
-                    pass
+            try:
+                dump_cleanup(op_name)
+            except Exception:
+                pass
             raise
 
-        if do_inspect:
-            try:
-                inspect_after(op_name, args, result)
-            except Exception as e:
-                logger.debug(f"inspect_after hook failed for '{op_name}': {e}")
-        if do_dump:
-            try:
-                dump_after(op_name, args, result)
-            except Exception as e:
-                logger.debug(f"dump_after hook failed for '{op_name}': {e}")
+        try:
+            dump_after(op_name, args, result)
+        except Exception as e:
+            logger.debug(f"dump_after hook failed for '{op_name}': {e}")
 
         return result
 
@@ -472,8 +483,11 @@ class OpManager:
         """
         Resolve and call an operator implementation with optional fallback support.
 
-        When VLLM_FL_STRICT=1, this method will try alternative implementations
-        if the primary one fails. Otherwise, it behaves like the original implementation.
+        Behavior is controlled by the active policy's strict flag (VLLM_FL_STRICT):
+          - VLLM_FL_STRICT=0 (default): fallback mode — if the primary implementation
+            fails, the system automatically tries the next available implementation.
+          - VLLM_FL_STRICT=1: strict mode — fail immediately on the first error,
+            no fallback is attempted.
 
         Logs on first call or when the implementation changes (e.g., backend switch).
 
@@ -485,10 +499,10 @@ class OpManager:
             Result from the implementation
 
         Raises:
-            RuntimeError: If all implementations fail (when fallback enabled) or
-                         if the primary implementation fails (when fallback disabled)
+            RuntimeError: If all implementations fail (fallback mode) or
+                         if the primary implementation fails (strict mode)
         """
-        enable_fallback = os.getenv("VLLM_FL_STRICT", "1") != "0"
+        enable_fallback = not get_policy().strict
 
         if not enable_fallback:
             # Original behavior: use cached resolve() and fast-fail
@@ -516,6 +530,8 @@ class OpManager:
                                         f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "
                                         f"(kind={impl.kind.value}, vendor={impl.vendor})"
                                     )
+                                if impl.kind == BackendImplKind.DEFAULT:
+                                    _record_default_flagos_op(op_name, impl)
                                 break
                         self._called_ops[op_name] = impl_id
 
@@ -557,6 +573,8 @@ class OpManager:
                                         f"Op '{op_name}' switched from '{last_impl_id}' to '{impl.impl_id}' "
                                         f"(kind={impl.kind.value}, vendor={impl.vendor})"
                                     )
+                                if impl.kind == BackendImplKind.DEFAULT:
+                                    _record_default_flagos_op(op_name, impl)
                                 self._called_ops[op_name] = impl.impl_id
                 else:
                     # Always log fallback attempts (these are important runtime events)
@@ -571,6 +589,8 @@ class OpManager:
                 if idx > 0:
                     with self._lock:
                         self._called_ops[op_name] = impl.impl_id
+                if impl.kind == BackendImplKind.DEFAULT:
+                    _record_default_flagos_op(op_name, impl)
 
                 return result
 

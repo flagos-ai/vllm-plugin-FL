@@ -58,7 +58,7 @@ class IluvatarBackend(Backend):
                             IluvatarBackend._available = True
                         else:
                             IluvatarBackend._available = False
-    
+
                     else:
                         IluvatarBackend._available = False
             except Exception:

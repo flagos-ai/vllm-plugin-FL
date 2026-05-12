@@ -2,13 +2,15 @@
 __pycache__/
 build/
 dist/
+vllm_fl/_version.py
 
 # Coverage
 .coverage
 .coverage.*
 htmlcov/
-coverage.json
+coverage*.json
 coverage.xml
 
 # Reports
-report.json
+report*.json
+test-results-*

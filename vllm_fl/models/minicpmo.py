@@ -95,7 +95,7 @@ class MiniCPMOAudioFeatureInputs(TensorSchema):
     ]
     """
     Slice here means chunk. Audio that is too long will be split into slices,
-    which is the same as image. Padding is used therefore `audio_features` is 
+    which is the same as image. Padding is used therefore `audio_features` is
     `torch.Tensor`.
     """
 
@@ -104,7 +104,7 @@ class MiniCPMOAudioFeatureInputs(TensorSchema):
         TensorShape("bn", "s"),
     ]
     """
-    This should be feature length of each audio slice, 
+    This should be feature length of each audio slice,
     which equals to `audio_features.shape[-1]`
     """
 
@@ -818,7 +818,7 @@ class MiniCPMO(MiniCPMOBaseModel, MiniCPMV2_6):
             version = tuple([int(x) for x in version])
         else:
             # Auto-detect version based on config features:
-            # - MiniCPM-o 4.5 (Qwen3 backbone): has head_dim attribute, 
+            # - MiniCPM-o 4.5 (Qwen3 backbone): has head_dim attribute,
             #   hidden_size=4096, num_hidden_layers=36
             # - MiniCPM-o 2.6 (Qwen2 backbone): no head_dim, different arch
             has_head_dim = hasattr(config, "head_dim")
