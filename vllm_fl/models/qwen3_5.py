@@ -69,7 +69,7 @@ from vllm.model_executor.models.qwen3_next import (
     QwenNextMixtureOfExperts,
 )
 from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
-from vllm_fl.configs.qwen3_5 import Qwen3_5Config, Qwen3_5TextConfig
+from vllm_fl.configs.qwen3_5 import Qwen3_5Config
 from vllm_fl.configs.qwen3_5_moe import Qwen3_5MoeConfig, Qwen3_5MoeTextConfig
 import vllm_fl.models.qwen3_next # for error ''_OpNamespace' 'vllm' object has no attribute 'gdn_attention_core''
 

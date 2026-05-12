@@ -59,13 +59,16 @@ class PlatformFL(Platform):
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "iluvatar":
+        target_vendors = ["iluvatar", "hygon"]
+        if self.vendor_name and self.vendor_name.lower() in target_vendors:
             return False
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "iluvatar":
+        target_vendors = ["iluvatar", "hygon"]
+        # print(f"Vendor name: {self.vendor_name}, Device type: {self.device_type}")
+        if self.vendor_name and self.vendor_name.lower() in target_vendors:
             return False
         return self.device_type == "cuda"
 
@@ -284,6 +287,10 @@ class PlatformFL(Platform):
     @classmethod
     def use_custom_allreduce(cls) -> bool:
         if cls.dist_backend == "flagcx":
+            return False
+
+        target_vendors = ["iluvatar", "hygon"]
+        if cls.vendor_name and cls.vendor_name.lower() in target_vendors:
             return False
         return True
 

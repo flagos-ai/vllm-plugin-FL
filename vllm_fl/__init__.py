@@ -37,18 +37,14 @@ def register():
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
         from vllm_fl.configs.qwen3_5 import Qwen3_5Config
-        from transformers import AutoConfig
         _CONFIG_REGISTRY["qwen3_5"] = Qwen3_5Config
-        AutoConfig.register("qwen3_5", Qwen3_5Config)
     except Exception as e:
         logger.error(f"Register Qwen3.5 config in platform plugin error: {str(e)}")
 
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
         from vllm_fl.configs.qwen3_5_moe import Qwen3_5MoeConfig
-        from transformers import AutoConfig
         _CONFIG_REGISTRY["qwen3_5_moe"] = Qwen3_5MoeConfig
-        AutoConfig.register("qwen3_5_moe", Qwen3_5MoeConfig)
     except Exception as e:
         logger.error(f"Register Qwen3.5 MoE config in platform plugin error: {str(e)}")
 
