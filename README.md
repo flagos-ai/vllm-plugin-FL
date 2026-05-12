@@ -56,9 +56,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
-3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/),If on Sunrize platform, depends on FlagGems [PR #2949](https://github.com/flagos-ai/FlagGems/pull/2949)
+3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/)
 
-    3.1 Install Build Dependencies, [PR #2949](https://github.com/flagos-ai/FlagGems/pull/2949)
+    3.1 Install Build Dependencies
 
     ```sh
     pip install -U scikit-build-core==0.11 pybind11 ninja cmake
