@@ -10,12 +10,29 @@ from typing_extensions import ParamSpec
 
 import torch
 
-# import custom ops, trigger op registration (CUDA only)
-try:
-    import vllm._C  # noqa
-    import vllm._C_stable_libtorch  # noqa
-except (ImportError, OSError):
-    pass  # NPU or other platforms may not have vllm._C
+# Detect Metax early and load MACA C extensions BEFORE FlagGems can register
+# fallback vLLM op schemas via torch.library.define().
+from vllm_fl.utils import _looks_like_metax_runtime, _preload_metax_mcoplib_if_needed
+
+if _looks_like_metax_runtime():
+    import sys
+    import types
+
+    _preload_metax_mcoplib_if_needed()
+    # Insert stub vllm._C so that vLLM's fallback torch.library.define() path
+    # is never triggered. mcoplib already registered all ops under the _C
+    # namespace via TORCH_LIBRARY, so torch.ops._C.* calls work as-is.
+    if "vllm._C" not in sys.modules:
+        sys.modules["vllm._C"] = types.ModuleType("vllm._C")
+    if "vllm._C_stable_libtorch" not in sys.modules:
+        sys.modules["vllm._C_stable_libtorch"] = types.ModuleType(
+            "vllm._C_stable_libtorch")
+else:
+    try:
+        import vllm._C  # noqa
+        import vllm._C_stable_libtorch  # noqa
+    except (ImportError, OSError):
+        pass
 
 from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
@@ -127,10 +144,12 @@ class PlatformFL(Platform):
     def import_kernels(cls) -> None:
         """Import device-specific kernels."""
         logger.info(f"current vendor_name is: {cls.vendor_name}")
-        # Always load base vLLM C extensions
-        super().import_kernels()
 
         if cls.vendor_name == "metax":
+            # Load mcoplib first to register ops via C++ TORCH_LIBRARY.
+            # Skip super().import_kernels() — the base class would register
+            # fallback fake op schemas (at /dev/null) when vllm._C is absent,
+            # causing a duplicate schema crash when mcoplib._C loads.
             try:
                 import mcoplib._C  # noqa: F401
             except ImportError:
@@ -145,6 +164,8 @@ class PlatformFL(Platform):
                 import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
             except Exception as e:
                 logger.warning(f"Failed to import maca patches: {e}")
+        else:
+            super().import_kernels()
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
@@ -400,7 +421,7 @@ class PlatformFL(Platform):
             return DeviceCapability(major=major, minor=minor)
         # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
-            return None        
+            return None
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 
