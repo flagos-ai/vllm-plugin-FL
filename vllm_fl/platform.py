@@ -3,6 +3,8 @@
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+#
+# 2026 - Modified by Kunlunxin, Inc. All Rights Reserved.
 
 import os
 from typing import TYPE_CHECKING, Optional, TypeVar
@@ -153,8 +155,15 @@ class PlatformFL(Platform):
             elif cls.device_type == "musa":
                 cache_config.block_size = 64
                 logger.info("Setting kv cache block size to 64 for MUSA.")
+            elif cls.vendor_name == "kunlunxin":
+                cache_config.block_size = 128
+                logger.info("Setting kv cache block size to 128 for Kunlunxin.")
             else:
                 cache_config.block_size = 16
+        if cls.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patch import refresh_block_size
+
+            refresh_block_size(vllm_config)
 
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
@@ -287,7 +296,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "kunlunxin"]:
             return True
         return False
 

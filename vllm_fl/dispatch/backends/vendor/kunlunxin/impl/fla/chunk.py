@@ -7,20 +7,101 @@
 # the following copyright notice:
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 # ruff: noqa: E501
-# mypy: ignore-errors
+#
+# 2026 - Modified by Kunlunxin, Inc. All Rights Reserved.
+
+"""
+Kunlunxin implementation of chunk_gated_delta_rule.
+
+Contains both the low-level kernel wrapper (chunk_gated_delta_rule_fwd) and
+the top-level entry (chunk_gated_delta_rule).
+
+The top-level ChunkGatedDeltaRuleFunction.forward **skips l2norm** because the
+Kunlunxin kernel handles it internally (use_qk_l2norm_in_kernel=True).
+"""
+
+from __future__ import annotations
+
 import warnings
 from typing import Optional
 
 import torch
 from einops import rearrange
 
-from .l2norm import l2norm_fwd
-from .utils import input_guard
-from flag_gems.runtime.backend._ascend.fla import chunk_gated_delta_rule_fwd
+import xtorch_ops
+
+
+def chunk_gated_delta_rule_fwd(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    g: torch.Tensor,
+    beta: torch.Tensor,
+    scale: float,
+    initial_state: torch.Tensor,
+    output_final_state: bool,
+    cu_seqlens: Optional[torch.LongTensor] = None,
+) -> tuple:
+    """
+    Kunlunxin chunked gated delta rule forward pass.
+
+    Args:
+        q: queries [B, T, H, K]
+        k: keys [B, T, H, K]
+        v: values [B, T, H, V]
+        g: decay gates (in log space)
+        beta: betas
+        scale: scale factor
+        initial_state: [N, H, V, K]
+        output_final_state: whether to output final state
+        cu_seqlens: cumulative sequence lengths
+
+    Returns:
+        7-tuple: (g, o, A, final_state, w, h, v_new)
+        to match the dispatch interface expected by vllm_fl
+    """
+    input_dtype = q.dtype
+
+    # check dtype
+    if input_dtype == torch.bfloat16:
+        g_input = g.float()
+        beta_input = beta.float()
+        state_input = initial_state.float()
+    else:
+        g_input = g
+        beta_input = beta
+        state_input = initial_state
+
+    cu_seqlens_cpu = cu_seqlens.cpu() if cu_seqlens is not None else None
+
+    final_state = torch.empty_like(state_input)
+    o = torch.empty_like(v)
+    xtorch_ops.chunk_gated_delta_rule(
+        q,
+        k,
+        v,
+        g_input,
+        beta_input,
+        -1,  # uses -1 for automatic scale
+        state_input,
+        o,
+        final_state,
+        cu_seqlens_cpu,
+        head_first=False,
+        use_qk_l2norm_in_kernel=True,  # always True in Kunlunxin
+    )
+
+    # Transpose final_state back to [N, H, K, V]
+    if final_state is not None:
+        final_state = final_state.transpose(2, 3).contiguous()
+
+    # Return 7-tuple to match the dispatch interface:
+    # (g, o, A, final_state, w, h, v_new)
+    return g, o, None, final_state, None, None, None
+
 
 class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
     @staticmethod
-    @input_guard
     def forward(
         ctx,
         q: torch.Tensor,
@@ -34,9 +115,12 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         cu_seqlens: Optional[torch.LongTensor] = None,
         use_qk_l2norm_in_kernel: bool = False,
     ):
-        if use_qk_l2norm_in_kernel:
-            q = l2norm_fwd(q)
-            k = l2norm_fwd(k)
+        # klx diff: skip l2norm — kernel handles it internally
+        # (upstream would do l2norm_fwd(q), l2norm_fwd(k) here)
+
+        # [N, H, K, V] -> [N, H, V, K] for kunlunxin kernel
+        if initial_state is not None:
+            initial_state = initial_state.transpose(2, 3).contiguous()
 
         g, o, A, final_state, w, h, v_new = chunk_gated_delta_rule_fwd(
             q=q,

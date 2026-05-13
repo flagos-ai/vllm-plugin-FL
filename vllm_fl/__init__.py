@@ -1,4 +1,6 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
+#
+# 2026 - Modified by Kunlunxin, Inc. All Rights Reserved.
 
 import os
 import logging
@@ -47,7 +49,16 @@ def register():
 def register_model():
     """Register the FL model."""
     from vllm import ModelRegistry
-    import vllm.model_executor.models.qwen3_next as qwen3_next_module
+
+    # Kunlunxin: patch torch.xpu.get_device_name BEFORE any import that
+    # transitively loads vllm.model_executor.layers.fla.ops.utils, which
+    # crashes on "Torch not compiled with XPU enabled" (see patch_fla_utils.py)
+    from vllm_fl.dispatch.config.utils import get_platform_name
+    if get_platform_name() == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
+            ensure_fla_compat,
+        )
+        ensure_fla_compat()
 
     # Register Qwen3.5 MoE config
     try:
@@ -59,6 +70,7 @@ def register_model():
 
     # Register Qwen3Next model
     try:
+        import vllm.model_executor.models.qwen3_next as qwen3_next_module
         from vllm_fl.models.qwen3_next import Qwen3NextForCausalLM  # noqa: F401
 
         qwen3_next_module.Qwen3NextForCausalLM = Qwen3NextForCausalLM

@@ -3,7 +3,7 @@
 llm:
   model: "/data/models/Qwen/Qwen3-0.6B"
   max_model_len: 8192
-  gpu_memory_utilization: 0.7
+  gpu_memory_utilization: 0.8
   trust_remote_code: true
 
 generate:

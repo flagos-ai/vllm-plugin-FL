@@ -382,13 +382,9 @@ class WorkerFL(WorkerBase):
         )
 
         if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe.ascend_config import (
-                init_ascend_config,
-            )
             from vllm_fl.dispatch.backends.vendor.ascend.impl.triton_utils import (
                     init_device_properties_triton,
             )
-            init_ascend_config(self.vllm_config)
             init_device_properties_triton()
         # Set random seed.
         set_random_seed(self.model_config.seed)

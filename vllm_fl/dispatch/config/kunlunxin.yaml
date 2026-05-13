@@ -1,0 +1,91 @@
+# vLLM-FL Dispatch Configuration for Kunlunxin vendor
+# Auto-loaded when running on Kunlunxin hardware
+
+# Preferred default backend type: flaggems, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Vendor Whitelist (Optional, allows all if not set)
+# allow_vendors:
+#  - kunlunxin
+#  - cuda
+
+# Vendor Blacklist (Optional)
+# deny_vendors:
+#   - cuda
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos        : FlagOS implementation
+#   - reference     : PyTorch reference implementation
+#   - vendor        : Any available vendor backend (auto-detected)
+#   - vendor:kunlunxin : Kunlunxin-specific vendor backend
+op_backends:
+  # attention_backend: prioritize flagos (FlagGems Triton) implementation
+  attention_backend:
+    - flagos
+    - vendor
+    - reference
+
+  # rms_norm: prioritize vendor (Kunlunxin) implementation
+  rms_norm:
+    - flagos
+    - vendor
+    - reference
+
+  # silu_and_mul: prioritize vendor (Kunlunxin) implementation
+  silu_and_mul:
+    - flagos
+    - vendor
+    - reference
+
+  # rotary_embedding: prioritize vendor (Kunlunxin) implementation
+  rotary_embedding:
+    - flagos
+    - vendor
+    - reference
+
+  # FLA chunk gated delta rule: vendor (Kunlunxin) implementation
+  chunk_gated_delta_rule_fwd:
+    - vendor
+    - reference
+
+  # FLA fused recurrent gated delta rule: vendor (Kunlunxin) implementation
+  fused_recurrent_gated_delta_rule_fwd:
+    - vendor
+    - reference
+
+  # Causal conv1d forward: vendor (Kunlunxin) implementation
+  causal_conv1d_fn:
+    - vendor
+    - reference
+
+  # Causal conv1d update: vendor (Kunlunxin) implementation
+  causal_conv1d_update:
+    - vendor
+    - reference
+
+  # Fused GDN gating: vendor (Kunlunxin) implementation
+  fused_gdn_gating:
+    - vendor
+    - reference
+
+# FlagOS operator blacklist
+# These operators will NOT use FlagOS implementation even if FlagOS is enabled.
+flagos_blacklist:
+  - chunk_gated_delta_rule_fwd
+  - fused_recurrent_gated_delta_rule_fwd
+  - causal_conv1d_fn
+  - causal_conv1d_update
+  - fused_gdn_gating
+
+# OOT (Out-of-Tree) operator blacklist
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe

@@ -3,10 +3,10 @@
 llm:
   model: "/data/models/Qwen/Qwen3-Next-80B-A3B-Instruct"
   tensor_parallel_size: 8
-  max_model_len: 16384
+  max_model_len: 8192
   max_num_batched_tokens: 16384
   max_num_seqs: 512
-  gpu_memory_utilization: 0.7
+  gpu_memory_utilization: 0.8
   enforce_eager: true
   trust_remote_code: true
 
