@@ -29,7 +29,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Iluvatar | Supported | - |
 | Tsingmicro | Merging | [PR #52](https://github.com/flagos-ai/vllm-plugin-FL/pull/52) |
 | Moore Threads | Supported | - |
-| Hygon | Merging | [PR #78](https://github.com/flagos-ai/vllm-plugin-FL/pull/78) |
+| Hygon | Supported | - |
 
 ## Quick Start
 
