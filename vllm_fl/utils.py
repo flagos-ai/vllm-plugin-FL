@@ -4,10 +4,6 @@ import json
 import os
 from typing import Optional, Tuple
 
-import shutil    #patch for hygon device get
-if "GEMS_VENDOR" not in os.environ and shutil.which("hy-smi") and shutil.which("rocm-smi"):
-    os.environ["GEMS_VENDOR"] = "hygon"
-
 import flag_gems
 from flag_gems.runtime.backend.device import DeviceDetector
 from flag_gems.runtime import backend
