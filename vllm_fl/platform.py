@@ -344,7 +344,7 @@ class PlatformFL(Platform):
         if cls.dist_backend == "flagcx":
             return False
 
-        target_vendors = ["iluvatar", "hygon"]
+        target_vendors = ["hygon"]
         if cls.vendor_name and cls.vendor_name.lower() in target_vendors:
             return False
         return True
