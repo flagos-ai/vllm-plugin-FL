@@ -70,10 +70,6 @@ class PlatformFL(Platform):
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        target_vendors = ["hygon"]
-        # print(f"Vendor name: {self.vendor_name}, Device type: {self.device_type}")
-        if self.vendor_name and self.vendor_name.lower() in target_vendors:
-            return False
 
         if self.vendor_name == "musa":
             return True
