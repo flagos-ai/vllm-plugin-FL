@@ -41,6 +41,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "mthreads": {"device_type": "musa", "device_name": "musa"},
     # Registered backend: vendor/kunlunxin
     "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
+    # Registered backend: vendor/musa
+    "hygon": {"device_type": "cuda", "device_name": "rocm"},
 }
 
 
@@ -209,7 +211,7 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "kunlunxin"]
+        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "kunlunxin", "hygon"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
