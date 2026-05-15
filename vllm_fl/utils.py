@@ -42,7 +42,7 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/kunlunxin
     "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
     # Registered backend: vendor/musa
-    "hygon": {"device_type": "cuda", "device_name": "rocm"},
+    "hygon": {"device_type": "cuda", "device_name": "cuda"},
 }
 
 
