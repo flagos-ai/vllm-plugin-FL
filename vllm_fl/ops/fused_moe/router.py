@@ -64,6 +64,8 @@ class FusedTopKRouterFL(FusedTopKRouter):
         hidden_states: torch.Tensor,
         router_logits: torch.Tensor,
         indices_type: torch.dtype | None,
+        *,
+        input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         topk_weights, topk_ids, _ = fused_topk(
             hidden_states=hidden_states,
@@ -164,8 +166,16 @@ class GroupedTopKRouterFL(GroupedTopKRouter):
         hidden_states: torch.Tensor,
         router_logits: torch.Tensor,
         indices_type: torch.dtype | None,
+        *,
+        input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if not self._valid_grouping(router_logits):
+        def _valid_grouping():
+            num_experts = router_logits.shape[-1]
+            if num_experts <= self.num_expert_group:
+                return False
+            return num_experts % self.num_expert_group == 0
+
+        if not _valid_grouping():
             if self.e_score_correction_bias is not None:
                 topk_weights, topk_ids = fused_topk_bias(
                     hidden_states=hidden_states,
@@ -221,6 +231,8 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
         hidden_states: torch.Tensor,
         router_logits: torch.Tensor,
         indices_type: torch.dtype | None,
+        *,
+        input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         topk_weights, topk_ids = fused_topk_bias(
             hidden_states=hidden_states,

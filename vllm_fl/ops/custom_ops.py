@@ -7,7 +7,7 @@ from vllm.model_executor.custom_op import CustomOp, PluggableLayer
 from .layernorm import *  # noqa F403 F401
 from .activation import *  # noqa F403 F401
 from .rotary_embedding import *  # noqa F403 F401
-from .fused_moe import *  # noqa F403 F401
+from .fused_moe.layer import FusedMoEFL, SharedFusedMoEFL, UnquantizedFusedMoEMethodFL  # noqa F401
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +22,66 @@ OOT_OPS = {
     "gelu_and_mul": (GeluAndMulFL, "GeluAndMul"),  # noqa F405
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
-    "fused_moe": (FusedMoEFL, "FusedMoE"),  # noqa F405
-    "shared_fused_moe": (SharedFusedMoEFL, "SharedFusedMoE"),  # noqa F405
-    "unquantized_fused_moe_method": (
-        UnquantizedFusedMoEMethodFL,  # noqa F405
-        "UnquantizedFusedMoEMethod",
-    ),
 }
+
+def _patch_unquantized_fused_moe_for_oot():
+    """
+    Fix vLLM bug: when platform is OOT, select_unquantized_moe_backend returns
+    experts_cls=None and moe_kernel stays None. This breaks:
+    1. is_monolithic property (calls None.is_monolithic())
+    2. maybe_init_modular_kernel (tries to create modular kernel, raises)
+    3. forward_oot (falls back to forward_native which asserts moe_kernel)
+
+    We patch supports_internal_mk to return True for OOT (skips modular init),
+    and forward_oot to use the plugin's fused_experts dispatch.
+    """
+    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
+        UnquantizedFusedMoEMethod,
+    )
+    from vllm.model_executor.layers.fused_moe.oracle.unquantized import (
+        UnquantizedMoeBackend,
+    )
+
+    _orig_supports_internal_mk = UnquantizedFusedMoEMethod.supports_internal_mk
+
+    @property
+    def _patched_supports_internal_mk(self) -> bool:
+        if self.unquantized_backend == UnquantizedMoeBackend.OOT:
+            return True
+        return _orig_supports_internal_mk.fget(self)
+
+    UnquantizedFusedMoEMethod.supports_internal_mk = _patched_supports_internal_mk
+
+    @property
+    def _patched_is_monolithic(self) -> bool:
+        if self.unquantized_backend == UnquantizedMoeBackend.OOT:
+            return False
+        if self.unquantized_backend == UnquantizedMoeBackend.CPU:
+            return True
+        if self.moe_kernel is not None:
+            return self.moe_kernel.is_monolithic
+        if hasattr(self, "experts_cls") and self.experts_cls is not None:
+            return self.experts_cls.is_monolithic()
+        return False
+
+    UnquantizedFusedMoEMethod.is_monolithic = _patched_is_monolithic
+
+    def _patched_forward_oot(self, layer, x, topk_weights, topk_ids, shared_experts_input):
+        from vllm_fl.ops.fused_moe.fused_moe import fused_experts
+        return fused_experts(
+            hidden_states=x,
+            w1=layer.w13_weight,
+            w2=layer.w2_weight,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            activation=layer.activation,
+            apply_router_weight_on_input=layer.apply_router_weight_on_input,
+            global_num_experts=layer.global_num_experts,
+            expert_map=layer.expert_map,
+        )
+
+    UnquantizedFusedMoEMethod.forward_oot = _patched_forward_oot
+
 
 def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     """
@@ -43,6 +96,9 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     will be excluded from registration.
     """
     from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
+
+    # Patch UnquantizedFusedMoEMethod for OOT platforms before any MoE layers are created
+    _patch_unquantized_fused_moe_for_oot()
 
     # Check if OOT registration is enabled
     if not is_oot_enabled():
@@ -74,6 +130,9 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
             continue
 
         op_cls, registration_name = OOT_OPS[op_name]
+        if op_cls is None:
+            logger.debug(f"Skipping '{op_name}': class not available in this vLLM version")
+            continue
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
         if issubclass(op_cls, PluggableLayer):
             PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)

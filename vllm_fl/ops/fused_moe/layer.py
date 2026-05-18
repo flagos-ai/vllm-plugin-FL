@@ -4,7 +4,10 @@
 import torch
 
 from vllm.model_executor.layers.fused_moe import FusedMoE
-from vllm.model_executor.layers.fused_moe.shared_fused_moe import SharedFusedMoE
+try:
+    from vllm.model_executor.layers.fused_moe.shared_fused_moe import SharedFusedMoE
+except ImportError:
+    SharedFusedMoE = None
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
     UnquantizedFusedMoEMethod,
 )
@@ -111,18 +114,22 @@ class FusedMoEFL(FusedMoE):
                 indices_type_getter=router.indices_type_getter,
             )
 
-        # Re-initialize runner with the new FL router
-        self.runner = self._init_runner()
+        # Re-initialize runner with the new FL router (if available in this vLLM version)
+        if hasattr(self, '_init_runner'):
+            self.runner = self._init_runner()
 
 
-class SharedFusedMoEFL(SharedFusedMoE, FusedMoEFL):
-    """OOT replacement for SharedFusedMoE.
+if SharedFusedMoE is not None:
+    class SharedFusedMoEFL(SharedFusedMoE, FusedMoEFL):
+        """OOT replacement for SharedFusedMoE.
 
-    PluggableLayer.__new__ matches by cls.__name__, so SharedFusedMoE
-    needs its own registration entry.  The FL router/expert replacement
-    logic is inherited from FusedMoEFL via MRO.
-    """
-    pass
+        PluggableLayer.__new__ matches by cls.__name__, so SharedFusedMoE
+        needs its own registration entry.  The FL router/expert replacement
+        logic is inherited from FusedMoEFL via MRO.
+        """
+        pass
+else:
+    SharedFusedMoEFL = None
 
 
 __all__ = ["FusedMoEFL", "SharedFusedMoEFL", "UnquantizedFusedMoEMethodFL"]

@@ -389,6 +389,10 @@ class PlatformFL(Platform):
     def num_compute_units(cls, device_id: int = 0) -> int:
         return cls.torch_device_fn.get_device_properties(device_id).multi_processor_count
 
+    @classmethod
+    def manual_seed_all(cls, seed: int) -> None:
+        cls.torch_device_fn.manual_seed_all(seed)
+
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
