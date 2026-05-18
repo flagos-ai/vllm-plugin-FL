@@ -61,7 +61,7 @@ from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import AsyncModelRunnerOutput, DraftTokenIds, ModelRunnerOutput
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
-from vllm.v1.worker.worker_base import WorkerBase
+from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
 
@@ -688,7 +688,10 @@ class WorkerFL(WorkerBase):
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
 
-        return self.compilation_config.compilation_time
+        return CompilationTimes(
+            language_model=self.compilation_config.compilation_time,
+            encoder=0.0,
+        )
 
     def reset_mm_cache(self) -> None:
         self.model_runner.reset_mm_cache()
@@ -1068,8 +1071,14 @@ class WorkerFL(WorkerBase):
         )
 
     def shutdown(self) -> None:
-        if runner := getattr(self, "model_runner", None):
-            runner.ensure_kv_transfer_shutdown()
+        try:
+            from vllm.distributed.kv_transfer.kv_transfer_state import (
+                ensure_kv_transfer_shutdown,
+            )
+            if ensure_kv_transfer_shutdown is not None:
+                ensure_kv_transfer_shutdown()
+        except ImportError:
+            pass
         if self.profiler is not None:
             self.profiler.shutdown()
 
@@ -1087,7 +1096,7 @@ def init_worker_distributed_environment(
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
-    init_batch_invariance(attention_config.backend)
+    init_batch_invariance()
 
     init_method = distributed_init_method or "env://"
     init_distributed_environment(
