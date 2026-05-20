@@ -179,17 +179,13 @@ def patch_op_cls():
     """Register Sunrise replacements for upstream custom ops."""
     try:
         from vllm.model_executor.custom_op import CustomOp
-        #from vllm.model_executor.custom_op import PluggableLayer
 
         from .impl.vocab_parallel_embedding import SunriseVocabParallelEmbedding
 
-        #PluggableLayer.register_oot(
-        #    _decorated_layer_cls=SunriseVocabParallelEmbedding,
         CustomOp.register_oot(
-             _decorated_op_cls=SunriseVocabParallelEmbedding,
+            _decorated_op_cls=SunriseVocabParallelEmbedding,
             name="VocabParallelEmbedding",
         )
         logger.info("Patched VocabParallelEmbedding for Sunrise/PTPU")
     except Exception as e:
         logger.warning("Failed to patch VocabParallelEmbedding for Sunrise: %s", e)
-
