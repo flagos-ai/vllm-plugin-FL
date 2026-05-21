@@ -246,6 +246,7 @@ class GraphWrapper:
         except (ImportError, RuntimeError):
             pass
 
-        current_platform.torch_device_fn.synchronize()
+        if current_platform.device_type == "npu":
+            current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
         return entry.output
