@@ -656,9 +656,6 @@ class FlagCXConnectorWorker:
                 self.kv_tensors_meta.append((base_addr, curr_size))
 
         self.kv_caches_base_addr = seen_base_addresses
-        self._local_mr_idx: dict[int, int] = {
-            addr: i for i, addr in enumerate(seen_base_addresses)
-        }
 
         assert tensor_size_bytes is not None
         assert self.num_blocks != 0
@@ -842,10 +839,9 @@ class FlagCXConnectorWorker:
         local_base_addr = self.kv_caches_base_addr
         remote_base_addr = agent_meta.kv_caches_base_addr
         block_len = self.block_len
-        local_mr_idx = self._local_mr_idx
-        remote_mr_idx = {
-            addr: i for i, addr in enumerate(remote_base_addr)
-        }
+        remote_session = (
+            f"{agent_meta.remote_hostname}:{agent_meta.remote_port}"
+        )
 
         decode_listener_addr = (
             f"{agent_meta.remote_hostname}:"
@@ -853,68 +849,58 @@ class FlagCXConnectorWorker:
         )
         pair_info = self.pair_comms.get(decode_listener_addr)
         if pair_info is None:
-            raise RuntimeError(
-                f"No pair comm for {decode_listener_addr}"
-            )
+            raise RuntimeError(f"No pair comm for {decode_listener_addr}")
         comm = pair_info.comm
-        my_rank = pair_info.my_rank
-        peer_rank = 1 - my_rank
-
-        req_groups: list[tuple[list[list[int]], list[list[int]]]] = []
-        for req_id, send_meta, remote_block_ids in send_reqs:
-            send_meta.ready.wait()
-            if not remote_block_ids:
-                continue
-            local_block_ids = send_meta.local_block_ids
-            num_remote = len(remote_block_ids)
-            assert len(local_block_ids) >= num_remote
-            if len(local_block_ids) > num_remote:
-                local_block_ids = local_block_ids[-num_remote:]
-            gl, gr = _group_contiguous(local_block_ids, remote_block_ids)
-            if gl:
-                req_groups.append((gl, gr))
-
-        if not req_groups:
-            return 0
-
-        per_layer_mrs = self.per_layer_mrs
-        num_layers = self.num_attn_layers
-        # Sanity: registered MRs must match num_layers × per_layer_mrs.
-        assert len(local_base_addr) == num_layers * per_layer_mrs, (
-            f"MR count mismatch: {len(local_base_addr)} vs "
-            f"{num_layers}×{per_layer_mrs}"
-        )
+        peer_rank = 1 - pair_info.my_rank
 
         num_reqs = len(send_reqs)
         start_time = time.perf_counter()
         nvtx.range_push(
-            f"_send_blocks(reqs={num_reqs},layers={num_layers}"
-            f",peer={peer_rank})"
+            f"_send_blocks(reqs={num_reqs},peer={peer_rank})"
         )
 
-        total_mrs = num_layers * per_layer_mrs
         src_offs: list[int] = []
         dst_offs: list[int] = []
         sizes: list[int] = []
         src_mrs: list[int] = []
         dst_mrs: list[int] = []
 
-        # Precompute (src_mr, dst_mr) per global MR index once.
-        mr_pairs: list[tuple[int, int]] = []
-        for mr_global in range(total_mrs):
-            la = local_base_addr[mr_global]
-            ra = remote_base_addr[mr_global]
-            mr_pairs.append((local_mr_idx[la], remote_mr_idx[ra]))
+        for req_id, send_meta, remote_block_ids in send_reqs:
+            send_meta.ready.wait()
 
-        for gl, gr in req_groups:
-            for src_mr, dst_mr in mr_pairs:
-                for grp_l, grp_r in zip(gl, gr):
-                    n = len(grp_l)
-                    src_offs.append(grp_l[0] * block_len)
-                    dst_offs.append(grp_r[0] * block_len)
-                    sizes.append(n * block_len)
-                    src_mrs.append(src_mr)
-                    dst_mrs.append(dst_mr)
+            num_remote_blocks = len(remote_block_ids)
+            if num_remote_blocks == 0:
+                continue
+
+            local_block_ids = send_meta.local_block_ids
+            # Partial prefix cache hit: just read uncomputed blocks.
+            num_local_blocks = len(local_block_ids)
+            assert num_local_blocks >= num_remote_blocks
+            if num_local_blocks > num_remote_blocks:
+                local_block_ids = local_block_ids[-num_remote_blocks:]
+
+            group_local_block_ids, group_remote_block_ids = _group_contiguous(
+                local_block_ids, remote_block_ids
+            )
+
+            for mr_idx, (local_layer_addr, remote_layer_addr) in enumerate(
+                zip(local_base_addr, remote_base_addr)
+            ):
+                for group_local_block_id, group_remote_block_id in zip(
+                    group_local_block_ids, group_remote_block_ids
+                ):
+                    src_offs.append(group_local_block_id[0] * block_len)
+                    dst_offs.append(group_remote_block_id[0] * block_len)
+                    sizes.append(block_len * len(group_local_block_id))
+                    src_mrs.append(mr_idx)
+                    dst_mrs.append(mr_idx)
+
+            logger.debug(
+                "Sending kv_caches for request %s (%d blocks) to %s",
+                req_id,
+                num_remote_blocks,
+                remote_session,
+            )
 
         total_xfers = len(sizes)
         with pair_info.send_lock:
@@ -936,10 +922,8 @@ class FlagCXConnectorWorker:
 
         nvtx.range_pop()  # _send_blocks
         logger.debug(
-            "Queued %d xfers across %d layers to rank %d, took %.4f s",
-            total_xfers,
-            num_layers,
-            peer_rank,
+            "Sending to %s done, took %s",
+            remote_session,
             time.perf_counter() - start_time,
         )
         return wait_counter_target
