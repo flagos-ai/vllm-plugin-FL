@@ -332,8 +332,10 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    raw_csv = f"raw_runs_{timestamp}.csv"
-    summary_csv = f"summary_{timestamp}.csv"
+    output_dir = "benchmark_results"
+    os.makedirs(output_dir, exist_ok=True)
+    raw_csv = os.path.join(output_dir, f"raw_runs_{timestamp}.csv")
+    summary_csv = os.path.join(output_dir, f"summary_{timestamp}.csv")
 
     all_summary = []
 
