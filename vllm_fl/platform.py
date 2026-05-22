@@ -40,6 +40,7 @@ _R = TypeVar("_R")
 dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
+    "musa": "mccl",
 }
 
 
@@ -69,7 +70,7 @@ class PlatformFL(Platform):
         """Stateless version of [torch.cuda.is_available][]."""
         if self.vendor_name == "iluvatar":
             return False
-        if self.vendor_name == "musa":
+        if self.device_type == "musa":
             return True
         if self.vendor_name == "hygon":
             return False
@@ -77,8 +78,6 @@ class PlatformFL(Platform):
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "musa":
-            return True
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
     def is_musa(self) -> bool:
@@ -148,6 +147,13 @@ class PlatformFL(Platform):
                 import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
             except Exception as e:
                 logger.warning(f"Failed to import maca patches: {e}")
+
+        if cls.device_type == "musa":
+            try:
+                from vllm_fl.dispatch.backends.vendor.musa.patch import apply_musa_patches
+                apply_musa_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply MUSA patches: {e}")
 
     @classmethod
     def import_ir_kernels(cls) -> None:
