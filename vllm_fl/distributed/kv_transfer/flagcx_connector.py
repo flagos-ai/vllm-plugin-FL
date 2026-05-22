@@ -426,16 +426,6 @@ class FlagCXConnectorWorker:
         self._abort_request_timeout = int(os.getenv(
             "FLAGCX_CONNECTOR_ABORT_REQUEST_TIMEOUT", "480"
         ))
-        self._put_slice_size = int(os.getenv(
-            "FLAGCX_CONNECTOR_SLICE_SIZE", "65536"
-        ))
-        self._put_batch_size = int(os.getenv(
-            "FLAGCX_CONNECTOR_BATCH_PUTS", "256"
-        ))
-        if self._put_slice_size < 0:
-            self._put_slice_size = 0
-        if self._put_batch_size <= 0:
-            self._put_batch_size = 1
 
         # ---- Attention backend detection ----
         self.block_size = vllm_config.cache_config.block_size

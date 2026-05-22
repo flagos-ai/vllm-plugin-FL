@@ -1,233 +1,162 @@
-# SPDX-License-Identifier: Apache-2.0
-# 1P1D disaggregated serving proxy for FlagcxConnector
-#
-# Usage:
-#   python3 router.py \
-#     --host 0.0.0.0 --port 8000 \
-#     --prefill http://<prefill_host>:<vllm_port> <FLAGCX_BOOTSTRAP_PORT> \
-#     --decode  http://<decode_host>:<vllm_port>
-#
-# FLAGCX_BOOTSTRAP_PORT is the ZMQ side-channel BASE port (default 8998).
+# FlagCX Connector Disaggregated Serving (1P1D)
 
-import argparse
-import asyncio
-import itertools
-import os
-import urllib.parse
-import uuid
-from contextlib import asynccontextmanager
+This guide walks through setting up disaggregated prefill-decode serving with the **FlagCXConnector** on two nodes (one Prefill, one Decode).
 
-import httpx
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+## Prerequisites
 
-global_args = None
+- Two nodes with RDMA (InfiniBand) connectivity
+- NVIDIA GPUs with CUDA toolkit installed
+- vLLM (v1 architecture) installed
+- Python 3.10+
 
+## 1. Build FlagCX
 
-async def wait_for_health(prefill_clients, decode_clients, ready):
-    for client_info in prefill_clients:
-        while True:
-            try:
-                response = await client_info["client"].get("/health")
-                response.raise_for_status()
-                break
-            except Exception as exc:
-                print(f"Waiting for prefill {client_info['url']}/health: {exc}")
-                await asyncio.sleep(1)
-        print(f"Prefill {client_info['url']} is healthy.")
-    for client_info in decode_clients:
-        while True:
-            try:
-                response = await client_info["client"].get("/health")
-                response.raise_for_status()
-                break
-            except Exception as exc:
-                print(f"Waiting for decode {client_info['url']}/health: {exc}")
-                await asyncio.sleep(1)
-        print(f"Decode {client_info['url']} is healthy.")
-    ready.set()
-    print("All prefill and decode instances are ready.")
+On **both** Prefill and Decode nodes:
 
+```bash
+git clone https://github.com/FlagOpen/FlagCX.git
+cd FlagCX
 
-@asynccontextmanager
-async def lifespan(app):
-    app.state.prefill_clients = []
-    app.state.decode_clients = []
-    app.state.ready = asyncio.Event()
+# Build with NVIDIA backend
+make USE_NVIDIA=1 -j$(nproc)
 
-    for url, side_channel_port in global_args.prefill:
-        parsed_url = urllib.parse.urlparse(url)
-        app.state.prefill_clients.append(
-            {
-                "client": httpx.AsyncClient(
-                    timeout=None,
-                    base_url=url,
-                    limits=httpx.Limits(
-                        max_connections=None, max_keepalive_connections=None
-                    ),
-                ),
-                "url": url,
-                "remote_host": parsed_url.hostname,
-                "side_channel_port": side_channel_port,
-            }
-        )
+# Verify the shared library is built
+ls build/lib/libflagcx.so
+```
 
-    for url in global_args.decode:
-        app.state.decode_clients.append(
-            {
-                "client": httpx.AsyncClient(
-                    timeout=None,
-                    base_url=url,
-                    limits=httpx.Limits(
-                        max_connections=None, max_keepalive_connections=None
-                    ),
-                ),
-                "url": url,
-            }
-        )
+Set environment variables (add to your shell profile or export before running):
 
-    asyncio.create_task(
-        wait_for_health(
-            app.state.prefill_clients, app.state.decode_clients, app.state.ready
-        )
-    )
-    app.state.prefill_iterator = itertools.cycle(range(len(app.state.prefill_clients)))
-    app.state.decode_iterator = itertools.cycle(range(len(app.state.decode_clients)))
-    print(
-        f"Got {len(app.state.prefill_clients)} prefill clients and {len(app.state.decode_clients)} decode clients."
-    )
+```bash
+export FLAGCX_PATH=/path/to/FlagCX
+# FLAGCX_LIB_PATH is optional; defaults to ${FLAGCX_PATH}/build/lib/libflagcx.so
+```
 
-    yield
+## 2. Install vllm-plugin-FL
 
-    for c in app.state.prefill_clients:
-        await c["client"].aclose()
-    for c in app.state.decode_clients:
-        await c["client"].aclose()
+On **both** Prefill and Decode nodes:
 
+```bash
+git clone https://github.com/flagos-ai/vllm-plugin-FL.git
+cd vllm-plugin-FL
+pip install --no-build-isolation -e .
+```
 
-app = FastAPI(lifespan=lifespan)
+## 3. Start the Prefill Instance
 
+Run on the **Prefill node** (e.g. `10.8.2.168`):
 
-async def send_to_prefill(prefill_client, endpoint, req_data, request_id):
-    data = req_data.copy()
-    data["kv_transfer_params"] = {"do_remote_decode": True, "do_remote_prefill": False}
-    data["stream"] = False
-    data["max_tokens"] = 1
-    if "max_completion_tokens" in data:
-        data["max_completion_tokens"] = 1
-    data.pop("stream_options", None)
-    headers = {"X-Request-Id": request_id}
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        response = await prefill_client["client"].post(
-            endpoint, json=data, headers=headers
-        )
-        response.raise_for_status()
-        await response.aclose()
-    except Exception as exc:
-        print(f"Prefill request {request_id} error: {exc}")
+```bash
+# ---- Network / RDMA settings (adjust to your cluster) ----
+export NCCL_SOCKET_IFNAME=bond0
+export GLOO_SOCKET_IFNAME=bond0
+export NCCL_DEBUG=version
+export NCCL_IB_HCA==mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7
+export NCCL_NVLS_ENABLE=0
+export NCCL_IB_GID_INDEX=3
 
+# ---- FlagCX settings ----
+export FLAGCX_USE_HETERO_COMM=1
+export FLAGCX_PATH=/path/to/FlagCX
 
-async def stream_from_decode(
-    prefill_client, decode_client, endpoint, req_data, request_id
-):
-    data = req_data.copy()
-    data["kv_transfer_params"] = {
-        "do_remote_prefill": True,
-        "do_remote_decode": False,
-        "remote_host": prefill_client["remote_host"],
-        "remote_port": prefill_client["side_channel_port"],
-    }
-    headers = {"X-Request-Id": request_id}
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    async with decode_client["client"].stream(
-        "POST", endpoint, json=data, headers=headers
-    ) as response:
-        response.raise_for_status()
-        async for chunk in response.aiter_bytes():
-            yield chunk
+# ---- vLLM settings ----
+export VLLM_RPC_TIMEOUT=600000
+export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
+export VLLM_PLUGINS=fl
 
+vllm serve <model_path> \
+    --host 0.0.0.0 \
+    --port 20001 \
+    --tensor-parallel-size 8 \
+    --seed 1024 \
+    --max-model-len 40960 \
+    --served-model-name base_model \
+    --max-num-batched-tokens 65536 \
+    --max-num-seqs 256 \
+    --trust-remote-code \
+    --gpu-memory-utilization 0.8 \
+    --kv-transfer-config \
+    '{"kv_connector":"FlagCXConnector","kv_role":"kv_producer"}'
+```
 
-async def _handle_completions(api, request):
-    if not app.state.ready.is_set():
-        raise HTTPException(status_code=503, detail="Service Unavailable")
-    try:
-        req_data = await request.json()
-        request_id = str(uuid.uuid4())
-        prefill_client = app.state.prefill_clients[next(app.state.prefill_iterator)]
-        decode_client = app.state.decode_clients[next(app.state.decode_iterator)]
-        asyncio.create_task(send_to_prefill(prefill_client, api, req_data, request_id))
+## 4. Start the Decode Instance
 
-        async def generate():
-            async for chunk in stream_from_decode(
-                prefill_client, decode_client, api, req_data, request_id
-            ):
-                yield chunk
+Run on the **Decode node** (e.g. `10.8.2.169`):
 
-        return StreamingResponse(generate(), media_type="application/json")
-    except Exception as e:
-        import sys
-        import traceback
+```bash
+# ---- Network / RDMA settings (same as Prefill) ----
+export NCCL_SOCKET_IFNAME=bond0
+export GLOO_SOCKET_IFNAME=bond0
+export NCCL_DEBUG=version
+export NCCL_IB_HCA==mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7
+export NCCL_NVLS_ENABLE=0
+export NCCL_IB_GID_INDEX=3
 
-        print(f"Error in proxy [{api}]: {e}")
-        print("".join(traceback.format_exception(*sys.exc_info())))
-        raise
+# ---- FlagCX settings ----
+export FLAGCX_USE_HETERO_COMM=1
+export FLAGCX_PATH=/path/to/FlagCX
 
+# ---- vLLM settings ----
+export VLLM_RPC_TIMEOUT=600000
+export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
+export VLLM_PLUGINS=fl
 
-@app.post("/v1/completions")
-async def handle_completions(request: Request):
-    return await _handle_completions("/v1/completions", request)
+vllm serve <model_path> \
+    --host 0.0.0.0 \
+    --port 20002 \
+    --tensor-parallel-size 8 \
+    --seed 1024 \
+    --max-model-len 40960 \
+    --served-model-name base_model \
+    --max-num-batched-tokens 65536 \
+    --max-num-seqs 256 \
+    --trust-remote-code \
+    --gpu-memory-utilization 0.8 \
+    --kv-transfer-config \
+    '{"kv_connector":"FlagCXConnector","kv_role":"kv_consumer"}'
+```
 
+## 5. Start the Router
 
-@app.post("/v1/chat/completions")
-async def handle_chat_completions(request: Request):
-    return await _handle_completions("/v1/chat/completions", request)
+The router is a FastAPI proxy that coordinates Prefill and Decode instances. Run it on **any** node that can reach both:
 
+```bash
+cd vllm-plugin-FL/examples/disaggregated_serving_xpyd
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="1P1D proxy for FlagcxConnector (ZMQ side-channel)"
-    )
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument(
-        "--prefill",
-        nargs="+",
-        action="append",
-        dest="prefill_raw",
-        metavar=("URL", "ZMQ_PORT"),
-        help="Prefill URL and ZMQ side-channel base port (= FLAGCX_BOOTSTRAP_PORT, default 8998)",
-    )
-    parser.add_argument(
-        "--decode",
-        nargs=1,
-        action="append",
-        dest="decode_raw",
-        metavar="URL",
-        help="Decode vllm URL",
-    )
+python3 router.py \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --prefill http://<prefill_host>:20001 8998 \
+  --decode http://<decode_host>:20002
+```
 
-    args = parser.parse_args()
-    args.prefill = []
-    for item in args.prefill_raw or []:
-        url = item[0]
-        port = int(item[1]) if len(item) >= 2 else 8998
-        args.prefill.append((url, port))
-    args.decode = [item[0] for item in (args.decode_raw or [])]
+- The second argument after the Prefill URL is the **ZMQ side-channel base port** (`FLAGCX_BOOTSTRAP_PORT`, default `8998`).
+- You can specify multiple `--prefill` / `--decode` for xPyD topologies.
 
-    if not args.prefill:
-        parser.error("At least one --prefill URL is required.")
-    if not args.decode:
-        parser.error("At least one --decode URL is required.")
-    return args
+## 6. Send Requests
 
+```bash
+curl -s http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "base_model",
+    "prompt": "Hello, world!",
+    "max_tokens": 64
+  }'
+```
 
-if __name__ == "__main__":
-    global_args = parse_args()
-    import uvicorn
+## 7. Benchmarking
 
-    uvicorn.run(app, host=global_args.host, port=global_args.port)
+```bash
+vllm bench serve \
+  --base-url http://<router_host>:8000 \
+  --endpoint /v1/completions \
+  --model <model_path> \
+  --served-model-name base_model \
+  --dataset-name random \
+  --random-input-len 1024 \
+  --random-output-len 1024 \
+  --request-rate 70 \
+  --num-prompts 350 \
+  --percentile-metrics ttft,tpot,itl,e2el \
+  --metric-percentiles 50,90,99
+```
