@@ -426,16 +426,6 @@ class FlagCXConnectorWorker:
         self._abort_request_timeout = int(os.getenv(
             "FLAGCX_CONNECTOR_ABORT_REQUEST_TIMEOUT", "480"
         ))
-        self._put_slice_size = int(os.getenv(
-            "FLAGCX_CONNECTOR_SLICE_SIZE", "65536"
-        ))
-        self._put_batch_size = int(os.getenv(
-            "FLAGCX_CONNECTOR_BATCH_PUTS", "256"
-        ))
-        if self._put_slice_size < 0:
-            self._put_slice_size = 0
-        if self._put_batch_size <= 0:
-            self._put_batch_size = 1
 
         # ---- Attention backend detection ----
         self.block_size = vllm_config.cache_config.block_size
@@ -964,16 +954,12 @@ class FlagCXConnectorWorker:
                 return
 
         except zmq.ContextTerminated:
-            return
-        except zmq.Again:
-            logger.error(
-                "Timeout waiting for Prefill reply for %s",
-                req_ids,
+            logger.debug(
+                "ZMQ context terminated, exiting FlagCX receiver thread."
             )
-            return
         except Exception as e:
             logger.error(
-                "FlagCX receive_kv failed for %s: %s", req_ids, e
+                "FlagCXAgentMetadata transfer failed for %s: %s", req_ids, e
             )
             return
         finally:
@@ -1096,3 +1082,4 @@ def _get_side_channel_port(vllm_config: VllmConfig) -> int:
         + vllm_config.parallel_config.data_parallel_rank
         * vllm_config.parallel_config.tensor_parallel_size
     )
+
