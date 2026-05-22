@@ -100,12 +100,36 @@ PATTERNS = {
     "p99_itl_ms": r"P99 ITL \(ms\):\s+([0-9.]+)",
 }
 
-CSV_COLUMNS = [
+RAW_CSV_COLUMNS = [
     "Prefill",
     "Decode",
     "Conc",
     "Num Prompts",
     "Successful Requests",
+    "Run Status",
+    "Benchmark Duration (s)",
+    "Total Input Tokens",
+    "Total Output Tokens",
+    "Req/s",
+    "Output tok/s",
+    "Peak Output tok/s",
+    "Total tok/s",
+    "Mean TTFT (ms)",
+    "Median TTFT (ms)",
+    "P99 TTFT (ms)",
+    "Mean TPOT (ms)",
+    "Median TPOT (ms)",
+    "P99 TPOT (ms)",
+    "Mean ITL (ms)",
+    "Median ITL (ms)",
+    "P99 ITL (ms)",
+]
+
+SUMMARY_CSV_COLUMNS = [
+    "Prefill",
+    "Decode",
+    "Conc",
+    "Num Prompts",
     "Benchmark Duration (s)",
     "Total Input Tokens",
     "Total Output Tokens",
@@ -140,15 +164,14 @@ def extract_metrics(output_text):
     return result
 
 
-def format_result(case, metrics):
+def format_result(case, metrics, include_successful_requests=True):
     input_len, output_len, concurrency, num_prompts = case
 
-    return {
+    result = {
         "Prefill": input_len,
         "Decode": output_len,
         "Conc": concurrency,
         "Num Prompts": num_prompts,
-        "Successful Requests": metrics.get("successful_requests"),
         "Benchmark Duration (s)": metrics.get("benchmark_duration"),
         "Total Input Tokens": metrics.get("total_input_tokens"),
         "Total Output Tokens": metrics.get("total_output_tokens"),
@@ -167,14 +190,19 @@ def format_result(case, metrics):
         "P99 ITL (ms)": metrics.get("p99_itl_ms"),
     }
 
+    if include_successful_requests:
+        result["Successful Requests"] = metrics.get("successful_requests")
 
-def append_csv(row, filename):
+    return result
+
+
+def append_csv(row, filename, columns):
     file_exists = os.path.exists(filename)
 
     with open(filename, "a", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=CSV_COLUMNS,
+            fieldnames=columns,
         )
 
         if not file_exists:
@@ -248,19 +276,35 @@ def run_test_case(case, raw_csv):
     for run_id in range(1, RUNS + 1):
         metrics = run_once(case, run_id)
 
-        raw_row = format_result(case, metrics)
+        raw_row = format_result(case, metrics, include_successful_requests=True)
+        expected_successful_requests = case[3]
+        raw_row["Run Status"] = (
+            "SUCCESS"
+            if metrics.get("successful_requests") == expected_successful_requests
+            else "FAILED"
+        )
 
-        append_csv(raw_row, raw_csv)
+        append_csv(raw_row, raw_csv, RAW_CSV_COLUMNS)
 
         all_runs.append(metrics)
 
     valid_runs = all_runs[SKIP_FIRST:]
 
+    expected_successful_requests = case[3]
+    has_failed_run = any(
+        run.get("successful_requests") != expected_successful_requests
+        for run in valid_runs
+    )
+
     avg_metrics = average_metrics(valid_runs)
 
-    summary_row = format_result(case, avg_metrics)
+    summary_row = format_result(
+        case,
+        avg_metrics,
+        include_successful_requests=False,
+    )
 
-    return summary_row
+    return summary_row, has_failed_run
 
 
 def print_summary(results):
@@ -303,15 +347,16 @@ def main():
 
     for case in test_cases:
         try:
-            summary_row = run_test_case(
+            summary_row, has_failed_run = run_test_case(
                 case,
                 raw_csv,
             )
 
-            append_csv(
-                summary_row,
-                summary_csv,
-            )
+            if has_failed_run:
+                print(f"SKIP SUMMARY ROW (failed case): {case}")
+                continue
+
+            append_csv(summary_row, summary_csv, SUMMARY_CSV_COLUMNS)
 
             all_summary.append(summary_row)
 
