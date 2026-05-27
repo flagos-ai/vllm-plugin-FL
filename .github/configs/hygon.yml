@@ -1,0 +1,35 @@
+# CUDA Hardware Configuration
+# This file defines CI/CD settings for CUDA-based testing
+
+platform: hygon
+
+# Docker image for this hardware
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.1.0-hygon-ci
+
+Runner labels for this hardware (self-hosted)
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - hygon
+  - dcu-8
+
+# # Runner labels for this hardware (Platform hosted)
+# runner_labels:
+#   - ci-vllm-plugin-fl-hygon
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /opt/hyhal:/opt/hyhal:ro
+  - /data:/data
+
+# Container options (hardware-specific settings)
+container_options: >-
+  --hostname vllm-plugin-fl
+  --ipc=host
+  --device=/dev/kfd
+  --device=/dev/mkfd
+  --device=/dev/dri
+  --group-add video
+  --cap-add=SYS_PTRACE
+  --security-opt seccomp=unconfined

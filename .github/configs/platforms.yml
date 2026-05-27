@@ -9,8 +9,10 @@ platforms:
   cuda:
     enabled: true
   ascend:
-    enabled: true
+    enabled: false
   maca:
     enabled: true
   musa:
+    enabled: false
+  hygon:
     enabled: true
