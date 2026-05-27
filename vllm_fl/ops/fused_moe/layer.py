@@ -43,6 +43,14 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
             moe_config=self.moe
         )
 
+    @property
+    def is_monolithic(self) -> bool:
+        if self.moe_kernel is None:
+            if self.experts_cls is None:
+                return True
+            return self.experts_cls.is_monolithic()
+        return self.moe_kernel.is_monolithic
+
 
 class FusedMoEFL(FusedMoE):
     """
@@ -70,6 +78,10 @@ class FusedMoEFL(FusedMoE):
         self._routed_input_transform = routed_input_transform
         self._routed_output_transform = routed_output_transform
         self._apply_routed_scale_to_output = apply_routed_scale_to_output
+        # Replace quant_method with FL version that properly handles OOT backend
+        if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(self.quant_method, UnquantizedFusedMoEMethodFL):
+            self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
+            self.base_quant_method = self.quant_method
         # Replace router with FL version that uses call_op for flaggems dispatch
         self._replace_router_with_fl()
 
