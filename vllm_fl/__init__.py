@@ -43,8 +43,54 @@ def _register_flagcx_connector():
             )
 
 
+def _patch_vllm_matcher_utils():
+    """Pre-patch vllm.compilation.matcher_utils to avoid AttributeError on MUSA.
+
+    On MUSA/MetaX platforms, vllm's _C extension cannot be loaded because it
+    links against libcudart.so.12 which is not present. This causes
+    vllm/compilation/matcher_utils.py to crash at import time (line 26) when
+    it tries to access torch.ops._C.rms_norm / fused_add_rms_norm /
+    rotary_embedding.
+
+    We patch the module by replacing it with a safe stub *before* the
+    EngineCore subprocess imports it, so the rest of vllm can continue to
+    import cleanly. The actual OOT ops will be registered later by
+    register_oot_ops() in worker.py.
+    """
+    import sys
+    import types
+    import torch
+
+    # Only patch when the _C ops are genuinely missing (i.e. MUSA platform).
+    _c_ns = getattr(torch.ops, "_C", None)
+    if _c_ns is not None and hasattr(_c_ns, "rms_norm"):
+        return  # CUDA path: ops already loaded, nothing to do.
+
+    # If matcher_utils is already imported and succeeded, nothing to do.
+    if "vllm.compilation.matcher_utils" in sys.modules:
+        return
+
+    # Build a minimal stub module that exposes the names matcher_utils needs.
+    stub = types.ModuleType("vllm.compilation.matcher_utils")
+    stub.RMS_OP = None
+    stub.RMS_ADD_OP = None
+    stub.ROTARY_OP = None
+
+    # Provide a no-op get_matching_ops so call-sites don't crash.
+    def get_matching_ops(*args, **kwargs):
+        return []
+
+    stub.get_matching_ops = get_matching_ops
+    sys.modules["vllm.compilation.matcher_utils"] = stub
+    logger.info(
+        "vllm_fl: patched vllm.compilation.matcher_utils with stubs "
+        "(MUSA platform — libcudart.so.12 not available)."
+    )
+
+
 def register():
     """Register the FL platform."""
+    _patch_vllm_matcher_utils()
     _patch_transformers_compat()
 
     # Model-specific platform patches
