@@ -452,7 +452,17 @@ class PlatformFL(Platform):
     @classmethod
     def manual_seed_all(cls, seed: int) -> None:
         """Set RNG seed across all devices for the current platform."""
-        cls.torch_device_fn.manual_seed_all(seed)
+        # torch_ptpu.ptpu doesn't have manual_seed_all, implement it manually
+        if hasattr(cls.torch_device_fn, 'manual_seed_all'):
+            cls.torch_device_fn.manual_seed_all(seed)
+        else:
+            # Fallback for devices without manual_seed_all (e.g., ptpu)
+            torch.manual_seed(seed)
+            if hasattr(cls.torch_device_fn, 'device_count') and hasattr(cls.torch_device_fn, '_get_or_create_default_generator'):
+                # Set seed for each device's default generator
+                for device_id in range(cls.torch_device_fn.device_count()):
+                    generator = cls.torch_device_fn._get_or_create_default_generator(device_id)
+                    generator.manual_seed(seed)
 
     @classmethod
     def is_integrated_gpu(cls, device_id: int = 0) -> bool:

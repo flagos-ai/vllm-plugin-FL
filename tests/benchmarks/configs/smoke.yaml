@@ -1,0 +1,45 @@
+throughput:
+  - name: throughput_smoke_dummy
+    model: qwen3
+    case: 06b_tp2
+    parameters:
+      dataset_name: random
+      random_input_len: 32
+      random_output_len: 1
+      num_prompts: 4
+      enforce_eager: true
+      load_format: dummy
+
+latency:
+  - name: latency_smoke_dummy
+    model: qwen3
+    case: 06b_tp2
+    parameters:
+      input_len: 32
+      output_len: 1
+      batch_size: 1
+      num_iters_warmup: 1
+      num_iters: 2
+      enforce_eager: true
+      load_format: dummy
+
+serve:
+  - name: serve_smoke_dummy
+    model: qwen3
+    case: 06b_tp2
+    server_parameters:
+      served_model_name: smoke-model
+      tensor_parallel_size: 1
+      max_model_len: 1024
+      enforce_eager: true
+      load_format: dummy
+    client_parameters:
+      model: smoke-model
+      backend: openai-chat
+      endpoint: /v1/chat/completions
+      dataset_name: random
+      random_input_len: 32
+      random_output_len: 4
+      num_prompts: 5
+      percentile_metrics: ttft,tpot,itl,e2el
+      goodput: e2el:10000

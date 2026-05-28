@@ -108,6 +108,7 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
 
+
   # Slow end-to-end model tests (inference, serving).
   # Grouped by (task, device) — all model/case combos for the same task
   # run inside a single job to avoid repeated container startup.
@@ -130,11 +131,23 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
+  # Validates vllm bench throughput/latency/serve entrypoints.
+  benchmark:
+    needs: [setup, e2e]
+    uses: ./.github/workflows/_benchmark_test.yml
+    with:
+      platform: ${{ inputs.platform }}
+      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
+      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      timeout: 30
+
   # ============================================================
   # Feishu notification — per-platform status
   # ============================================================
   notify:
-    needs: [setup, unit, functional, e2e]
+    needs: [unit, functional, e2e, benchmark]
     if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
@@ -142,11 +155,12 @@ jobs:
       status: >-
         ${{ (needs.unit.result == 'success' &&
              needs.functional.result == 'success' &&
-             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped'))
+             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped'))
             && 'success'
             || (needs.unit.result == 'cancelled' ||
                 needs.functional.result == 'cancelled' ||
-                needs.e2e.result == 'cancelled')
+                needs.e2e.result == 'cancelled' ||
+                needs.benchmark.result == 'cancelled')
                && 'cancelled'
                || 'failure' }}
-    secrets: inherit

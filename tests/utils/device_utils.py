@@ -78,15 +78,20 @@ def get_model_base_path() -> str:
     return os.environ.get("FL_MODEL_BASE_PATH", "/data/models")
 
 
-skip_if_no_accelerator = pytest.mark.skipif(
-    not is_accelerator_available(), reason="Accelerator not available"
-)
+def skip_if_no_accelerator(fn):
+    return pytest.mark.skipif(
+        not is_accelerator_available(), reason="Accelerator not available"
+    )(fn)
 
-skip_if_not_multi_accelerator = pytest.mark.skipif(
-    not is_accelerator_available() or get_device_count() < 2,
-    reason="Multiple accelerators not available",
-)
 
-skip_if_not_nvidia = pytest.mark.skipif(
-    get_backend() != "nvidia", reason="NVIDIA-specific test"
-)
+def skip_if_not_multi_accelerator(fn):
+    return pytest.mark.skipif(
+        not is_accelerator_available() or get_device_count() < 2,
+        reason="Multiple accelerators not available",
+    )(fn)
+
+
+def skip_if_not_nvidia(fn):
+    return pytest.mark.skipif(get_backend() != "nvidia", reason="NVIDIA-specific test")(
+        fn
+    )

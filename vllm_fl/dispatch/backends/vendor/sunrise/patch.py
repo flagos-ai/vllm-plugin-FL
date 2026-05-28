@@ -22,6 +22,7 @@ def apply_sunrise_patches():
     patch_flagcx_stream_adapter()
     patch_distributed_runtime()
     patch_op_cls()
+    patch_accelerator_empty_cache()
 
 
 def patch_flagcx_stream_adapter():
@@ -178,14 +179,32 @@ def patch_distributed_runtime():
 def patch_op_cls():
     """Register Sunrise replacements for upstream custom ops."""
     try:
-        from vllm.model_executor.custom_op import CustomOp
+        from vllm.model_executor.custom_op import PluggableLayer
 
         from .impl.vocab_parallel_embedding import SunriseVocabParallelEmbedding
 
-        CustomOp.register_oot(
-            _decorated_op_cls=SunriseVocabParallelEmbedding,
+        PluggableLayer.register_oot(
+            _decorated_layer_cls=SunriseVocabParallelEmbedding,
             name="VocabParallelEmbedding",
         )
         logger.info("Patched VocabParallelEmbedding for Sunrise/PTPU")
     except Exception as e:
         logger.warning("Failed to patch VocabParallelEmbedding for Sunrise: %s", e)
+
+
+def patch_accelerator_empty_cache():
+    """Redirect torch.accelerator.empty_cache() to torch.ptpu.empty_cache().
+
+    torch.accelerator.empty_cache() requires a DeviceAllocator interface that
+    PTPU does not implement. torch.ptpu.empty_cache() works correctly instead.
+    """
+    try:
+        import torch.accelerator as _accel
+
+        if getattr(_accel, "_sunrise_empty_cache_patched", False):
+            return
+        _accel.empty_cache = torch.ptpu.empty_cache
+        _accel._sunrise_empty_cache_patched = True
+        logger.info("Patched torch.accelerator.empty_cache for Sunrise/PTPU")
+    except Exception as e:
+        logger.warning("Failed to patch torch.accelerator.empty_cache: %s", e)

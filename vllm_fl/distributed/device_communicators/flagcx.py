@@ -22,14 +22,24 @@ _flagcx_path = os.getenv('FLAGCX_PATH')
 if _flagcx_path and os.path.isdir(_flagcx_path):
     sys.path.append(_flagcx_path)
 
-from plugin.interservice.flagcx_wrapper import (
-    FLAGCXLibrary,
-    buffer_type,
-    flagcxComm_t,
-    flagcxDataTypeEnum,
-    flagcxUniqueId,
-    flagcxRedOpTypeEnum,
-)
+try:
+    from plugin.interservice.flagcx_wrapper import (
+        FLAGCXLibrary,
+        buffer_type,
+        flagcxComm_t,
+        flagcxDataTypeEnum,
+        flagcxUniqueId,
+        flagcxRedOpTypeEnum,
+    )
+    _flagcx_available = True
+except (ImportError, ModuleNotFoundError):
+    _flagcx_available = False
+    FLAGCXLibrary = None
+    buffer_type = None
+    flagcxComm_t = None
+    flagcxDataTypeEnum = None
+    flagcxUniqueId = None
+    flagcxRedOpTypeEnum = None
 
 class PyFlagcxCommunicator:
     def __init__(

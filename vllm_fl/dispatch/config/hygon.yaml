@@ -1,5 +1,5 @@
-# vLLM-FL Dispatch Configuration for CUDA
-# Auto-loaded when running on NVIDIA GPU hardware
+# vLLM-FL Dispatch Configuration for hygon GPU
+# Auto-loaded when running on hygon hardware
 
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
@@ -10,51 +10,50 @@ prefer: flagos
 strict: false
 
 # Vendor Whitelist (Optional, allows all if not set)
-allow_vendors:
- - cuda
+# allow_vendors:
+#   - hygon
 
 # Vendor Blacklist (Optional)
 # deny_vendors:
-#   - ascend
+#   - cuda
+
 
 # Per-operator backend execution order (Optional)
 # Only the backends listed here will be attempted, in the order specified.
 #
 # Supported tokens:
-#   - flagos        : Default FlagOS implementation (Triton)
-#   - reference     : PyTorch reference implementation
-#   - vendor        : Any available vendor backend (auto-detected)
-#   - vendor:cuda   : CUDA-specific vendor backend
+#   - flagos      : Default FlagGems implementation (Triton)
+#   - reference   : PyTorch reference implementation
+#   - vendor      : Any available vendor backend (auto-detected)
+#   - vendor:hygon : hygon-specific vendor backend
 op_backends:
+  # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
   attention_backend:
     - flagos
-    - vendor
+    - vendor:hygon
     - reference
+
   rms_norm:
     - flagos
-    - vendor
+    - vendor:hygon
     - reference
+
   silu_and_mul:
     - flagos
-    - vendor
+    - vendor:hygon
     - reference
+
   rotary_embedding:
     - flagos
-    - vendor
+    - vendor:hygon
     - reference
 
 # FlagOS operator blacklist
+# Blacklist only ops that are known to have issues
 flagos_blacklist:
-  - copy_
-  - to_copy
   - cat
-  - index
-  - mul
-  - pow_scalar
-  - index_put_
-  - index_put
-  - _index_put_impl_
-  - nonzero
 
 # OOT (Out-of-Tree) operator blacklist
-# oot_blacklist: []
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe

@@ -41,7 +41,7 @@ def _get_masked_input_and_mask_eager(
 class SunriseVocabParallelEmbedding(VocabParallelEmbedding):
     """Sunrise/PTPU version that use eager mode get_masked_input_and_mask."""
 
-    def forward_native(self, input_: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_: torch.Tensor) -> torch.Tensor:
         if self.tp_size > 1:
             masked_input, input_mask = _get_masked_input_and_mask_eager(
                 input_,
@@ -58,3 +58,6 @@ class SunriseVocabParallelEmbedding(VocabParallelEmbedding):
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
         return tensor_model_parallel_all_reduce(output_parallel)
+
+    def forward_native(self, input_: torch.Tensor) -> torch.Tensor:
+        return self.forward(input_)

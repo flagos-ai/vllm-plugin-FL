@@ -4,10 +4,20 @@
 platform: cuda
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.3.0-cuda-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-cuda-ci
 
-# Runner labels for this hardware
-runner_labels: ['ci-vllm-plugin-fl']
+# Runner labels for this hardware (self-hosted)
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - nvidia
+  - gpu-8
+  - cuda130
+
+# Runner labels for this hardware (Platform hosted)
+# runner_labels:
+#   - ci-vllm-plugin-fl
 
 # Container volumes (hardware-specific paths)
 container_volumes:
