@@ -116,6 +116,11 @@ class OpManager:
         """Get the underlying operator registry."""
         return self._registry
 
+    @property
+    def policy_epoch(self) -> int:
+        """Current manager policy epoch used to invalidate dispatch caches."""
+        return self._state.policy_epoch
+
     def _reset_after_fork(self) -> None:
         """Reset state after process fork."""
         with self._lock:
@@ -272,6 +277,42 @@ class OpManager:
     def _default_order(self, policy: SelectionPolicy) -> list[str]:
         """Get default selection order based on policy."""
         return policy.get_default_order()
+
+    def _record_first_use(self, op_name: str, impl: OpImpl) -> None:
+        """Log and record the selected implementation when it changes."""
+        impl_id = impl.impl_id
+        last_impl_id = self._called_ops.get(op_name)
+
+        if last_impl_id == impl_id:
+            return
+
+        with self._lock:
+            last_impl_id = self._called_ops.get(op_name)
+            if last_impl_id == impl_id:
+                return
+
+            if last_impl_id is None:
+                logger.info(
+                    f"Op '{op_name}' using '{impl_id}' "
+                    f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                )
+            else:
+                logger.info(
+                    f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "
+                    f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                )
+
+            if impl.kind == BackendImplKind.DEFAULT:
+                _record_default_flagos_op(op_name, impl)
+
+            self._called_ops[op_name] = impl_id
+
+    def _mark_failed_impl(self, op_name: str, impl_id: str) -> None:
+        """Remember that an implementation failed for fallback selection."""
+        with self._lock:
+            if op_name not in self._failed_impls:
+                self._failed_impls[op_name] = set()
+            self._failed_impls[op_name].add(impl_id)
 
     def _resolve_impl(self, op_name: str) -> OpImpl:
         """Resolve and cache the best implementation for an operator."""
@@ -491,25 +532,7 @@ class OpManager:
 
         if not enable_fallback:
             impl = self._resolve_impl(op_name)
-            impl_id = impl.impl_id
-            last_impl_id = self._called_ops.get(op_name)
-
-            if last_impl_id != impl_id:
-                with self._lock:
-                    if self._called_ops.get(op_name) != impl_id:
-                        if last_impl_id is None:
-                            logger.info(
-                                f"Op '{op_name}' using '{impl_id}' "
-                                f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                            )
-                        else:
-                            logger.info(
-                                f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "
-                                f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                            )
-                        if impl.kind == BackendImplKind.DEFAULT:
-                            _record_default_flagos_op(op_name, impl)
-                        self._called_ops[op_name] = impl_id
+            self._record_first_use(op_name, impl)
 
             return self._call_with_hooks(op_name, impl.fn, args, kwargs)
         candidates = self.resolve_candidates(op_name)
@@ -535,23 +558,7 @@ class OpManager:
                 # Log primary implementation or fallback attempts
                 if idx == 0:
                     # Primary implementation
-                    last_impl_id = self._called_ops.get(op_name)
-                    if last_impl_id != impl.impl_id:
-                        with self._lock:
-                            if self._called_ops.get(op_name) != impl.impl_id:
-                                if last_impl_id is None:
-                                    logger.info(
-                                        f"Op '{op_name}' using '{impl.impl_id}' "
-                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                                    )
-                                else:
-                                    logger.info(
-                                        f"Op '{op_name}' switched from '{last_impl_id}' to '{impl.impl_id}' "
-                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                                    )
-                                if impl.kind == BackendImplKind.DEFAULT:
-                                    _record_default_flagos_op(op_name, impl)
-                                self._called_ops[op_name] = impl.impl_id
+                    self._record_first_use(op_name, impl)
                 else:
                     # Always log fallback attempts (these are important runtime events)
                     logger.info(
@@ -573,10 +580,7 @@ class OpManager:
             except Exception as e:
                 last_error = e
                 # Mark this implementation as failed
-                with self._lock:
-                    if op_name not in self._failed_impls:
-                        self._failed_impls[op_name] = set()
-                    self._failed_impls[op_name].add(impl.impl_id)
+                self._mark_failed_impl(op_name, impl.impl_id)
 
                 if idx < len(available_candidates) - 1:
                     # Not the last candidate, log warning and try next
