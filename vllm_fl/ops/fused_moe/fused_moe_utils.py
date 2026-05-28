@@ -19,15 +19,20 @@ from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 from vllm.model_executor.layers.fused_moe.fused_moe import TritonExperts, try_get_optimal_moe_config
 from vllm.model_executor.layers.fused_moe.utils import _resize_cache, moe_kernel_quantize_input
 from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
-    FlashinferMoeBackend, 
+    FlashinferMoeBackend,
     get_flashinfer_moe_backend,
 )
 from vllm.triton_utils import tl, triton
-from vllm_fl.dispatch import call_op
+from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import use_flaggems
 
+_moe_align_block_size = CachedOp("moe_align_block_size")
+_invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
+_moe_sum = CachedOp("moe_sum")
+
 logger = init_logger(__name__)
+
 
 def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBackend]:
     """
@@ -82,7 +87,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
 
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
-    
+
     if current_platform.is_out_of_tree() and use_flaggems():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
@@ -97,7 +102,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
     # NOTE(rob): We need to peak into the P/F selection to determine
     # if we are using the batched or standard expert format, which
     # if not ideal. Once we unify TP + DP/EP, we can select P/F first.
-    activation_format = ( 
+    activation_format = (
         mk.FusedMoEActivationFormat.BatchedExperts
         if moe_config.moe_parallel_config.use_batched_activation_format
         else mk.FusedMoEActivationFormat.Standard
@@ -168,7 +173,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
                     f"FlashInfer MOE backend {fi_backend} "
                     "does not support unquantized MoE."
                 )
-            k_cls = backend_to_kernel_cls(backend) 
+            k_cls = backend_to_kernel_cls(backend)
             return _return_or_raise(backend, moe_config, activation_format)
         else:
             # If the user is not explicit about the backend, try both.
@@ -255,7 +260,7 @@ def _prepare_expert_assignment(
             ),
         )
 
-    return call_op("moe_align_block_size",
+    return _moe_align_block_size(
         topk_ids,
         config["BLOCK_SIZE_M"],
         global_num_experts,
@@ -354,7 +359,7 @@ class TritonExpertsFL(TritonExperts):
             )
         )
 
-        call_op("invoke_fused_moe_triton_kernel",
+        _invoke_fused_moe_triton_kernel(
             hidden_states,
             w1,
             intermediate_cache1,
@@ -393,7 +398,7 @@ class TritonExpertsFL(TritonExperts):
             quantization_emulation=self.quantization_emulation,
         )
 
-        call_op("invoke_fused_moe_triton_kernel",
+        _invoke_fused_moe_triton_kernel(
             qintermediate_cache2,
             w2,
             intermediate_cache3,
@@ -420,4 +425,4 @@ class TritonExpertsFL(TritonExperts):
         self.moe_sum(intermediate_cache3, output)
 
     def moe_sum(self, input: torch.Tensor, output: torch.Tensor) -> None:
-        call_op("moe_sum", input, output)
+        _moe_sum(input, output)

@@ -76,12 +76,15 @@ Configuration File (YAML):
             - reference
 """
 
+import os
+
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
 from .policy import (
     SelectionPolicy,
     PolicyManager,
     get_policy,
+    get_policy_epoch,
     set_global_policy,
     reset_global_policy,
     policy_context,
@@ -139,6 +142,71 @@ def resolve_op(op_name: str):
     return get_default_manager().resolve(op_name)
 
 
+# Fast-path opt-out: set VLLM_FL_OP_FAST_PATH=0 to disable per-op fn caching
+# in hot OOT layers and route every call back through OpManager.call.
+_OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
+
+
+class CachedOp:
+    """Resolve an op once at the call site and refresh on policy changes.
+
+    OpManager.call preserves fallback and IO-dump hooks, but it also pays the
+    manager/fallback path on every invocation. Hot layer paths can use CachedOp
+    to call the resolved implementation directly after the first lookup.
+
+    The cache is invalidated by both OpManager.policy_epoch and
+    PolicyManager.policy_epoch. The latter matters for policy_context() and
+    set_global_policy(), which can change the effective backend without
+    touching the OpManager instance.
+    """
+
+    __slots__ = (
+        "_op_name",
+        "_fn",
+        "_manager",
+        "_manager_epoch",
+        "_policy_epoch",
+    )
+
+    def __init__(self, op_name: str) -> None:
+        self._op_name = op_name
+        self._fn = None
+        self._manager = None
+        self._manager_epoch = -1
+        self._policy_epoch = -1
+
+    def __call__(self, *args, **kwargs):
+        if not _OP_FAST_PATH_ENABLED:
+            return get_default_manager().call(self._op_name, *args, **kwargs)
+
+        mgr = self._manager
+        if mgr is None:
+            mgr = get_default_manager()
+            self._manager = mgr
+
+        manager_epoch = mgr._state.policy_epoch
+        policy_epoch = get_policy_epoch()
+        fn = self._fn
+        if (
+            fn is None
+            or self._manager_epoch != manager_epoch
+            or self._policy_epoch != policy_epoch
+        ):
+            fn = mgr.resolve(self._op_name)
+            self._fn = fn
+            # resolve() can initialize the manager and bump its epoch.
+            self._manager_epoch = mgr._state.policy_epoch
+            self._policy_epoch = get_policy_epoch()
+
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            self._fn = None
+            if get_policy().strict:
+                raise
+            return mgr.call(self._op_name, *args, **kwargs)
+
+
 __all__ = [
     # Types
     "OpImpl",
@@ -152,6 +220,7 @@ __all__ = [
     "SelectionPolicy",
     "PolicyManager",
     "get_policy",
+    "get_policy_epoch",
     "set_global_policy",
     "reset_global_policy",
     "policy_context",
@@ -188,4 +257,5 @@ __all__ = [
     # Convenience functions
     "call_op",
     "resolve_op",
+    "CachedOp",
 ]

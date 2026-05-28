@@ -19,7 +19,14 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
 )
 from vllm.model_executor.layers.fused_moe.utils import moe_kernel_quantize_input
 from vllm.triton_utils import tl
-from vllm_fl.dispatch import call_op
+from vllm_fl.dispatch import CachedOp
+
+_moe_align_block_size = CachedOp("moe_align_block_size")
+_invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
+_silu_and_mul = CachedOp("silu_and_mul")
+_gelu_and_mul = CachedOp("gelu_and_mul")
+_moe_sum = CachedOp("moe_sum")
+
 
 def fused_experts_impl(
     hidden_states: torch.Tensor,
@@ -162,8 +169,7 @@ def fused_experts_impl(
             block_shape=block_shape,
         )
 
-        sorted_token_ids, expert_ids, num_tokens_post_padded = call_op(
-            "moe_align_block_size",
+        sorted_token_ids, expert_ids, num_tokens_post_padded = _moe_align_block_size(
             curr_topk_ids,
             config["BLOCK_SIZE_M"],
             global_num_experts,
@@ -171,8 +177,7 @@ def fused_experts_impl(
             ignore_invalid_experts=True,
         )
 
-        call_op(
-            "invoke_fused_moe_triton_kernel",
+        _invoke_fused_moe_triton_kernel(
             qcurr_hidden_states,
             w1,
             intermediate_cache1,
@@ -201,15 +206,11 @@ def fused_experts_impl(
         if hasattr(activation, "value"):
             activation = activation.value
         if activation == "silu":
-            intermediate_cache2 = call_op(
-                "silu_and_mul", None, intermediate_cache1.view(-1, N)
-            )
+            intermediate_cache2 = _silu_and_mul(None, intermediate_cache1.view(-1, N))
             # torch.ops._C.silu_and_mul(intermediate_cache2,
             #                           intermediate_cache1.view(-1, N))
         elif activation == "gelu":
-            intermediate_cache2 = call_op(
-                "gelu_and_mul", None, intermediate_cache1.view(-1, N)
-            )
+            intermediate_cache2 = _gelu_and_mul(None, intermediate_cache1.view(-1, N))
         # Activation function without multiplication
         elif activation == "silu_no_mul":
             intermediate_cache2 = F.silu(intermediate_cache1.view(-1, N))
@@ -227,8 +228,7 @@ def fused_experts_impl(
             block_shape=block_shape,
         )
 
-        call_op(
-            "invoke_fused_moe_triton_kernel",
+        _invoke_fused_moe_triton_kernel(
             qintermediate_cache2,
             w2,
             intermediate_cache3,
@@ -251,8 +251,7 @@ def fused_experts_impl(
             B_bias=w2_bias,
         )
 
-        call_op(
-            "moe_sum",
+        _moe_sum(
             intermediate_cache3.view(*intermediate_cache3.size()),
             out_hidden_states[begin_chunk_idx:end_chunk_idx],
         )
