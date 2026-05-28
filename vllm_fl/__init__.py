@@ -43,8 +43,41 @@ def _register_flagcx_connector():
             )
 
 
+def _patch_flash_attn_import():
+    """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
+    import sys
+    if "vllm.vllm_flash_attn" in sys.modules:
+        return
+    try:
+        import vllm.vllm_flash_attn  # noqa: F401
+    except ImportError:
+        import types
+        stub = types.ModuleType("vllm.vllm_flash_attn")
+        stub.FA2_AVAILABLE = False
+        stub.FA3_AVAILABLE = False
+        stub.fa_version_unsupported_reason = lambda *a, **kw: "flash_attn C extensions not available"
+        stub.flash_attn_varlen_func = None
+        stub.get_scheduler_metadata = None
+        stub.is_fa_version_supported = lambda *a, **kw: False
+        sys.modules["vllm.vllm_flash_attn"] = stub
+
+
+def _patch_custom_ops():
+    """Register torch.ops._C op schemas when vllm._C is unavailable."""
+    try:
+        import vllm._C  # noqa: F401
+        return
+    except (ImportError, OSError):
+        pass
+
+    from vllm_fl.ops._C_ops_registry import register_op_schemas
+    register_op_schemas()
+
+
 def register():
     """Register the FL platform."""
+    _patch_custom_ops()
+    _patch_flash_attn_import()
     _patch_transformers_compat()
 
     # Model-specific platform patches
