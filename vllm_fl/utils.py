@@ -1,14 +1,18 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+import importlib
 import json
 import os
+import shutil
+import subprocess
 from typing import Optional, Tuple
 
-import flag_gems
-from flag_gems.runtime.backend.device import DeviceDetector
-from flag_gems.runtime import backend
-
 _OP_CONFIG: Optional[dict[str, str]] = None
+
+_FLAG_GEMS_MODULE = None
+_FLAG_GEMS_BACKEND = None
+_DEVICE_DETECTOR_CLS = None
+
 
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
@@ -41,6 +45,67 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/hygon
     "hygon": {"device_type": "cuda", "device_name": "cuda"},    
 }
+
+
+def _is_metax_platform() -> bool:
+    for env_name in ("GEMS_VENDOR", "VLLM_FL_PLATFORM"):
+        value = os.environ.get(env_name, "").strip().lower()
+        if value:
+            return value in ("metax", "maca")
+
+    mx_smi = shutil.which("mx-smi")
+    if not mx_smi:
+        return False
+
+    try:
+        result = subprocess.run(
+            [mx_smi],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=1,
+        )
+    except Exception:
+        return False
+
+    return result.returncode == 0
+
+
+def _preload_metax_kernels() -> None:
+    # import MetaX kernels before Gems. otherwise Gems may create
+    # fallback _C/_moe_C schemas that collide with mcoplib registrations.
+    if not _is_metax_platform():
+        return
+
+    for module_name in ("mcoplib._C", "mcoplib._moe_C"):
+        try:
+            importlib.import_module(module_name)
+        except (ImportError, OSError):
+            continue
+
+
+def _load_flaggems_runtime() -> tuple[object, object, type]:
+    global _FLAG_GEMS_MODULE, _FLAG_GEMS_BACKEND, _DEVICE_DETECTOR_CLS
+
+    if _FLAG_GEMS_MODULE is None:
+        _preload_metax_kernels()
+        import flag_gems
+
+        _FLAG_GEMS_MODULE = flag_gems
+    if _FLAG_GEMS_BACKEND is None:
+        from flag_gems.runtime import backend as flag_gems_backend
+
+        _FLAG_GEMS_BACKEND = flag_gems_backend
+    if _DEVICE_DETECTOR_CLS is None:
+        from flag_gems.runtime.backend.device import DeviceDetector
+
+        _DEVICE_DETECTOR_CLS = DeviceDetector
+
+    return _FLAG_GEMS_MODULE, _FLAG_GEMS_BACKEND, _DEVICE_DETECTOR_CLS
+
+
+if not _is_metax_platform():
+    _load_flaggems_runtime()
 
 
 def _get_vendor_device_field(vendor_name: str, field: str) -> str:
@@ -207,9 +272,11 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
-        self.device = DeviceDetector()
+        _, self._backend, device_detector_cls = _load_flaggems_runtime()
+        self.device = device_detector_cls()
         self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise"]
-        backend.set_torch_backend_device_fn(self.device.vendor_name)
+        self._backend.set_torch_backend_device_fn(self.device.vendor_name)
+
 
     @property
     def dispatch_key(self):
@@ -226,12 +293,12 @@ class DeviceInfo:
     @property
     def torch_device_fn(self):
         # torch_device_fn is like 'torch.cuda' object
-        return backend.gen_torch_device_object()
+        return self._backend.gen_torch_device_object()
 
     @property
     def torch_backend_device(self):
         # torch_backend_device is like 'torch.backend.cuda' object
-        return backend.get_torch_backend_device_fn()
+        return self._backend.get_torch_backend_device_fn()
 
     def get_supported_device(self):
         if self.vendor_name not in self.supported_device:
@@ -244,6 +311,8 @@ def get_flaggems_all_ops() -> list[str]:
     Get all FlagGems operator names from flag_gems._FULL_CONFIG.
     """
     try:
+        flag_gems, _, _ = _load_flaggems_runtime()
+
         # _FULL_CONFIG is a tuple of (op_name, function, ...) tuples
         # Some entries have 2 elements, some have 3
         ops = [entry[0] for entry in flag_gems._FULL_CONFIG]

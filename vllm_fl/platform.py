@@ -17,6 +17,7 @@ try:
 except (ImportError, OSError):
     pass  # NPU or other platforms may not have vllm._C
 
+from vllm.attention.backends.registry import AttentionBackendEnum
 from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
 from vllm.platforms.interface import DeviceCapability
