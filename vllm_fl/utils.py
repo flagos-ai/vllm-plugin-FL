@@ -1,14 +1,13 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+import importlib
 import json
 import os
+import shutil
 from typing import Optional, Tuple
 
-import flag_gems
-from flag_gems.runtime.backend.device import DeviceDetector
-from flag_gems.runtime import backend
-
 _OP_CONFIG: Optional[dict[str, str]] = None
+_METAX_MCOPLIB_PRELOADED = False
 
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
@@ -72,6 +71,40 @@ def get_device_type(vendor_name: str) -> str:
 def get_device_name(vendor_name: str) -> str:
     """Return the configured device_name for the given vendor."""
     return _get_vendor_device_field(vendor_name, "device_name")
+
+
+def _looks_like_metax_runtime() -> bool:
+    vendor = os.environ.get("GEMS_VENDOR", "").strip().lower()
+    platform = os.environ.get("VLLM_FL_PLATFORM", "").strip().lower()
+    return vendor == "metax" or platform == "metax" or shutil.which("mx-smi") is not None
+
+
+def _preload_metax_mcoplib_if_needed() -> None:
+    """Load MACA vLLM op libraries before FlagGems can define fallback schemas."""
+    global _METAX_MCOPLIB_PRELOADED
+    if _METAX_MCOPLIB_PRELOADED or not _looks_like_metax_runtime():
+        return
+
+    for module_name in ("mcoplib._C", "mcoplib._moe_C"):
+        try:
+            importlib.import_module(module_name)
+        except ImportError:
+            pass
+    _METAX_MCOPLIB_PRELOADED = True
+
+
+def _import_flaggems_runtime():
+    _preload_metax_mcoplib_if_needed()
+
+    from flag_gems.runtime import backend
+    from flag_gems.runtime.backend.device import DeviceDetector
+
+    return DeviceDetector, backend
+
+
+def _import_flag_gems():
+    _preload_metax_mcoplib_if_needed()
+    return importlib.import_module("flag_gems")
 
 
 def use_flaggems(default: bool = True) -> bool:
@@ -207,9 +240,11 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
+        DeviceDetector, backend = _import_flaggems_runtime()
         self.device = DeviceDetector()
+        self._backend = backend
         self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise"]
-        backend.set_torch_backend_device_fn(self.device.vendor_name)
+        self._backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
     def dispatch_key(self):
@@ -226,12 +261,12 @@ class DeviceInfo:
     @property
     def torch_device_fn(self):
         # torch_device_fn is like 'torch.cuda' object
-        return backend.gen_torch_device_object()
+        return self._backend.gen_torch_device_object()
 
     @property
     def torch_backend_device(self):
         # torch_backend_device is like 'torch.backend.cuda' object
-        return backend.get_torch_backend_device_fn()
+        return self._backend.get_torch_backend_device_fn()
 
     def get_supported_device(self):
         if self.vendor_name not in self.supported_device:
@@ -244,6 +279,7 @@ def get_flaggems_all_ops() -> list[str]:
     Get all FlagGems operator names from flag_gems._FULL_CONFIG.
     """
     try:
+        flag_gems = _import_flag_gems()
         # _FULL_CONFIG is a tuple of (op_name, function, ...) tuples
         # Some entries have 2 elements, some have 3
         ops = [entry[0] for entry in flag_gems._FULL_CONFIG]
