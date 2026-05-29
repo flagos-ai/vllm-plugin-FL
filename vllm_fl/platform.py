@@ -52,7 +52,8 @@ class PlatformFL(Platform):
     # cuda_alike (nvidia/metax): device_name = vendor_name (not used in torch.device)
     # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
     device_name = device_info.vendor_name if (
-        device_info.device_type == "cuda" and device_info.vendor_name != "iluvatar"
+        device_info.device_type == "cuda"
+        and device_info.vendor_name not in ("iluvatar", "hygon")
     ) else device_info.device_type
     device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
@@ -70,6 +71,8 @@ class PlatformFL(Platform):
             return False
         if self.vendor_name == "musa":
             return True
+        if self.vendor_name == "hygon":
+            return False
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
@@ -307,7 +310,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon"]:
             return True
         return False
 
@@ -346,6 +349,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
+        if cls.vendor_name == "hygon":
+            return False
         if cls.dist_backend == "flagcx":
             return False
         return True
