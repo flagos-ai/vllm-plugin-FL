@@ -13,6 +13,9 @@ from .attention import (
     AscendAttentionState,
     AscendMetadata,
     AscendMLABackend,
+    AscendMLAMetadataBuilder,
+    AscendMLAMetadata,
+    AscendMLAImpl,
     is_torch_npu_available,
 )
 from .attention_mask import AttentionMaskBuilder, get_attention_mask_builder
@@ -29,6 +32,9 @@ __all__ = [
     "AscendMetadata",
     "AscendAttentionState",
     "AscendMLABackend",
+    "AscendMLAMetadataBuilder",
+    "AscendMLAMetadata",
+    "AscendMLAImpl",
     "is_torch_npu_available",
     "AttentionMaskBuilder",
     "get_attention_mask_builder",
