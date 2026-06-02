@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, Optional
 import msgspec
 import numpy as np
 import torch
-import torch.cuda.nvtx as nvtx
 import zmq
 import zmq.asyncio
 
@@ -645,9 +644,7 @@ class FlagCXConnectorWorker:
         remote_session = f"{agent_meta.remote_hostname}:{agent_meta.remote_port}"
         conn = self._get_conn(remote_session)
 
-        num_reqs = len(send_reqs)
         start_time = time.perf_counter()
-        nvtx.range_push(f"_send_blocks(reqs={num_reqs},dst={remote_session})")
 
         # Absolute-VA addressed write lists: each entry pairs a local source
         # VA with the absolute remote destination VA. The engine resolves
@@ -697,16 +694,10 @@ class FlagCXConnectorWorker:
 
         total_xfers = len(sizes)
         if total_xfers > 0:
-            nvtx.range_push(
-                f"flagcxP2pBatchWriteSync(n={total_xfers}"
-                f",total_bytes={sum(sizes)},dst={remote_session})"
-            )
             self.flagcx.flagcxP2pBatchWriteSync(
                 conn, src_vas, dst_vas, sizes
             )
-            nvtx.range_pop()
 
-        nvtx.range_pop()  # _send_blocks
         logger.debug(
             "Sending to %s done, took %s",
             remote_session,
