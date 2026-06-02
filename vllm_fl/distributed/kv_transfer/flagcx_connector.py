@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import asyncio
-import ctypes
 import os
 import sys
 import threading
@@ -9,7 +8,7 @@ import time
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
 import msgspec
@@ -113,17 +112,6 @@ class FinishedSendReqSet:
 class FinishedReceiveReqSet:
     set: set[ReqId]
     lock: asyncio.Lock
-
-
-@dataclass
-class PairCommInfo:
-    """Per-pair comm state."""
-
-    comm: Any
-    my_rank: int
-    total_puts: int = 0
-    signal_buffer: Optional[torch.Tensor] = None
-    send_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class FlagCXConnectorMetadata(KVConnectorMetadata):
@@ -369,10 +357,18 @@ class FlagCXConnectorWorker:
         self.flagcx = FLAGCXLibrary(library_path)
         self.kv_cache_device: torch.device | None = None
 
-        # ---- Per-pair comms (lazily created on first transfer) ----
-        self.pair_comms: dict[str, PairCommInfo] = {}
-        self.pair_comms_lock = threading.Lock()
+        # ---- P2P engine (one-sided RDMA + RPC control plane) ----
+        # Replaces the old per-pair comm model. The engine owns the
+        # handshake/RPC port; transfers are addressed by absolute VA.
+        self.engine = self.flagcx.flagcxP2pEngineCreate()
+        self.rpc_port: int = 0
         self.kv_tensors_meta: list[tuple[int, int]] = []
+
+        # ---- Cached connections, keyed by "host:rpc_port" ----
+        # The engine caches connections internally; this memoizes the
+        # opaque handle so we call get_conn once per remote session.
+        self.session_conns: dict[str, Any] = {}
+        self.conn_lock = threading.Lock()
 
         # ---- Side-channel ZMQ port ----
         self.side_channel_port: int = _get_side_channel_port(vllm_config)
@@ -402,9 +398,11 @@ class FlagCXConnectorWorker:
 
         # ---- Decode (receiver) background threads ----
         if self.kv_role != "kv_producer":
-            # Listener thread for comm init handshake from Prefill
-            self._decode_listener_t: threading.Thread | None = None
-            # Async event loop for _receive_kv coroutines
+            # Async event loop for _receive_kv coroutines (sends request-level
+            # metadata to Prefill over the ZMQ side channel and awaits the
+            # transfer-done reply). No comm-init listener is needed anymore;
+            # the engine's RPC server (started in register_kv_caches) handles
+            # the data-plane handshake.
             self.receiver_loop = asyncio.new_event_loop()
             self._receiver_t = threading.Thread(
                 target=self._receiver_loop_fn,
@@ -453,152 +451,17 @@ class FlagCXConnectorWorker:
         self._encoder = msgspec.msgpack.Encoder()
         self._decoder = msgspec.msgpack.Decoder(FlagCXAgentMetadata)
 
-    @staticmethod
-    def _comm_repr(comm: Any) -> str:
-        value = getattr(comm, "value", None)
-        return hex(value) if value is not None else "0x0"
-
-    def _register_kv_for_comm(self, comm: Any) -> torch.Tensor:
-        """Register KV MRs + signal buffer. Both sides must call this
-        after flagcxCommInitRank (internal AllGather for rendezvous)."""
-        for base_addr, size in self.kv_tensors_meta:
-            self.flagcx.flagcxOneSideRegister(comm, base_addr, size)
-        assert self.kv_cache_device is not None
-        signal_buffer = torch.zeros(
-            1,
-            dtype=torch.int64,
-            device=self.kv_cache_device,
-        )
-        self.flagcx.flagcxOneSideSignalRegister(
-            comm, signal_buffer.data_ptr(), signal_buffer.nbytes
-        )
-        logger.info(
-            "Registered %d KV MRs + signal buffer for comm=%s "
-            "(signal_ptr=%s, device=%s)",
-            len(self.kv_tensors_meta),
-            self._comm_repr(comm),
-            hex(signal_buffer.data_ptr()),
-            signal_buffer.device,
-        )
-        return signal_buffer
-
-    def _create_pair_comm(self, decode_listener_addr: str) -> PairCommInfo:
-        """Prefill side: create pair comm to a Decode peer.
-        Sends uid via ZMQ DEALER→ROUTER, then both sides call
-        flagcxCommInitRank simultaneously."""
-        with self.pair_comms_lock:
-            existing = self.pair_comms.get(decode_listener_addr)
-            if existing is not None:
-                return existing
-
-        # 1. Generate uid
-        uid = self.flagcx.flagcxGetUniqueId()
-        uid_bytes = bytes(uid.contents.internal)
-
-        # 2. Send NEW handshake to Decode listener via ZMQ DEALER
-        my_identity = f"{self.hostname}:{self.side_channel_port + self.tp_rank}"
-        sock = self.zmq_ctx.socket(zmq.DEALER)
-        sock.setsockopt_string(zmq.IDENTITY, my_identity)
-        # Fail fast if the Decode listener isn't reachable / hangs, so a
-        # ThreadPoolExecutor worker doesn't get stuck forever.
-        sock.setsockopt(zmq.RCVTIMEO, 120000)  # 120s
-        sock.setsockopt(zmq.LINGER, 0)
-        sock.connect(f"tcp://{decode_listener_addr}")
-        sock.send(
-            msgspec.msgpack.encode(
-                {
-                    "cmd": "NEW",
-                    "uid": uid_bytes,
-                }
-            )
-        )
-
-        # 3. flagcxCommInitRank(rank=0) — blocks until Decode also calls
-        comm = self.flagcx.flagcxCommInitRank(2, uid, 0)
-        signal_buffer = self._register_kv_for_comm(comm)
-
-        # 4. Wait for Decode to confirm registration is done
-        try:
-            reply = sock.recv()
-        except zmq.Again as e:
-            sock.close()
-            raise RuntimeError(
-                f"Timed out waiting for Decode registration reply "
-                f"from {decode_listener_addr}"
-            ) from e
-        finally:
-            sock.close()
-
-        if reply != b"OK":
-            raise RuntimeError(
-                f"Decode handshake with {decode_listener_addr} failed: "
-                f"unexpected reply {reply!r}"
-            )
-
-        pair_info = PairCommInfo(
-            comm=comm,
-            my_rank=0,
-            signal_buffer=signal_buffer,
-        )
-        with self.pair_comms_lock:
-            self.pair_comms[decode_listener_addr] = pair_info
-
-        logger.info("Pair comm ready (Prefill/rank=0) ↔ %s", decode_listener_addr)
-        return pair_info
-
-    def _decode_listener_thread(
-        self, ready_event: threading.Event, base_port: int, tp_rank: int
-    ):
-        """Decode side: ROUTER listener for comm init handshakes."""
-        listen_path = make_zmq_path("tcp", self.hostname, base_port + tp_rank)
-        router = make_zmq_socket(self.zmq_ctx, listen_path, zmq.ROUTER)
-        logger.info("Decode listener started on %s", listen_path)
-        ready_event.set()
-
-        poller = zmq.Poller()
-        poller.register(router, zmq.POLLIN)
-
-        try:
-            while True:
-                socks = dict(poller.poll())
-                if router not in socks:
-                    continue
-
-                identity, msg = router.recv_multipart()
-                data = msgspec.msgpack.decode(msg)
-
-                if data.get(b"cmd") == b"NEW" or data.get("cmd") == "NEW":
-                    uid_bytes = data.get(b"uid") or data.get("uid")
-                    uid = self.flagcx.unique_id_from_bytes(uid_bytes)
-                    # Match style used by device_communicators/flagcx.py:
-                    # pass a pointer via ctypes.byref to flagcxCommInitRank.
-                    comm = self.flagcx.flagcxCommInitRank(2, ctypes.byref(uid), 1)
-                    signal_buffer = self._register_kv_for_comm(comm)
-
-                    remote_addr = identity.decode()
-                    pair_info = PairCommInfo(
-                        comm=comm,
-                        my_rank=1,
-                        signal_buffer=signal_buffer,
-                    )
-                    with self.pair_comms_lock:
-                        self.pair_comms[remote_addr] = pair_info
-
-                    # Reply OK so Prefill knows registration is done
-                    router.send_multipart([identity, b"OK"])
-                    logger.info("Pair comm ready (Decode/rank=1) ↔ %s", remote_addr)
-                else:
-                    logger.warning(
-                        "Decode listener: unknown cmd from %s: %s",
-                        identity,
-                        data,
-                    )
-        except zmq.ContextTerminated:
-            pass
-        except Exception as e:
-            logger.error("Decode listener error: %s", e)
-        finally:
-            router.close()
+    def _get_conn(self, session: str) -> Any:
+        """Get (or lazily open) the engine connection to a remote session
+        string "host:rpc_port". The first call performs the QP + desc-table
+        handshake; subsequent calls return the cached handle."""
+        with self.conn_lock:
+            conn = self.session_conns.get(session)
+            if conn is None:
+                conn = self.flagcx.flagcxP2pGetConn(self.engine, session)
+                self.session_conns[session] = conn
+                logger.info("Opened P2P connection to %s", session)
+            return conn
 
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
         logger.info("Registering KV caches. use_mla: %s", self.use_mla)
@@ -639,14 +502,32 @@ class FlagCXConnectorWorker:
         self.block_len = tensor_size_bytes // self.num_blocks
         self.device_kv_caches = kv_caches
 
+        # Register every KV tensor with the engine as an RDMA MR. The engine
+        # tracks them in its global region table; writes later resolve the
+        # local lkey by source VA, so the MR handles need not be kept.
+        for base_addr, size in self.kv_tensors_meta:
+            self.flagcx.flagcxP2pRegister(self.engine, base_addr, size)
+
+        # The engine's handshake port becomes our session identity; peers
+        # connect to "{hostname}:{rpc_port}" for the data-plane transfer.
+        self.rpc_port = self.flagcx.flagcxP2pGetRpcPort(self.engine)
+
         logger.info(
-            "KV cache metadata collected: %d tensors, num_blocks=%d, block_len=%d.",
+            "KV cache metadata collected: %d tensors, num_blocks=%d, "
+            "block_len=%d, rpc_port=%d.",
             len(seen_base_addresses),
             self.num_blocks,
             self.block_len,
+            self.rpc_port,
         )
 
-        # Launch Prefill sender thread (PULL socket for Decode requests)
+        # Decode (write target) starts the RPC accept daemon so Prefill can
+        # connect and RDMA-write into our registered KV regions.
+        if self.kv_role != "kv_producer":
+            self.flagcx.flagcxP2pStartRpcServer(self.engine)
+            logger.info("FlagCX P2P RPC server started on port %d", self.rpc_port)
+
+        # Launch Prefill sender thread (ROUTER socket for Decode requests)
         if self.kv_role != "kv_consumer":
             ready_event = threading.Event()
             self._sender_t = threading.Thread(
@@ -656,18 +537,6 @@ class FlagCXConnectorWorker:
                 name="flagcx_sender",
             )
             self._sender_t.start()
-            ready_event.wait()
-
-        # Launch Decode listener thread (ROUTER for comm init handshakes)
-        if self.kv_role != "kv_producer":
-            ready_event = threading.Event()
-            self._decode_listener_t = threading.Thread(
-                target=self._decode_listener_thread,
-                args=(ready_event, self.side_channel_port, self.tp_rank),
-                daemon=True,
-                name="flagcx_decode_listener",
-            )
-            self._decode_listener_t.start()
             ready_event.wait()
 
     def _sender_thread(
@@ -722,15 +591,6 @@ class FlagCXConnectorWorker:
 
         try:
             metadata = self._decoder.decode(metadata_bytes)
-            decode_listener_addr = (
-                f"{metadata.remote_hostname}:{metadata.remote_port + self.tp_rank}"
-            )
-
-            with self.pair_comms_lock:
-                pair_info = self.pair_comms.get(decode_listener_addr)
-            if pair_info is None:
-                self._create_pair_comm(decode_listener_addr)
-
             self._send_kv_to_decode(metadata)
             status = TRANS_DONE
         except Exception as e:
@@ -763,31 +623,7 @@ class FlagCXConnectorWorker:
                 send_reqs.append((req_id, send_meta, remote_block_ids))
 
         if send_reqs:
-            wait_counter_target = self._send_blocks(send_reqs, meta)
-
-            if wait_counter_target > 0:
-                decode_listener_addr = (
-                    f"{meta.remote_hostname}:{meta.remote_port + self.tp_rank}"
-                )
-                try:
-                    with self.pair_comms_lock:
-                        pair_info = self.pair_comms.get(decode_listener_addr)
-                    if pair_info is not None:
-                        nvtx.range_push(
-                            f"flagcxWaitCounter(target={wait_counter_target})"
-                        )
-                        self.flagcx.flagcxWaitCounter(
-                            pair_info.comm, wait_counter_target
-                        )
-                        nvtx.range_pop()
-                except Exception:
-                    nvtx.range_pop()  # guard in case of exception
-                    logger.exception(
-                        "flagcxWaitCounter failed: addr=%s target=%d",
-                        decode_listener_addr,
-                        wait_counter_target,
-                    )
-                    raise
+            self._send_blocks(send_reqs, meta)
 
             ok_reqs = [req_id for req_id, _, _ in send_reqs]
             with self.reqs_need_send.lock:
@@ -805,26 +641,20 @@ class FlagCXConnectorWorker:
         local_base_addr = self.kv_caches_base_addr
         remote_base_addr = agent_meta.kv_caches_base_addr
         block_len = self.block_len
+        # Data-plane session: the peer's engine handshake port.
         remote_session = f"{agent_meta.remote_hostname}:{agent_meta.remote_port}"
-
-        decode_listener_addr = (
-            f"{agent_meta.remote_hostname}:{agent_meta.remote_port + self.tp_rank}"
-        )
-        pair_info = self.pair_comms.get(decode_listener_addr)
-        if pair_info is None:
-            raise RuntimeError(f"No pair comm for {decode_listener_addr}")
-        comm = pair_info.comm
-        peer_rank = 1 - pair_info.my_rank
+        conn = self._get_conn(remote_session)
 
         num_reqs = len(send_reqs)
         start_time = time.perf_counter()
-        nvtx.range_push(f"_send_blocks(reqs={num_reqs},peer={peer_rank})")
+        nvtx.range_push(f"_send_blocks(reqs={num_reqs},dst={remote_session})")
 
-        src_offs: list[int] = []
-        dst_offs: list[int] = []
+        # Absolute-VA addressed write lists: each entry pairs a local source
+        # VA with the absolute remote destination VA. The engine resolves
+        # both the local lkey and remote rkey from the addresses internally.
+        src_vas: list[int] = []
+        dst_vas: list[int] = []
         sizes: list[int] = []
-        src_mrs: list[int] = []
-        dst_mrs: list[int] = []
 
         for req_id, send_meta, remote_block_ids in send_reqs:
             send_meta.ready.wait()
@@ -834,7 +664,7 @@ class FlagCXConnectorWorker:
                 continue
 
             local_block_ids = send_meta.local_block_ids
-            # Partial prefix cache hit: just read uncomputed blocks.
+            # Partial prefix cache hit: just send uncomputed blocks.
             num_local_blocks = len(local_block_ids)
             assert num_local_blocks >= num_remote_blocks
             if num_local_blocks > num_remote_blocks:
@@ -844,17 +674,19 @@ class FlagCXConnectorWorker:
                 local_block_ids, remote_block_ids
             )
 
-            for mr_idx, (local_layer_addr, remote_layer_addr) in enumerate(
-                zip(local_base_addr, remote_base_addr)
+            for local_layer_addr, remote_layer_addr in zip(
+                local_base_addr, remote_base_addr
             ):
                 for group_local_block_id, group_remote_block_id in zip(
                     group_local_block_ids, group_remote_block_ids
                 ):
-                    src_offs.append(group_local_block_id[0] * block_len)
-                    dst_offs.append(group_remote_block_id[0] * block_len)
+                    src_vas.append(
+                        local_layer_addr + group_local_block_id[0] * block_len
+                    )
+                    dst_vas.append(
+                        remote_layer_addr + group_remote_block_id[0] * block_len
+                    )
                     sizes.append(block_len * len(group_local_block_id))
-                    src_mrs.append(mr_idx)
-                    dst_mrs.append(mr_idx)
 
             logger.debug(
                 "Sending kv_caches for request %s (%d blocks) to %s",
@@ -864,26 +696,15 @@ class FlagCXConnectorWorker:
             )
 
         total_xfers = len(sizes)
-        with pair_info.send_lock:
-            if total_xfers > 0:
-                nvtx.range_push(
-                    f"flagcxBatchPut(n={total_xfers}"
-                    f",total_bytes={sum(sizes)}"
-                    f",peer={peer_rank})"
-                )
-                self.flagcx.flagcxBatchPut(
-                    comm,
-                    peer_rank,
-                    src_offs,
-                    dst_offs,
-                    sizes,
-                    src_mrs,
-                    dst_mrs,
-                )
-                nvtx.range_pop()
-
-            pair_info.total_puts += total_xfers
-            wait_counter_target = pair_info.total_puts
+        if total_xfers > 0:
+            nvtx.range_push(
+                f"flagcxP2pBatchWriteSync(n={total_xfers}"
+                f",total_bytes={sum(sizes)},dst={remote_session})"
+            )
+            self.flagcx.flagcxP2pBatchWriteSync(
+                conn, src_vas, dst_vas, sizes
+            )
+            nvtx.range_pop()
 
         nvtx.range_pop()  # _send_blocks
         logger.debug(
@@ -891,7 +712,7 @@ class FlagCXConnectorWorker:
             remote_session,
             time.perf_counter() - start_time,
         )
-        return wait_counter_target
+        return total_xfers
 
     def _receiver_loop_fn(self, loop: asyncio.AbstractEventLoop):
         asyncio.set_event_loop(loop)
@@ -906,7 +727,7 @@ class FlagCXConnectorWorker:
 
         metadata = FlagCXAgentMetadata(
             remote_hostname=self.hostname,
-            remote_port=self.side_channel_port,
+            remote_port=self.rpc_port,
             request_ids=req_ids,
             kv_caches_base_addr=self.kv_caches_base_addr,
             block_ids=block_ids,
@@ -1028,6 +849,15 @@ class FlagCXConnectorWorker:
             if hasattr(self, "receiver_loop") and self.receiver_loop.is_running():
                 self.receiver_loop.call_soon_threadsafe(self.receiver_loop.stop)
                 self._receiver_t.join(timeout=2)
+        # Tear down the engine (stops the RPC server, closes connections and
+        # deregisters MRs).
+        engine = getattr(self, "engine", None)
+        if engine is not None:
+            try:
+                self.flagcx.flagcxP2pEngineDestroy(engine)
+            except Exception as e:
+                logger.warning("flagcxP2pEngineDestroy failed: %s", e)
+            self.engine = None
 
 
 def _group_contiguous(
