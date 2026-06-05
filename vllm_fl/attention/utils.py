@@ -20,36 +20,65 @@ def patch_mm_encoder_attention():
        _forward_fa (Flash Attention) when is_flash_attn_backend is True.
 
     """
-    import vllm.model_executor.layers.attention.mm_encoder_attention as mm_mod
     from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
-    def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
-        if attn_backend == AttentionBackendEnum.FLASH_ATTN:
-            try:
-                from vllm.vllm_flash_attn import flash_attn_varlen_func
+    # Part 1 (all platforms): patch maybe_get_vit_flash_attn_backend so that
+    # OOT platforms can resolve flash_attn_varlen_func (vllm_flash_attn →
+    # flash_attn fallback).  Wrapped in try/except to tolerate vLLM versions
+    # that lack mm_encoder_attention (e.g. CUDA CI unit-test environments).
+    try:
+        import vllm.model_executor.layers.attention.mm_encoder_attention as mm_mod
 
-                logger.info_once("Using vllm.vllm_flash_attn for vit attention")
-            except (ImportError, ModuleNotFoundError):
-                from flash_attn import flash_attn_varlen_func
+        def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
+            if attn_backend == AttentionBackendEnum.FLASH_ATTN:
+                try:
+                    from vllm.vllm_flash_attn import flash_attn_varlen_func
 
-                logger.info_once("Using flash_attn for vit attention")
-            return flash_attn_varlen_func
-        elif attn_backend == AttentionBackendEnum.ROCM_AITER_FA:
-            from aiter import flash_attn_varlen_func
-            logger.info_once("Using aiter.flash_attn_varlen_func for vit attention")
-            return flash_attn_varlen_func
-        else:
-            return None
+                    logger.info_once(
+                        "Using vllm.vllm_flash_attn for vit attention"
+                    )
+                except (ImportError, ModuleNotFoundError):
+                    from flash_attn import flash_attn_varlen_func
 
-    mm_mod.maybe_get_vit_flash_attn_backend = _patched_maybe_get_vit_flash_attn_backend
+                    logger.info_once("Using flash_attn for vit attention")
+                return flash_attn_varlen_func
+            elif attn_backend == AttentionBackendEnum.ROCM_AITER_FA:
+                from aiter import flash_attn_varlen_func
 
-    # Patch (Hygon only): route forward_native → _forward_fa when FLASH_ATTN is selected
+                logger.info_once(
+                    "Using aiter.flash_attn_varlen_func for vit attention"
+                )
+                return flash_attn_varlen_func
+            else:
+                return None
+
+        mm_mod.maybe_get_vit_flash_attn_backend = (
+            _patched_maybe_get_vit_flash_attn_backend
+        )
+        logger.info_once(
+            "Patched maybe_get_vit_flash_attn_backend for OOT platforms"
+        )
+    except Exception:
+        logger.info_once(
+            "Skipped maybe_get_vit_flash_attn_backend patch: "
+            "mm_encoder_attention module not available"
+        )
+        mm_mod = None
+
+    # Part 2 (Hygon-only): route forward_native → _forward_fa to avoid SDPA
+    # head-count bug, and inject flash_attn_varlen_func into fa_utils.
     from vllm.platforms import current_platform
 
     vendor = getattr(current_platform, "vendor_name", "")
     if vendor != "hygon":
         logger.info_once(
-            f"Skip Hygon FA patch: vendor={vendor!r} != 'hygon'"
+            "Skip Hygon FA patch: vendor=%r != 'hygon'", vendor
+        )
+        return
+
+    if mm_mod is None:
+        logger.info_once(
+            "Skip Hygon FA patch: mm_encoder_attention not available"
         )
         return
 
