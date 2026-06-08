@@ -45,12 +45,6 @@ op_backends:
 
 # FlagOS operator blacklist
 flagos_blacklist:
-  - copy_
-  - to_copy
-  - cat
-  - index
-  - mul
-  - pow_scalar
   - index_put_
   - index_put
   - _index_put_impl_
