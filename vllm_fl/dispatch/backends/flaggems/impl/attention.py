@@ -39,7 +39,7 @@ from vllm.v1.attention.backends.utils import (
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.platforms.interface import DeviceCapability
 from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
-# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash,
+# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash, 
 # from flag_gems import reshape_and_cache_flash
 
 logger = init_logger(__name__)
@@ -455,7 +455,7 @@ class AttentionFLImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         self.attn_type = attn_type
-        self.vllm_flash_attn_version = self._detect_flaggems_fa_version()
+        self.vllm_flash_attn_version = 2 # 2 #get_flash_attn_version() 3->2 fix
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = vllm_is_batch_invariant()
 

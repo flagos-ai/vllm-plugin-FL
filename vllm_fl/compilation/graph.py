@@ -41,6 +41,8 @@ class Graph:
         graph = torch.npu.NPUGraph
     elif current_platform.device_type == "musa":
         graph = torch.musa.MUSAGraph
+	elif current_platform.device_type == "txda":
+	    graph = None
     else:
         raise NotImplementedError("not support graph")
 

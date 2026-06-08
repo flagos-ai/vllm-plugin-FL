@@ -72,7 +72,8 @@ class PyFlagcxCommunicator:
             ### TODO(lms): simplify it
             if library_path is None:
                 flagcx_path = os.getenv('FLAGCX_PATH')
-                library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
+                #library_path=os.path.join(flagcx_path, "libflagcx.so") # rcy fix
+                library_path= "/usr/local/kuiper/lib/libflagcx.so"
                 self.flagcx = FLAGCXLibrary(library_path)
             else:
                 self.flagcx = FLAGCXLibrary(library_path)
@@ -111,14 +112,10 @@ class PyFlagcxCommunicator:
         assert isinstance(device, torch.device)
         self.device = device
         # nccl communicator and stream will use this device
-        # `torch.cuda.device` / `torch.musa.device` are context managers that
-        # change the current device to the specified one
-        if self.device.type == "musa":
-            device_ctx = torch.musa.device(self.device)
-        else:
-            device_ctx = torch.cuda.device(self.device)
-
-        with device_ctx:
+        # `torch.cuda.device` is a context manager that changes the
+        # current cuda device to the specified one
+        # rcy_fix
+        with torch.txda.device(device):
             self.comm = self.flagcx.flagcxCommInitRank(
                 self.world_size, ctypes.byref(self.unique_id), self.rank)
 

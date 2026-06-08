@@ -57,7 +57,7 @@ class PlatformFL(Platform):
         "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
     )
     ### TODO(lms): dispatch device_control_env_var
-    # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
+    device_control_env_var: str = "TXDA_VISIBLE_DEVICES"
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
@@ -298,7 +298,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "kunlunxin", "hygon"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "kunlunxin", "hygon", "txda"]:
             return True
         return False
 
@@ -359,6 +359,8 @@ class PlatformFL(Platform):
         if cls.device_type == "musa":
             major, minor = torch.musa.get_device_capability(device_id)
             return DeviceCapability(major=major, minor=minor)
+        elif cls.device_type == "txda":
+            return DeviceCapability(major=8, minor=1)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 
