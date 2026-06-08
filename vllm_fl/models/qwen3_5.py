@@ -71,7 +71,11 @@ from vllm.model_executor.models.qwen3_next import (
 from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm_fl.configs.qwen3_5 import Qwen3_5Config
 from vllm_fl.configs.qwen3_5_moe import Qwen3_5MoeConfig, Qwen3_5MoeTextConfig
-import vllm_fl.models.qwen3_next # for error ''_OpNamespace' 'vllm' object has no attribute 'gdn_attention_core''
+
+try:
+    import vllm_fl.models.qwen3_next # for error ''_OpNamespace' 'vllm' object has no attribute 'gdn_attention_core''
+except (ImportError, AttributeError):
+    pass
 
 logger = init_logger(__name__)
 
@@ -341,7 +345,7 @@ class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
                 vllm_config=vllm_config,
                 prefix=f"{prefix}.mlp",
             )
-        elif config.model_type == "qwen3_5_text":
+        elif config.model_type in ("qwen3_5_text", "qwen3_text"):
             self.mlp = Qwen3NextMLP(
                 hidden_size=config.hidden_size,
                 intermediate_size=config.intermediate_size,

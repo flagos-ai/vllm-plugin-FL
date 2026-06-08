@@ -39,6 +39,7 @@ def register():
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
         from vllm_fl.configs.qwen3_5 import Qwen3_5Config
         _CONFIG_REGISTRY["qwen3_5"] = Qwen3_5Config
+        _CONFIG_REGISTRY["qwen3"] = Qwen3_5Config
     except Exception as e:
         logger.error(f"Register Qwen3.5 config in platform plugin error: {str(e)}")
 
