@@ -26,7 +26,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | NVIDIA | Supported | - |
 | Ascend | Supported | - |
 | MetaX | Supported | - |
-| Pingtouge-Zhenwu | Supported | - |
+| T-Head | Supported | - |
 | Iluvatar | Supported | - |
 | Tsingmicro | Merging | [PR #52](https://github.com/flagos-ai/vllm-plugin-FL/pull/52) |
 | Moore Threads | Supported | - |
@@ -69,7 +69,6 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     ```sh
     git clone https://github.com/flagos-ai/FlagGems
     cd FlagGems
-    git checkout v5.0.0
     pip install --no-build-isolation .
     # or editble install
     pip install --no-build-isolation -e .
