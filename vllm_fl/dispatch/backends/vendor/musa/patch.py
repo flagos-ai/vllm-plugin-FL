@@ -17,23 +17,11 @@ def apply_musa_patches():
         return
     _patches_applied = True
 
-    patch_mccl_backend()
     patch_topk_topp_sampler()
-    patch_sync_device()
     patch_triton_reshape_and_cache_flash()
     patch_cuda_get_device_properties()
     patch_accelerator_missing_attrs()
     patch_cuda_stream_for_musa()
-
-
-def patch_mccl_backend():
-    """Register the mccl distributed backend for MUSA via torch_musa."""
-    try:
-        import torch_musa.distributed as musa_dist
-        musa_dist._apply_distributed_patch()
-        logger.info("Registered mccl distributed backend for MUSA")
-    except Exception as e:
-        logger.warning("Failed to register mccl backend for MUSA: %s", e)
 
 
 def patch_topk_topp_sampler():
@@ -56,33 +44,6 @@ def patch_topk_topp_sampler():
         # worker processes will retry and succeed independently.
         logger.debug("Failed to patch top-k/top-p sampler for MUSA: %s", e)
 
-
-def patch_sync_device():
-    """Patch _sync_device in ModelRunnerFL to use torch_musa.synchronize().
-
-    torch.accelerator.synchronize() is not supported on MUSA; use the
-    MUSA-native synchronize instead.
-    """
-    try:
-        import torch_musa
-
-        if getattr(patch_sync_device, "_musa_sync_device_patched", False):
-            return
-
-        def _sync_device_musa(self):
-            torch_musa.synchronize()
-
-        # Defer the import of model_runner to avoid circular imports during
-        # early module initialization (fused_moe.modular_kernel is not yet
-        # fully loaded when apply_musa_patches() is first called).
-        import vllm_fl.worker.model_runner as mr_mod
-        mr_mod.ModelRunnerFL._sync_device = _sync_device_musa
-        patch_sync_device._musa_sync_device_patched = True
-        logger.info("Patched ModelRunnerFL._sync_device to use torch_musa.synchronize()")
-    except Exception as e:
-        # May fail during early init due to circular imports; will be retried
-        # in worker processes once all modules are fully initialized.
-        logger.debug("Failed to patch _sync_device for MUSA: %s", e)
 
 
 def patch_triton_reshape_and_cache_flash():
