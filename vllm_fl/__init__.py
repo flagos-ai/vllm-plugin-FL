@@ -2,6 +2,18 @@
 
 import os
 import logging
+import sys
+
+# vLLM 0.20.2 references this CUDA-only dtype at import time. Some MUSA
+# PyTorch builds do not expose it, so provide a harmless sentinel without
+# modifying vLLM site-packages.
+if "torch" in sys.modules:
+    _torch = sys.modules["torch"]
+else:
+    import torch as _torch
+if not hasattr(_torch, "float4_e2m1fn_x2"):
+    _torch.float4_e2m1fn_x2 = _torch.uint8
+del _torch
 
 from vllm_fl.utils import get_op_config as _get_op_config
 
@@ -96,10 +108,20 @@ def register():
     return "vllm_fl.platform.PlatformFL"
 
 def register_quant_linear():
+    from vllm.platforms import current_platform
+
+    # Avoid CUDA-only cutlass import chains on MUSA.
+    if current_platform.device_type == "musa":
+        return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
     add_oot_quant_kernel()
 
 def register_router():
+    from vllm.platforms import current_platform
+
+    # Avoid CUDA-only fused_moe/router import chains on MUSA.
+    if current_platform.device_type == "musa":
+        return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 
