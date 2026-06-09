@@ -6006,6 +6006,8 @@ class ModelRunnerFL(
             torch.musa.empty_cache()
         elif hasattr(torch, "cuda"):
             torch.cuda.empty_cache()
+        else:
+            raise RuntimeError("No active accelerator device found to empty cache.")
 
         logger.debug("Cleaned up profiling KV cache and CUDA graphs")
 
