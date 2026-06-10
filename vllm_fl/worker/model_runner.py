@@ -11,7 +11,7 @@ import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import copy, deepcopy
 from dataclasses import dataclass, replace
 from functools import reduce
@@ -114,7 +114,7 @@ def _accelerator_synchronize() -> None:
         torch.accelerator.synchronize()
 
 
-if current_platform.dist_backend == "flagcx":
+if current_platform.dist_backend == "flagcx" or not current_platform.is_cuda():
     @contextmanager
     def graph_capture(device: torch.device):
         """

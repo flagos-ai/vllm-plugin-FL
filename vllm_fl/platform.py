@@ -179,7 +179,6 @@ class PlatformFL(Platform):
                 logger.info("Setting kv cache block size to 64 for MUSA.")
             else:
                 cache_config.block_size = 16
-
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
         # Note: block_size is initialized in
@@ -201,6 +200,19 @@ class PlatformFL(Platform):
         compilation_config = vllm_config.compilation_config
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
+
+        if (
+            cls.device_type == "musa"
+            and compilation_config.cudagraph_mode.has_full_cudagraphs()
+        ):
+            logger.info(
+                "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
+                "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
+                "is not yet supported by torch_musa. PIECEWISE graphs still "
+                "provide graph capture benefits for non-TP-communication regions.",
+                compilation_config.cudagraph_mode,
+            )
+            compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
             parallel_config.data_parallel_size > 1
@@ -316,10 +328,9 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon"]:
+        if cls.device_type in ["cuda", "npu", "musa"]:
             return True
         return False
-
     @classmethod
     def insert_blocks_to_device(
         cls,
