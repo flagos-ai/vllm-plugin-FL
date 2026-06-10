@@ -179,6 +179,7 @@ class PlatformFL(Platform):
                 logger.info("Setting kv cache block size to 64 for MUSA.")
             else:
                 cache_config.block_size = 16
+
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
         # Note: block_size is initialized in
@@ -328,9 +329,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.device_type in ["cuda", "npu", "musa"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads"]:
             return True
         return False
+
     @classmethod
     def insert_blocks_to_device(
         cls,
