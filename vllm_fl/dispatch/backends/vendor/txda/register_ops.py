@@ -37,33 +37,33 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
-        # # Activation
-        # OpImpl(
-        #     op_name="silu_and_mul",
-        #     impl_id="vendor.txda",
-        #     kind=BackendImplKind.VENDOR,
-        #     fn=_bind_is_available(backend.silu_and_mul, is_avail),
-        #     vendor="txda",
-        #     priority=BackendPriority.VENDOR,
-        # ),
-        # # Normalization
-        # OpImpl(
-        #     op_name="rms_norm",
-        #     impl_id="vendor.txda",
-        #     kind=BackendImplKind.VENDOR,
-        #     fn=_bind_is_available(backend.rms_norm, is_avail),
-        #     vendor="txda",
-        #     priority=BackendPriority.VENDOR,
-        # ),
-        # # Rotary Embedding
-        # OpImpl(
-        #     op_name="rotary_embedding",
-        #     impl_id="vendor.txda",
-        #     kind=BackendImplKind.VENDOR,
-        #     fn=_bind_is_available(backend.rotary_embedding, is_avail),
-        #     vendor="txda",
-        #     priority=BackendPriority.VENDOR,
-        # ),
+        # Activation
+        OpImpl(
+            op_name="silu_and_mul",
+            impl_id="vendor.txda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            vendor="txda",
+            priority=BackendPriority.VENDOR,
+        ),
+        # Normalization
+        OpImpl(
+            op_name="rms_norm",
+            impl_id="vendor.txda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.rms_norm, is_avail),
+            vendor="txda",
+            priority=BackendPriority.VENDOR,
+        ),
+        # Rotary Embedding
+        OpImpl(
+            op_name="rotary_embedding",
+            impl_id="vendor.txda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            vendor="txda",
+            priority=BackendPriority.VENDOR,
+        ),
         # Attention Backend
         OpImpl(
             op_name="attention_backend",

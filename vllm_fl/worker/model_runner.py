@@ -654,7 +654,7 @@ class ModelRunnerFL(
         if self.mm_budget:
             self.mm_budget.reset_cache()
 
-    # @torch.inference_mode()
+    @torch.inference_mode()
     def init_fp8_kv_scales(self) -> None:
         """
         Re-initialize the KV cache and FP8 scales after waking from sleep.
@@ -2941,7 +2941,7 @@ class ModelRunnerFL(
                 pyt_hooks.register_hooks(self.model, self.model.__class__.__name__)
                 self.layerwise_nvtx_hooks_registered = True
 
-    # @torch.inference_mode()
+    @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
@@ -2994,8 +2994,8 @@ class ModelRunnerFL(
                         # returns True. before returning early here we call
                         # dummy run to ensure coordinate_batch_across_dp
                         # is called into to avoid out of sync issues.
-                        # self._dummy_run(1)
-                        pass
+                        self._dummy_run(1)
+                        #pass
                     if not has_kv_transfer_group():
                         # Return empty ModelRunnerOutput if no work to do.
                         return EMPTY_MODEL_RUNNER_OUTPUT
@@ -4024,7 +4024,7 @@ class ModelRunnerFL(
             )
         )
 
-    # @torch.inference_mode()
+    @torch.inference_mode()
     def _dummy_run(
         self,
         num_tokens: int,
@@ -4321,7 +4321,7 @@ class ModelRunnerFL(
         )
         return hidden_states, hidden_states[logit_indices_device]
 
-    # @torch.inference_mode()
+    @torch.inference_mode()
     def _dummy_sampler_run(
         self,
         hidden_states: torch.Tensor,
@@ -4452,7 +4452,7 @@ class ModelRunnerFL(
             else:
                 raise e
 
-    # @torch.inference_mode()
+    @torch.inference_mode()
     def _dummy_pooler_run(
         self,
         hidden_states: torch.Tensor,
@@ -4528,20 +4528,20 @@ class ModelRunnerFL(
                         self.encoder_cache[f"tmp_{i}"] = output
 
         # Add `is_profile` here to pre-allocate communication buffers
-        # hidden_states, last_hidden_states = self._dummy_run(
-        #     self.max_num_tokens, is_profile=True
-        # )
-        #if get_pp_group().is_last_rank:
-            #if self.is_pooling_model:
-                #output = self._dummy_pooler_run(hidden_states)
-            #else:
-                #output = self._dummy_sampler_run(last_hidden_states)
-        #else:
-            #output = None
-        #self._sync_device()
-        #del hidden_states, output
-        #self.encoder_cache.clear()
-        #gc.collect()
+        hidden_states, last_hidden_states = self._dummy_run(
+            self.max_num_tokens, is_profile=True
+        )
+        if get_pp_group().is_last_rank:
+            if self.is_pooling_model:
+                output = self._dummy_pooler_run(hidden_states)
+            else:
+                output = self._dummy_sampler_run(last_hidden_states)
+        else:
+            output = None
+        self._sync_device()
+        del hidden_states, output
+        self.encoder_cache.clear()
+        gc.collect()
 
     def capture_model(self) -> int:
         if self.compilation_config.cudagraph_mode == CUDAGraphMode.NONE:

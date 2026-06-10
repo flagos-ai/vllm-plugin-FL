@@ -32,6 +32,8 @@ def input_guard(fn: Callable[..., torch.Tensor]) -> Callable[..., torch.Tensor]:
         if tensor is not None:
             if hasattr(torch, "npu") and torch.npu.is_available():
                 device_cls = torch.npu.device
+            elif hasattr(torch, "txda") and torch.npu.is_available():
+                device_cls = torch.txda.device
             else:
                 device_cls = torch.cuda.device
             ctx = device_cls(tensor.device.index)

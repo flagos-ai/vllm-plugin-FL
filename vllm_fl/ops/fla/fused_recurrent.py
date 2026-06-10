@@ -6,16 +6,14 @@ from vllm.model_executor.custom_op import CustomOp
 
 from vllm_fl.utils import use_flaggems_op
 
-if True:
+if use_flaggems_op("fused_recurrent_gated_delta_rule_fwd"):
     from flag_gems.fused.FLA import fused_recurrent_gated_delta_rule_fwd
 else:
     from vllm.model_executor.layers.fla.ops.fused_recurrent import (
         fused_recurrent_gated_delta_rule_fwd,
     )
-from flag_gems.fused.FLA.utils import input_guard
 
 class FusedRecurrentFunction(torch.autograd.Function):
-    #@input_guard
     @staticmethod
     def forward(
         ctx,
