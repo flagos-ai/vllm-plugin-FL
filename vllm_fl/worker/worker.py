@@ -234,12 +234,16 @@ class WorkerFL(WorkerBase):
             # Get whitelist and blacklist from environment variables
             whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
+            # Only rank 0 records the oplist to avoid file truncation and
+            # interleaved writes when tensor-parallel-size > 1.
+            should_record = (rank == 0)
+
             # Use whitelist if specified (takes precedence over blacklist)
             if whitelist:
                 logger.info(f"[FlagGems] Enable only the following ops: {whitelist}")
                 flag_gems.only_enable(
                     include=whitelist,
-                    record=True,
+                    record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
@@ -247,14 +251,14 @@ class WorkerFL(WorkerBase):
                 logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
                 flag_gems.enable(
                     unused=blacklist,
-                    record=True,
+                    record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
             else:
                 logger.info("[FlagGems] Enable all ops")
                 flag_gems.enable(
-                    record=True, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
+                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
                 )
 
     # def sleep(self, level: int = 1) -> None:

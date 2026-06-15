@@ -11,7 +11,7 @@ import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import copy, deepcopy
 from dataclasses import dataclass, replace
 from functools import reduce
@@ -103,7 +103,18 @@ from vllm.multimodal.inputs import (
 )
 from vllm.multimodal.utils import group_and_batch_mm_kwargs
 from vllm.platforms import current_platform
-if current_platform.dist_backend == "flagcx":
+
+
+def _accelerator_synchronize() -> None:
+    """Synchronize the current device, with MUSA compatibility."""
+    if current_platform.device_type == "musa":
+        import torch_musa
+        torch_musa.synchronize()
+    else:
+        torch.accelerator.synchronize()
+
+
+if current_platform.dist_backend == "flagcx" or current_platform.device_type == "musa":
     @contextmanager
     def graph_capture(device: torch.device):
         """
@@ -1097,7 +1108,7 @@ class ModelRunnerFL(
 
     # Note: used for model runner override.
     def _sync_device(self) -> None:
-        torch.accelerator.synchronize()
+        _accelerator_synchronize()
 
     def _get_or_create_async_output_copy_stream(self) -> current_platform.torch_device_fn.Stream:
         stream = self.async_output_copy_stream
@@ -5960,7 +5971,7 @@ class ModelRunnerFL(
         reset_workspace_manager()
 
     def _cleanup_profiling_kv_cache(self) -> None:
-        torch.accelerator.synchronize()
+        _accelerator_synchronize()
         if hasattr(self, "kv_caches") and self.kv_caches:
             for i in range(len(self.kv_caches)):
                 self.kv_caches[i] = None  # type: ignore
@@ -5989,7 +6000,14 @@ class ModelRunnerFL(
                     layer.impl._v_scale_cache = None
 
         gc.collect()
-        torch.accelerator.empty_cache()
+        if hasattr(torch.accelerator, "empty_cache"):
+            torch.accelerator.empty_cache()
+        elif hasattr(torch, "musa"):
+            torch.musa.empty_cache()
+        elif hasattr(torch, "cuda"):
+            torch.cuda.empty_cache()
+        else:
+            raise RuntimeError("No active accelerator device found to empty cache.")
 
         logger.debug("Cleaned up profiling KV cache and CUDA graphs")
 
@@ -6028,7 +6046,7 @@ class ModelRunnerFL(
         with self._freeze_gc(), graph_capture(device=self.device):
             shared_memory_estimate = {}
             per_graph_estimate = {}
-            torch.accelerator.synchronize()
+            _accelerator_synchronize()
             torch.accelerator.empty_cache()
 
             for mode, descs in capture_descs:
@@ -6049,7 +6067,7 @@ class ModelRunnerFL(
                             else None
                         ),
                     )
-                    torch.accelerator.synchronize()
+                    _accelerator_synchronize()
                     free_after = current_platform.torch_device_fn.mem_get_info()[0]
                     mem_samples.append(mem_before - free_after)
 
@@ -6139,7 +6157,7 @@ class ModelRunnerFL(
         # can reuse the memory pool allocated for the large shapes.
         set_cudagraph_capturing_enabled(True)
         with self._freeze_gc(), graph_capture(device=self.device):
-            torch.accelerator.synchronize()
+            _accelerator_synchronize()
             torch.accelerator.empty_cache()
             start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
@@ -6151,13 +6169,13 @@ class ModelRunnerFL(
                     batch_descriptors=batch_descs,
                     cudagraph_runtime_mode=runtime_mode,
                 )
-                torch.accelerator.synchronize()
+                _accelerator_synchronize()
 
             # Capture encoder CUDA graphs if enabled
             if self.encoder_cudagraph_manager is not None:
                 self.encoder_cudagraph_manager.capture()
 
-            torch.accelerator.synchronize()
+            _accelerator_synchronize()
             end_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
         # Disable cudagraph capturing globally, so any unexpected cudagraph
@@ -6167,7 +6185,7 @@ class ModelRunnerFL(
         # after here.
         set_cudagraph_capturing_enabled(False)
 
-        torch.accelerator.synchronize()
+        _accelerator_synchronize()
         torch.accelerator.empty_cache()
 
         # Lock workspace to prevent resizing during execution.
@@ -6268,7 +6286,7 @@ class ModelRunnerFL(
                 cudagraph_runtime_mode=cudagraph_runtime_mode,
                 allow_microbatching=allow_microbatching,
             )
-            torch.accelerator.synchronize()
+            _accelerator_synchronize()
         self.maybe_remove_all_loras(self.lora_config)
 
     def initialize_attn_backend(
@@ -7072,13 +7090,13 @@ class ModelRunnerFL(
         group_refs = group_lora_refs[current_item_idx : current_item_idx + num_items]
         group_request_ids = {req_id for req_id, _ in group_refs}
 
-        torch.accelerator.synchronize()
+        _accelerator_synchronize()
         start_time = time.perf_counter()
 
         try:
             yield
         finally:
-            torch.accelerator.synchronize()
+            _accelerator_synchronize()
             elapsed = time.perf_counter() - start_time
 
             per_request_time = elapsed / max(len(group_request_ids), 1)
