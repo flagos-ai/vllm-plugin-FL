@@ -48,16 +48,14 @@ class MacaBackend(Backend):
         return "metax"
 
     def is_available(self) -> bool:
-        """Check if Metax hardware and libraries are available."""
+        """Check if Metax hardware and mcoplib libraries are available."""
         if MacaBackend._available is None:
-            try:
-                # Check if Metax device is available
-                if torch.cuda.is_available() and torch.cuda.device_count() > 0:
-                    MacaBackend._available = True
-                else:
-                    MacaBackend._available = False
-            except Exception:
-                MacaBackend._available = False
+            import importlib.util
+
+            MacaBackend._available = (
+                torch.cuda.is_available()
+                and importlib.util.find_spec("mcoplib") is not None
+            )
         return MacaBackend._available
 
     # ==================== Operator Implementations ====================

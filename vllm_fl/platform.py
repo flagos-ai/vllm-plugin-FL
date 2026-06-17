@@ -40,6 +40,7 @@ _R = TypeVar("_R")
 dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
+    "musa": "mccl",
 }
 
 
@@ -52,7 +53,8 @@ class PlatformFL(Platform):
     # cuda_alike (nvidia/metax): device_name = vendor_name (not used in torch.device)
     # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
     device_name = device_info.vendor_name if (
-        device_info.device_type == "cuda" and device_info.vendor_name != "iluvatar"
+        device_info.device_type == "cuda"
+        and device_info.vendor_name not in ("iluvatar", "hygon")
     ) else device_info.device_type
     device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
@@ -68,14 +70,14 @@ class PlatformFL(Platform):
         """Stateless version of [torch.cuda.is_available][]."""
         if self.vendor_name == "iluvatar":
             return False
-        if self.vendor_name == "musa":
+        if self.device_type == "musa":
             return True
+        if self.vendor_name == "hygon":
+            return False
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "musa":
-            return True
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
     def is_musa(self) -> bool:
@@ -146,6 +148,13 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to import maca patches: {e}")
 
+        if cls.device_type == "musa":
+            try:
+                from vllm_fl.dispatch.backends.vendor.musa.patch import apply_musa_patches
+                apply_musa_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply MUSA patches: {e}")
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""
@@ -192,6 +201,19 @@ class PlatformFL(Platform):
         compilation_config = vllm_config.compilation_config
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
+
+        if (
+            cls.device_type == "musa"
+            and compilation_config.cudagraph_mode.has_full_cudagraphs()
+        ):
+            logger.info(
+                "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
+                "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
+                "is not yet supported by torch_musa. PIECEWISE graphs still "
+                "provide graph capture benefits for non-TP-communication regions.",
+                compilation_config.cudagraph_mode,
+            )
+            compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
             parallel_config.data_parallel_size > 1
@@ -307,7 +329,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads"]:
             return True
         return False
 
@@ -346,6 +368,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
+        if cls.vendor_name == "hygon":
+            return False
         if cls.dist_backend == "flagcx":
             return False
         return True
@@ -386,9 +410,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        if cls.vendor_name == "nvidia":
-            return True
-        return False
+        return cls.vendor_name in ("nvidia", "thead")
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:
@@ -405,10 +427,13 @@ class PlatformFL(Platform):
             return DeviceCapability(major=major, minor=minor)
         # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
-            return None        
+            return None
+        # In empty/CPU-only mode there is no real device to query.
+        if not torch.cuda.is_available():
+            return DeviceCapability(major=0, minor=0)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
-    
+
     @classmethod
     def support_deep_gemm(cls) -> bool:
         """Currently, only Hopper and Blackwell GPUs are supported."""
@@ -452,7 +477,17 @@ class PlatformFL(Platform):
     @classmethod
     def manual_seed_all(cls, seed: int) -> None:
         """Set RNG seed across all devices for the current platform."""
-        cls.torch_device_fn.manual_seed_all(seed)
+        # torch_ptpu.ptpu doesn't have manual_seed_all, implement it manually
+        if hasattr(cls.torch_device_fn, 'manual_seed_all'):
+            cls.torch_device_fn.manual_seed_all(seed)
+        else:
+            # Fallback for devices without manual_seed_all (e.g., ptpu)
+            torch.manual_seed(seed)
+            if hasattr(cls.torch_device_fn, 'device_count') and hasattr(cls.torch_device_fn, '_get_or_create_default_generator'):
+                # Set seed for each device's default generator
+                for device_id in range(cls.torch_device_fn.device_count()):
+                    generator = cls.torch_device_fn._get_or_create_default_generator(device_id)
+                    generator.manual_seed(seed)
 
     @classmethod
     def is_integrated_gpu(cls, device_id: int = 0) -> bool:

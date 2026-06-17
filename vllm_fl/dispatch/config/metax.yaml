@@ -26,22 +26,30 @@ strict: false
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:metax   : METAX-specific vendor backend
 op_backends:
-  # attention_backend: prioritize vendor (MACA attention)
+  # attention_backend: prioritize vendor (MACA attention), fallback to flagos
   attention_backend:
     - vendor:metax
+    - flagos
+  silu_and_mul:
+    - vendor:metax
+    - reference
+  gelu_and_mul:
+    - vendor:metax
+    - flagos
+    - reference
   topk_softmax:
     - vendor:metax
   rms_norm:
     - flagos
     - vendor:metax
     - reference
-  silu_and_mul:
-    - vendor:metax
-    - reference
   rotary_embedding:
     - flagos
     - vendor:metax
     - reference
+  reshape_and_cache_flash:
+    - flagos
+    - vendor:metax
 
 # FlagOS operator blacklist
 flagos_blacklist:

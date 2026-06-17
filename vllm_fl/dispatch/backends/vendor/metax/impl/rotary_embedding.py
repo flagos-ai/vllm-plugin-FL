@@ -14,17 +14,24 @@ def rotary_embedding_maca(
     inplace: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Apply rotary position embedding using vLLM's CUDA implementation.
-    """
+    Apply rotary position embedding using mcoplib's _C implementation.
 
+    Adapts from dispatch interface (cos, sin separate) to _C op interface
+    (cos_sin_cache combined, head_size, is_neox).
+    """
     from vllm._custom_ops import rotary_embedding
+
+    # Reconstruct cos_sin_cache: shape [max_pos, rotary_dim]
+    cos_sin_cache = torch.cat([cos, sin], dim=-1)
+    head_size = obj.head_size
+    is_neox = not rotary_interleaved
 
     rotary_embedding(
         position_ids,
         query,
         key,
-        cos,
-        sin,
-        rotary_interleaved,
+        head_size,
+        cos_sin_cache,
+        is_neox,
     )
     return query, key

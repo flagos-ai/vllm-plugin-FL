@@ -36,6 +36,12 @@ def register_builtins(registry) -> None:
     backend = MacaBackend()
     is_avail = backend.is_available
 
+    # attention_backend does NOT depend on mcoplib; metax flash_attn is
+    # installed independently, so it's always available on metax hardware.
+    def _always_available():
+        import torch
+        return torch.cuda.is_available()
+
     impls = [
         # Activation
         OpImpl(
@@ -43,6 +49,14 @@ def register_builtins(registry) -> None:
             impl_id="vendor.metax",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="gelu_and_mul",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.gelu_and_mul, is_avail),
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),
@@ -64,12 +78,12 @@ def register_builtins(registry) -> None:
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),
-        # Attention Backend
+        # Attention Backend (independent of mcoplib)
         OpImpl(
             op_name="attention_backend",
             impl_id="vendor.metax",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.attention_backend, is_avail),
+            fn=_bind_is_available(backend.attention_backend, _always_available),
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),
