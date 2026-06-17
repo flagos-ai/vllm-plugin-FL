@@ -13,6 +13,7 @@ else:
         fused_recurrent_gated_delta_rule_fwd,
     )
 
+
 class FusedRecurrentFunction(torch.autograd.Function):
     @staticmethod
     def forward(

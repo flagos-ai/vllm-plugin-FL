@@ -455,7 +455,7 @@ class AttentionFLImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         self.attn_type = attn_type
-        self.vllm_flash_attn_version = 2 # 2 #get_flash_attn_version() 3->2 fix
+        self._detect_flaggems_fa_version()
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = vllm_is_batch_invariant()
 

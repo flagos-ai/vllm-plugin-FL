@@ -50,8 +50,8 @@ def register():
         logger.error(f"Register Qwen3.5 MoE config in platform plugin error: {str(e)}")
 
     # Model-specific platform patches
-    from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
-    glm5_platform()
+    from vllm_fl.patches import apply_all_patches
+    apply_all_patches()
 
     multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
     if multiproc_method is None:

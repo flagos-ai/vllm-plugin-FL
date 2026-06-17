@@ -6,4 +6,4 @@ Txda (Tsingmicro) backend for vllm-plugin-FL dispatch.
 
 from .txda import TxdaBackend
 
-__all__ = ["TxadBackend"]
+__all__ = ["TxdaBackend"]

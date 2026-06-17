@@ -72,7 +72,7 @@ class PyFlagcxCommunicator:
             ### TODO(lms): simplify it
             if library_path is None:
                 flagcx_path = os.getenv('FLAGCX_PATH')
-                library_path=os.path.join(flagcx_path, "libflagcx.so")
+                library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
                 self.flagcx = FLAGCXLibrary(library_path)
             else:
                 self.flagcx = FLAGCXLibrary(library_path)
@@ -111,8 +111,8 @@ class PyFlagcxCommunicator:
         assert isinstance(device, torch.device)
         self.device = device
         # nccl communicator and stream will use this device
-        # `torch.cuda.device` is a context manager that changes the
-        # current cuda device to the specified one
+        # `torch.cuda.device` / `torch.musa.device` are context managers that
+        # change the current device to the specified one
         if self.device.type == "musa":
             device_ctx = torch.musa.device(self.device)
         elif self.device.type == "txda":

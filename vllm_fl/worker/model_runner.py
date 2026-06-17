@@ -654,7 +654,7 @@ class ModelRunnerFL(
         if self.mm_budget:
             self.mm_budget.reset_cache()
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def init_fp8_kv_scales(self) -> None:
         """
         Re-initialize the KV cache and FP8 scales after waking from sleep.
@@ -2941,7 +2941,7 @@ class ModelRunnerFL(
                 pyt_hooks.register_hooks(self.model, self.model.__class__.__name__)
                 self.layerwise_nvtx_hooks_registered = True
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
@@ -3203,7 +3203,7 @@ class ModelRunnerFL(
 
         return None
 
-    # @torch.inference_mode
+    @managed_inference_mode()
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | IntermediateTensors:
@@ -4024,7 +4024,7 @@ class ModelRunnerFL(
             )
         )
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def _dummy_run(
         self,
         num_tokens: int,
@@ -4321,7 +4321,7 @@ class ModelRunnerFL(
         )
         return hidden_states, hidden_states[logit_indices_device]
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def _dummy_sampler_run(
         self,
         hidden_states: torch.Tensor,
@@ -4452,7 +4452,7 @@ class ModelRunnerFL(
             else:
                 raise e
 
-    @torch.inference_mode()
+    @managed_inference_mode()
     def _dummy_pooler_run(
         self,
         hidden_states: torch.Tensor,

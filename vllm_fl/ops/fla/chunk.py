@@ -6,9 +6,7 @@ import torch
 
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.fla.ops.l2norm import l2norm_fwd
-#from flag_gems.fused.FLA.utils import input_guard
 from .utils import input_guard
-
 from vllm_fl.utils import use_flaggems_op
 
 if use_flaggems_op("chunk_gated_delta_rule_fwd"):
