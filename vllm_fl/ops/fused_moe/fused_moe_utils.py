@@ -19,7 +19,7 @@ from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 from vllm.model_executor.layers.fused_moe.fused_moe import TritonExperts, try_get_optimal_moe_config
 from vllm.model_executor.layers.fused_moe.utils import _resize_cache, moe_kernel_quantize_input
 from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
-    FlashinferMoeBackend, 
+    FlashinferMoeBackend,
     get_flashinfer_moe_backend,
 )
 from vllm.triton_utils import tl, triton
@@ -82,7 +82,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
 
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
-    
+
     if current_platform.is_out_of_tree() and use_flaggems():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
@@ -97,7 +97,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
     # NOTE(rob): We need to peak into the P/F selection to determine
     # if we are using the batched or standard expert format, which
     # if not ideal. Once we unify TP + DP/EP, we can select P/F first.
-    activation_format = ( 
+    activation_format = (
         mk.FusedMoEActivationFormat.BatchedExperts
         if moe_config.moe_parallel_config.use_batched_activation_format
         else mk.FusedMoEActivationFormat.Standard
@@ -168,7 +168,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
                     f"FlashInfer MOE backend {fi_backend} "
                     "does not support unquantized MoE."
                 )
-            k_cls = backend_to_kernel_cls(backend) 
+            k_cls = backend_to_kernel_cls(backend)
             return _return_or_raise(backend, moe_config, activation_format)
         else:
             # If the user is not explicit about the backend, try both.
@@ -282,6 +282,38 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
+        # Fast path (no LoRA): single fused FlagGems call.
+        if self._lora_context is None:
+            import flag_gems
+
+            output.copy_(flag_gems.fused_experts_impl(
+                hidden_states,
+                w1,
+                w2,
+                topk_weights,
+                topk_ids,
+                inplace=False,
+                activation=activation.value,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+                use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                per_channel_quant=self.per_act_token_quant,
+                global_num_experts=global_num_experts,
+                expert_map=expert_map,
+                w1_scale=self.w1_scale,
+                w2_scale=self.w2_scale,
+                a1_scale=a1q_scale,
+                a2_scale=a2_scale,
+                block_shape=self.block_shape,
+                w1_bias=self.w1_bias,
+                w2_bias=self.w2_bias,
+            ))
+            return
+
+        # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
+        # adapters can be injected between GEMM1/activation/GEMM2.
         # Check constraints.
         if self.quant_config.use_int4_w4a16:
             assert hidden_states.size(-1) // 2 == w1.size(2), "Hidden size mismatch"
@@ -377,7 +409,33 @@ class TritonExpertsFL(TritonExperts):
             B_bias=self.w1_bias,
         )
 
-        # self.activation(
+        # LoRA w13: applied to intermediate_cache1 before activation, using
+        # hidden_states as the lora_a input.  moe_lora_align_block_size is
+        # called once here and results reused for the w2 LoRA below.
+        sorted_token_ids_lora = None
+        expert_ids_lora = None
+        num_tokens_post_padded_lora = None
+        token_lora_mapping = None
+        lora_context = self._lora_context
+        if lora_context is not None:
+            (
+                sorted_token_ids_lora,
+                expert_ids_lora,
+                num_tokens_post_padded_lora,
+                token_lora_mapping,
+            ) = self.apply_w13_lora(
+                lora_context,
+                y=intermediate_cache1,
+                x=hidden_states,
+                topk_ids=topk_ids,
+                topk_weights=topk_weights,
+                expert_map=expert_map,
+                w1=w1,
+                w2=w2,
+                num_tokens=num_tokens,
+                top_k_num=top_k_num,
+            )
+
         apply_moe_activation(
             activation, intermediate_cache2, intermediate_cache1.view(-1, N)
         )
@@ -415,6 +473,25 @@ class TritonExpertsFL(TritonExperts):
             block_shape=self.block_shape,
             B_bias=self.w2_bias,
         )
+
+        # LoRA w2: applied to intermediate_cache3 before moe_sum, using the
+        # unquantized intermediate_cache2 as the lora_a input.  Reuses the
+        # sorted_token_ids_lora computed above.
+        if lora_context is not None:
+            self.apply_w2_lora(
+                lora_context,
+                y=intermediate_cache3,
+                x=intermediate_cache2,
+                topk_weights=topk_weights,
+                sorted_token_ids_lora=sorted_token_ids_lora,
+                expert_ids_lora=expert_ids_lora,
+                num_tokens_post_padded_lora=num_tokens_post_padded_lora,
+                token_lora_mapping=token_lora_mapping,
+                num_tokens=num_tokens,
+                w1=w1,
+                w2=w2,
+                top_k_num=top_k_num,
+            )
 
         # separate function is required for MoE + LoRA
         self.moe_sum(intermediate_cache3, output)
