@@ -475,3 +475,27 @@ from vllm.distributed.device_communicators import pynccl, pynccl_wrapper
 
 pynccl.NCCLLibrary = MCCLLibrary
 pynccl_wrapper.NCCLLibrary = MCCLLibrary
+
+
+# ---------------------------------------------------------------------------
+# Patch: Make pynccl all_reduce compatible with torch.compile.
+#
+# pynccl uses ctypes (_SimpleCData) to pass tensor data pointers to MCCL.
+# TorchDynamo cannot trace ctypes calls, and vLLM's no-guards compilation
+# mode does not allow graph breaks (torch.compiler.disable fails too).
+#
+# Solution: Replace CudaCommunicator.all_reduce to use torch.distributed
+# instead of pynccl's ctypes path. torch.distributed's NCCL backend is
+# natively supported by TorchDynamo for tracing.
+# ---------------------------------------------------------------------------
+import torch.distributed as dist
+from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
+
+
+def _compile_friendly_all_reduce(self, input_, op=dist.ReduceOp.SUM):
+    """Use torch.distributed all_reduce which Dynamo can trace."""
+    dist.all_reduce(input_, op=op)
+    return input_
+
+
+CudaCommunicator.all_reduce = _compile_friendly_all_reduce
