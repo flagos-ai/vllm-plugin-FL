@@ -148,6 +148,11 @@ class CMakeBuildExt(build_ext):
             ]
             built_ext = next(
                 (match for pattern in patterns for match in glob.glob(pattern)),
+                (
+                    match
+                    for pattern in patterns
+                    for match in glob.glob(pattern)
+                ),
                 None,
             )
             if built_ext is None:
