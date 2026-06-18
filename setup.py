@@ -148,17 +148,11 @@ class CMakeBuildExt(build_ext):
             ]
             built_ext = next(
                 (match for pattern in patterns for match in glob.glob(pattern)),
-                (
-                    match
-                    for pattern in patterns
-                    for match in glob.glob(pattern)
-                ),
                 None,
             )
             if built_ext is None:
                 raise RuntimeError(
-                    f"Could not find built extension {target_name} in "
-                    f"{self.build_temp}"
+                    f"Could not find built extension {target_name} in {self.build_temp}"
                 )
             shutil.copy2(built_ext, dest_path)
 
