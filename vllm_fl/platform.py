@@ -410,7 +410,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead")
+        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:
