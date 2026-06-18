@@ -32,11 +32,10 @@ logger = init_logger(__name__)
 
 # FL-specific: platform-agnostic weak_ref_tensors
 def weak_ref_tensors(tensor: Any) -> Any:
-    if current_platform.device_type == "cuda":
+    try:
         from vllm.utils.torch_utils import weak_ref_tensors
         return weak_ref_tensors(tensor)
-    else:
-        ### TODO: add csrc npu custom op
+    except Exception:
         return tensor
 
 
