@@ -199,8 +199,10 @@ class PlatformFL(Platform):
         from vllm.config import CUDAGraphMode
 
         compilation_config = vllm_config.compilation_config
-        if compilation_config.compile_sizes is None:
-            compilation_config.compile_sizes = []
+        # NOTE: Do NOT set compile_sizes to [] here.
+        # Leaving it as None allows vllm's optimization level defaults
+        # and _set_cudagraph_sizes() to auto-populate compile_sizes
+        # based on cudagraph_capture_sizes for proper graph capture.
 
         if (
             cls.device_type == "musa"
@@ -329,7 +331,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar"]:
             return True
         return False
 
