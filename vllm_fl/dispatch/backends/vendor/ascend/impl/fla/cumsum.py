@@ -1,3 +1,8 @@
+# Copyright © 2025 Huawei Technologies Co., Ltd.
+# Copyright (c) 2025 sgl-project
+# Based on vLLM: https://github.com/vllm-project/vllm
+# Based on flash-linear-attention: https://github.com/fla-org/flash-linear-attention
+#
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # SPDX-FileCopyrightText: Songlin Yang, Yu Zhang
@@ -7,11 +12,12 @@
 # the following copyright notice:
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 # ruff: noqa: E501
-# mypy: ignore-errors
+
 from typing import Optional
 
 import torch
-from vllm.triton_utils import tl, triton
+import triton
+import triton.language as tl
 
 from .utils import prepare_chunk_indices
 
@@ -43,14 +49,12 @@ def chunk_local_cumsum_scalar_kernel(
     N_CHUNKS: tl.constexpr = BLOCK_T // CHUNK_SIZE
 
     if IS_VARLEN:
-        i_s, i_block = (
-            tl.load(chunk_indices + i_block * 2).to(tl.int32),
-            tl.load(chunk_indices + i_block * 2 + 1).to(tl.int32),
-        )
-        bos, eos = (
-            tl.load(cu_seqlens + i_s).to(tl.int32),
-            tl.load(cu_seqlens + i_s + 1).to(tl.int32),
-        )
+        i_s, i_block = tl.load(chunk_indices + i_block * 2).to(tl.int32), tl.load(
+            chunk_indices + i_block * 2 + 1
+        ).to(tl.int32)
+        bos, eos = tl.load(cu_seqlens + i_s).to(tl.int32), tl.load(
+            cu_seqlens + i_s + 1
+        ).to(tl.int32)
         T = eos - bos
     else:
         bos, eos = i_b * T, i_b * T + T
@@ -97,15 +101,15 @@ def chunk_local_cumsum_scalar(
     scale: float = None,
     cu_seqlens: Optional[torch.Tensor] = None,
     head_first: bool = False,
-    output_dtype: Optional[torch.Tensor] = torch.float,
+    output_dtype: Optional[torch.dtype] = torch.float,
 ):
     if head_first:
         B, H, T = g.shape
     else:
         B, T, H = g.shape
-    assert chunk_size == 2 ** (chunk_size.bit_length() - 1), (
-        "chunk_size must be a power of 2"
-    )
+    assert chunk_size == 2 ** (
+        chunk_size.bit_length() - 1
+    ), "chunk_size must be a power of 2"
     OPTIM_BLOCK_SIZE = triton.next_power_of_2((2**18) // (H * chunk_size))
     block_indices = (
         prepare_chunk_indices(cu_seqlens, chunk_size=OPTIM_BLOCK_SIZE)
@@ -149,9 +153,9 @@ def chunk_local_cumsum(
     **kwargs,
 ) -> torch.Tensor:
     if cu_seqlens is not None:
-        assert g.shape[0] == 1, (
-            "Only batch size 1 is supported when cu_seqlens are provided"
-        )
+        assert (
+            g.shape[0] == 1
+        ), "Only batch size 1 is supported when cu_seqlens are provided"
     if len(g.shape) == 3:
         return chunk_local_cumsum_scalar(
             g=g,
@@ -163,8 +167,4 @@ def chunk_local_cumsum(
             output_dtype=output_dtype,
         )
     else:
-        raise ValueError(
-            f"Unsupported input shape {g.shape}, "
-            f"which should be (B, T, H, D) if `head_first=False` "
-            f"or (B, H, T, D) otherwise"
-        )
+        raise ValueError(f"Unsupported input shape {g.shape}")

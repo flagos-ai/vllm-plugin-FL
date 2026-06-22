@@ -1,3 +1,7 @@
+# Copyright © 2025 Huawei Technologies Co., Ltd.
+# Based on vLLM: https://github.com/vllm-project/vllm
+# Based on flash-linear-attention: https://github.com/fla-org/flash-linear-attention
+#
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # SPDX-FileCopyrightText: Songlin Yang, Yu Zhang
@@ -6,13 +10,13 @@
 # The original source code was licensed under the MIT license and included
 # the following copyright notice:
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
-
 # ruff: noqa: E501
-# mypy: ignore-errors
+
 from typing import Optional
 
 import torch
-from vllm.triton_utils import tl, triton
+import triton
+import triton.language as tl
 
 from .utils import prepare_chunk_offsets, safe_exp
 
@@ -50,10 +54,9 @@ def chunk_fwd_kernel_o(
     T_max = T
 
     if IS_VARLEN:
-        bos, eos = (
-            tl.load(cu_seqlens + i_n).to(tl.int32),
-            tl.load(cu_seqlens + i_n + 1).to(tl.int32),
-        )
+        bos, eos = tl.load(cu_seqlens + i_n).to(tl.int32), tl.load(
+            cu_seqlens + i_n + 1
+        ).to(tl.int32)
         T = eos - bos
         NT = tl.cdiv(T, BT)
         boh = tl.load(chunk_offsets + i_n).to(tl.int64)
@@ -118,7 +121,7 @@ def chunk_fwd_kernel_o(
 
         b_v = tl.load(p_v, boundary_check=(0, 1))
         # to fix mma -> mma layout conversion
-        # already solved by fla v3.2 or higher
+        # already solved by triton v3.2 or higher
         b_o = b_o * scale + tl.dot(b_A.to(b_v.dtype), b_v) * scale
         tl.store(p_o, b_o.to(p_o.dtype.element_ty), boundary_check=(0, 1))
 

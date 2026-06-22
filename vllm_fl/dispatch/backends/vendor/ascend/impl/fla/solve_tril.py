@@ -1,3 +1,7 @@
+# Copyright © 2025 Huawei Technologies Co., Ltd.
+# Based on vLLM: https://github.com/vllm-project/vllm
+# Based on flash-linear-attention: https://github.com/fla-org/flash-linear-attention
+#
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # SPDX-FileCopyrightText: Songlin Yang, Yu Zhang
@@ -7,11 +11,12 @@
 # the following copyright notice:
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 # ruff: noqa: E501
-# mypy: ignore-errors
+
 from typing import Optional
 
 import torch
-from vllm.triton_utils import tl, triton
+import triton
+import triton.language as tl
 
 from .utils import prepare_chunk_indices
 

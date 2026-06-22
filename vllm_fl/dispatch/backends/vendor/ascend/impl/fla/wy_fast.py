@@ -1,3 +1,7 @@
+# Copyright © 2025 Huawei Technologies Co., Ltd.
+# Based on vLLM: https://github.com/vllm-project/vllm
+# Based on flash-linear-attention: https://github.com/fla-org/flash-linear-attention
+#
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # SPDX-FileCopyrightText: Songlin Yang, Yu Zhang
@@ -6,13 +10,13 @@
 # The original source code was licensed under the MIT license and included
 # the following copyright notice:
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
-
 # ruff: noqa: E501
-# mypy: ignore-errors
+
 from typing import Optional, Tuple
 
 import torch
-from vllm.triton_utils import tl, triton
+import triton
+import triton.language as tl
 
 from .utils import prepare_chunk_indices
 
@@ -45,14 +49,12 @@ def recompute_w_u_fwd_kernel(
     for i_bh in range(H):
         i_b, i_h = i_bh // H, i_bh % H
         if IS_VARLEN:
-            i_n, i_t = (
-                tl.load(chunk_indices + i_t_o * 2).to(tl.int32),
-                tl.load(chunk_indices + i_t_o * 2 + 1).to(tl.int32),
-            )
-            bos, eos = (
-                tl.load(cu_seqlens + i_n).to(tl.int32),
-                tl.load(cu_seqlens + i_n + 1).to(tl.int32),
-            )
+            i_n, i_t = tl.load(chunk_indices + i_t_o * 2).to(tl.int32), tl.load(
+                chunk_indices + i_t_o * 2 + 1
+            ).to(tl.int32)
+            bos, eos = tl.load(cu_seqlens + i_n).to(tl.int32), tl.load(
+                cu_seqlens + i_n + 1
+            ).to(tl.int32)
             T = eos - bos
         else:
             bos, eos = i_b * T, i_b * T + T

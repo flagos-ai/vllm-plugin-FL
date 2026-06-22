@@ -1,15 +1,12 @@
-# Copyright (c) 2026 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm-ascend/blob/v0.13.0/vllm_ascend/ops/triton/fused_gdn_gating.py
-# Adapt from https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/models/qwen3_next.py
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
+# Copyright © 2025 Huawei Technologies Co., Ltd.
+# Copyright contributors to the vLLM project
 import torch
-from vllm.triton_utils import tl, triton
+import numpy as np
 
-from .triton_utils import get_vectorcore_num
+import triton
+import triton.language as tl
 
-UNIFIED_BUFFER_SIZE = 1572864
+from triton_ascend_kernels.utils import get_npu_vectorcore_num
 
 
 @triton.jit
@@ -21,57 +18,58 @@ def fused_gdn_gating_kernel(
     b,
     dt_bias,
     seq_len,
-    NUM_HEADS: tl.constexpr,
-    NUM_BATCHES: tl.constexpr,
     beta: tl.constexpr,
     threshold: tl.constexpr,
-    BLK_HEADS: tl.constexpr,
-    COL_ITER: tl.constexpr,
-    BLK_BATCHES: tl.constexpr,
-    ROW_ITER: tl.constexpr,
+    rows_per_prog: tl.constexpr,
+    cols_per_row: tl.constexpr,
+    NUM_BATCHES: tl.constexpr,
+    NUM_HEADS: tl.constexpr,
+    BLOCK_BATCHES: tl.constexpr,
+    BLOCK_HEADS: tl.constexpr,
 ):
-    i_b, i_s = tl.program_id(0), tl.program_id(1)
-    for row_idx in range(0, ROW_ITER):
-        batch_off = (
-            i_b * ROW_ITER * BLK_BATCHES
-            + row_idx * BLK_BATCHES
-            + tl.arange(0, BLK_BATCHES)
-        )
+    prog_id, i_s = tl.program_id(0), tl.program_id(1)
 
-        for col_idx in range(0, COL_ITER):
-            head_off = col_idx * BLK_HEADS + tl.arange(0, BLK_HEADS)
+    row_block_off = prog_id * rows_per_prog
+    for i_d in range(0, cols_per_row):
+        # Col direction
+        head_off = i_d * BLOCK_HEADS + tl.arange(0, BLOCK_HEADS)
+        head_mask = head_off < NUM_HEADS
 
-            off = (
-                batch_off[:, None] * seq_len * NUM_HEADS
-                + i_s * NUM_HEADS
-                + head_off[None, :]
-            )
-            head_mask = head_off < NUM_HEADS
-            mask = head_mask[None, :] & (batch_off[:, None] < NUM_BATCHES)
+        blk_A_log = tl.load(A_log + head_off, mask=head_mask)
+        blk_bias = tl.load(dt_bias + head_off, mask=head_mask)
 
-            blk_A_log = tl.load(A_log + head_off, mask=head_mask)
-            blk_a = tl.load(a + off, mask=mask)
-            blk_b = tl.load(b + off, mask=mask)
-            blk_bias = tl.load(dt_bias + head_off, mask=head_mask)
+        for row_id in range(0, rows_per_prog, BLOCK_BATCHES):
+            row_id = tl.multiple_of(row_id, BLOCK_BATCHES)
+            # Row direction
+            i_b = row_block_off + row_id + tl.arange(0, BLOCK_BATCHES)
+            batch_off = i_b * seq_len * NUM_HEADS + i_s * NUM_HEADS
+            batch_mask = i_b < NUM_BATCHES
 
-            x = blk_a.to(tl.float32) + blk_bias.to(tl.float32)[None, :]
+            # 2D off & mask
+            tot_off = batch_off[:, None] + head_off[None, :]
+            tot_mask = batch_mask[:, None] & head_mask[None, :]
+
+            blk_a = tl.load(a + tot_off, mask=tot_mask)
+            blk_b = tl.load(b + tot_off, mask=tot_mask)
+
+            x = blk_a.to(tl.float32) + blk_bias.to(tl.float32)
+            softplus_mask = beta * x <= threshold
             softplus_x = tl.where(
-                beta * x <= threshold, (1 / beta) * tl.log(1 + tl.exp(beta * x)), x
+                softplus_mask, (1 / beta) * tl.log(1 + tl.exp(beta * x)), x
             )
-
             blk_g = -tl.exp(blk_A_log.to(tl.float32)) * softplus_x
-            tl.store(g + off, blk_g.to(g.dtype.element_ty), mask=mask)
-
-            # compute beta_output = sigmoid(b)
             blk_beta_output = tl.sigmoid(blk_b.to(tl.float32))
+
+            # Store
+            tl.store(g + tot_off, blk_g.to(g.dtype.element_ty), mask=tot_mask)
             tl.store(
-                beta_output + off,
+                beta_output + tot_off,
                 blk_beta_output.to(beta_output.dtype.element_ty),
-                mask=mask,
+                mask=tot_mask,
             )
 
 
-def fused_gdn_gating_patch(
+def fused_gdn_gating(
     A_log: torch.Tensor,
     a: torch.Tensor,
     b: torch.Tensor,
@@ -79,34 +77,57 @@ def fused_gdn_gating_patch(
     beta: float = 1.0,
     threshold: float = 20.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Fused computation of g and beta for Gated Delta Net.
+    g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
+    beta_output = b.sigmoid()
+    """
     batch, num_heads = a.shape
     seq_len = 1
-
-    num_cores = get_vectorcore_num()
-
-    BLK_HEADS = 8
-    COL_ITER = triton.cdiv(num_heads, BLK_HEADS)
-
-    if batch <= num_cores:
-        progs = batch
-        BLK_BATCHES = 1
-        ROW_ITER = 1
-    else:
-        progs = num_cores
-        FACTOR = 8 * num_heads
-        row_per_core = triton.cdiv(batch, num_cores)
-        BLK_BATCHES = (
-            triton.next_power_of_2(
-                triton.cdiv(UNIFIED_BUFFER_SIZE, FACTOR * BLK_HEADS) // a.element_size()
-            )
-            // 2
-        )
-        ROW_ITER = triton.cdiv(row_per_core, BLK_BATCHES)
-
     g = torch.empty(1, batch, num_heads, dtype=torch.float32, device=a.device)
     beta_output = torch.empty(1, batch, num_heads, dtype=b.dtype, device=b.device)
 
-    grid = (progs, seq_len)
+    core_num = get_npu_vectorcore_num()
+
+    if batch <= core_num:
+        num_progs = batch
+        rows_per_prog = 1
+    else:
+        num_progs = core_num
+        rows_per_prog = triton.cdiv(batch, core_num)
+
+    element_size = 4  # Always cast tensor elements to f32
+
+    def get_resident_size(block_heads):
+        size_of_alog = block_heads * element_size
+        size_of_bias = block_heads * element_size
+        return size_of_alog + size_of_bias
+
+    def get_dyn_size(block_heads):
+        size_of_a = block_heads * element_size
+        size_of_b = block_heads * element_size
+        size_of_interx = block_heads * element_size * 2
+        size_of_spmask = block_heads
+        size_of_exp_alog = block_heads * element_size * 2
+        return (
+            size_of_a + size_of_b + size_of_interx + size_of_spmask + size_of_exp_alog
+        )
+
+    ub_size = 196608
+    # 1. Row first
+    cols_per_row = triton.cdiv(
+        get_resident_size(num_heads) + get_dyn_size(num_heads), ub_size
+    )
+    BLOCK_HEADS = num_heads // cols_per_row
+    # 2. Col next
+    if rows_per_prog == 1:
+        BLOCK_BATCHES = 1
+    else:
+        BLOCK_BATCHES = (
+            (ub_size - get_resident_size(num_heads)) // get_dyn_size(num_heads) // 2
+        )
+
+    grid = (num_progs, seq_len)
     fused_gdn_gating_kernel[grid](
         g,
         beta_output,
@@ -115,13 +136,13 @@ def fused_gdn_gating_patch(
         b,
         dt_bias,
         seq_len,
-        num_heads,
-        batch,
         beta,
         threshold,
-        BLK_HEADS=BLK_HEADS,
-        COL_ITER=COL_ITER,
-        BLK_BATCHES=BLK_BATCHES,
-        ROW_ITER=ROW_ITER,
+        rows_per_prog,
+        cols_per_row,
+        batch,
+        num_heads,
+        BLOCK_BATCHES,
+        BLOCK_HEADS,
     )
     return g, beta_output

@@ -1,3 +1,8 @@
+# Copyright © 2025 Huawei Technologies Co., Ltd.
+# Copyright (c) 2025 sgl-project
+# Based on vLLM: https://github.com/vllm-project/vllm
+# Based on flash-linear-attention: https://github.com/fla-org/flash-linear-attention
+#
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # SPDX-FileCopyrightText: Songlin Yang, Yu Zhang
@@ -7,15 +12,14 @@
 # the following copyright notice:
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 # ruff: noqa: E501
-# mypy: ignore-errors
+
 from typing import Optional
 
 import torch
-from vllm.triton_utils import tl, triton
+import triton
+import triton.language as tl
 
 from .utils import prepare_chunk_indices, prepare_chunk_offsets, safe_exp
-
-_CONDITIONS = ("seq7168",)
 
 
 @triton.heuristics(
@@ -222,8 +226,6 @@ def chunk_gated_delta_rule_fwd_h(
     save_new_value: bool = True,
     cu_seqlens: Optional[torch.LongTensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    # This kernel is slightly different from fla to support Q/K with different head numbers.
-    # In fla, Q/K always have the same head number, so Hg is always equal to H.
     B, T, Hg, K, V = *k.shape, u.shape[-1]
     H = u.shape[-2]
     BT = chunk_size
