@@ -21,7 +21,7 @@ NVCC_THREADS = os.environ.get("NVCC_THREADS")
 CMAKE_BUILD_TYPE = os.environ.get("CMAKE_BUILD_TYPE")
 VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
-SUPPORTED_VENDORS = ("cuda", "ascend")
+SUPPORTED_VENDORS = ("cuda")
 
 
 def _is_cuda() -> bool:
@@ -117,7 +117,7 @@ class CMakeBuildExt(build_ext):
         except (OSError, subprocess.CalledProcessError) as exc:
             raise RuntimeError(
                 "CMake is required to build vllm_fl._C. "
-                "Install cmake and run with VLLM_VENDOR=cuda or ascend."
+                "Install cmake and run with VLLM_VENDOR=cuda."
             ) from exc
 
         os.makedirs(self.build_temp, exist_ok=True)
