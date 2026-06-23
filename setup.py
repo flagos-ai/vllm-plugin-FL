@@ -21,7 +21,7 @@ NVCC_THREADS = os.environ.get("NVCC_THREADS")
 CMAKE_BUILD_TYPE = os.environ.get("CMAKE_BUILD_TYPE")
 VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
-SUPPORTED_VENDORS = ("cuda")
+SUPPORTED_VENDORS = ("cuda",)
 
 
 def _is_cuda() -> bool:
