@@ -261,6 +261,12 @@ class WorkerFL(WorkerBase):
                     record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
                 )
 
+        # FlagGems Sampler patch, gated by the same per-op whitelist as every
+        # other op (use_flaggems_op("sampler")). Runs here, before model load,
+        # which the patch's ordering requirement depends on.
+        from vllm_fl.patches.sampler import maybe_patch_sampler
+        maybe_patch_sampler()
+
     # def sleep(self, level: int = 1) -> None:
     #     TODO(lms): rewrite CuMemAllocator
     #     from vllm.device_allocator.cumem import CuMemAllocator

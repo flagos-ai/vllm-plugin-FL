@@ -2,8 +2,10 @@
 
 from typing import Optional
 import torch
+import flag_gems.ops as gems_ops
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
 from vllm_fl.dispatch import call_op
+from vllm_fl.utils import use_flaggems_op
 
 
 class RotaryEmbeddingFL(RotaryEmbedding):
@@ -57,8 +59,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         )
 
         if self.rotary_dim < self.head_size:
-            query = torch.cat((q_embed, query_pass), dim=-1).reshape(query_shape)
-            key = torch.cat((k_embed, key_pass), dim=-1).reshape(key_shape)
+            # cat is a helper op of the rotary_embedding semantic: route it
+            # through the same per-op gate as the main kernel, instead of
+            # relying on the global aten dispatch to swap torch.cat.
+            cat = gems_ops.cat if use_flaggems_op("rotary_embedding") else torch.cat
+            query = cat((q_embed, query_pass), dim=-1).reshape(query_shape)
+            key = cat((k_embed, key_pass), dim=-1).reshape(key_shape)
         else:
             query = q_embed.reshape(query_shape)
             key = k_embed.reshape(key_shape)

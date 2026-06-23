@@ -25,7 +25,7 @@ from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
 from vllm.triton_utils import tl, triton
 from vllm_fl.dispatch import call_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
-from vllm_fl.utils import use_flaggems
+from vllm_fl.utils import use_flaggems, use_flaggems_op
 
 logger = init_logger(__name__)
 
@@ -83,7 +83,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
     
-    if current_platform.is_out_of_tree() and use_flaggems():
+    if current_platform.is_out_of_tree() and use_flaggems() and use_flaggems_op("fused_moe"):
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     if moe_config.is_lora_enabled:
