@@ -1,7 +1,7 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-import os
 import logging
+import os
 import sys
 
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
@@ -17,10 +17,8 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
-from vllm_fl.utils import get_op_config as _get_op_config
-
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
-
+from vllm_fl.utils import get_op_config as _get_op_config
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +128,12 @@ def register_model():
     """Register FL-specific models not yet upstream."""
     _register_flagcx_connector()
 
+    from vllm_fl.patches.gdn_mixed_prefill_decode import (
+        apply_gdn_mixed_prefill_decode_patch,
+    )
+
+    apply_gdn_mixed_prefill_decode_patch()
+
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
     register_router()
@@ -137,6 +141,7 @@ def register_model():
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
+
         from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
         _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
 
