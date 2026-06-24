@@ -14,6 +14,7 @@ import yaml
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
+import torch
 
 from vllm_fl.utils import get_op_config
 
@@ -166,6 +167,10 @@ class PolicyManager:
             "vllm_fl_selection_policy",
             default=None,
         )
+        # Thread-local mirror of the context var.  Dynamo cannot trace
+        # ContextVar.get(), but plain attribute access on thread-local storage
+        # is fine.
+        self._thread_policy = threading.local()
 
     @classmethod
     def get_instance(cls):
@@ -188,7 +193,30 @@ class PolicyManager:
             return self._policy_epoch
 
     def get_policy(self) -> SelectionPolicy:
-        """Get the current effective policy (context or global)."""
+        """Get the current effective policy (context or global).
+
+        Uses a thread-local mirror of the context var so that the hot path
+        does not need ContextVar.get(), which torch.compile/Dynamo cannot
+        trace.  The ContextVar is still updated by _PolicyContext for
+        correctness in non-compiled code.
+        """
+        # Fast, Dynamo-friendly path: check the thread-local mirror first.
+        thread_policy = getattr(self._thread_policy, "current", None)
+        if thread_policy is not None:
+            return thread_policy
+
+        # When being traced by torch.compile, avoid ContextVar.get() entirely
+        # because Dynamo cannot trace it.  Context overrides are mirrored in
+        # thread-local storage above, so reaching here under compilation means
+        # we should use the global policy.
+        if torch._dynamo.is_compiling():
+            if self._global_policy is None:
+                with self._global_policy_lock:
+                    if self._global_policy is None:
+                        self._global_policy = self._policy_from_env()
+            return self._global_policy
+
+        # Non-compiled path: keep ContextVar for correctness.
         ctx_policy = self._policy_var.get()
         if ctx_policy is not None:
             return ctx_policy
@@ -481,6 +509,9 @@ class _PolicyContext:
     def __enter__(self) -> "_PolicyContext":
         policy_var = self._manager._get_policy_var()
         self._token = policy_var.set(self._policy)
+        # Mirror the context override in thread-local storage for the
+        # Dynamo-friendly fast path in get_policy.
+        self._manager._thread_policy.current = self._policy
         self._manager.bump_policy_epoch()
         return self
 
@@ -488,6 +519,7 @@ class _PolicyContext:
         if self._token is not None:
             policy_var = self._manager._get_policy_var()
             policy_var.reset(self._token)
+            self._manager._thread_policy.current = None
             self._manager.bump_policy_epoch()
 
 

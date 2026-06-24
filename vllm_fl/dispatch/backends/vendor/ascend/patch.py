@@ -19,6 +19,8 @@ def apply_ascend_patches():
     patch_op_cls()
     patch_fused_moe()
     patch_qwen3_5_attention()
+    patch_graph()
+    patch_npugraph_ex()
 
 def patch_mamba_config():
     """Patch HybridAttentionMambaModelConfig for Ascend."""
@@ -65,6 +67,26 @@ def patch_qwen3_5_attention():
         _do_patch()
     except Exception as e:
         logger.warning("Failed to patch Qwen3NextAttention for Ascend: %s", e)
+
+
+def patch_graph():
+    """Patch GraphWrapper with Ascend ACL graph behavior."""
+    try:
+        from .patches.patch_graph import patch_graph as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch GraphWrapper for Ascend: %s", e)
+
+
+def patch_npugraph_ex():
+    """Patch npugraph_ex/torchair ValuePack handling."""
+    try:
+        from .patches.patch_npugraph_ex import patch_npugraph_ex as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch npugraph_ex for Ascend: %s", e)
 
 
 def patch_fla_ops():

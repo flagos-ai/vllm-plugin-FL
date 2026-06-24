@@ -5,7 +5,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
-from collections import Counter
 from collections.abc import Callable
 from contextlib import ExitStack
 from typing import Any, Optional
@@ -24,14 +23,78 @@ from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
 
+# --------------------------------------------------------------------------- #
+# Backend-specific extension registry for GraphWrapper.
+#
+# A vendor backend can register a mixin class that implements any subset of the
+# hook methods below.  The mixin is instantiated once per GraphWrapper and
+# receives the same hook calls during capture/replay.  This keeps the generic
+# framework code free of device-specific details.
+# --------------------------------------------------------------------------- #
+_graph_wrapper_backend_registry: dict[str, type] = {}
+
+
+def register_graph_wrapper_backend(device_type: str, backend_cls: type) -> None:
+    """Register a backend-specific mixin for GraphWrapper.
+
+    The mixin class may implement any of the following hook methods:
+
+    - before_capture(self, entry: GraphEntry, args, kwargs) -> None
+        Called after input_addresses are recorded but before the graph capture
+        context is entered.  Useful for stream synchronization or patching the
+        runtime environment.
+
+    - wrap_capture_context(self, entry: GraphEntry, stack: ExitStack) -> None
+        Called inside the ExitStack used around graph capture.  The backend can
+        enter additional context managers (e.g. disable gc / empty_cache).
+
+    - after_capture(self, entry: GraphEntry, output, args, kwargs) -> Any
+        Called after the graph capture block exits but before the entry is
+        stored.  The return value replaces `output` if not None.
+
+    - before_replay(self, entry: GraphEntry, args, kwargs) -> None
+        Called before graph replay.  Useful for device synchronization.
+
+    - capture_error_handler(self, exc: BaseException) -> None
+        Called when graph capture raises.  May translate the exception or raise
+        a more informative error.
+
+    - weak_ref_tensors(self, tensor: Any) -> Any
+        Return a weak-ref version of tensors for the current backend.  If not
+        implemented, falls back to the generic helper.
+    """
+    _graph_wrapper_backend_registry[device_type] = backend_cls
+    logger.info_once("Registered graph wrapper backend for device_type=%s: %s",
+                     device_type, backend_cls.__name__)
+
+
+def get_graph_wrapper_backend(device_type: str) -> Optional[type]:
+    return _graph_wrapper_backend_registry.get(device_type)
+
 
 def weak_ref_tensors(tensor: Any) -> Any:
+    backend = _get_active_backend()
+    if backend is not None and hasattr(backend, "weak_ref_tensors"):
+        return backend.weak_ref_tensors(tensor)
     if current_platform.device_type == "cuda":
         from vllm.utils.torch_utils import weak_ref_tensors
         return weak_ref_tensors(tensor)
-    else:
-        ### TODO: add csrc npu custom op
-        return tensor
+    # TODO: add csrc npu custom op when available
+    return tensor
+
+
+# Per-wrapper active backend instance.  This is set by GraphWrapper.__init__ and
+# used by the weak_ref_tensors helper so callers do not need to pass `self`.
+_active_backend_instance: Optional[Any] = None
+
+
+def _set_active_backend(backend: Optional[Any]) -> None:
+    global _active_backend_instance
+    _active_backend_instance = backend
+
+
+def _get_active_backend() -> Optional[Any]:
+    return _active_backend_instance
 
 
 class Graph:
@@ -44,6 +107,7 @@ class Graph:
     else:
         raise NotImplementedError("not support graph")
 
+
 @dataclasses.dataclass
 class GraphEntry:
     batch_descriptor: BatchDescriptor
@@ -53,6 +117,7 @@ class GraphEntry:
     # for graph debugging, track the input addresses
     # during capture, and check if they are the same during replay
     input_addresses: Optional[list[int]] = None
+
 
 @dataclasses.dataclass
 class GraphOptions:
@@ -89,6 +154,13 @@ class GraphWrapper:
         # the entries for different batch descriptors that we need to capture
         # cudagraphs for.
         self.concrete_graph_entries: dict[BatchDescriptor, GraphEntry] = {}
+
+        # Instantiate backend-specific mixin if one has been registered.
+        backend_cls = get_graph_wrapper_backend(current_platform.device_type)
+        if backend_cls is not None:
+            self.backend = backend_cls(self)
+        else:
+            self.backend = None
 
     def __getattr__(self, key: str):
         # allow accessing the attributes of the runnable.
@@ -148,6 +220,14 @@ class GraphWrapper:
             entry.input_addresses = input_addresses
             graph = Graph.graph()
 
+            _set_active_backend(self.backend)
+
+            # Give the backend a chance to run pre-capture logic (e.g. stream
+            # sync, offloader sync).
+            if self.backend is not None and hasattr(self.backend,
+                                                    "before_capture"):
+                self.backend.before_capture(entry, args, kwargs)
+
             with ExitStack() as stack:
                 if self.graph_options.gc_disable:
                     # during every model forward for piecewise graph
@@ -158,28 +238,53 @@ class GraphWrapper:
                     # and disable gc for the rest of the graphs.
                     stack.enter_context(patch("gc.collect", lambda: None))
                     stack.enter_context(
-                        patch("vllm_fl.platform.PlatformFL.empty_cache", lambda: None)
+                        patch("vllm_fl.platform.PlatformFL.empty_cache",
+                              lambda: None)
                     )
 
-            set_graph_pool_id(self.graph_pool)
+                # Backend-specific context wrappers (e.g. disable NPU
+                # empty_cache when it lives on a different module path).
+                if self.backend is not None and hasattr(
+                        self.backend, "wrap_capture_context"):
+                    self.backend.wrap_capture_context(entry, stack)
 
-            # mind-exploding: carefully manage the reference and memory.
-            with current_platform.torch_device_fn.graph(graph, pool=self.graph_pool):
-                # `output` is managed by pytorch's cudagraph pool
-                output = self.runnable(*args, **kwargs)
-                if self.graph_options.weak_ref_output:
-                        # by converting it to weak ref,
-                        # the original `output` will immediately be released
-                        # to save memory. It is only safe to do this for
-                        # the last graph in piecewise cuadgraph mode, because
-                        # the output of the last graph will not be used by
-                        # any other cuda graph.
-                        output = weak_ref_tensors(output)
+                set_graph_pool_id(self.graph_pool)
+
+                # mind-exploding: carefully manage the reference and memory.
+                try:
+                    with current_platform.torch_device_fn.graph(
+                            graph, pool=self.graph_pool):
+                        # `output` is managed by pytorch's cudagraph pool
+                        output = self.runnable(*args, **kwargs)
+                        if self.graph_options.weak_ref_output:
+                            # by converting it to weak ref,
+                            # the original `output` will immediately be released
+                            # to save memory. It is only safe to do this for
+                            # the last graph in piecewise cuadgraph mode, because
+                            # the output of the last graph will not be used by
+                            # any other cuda graph.
+                            output = weak_ref_tensors(output)
+                except BaseException as exc:
+                    if self.backend is not None and hasattr(
+                            self.backend, "capture_error_handler"):
+                        self.backend.capture_error_handler(exc)
+                    raise
+
+            # Backend-specific post-capture logic (weak-ref workspaces,
+            # offloader join, etc.).  The return value may replace `output`.
+            if self.backend is not None and hasattr(self.backend,
+                                                    "after_capture"):
+                backend_output = self.backend.after_capture(
+                    entry, output, args, kwargs)
+                if backend_output is not None:
+                    output = backend_output
 
             entry.output = weak_ref_tensors(output)
             entry.graph = graph
 
             compilation_counter.num_cudagraph_captured += 1
+
+            _set_active_backend(None)
 
             # important: we need to return the output, rather than
             # the weak ref of the output, so that pytorch can correctly
@@ -197,6 +302,15 @@ class GraphWrapper:
                 f"got {new_input_addresses}"
             )
 
-        current_platform.torch_device_fn.synchronize()
+        _set_active_backend(self.backend)
+
+        if self.backend is not None and hasattr(self.backend,
+                                                "before_replay"):
+            self.backend.before_replay(entry, args, kwargs)
+        else:
+            current_platform.torch_device_fn.synchronize()
+
         entry.graph.replay()
+
+        _set_active_backend(None)
         return entry.output
