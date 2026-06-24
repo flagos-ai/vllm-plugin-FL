@@ -6757,10 +6757,19 @@ class ModelRunnerFL(
         Update the layout of attention layers from (2, num_blocks, ...) to
         (num_blocks, 2, ...).
 
+        On Ascend NPU, skip the re-striding because _npu_reshape_and_cache
+        and npu_fused_infer_attention_score require contiguous kv_cache
+        views. The interleaved layout from as_strided_ makes kv_cache[0]
+        and kv_cache[1] non-contiguous, causing OOM when .contiguous()
+        is called during inference.
+
         Args:
             kv_caches: The KV cache buffer of each layer.
             kernel_block_sizes: The kernel block sizes for each KV cache group.
         """
+        from vllm.platforms import current_platform
+        if current_platform.device_type == "npu":
+            return
 
         for group in self._kv_cache_spec_attn_group_iterator():
             kv_cache_spec = group.kv_cache_spec
