@@ -5,7 +5,12 @@ import os
 from typing import Optional, Tuple
 
 import flag_gems
-from flag_gems.runtime.backend.device import DeviceDetector
+try:
+    # FlagGems<=5.0.2: DeviceDetector lives in device.
+    from flag_gems.runtime.backend.device import DeviceDetector
+except ImportError:
+    # FlagGems>5.0.2: DeviceDetector lives in device_finder.
+    from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend
 
 _OP_CONFIG: Optional[dict[str, str]] = None
@@ -36,6 +41,12 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "metax": {"device_type": "cuda", "device_name": "metax"},
     # Registered backend: vendor/musa
     "mthreads": {"device_type": "musa", "device_name": "musa"},
+    # Registered backend: vendor/sunrise
+    "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
+    # Registered backend: vendor/hygon
+    "hygon": {"device_type": "cuda", "device_name": "cuda"},
+    # Registered backend: vendor/thead (PPU)
+    "thead": {"device_type": "cuda", "device_name": "thead"},
 }
 
 
@@ -204,7 +215,7 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend", "metax", "mthreads"]
+        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property

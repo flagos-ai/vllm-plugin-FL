@@ -26,6 +26,7 @@ from vllm.distributed import (
 from vllm.distributed.ec_transfer import ensure_ec_transfer_initialized
 from vllm.distributed.kv_transfer import (
     ensure_kv_transfer_initialized,
+    ensure_kv_transfer_shutdown,
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
@@ -50,7 +51,7 @@ from vllm.lora.request import LoRARequest
 from vllm.utils.torch_utils import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
 from vllm.platforms import current_platform
-from vllm.profiler.wrapper import TorchProfilerWrapper
+from vllm.profiler.wrapper import CudaProfilerWrapper, TorchProfilerWrapper
 
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
@@ -61,7 +62,7 @@ from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import AsyncModelRunnerOutput, DraftTokenIds, ModelRunnerOutput
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
-from vllm.v1.worker.worker_base import WorkerBase
+from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
 
@@ -210,20 +211,16 @@ class WorkerFL(WorkerBase):
         # Buffers saved before sleep
         self._sleep_saved_buffers: dict[str, torch.Tensor] = {}
 
-        # Torch profiler. Enabled and configured through env vars:
-        # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
+        # Torch/CUDA profiler. Enabled and configured through profiler_config.
+        # Profiler wrapper is created lazily in profile() when start is called,
+        # so we have all the information needed for proper trace naming.
         self.profiler: Any | None = None
         profiler_config = vllm_config.profiler_config
-        if profiler_config.profiler == "torch":
-            worker_name = f"{vllm_config.instance_id}-rank-{self.rank}"
-            self.profiler = TorchProfilerWrapper(
-                profiler_config,
-                worker_name=worker_name,
-                local_rank=self.local_rank,
-                activities=["CPU", "CUDA"],
-            )
-        else:
-            self.profiler = None
+        self.profiler_config = profiler_config
+
+        # Only validate profiler config is valid, don't instantiate yet
+        if self.profiler_config.profiler not in ("torch", "cuda", None):
+            raise ValueError(f"Unknown profiler type: {self.profiler_config.profiler}")
 
         logger.debug("=== ENVIRONMENT VARIABLES ===")
         for k, v in sorted(os.environ.items()):
@@ -237,12 +234,16 @@ class WorkerFL(WorkerBase):
             # Get whitelist and blacklist from environment variables
             whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
+            # Only rank 0 records the oplist to avoid file truncation and
+            # interleaved writes when tensor-parallel-size > 1.
+            should_record = (rank == 0)
+
             # Use whitelist if specified (takes precedence over blacklist)
             if whitelist:
                 logger.info(f"[FlagGems] Enable only the following ops: {whitelist}")
                 flag_gems.only_enable(
                     include=whitelist,
-                    record=True,
+                    record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
@@ -250,14 +251,14 @@ class WorkerFL(WorkerBase):
                 logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
                 flag_gems.enable(
                     unused=blacklist,
-                    record=True,
+                    record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
             else:
                 logger.info("[FlagGems] Enable all ops")
                 flag_gems.enable(
-                    record=True, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
+                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
                 )
 
     # def sleep(self, level: int = 1) -> None:
@@ -517,7 +518,6 @@ class WorkerFL(WorkerBase):
         logger.info_once(
             "Available KV cache memory: %.2f GiB",
             GiB(self.available_kv_cache_memory_bytes),
-            scope="local",
         )
         gc.collect()
 
@@ -565,7 +565,7 @@ class WorkerFL(WorkerBase):
         #     context = nullcontext()
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
-    def compile_or_warm_up_model(self) -> float:
+    def compile_or_warm_up_model(self) -> CompilationTimes:
         warmup_sizes = []
         if self.vllm_config.compilation_config.mode == CompilationMode.VLLM_COMPILE:
             # warm up sizes that are not in cudagraph capture sizes,
@@ -602,7 +602,7 @@ class WorkerFL(WorkerBase):
         kernel_warmup(self)
 
         cuda_graph_memory_bytes = 0
-        if not self.model_config.enforce_eager:
+        if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
             cuda_graph_memory_bytes = self.model_runner.capture_model()
 
         if self.cache_config.kv_cache_memory_bytes is None and hasattr(
@@ -688,7 +688,10 @@ class WorkerFL(WorkerBase):
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
 
-        return self.compilation_config.compilation_time
+        return CompilationTimes(
+            language_model=self.compilation_config.compilation_time,
+            encoder=self.compilation_config.encoder_compilation_time,
+        )
 
     def reset_mm_cache(self) -> None:
         self.model_runner.reset_mm_cache()
@@ -701,6 +704,10 @@ class WorkerFL(WorkerBase):
 
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         return self.model_runner.get_supported_tasks()
+
+    def get_compilation_match_table(self) -> dict[str, int]:
+        from vllm.compilation.passes.vllm_inductor_pass import get_match_table
+        return get_match_table()
 
     def get_encoder_timing_stats(self) -> dict[str, dict[str, float | int]]:
         """Get encoder timing stats from model runner."""
@@ -799,11 +806,47 @@ class WorkerFL(WorkerBase):
         return self.model_runner.take_draft_token_ids()
 
     def profile(self, is_start: bool = True, profile_prefix: str | None = None):
-        if self.profiler is None:
-            raise RuntimeError("Profiling is not enabled.")
+        if self.profiler_config is None or self.profiler_config.profiler is None:
+            raise RuntimeError(
+                "Profiling is not enabled. Please set --profiler-config to enable "
+                "profiling. Example: "
+                "'--profiler-config.profiler=torch --profiler-config.torch_profiler_dir"
+                "=YOUR_DIR_PATH_TO_DUMP_TRACE'"
+            )
+
         if is_start:
+            from vllm.distributed.utils import get_worker_rank_suffix
+
+            rank_suffix = get_worker_rank_suffix(global_rank=self.rank)
+            trace_name = (
+                f"{profile_prefix}_{rank_suffix}" if profile_prefix else rank_suffix
+            )
+
+            if self.profiler is None:
+                profiler_type = self.profiler_config.profiler
+                if profiler_type == "torch":
+                    self.profiler = TorchProfilerWrapper(
+                        self.profiler_config,
+                        worker_name=trace_name,
+                        local_rank=self.local_rank,
+                        activities=["CPU", "CUDA"],
+                    )
+                    logger.debug(
+                        "Starting torch profiler with trace name: %s", trace_name
+                    )
+                elif profiler_type == "cuda":
+                    self.profiler = CudaProfilerWrapper(self.profiler_config)
+                    logger.debug("Starting CUDA profiler")
+                else:
+                    raise ValueError(
+                        f"Invalid profiler value of {self.profiler_config.profiler}"
+                    )
+
             self.profiler.start()
         else:
+            if self.profiler is None:
+                logger.warning("Profiler was not started, nothing to stop.")
+                return
             self.profiler.stop()
 
     def execute_dummy_batch(self) -> None:
@@ -1068,10 +1111,12 @@ class WorkerFL(WorkerBase):
         )
 
     def shutdown(self) -> None:
-        if runner := getattr(self, "model_runner", None):
-            runner.ensure_kv_transfer_shutdown()
+        if ensure_kv_transfer_shutdown is not None:
+            ensure_kv_transfer_shutdown()
         if self.profiler is not None:
             self.profiler.shutdown()
+        if model_runner := getattr(self, "model_runner", None):
+            model_runner.shutdown()
 
 
 def init_worker_distributed_environment(
@@ -1082,12 +1127,11 @@ def init_worker_distributed_environment(
     backend: str = "nccl",
 ) -> None:
     """Initialize the distributed environment."""
-    attention_config = vllm_config.attention_config
     parallel_config = vllm_config.parallel_config
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
-    init_batch_invariance(attention_config.backend)
+    init_batch_invariance()
 
     init_method = distributed_init_method or "env://"
     init_distributed_environment(

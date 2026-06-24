@@ -48,6 +48,8 @@ class Graph:
         graph = torch.npu.NPUGraph
     elif current_platform.device_type == "musa":
         graph = torch.musa.MUSAGraph
+    elif current_platform.device_type == "ptpu":
+        graph = torch.ptpu.PTPUGraph
     else:
         raise NotImplementedError("not support graph")
 
@@ -244,6 +246,7 @@ class GraphWrapper:
         except (ImportError, RuntimeError):
             pass
 
-        current_platform.torch_device_fn.synchronize()
+        if current_platform.device_type == "npu":
+            current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
         return entry.output

@@ -26,17 +26,18 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | NVIDIA | Supported | - |
 | Ascend | Supported | - |
 | MetaX | Supported | - |
-| Pingtouge-Zhenwu | Supported | - |
+| T-Head | Supported | - |
 | Iluvatar | Supported | - |
 | Tsingmicro | Merging | [PR #52](https://github.com/flagos-ai/vllm-plugin-FL/pull/52) |
 | Moore Threads | Supported | - |
-| Hygon | Merging | [PR #78](https://github.com/flagos-ai/vllm-plugin-FL/pull/78) |
+| Hygon | Supported | - |
+| Sunrise | Supported | - |
 
 ## Quick Start
 
 ### Setup
 
-1. Install vllm from the official [v0.19.0](https://github.com/vllm-project/vllm/tree/v0.19.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
+1. Install vllm from the official [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) (optional if the correct version is installed)
 
 
 2. Install vllm-plugin-FL
@@ -55,7 +56,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
-3. Install [FlagGems](https://github.com/flagos-ai/FlagGems/blob/master/docs/getting-started.md#quick-installation)
+3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/)
 
     3.1 Install Build Dependencies
 
@@ -68,11 +69,12 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     ```sh
     git clone https://github.com/flagos-ai/FlagGems
     cd FlagGems
-    git checkout v5.0.0
     pip install --no-build-isolation .
     # or editble install
     pip install --no-build-isolation -e .
     ```
+    Note: if on Sunrize platform, depends on FlagGems [PR #2949](https://github.com/flagos-ai/FlagGems/pull/2949)
+          if on Hygon platform, depends on FlagGems [PR #3477](https://github.com/flagos-ai/FlagGems/pull/3477)
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 

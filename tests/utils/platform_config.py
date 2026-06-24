@@ -303,6 +303,11 @@ class PlatformConfig:
         e2e_raw = dt.get("tests", {}).get("e2e", {})
         return FunctionalTests(tests=e2e_raw)
 
+    def get_benchmark_tests(self) -> dict[str, Any]:
+        """Return benchmark test configuration for the active device."""
+        dt = self.device_tests.get(self.device, {})
+        return dt.get("tests", {}).get("benchmark", {})
+
     def get_functional_filter(self) -> TestFilter:
         """Return functional test include/exclude for the active device."""
         dt = self.device_tests.get(self.device, {})

@@ -81,6 +81,51 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),
+        # MoE align
+        OpImpl(
+            op_name="moe_align_block_size",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
+        # MoE sum
+        OpImpl(
+            op_name="moe_sum",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.moe_sum, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
+        # topk softmax
+        OpImpl(
+            op_name="topk_softmax",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.topk_softmax, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
+        # invoke fused moe triton kernel
+        OpImpl(
+            op_name="invoke_fused_moe_triton_kernel",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
+        # grouped topk
+        OpImpl(
+            op_name="grouped_topk",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.grouped_topk, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
     ]
 
     registry.register_many(impls)

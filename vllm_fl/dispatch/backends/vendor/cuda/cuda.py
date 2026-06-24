@@ -222,3 +222,69 @@ class CudaBackend(Backend):
         return topk_softmax_cuda(
             topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
         )
+
+    def invoke_fused_moe_triton_kernel(
+        self,
+        A,
+        B,
+        C,
+        A_scale,
+        B_scale,
+        topk_weights,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        mul_routed_weight,
+        top_k,
+        config,
+        compute_type,
+        use_fp8_w8a8,
+        use_int8_w8a8,
+        use_int8_w8a16,
+        use_int4_w4a16,
+        per_channel_quant,
+        block_shape=None,
+        B_bias=None,
+    ):
+        from .impl.fused_moe import invoke_fused_moe_triton_kernel_cuda
+
+        invoke_fused_moe_triton_kernel_cuda(
+            A,
+            B,
+            C,
+            A_scale,
+            B_scale,
+            topk_weights,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            mul_routed_weight,
+            top_k,
+            config,
+            compute_type,
+            use_fp8_w8a8,
+            use_int8_w8a8,
+            use_int8_w8a16,
+            use_int4_w4a16,
+            per_channel_quant,
+            block_shape=block_shape,
+            B_bias=B_bias,
+        )
+
+    def grouped_topk(
+        self,
+        scores,
+        n_group,
+        topk_group,
+        topk,
+        renormalize,
+        routed_scaling_factor,
+        bias,
+        scoring_func=0,
+    ):
+        from .impl.fused_moe import grouped_topk_cuda
+
+        return grouped_topk_cuda(
+            scores, n_group, topk_group, topk,
+            renormalize, routed_scaling_factor, bias, scoring_func,
+        )

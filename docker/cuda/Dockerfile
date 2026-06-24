@@ -1,4 +1,4 @@
-ARG CUDA_VERSION=12.8.1
+ARG CUDA_VERSION=13.0.2
 ARG UBUNTU_VERSION=22.04
 
 # ---------- base stage ----------
@@ -6,22 +6,27 @@ FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
 
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.7.12
-ARG VLLM_VERSION=0.19.0
+ARG VLLM_VERSION=0.20.2
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
-        ca-certificates \
-        curl \
+        ccache \
         git \
+        curl \
+        ca-certificates \
         vim \
         wget \
+        python3-pip \
         libibverbs-dev \
+        gcc-10 \
+        g++-10 \
         librdmacm-dev \
         libnuma-dev \
         software-properties-common \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 110 --slave /usr/bin/g++ g++ /usr/bin/g++-10 \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -42,12 +47,14 @@ RUN uv pip install --system pip setuptools wheel
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
 
+ENV VLLM_ENABLE_CUDA_COMPATIBILITY=0
+
 # ---------- dev stage ----------
 FROM base AS dev
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.19.0
+ARG VLLM_VERSION=0.20.2
 
 # Install vLLM
 RUN uv pip install --system \
@@ -70,7 +77,7 @@ FROM base AS ci
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.19.0
+ARG VLLM_VERSION=0.20.2
 
 # Install vLLM
 RUN uv pip install --system \
@@ -104,6 +111,8 @@ RUN uv pip install --system scikit-build-core==0.11 pybind11 \
 RUN git clone --branch ${FLAGCX_VERSION} --depth 1  https://github.com/flagos-ai/FlagCX.git /workspace/FlagCX \
     && cd /workspace/FlagCX \
     && git submodule update --init --recursive \
+    && sed -i 's/NCCL_VERSION_CODE > NCCL_VERSION(2, 28, 0)/NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)/g' \
+       /workspace/FlagCX/flagcx/adaptor/ccl/nccl_adaptor.cc \
     && make USE_NVIDIA=1 \
     && cd plugin/torch \
     && FLAGCX_ADAPTOR=nvidia uv pip install --system --no-build-isolation .
@@ -124,7 +133,7 @@ FROM base AS release
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.19.0
+ARG VLLM_VERSION=0.20.2
 
 # Install vLLM
 RUN uv pip install --system \

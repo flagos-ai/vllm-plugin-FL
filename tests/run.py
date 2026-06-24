@@ -43,6 +43,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 # Ensure repo root is on sys.path so ``tests.*`` imports work
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -167,6 +169,7 @@ class TestRunner:
         - ``unit``: unit tests
         - ``functional``: component-level GPU tests (ops, compilation, distributed)
         - ``e2e``: end-to-end model tests (inference, serving)
+        - ``benchmark``: benchmark smoke tests
         - ``all``: all of the above
         """
         cases: list[TestCase] = []
@@ -179,6 +182,9 @@ class TestRunner:
 
         if self.scope in ("all", "e2e"):
             cases.extend(self._discover_e2e_tests())
+
+        if self.scope in ("all", "benchmark"):
+            cases.extend(self._discover_benchmark_tests())
 
         return cases
 
@@ -329,6 +335,93 @@ class TestRunner:
         """End-to-end model tests (inference, serving)."""
         return self._discover_from_yaml("tests/e2e_tests")
 
+    def _discover_benchmark_tests(self) -> list[TestCase]:
+        """Benchmark smoke tests selected by platform YAML."""
+        benchmark = self.config.get_benchmark_tests()
+        if not benchmark.get("enabled", False):
+            return []
+        selected_smoke = benchmark.get("smoke", [])
+
+        if not selected_smoke:
+            return []
+
+        if isinstance(selected_smoke, str):
+            selected_types = {selected_smoke}
+        else:
+            selected_types = set(selected_smoke)
+
+        config_path = Path("tests/benchmarks/configs/smoke.yaml")
+        if not config_path.exists():
+            print(f"[run] Warning: benchmark config not found: {config_path}")
+            return []
+
+        with open(config_path) as f:
+            smoke_config = yaml.safe_load(f) or {}
+
+        cases: list[TestCase] = []
+        for bench_type, case_list in smoke_config.items():
+            if bench_type not in selected_types:
+                continue
+            if not isinstance(case_list, list):
+                continue
+
+            pytest_path = f"tests/benchmarks/test_benchmark_{bench_type}.py"
+            pytest_abspath = _REPO_ROOT / pytest_path
+            if not pytest_abspath.exists():
+                print(f"[run] Warning: benchmark test file not found: {pytest_path}")
+                continue
+
+            for case_cfg in case_list:
+                runtime_case = dict(case_cfg)
+                model_name = str(runtime_case.pop("model"))
+                model_case = str(runtime_case.pop("case"))
+                model_cfg = ModelConfig.load(model_name, model_case)
+
+                if "parameters" in runtime_case:
+                    params = {
+                        "model": model_cfg.model,
+                        "tokenizer": model_cfg.model,
+                        **model_cfg.engine,
+                        **runtime_case.get("parameters", {}),
+                    }
+                    runtime_case["parameters"] = params
+
+                if "server_parameters" in runtime_case:
+                    server_params = {
+                        "model": model_cfg.model,
+                        "tokenizer": model_cfg.model,
+                        **model_cfg.engine,
+                        **runtime_case.get("server_parameters", {}),
+                    }
+                    runtime_case["server_parameters"] = server_params
+
+                if "client_parameters" in runtime_case:
+                    client_params = {
+                        "tokenizer": model_cfg.model,
+                        **runtime_case.get("client_parameters", {}),
+                    }
+                    if model_cfg.engine.get("trust_remote_code"):
+                        client_params.setdefault("trust_remote_code", True)
+                    runtime_case["client_parameters"] = client_params
+
+                name = str(runtime_case.get("name", f"{bench_type}_unnamed"))
+                cases.append(
+                    TestCase(
+                        name=f"benchmark/{bench_type}/{name}",
+                        pytest_path=pytest_path,
+                        task="benchmark",
+                        model=bench_type,
+                        case=name,
+                        extra_args=["-v", "--tb=short", "-s"],
+                        extra_env={
+                            "FL_BENCHMARK_TYPE": bench_type,
+                            "FL_BENCHMARK_CASE": json.dumps(runtime_case),
+                        },
+                    )
+                )
+
+        return cases
+
     # --- Test execution ------------------------------------------------------
 
     def _run_single(self, tc: TestCase) -> TestResult:
@@ -442,10 +535,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--scope",
-        choices=["all", "unit", "functional", "e2e"],
+        choices=["all", "unit", "functional", "e2e", "benchmark"],
         default="all",
         help="Which test scope to run: unit, functional (ops/compilation/"
-        "distributed), e2e (inference/serving), or all (default: all)",
+        "distributed), e2e (inference/serving), benchmark, or all (default: all)",
     )
     parser.add_argument(
         "--task",

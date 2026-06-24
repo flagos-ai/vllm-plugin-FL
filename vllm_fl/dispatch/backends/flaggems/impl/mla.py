@@ -11,8 +11,8 @@ import torch
 from vllm.v1.attention.backend import (
     AttentionLayer,
     AttentionType,
-    is_quantized_kv_cache,
 )
+from vllm.utils.torch_utils import is_quantized_kv_cache
 
 # from vllm.attention.ops.triton_decode_attention import decode_attention_fwd
 # from vllm.attention.ops.triton_flash_attention import triton_attention

@@ -68,6 +68,7 @@ def pytest_configure(config):
         "flaggems: marks tests as requiring the flag_gems library",
         "flagcx: marks tests as requiring the FlagCX library",
         "functional: marks tests as functional tests",
+        "benchmark: marks tests as benchmark smoke tests",
     ]:
         config.addinivalue_line("markers", line)
 
