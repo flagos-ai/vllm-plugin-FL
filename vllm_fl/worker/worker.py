@@ -50,7 +50,6 @@ from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
 from vllm.platforms import current_platform
-from vllm.profiler.wrapper import TorchProfilerWrapper
 
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
@@ -221,33 +220,14 @@ class WorkerFL(WorkerBase):
         profiler_config = vllm_config.profiler_config
         if profiler_config.profiler == "torch":
             worker_name = f"{vllm_config.instance_id}-rank-{self.rank}"
-            # Probe Ascend NPU via torch_npu directly. current_platform.device_type
-            # can return an empty string when vendor detection fails, so we fall
-            # back to torch.npu.is_available() which directly checks the hardware.
-            try:
-                import torch_npu  # noqa: F401
-                is_npu = torch.npu.is_available()
-            except ImportError:
-                is_npu = False
-
-            if is_npu:
-                # Ascend: route through torch_npu.profiler so the profiler
-                # emits the full _ascend_pt output (op_statistic.csv,
-                # step_trace_time.csv, ...). The wrapper is lazy-imported
-                # so torch_npu is only required on actual NPU hosts.
-                from vllm_fl.profiler.ascend import AscendTorchProfilerWrapper
-                self.profiler = AscendTorchProfilerWrapper(
-                    profiler_config,
-                    worker_name=worker_name,
-                    local_rank=self.local_rank,
-                )
-            else:
-                self.profiler = TorchProfilerWrapper(
-                    profiler_config,
-                    worker_name=worker_name,
-                    local_rank=self.local_rank,
-                    activities=["CPU", "CUDA"],
-                )
+            # FL wrapper branches Ascend NPU vs CUDA internally, keeping the
+            # hardware probe out of the worker path.
+            from vllm_fl.profiler import FLTorchProfilerWrapper
+            self.profiler = FLTorchProfilerWrapper(
+                profiler_config,
+                worker_name=worker_name,
+                local_rank=self.local_rank,
+            )
         else:
             self.profiler = None
 
