@@ -206,6 +206,21 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
+        # Ascend NPU: torch_npu inductor codegen has issues with
+        # multi-device compilation (e.g. reduction scheduling on npu:1).
+        # Disable torch.compile and CUDAGraphs until torch_npu inductor
+        # is stable. check_and_update_config runs after VllmConfig.__init__
+        # processes enforce_eager, so we must set compilation_config directly.
+        if cls.device_type == "npu":
+            from vllm.config import CompilationMode
+            if compilation_config.mode != CompilationMode.NONE:
+                logger.info(
+                    "Disabling torch.compile for Ascend NPU to avoid "
+                    "torch_npu inductor codegen issues."
+                )
+                compilation_config.mode = CompilationMode.NONE
+                compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+
         if (
             cls.device_type == "musa"
             and compilation_config.cudagraph_mode.has_full_cudagraphs()

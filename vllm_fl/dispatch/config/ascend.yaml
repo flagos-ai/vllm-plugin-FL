@@ -44,6 +44,22 @@ op_backends:
     - vendor
     - flagos
     - reference
+  # invoke_fused_moe_triton_kernel: prioritize vendor (torch.mm) because
+  # FlagGems Triton kernel overflows NPU unified buffer on some model shapes
+  invoke_fused_moe_triton_kernel:
+    - vendor
+    - flagos
+  # moe_align_block_size: prioritize vendor (pure-torch) because
+  # FlagGems Triton kernel causes DDR address OOB on NPU
+  moe_align_block_size:
+    - vendor
+    - flagos
+  moe_sum:
+    - vendor
+    - flagos
+  topk_softmax:
+    - vendor
+    - flagos
 
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
@@ -107,6 +123,11 @@ flagos_blacklist:
   - _flash_attention_forward
   - scatter
   - scatter_
+  - index_put
+  - index_put_
+  - _index_put_impl_
+  - argmax
+  - addmm
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
