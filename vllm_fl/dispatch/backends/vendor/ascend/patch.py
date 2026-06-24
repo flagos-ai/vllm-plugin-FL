@@ -18,6 +18,7 @@ def apply_ascend_patches():
     patch_fla_ops()
     patch_op_cls()
     patch_fused_moe()
+    patch_qwen3_5_attention()
 
 def patch_mamba_config():
     """Patch HybridAttentionMambaModelConfig for Ascend."""
@@ -55,6 +56,16 @@ def patch_fused_moe():
         logger.info("Patched fused_moe for Ascend")
     except Exception as e:
         logger.warning("Failed to patch fused_moe ops: %s", e)
+
+def patch_qwen3_5_attention():
+    """Patch Qwen3.5/Qwen3.6 attention to use the fused Ascend kernel."""
+    try:
+        from .patches.patch_qwen3_5 import patch_qwen3_5_attention as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch Qwen3NextAttention for Ascend: %s", e)
+
 
 def patch_fla_ops():
     """Patch FLA ops and fused_gdn_gating with Ascend implementations."""
