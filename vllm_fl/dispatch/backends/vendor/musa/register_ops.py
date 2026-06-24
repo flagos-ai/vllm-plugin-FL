@@ -32,6 +32,9 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .musa import MusaBackend
+    from .patch import apply_musa_patches
+
+    apply_musa_patches()
 
     backend = MusaBackend()
     is_avail = backend.is_available

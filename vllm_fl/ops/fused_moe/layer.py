@@ -73,19 +73,33 @@ class FusedMoEFL(FusedMoE):
         apply_routed_scale_to_output = kwargs.pop("apply_routed_scale_to_output", False)
         super().__init__(*args, **kwargs)
         self._routed_scaling_factor = routed_scaling_factor
-        self._shared_experts = shared_experts
-        self._gate = gate
-        self._routed_input_transform = routed_input_transform
-        self._routed_output_transform = routed_output_transform
         self._apply_routed_scale_to_output = apply_routed_scale_to_output
         # Replace quant_method with FL version that properly handles OOT backend
         if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(self.quant_method, UnquantizedFusedMoEMethodFL):
             self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
             self.base_quant_method = self.quant_method
-        # Replace router with FL version that uses call_op for flaggems dispatch
-        self._replace_router_with_fl()
+        # Replace router with FL version that uses call_op for flaggems dispatch.
+        # NOTE: shared_experts / gate / routed transforms are passed through to
+        # the runner rather than stored as attributes on this layer.  Assigning
+        # an nn.Module to `self.<name>` would register it as a child submodule,
+        # creating a duplicate path (e.g. `<moe>._shared_experts`) that the
+        # runner already owns under `<moe>.runner`.  That duplicate breaks LoRA
+        # module replacement, which traverses the wrapped FusedMoE*WithLoRA and
+        # finds no `_shared_experts` attribute on the wrapper.
+        self._replace_router_with_fl(
+            shared_experts=shared_experts,
+            gate=gate,
+            routed_input_transform=routed_input_transform,
+            routed_output_transform=routed_output_transform,
+        )
 
-    def _replace_router_with_fl(self):
+    def _replace_router_with_fl(
+        self,
+        shared_experts=None,
+        gate=None,
+        routed_input_transform=None,
+        routed_output_transform=None,
+    ):
         """Replace the router with FL version that routes through call_op dispatch."""
         router = self.router
 
@@ -132,12 +146,12 @@ class FusedMoEFL(FusedMoE):
             layer_name=self.layer_name,
             moe_config=self.moe_config,
             router=self.router,
-            gate=self._gate,
-            shared_experts=self._shared_experts,
+            gate=gate,
+            shared_experts=shared_experts,
             quant_method=self.quant_method,
             enable_dbo=self.vllm_config.parallel_config.enable_dbo,
-            routed_input_transform=self._routed_input_transform,
-            routed_output_transform=self._routed_output_transform,
+            routed_input_transform=routed_input_transform,
+            routed_output_transform=routed_output_transform,
             # When apply_routed_scale_to_output is True, we allow
             # the scaling factor to be passed to the runner, otherwise
             # we pass 1.0 so it ends up being a nop.
