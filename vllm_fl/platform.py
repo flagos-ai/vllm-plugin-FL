@@ -199,10 +199,8 @@ class PlatformFL(Platform):
         from vllm.config import CUDAGraphMode
 
         compilation_config = vllm_config.compilation_config
-        # NOTE: Do NOT set compile_sizes to [] here.
-        # Leaving it as None allows vllm's optimization level defaults
-        # and _set_cudagraph_sizes() to auto-populate compile_sizes
-        # based on cudagraph_capture_sizes for proper graph capture.
+        if compilation_config.compile_sizes is None:
+            compilation_config.compile_sizes = []
 
         if (
             cls.device_type == "musa"
