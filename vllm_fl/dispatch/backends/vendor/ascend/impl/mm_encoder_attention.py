@@ -95,6 +95,13 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         kv_len = key.size(1)
         is_reshaped = query.dim() == 4
 
+        if cu_seqlens is None:
+            cu_seqlens = torch.arange(0, (bsz + 1) * q_len,
+                                      step=q_len,
+                                      dtype=torch.int32,
+                                      device="cpu")
+        cu_seqlens = torch.diff(cu_seqlens).to("cpu")
+
         # q, k, v: [b, s, head, head_dim] -> [b * s, head, head_dim]
         q, k, v = self.reshape_qkv_to_3d(query, key, value, bsz, q_len, kv_len)
 
@@ -109,14 +116,6 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             v = F.pad(v, (0, pad_len), mode="constant", value=0)
 
         context_layer = torch.empty_like(q)
-
-        if cu_seqlens is None:
-            cu_seqlens = torch.arange(0, (bsz + 1) * q_len,
-                                      step=q_len,
-                                      dtype=torch.int32,
-                                      device=query.device)
-
-        cu_seqlens = torch.diff(cu_seqlens).to("cpu")
 
         # operator requires pta version >= 2.5.1
         torch_npu._npu_flash_attention_unpad(

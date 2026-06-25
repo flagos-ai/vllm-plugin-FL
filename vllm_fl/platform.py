@@ -179,6 +179,10 @@ class PlatformFL(Platform):
                 logger.info("Setting kv cache block size to 64 for MUSA.")
             else:
                 cache_config.block_size = 16
+        if cls.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patch import refresh_block_size
+
+            refresh_block_size(vllm_config)
 
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
