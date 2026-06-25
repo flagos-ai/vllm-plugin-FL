@@ -282,8 +282,8 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
-        # Fast path (no LoRA): single fused FlagGems call.
-        if self._lora_context is None:
+        # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
+        if self._lora_context is None and current_platform.is_cuda():
             import flag_gems
 
             output.copy_(flag_gems.fused_experts_impl(
