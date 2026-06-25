@@ -55,7 +55,6 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     # or editble install
     pip install --no-build-isolation -e .
     ```
-
  
     For CUDA-like devices, including CUDA and HIP/ROCm environments that use
     PyTorch's CUDA dispatch key, build the plugin native extension by setting
@@ -67,15 +66,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     VLLM_VENDOR=cuda pip install --no-build-isolation -e .
     ```
 
-    This builds and installs `vllm_fl._C`, which currently provides the native
-    `weak_ref_tensor` custom op used by vLLM CUDA graph capture. This is
-    especially important when vLLM itself is installed with
-    `VLLM_TARGET_DEVICE=empty`: the empty vLLM build does not provide the normal
-    device-specific vLLM C++ custom op implementation, so graph capture may keep
-    real tensor references instead of weak tensor views and can show abnormal GPU
-    memory usage. Building `vllm_fl._C` lets the plugin register a real
-    `weak_ref_tensor` implementation for CUDA-like devices without changing the
-    vLLM user-facing API.
+    This builds and installs `vllm_fl._C`, which provides native C++ support
+    required by some graph/custom-op paths, especially when vLLM is installed
+    with `VLLM_TARGET_DEVICE=empty`.
 
     If `VLLM_VENDOR` is not set, vllm-plugin-FL is installed as a Python-only
     plugin and the native extension is skipped.
