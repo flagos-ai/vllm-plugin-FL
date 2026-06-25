@@ -17,6 +17,7 @@ _QUERY_OP_IMPLS = [
     ("cutlass_scaled_mm_supports_block_fp8", lambda cap: cap >= 100),
     ("cutlass_group_gemm_supported", lambda cap: cap >= 90),
     ("cutlass_scaled_mm_supports_fp4", lambda cap: cap >= 100),
+    ("weak_ref_tensor", lambda t: t),
     ("get_cuda_view_from_cpu_tensor", lambda t: t),
 ]
 
