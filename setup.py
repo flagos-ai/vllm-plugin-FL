@@ -1,3 +1,14 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
+#
+# vllm-plugin-FL: vLLM Federated Learning Plugin
+#
+# This setup script builds the vllm_fl._C C++/CUDA extension via CMake.
+# It supports vendor-specific compilation (currently CUDA only) controlled by
+# the VLLM_VENDOR environment variable. The build pipeline:
+#   1. Detects available tooling (cmake, ninja, sccache/ccache)
+#   2. Configures and compiles the C++/CUDA sources under csrc/
+#   3. Copies the resulting shared library (.so/.pyd) to the package directory
+
 from __future__ import annotations
 
 import glob

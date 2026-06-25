@@ -1,3 +1,4 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-FL project
 #
