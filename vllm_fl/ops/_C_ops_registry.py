@@ -57,10 +57,12 @@ def register_op_schemas():
     # Pre-load mcoplib._C (MetaX) so its TORCH_LIBRARY registrations land
     # before our FRAGMENT definitions.  The hasattr check below will then
     # skip any ops already registered by mcoplib, avoiding c10::Error.
-    try:
-        import mcoplib._C  # noqa: F401
-    except ImportError:
-        pass
+    import importlib.util
+    if importlib.util.find_spec("mcoplib") is not None:
+        try:
+            import mcoplib._C  # noqa: F401
+        except ImportError:
+            logger.warning("Failed to import mcoplib._C")
 
     from vllm_fl.ops._C_ops_schemas import SCHEMAS as schemas
 
