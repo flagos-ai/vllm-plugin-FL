@@ -16,7 +16,6 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/glm_5_offline_inference.py)  |
-| Qwen3.6-27B | Supported | [Ascend patch](./vllm_fl/dispatch/backends/vendor/ascend/patches/patch_qwen3_5.py) |
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 
 ### Supported Chips
