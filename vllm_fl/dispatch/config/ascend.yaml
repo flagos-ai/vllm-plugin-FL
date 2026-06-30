@@ -64,6 +64,25 @@ op_backends:
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
 flagos_blacklist:
+  # index (advanced-index gather `tensor[idx]`): the FlagGems Triton index kernel
+  # corrupts gathers on Ascend NPU (same NPU-indexing failure class as the GDN
+  # ssm_state gather). The Qwen3-VL ViT 2D rotary gathers per-position cos/sin via
+  # `cos[pos_ids]` / `sin[pos_ids]`; a corrupted gather scrambles the rotary
+  # positions, so over the 27 ViT blocks the image embeddings lose fine spatial
+  # detail -> OCR / thin shapes decode as garbage while coarse features survive.
+  # The LLM rope uses the vendor rotary_embedding op (not aten index), so text is
+  # unaffected. Fall back to torch (correct on NPU) for index.
+  - index
+  # exp / log: the FlagGems Triton exp/log kernels are imprecise AND slow on
+  # Ascend NPU. The GDN linear-attention recurrent path applies the gated decay
+  # `h *= exp(g)` once per timestep and computes the gate via exp/log (softplus),
+  # so for a long prefill they run tens of thousands of times across the GDN
+  # layers. The per-step error compounds and corrupts the recurrent state at long
+  # context (35B begin-of-context retrieval degenerates), and the per-call Triton
+  # launch overhead makes the prefill ~150x slower. The LLM softmax/attention use
+  # vendor ops (not aten exp/log), so falling back to torch is correct and fast.
+  - exp
+  - log
   - masked_scatter_
   - masked_scatter
   - scatter_add_
