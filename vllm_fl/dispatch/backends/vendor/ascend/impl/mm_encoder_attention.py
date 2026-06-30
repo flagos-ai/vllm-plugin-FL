@@ -134,3 +134,4 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             context_layer = context_layer.transpose(1, 2).contiguous()
             context_layer = context_layer.view(bsz, -1, self.num_heads * self.head_size)
         return context_layer
+
