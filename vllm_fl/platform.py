@@ -129,8 +129,6 @@ class PlatformFL(Platform):
     def import_kernels(cls) -> None:
         """Import device-specific kernels."""
         logger.info(f"current vendor_name is: {cls.vendor_name}")
-        # Always load base vLLM C extensions
-        super().import_kernels()
 
         if cls.vendor_name == "metax":
             try:
@@ -147,6 +145,8 @@ class PlatformFL(Platform):
                 import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
             except Exception as e:
                 logger.warning(f"Failed to import maca patches: {e}")
+        else:
+            super().import_kernels()
 
         if cls.device_type == "musa":
             try:
@@ -179,6 +179,10 @@ class PlatformFL(Platform):
                 logger.info("Setting kv cache block size to 64 for MUSA.")
             else:
                 cache_config.block_size = 16
+        if cls.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patch import refresh_block_size
+
+            refresh_block_size(vllm_config)
 
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
@@ -329,7 +333,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar"]:
             return True
         return False
 
@@ -410,7 +414,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead")
+        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:

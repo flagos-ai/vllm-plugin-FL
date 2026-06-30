@@ -84,6 +84,11 @@ def _patch_custom_ops():
     except (ImportError, OSError):
         pass
 
+    try:
+        import vllm_fl._C  # noqa: F401
+    except (ImportError, OSError) as e:
+        logger.debug("Failed to import vllm_fl._C: %s", e)
+
     from vllm_fl.ops._C_ops_registry import register_op_schemas
     register_op_schemas()
 

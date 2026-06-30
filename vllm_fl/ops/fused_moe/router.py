@@ -169,7 +169,17 @@ class GroupedTopKRouterFL(GroupedTopKRouter):
         *,
         input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if not self._valid_grouping(router_logits):
+        # Mirror upstream GroupedTopKRouter._compute_routing, which checks
+        # expert/grouping validity via an inner `valid_grouping()` closure
+        # rather than a `_valid_grouping` method. The earlier port called a
+        # non-existent `self._valid_grouping`, raising AttributeError.
+        def valid_grouping() -> bool:
+            num_experts = router_logits.shape[-1]
+            if num_experts <= self.num_expert_group:
+                return False
+            return num_experts % self.num_expert_group == 0
+
+        if not valid_grouping():
             if self.e_score_correction_bias is not None:
                 topk_weights, topk_ids = fused_topk_bias(
                     hidden_states=hidden_states,
