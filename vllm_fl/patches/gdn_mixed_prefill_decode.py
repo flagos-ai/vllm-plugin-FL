@@ -42,10 +42,16 @@ def apply_gdn_mixed_prefill_decode_patch() -> None:
         _PATCHED = True
         return
 
-    from vllm.model_executor.layers.fla.ops import (
-        fused_post_conv_prep,
-        fused_sigmoid_gating_delta_rule_update,
-    )
+    try:
+        from flag_gems import (
+            fused_post_conv_prep,
+            fused_sigmoid_gating_delta_rule_update,
+        )
+    except ImportError:
+        from vllm.model_executor.layers.fla.ops import (
+            fused_post_conv_prep,
+            fused_sigmoid_gating_delta_rule_update,
+        )
     from vllm.model_executor.layers.mamba import gdn_linear_attn as gdn_mod
     from vllm.model_executor.layers.mamba.gdn_linear_attn import (
         GatedDeltaNetAttention,
