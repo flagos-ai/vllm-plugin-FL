@@ -93,6 +93,77 @@ def _patch_custom_ops():
     register_op_schemas()
 
 
+def _patch_moe_backend_selection():
+    """Patch select_unquantized_moe_backend to fall through to CUDA backends
+    when no OOT FusedMoE pluggable layer is registered.
+
+    Upstream returns (OOT, None) for any is_out_of_tree() platform.  When
+    FusedMoEFL is registered, the OOT path delegates correctly.  When it is
+    not (VLLM_FL_PREFER_ENABLED=0 or whitelist filtering), experts_cls=None
+    triggers AttributeError.  This patch skips the is_out_of_tree() early
+    return in that case so native CUDA backends (flashinfer/triton) are used.
+
+    Implementation note: importing oracle.unquantized triggers the parent
+    fused_moe/__init__.py which imports unquantized_fused_moe_method, binding
+    the original function via `from ... import`.  We must patch BOTH module
+    namespaces AFTER the import chain is fully resolved.
+
+    NOTE: This function must NOT be called from register() (platform plugin)
+    because it triggers a circular import (vllm.config not yet ready).
+    It must be called from register_model() (general plugin) instead.
+    """
+    import vllm.model_executor.layers.fused_moe.oracle.unquantized as oracle_mod
+    from vllm.model_executor.custom_op import op_registry_oot
+    from vllm.platforms import current_platform
+
+    _orig = oracle_mod.select_unquantized_moe_backend
+
+    def _patched(moe_config):
+        # When FusedMoE is registered OOT, let upstream handle it normally
+        if not current_platform.is_out_of_tree() or "FusedMoE" in op_registry_oot:
+            return _orig(moe_config)
+        # No OOT FusedMoE registered — select CUDA backends directly,
+        # reusing upstream's _get_priority_backends logic
+        from vllm.model_executor.layers.fused_moe.oracle.unquantized import (
+            _get_priority_backends, backend_to_kernel_cls)
+        from vllm.model_executor.layers.fused_moe import modular_kernel as mk
+        from vllm.model_executor.layers.fused_moe.oracle.unquantized import (
+            UnquantizedMoeBackend,)
+
+        if moe_config.is_lora_enabled:
+            return UnquantizedMoeBackend.TRITON, backend_to_kernel_cls(
+                UnquantizedMoeBackend.TRITON)
+
+        AVAILABLE_BACKENDS = _get_priority_backends(moe_config)
+
+        activation_format = (
+            mk.FusedMoEActivationFormat.BatchedExperts
+            if moe_config.moe_parallel_config.use_batched_activation_format
+            else mk.FusedMoEActivationFormat.Standard
+        )
+
+        for backend in AVAILABLE_BACKENDS:
+            k_cls = backend_to_kernel_cls(backend)
+            supported, reason = k_cls.is_supported_config(
+                k_cls, moe_config, None, None, activation_format)
+            if supported:
+                logger.info(
+                    f"Using {backend.value} Unquantized MoE backend "
+                    f"(FL fallback, no OOT FusedMoE registered).")
+                return backend, k_cls
+
+        raise NotImplementedError(
+            "No Unquantized MoE backend supports the deployment configuration.")
+
+    # Patch the oracle module (source of truth)
+    oracle_mod.select_unquantized_moe_backend = _patched
+
+    # Also patch the consumer module which already bound the original via
+    # `from ... import` during the import chain triggered above.
+    import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as uqm
+    uqm.select_unquantized_moe_backend = _patched
+
+
 def register():
     """Register the FL platform."""
     _patch_custom_ops()
@@ -128,11 +199,15 @@ def register_router():
     # fused_moe import chain triggers cutlass_scaled_mm_supports_fp8 on MUSA
     if current_platform.device_type == "musa":
         return
+    from vllm_fl.utils import is_oot_enabled
+    if not is_oot_enabled():
+        return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+    _patch_moe_backend_selection()
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
