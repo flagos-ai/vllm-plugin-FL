@@ -345,6 +345,17 @@ class AscendAttentionMetadataBuilder:
             model_runner_type=self.model_config.runner_type,
         )
 
+    def build_for_drafting(
+        self,
+        common_attn_metadata,
+        draft_index: int,
+    ):
+        """Build attention metadata for the draft model during speculative decoding."""
+        return self.build(
+            common_prefix_len=0,
+            common_attn_metadata=common_attn_metadata,
+        )
+
     def _determine_attn_state(
         self,
         num_decodes: int,

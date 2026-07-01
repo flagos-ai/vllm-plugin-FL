@@ -168,3 +168,35 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register BgeM3EmbeddingModel error: {str(e)}")
+
+    # Ensure Qwen3NextMTP draft configs are treated as text-only even when
+    # ModelConfig is reconstructed in worker processes before the platform
+    # post-init patch is active.
+    try:
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_qwen3_mtp import (
+            patch_qwen3_next_mtp_multimodal_flag,
+        )
+        patch_qwen3_next_mtp_multimodal_flag()
+    except Exception as e:
+        logger.error(f"Patch Qwen3NextMTP multimodal flag error: {str(e)}")
+
+    # Use Ascend-compatible rejection-sampler helpers for speculative decoding.
+    try:
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_qwen3_mtp import (
+            patch_ascend_rejection_sampler,
+        )
+        patch_ascend_rejection_sampler()
+    except Exception as e:
+        logger.error(f"Patch Ascend rejection sampler error: {str(e)}")
+
+    # Honor VLLM_CUDAGRAPH_* environment variables so that scripts can limit
+    # NPU graph capture sizes without passing --compilation-config.
+    try:
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_qwen3_mtp import (
+            patch_cudagraph_env_vars,
+        )
+        patch_cudagraph_env_vars()
+    except Exception as e:
+        logger.error(f"Apply cudagraph env patch error: {str(e)}")
+
+    return "vllm_fl.platform.PlatformFL"
