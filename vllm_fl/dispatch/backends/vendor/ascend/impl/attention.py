@@ -51,6 +51,10 @@ from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_graph import (
 
 logger = logging.getLogger(__name__)
 
+# Ascend npu_fused_infer_attention_score with input_layout="TND" only supports
+# head_dim in {64, 128, 192} (plus the special qD=kD=192, vD=128 case).
+_PFA_TND_SUPPORTED_HEAD_DIMS = frozenset({64, 128, 192})
+
 # Check torch_npu availability and setup NPU compatibility
 _TORCH_NPU_AVAILABLE = False
 try:
@@ -557,6 +561,15 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
         self.key_cache = None
         self.value_cache = None
+        self._use_fusion_fallback = self.head_size not in _PFA_TND_SUPPORTED_HEAD_DIMS
+        if self._use_fusion_fallback:
+            logger.info(
+                "AscendAttentionBackendImpl: head_size=%d is not supported by "
+                "npu_fused_infer_attention_score TND layout, falling back to "
+                "npu_fusion_attention.", self.head_size)
+
+    _fusion_causal_mask: Optional[torch.Tensor] = None
+    _fusion_causal_mask_device: Optional[torch.device] = None
 
     @classmethod
     def update_graph_params(
@@ -666,6 +679,96 @@ class AscendAttentionBackendImpl(AttentionImpl):
             )
         return key, value
 
+    def _get_fusion_causal_mask(self, device: torch.device) -> torch.Tensor:
+        """Get a 2048x2048 lower-triangular bool mask for npu_fusion_attention.
+
+        npu_fusion_attention expects a bool causal mask where True means the
+        position is allowed to attend.  The mask is cached per-device.
+        """
+        cls = AscendAttentionBackendImpl
+        if (cls._fusion_causal_mask is None
+                or cls._fusion_causal_mask_device != device):
+            cls._fusion_causal_mask = torch.ones(
+                2048, 2048, dtype=torch.bool, device=device).tril_()
+            cls._fusion_causal_mask_device = device
+        return cls._fusion_causal_mask
+
+    def _gather_kv_cache(
+        self,
+        attn_metadata: AscendMetadata,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Gather paged KV cache into dense (T_kv, num_kv_heads, head_size)."""
+        if self.key_cache is None or self.value_cache is None:
+            raise RuntimeError(
+                "key_cache/value_cache is not initialized for KV gather")
+
+        seq_lens = attn_metadata.seq_lens_list
+        batch_size = len(seq_lens)
+        block_table = attn_metadata.block_tables[:batch_size]
+        flat_ids = block_table.reshape(-1).long()
+
+        gathered_k = self.key_cache[flat_ids]
+        gathered_v = self.value_cache[flat_ids]
+        gathered_k = gathered_k.view(
+            batch_size, -1, self.num_kv_heads, self.head_size)
+        gathered_v = gathered_v.view(
+            batch_size, -1, self.num_kv_heads, self.head_size)
+
+        k_list: List[torch.Tensor] = []
+        v_list: List[torch.Tensor] = []
+        for i, sl in enumerate(seq_lens):
+            k_list.append(gathered_k[i, :sl])
+            v_list.append(gathered_v[i, :sl])
+
+        return torch.cat(k_list, dim=0), torch.cat(v_list, dim=0)
+
+    def _forward_fusion_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass using npu_fusion_attention for unsupported head sizes."""
+        num_tokens = attn_metadata.actual_seq_lengths_q[-1]
+        query = query[:num_tokens]
+
+        if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
+            key = key[:num_tokens]
+            value = value[:num_tokens]
+            actual_seq_kvlen = attn_metadata.actual_seq_lengths_q
+        else:
+            key, value = self._gather_kv_cache(attn_metadata)
+            actual_seq_kvlen = [
+                sum(attn_metadata.seq_lens_list[:i + 1])
+                for i in range(len(attn_metadata.seq_lens_list))
+            ]
+
+        if attn_metadata.causal:
+            attn_mask = self._get_fusion_causal_mask(query.device)
+            sparse_mode = 3
+        else:
+            attn_mask = None
+            sparse_mode = 0
+
+        attn_output = torch_npu.npu_fusion_attention(
+            query=query,
+            key=key,
+            value=value,
+            head_num=self.num_heads,
+            input_layout="TND",
+            scale=self.scale,
+            sparse_mode=sparse_mode,
+            atten_mask=attn_mask,
+            actual_seq_qlen=attn_metadata.actual_seq_lengths_q,
+            actual_seq_kvlen=actual_seq_kvlen,
+        )[0]
+
+        attn_output = attn_output.view(num_tokens, self.num_heads, self.head_size)
+        output[:num_tokens] = attn_output[:num_tokens]
+        return output
+
     def forward_fused_infer_attention(
         self,
         query: torch.Tensor,
@@ -675,6 +778,11 @@ class AscendAttentionBackendImpl(AttentionImpl):
         output: torch.Tensor,
     ) -> torch.Tensor:
         """Forward pass using fused_infer_attention_score."""
+        if (self._use_fusion_fallback
+                and attn_metadata.attn_state != AscendAttentionState.DecodeOnly):
+            return self._forward_fusion_attention(
+                query, key, value, attn_metadata, output)
+
         key, value, block_size, block_table, actual_seq_lengths_kv = \
             self._get_fia_params(key, value, attn_metadata)
 
