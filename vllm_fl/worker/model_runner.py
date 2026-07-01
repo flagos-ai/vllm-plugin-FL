@@ -99,7 +99,7 @@ from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import is_pin_memory_available
 
 from vllm.platforms import current_platform
-if current_platform.dist_backend == "flagcx":
+if current_platform.dist_backend in ("flagcx", "hccl"):
     @contextmanager
     def graph_capture(device: torch.device):
         """

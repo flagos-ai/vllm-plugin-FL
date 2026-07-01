@@ -41,6 +41,13 @@ from vllm.v1.attention.backends.utils import AttentionCGSupport, CommonAttention
 from vllm_fl.dispatch.backends.vendor.ascend.impl.attention_mask import (
     AttentionMaskBuilder,
 )
+from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_graph import (
+    get_draft_graph_params,
+    get_draft_graph_prefill_params,
+    get_graph_params,
+    update_draft_graph_params_workspaces,
+    update_graph_params_workspaces,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -551,6 +558,33 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self.key_cache = None
         self.value_cache = None
 
+    @classmethod
+    def update_graph_params(
+        cls,
+        update_stream,
+        forward_context,
+        num_tokens: int,
+        vllm_config: VllmConfig,
+        speculative_config=None,
+        num_dcp_pcp_tokens=None,
+        draft_attn_metadatas=None,
+    ) -> None:
+        """Update graph parameters for ACL graph capture.
+
+        This is called by the model runner before graph replay to prepare
+        attention-specific workspaces and handles for the given capture size.
+        """
+        logger.debug(
+            "Updating graph params for AscendAttentionBackendImpl "
+            "num_tokens=%s", num_tokens)
+        # Workspace creation is backend-specific.  For the native torch_npu
+        # path the actual workspace is allocated lazily inside the attention
+        # kernels, so we only record the metadata here.
+        params = get_graph_params()
+        if params is not None and num_tokens in params.workspaces:
+            if params.workspaces[num_tokens] is None:
+                params.workspaces[num_tokens] = True  # marker
+
     def _get_fia_params(
         self,
         key: torch.Tensor,
@@ -574,8 +608,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
             # num_block, block_size, _, _ = self.key_cache.shape
             # key = self.key_cache.view(num_block, block_size, -1)
             # value = self.value_cache.view(num_block, block_size, -1)
-            key = self.key_cache.view(-1, block_size, 256)
-            value = self.value_cache.view(-1, block_size, 256)
+
+            #key = self.key_cache.view(-1, block_size, 256)
+            #value = self.value_cache.view(-1, block_size, 256)
+            #block_table = attn_metadata.block_tables
+            #actual_seq_lengths_kv = attn_metadata.seq_lens_list
+
+            # Get block_size from key_cache shape
+            num_block, block_size, _, _ = self.key_cache.shape
+            key = self.key_cache.view(num_block, block_size, -1)
+            value = self.value_cache.view(num_block, block_size, -1)
             block_table = attn_metadata.block_tables
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
         else:
@@ -583,8 +625,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
             # num_block, block_size, _, _ = self.key_cache.shape
             # key = self.key_cache.view(num_block, block_size, -1)
             # value = self.value_cache.view(num_block, block_size, -1)
-            key = self.key_cache.view(-1, block_size, 256)
-            value = self.value_cache.view(-1, block_size, 256)
+
+            #key = self.key_cache.view(-1, block_size, 256)
+            #value = self.value_cache.view(-1, block_size, 256)
+            #block_table = attn_metadata.block_tables
+            #actual_seq_lengths_kv = attn_metadata.seq_lens_list
+
+            # Get block_size from key_cache shape
+            num_block, block_size, _, _ = self.key_cache.shape
+            key = self.key_cache.view(num_block, block_size, -1)
+            value = self.value_cache.view(num_block, block_size, -1)
             block_table = attn_metadata.block_tables
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
 
@@ -809,20 +859,204 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return output
 
 
-# MLA Backend placeholder - can be extended later
-class AscendMLABackend:
-    """
-    Ascend MLA (Multi-head Latent Attention) backend placeholder.
 
-    This is a minimal implementation. Full MLA support would require
-    additional implementation based on the specific MLA algorithm.
+# MLA Backend
+class AscendMLABackend(AttentionBackend):
+    """
+    Ascend MLA (Multi-head Latent Attention) backend.
+
+    This is a structural backend that participates in the Ascend ACL graph
+    parameter upgrade mechanism.  The full MLA forward path can be extended
+    later; for now the class provides the backend contract and graph-param
+    hooks required by the model runner.
     """
 
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError(
-            "Ascend MLA attention backend is not yet fully implemented. "
-            "Please use standard attention backend by setting use_mla=False"
+    accept_output_buffer: bool = True
+
+    @staticmethod
+    def get_name() -> str:
+        return "ASCEND_MLA_FL"
+
+    @staticmethod
+    def get_impl_cls() -> Type["AscendMLABackendImpl"]:
+        return AscendMLABackendImpl
+
+    @staticmethod
+    def get_builder_cls() -> Type["AscendMLAMetadataBuilder"]:
+        return AscendMLAMetadataBuilder
+
+    @staticmethod
+    def get_kv_cache_shape(
+        num_blocks: int,
+        block_size: int,
+        num_kv_heads: int,
+        head_size: int,
+        cache_dtype_str: str = "auto",
+    ) -> Tuple[int, ...]:
+        # MLA uses a compressed KV cache shape.
+        return (num_blocks, block_size, num_kv_heads, head_size)
+
+    @staticmethod
+    def swap_blocks(
+        src_kv_cache: List[torch.Tensor],
+        dst_kv_cache: List[torch.Tensor],
+        src_to_dst: torch.Tensor,
+    ) -> None:
+        src_indices = src_to_dst[:, 0]
+        dst_indices = src_to_dst[:, 1]
+        for src, dst in zip(src_kv_cache, dst_kv_cache):
+            dst[dst_indices] = src[src_indices].to(dst.device)
+
+    @staticmethod
+    def copy_blocks(
+        kv_caches: List[torch.Tensor],
+        src_to_dists: torch.Tensor,
+    ) -> None:
+        src_indices = src_to_dists[:, 0]
+        dst_indices = src_to_dists[:, 1]
+        for kv_cache in kv_caches:
+            kv_cache[dst_indices] = kv_cache[src_indices]
+
+    @staticmethod
+    def get_supported_block_size() -> list[int]:
+        return [128]
+
+
+@dataclass
+class AscendMLAMetadata:
+    """Per-layer metadata placeholder for Ascend MLA attention."""
+
+    attn_mask: Optional[torch.Tensor] = None
+    slot_mapping: torch.Tensor = None
+    block_tables: torch.Tensor = None
+    seq_lens: torch.Tensor = None
+    seq_lens_list: List[int] = None
+    query_start_loc: torch.Tensor = None
+    max_query_len: Optional[int] = None
+    num_actual_tokens: int = 0
+
+
+class AscendMLAMetadataBuilder:
+    """Metadata builder for Ascend MLA attention."""
+
+    aclgraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.ALWAYS
+    reorder_batch_threshold: ClassVar[int] = 1
+
+    def __init__(
+        self,
+        kv_cache_spec,
+        layer_names: list[str],
+        vllm_config: VllmConfig,
+        device: torch.device,
+    ):
+        self.vllm_config = vllm_config
+        self.model_config = vllm_config.model_config
+        self.device = device
+
+    @staticmethod
+    def get_cudagraph_support(vllm_config, kv_cache_spec) -> AttentionCGSupport:
+        return AttentionCGSupport.ALWAYS
+
+    def build(
+        self,
+        common_prefix_len: int,
+        common_attn_metadata,
+        model: Optional[nn.Module] = None,
+    ):
+        num_reqs = common_attn_metadata.num_reqs
+        num_actual_tokens = common_attn_metadata.num_actual_tokens
+        return AscendMLAMetadata(
+            slot_mapping=common_attn_metadata.slot_mapping[:num_actual_tokens],
+            block_tables=common_attn_metadata.block_table_tensor,
+            seq_lens=common_attn_metadata.seq_lens_cpu[:num_reqs],
+            seq_lens_list=common_attn_metadata.seq_lens_cpu[:num_reqs].tolist(),
+            query_start_loc=common_attn_metadata.query_start_loc_cpu[:num_reqs + 1],
+            max_query_len=common_attn_metadata.max_query_len,
+            num_actual_tokens=num_actual_tokens,
         )
+
+    def build_for_graph_capture(
+        self,
+        common_attn_metadata,
+        model: Optional[nn.Module] = None,
+    ):
+        return self.build(0, common_attn_metadata, model)
+
+    def reorder_batch(self, input_batch, scheduler_output) -> bool:
+        return False
+
+    def use_cascade_attention(self, *args, **kwargs) -> bool:
+        return False
+
+
+class AscendMLABackendImpl(AttentionImpl):
+    """
+    Ascend MLA attention implementation placeholder.
+
+    Provides the graph-param upgrade hook; full MLA forward kernel integration
+    can be added later without changing the framework contract.
+    """
+
+    def __init__(
+        self,
+        num_heads: int,
+        head_size: int,
+        scale: float,
+        num_kv_heads: int,
+        alibi_slopes: Optional[List[float]],
+        sliding_window: Optional[int],
+        kv_cache_dtype: str,
+        logits_soft_cap: Optional[float],
+        attn_type: str,
+        kv_sharing_target_layer_name: Optional[str],
+        **kwargs,
+    ) -> None:
+        self.num_heads = num_heads
+        self.head_size = head_size
+        self.scale = float(scale)
+        self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+        self.kv_cache_dtype = kv_cache_dtype
+        self.sliding_window = sliding_window
+        self.attn_type = attn_type
+
+    @classmethod
+    def update_graph_params(
+        cls,
+        update_stream,
+        forward_context,
+        num_tokens: int,
+        vllm_config: VllmConfig,
+        speculative_config=None,
+        num_dcp_pcp_tokens=None,
+        draft_attn_metadatas=None,
+    ) -> None:
+        """Update graph parameters for Ascend MLA ACL graph capture."""
+        logger.debug(
+            "Updating graph params for AscendMLABackendImpl num_tokens=%s",
+            num_tokens)
+        params = get_graph_params()
+        if params is not None and num_tokens in params.workspaces:
+            if params.workspaces[num_tokens] is None:
+                params.workspaces[num_tokens] = True  # marker
+
+    def forward(
+        self,
+        layer: AttentionLayer,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: Tuple[torch.Tensor],
+        attn_metadata: AscendMLAMetadata,
+        output: Optional[torch.Tensor] = None,
+        output_scale: Optional[torch.Tensor] = None,
+        output_block_scale: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if output is None:
+            output = torch.empty_like(query)
+        # TODO: integrate native Ascend MLA kernel.
+        raise NotImplementedError(
+            "AscendMLABackendImpl.forward is not yet implemented. "
+            "Use standard attention backend for now.")
 
 
 __all__ = [
@@ -832,5 +1066,8 @@ __all__ = [
     "AscendMetadata",
     "AscendAttentionState",
     "AscendMLABackend",
+    "AscendMLAMetadataBuilder",
+    "AscendMLABackendImpl",
+    "AscendMLAMetadata",
     "is_torch_npu_available",
 ]
