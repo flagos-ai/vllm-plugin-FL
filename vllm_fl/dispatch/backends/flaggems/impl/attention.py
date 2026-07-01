@@ -457,7 +457,7 @@ class AttentionFLImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         self.attn_type = attn_type
-        self.vllm_flash_attn_version = 3 # 2 #get_flash_attn_version()
+        self.vllm_flash_attn_version = 2 if current_platform.device_type == "txda" else 3 # 2 #get_flash_attn_version()
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = _bi_mode
 
