@@ -62,9 +62,16 @@ class FusedMoEFL(FusedMoE):
     - When FusedMoE() is instantiated, FusedMoEFL is created instead
     - Router operations use call_op("topk_softmax"/"grouped_topk")
     - Expert computation uses call_op("invoke_fused_moe_triton_kernel")
+
+    When VLLM_FL_PREFER_ENABLED=0, this layer acts as a thin shim that only
+    fixes the OOT backend selection (avoiding the upstream OOT→None crash) but
+    does NOT replace routers or inject FL dispatch paths. The result is native
+    CUDA execution with no FL code in the hot path.
     """
 
     def __init__(self, *args, **kwargs):
+        from vllm_fl.utils import is_oot_enabled
+
         routed_scaling_factor = kwargs.get("routed_scaling_factor", 1.0)
         shared_experts = kwargs.get("shared_experts", None)
         gate = kwargs.get("gate", None)
@@ -74,10 +81,33 @@ class FusedMoEFL(FusedMoE):
         super().__init__(*args, **kwargs)
         self._routed_scaling_factor = routed_scaling_factor
         self._apply_routed_scale_to_output = apply_routed_scale_to_output
-        # Replace quant_method with FL version that properly handles OOT backend
+        # Replace quant_method with FL version that properly handles OOT backend.
+        # This is always needed because the upstream select_unquantized_moe_backend()
+        # returns (OOT, None) for out-of-tree platforms, which would crash.
         if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(self.quant_method, UnquantizedFusedMoEMethodFL):
             self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
             self.base_quant_method = self.quant_method
+
+        if not is_oot_enabled():
+            # PREFER_ENABLED=0: skip router replacement and FL dispatch paths.
+            # Only re-create the runner with the fixed quant_method so native
+            # CUDA backends are selected without any FL code in the hot path.
+            self.runner: MoERunnerInterface = MoERunner(
+                layer_name=self.layer_name,
+                moe_config=self.moe_config,
+                router=self.router,
+                gate=gate,
+                shared_experts=shared_experts,
+                quant_method=self.quant_method,
+                enable_dbo=self.vllm_config.parallel_config.enable_dbo,
+                routed_input_transform=routed_input_transform,
+                routed_output_transform=routed_output_transform,
+                routed_scaling_factor=self._routed_scaling_factor
+                if self._apply_routed_scale_to_output
+                else 1.0,
+            )
+            return
+
         # Replace router with FL version that uses call_op for flaggems dispatch.
         # NOTE: shared_experts / gate / routed transforms are passed through to
         # the runner rather than stored as attributes on this layer.  Assigning

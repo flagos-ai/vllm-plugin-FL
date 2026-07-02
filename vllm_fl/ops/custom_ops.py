@@ -43,8 +43,11 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
 
     Note: fused_moe is ALWAYS registered regardless of is_oot_enabled(),
     whitelist, or blacklist. Upstream vLLM assumes is_out_of_tree() implies
-    an OOT FusedMoE PluggableLayer exists. FusedMoEFL handles the "no FL
-    ops" case internally by delegating to native CUDA backends.
+    an OOT FusedMoE PluggableLayer exists (the upstream
+    select_unquantized_moe_backend returns OOT/None which crashes).
+    When VLLM_FL_PREFER_ENABLED=0, FusedMoEFL acts as a thin shim: it
+    fixes the backend selection but skips router replacement and FL dispatch
+    paths, resulting in pure native CUDA execution.
     """
     from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
     from vllm.model_executor.custom_op import op_registry_oot
