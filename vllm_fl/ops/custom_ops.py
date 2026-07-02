@@ -40,10 +40,26 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
 
     Operators in VLLM_FL_OOT_BLACKLIST or platform config oot_blacklist
     will be excluded from registration.
+
+    Note: fused_moe is ALWAYS registered regardless of is_oot_enabled(),
+    whitelist, or blacklist. Upstream vLLM assumes is_out_of_tree() implies
+    an OOT FusedMoE PluggableLayer exists. FusedMoEFL handles the "no FL
+    ops" case internally by delegating to native CUDA backends.
     """
     from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
+    from vllm.model_executor.custom_op import op_registry_oot
 
-    # Check if OOT registration is enabled
+    # Always register fused_moe to satisfy upstream's OOT FusedMoE assumption.
+    # FusedMoEFL delegates to native backends when FL ops are disabled.
+    _always_register = ["fused_moe"]
+    for op_name in _always_register:
+        if op_name in OOT_OPS:
+            op_cls, registration_name = OOT_OPS[op_name]
+            if registration_name not in op_registry_oot:
+                logger.info(f"Registering oot op (always): {op_name} as '{registration_name}'")
+                PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)
+
+    # Check if OOT registration is enabled for remaining ops
     if not is_oot_enabled():
         return
 
@@ -59,8 +75,9 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     else:
         ops_to_register = list(OOT_OPS.keys())
 
-    # Apply blacklist
-    ops_to_register = [op for op in ops_to_register if op not in blacklist]
+    # Apply blacklist and exclude always-registered ops
+    ops_to_register = [op for op in ops_to_register
+                       if op not in blacklist and op not in _always_register]
 
     for op_name in ops_to_register:
         if op_name not in OOT_OPS:
