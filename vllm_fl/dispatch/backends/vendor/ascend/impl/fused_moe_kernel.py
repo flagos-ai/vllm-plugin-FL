@@ -100,34 +100,209 @@ def invoke_fused_moe_torch(
     use_int8_w8a8: bool = False,
     B_bias: torch.Tensor | None = None,
 ):
-    """Pure-torch fused MoE GEMM for Ascend NPU.
+    """Ascend NPU fused MoE GEMM.
 
-    Derives the expert->token mapping DIRECTLY from this call's arguments so
-    that it is correct for BOTH dispatch paths:
+    Uses per-expert torch.mm loop. The npu_grouped_matmul fast path is
+    available via _npu_grouped_matmul_fused_experts (fused_moe.py) which
+    uses npu_moe_init_routing_v2 for correct expert-token alignment.
 
-    * aligned path (prefill / larger batches): ``moe_align_block_size`` fills
-      ``sorted_token_ids`` (block-padded token-expert-pair indices) and
-      ``expert_ids`` (one expert per block).
-    * naive path (decode / very sparse batches): ``_prepare_expert_assignment``
-      sets ``sorted_token_ids=None`` and ``expert_ids = topk_ids.view(-1)``,
-      i.e. one expert per token-expert pair, with pair ``p`` mapping to input
-      token ``p // top_k`` and output row ``p``.
-
-    NEVER read thread-local state cached by moe_align here: the naive decode
-    path skips moe_align entirely, so a cached prefill layout would be stale
-    and silently drop nearly every decode pair (zeroing the MoE output and
-    corrupting every decode step while the prefill's first token stays right).
+    The function handles two dispatch paths:
+    * aligned path (prefill): sorted_token_ids + expert_ids from moe_align
+    * naive path (decode): sorted_token_ids=None, expert_ids = topk_ids.view(-1)
     """
+    _invoke_fused_moe_loop(
+        A, B, C, A_scale, B_scale, topk_weights,
+        sorted_token_ids, expert_ids, num_tokens_post_padded,
+        mul_routed_weight, top_k, config,
+        use_fp8_w8a8=use_fp8_w8a8, use_int8_w8a8=use_int8_w8a8,
+        B_bias=B_bias,
+    )
+
+
+def _invoke_fused_moe_grouped_matmul(
+    A, B, C, A_scale, B_scale, topk_weights,
+    sorted_token_ids, expert_ids, num_tokens_post_padded,
+    mul_routed_weight, top_k, config,
+    use_fp8_w8a8=False, use_int8_w8a8=False, B_bias=None,
+):
+    """High-performance path using npu_grouped_matmul.
+
+    Reconstructs the expert->token mapping from sorted_token_ids/expert_ids,
+    then uses npu_grouped_matmul with split_item=2 for a single kernel call.
+    """
+    import torch_npu
+
+    E, N, K = B.shape  # B is [E, N, K] (weight per expert: out x in)
+    c_flat = C.view(-1, N)
+    num_valid_tokens = c_flat.shape[0]
+    block_size = config["BLOCK_SIZE_M"]
+    device = A.device
+
+    if sorted_token_ids is None:
+        # Naive decode path: expert_ids[p] is the expert for pair p.
+        # A[p // top_k] is the input token.
+        num_pairs = min(len(expert_ids), num_valid_tokens)
+        expert_ids_cpu = expert_ids[:num_pairs].cpu()
+
+        # Build per-expert token counts and gather indices
+        # Sort pairs by expert for grouped_matmul
+        sorted_expert_ids, sort_order = expert_ids_cpu.sort()
+        sort_order_dev = sort_order.to(device)
+
+        # Get unique experts and counts
+        unique_experts, counts = torch.unique_consecutive(
+            sorted_expert_ids, return_counts=True
+        )
+
+        # Skip if all invalid
+        valid = unique_experts >= 0
+        if not valid.any():
+            return
+
+        # Build group_list (cumulative token counts per expert, only for active experts)
+        # For npu_grouped_matmul with split_item=2, we need the weight stacked in
+        # expert order matching the group_list. But our experts may be sparse.
+        # Instead, build a dense gathered input and use per-expert weight list.
+
+        # Gather input tokens in sorted-by-expert order
+        a_indices = (sort_order_dev // max(top_k, 1)).long()
+        gathered_a = A[a_indices]  # [num_pairs, K]
+
+        # Build group_list as cumsum of counts for valid experts
+        valid_mask_cpu = unique_experts >= 0
+        valid_experts = unique_experts[valid_mask_cpu]
+        valid_counts = counts[valid_mask_cpu]
+
+        # For npu_grouped_matmul, we need contiguous expert weights
+        # Gather only the active expert weights
+        valid_experts_dev = valid_experts.to(device).long()
+        gathered_B = torch.index_select(B, 0, valid_experts_dev)  # [num_active, N, K]
+        # Transpose: [num_active, N, K] -> [num_active, K, N] for x @ W
+        gathered_B_t = gathered_B.transpose(1, 2).contiguous()
+
+        # Filter out invalid experts from gathered_a
+        # The sort puts negatives first (since -1 < 0 < valid experts)
+        invalid_count = counts[~valid_mask_cpu].sum().item() if (~valid_mask_cpu).any() else 0
+        if invalid_count > 0:
+            gathered_a = gathered_a[invalid_count:]
+            sort_order_dev = sort_order_dev[invalid_count:]
+
+        if gathered_a.shape[0] == 0:
+            return
+
+        # group_list: cumulative counts (group_list_type=1)
+        group_list = valid_counts.to(torch.int64).cumsum(0).to(device)
+
+        # Grouped matmul: one kernel for all experts
+        result = torch_npu.npu_grouped_matmul(
+            x=[gathered_a],
+            weight=[gathered_B_t],
+            split_item=2,
+            group_list_type=1,
+            group_type=0,
+            group_list=group_list,
+        )[0]
+
+        if B_bias is not None:
+            # Apply per-expert bias
+            offset = 0
+            for i, expert_id in enumerate(valid_experts.tolist()):
+                cnt = valid_counts[i].item()
+                result[offset:offset + cnt] += B_bias[expert_id]
+                offset += cnt
+
+        # Apply routing weights
+        if mul_routed_weight and topk_weights is not None:
+            topk_weights_flat = topk_weights.view(-1)
+            w = topk_weights_flat[sort_order_dev].unsqueeze(-1)
+            result = result * w.to(result.dtype)
+
+        # Scatter back to output
+        c_flat[sort_order_dev] = result.to(c_flat.dtype)
+
+    else:
+        # Aligned path: sorted_token_ids + expert_ids from moe_align_block_size
+        total_padded = int(num_tokens_post_padded.cpu().item())
+        sorted_ids_cpu = sorted_token_ids[:total_padded].cpu()
+        expert_ids_cpu = expert_ids.cpu()
+
+        # Build per-expert valid token lists (CPU, fast)
+        expert_to_valid = {}
+        num_blocks = len(expert_ids_cpu)
+        for block_idx in range(num_blocks):
+            eid = int(expert_ids_cpu[block_idx])
+            if eid < 0:
+                continue
+            start = block_idx * block_size
+            end = min(start + block_size, total_padded)
+            if start >= end:
+                break
+            block_ids = sorted_ids_cpu[start:end].numpy()
+            valid = block_ids[block_ids < num_valid_tokens]
+            if len(valid) > 0:
+                expert_to_valid.setdefault(eid, []).append(valid)
+
+        if not expert_to_valid:
+            return
+
+        # Concatenate all valid ids per expert and sort experts
+        sorted_experts = sorted(expert_to_valid.keys())
+        all_valid_ids = []
+        expert_counts = []
+        for eid in sorted_experts:
+            ids = np.concatenate(expert_to_valid[eid]).astype(np.int64)
+            all_valid_ids.append(ids)
+            expert_counts.append(len(ids))
+
+        # Build tensors
+        all_ids_np = np.concatenate(all_valid_ids)
+        all_ids_dev = torch.from_numpy(all_ids_np).to(device)
+        a_indices = all_ids_dev // max(top_k, 1)
+        gathered_a = A[a_indices.long()]
+
+        # Gather expert weights in order
+        expert_ids_tensor = torch.tensor(sorted_experts, dtype=torch.int64, device=device)
+        gathered_B = torch.index_select(B, 0, expert_ids_tensor)
+        gathered_B_t = gathered_B.transpose(1, 2).contiguous()
+
+        # group_list: cumulative counts
+        group_list = torch.tensor(expert_counts, dtype=torch.int64, device=device).cumsum(0)
+
+        # Grouped matmul
+        result = torch_npu.npu_grouped_matmul(
+            x=[gathered_a],
+            weight=[gathered_B_t],
+            split_item=2,
+            group_list_type=1,
+            group_type=0,
+            group_list=group_list,
+        )[0]
+
+        if B_bias is not None:
+            offset = 0
+            for i, eid in enumerate(sorted_experts):
+                cnt = expert_counts[i]
+                result[offset:offset + cnt] += B_bias[eid]
+                offset += cnt
+
+        if mul_routed_weight and topk_weights is not None:
+            topk_weights_flat = topk_weights.view(-1)
+            w = topk_weights_flat[all_ids_dev].unsqueeze(-1)
+            result = result * w.to(result.dtype)
+
+        c_flat[all_ids_dev] = result.to(c_flat.dtype)
+
+
+def _invoke_fused_moe_loop(
+    A, B, C, A_scale, B_scale, topk_weights,
+    sorted_token_ids, expert_ids, num_tokens_post_padded,
+    mul_routed_weight, top_k, config,
+    use_fp8_w8a8=False, use_int8_w8a8=False, B_bias=None,
+):
+    """Fallback per-expert torch.mm loop."""
     N = B.shape[1]
     block_size = config["BLOCK_SIZE_M"]
-
     c_flat = C.view(-1, N)
-
-    # num_valid_tokens is the number of token-expert pairs (M * top_k), which
-    # is the padding sentinel used by moe_align_block_size. The output C has
-    # shape [M, top_k, N] so c_flat has exactly M*top_k rows. Using A.shape[0]
-    # is WRONG for the first GEMM (where A is [M, K] = M rows), because it
-    # would drop every token-expert pair with flat index >= M.
     num_valid_tokens = c_flat.shape[0]
 
     if topk_weights is not None:
@@ -136,14 +311,9 @@ def invoke_fused_moe_torch(
         topk_weights_flat = None
 
     device = A.device
-
-    # expert_id -> 1-D LongTensor of output rows (flat pair indices) on device
     expert_indices = {}
 
     if sorted_token_ids is None:
-        # Naive path: expert_ids has one entry per token-expert pair. Pair p
-        # uses input token p // top_k and writes output row p directly. Build
-        # the per-expert row lists with a single CPU pass over expert_ids.
         expert_ids_cpu = expert_ids.cpu().numpy()
         expert_batches = {}
         for pair_idx in range(len(expert_ids_cpu)):
@@ -158,13 +328,11 @@ def invoke_fused_moe_torch(
             a_idx = valid_ids // max(top_k, 1)
             expert_indices[expert_id] = (valid_ids, a_idx)
     else:
-        # Aligned path: iterate blocks; each block belongs to one expert and
-        # spans `block_size` sorted pair indices (padding == num_valid_tokens).
         sorted_ids_cpu = sorted_token_ids.cpu().numpy()
         expert_ids_cpu = expert_ids.cpu().numpy()
         total_padded = int(num_tokens_post_padded.cpu().item())
 
-        expert_batches = {}  # expert_id -> list of valid_ids arrays
+        expert_batches = {}
         num_blocks = len(expert_ids_cpu)
         for block_idx in range(num_blocks):
             expert_id = int(expert_ids_cpu[block_idx])
@@ -186,7 +354,6 @@ def invoke_fused_moe_torch(
             a_idx = valid_ids // max(top_k, 1)
             expert_indices[expert_id] = (valid_ids, a_idx)
 
-    # Process each expert with pre-built indices (one torch.mm per expert)
     for expert_id, (valid_ids, a_idx) in expert_indices.items():
         a_block = A[a_idx]
         out = torch.mm(a_block, B[expert_id].t())
@@ -200,5 +367,4 @@ def invoke_fused_moe_torch(
 
         c_flat[valid_ids] = out.to(c_flat.dtype)
 
-    # Release index references
     del expert_indices
