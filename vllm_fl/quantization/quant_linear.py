@@ -1,11 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-from vllm.model_executor.kernels.linear import (
-    _POSSIBLE_INT8_KERNELS,
-    _POSSIBLE_FP8_KERNELS,
-    _POSSIBLE_KERNELS,
-    _POSSIBLE_FP8_BLOCK_KERNELS,
-)
 from vllm.platforms import PlatformEnum, current_platform
 
 
@@ -37,6 +31,12 @@ def add_oot_quant_kernel() -> None:
     (CUDA / ROCM / CPU) into PlatformEnum.OOT. Each kernel's own
     is_supported() / can_implement() will filter at runtime.
     """
+    from vllm.model_executor.kernels.linear import (
+        _POSSIBLE_INT8_KERNELS,
+        _POSSIBLE_FP8_KERNELS,
+        _POSSIBLE_KERNELS,
+        _POSSIBLE_FP8_BLOCK_KERNELS,
+    )
     source = _resolve_source_platform()
 
     if PlatformEnum.OOT not in _POSSIBLE_KERNELS:

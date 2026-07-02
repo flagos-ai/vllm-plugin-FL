@@ -223,8 +223,8 @@ from vllm.model_executor.layers.linear import (
 )
 from vllm.platforms import current_platform
 from vllm.utils.math_utils import cdiv, round_down
+from vllm.v1.attention.backend import AttentionMetadataBuilder
 from vllm.v1.attention.backends.utils import (
-    AttentionMetadataBuilder,
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
     get_per_layer_parameters,
