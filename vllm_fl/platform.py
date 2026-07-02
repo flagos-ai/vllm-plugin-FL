@@ -246,7 +246,7 @@ class PlatformFL(Platform):
         if cls.device_type == "npu":
             from vllm.config import CompilationMode
             if compilation_config.mode != CompilationMode.NONE:
-                logger.info(
+                logger.warning(
                     "Disabling torch.compile for Ascend NPU to avoid "
                     "torch_npu inductor codegen issues."
                 )
