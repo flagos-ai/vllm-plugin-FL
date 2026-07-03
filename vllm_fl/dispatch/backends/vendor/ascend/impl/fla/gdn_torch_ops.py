@@ -8,8 +8,6 @@
 #   vllm/model_executor/layers/mamba/gdn_linear_attn.py (fused_gdn_gating)
 #   vllm/model_executor/layers/fla/ops/l2norm.py
 
-import math
-
 import torch
 import torch.nn.functional as F
 
