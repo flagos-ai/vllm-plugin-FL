@@ -43,8 +43,40 @@ def _register_flagcx_connector():
             )
 
 
+def _patch_flaggems_compat():
+    """Patch FlagGems import compatibility for Hygon DCU.
+
+    1. device.py was renamed to device_finder.py upstream; inject a shim
+       so old import paths still resolve.
+    2. libentry.py imports triton.backends.hcu.compiler unconditionally;
+       pre-inject a stub so ModuleNotFoundError is avoided on non-hcu envs.
+    """
+    import sys
+    import types
+
+    # Shim: flag_gems.runtime.backend.device -> device_finder
+    try:
+        from flag_gems.runtime.backend import device_finder
+        sys.modules.setdefault(
+            "flag_gems.runtime.backend.device", device_finder
+        )
+    except ImportError:
+        pass
+
+    # Stub: triton.backends.hcu.compiler (avoid crash if hcu not installed)
+    if "triton.backends.hcu" not in sys.modules:
+        hcu_pkg = types.ModuleType("triton.backends.hcu")
+        hcu_pkg.__path__ = []
+        hcu_pkg.__package__ = "triton.backends.hcu"
+        sys.modules["triton.backends.hcu"] = hcu_pkg
+    if "triton.backends.hcu.compiler" not in sys.modules:
+        hcu_compiler = types.ModuleType("triton.backends.hcu.compiler")
+        sys.modules["triton.backends.hcu.compiler"] = hcu_compiler
+
+
 def register():
     """Register the FL platform."""
+    _patch_flaggems_compat()
     _patch_transformers_compat()
 
     # Model-specific platform patches
@@ -59,6 +91,12 @@ def register():
     if multiproc_method is None:
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
+
+    # Register OOT quant kernels (must be early, before model init)
+    try:
+        register_quant_linear()
+    except Exception as e:
+        logger.warning(f"register_quant_linear() failed (non-fatal): {e}")
 
     return "vllm_fl.platform.PlatformFL"
 
