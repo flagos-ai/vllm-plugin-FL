@@ -14,8 +14,8 @@ class TestRotaryEmbeddingFL:
     """Test RotaryEmbeddingFL class behavior."""
 
     @pytest.fixture
-    def mock_call_op(self):
-        with patch("vllm_fl.ops.rotary_embedding.call_op") as mock:
+    def mock_cached_op(self):
+        with patch("vllm_fl.ops.rotary_embedding._rotary_embedding") as mock:
             yield mock
 
     @pytest.fixture
@@ -25,7 +25,7 @@ class TestRotaryEmbeddingFL:
         ):
             yield
 
-    def test_forward_oot_dispatches_correctly(self, mock_parent_init, mock_call_op):
+    def test_forward_oot_dispatches_correctly(self, mock_parent_init, mock_cached_op):
         """Test forward_oot calls dispatch system with correct arguments."""
         from vllm_fl.ops.rotary_embedding import RotaryEmbeddingFL
 
@@ -44,7 +44,10 @@ class TestRotaryEmbeddingFL:
         layer.is_neox_style = True
         layer.cos_sin_cache = torch.randn(2048, 64)
 
-        mock_call_op.return_value = (torch.randn(4, 8, 32), torch.randn(4, 8, 32))
+        mock_cached_op.return_value = (
+            torch.randn(4, 8, 32),
+            torch.randn(4, 8, 32),
+        )
 
         positions = torch.tensor([0, 1, 2, 3])
         query = torch.randn(4, 8, 64)
@@ -52,6 +55,6 @@ class TestRotaryEmbeddingFL:
 
         layer.forward_oot(positions, query, key)
 
-        mock_call_op.assert_called_once()
-        call_args = mock_call_op.call_args
-        assert call_args[0][0] == "rotary_embedding"
+        mock_cached_op.assert_called_once()
+        call_args = mock_cached_op.call_args
+        assert call_args[0][0] is layer

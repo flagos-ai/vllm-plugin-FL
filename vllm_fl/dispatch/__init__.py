@@ -76,12 +76,15 @@ Configuration File (YAML):
             - reference
 """
 
+import os
+
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
 from .policy import (
     SelectionPolicy,
     PolicyManager,
     get_policy,
+    get_policy_epoch,
     set_global_policy,
     reset_global_policy,
     policy_context,
@@ -108,6 +111,7 @@ from .io_dumper import (
     enable_io_dump,
     disable_io_dump,
     io_dump_step,
+    is_dump_enabled,
 )
 from .io_common import list_model_layers, register_tensor_stat, tensor_stats
 
@@ -139,6 +143,94 @@ def resolve_op(op_name: str):
     return get_default_manager().resolve(op_name)
 
 
+# Fast-path opt-out: set VLLM_FL_OP_FAST_PATH=0 to disable per-op fn caching
+# in hot OOT layers and route every call back through OpManager.call.
+_OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
+
+
+class CachedOp:
+    """Resolve an op once at the call site and refresh on policy changes.
+
+    OpManager.call preserves fallback and IO-dump hooks, but it also pays the
+    manager/fallback path on every invocation. Hot layer paths can use CachedOp
+    to call the resolved implementation directly after the first lookup.
+
+    The cache is invalidated by both OpManager.policy_epoch and
+    PolicyManager.policy_epoch. The latter matters for policy_context() and
+    set_global_policy(), which can change the effective backend without
+    touching the OpManager instance.
+
+    Cache refresh is best-effort under concurrent calls. If another thread
+    changes policy at the same time, a call may observe the previous impl once
+    before the next epoch check refreshes it.
+    """
+
+    __slots__ = (
+        "_op_name",
+        "_impl",
+        "_use_manager_call",
+        "_manager_id",
+        "_manager_epoch",
+        "_policy_epoch",
+    )
+
+    def __init__(self, op_name: str) -> None:
+        self._op_name = op_name
+        self._impl = None
+        self._use_manager_call = False
+        self._manager_id = -1
+        self._manager_epoch = -1
+        self._policy_epoch = -1
+
+    def __call__(self, *args, **kwargs):
+        mgr = get_default_manager()
+
+        if not _OP_FAST_PATH_ENABLED:
+            return mgr.call(self._op_name, *args, **kwargs)
+
+        if is_dump_enabled():
+            return mgr.call(self._op_name, *args, **kwargs)
+
+        manager_epoch = mgr.policy_epoch
+        manager_id = id(mgr)
+        policy_epoch = get_policy_epoch()
+        if (
+            self._manager_id != manager_id
+            or self._manager_epoch != manager_epoch
+            or self._policy_epoch != policy_epoch
+        ):
+            self._impl = None
+            self._use_manager_call = False
+
+        if self._use_manager_call:
+            return mgr.call(self._op_name, *args, **kwargs)
+
+        impl = self._impl
+        if (
+            impl is None
+            or self._manager_id != manager_id
+            or self._manager_epoch != manager_epoch
+            or self._policy_epoch != policy_epoch
+        ):
+            impl = mgr._resolve_impl(self._op_name)
+            mgr._record_first_use(self._op_name, impl)
+            self._impl = impl
+            # resolve() can initialize the manager and bump its epoch.
+            self._manager_id = manager_id
+            self._manager_epoch = mgr.policy_epoch
+            self._policy_epoch = get_policy_epoch()
+
+        try:
+            return impl.fn(*args, **kwargs)
+        except Exception:
+            self._impl = None
+            if get_policy().strict:
+                raise
+            mgr._mark_failed_impl(self._op_name, impl.impl_id)
+            self._use_manager_call = True
+            return mgr.call(self._op_name, *args, **kwargs)
+
+
 __all__ = [
     # Types
     "OpImpl",
@@ -152,6 +244,7 @@ __all__ = [
     "SelectionPolicy",
     "PolicyManager",
     "get_policy",
+    "get_policy_epoch",
     "set_global_policy",
     "reset_global_policy",
     "policy_context",
@@ -188,4 +281,5 @@ __all__ = [
     # Convenience functions
     "call_op",
     "resolve_op",
+    "CachedOp",
 ]
