@@ -66,7 +66,6 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     so it picks native CUDA backends instead of returning (OOT, None).
     """
     from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
-    from vllm.model_executor.custom_op import op_registry_oot
 
     # Check if OOT registration is enabled
     if not is_oot_enabled():
