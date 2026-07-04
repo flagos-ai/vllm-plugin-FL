@@ -13,66 +13,10 @@ from typing import Optional
 
 import torch
 from einops import rearrange
-from vllm.model_executor.layers.fla.ops.utils import SUPPRESS_LEVEL
 
-from .chunk_delta_h import chunk_gated_delta_rule_fwd_h
-from .chunk_o import chunk_fwd_o
-from .chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
-from .cumsum import chunk_local_cumsum
 from .l2norm import l2norm_fwd
-from .solve_tril import solve_tril
 from .utils import input_guard
-from .wy_fast import recompute_w_u_fwd
-
-
-def chunk_gated_delta_rule_fwd(
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    g: torch.Tensor,
-    beta: torch.Tensor,
-    scale: float,
-    initial_state: torch.Tensor,
-    output_final_state: bool,
-    cu_seqlens: Optional[torch.LongTensor] = None,
-):
-    g = chunk_local_cumsum(g, chunk_size=64, cu_seqlens=cu_seqlens)
-    # obtain WY representation. u is actually the new v.
-    A = chunk_scaled_dot_kkt_fwd(
-        k=k, beta=beta, g_cumsum=g, cu_seqlens=cu_seqlens, output_dtype=torch.float32
-    )
-    A = solve_tril(A=A, cu_seqlens=cu_seqlens, output_dtype=k.dtype)
-    w, u = recompute_w_u_fwd(
-        k=k,
-        v=v,
-        beta=beta,
-        A=A,
-        g_cumsum=g,
-        cu_seqlens=cu_seqlens,
-    )
-    h, v_new, final_state = chunk_gated_delta_rule_fwd_h(
-        k=k,
-        w=w,
-        u=u,
-        g=g,
-        initial_state=initial_state,
-        output_final_state=output_final_state,
-        cu_seqlens=cu_seqlens,
-    )
-    o = chunk_fwd_o(
-        q=q,
-        k=k,
-        v=v_new,
-        h=h,
-        g=g,
-        scale=scale,
-        cu_seqlens=cu_seqlens,
-    )
-    if SUPPRESS_LEVEL < 3:
-        return g, o, A, final_state, None, None, None
-    elif SUPPRESS_LEVEL >= 3:
-        return g, o, A, final_state, w, h, v_new
-
+from flag_gems.runtime.backend._ascend.fla import chunk_gated_delta_rule_fwd
 
 class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
     @staticmethod

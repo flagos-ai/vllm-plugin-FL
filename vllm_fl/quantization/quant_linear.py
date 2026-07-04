@@ -2,8 +2,12 @@
 # All imports are lazy (inside functions) to avoid circular import
 # during early plugin registration (vllm_fl.register()).
 
+<<<<<<< HEAD
 import logging
 logger = logging.getLogger(__name__)
+=======
+from vllm.platforms import PlatformEnum, current_platform
+>>>>>>> upstream/main
 
 
 def _patch_triton_int8_is_supported() -> None:
@@ -48,6 +52,7 @@ def add_oot_quant_kernel() -> None:
         _POSSIBLE_KERNELS,
         _POSSIBLE_FP8_BLOCK_KERNELS,
     )
+<<<<<<< HEAD
     from vllm.platforms import PlatformEnum, current_platform
 
     def _resolve_source_platform() -> PlatformEnum:
@@ -59,6 +64,8 @@ def add_oot_quant_kernel() -> None:
             return PlatformEnum.CPU
         return PlatformEnum.CUDA  # fallback
 
+=======
+>>>>>>> upstream/main
     source = _resolve_source_platform()
 
     if PlatformEnum.OOT not in _POSSIBLE_KERNELS:

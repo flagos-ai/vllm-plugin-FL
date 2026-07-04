@@ -40,6 +40,7 @@ _R = TypeVar("_R")
 dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
+    "musa": "mccl",
 }
 
 
@@ -69,7 +70,7 @@ class PlatformFL(Platform):
         """Stateless version of [torch.cuda.is_available][]."""
         if self.vendor_name == "iluvatar":
             return False
-        if self.vendor_name == "musa":
+        if self.device_type == "musa":
             return True
         if self.vendor_name == "hygon":
             return False
@@ -77,8 +78,6 @@ class PlatformFL(Platform):
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "musa":
-            return True
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
     def is_musa(self) -> bool:
@@ -130,8 +129,6 @@ class PlatformFL(Platform):
     def import_kernels(cls) -> None:
         """Import device-specific kernels."""
         logger.info(f"current vendor_name is: {cls.vendor_name}")
-        # Always load base vLLM C extensions
-        super().import_kernels()
 
         if cls.vendor_name == "metax":
             try:
@@ -148,6 +145,15 @@ class PlatformFL(Platform):
                 import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
             except Exception as e:
                 logger.warning(f"Failed to import maca patches: {e}")
+        else:
+            super().import_kernels()
+
+        if cls.device_type == "musa":
+            try:
+                from vllm_fl.dispatch.backends.vendor.musa.patch import apply_musa_patches
+                apply_musa_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply MUSA patches: {e}")
 
     @classmethod
     def import_ir_kernels(cls) -> None:
@@ -173,6 +179,10 @@ class PlatformFL(Platform):
                 logger.info("Setting kv cache block size to 64 for MUSA.")
             else:
                 cache_config.block_size = 16
+        if cls.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patch import refresh_block_size
+
+            refresh_block_size(vllm_config)
 
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
@@ -195,6 +205,19 @@ class PlatformFL(Platform):
         compilation_config = vllm_config.compilation_config
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
+
+        if (
+            cls.device_type == "musa"
+            and compilation_config.cudagraph_mode.has_full_cudagraphs()
+        ):
+            logger.info(
+                "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
+                "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
+                "is not yet supported by torch_musa. PIECEWISE graphs still "
+                "provide graph capture benefits for non-TP-communication regions.",
+                compilation_config.cudagraph_mode,
+            )
+            compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
             parallel_config.data_parallel_size > 1
@@ -310,7 +333,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar"]:
             return True
         return False
 
@@ -391,9 +414,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        if cls.vendor_name == "nvidia":
-            return True
-        return False
+        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:
@@ -410,10 +431,10 @@ class PlatformFL(Platform):
             return DeviceCapability(major=major, minor=minor)
         # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
-            return None        
+            return None
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
-    
+
     @classmethod
     def support_deep_gemm(cls) -> bool:
         """Currently, only Hopper and Blackwell GPUs are supported."""

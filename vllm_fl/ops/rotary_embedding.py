@@ -3,7 +3,9 @@
 from typing import Optional
 import torch
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
-from vllm_fl.dispatch import call_op
+from vllm_fl.dispatch import CachedOp
+
+_rotary_embedding = CachedOp("rotary_embedding")
 
 
 class RotaryEmbeddingFL(RotaryEmbedding):
@@ -44,8 +46,7 @@ class RotaryEmbeddingFL(RotaryEmbedding):
 
         cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
 
-        q_embed, k_embed = call_op(
-            "rotary_embedding",
+        q_embed, k_embed = _rotary_embedding(
             self,
             query_rot,
             key_rot,

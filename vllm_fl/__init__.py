@@ -2,6 +2,20 @@
 
 import os
 import logging
+import sys
+
+# torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
+# vllm.ir.tolerances references it at module level, so we inject a sentinel
+# before any vllm.ir import can happen.
+if "torch" in sys.modules:
+    _torch = sys.modules["torch"]
+    if not hasattr(_torch, "float4_e2m1fn_x2"):
+        _torch.float4_e2m1fn_x2 = _torch.uint8
+else:
+    import torch as _torch
+    if not hasattr(_torch, "float4_e2m1fn_x2"):
+        _torch.float4_e2m1fn_x2 = _torch.uint8
+del _torch
 
 from vllm_fl.utils import get_op_config as _get_op_config
 
@@ -43,6 +57,7 @@ def _register_flagcx_connector():
             )
 
 
+<<<<<<< HEAD
 def _patch_flaggems_compat():
     """Patch FlagGems import compatibility for Hygon DCU.
 
@@ -72,11 +87,52 @@ def _patch_flaggems_compat():
     if "triton.backends.hcu.compiler" not in sys.modules:
         hcu_compiler = types.ModuleType("triton.backends.hcu.compiler")
         sys.modules["triton.backends.hcu.compiler"] = hcu_compiler
+=======
+def _patch_flash_attn_import():
+    """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
+    import sys
+    if "vllm.vllm_flash_attn" in sys.modules:
+        return
+    try:
+        import vllm.vllm_flash_attn  # noqa: F401
+    except ImportError:
+        import types
+        stub = types.ModuleType("vllm.vllm_flash_attn")
+        stub.FA2_AVAILABLE = False
+        stub.FA3_AVAILABLE = False
+        stub.fa_version_unsupported_reason = lambda *a, **kw: "flash_attn C extensions not available"
+        stub.flash_attn_varlen_func = None
+        stub.get_scheduler_metadata = None
+        stub.is_fa_version_supported = lambda *a, **kw: False
+        sys.modules["vllm.vllm_flash_attn"] = stub
+
+
+def _patch_custom_ops():
+    """Register torch.ops._C op schemas when vllm._C is unavailable."""
+    try:
+        import vllm._C  # noqa: F401
+        return
+    except (ImportError, OSError):
+        pass
+
+    try:
+        import vllm_fl._C  # noqa: F401
+    except (ImportError, OSError) as e:
+        logger.debug("Failed to import vllm_fl._C: %s", e)
+
+    from vllm_fl.ops._C_ops_registry import register_op_schemas
+    register_op_schemas()
+>>>>>>> upstream/main
 
 
 def register():
     """Register the FL platform."""
+<<<<<<< HEAD
     _patch_flaggems_compat()
+=======
+    _patch_custom_ops()
+    _patch_flash_attn_import()
+>>>>>>> upstream/main
     _patch_transformers_compat()
 
     # Model-specific platform patches
@@ -101,10 +157,22 @@ def register():
     return "vllm_fl.platform.PlatformFL"
 
 def register_quant_linear():
+    from vllm.platforms import current_platform
+    # vllm.model_executor.kernels.linear triggers cutlass_scaled_mm_supports_fp8
+    # at module level, which requires torch.ops._C — not available on MUSA.
+    if current_platform.device_type == "musa":
+        return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
     add_oot_quant_kernel()
 
 def register_router():
+    from vllm.platforms import current_platform
+    # fused_moe import chain triggers cutlass_scaled_mm_supports_fp8 on MUSA
+    if current_platform.device_type == "musa":
+        return
+    from vllm_fl.utils import is_oot_enabled
+    if not is_oot_enabled():
+        return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 

@@ -82,6 +82,15 @@ def register_builtins(registry) -> None:
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),
+        # invoke fused moe triton kernel
+        OpImpl(
+            op_name="invoke_fused_moe_triton_kernel",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
     ]
 
     registry.register_many(impls)

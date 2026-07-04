@@ -1,33 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # 2026 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
-# This file is a pure Python wrapper for the NCCL library.
-# The main purpose is to use NCCL combined with CUDA graph.
-# Before writing this script, we tried the following approach:
-# 1. We tried to use `cupy`, it calls NCCL correctly, but `cupy` itself
-#  often gets stuck when initializing the NCCL communicator.
-# 2. We tried to use `torch.distributed`, but `torch.distributed.all_reduce`
-#  contains many other potential cuda APIs, that are not allowed during
-#  capturing the CUDA graph. For further details, please check
-# https://discuss.pytorch.org/t/pytorch-cudagraph-with-nccl-operation-failed/ .
 #
-# Another rejected idea is to write a C/C++ binding for NCCL. It is usually
-# doable, but we often encounter issues related with nccl versions, and need
-# to switch between different versions of NCCL. See
-# https://github.com/NVIDIA/nccl/issues/1234 for more details.
-# A C/C++ binding is not flexible enough to handle this. It requires
-# recompilation of the code every time we want to switch between different
-# versions. This current implementation, with a **pure** Python wrapper, is
-# more flexible. We can easily switch between different versions of NCCL by
-# changing the environment variable `VLLM_NCCL_SO_PATH`, or the `so_file`
-# variable in the code.
-
-
-# -------------------------------------------------------
-# Note: This patch is for compatibility on Metax platform,
-#       replaced some libraries' interface with maca's
-# -------------------------------------------------------
+# MetaX compatibility patch: replace NCCLLibrary with MCCLLibrary (maca backend)
+# and patch CudaCommunicator.all_reduce to use torch.distributed for torch.compile
+# compatibility (ctypes paths are not traceable by TorchDynamo).
 
 import ctypes
 import platform
@@ -475,3 +452,19 @@ from vllm.distributed.device_communicators import pynccl, pynccl_wrapper
 
 pynccl.NCCLLibrary = MCCLLibrary
 pynccl_wrapper.NCCLLibrary = MCCLLibrary
+
+
+# Patch: pynccl uses ctypes to pass tensor pointers to MCCL; TorchDynamo
+# cannot trace ctypes calls. Replace CudaCommunicator.all_reduce with a
+# torch.distributed call which Dynamo can trace natively.
+import torch.distributed as dist
+from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
+
+
+def _compile_friendly_all_reduce(self, input_):
+    """Use torch.distributed all_reduce which Dynamo can trace."""
+    dist.all_reduce(input_, op=dist.ReduceOp.SUM)
+    return input_
+
+
+CudaCommunicator.all_reduce = _compile_friendly_all_reduce

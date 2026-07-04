@@ -2,23 +2,35 @@
 # 2026 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import logging
-
-logger = logging.getLogger(__name__)
+from vllm.v1.attention.backends.fa_utils import logger
 from vllm.platforms import current_platform
 
 
 if current_platform.is_out_of_tree():
     from vllm import _custom_ops as ops
-
-    get_scheduler_metadata = None
-    reshape_and_cache_flash = ops.reshape_and_cache_flash
+    from vllm.logger import init_logger as _init_logger
     from flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache  # noqa: F401
 
-    get_scheduler_metadata = None
+    _logger = _init_logger(__name__)
+
+    class _dummy_ops:
+        @staticmethod
+        def get_scheduler_metadata(*args, **kwargs) -> None:
+            _logger.warning_once(
+                "get_scheduler_metadata is not implemented for maca ops, returning None."
+            )
+            return None
+
+    get_scheduler_metadata = _dummy_ops.get_scheduler_metadata
+    reshape_and_cache_flash = ops.reshape_and_cache_flash
 
 
-def get_flash_attn_version(requires_alibi: bool = False) -> int | None:
+def get_flash_attn_version(
+    requires_alibi: bool = False,
+    head_size: int | None = None,
+    head_size_v: int | None = None,
+    has_sinks: bool = False,
+) -> int | None:
     logger.info_once(
         "Using Maca version of flash attention, which only supports version 2."
     )
@@ -26,13 +38,21 @@ def get_flash_attn_version(requires_alibi: bool = False) -> int | None:
     # Note: In maca this need to be None since
     # metax flash_attn api does not have parameter
     # for `fa_version`.
-    return None
+    return 2
+
+
+def is_fa_version_supported(fa_version: int) -> bool:
+    return fa_version == 2
 
 
 def flash_attn_supports_fp8() -> bool:
     logger.info_once(
         "Using Maca version of flash attention, which does not support FP8"
     )
+    return False
+
+
+def flash_attn_supports_quant_query_input() -> bool:
     return False
 
 

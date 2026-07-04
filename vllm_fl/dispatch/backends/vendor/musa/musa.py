@@ -121,19 +121,23 @@ class MusaBackend(Backend):
             inplace=inplace,
         )
 
-    def attention_backend(self, use_mla: bool = False) -> str:
+    def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for Musa.
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
+            use_sparse: Whether to use Deepseek Sparse Attention (DSA)
 
         Returns:
             Fully qualified class path string
         """
-        from vllm.attention.backends.registry import AttentionBackendEnum
+        from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+        if use_sparse and not use_mla:
+            raise ValueError("use_sparse=True requires use_mla=True.")
 
         if use_mla:
             return AttentionBackendEnum.TRITON_MLA.get_path()
 
-        return AttentionBackendEnum.FLASH_ATTN.get_path()
+        return AttentionBackendEnum.TRITON_ATTN.get_path()
