@@ -128,6 +128,9 @@ def register_router():
     # fused_moe import chain triggers cutlass_scaled_mm_supports_fp8 on MUSA
     if current_platform.device_type == "musa":
         return
+    from vllm_fl.utils import is_oot_enabled
+    if not is_oot_enabled():
+        return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 
