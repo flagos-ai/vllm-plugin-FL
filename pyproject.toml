@@ -52,7 +52,7 @@ test = [
     "requests",
     "openai",
     "decorator",
-    "vllm[audio]==0.20.2",
+    "vllm[audio]==0.24.0",
     "modelscope>=1.18.1",
 ]
 
