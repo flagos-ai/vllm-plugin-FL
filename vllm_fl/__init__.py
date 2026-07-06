@@ -137,6 +137,20 @@ def register_router():
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 
+
+
+# Kunlunxin: prevent torch.xpu.get_device_name crash in FLA utils
+# Must run before any FLA module import (see patch_fla_utils.py)
+try:
+    from vllm_fl.dispatch.config.utils import get_platform_name
+    if get_platform_name() == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
+            ensure_fla_compat,
+        )
+        ensure_fla_compat()
+except Exception:
+    pass
+
 def register_model():
     """Register FL-specific models not yet upstream."""
     from vllm import ModelRegistry

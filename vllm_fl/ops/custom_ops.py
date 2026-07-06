@@ -181,3 +181,9 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         if getattr(current_platform, "vendor_name", None) == "gcu":
             from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
             apply_gcu_patches()
+        
+        # Apply Kunlunxin monkey-patches if running on Kunlunxin hardware.
+        from vllm_fl.dispatch.config.utils import get_platform_name
+        if get_platform_name() == "kunlunxin":
+            from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import apply_kunlunxin_patches
+            apply_kunlunxin_patches()
