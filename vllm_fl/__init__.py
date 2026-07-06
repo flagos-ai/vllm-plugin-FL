@@ -57,7 +57,6 @@ def _register_flagcx_connector():
             )
 
 
-<<<<<<< HEAD
 def _patch_flaggems_compat():
     """Patch FlagGems import compatibility for Hygon DCU.
 
@@ -87,7 +86,8 @@ def _patch_flaggems_compat():
     if "triton.backends.hcu.compiler" not in sys.modules:
         hcu_compiler = types.ModuleType("triton.backends.hcu.compiler")
         sys.modules["triton.backends.hcu.compiler"] = hcu_compiler
-=======
+
+
 def _patch_flash_attn_import():
     """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
     import sys
@@ -122,17 +122,13 @@ def _patch_custom_ops():
 
     from vllm_fl.ops._C_ops_registry import register_op_schemas
     register_op_schemas()
->>>>>>> upstream/main
 
 
 def register():
     """Register the FL platform."""
-<<<<<<< HEAD
     _patch_flaggems_compat()
-=======
     _patch_custom_ops()
     _patch_flash_attn_import()
->>>>>>> upstream/main
     _patch_transformers_compat()
 
     # Model-specific platform patches
