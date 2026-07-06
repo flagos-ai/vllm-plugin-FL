@@ -19,7 +19,7 @@
 import torch
 from einops import rearrange
 
-from vllm.model_executor.layers.mamba.gdn_linear_attn import GatedDeltaNetAttention
+from vllm.model_executor.layers.mamba.gdn.base import GatedDeltaNetAttention
 from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
 from vllm.config import VllmConfig
 
