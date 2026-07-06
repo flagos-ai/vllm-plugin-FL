@@ -19,7 +19,7 @@
 import torch
 from einops import rearrange
 
-from vllm.model_executor.layers.mamba.gdn_linear_attn import GatedDeltaNetAttention
+from vllm.model_executor.layers.mamba.gdn.base import GatedDeltaNetAttention
 from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
 from vllm.config import VllmConfig
 
@@ -112,3 +112,4 @@ class MacaGatedDeltaNetAttention(GatedDeltaNetAttention):
         core_attn_out = core_attn_out.reshape(z_shape_og)
         core_attn_out = rearrange(core_attn_out, "... h d -> ... (h d)")
         output[:num_tokens], _ = self.out_proj(core_attn_out)
+

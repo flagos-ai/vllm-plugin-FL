@@ -7,7 +7,7 @@ import torch
 import vllm.envs as envs
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
 from vllm._aiter_ops import rocm_aiter_ops
-from vllm.config.kernel import MoEBackend
+
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEConfig,
@@ -16,23 +16,19 @@ from vllm.platforms import current_platform
 from vllm.utils.flashinfer import has_flashinfer_cutlass_fused_moe
 from vllm.model_executor.layers.fused_moe.oracle.unquantized import UnquantizedMoeBackend, map_unquantized_backend, backend_to_kernel_cls
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
-from vllm.model_executor.layers.fused_moe.fused_moe import TritonExperts, try_get_optimal_moe_config
+from vllm.model_executor.layers.fused_moe.experts.triton_moe import TritonExperts
+from vllm.model_executor.layers.fused_moe.fused_moe import try_get_optimal_moe_config
 from vllm.model_executor.layers.fused_moe.utils import _resize_cache, moe_kernel_quantize_input
+import os
 from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
     FlashinferMoeBackend,
-    get_flashinfer_moe_backend,
 )
 from vllm.triton_utils import tl, triton
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.dispatch import call_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import use_flaggems
 
-_moe_align_block_size = CachedOp("moe_align_block_size")
-_invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
-_moe_sum = CachedOp("moe_sum")
-
 logger = init_logger(__name__)
-
 
 def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBackend]:
     """
@@ -163,7 +159,10 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
 
         elif envs.is_set("VLLM_FLASHINFER_MOE_BACKEND"):
             # If user is explicit about backend, validate it.
-            fi_backend = get_flashinfer_moe_backend()
+            # get_flashinfer_moe_backend() was removed in vllm 0.24.0; inline it.
+            fi_backend = FlashinferMoeBackend(
+                os.environ["VLLM_FLASHINFER_MOE_BACKEND"]
+            )
             if fi_backend == FlashinferMoeBackend.CUTLASS:
                 backend = UnquantizedMoeBackend.FLASHINFER_CUTLASS
             elif fi_backend == FlashinferMoeBackend.TENSORRT_LLM:
@@ -260,7 +259,7 @@ def _prepare_expert_assignment(
             ),
         )
 
-    return _moe_align_block_size(
+    return call_op("moe_align_block_size",
         topk_ids,
         config["BLOCK_SIZE_M"],
         global_num_experts,
@@ -391,7 +390,7 @@ class TritonExpertsFL(TritonExperts):
             )
         )
 
-        _invoke_fused_moe_triton_kernel(
+        call_op("invoke_fused_moe_triton_kernel",
             hidden_states,
             w1,
             intermediate_cache1,
@@ -456,7 +455,7 @@ class TritonExpertsFL(TritonExperts):
             quantization_emulation=self.quantization_emulation,
         )
 
-        _invoke_fused_moe_triton_kernel(
+        call_op("invoke_fused_moe_triton_kernel",
             qintermediate_cache2,
             w2,
             intermediate_cache3,
@@ -502,4 +501,4 @@ class TritonExpertsFL(TritonExperts):
         self.moe_sum(intermediate_cache3, output)
 
     def moe_sum(self, input: torch.Tensor, output: torch.Tensor) -> None:
-        _moe_sum(input, output)
+        call_op("moe_sum", input, output)

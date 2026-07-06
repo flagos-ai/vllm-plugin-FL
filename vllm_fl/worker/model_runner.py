@@ -237,6 +237,12 @@ from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.v1.worker.gpu.pool.late_interaction_runner import LateInteractionRunner
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+# vllm 0.24.0 compat: InputBatch does not accept pin_memory/is_spec_decode
+_InputBatchBase = InputBatch
+class InputBatch(_InputBatchBase):  # type: ignore[no-redef]
+    def __init__(self, *args, pin_memory=None, is_spec_decode=False, **kwargs):
+        super().__init__(*args, **kwargs)
+
 from vllm.v1.worker.gpu_ubatch_wrapper import UBatchWrapper
 from vllm.v1.worker.kv_connector_model_runner_mixin import KVConnectorModelRunnerMixin
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
@@ -6801,7 +6807,7 @@ class ModelRunnerFL(
 
         # Try creating KV caches optimized for kv-connector transfers
         cache_dtype = self.cache_config.cache_dtype
-        if self.use_uniform_kv_cache(self.attn_groups, cache_dtype):
+        if self.use_uniform_kv_cache(self.attn_groups):  # vllm 0.24.0: cache_dtype arg removed
             kv_caches, cross_layers_kv_cache, attn_backend = (
                 self.allocate_uniform_kv_caches(
                     kv_cache_config,

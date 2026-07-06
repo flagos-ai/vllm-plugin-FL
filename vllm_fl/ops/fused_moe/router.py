@@ -5,7 +5,7 @@ import torch
 from functools import partial
 
 from vllm._aiter_ops import rocm_aiter_ops
-from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
+from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
     rocm_aiter_grouped_topk,
 )
 from vllm.model_executor.layers.fused_moe.router.fused_topk_router import (
@@ -18,10 +18,7 @@ from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
     FusedTopKBiasRouter,
     fused_topk_bias
 )
-from vllm_fl.dispatch import CachedOp
-
-_topk_softmax = CachedOp("topk_softmax")
-_grouped_topk = CachedOp("grouped_topk")
+from vllm_fl.dispatch import call_op
 
 def fused_topk(
     hidden_states: torch.Tensor,
@@ -48,7 +45,8 @@ def fused_topk(
     )
 
     # topk_weights, topk_ids = vllm_topk_softmax(
-    topk_weights, topk_ids = _topk_softmax(
+    topk_weights, topk_ids = call_op(
+        "topk_softmax",
         topk_weights,
         topk_ids,
         token_expert_indices,
@@ -97,7 +95,8 @@ def _fl_grouped_topk(
 
     if e_score_correction_bias is not None:
         if scoring_func == "sigmoid":
-            topk_values, topk_indices = _grouped_topk(
+            topk_values, topk_indices = call_op(
+                "grouped_topk",
                 gating_output,
                 num_expert_group,
                 topk_group,
@@ -109,7 +108,8 @@ def _fl_grouped_topk(
             )
         elif scoring_func == "softmax":
             scores = torch.softmax(gating_output, dim=-1)
-            topk_values, topk_indices = _grouped_topk(
+            topk_values, topk_indices = call_op(
+                "grouped_topk",
                 scores,
                 num_expert_group,
                 topk_group,

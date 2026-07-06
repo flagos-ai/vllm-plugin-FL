@@ -18,11 +18,11 @@ import torch
 import zmq
 import zmq.asyncio
 
-from vllm.attention.backends.abstract import AttentionMetadata
+from vllm.v1.attention.backend import AttentionMetadata
 from vllm.utils.torch_utils import current_stream
-from vllm.attention.selector import get_attn_backend
+from vllm.v1.attention.selector import get_attn_backend
 from vllm.config import VllmConfig
-from vllm.distributed.kv_transfer.kv_connector.utils import TpKVTopology
+from vllm.distributed.kv_transfer.kv_connector.utils import TransferTopology
 from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1,
     KVConnectorMetadata,
@@ -478,18 +478,21 @@ class FlagCXConnectorWorker:
         self.backend_name = backend.get_name()
         self.kv_cache_layout = get_kv_cache_layout()
 
-        self._tp_size: dict[EngineId, int] = {self.engine_id: self.world_size}
-        self._block_size: dict[EngineId, int] = {
-            self.engine_id: self.block_size
-        }
-        self.kv_topo = TpKVTopology(
+        # TODO(flagcx): TpKVTopology was removed in vllm 0.24.0 and replaced by
+        # TransferTopology with a different API (dataclass, add_engine() for
+        # remote peers). The migration requires adapting the remote-engine
+        # registration logic. For now we construct TransferTopology with local
+        # info only; multi-engine disaggregated KV routing may need further
+        # work once TransferTopology.add_engine() calls are wired in.
+        self.kv_topo = TransferTopology(
             tp_rank=self.tp_rank,
+            tp_size=self.world_size,
+            block_size=self.block_size,
             engine_id=self.engine_id,
-            remote_tp_size=self._tp_size,
-            remote_block_size=self._block_size,
             is_mla=self.use_mla,
+            is_mamba=False,
             total_num_kv_heads=self.model_config.get_total_num_kv_heads(),
-            attn_backend=backend,
+            attn_backends=[backend],
         )
 
         self.zmq_ctx = zmq.Context()
