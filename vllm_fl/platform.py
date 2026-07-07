@@ -221,6 +221,21 @@ class PlatformFL(Platform):
                 compilation_config.mode = CompilationMode.NONE
                 compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
+        # Ascend NPU: force float32 SSM state cache for GDN linear attention.
+        # The pure-PyTorch recurrence accumulates state in float32 but writes
+        # back to initial_state.dtype each step. If the cache is bf16, the
+        # round-trip truncation compounds across hundreds of tokens, degrading
+        # output quality (especially at temperature > 0). Forcing float32 cache
+        # eliminates this precision loss with negligible memory impact (the SSM
+        # state is small relative to the KV cache).
+        if cls.device_type == "npu":
+            if cache_config and cache_config.mamba_ssm_cache_dtype is None:
+                cache_config.mamba_ssm_cache_dtype = "float32"
+                logger.info(
+                    "Forcing mamba_ssm_cache_dtype to float32 for Ascend NPU "
+                    "to avoid recurrence precision loss in GDN decode."
+                )
+
         if (
             cls.device_type == "musa"
             and compilation_config.cudagraph_mode.has_full_cudagraphs()

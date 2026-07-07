@@ -100,16 +100,14 @@ def invoke_fused_moe_torch(
     use_int8_w8a8: bool = False,
     B_bias: torch.Tensor | None = None,
 ):
-    """Ascend NPU fused MoE GEMM.
+    """Ascend NPU fused MoE GEMM using per-expert torch.mm loop.
 
-    Uses per-expert torch.mm loop. The npu_grouped_matmul fast path is
-    available via _npu_grouped_matmul_fused_experts (fused_moe.py) which
-    uses npu_moe_init_routing_v2 for correct expert-token alignment.
-
-    The function handles two dispatch paths:
-    * aligned path (prefill): sorted_token_ids + expert_ids from moe_align
-    * naive path (decode): sorted_token_ids=None, expert_ids = topk_ids.view(-1)
+    npu_grouped_matmul is disabled — it crashes aicore on MoE models like
+    Qwen3.6-35B-A3B (error 507015: aicore execution abnormal). The torch.mm
+    loop is slightly slower but reliable.
     """
+    # Use per-expert torch.mm loop — more reliable on Ascend NPU than
+    # npu_grouped_matmul which can crash aicore on certain model shapes.
     _invoke_fused_moe_loop(
         A, B, C, A_scale, B_scale, topk_weights,
         sorted_token_ids, expert_ids, num_tokens_post_padded,
