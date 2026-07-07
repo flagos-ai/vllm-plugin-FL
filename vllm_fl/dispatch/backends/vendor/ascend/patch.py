@@ -23,6 +23,7 @@ def apply_ascend_patches():
     patch_gdn_warmup()
     patch_gdn_triton_ops()
     patch_gdn_state_gather()
+    patch_gdn_state_dtype_float32()
     patch_vit_pos_embed()
 
 def patch_mamba_config():
@@ -392,8 +393,8 @@ def patch_gdn_triton_ops():
                     bt = beta_vals[t_flat].float()
 
                     if use_qk_l2norm_in_kernel:
-                        qt = qt / (torch.norm(qt, dim=-1, keepdim=True) + 1e-6)
-                        kt = kt / (torch.norm(kt, dim=-1, keepdim=True) + 1e-6)
+                        qt = qt * torch.rsqrt(torch.sum(qt * qt, dim=-1, keepdim=True) + 1e-6)
+                        kt = kt * torch.rsqrt(torch.sum(kt * kt, dim=-1, keepdim=True) + 1e-6)
                     qt = qt * scale
 
                     # h *= exp(g)
@@ -480,8 +481,8 @@ def patch_gdn_triton_ops():
                 b_v = mixed_qkv[i_n, v_start:v_start + HV * V_dim].view(HV, V_dim).float()
 
                 if use_qk_l2norm_in_kernel:
-                    b_q = b_q / (torch.norm(b_q, dim=-1, keepdim=True) + 1e-6)
-                    b_k = b_k / (torch.norm(b_k, dim=-1, keepdim=True) + 1e-6)
+                    b_q = b_q * torch.rsqrt(torch.sum(b_q * b_q, dim=-1, keepdim=True) + 1e-6)
+                    b_k = b_k * torch.rsqrt(torch.sum(b_k * b_k, dim=-1, keepdim=True) + 1e-6)
                 b_q = b_q * scale
 
                 # Expand to HV heads
@@ -638,3 +639,39 @@ def patch_vit_pos_embed():
             logger.info("Forced native ViT pos-embed interpolation for Ascend.")
     except Exception as e:
         logger.warning("Failed to patch ViT pos-embed interpolation: %s", e)
+
+
+def patch_gdn_state_dtype_float32():
+    """Force GDN SSM state to float32 to prevent precision degradation.
+
+    On Ascend NPU the SSM recurrent state is stored in bfloat16 by default
+    (when --mamba-ssm-cache-dtype is "auto"). Every decode step reads the
+    state to float32 for computation, then truncates back to bfloat16.
+    With bfloat16's 7-bit mantissa, the accumulated quantization error over
+    hundreds of decode steps corrupts the hidden state, causing:
+      - Garbled / repetitive output on long generations
+      - Degraded quality especially with temperature > 0 (where softmax
+        amplifies small logit errors into wrong token probabilities)
+
+    Fix: override get_state_dtype() to always return float32 for the SSM
+    state tensor, so no truncation occurs between decode steps.
+    """
+    try:
+        import vllm.model_executor.layers.mamba.gdn_linear_attn as _gdn
+
+        cls = _gdn.GatedDeltaNetAttention
+        _orig_get_state_dtype = cls.get_state_dtype
+
+        def _get_state_dtype_fp32(self):
+            conv_dtype, _ssm_dtype = _orig_get_state_dtype(self)
+            # Keep conv_state in original dtype (small, no accumulation issue)
+            # Force SSM state to float32 to avoid bfloat16 truncation
+            return (conv_dtype, torch.float32)
+
+        cls.get_state_dtype = _get_state_dtype_fp32
+        logger.info(
+            "Patched GDN get_state_dtype to use float32 SSM state "
+            "(prevents bfloat16 precision degradation on long sequences)."
+        )
+    except Exception as e:
+        logger.warning("Failed to patch GDN state dtype: %s", e)
