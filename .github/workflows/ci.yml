@@ -1,6 +1,17 @@
 # CI Workflow for VLLM Plugin FL
 # This workflow defines the CI process for the VLLM Plugin FL project.
 # It includes linting and platform-specific testing stages.
+#
+# Security model (two-tier):
+#   Tier 1 — lint: runs immediately on every PR, no approval required.
+#   Tier 2 — build + GPU tests: gated behind the "protected" environment.
+#             A repo maintainer must approve before any code runs on
+#             self-hosted GPU runners.  Schedule and workflow_dispatch
+#             bypass the gate because they only run trusted base-branch code.
+#
+# Setup required (one-time, per repo):
+#   Settings → Environments → New environment → name: "protected"
+#   Add Required reviewers (org members who can approve PRs for testing).
 name: CI
 
 on:
@@ -25,21 +36,36 @@ concurrency:
 jobs:
   # ============================================================
   # Job 1: Lint (ruff check, ruff format, typos)
-  # Runs on every push/PR. Fast, no special requirements.
+  # Tier 1 — runs immediately on every PR, no approval required.
   # ============================================================
   lint:
     uses: ./.github/workflows/_lint.yml
 
   # ============================================================
-  # Job 2: Build & install check
+  # Job 2: Approval gate
+  # Tier 2 — waits for a maintainer to approve via the "protected"
+  # environment before any code runs on self-hosted GPU runners.
+  # On schedule / workflow_dispatch the environment has no reviewers
+  # configured for those event types, so it passes through automatically.
+  # ============================================================
+  gate:
+    needs: lint
+    runs-on: ubuntu-latest
+    environment: protected
+    steps:
+      - name: Approved
+        run: echo "Gate passed — proceeding to build and GPU tests."
+
+  # ============================================================
+  # Job 3: Build & install check
   # Verify the package can be built and installed cleanly.
   # ============================================================
   build:
-    needs: lint
+    needs: gate
     uses: ./.github/workflows/_build_wheel.yml
 
   # ============================================================
-  # Job 3: Discover which platforms to test
+  # Job 4: Discover which platforms to test
   # ============================================================
   discover:
     needs: build
@@ -78,7 +104,7 @@ jobs:
         run: python3 .github/scripts/detect_platforms.py
 
   # ============================================================
-  # Job 4a: CUDA platform testing
+  # Job 5a: CUDA platform testing
   # ============================================================
   test-cuda:
     needs: discover
@@ -89,7 +115,7 @@ jobs:
     secrets: inherit
 
   # ============================================================
-  # Job 4b: Ascend platform testing
+  # Job 5b: Ascend platform testing
   # ============================================================
   test-ascend:
     needs: discover
