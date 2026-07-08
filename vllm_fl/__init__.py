@@ -103,6 +103,11 @@ def register():
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
     glm5_platform()
 
+    # Qwen3.6 hybrid (GDN) + Prefill Context Parallel.  Self-gates on
+    # prefill_context_parallel_size > 1, so this is a no-op without PCP.
+    from vllm_fl.patches.qwen36_pcp import apply_platform_patches as qwen36_pcp_platform
+    qwen36_pcp_platform()
+
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
     # subprocesses.
