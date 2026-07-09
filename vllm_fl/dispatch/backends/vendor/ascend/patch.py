@@ -447,8 +447,15 @@ def patch_gdn_triton_ops():
             initial_state, out, ssm_state_indices,
             use_qk_l2norm_in_kernel=False,
         ):
-            """Pure-PyTorch packed decode for GDN recurrence."""
-            import sys
+            """Pure-PyTorch packed decode for GDN recurrence.
+
+            Implements the gated delta rule recurrent update:
+              g = -exp(A_log) * softplus(a + dt_bias)
+              beta = sigmoid(b)
+              h = h * exp(g)
+              h = h + beta * (v - h @ k) ⊗ k
+              o = h @ q
+            """
             B_batch = mixed_qkv.shape[0]
             HV, V_dim, K_dim = initial_state.shape[-3:]
             qkv_dim = mixed_qkv.shape[1]
@@ -474,7 +481,7 @@ def patch_gdn_triton_ops():
                     out[i_n, 0, :, :] = 0
                     continue
 
-                # Extract q, k, v
+                # Extract q, k, v from packed mixed_qkv
                 q_start, k_start, v_start = 0, H * K_dim, 2 * H * K_dim
                 b_q = mixed_qkv[i_n, q_start:q_start + H * K_dim].view(H, K_dim).float()
                 b_k = mixed_qkv[i_n, k_start:k_start + H * K_dim].view(H, K_dim).float()
@@ -485,7 +492,7 @@ def patch_gdn_triton_ops():
                     b_k = b_k * torch.rsqrt(torch.sum(b_k * b_k, dim=-1, keepdim=True) + 1e-6)
                 b_q = b_q * scale
 
-                # Expand to HV heads
+                # Expand q/k heads to match value heads (multi-query attention)
                 if groups > 1:
                     b_q = b_q.repeat_interleave(groups, dim=0)  # [HV, K]
                     b_k = b_k.repeat_interleave(groups, dim=0)  # [HV, K]
@@ -494,10 +501,13 @@ def patch_gdn_triton_ops():
                 gt = g_vals[i_n]  # [HV]
                 bt = beta_vals[i_n]  # [HV]
 
+                # Gated decay
                 h = h * torch.exp(gt).unsqueeze(-1).unsqueeze(-1)
+                # Delta rule update: h += beta * (v - h@k) ⊗ k
                 hk = torch.bmm(h, b_k.unsqueeze(-1)).squeeze(-1)  # [HV, V]
                 vp = (b_v - hk) * bt.unsqueeze(-1)
                 h = h + torch.bmm(vp.unsqueeze(-1), b_k.unsqueeze(-2))
+                # Output: o = h @ q
                 b_o = torch.bmm(h, b_q.unsqueeze(-1)).squeeze(-1)  # [HV, V]
 
                 out[i_n, 0] = b_o.to(out.dtype)
