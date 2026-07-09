@@ -110,8 +110,6 @@ flagos_blacklist:
   - index_select
   - true_divide
   - true_divide_
-  - div
-  - div_
   - silu
   - silu_and_mul # performance loss end
   - to_copy
@@ -156,7 +154,6 @@ flagos_blacklist:
   - rand_like
   - gather
   - _log_softmax
-  - _softmax
   - _flash_attention_forward
   - scatter
   - scatter_
