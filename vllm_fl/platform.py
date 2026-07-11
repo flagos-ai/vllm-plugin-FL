@@ -333,7 +333,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead"]:
             return True
         return False
 
