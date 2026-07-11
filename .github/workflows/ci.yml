@@ -98,3 +98,14 @@ jobs:
     with:
       platform: ascend
     secrets: inherit
+
+  # ============================================================
+  # Job 4c: Hygon platform testing
+  # ============================================================
+  test-hygon:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: hygon
+    secrets: inherit

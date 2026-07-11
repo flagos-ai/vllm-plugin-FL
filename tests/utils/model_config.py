@@ -111,6 +111,9 @@ class ServeConfig:
         max_tokens: Max tokens for serving requests.
         served_model_name: Alias passed via ``--served-model-name``.
             Empty string means use the model path directly.
+        startup_retries: Number of health-check attempts allowed while the
+            vLLM server starts. Each attempt is followed by the server helper's
+            polling interval.
         stream: Whether to test streaming responses (chat endpoint).
         sampling: Sampling parameters (temperature, top_p, etc.) injected
             into the request payload.
@@ -126,6 +129,7 @@ class ServeConfig:
     chat_messages: list[dict[str, Any]] = field(default_factory=list)
     max_tokens: int = 50
     served_model_name: str = ""
+    startup_retries: int = 60
     stream: bool = False
     sampling: dict[str, Any] = field(default_factory=dict)
     extra_body: dict[str, Any] = field(default_factory=dict)
@@ -145,6 +149,7 @@ class ServeConfig:
             chat_messages=raw.get("chat_messages", []),
             max_tokens=raw.get("max_tokens", 50),
             served_model_name=raw.get("served_model_name", ""),
+            startup_retries=int(raw.get("startup_retries", 60)),
             stream=raw.get("stream", False),
             sampling=raw.get("sampling", {}),
             extra_body=raw.get("extra_body", {}),
