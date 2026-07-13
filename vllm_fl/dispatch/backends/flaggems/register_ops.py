@@ -13,7 +13,7 @@ import functools
 
 from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
 from vllm_fl.utils import use_flaggems_op
-
+from torch_txda import transfer_to_txda
 
 def _bind_is_available(fn, is_available_fn):
     """Wrap a function and bind _is_available attribute for OpImpl.is_available() check."""
