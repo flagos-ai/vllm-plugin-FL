@@ -74,7 +74,7 @@ class AttentionFLBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "FL"
+        return "CUSTOM"
 
     @classmethod
     def supports_attn_type(cls, attn_type: str) -> bool:
