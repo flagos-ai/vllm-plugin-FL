@@ -12,6 +12,8 @@ from typing import Optional
 
 import torch
 
+from torch_txda import transfer_to_txda
+
 # from vllm_fl.dispatch.backends.flaggems import FlagGemsBackend
 from vllm_fl.dispatch.backends.base import Backend
 
