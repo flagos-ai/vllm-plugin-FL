@@ -157,3 +157,14 @@ def register_model():
         #glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+
+    # Re-apply Qwen3.6 PCP patches here (general-plugins hook, runs in every
+    # worker via load_general_plugins() during init_worker, before the PCP
+    # attention-compat guard). The copy in register() fires during early
+    # platform detection when vllm.v1.* attention/model-runner classes are not
+    # yet importable, so those patches silently hit `except ImportError` and
+    # skip -> FlashAttentionImpl.supports_pcp never gets set. This late,
+    # idempotent call runs after vLLM is fully imported so the patches actually
+    # take effect.
+    from vllm_fl.patches.qwen36_pcp import apply_platform_patches as qwen36_pcp_platform
+    qwen36_pcp_platform()
