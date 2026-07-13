@@ -8,7 +8,7 @@ import flag_gems
 try:
     # FlagGems<=5.0.2: DeviceDetector lives in device.
     from flag_gems.runtime.backend.device import DeviceDetector
-except ImportError:
+except (ImportError, FileNotFoundError):
     # FlagGems>5.0.2: DeviceDetector lives in device_finder.
     from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend

@@ -55,7 +55,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     # or editble install
     pip install --no-build-isolation -e .
     ```
- 
+
     For CUDA-like devices, including CUDA and HIP/ROCm environments that use
     PyTorch's CUDA dispatch key, build the plugin native extension by setting
     `VLLM_VENDOR=cuda` during installation:

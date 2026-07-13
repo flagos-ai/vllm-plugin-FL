@@ -1,7 +1,11 @@
 import torch
 import torch.nn.functional as F
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
-from vllm_fl.dispatch import call_op
+from vllm_fl.dispatch import CachedOp
+
+_silu_and_mul = CachedOp("silu_and_mul")
+_gelu_and_mul = CachedOp("gelu_and_mul")
+
 
 def apply_moe_activation(
     activation: MoEActivation,
@@ -24,9 +28,9 @@ def apply_moe_activation(
 
     # Activations with gated multiplication (gate × activation(up))
     if activation == MoEActivation.SILU:
-        output.copy_(call_op("silu_and_mul", None, input))
+        output.copy_(_silu_and_mul(None, input))
     elif activation == MoEActivation.GELU:
-        output.copy_(call_op("gelu_and_mul", None, input))
+        output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.SWIGLUOAI:
         torch.ops._C.swigluoai_and_mul(output, input)
     elif activation == MoEActivation.SWIGLUSTEP:

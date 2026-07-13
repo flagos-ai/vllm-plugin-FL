@@ -1,0 +1,39 @@
+platform: hygon
+vendor: hygon
+
+device_types:
+  bw1000:
+    memory_gb: 64
+    tags: [bf16, fp16, fp32]
+
+tolerance:
+  inference:
+    default:
+      rtol: 1e-5
+      atol: 1e-8
+    bfloat16:
+      rtol: 1e-3
+      atol: 1e-3
+
+env_defaults:
+  GEMS_VENDOR: "hygon"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  VLLM_FL_FLAGOS_BLACKLIST: "pow_scalar,pow_tensor_scalar,pow_tensor_tensor,pow_tensor_scalar_,pow_tensor_tensor_,cat"
+
+bw1000:
+  name: "bw1000"
+  tests:
+    e2e:
+      inference:
+        qwen3_6: ["27b_tp2_eager"]
+      serving:
+        qwen3_6: ["35b_a3b_tp2_eager"]
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []
+    benchmark:
+      enabled: true
+      smoke: ["serve"]
