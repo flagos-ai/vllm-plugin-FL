@@ -95,7 +95,12 @@ class OpManager:
         self._lock = threading.RLock()
         self._registry = registry or OpRegistry()
         self._state = _OpManagerState()
-        self._dispatch_cache: Dict[Tuple[str, str, int], Callable] = {}
+        # Cache for resolve(): (op_name, policy, epoch) -> chosen impl.
+        self._dispatch_cache: Dict[Tuple[str, "SelectionPolicy", int], OpImpl] = {}
+        # Cache for resolve_candidates(): (op_name, policy, epoch) -> ordered impls.
+        self._candidates_cache: Dict[
+            Tuple[str, "SelectionPolicy", int], list[OpImpl]
+        ] = {}
         self._called_ops: Dict[str, str] = {}  # Map op_name -> last_used_impl_id
         self._failed_impls: Dict[str, Set[str]] = {}  # Map op_name -> set of failed impl_ids
 
@@ -111,6 +116,11 @@ class OpManager:
         """Get the underlying operator registry."""
         return self._registry
 
+    @property
+    def policy_epoch(self) -> int:
+        """Current manager policy epoch used to invalidate dispatch caches."""
+        return self._state.policy_epoch
+
     def _reset_after_fork(self) -> None:
         """Reset state after process fork."""
         with self._lock:
@@ -118,6 +128,7 @@ class OpManager:
             self._state.init_pid = -1
             self._state.policy_epoch += 1
             self._dispatch_cache.clear()
+            self._candidates_cache.clear()
             self._called_ops.clear()
             self._failed_impls.clear()
             logger.debug("OpManager reset after fork")
@@ -131,6 +142,7 @@ class OpManager:
         with self._lock:
             self._state.policy_epoch += 1
             self._dispatch_cache.clear()
+            self._candidates_cache.clear()
             self._failed_impls.clear()
             logger.debug(f"Policy epoch bumped to {self._state.policy_epoch}")
 
@@ -198,6 +210,7 @@ class OpManager:
             # Invalidate cache
             self._state.policy_epoch += 1
             self._dispatch_cache.clear()
+            self._candidates_cache.clear()
 
             # Print initialization summary
             snap = self._registry.snapshot()
@@ -265,6 +278,116 @@ class OpManager:
         """Get default selection order based on policy."""
         return policy.get_default_order()
 
+    def _record_first_use(self, op_name: str, impl: OpImpl) -> None:
+        """Log and record the selected implementation when it changes."""
+        impl_id = impl.impl_id
+        last_impl_id = self._called_ops.get(op_name)
+
+        if last_impl_id == impl_id:
+            return
+
+        with self._lock:
+            last_impl_id = self._called_ops.get(op_name)
+            if last_impl_id == impl_id:
+                return
+
+            if last_impl_id is None:
+                logger.info(
+                    f"Op '{op_name}' using '{impl_id}' "
+                    f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                )
+            else:
+                logger.info(
+                    f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "
+                    f"(kind={impl.kind.value}, vendor={impl.vendor})"
+                )
+
+            if impl.kind == BackendImplKind.DEFAULT:
+                _record_default_flagos_op(op_name, impl)
+
+            self._called_ops[op_name] = impl_id
+
+    def _mark_failed_impl(self, op_name: str, impl_id: str) -> None:
+        """Remember that an implementation failed for fallback selection."""
+        with self._lock:
+            if op_name not in self._failed_impls:
+                self._failed_impls[op_name] = set()
+            self._failed_impls[op_name].add(impl_id)
+
+    def _resolve_impl(self, op_name: str) -> OpImpl:
+        """Resolve and cache the best implementation for an operator."""
+        self.ensure_initialized()
+
+        policy = get_policy()
+        epoch = self._state.policy_epoch
+
+        cache_key = (op_name, policy, epoch)
+        cached = self._dispatch_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        candidates = self._compute_candidates(op_name, policy)
+        order = policy.per_op_order_dict.get(op_name) or self._default_order(policy)
+
+        chosen: Optional[OpImpl] = None
+        for token in order:
+            matches = [c for c in candidates if match_token(c, token)]
+            if not matches:
+                continue
+
+            matches.sort(key=lambda x: (x.priority, x.impl_id), reverse=True)
+            chosen = matches[0]
+            break
+
+        if chosen is None:
+            if policy.strict:
+                raise RuntimeError(
+                    f"No implementation available for op='{op_name}' under strict policy. "
+                    f"Candidates: {[c.impl_id for c in candidates]}"
+                )
+            raise RuntimeError(
+                f"No implementation selected for op='{op_name}'. "
+                f"Candidates: {[c.impl_id for c in candidates]}, Order: {order}"
+            )
+
+        self._dispatch_cache[cache_key] = chosen
+
+        if _DISPATCH_DEBUG:
+            vendor_info = f", vendor={chosen.vendor}" if chosen.vendor else ""
+            logger.debug(
+                f"[DISPATCH] Op '{op_name}' -> '{chosen.impl_id}' "
+                f"(kind={chosen.kind.value}{vendor_info})"
+            )
+
+        return chosen
+
+    def _compute_candidates(self, op_name: str, policy: SelectionPolicy) -> list[OpImpl]:
+        """Build the filtered candidate list for an op without ordering."""
+        snap = self._registry.snapshot()
+        candidates = list(snap.impls_by_op.get(op_name, []))
+        candidates = [c for c in candidates if self._matches_vendor_filters(c, policy)]
+
+        available: list[OpImpl] = []
+        for c in candidates:
+            try:
+                if c.is_available():
+                    available.append(c)
+                else:
+                    logger.debug(
+                        f"Implementation {c.impl_id} not available for op={op_name}"
+                    )
+            except Exception as e:
+                logger.warning(f"Error checking availability of {c.impl_id}: {e}")
+                continue
+
+        if not available:
+            raise RuntimeError(
+                f"No available implementation for op='{op_name}'. "
+                f"Registered: {[impl.impl_id for impl in snap.impls_by_op.get(op_name, [])]}"
+            )
+
+        return available
+
     def resolve(self, op_name: str) -> Callable:
         """
         Resolve and return the best implementation for an operator.
@@ -286,80 +409,7 @@ class OpManager:
         Raises:
             RuntimeError: If no implementation found
         """
-        self.ensure_initialized()
-
-        policy = get_policy()
-        policy_fp = policy.fingerprint()
-        epoch = self._state.policy_epoch
-
-        # Check cache
-        cache_key = (op_name, policy_fp, epoch)
-        cached = self._dispatch_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Get all implementations for this operator
-        snap = self._registry.snapshot()
-        candidates = list(snap.impls_by_op.get(op_name, []))
-
-        # Filter by vendor policy
-        candidates = [c for c in candidates if self._matches_vendor_filters(c, policy)]
-
-        # Filter by availability
-        available: list[OpImpl] = []
-        for c in candidates:
-            try:
-                if c.is_available():
-                    available.append(c)
-                else:
-                    logger.debug(f"Implementation {c.impl_id} not available for op={op_name}")
-            except Exception as e:
-                logger.warning(f"Error checking availability of {c.impl_id}: {e}")
-                continue
-
-        candidates = available
-
-        if not candidates:
-            raise RuntimeError(
-                f"No available implementation for op='{op_name}'. "
-                f"Registered: {[impl.impl_id for impl in snap.impls_by_op.get(op_name, [])]}"
-            )
-
-        # Get selection order (per-op or default)
-        order = policy.per_op_order_dict.get(op_name) or self._default_order(policy)
-
-        # Select best implementation
-        chosen: Optional[OpImpl] = None
-        for token in order:
-            matches = [c for c in candidates if match_token(c, token)]
-            if not matches:
-                continue
-
-            # Sort by priority (higher first), then by impl_id for stability
-            matches.sort(key=lambda x: (x.priority, x.impl_id), reverse=True)
-            chosen = matches[0]
-            break
-
-        if chosen is None:
-            if policy.strict:
-                raise RuntimeError(
-                    f"No implementation available for op='{op_name}' under strict policy. "
-                    f"Candidates: {[c.impl_id for c in candidates]}"
-                )
-            raise RuntimeError(
-                f"No implementation selected for op='{op_name}'. "
-                f"Candidates: {[c.impl_id for c in candidates]}, Order: {order}"
-            )
-
-        # Cache the result
-        self._dispatch_cache[cache_key] = chosen.fn
-
-        # Print selected backend if debug is enabled
-        if _DISPATCH_DEBUG:
-            vendor_info = f", vendor={chosen.vendor}" if chosen.vendor else ""
-            logger.debug(f"[DISPATCH] Op '{op_name}' -> '{chosen.impl_id}' (kind={chosen.kind.value}{vendor_info})")
-
-        return chosen.fn
+        return self._resolve_impl(op_name).fn
 
     def resolve_candidates(self, op_name: str) -> list[OpImpl]:
         """
@@ -381,49 +431,24 @@ class OpManager:
         self.ensure_initialized()
 
         policy = get_policy()
+        epoch = self._state.policy_epoch
+        cache_key = (op_name, policy, epoch)
+        cached = self._candidates_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
-        # Get all implementations for this operator
-        snap = self._registry.snapshot()
-        candidates = list(snap.impls_by_op.get(op_name, []))
-
-        # Filter by vendor policy
-        candidates = [c for c in candidates if self._matches_vendor_filters(c, policy)]
-
-        # Filter by availability
-        available: list[OpImpl] = []
-        for c in candidates:
-            try:
-                if c.is_available():
-                    available.append(c)
-                else:
-                    logger.debug(f"Implementation {c.impl_id} not available for op={op_name}")
-            except Exception as e:
-                logger.warning(f"Error checking availability of {c.impl_id}: {e}")
-                continue
-
-        candidates = available
-
-        if not candidates:
-            raise RuntimeError(
-                f"No available implementation for op='{op_name}'. "
-                f"Registered: {[impl.impl_id for impl in snap.impls_by_op.get(op_name, [])]}"
-            )
-
-        # Get selection order (per-op or default)
+        candidates = self._compute_candidates(op_name, policy)
         order = policy.per_op_order_dict.get(op_name) or self._default_order(policy)
 
-        # Sort candidates by order tokens, then by priority
         sorted_candidates: list[OpImpl] = []
         for token in order:
             matches = [c for c in candidates if match_token(c, token)]
             if matches:
-                # Sort by priority (higher first), then by impl_id for stability
                 matches.sort(key=lambda x: (x.priority, x.impl_id), reverse=True)
                 sorted_candidates.extend(matches)
 
-        # Remove duplicates while preserving order
         seen = set()
-        unique_candidates = []
+        unique_candidates: list[OpImpl] = []
         for c in sorted_candidates:
             if c.impl_id not in seen:
                 seen.add(c.impl_id)
@@ -435,6 +460,7 @@ class OpManager:
                 f"Candidates: {[c.impl_id for c in candidates]}, Order: {order}"
             )
 
+        self._candidates_cache[cache_key] = unique_candidates
         return unique_candidates
 
     def _call_with_hooks(self, op_name: str, fn, args: tuple, kwargs: dict):
@@ -505,37 +531,10 @@ class OpManager:
         enable_fallback = not get_policy().strict
 
         if not enable_fallback:
-            # Original behavior: use cached resolve() and fast-fail
-            fn = self.resolve(op_name)
+            impl = self._resolve_impl(op_name)
+            self._record_first_use(op_name, impl)
 
-            # Get current impl_id to check if it changed
-            impl_id = self.get_selected_impl_id(op_name)
-            last_impl_id = self._called_ops.get(op_name)
-
-            # Log if first call or implementation changed
-            if last_impl_id != impl_id:
-                with self._lock:
-                    # Double-check after acquiring lock
-                    if self._called_ops.get(op_name) != impl_id:
-                        snap = self._registry.snapshot()
-                        for impl in snap.impls_by_op.get(op_name, []):
-                            if impl.impl_id == impl_id:
-                                if last_impl_id is None:
-                                    logger.info(
-                                        f"Op '{op_name}' using '{impl_id}' "
-                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                                    )
-                                else:
-                                    logger.info(
-                                        f"Op '{op_name}' switched from '{last_impl_id}' to '{impl_id}' "
-                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                                    )
-                                if impl.kind == BackendImplKind.DEFAULT:
-                                    _record_default_flagos_op(op_name, impl)
-                                break
-                        self._called_ops[op_name] = impl_id
-
-            return self._call_with_hooks(op_name, fn, args, kwargs)
+            return self._call_with_hooks(op_name, impl.fn, args, kwargs)
         candidates = self.resolve_candidates(op_name)
         last_error = None
 
@@ -559,23 +558,7 @@ class OpManager:
                 # Log primary implementation or fallback attempts
                 if idx == 0:
                     # Primary implementation
-                    last_impl_id = self._called_ops.get(op_name)
-                    if last_impl_id != impl.impl_id:
-                        with self._lock:
-                            if self._called_ops.get(op_name) != impl.impl_id:
-                                if last_impl_id is None:
-                                    logger.info(
-                                        f"Op '{op_name}' using '{impl.impl_id}' "
-                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                                    )
-                                else:
-                                    logger.info(
-                                        f"Op '{op_name}' switched from '{last_impl_id}' to '{impl.impl_id}' "
-                                        f"(kind={impl.kind.value}, vendor={impl.vendor})"
-                                    )
-                                if impl.kind == BackendImplKind.DEFAULT:
-                                    _record_default_flagos_op(op_name, impl)
-                                self._called_ops[op_name] = impl.impl_id
+                    self._record_first_use(op_name, impl)
                 else:
                     # Always log fallback attempts (these are important runtime events)
                     logger.info(
@@ -597,10 +580,7 @@ class OpManager:
             except Exception as e:
                 last_error = e
                 # Mark this implementation as failed
-                with self._lock:
-                    if op_name not in self._failed_impls:
-                        self._failed_impls[op_name] = set()
-                    self._failed_impls[op_name].add(impl.impl_id)
+                self._mark_failed_impl(op_name, impl.impl_id)
 
                 if idx < len(available_candidates) - 1:
                     # Not the last candidate, log warning and try next
@@ -629,15 +609,7 @@ class OpManager:
         Returns:
             Implementation ID string
         """
-        fn = self.resolve(op_name)
-
-        # Try to find the impl by function identity
-        snap = self._registry.snapshot()
-        for impl in snap.impls_by_op.get(op_name, []):
-            if impl.fn is fn:
-                return impl.impl_id
-
-        return "unknown"
+        return self._resolve_impl(op_name).impl_id
 
 
 # Global default instance

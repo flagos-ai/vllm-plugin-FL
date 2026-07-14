@@ -63,6 +63,7 @@ def server():
         tp_size=_CFG.engine.get("tensor_parallel_size", 1),
         api_key=serve.api_key,
         served_model_name=serve.served_model_name,
+        max_retries=serve.startup_retries,
         extra_args=extra_args,
     ) as srv:
         yield srv

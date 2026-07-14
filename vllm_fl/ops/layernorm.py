@@ -3,7 +3,9 @@
 from typing import Optional, Union
 import torch
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm_fl.dispatch import call_op
+from vllm_fl.dispatch import CachedOp
+
+_rms_norm = CachedOp("rms_norm")
 
 
 class RMSNormFL(RMSNorm):
@@ -22,7 +24,7 @@ class RMSNormFL(RMSNorm):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        return call_op("rms_norm", self, x, residual)
+        return _rms_norm(self, x, residual)
 
 
 __all__ = ["RMSNormFL"]
