@@ -43,7 +43,37 @@ op_backends:
     - vendor:hygon
     - reference
 
+  gelu_and_mul:
+    - flagos
+    - vendor:hygon
+    - reference
+
   rotary_embedding:
+    - flagos
+    - vendor:hygon
+    - reference
+
+  moe_align_block_size:
+    - flagos
+    - vendor:hygon
+    - reference
+
+  moe_sum:
+    - flagos
+    - vendor:hygon
+    - reference
+
+  topk_softmax:
+    - flagos
+    - vendor:hygon
+    - reference
+
+  invoke_fused_moe_triton_kernel:
+    - flagos
+    - vendor:hygon
+    - reference
+
+  grouped_topk:
     - flagos
     - vendor:hygon
     - reference
