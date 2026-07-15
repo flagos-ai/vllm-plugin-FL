@@ -5,7 +5,12 @@ import os
 from typing import Optional, Tuple
 
 import flag_gems
-from flag_gems.runtime.backend.device import DeviceDetector
+try:
+    # FlagGems<=5.0.2: DeviceDetector lives in device.
+    from flag_gems.runtime.backend.device import DeviceDetector
+except (ImportError, FileNotFoundError):
+    # FlagGems>5.0.2: DeviceDetector lives in device_finder.
+    from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend
 
 _OP_CONFIG: Optional[dict[str, str]] = None
@@ -42,6 +47,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
+    # Registered backend: vendor/txda
+    "tsingmicro": {"device_type": "txda", "device_name": "txda"},
 }
 
 

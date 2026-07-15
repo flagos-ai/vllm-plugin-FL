@@ -378,13 +378,9 @@ class WorkerFL(WorkerBase):
         )
 
         if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe.ascend_config import (
-                init_ascend_config,
-            )
             from vllm_fl.dispatch.backends.vendor.ascend.impl.triton_utils import (
                     init_device_properties_triton,
             )
-            init_ascend_config(self.vllm_config)
             init_device_properties_triton()
         # Set random seed.
         set_random_seed(self.model_config.seed)
@@ -451,6 +447,14 @@ class WorkerFL(WorkerBase):
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
+        if current_platform.device_type == "txda":
+            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
+            # e.g., 20 GiB or similar default cache memory size.
+            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
+            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
+                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
+            return fallback_val
+
         GiB = lambda b: b / GiB_bytes
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for

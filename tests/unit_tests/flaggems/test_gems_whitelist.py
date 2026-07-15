@@ -16,7 +16,7 @@ from vllm_fl.utils import get_flag_gems_whitelist_blacklist, use_flaggems_op
 # On some platforms (e.g. Ascend), get_flagos_blacklist() returns a non-empty
 # default blacklist which would interfere with env-var-only assertions.
 _no_platform_blacklist = patch(
-    "vllm_fl.dispatch.config.get_flagos_blacklist", return_value=None
+    "vllm_fl.dispatch.config.get_flagos_blacklist", new=lambda: None
 )
 
 
