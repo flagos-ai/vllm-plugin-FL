@@ -106,7 +106,6 @@ def register():
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
     # subprocesses.
-    _register_flagcx_connector()
 
     multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
     if multiproc_method is None:
