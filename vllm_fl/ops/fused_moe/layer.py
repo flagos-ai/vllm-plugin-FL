@@ -2,6 +2,11 @@
 # Adapted from vllm/model_executor/layers/fused_moe/layer.py (v0.24.0)
 
 import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
+# Save the original FusedMoE factory BEFORE any monkey-patching occurs.
+# custom_ops.py patches _fused_moe_pkg.FusedMoE = FusedMoEFL at runtime,
+# so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
+# infinitely.  Capturing it here breaks the cycle.
+_OrigFusedMoE = _fused_moe_pkg.FusedMoE
 from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
@@ -44,8 +49,10 @@ def FusedMoEFL(*args, **kwargs) -> MoERunner:
     MoE layers in a model use flaggems operators transparently.
     """
     # 1. Build the standard MoERunner via the upstream factory.
-    #    Resolve FusedMoE through the upstream module namespace.
-    runner: MoERunner = _fused_moe_pkg.FusedMoE(*args, **kwargs)
+    #    Use _OrigFusedMoE (captured at import time, before monkey-patching)
+    #    to avoid infinite recursion when custom_ops.py has already replaced
+    #    _fused_moe_pkg.FusedMoE with FusedMoEFL.
+    runner: MoERunner = _OrigFusedMoE(*args, **kwargs)
 
     # 2. Replace quant_method with FL version.
     fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
