@@ -14,3 +14,10 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
+
+# log
+*.out
+*.log
+
+*.sh
+*.py
