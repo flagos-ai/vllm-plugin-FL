@@ -96,6 +96,36 @@ def grouped_topk_cuda(
     )
 
 
+def fused_topk_bias_cuda(
+    hidden_states: torch.Tensor,
+    gating_output: torch.Tensor,
+    scoring_func: str,
+    e_score_correction_bias: torch.Tensor | None,
+    topk: int,
+    renormalize: bool,
+    indices_type: torch.dtype | None = None,
+    input_tokens: torch.Tensor | None = None,
+    hash_indices_table: torch.Tensor | None = None,
+    routed_scaling_factor: float = 1.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
+        fused_topk_bias,
+    )
+
+    return fused_topk_bias(
+        hidden_states=hidden_states,
+        gating_output=gating_output,
+        scoring_func=scoring_func,
+        e_score_correction_bias=e_score_correction_bias,
+        topk=topk,
+        renormalize=renormalize,
+        indices_type=indices_type,
+        input_tokens=input_tokens,
+        hash_indices_table=hash_indices_table,
+        routed_scaling_factor=routed_scaling_factor,
+    )
+
+
 def invoke_fused_moe_triton_kernel_cuda(
     A,
     B,

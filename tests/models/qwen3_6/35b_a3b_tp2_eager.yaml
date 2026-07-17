@@ -1,0 +1,30 @@
+# Qwen3.6-35B-A3B Hygon smoke configuration (TP=2, eager).
+
+llm:
+  model: "/workspace/Qwen3.6-35B-A3B"
+  tensor_parallel_size: 2
+  pipeline_parallel_size: 1
+  max_model_len: 8192
+  gpu_memory_utilization: 0.95
+  enforce_eager: true
+  trust_remote_code: false
+  disable_custom_all_reduce: true
+
+generate:
+  prompts:
+    - "Introduce yourself,please"
+  sampling:
+    max_tokens: 100
+    temperature: 0.0
+
+serve:
+  served_model_name: "qwen"
+  startup_retries: 120
+  endpoints: ["chat"]
+  stream: false
+  max_tokens: 256
+  chat_messages:
+    - role: "user"
+      content: "Introduce yourself,please"
+  sampling:
+    temperature: 0.0

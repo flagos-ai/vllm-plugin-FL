@@ -10,3 +10,5 @@ platforms:
     enabled: true
   ascend:
     enabled: false
+  hygon:
+    enabled: true

@@ -42,6 +42,49 @@ class FlagGemsBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def fused_marlin_moe(self, *args, **kwargs) -> torch.Tensor:
+        from flag_gems.fused.fused_marlin_moe import fused_marlin_moe
+
+        # Current vLLM encodes ScalarType as a structured 64-bit integer,
+        # while FlagGems' Marlin MVP still uses its legacy enum values.
+        # Translate only at the FlagGems boundary; the CUDA vendor backend
+        # must continue receiving the original vLLM ScalarType id.
+        from vllm.scalar_type import scalar_types
+
+        quant_type_map = {
+            scalar_types.uint4b8.id: 0,
+            scalar_types.uint8b128.id: 1,
+            scalar_types.float4_e2m1f.id: 6,
+        }
+        args = list(args)
+        if "quant_type_id" in kwargs:
+            kwargs = dict(kwargs)
+            quant_type_id = kwargs["quant_type_id"]
+            if quant_type_id not in quant_type_map:
+                raise NotImplementedError(
+                    "FlagGems fused_marlin_moe does not support vLLM "
+                    f"quant_type_id={quant_type_id}"
+                )
+            kwargs["quant_type_id"] = quant_type_map[quant_type_id]
+        elif len(args) > 9:
+            quant_type_id = args[9]
+            if quant_type_id not in quant_type_map:
+                raise NotImplementedError(
+                    "FlagGems fused_marlin_moe does not support vLLM "
+                    f"quant_type_id={quant_type_id}"
+                )
+            args[9] = quant_type_map[quant_type_id]
+
+        return fused_marlin_moe(*args, **kwargs)
+
+    def router_gemm_bf16_fp32(
+        self, x: torch.Tensor, weight: torch.Tensor
+    ) -> torch.Tensor:
+        """Run the MoE router GEMM with an FP32 output."""
+        from .impl.router_gemm import router_gemm_bf16_fp32_flaggems
+
+        return router_gemm_bf16_fp32_flaggems(x, weight)
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
@@ -71,6 +114,11 @@ class FlagGemsBackend(Backend):
         from .impl.activation import gelu_and_mul_flaggems
 
         return gelu_and_mul_flaggems(obj, x)
+
+    def silu_and_mul_with_clamp(self, x: torch.Tensor, swiglu_limit: float, swiglu_limit_tensor: torch.Tensor) -> torch.Tensor:
+        from .impl.activation import silu_and_mul_with_clamp_flaggems
+
+        return silu_and_mul_with_clamp_flaggems(x, swiglu_limit_tensor)
 
     def rms_norm(
         self,
@@ -187,6 +235,34 @@ class FlagGemsBackend(Backend):
 
         moe_sum_flaggems(inp, out)
 
+    def fused_topk_bias(
+        self,
+        hidden_states,
+        gating_output,
+        scoring_func: str,
+        e_score_correction_bias,
+        topk: int,
+        renormalize: bool,
+        indices_type=None,
+        input_tokens=None,
+        hash_indices_table=None,
+        routed_scaling_factor: float = 1.0,
+    ):
+        from .impl.fused_moe import fused_topk_bias_flaggems
+
+        return fused_topk_bias_flaggems(
+            hidden_states,
+            gating_output,
+            scoring_func,
+            e_score_correction_bias,
+            topk,
+            renormalize,
+            indices_type,
+            input_tokens,
+            hash_indices_table,
+            routed_scaling_factor,
+        )
+
     def topk_softmax(
         self,
         topk_weights,
@@ -265,4 +341,329 @@ class FlagGemsBackend(Backend):
         return grouped_topk_flaggems(
             scores, n_group, topk_group, topk,
             renormalize, routed_scaling_factor, bias, scoring_func,
+        )
+
+    def mhc_pre(
+        self,
+        residual,
+        fn,
+        hc_scale,
+        hc_base,
+        rms_eps: float,
+        hc_pre_eps: float,
+        hc_sinkhorn_eps: float,
+        hc_post_mult_value: float,
+        sinkhorn_repeat: int,
+        n_splits: int = 1,
+    ):
+        from .impl.mhc import mhc_pre_flaggems
+
+        return mhc_pre_flaggems(
+            residual, fn, hc_scale, hc_base,
+            rms_eps, hc_pre_eps, hc_sinkhorn_eps,
+            hc_post_mult_value, sinkhorn_repeat, n_splits
+        )
+
+    def mhc_post(self, x, residual, post, comb):
+        from .impl.mhc import mhc_post_flaggems
+
+        return mhc_post_flaggems(x, residual, post, comb)
+
+    def hc_head_fused_kernel(
+        self,
+        hs_flat,
+        fn,
+        hc_scale,
+        hc_base,
+        out,
+        hidden_size: int,
+        rms_eps: float,
+        hc_eps: float,
+        hc_mult: int,
+    ):
+        from .impl.mhc import hc_head_fused_kernel_flaggems
+
+        hc_head_fused_kernel_flaggems(
+            hs_flat, fn, hc_scale, hc_base, out,
+            hidden_size, rms_eps, hc_eps, hc_mult,
+        )
+
+    def deepseek_v4_mega_moe_experts(
+        self,
+        hidden_states,
+        topk_weights,
+        topk_ids,
+        out,
+        layer_name: str,
+        activation_clamp: float | None,
+        fast_math: bool,
+    ):
+        # The new FlagGems fp8_fp4_mega_moe primitive is single-rank and
+        # consumes staged tensors/raw weights. This dispatch contract is the
+        # distributed vLLM layer-level op, so it is not directly compatible.
+        raise NotImplementedError(
+            "FlagGems fp8_fp4_mega_moe does not implement the distributed "
+            "deepseek_v4_mega_moe_experts contract"
+        )
+
+    def deepseek_v4_fp8_einsum(
+        self,
+        a: torch.Tensor,
+        a_scale: torch.Tensor,
+        b: torch.Tensor,
+        b_scale: torch.Tensor,
+        out: torch.Tensor,
+        equation: str,
+        recipe: list[int],
+    ):
+        from .impl.deepseek_v4_attn import deepseek_v4_fp8_einsum_flaggems
+
+        deepseek_v4_fp8_einsum_flaggems(a, a_scale, b, b_scale, out, equation, recipe)
+
+    def fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
+        self,
+        q: torch.Tensor,
+        kv: torch.Tensor,
+        swa_kv_cache_2d: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        positions: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        eps: float,
+        block_size: int,
+    ):
+        from .impl.deepseek_v4_attn import (
+            fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert_flaggems,
+        )
+
+        fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert_flaggems(
+            q, kv, swa_kv_cache_2d, slot_mapping, positions, cos_sin_cache,
+            eps, block_size,
+        )
+
+    def combine_topk_swa_indices(
+        self,
+        topk_indices: torch.Tensor,
+        query_start_loc: torch.Tensor,
+        seq_lens: torch.Tensor,
+        gather_lens: torch.Tensor,
+        window_size: int,
+        compress_ratio: int,
+        topk: int,
+        M: int,
+        N: int,
+    ):
+        from .impl.deepseek_v4_attn import combine_topk_swa_indices_flaggems
+
+        return combine_topk_swa_indices_flaggems(
+            topk_indices, query_start_loc, seq_lens,
+            gather_lens, window_size, compress_ratio,
+            topk, M, N
+        )
+
+    def compute_global_topk_indices_and_lens(
+        self,
+        topk_indices: torch.Tensor,
+        token_to_req_indices: torch.Tensor,
+        block_table: torch.Tensor,
+        block_size: int,
+        is_valid_token: torch.Tensor,
+    ):
+        from .impl.deepseek_v4_attn import compute_global_topk_indices_and_lens_flaggems
+
+        return compute_global_topk_indices_and_lens_flaggems(
+            topk_indices, token_to_req_indices, block_table, block_size, is_valid_token
+        )
+
+    def dequantize_and_gather_k_cache(
+        self,
+        out: torch.Tensor,
+        # [num_blocks, block_size, head_bytes]
+        k_cache: torch.Tensor,
+        # [num_reqs]
+        seq_lens: torch.Tensor,
+        # [num_reqs]
+        gather_lens: torch.Tensor | None,
+        # [num_reqs, max_blocks_per_seq]
+        block_table: torch.Tensor,
+        block_size: int,
+        offset: int,
+    ):
+        from .impl.deepseek_v4_attn import dequantize_and_gather_k_cache_flaggems
+
+        dequantize_and_gather_k_cache_flaggems(
+            out, k_cache, seq_lens, gather_lens, block_table, block_size, offset
+        )
+
+    def fused_indexer_q_rope_quant(
+        self,
+        positions: torch.Tensor,
+        index_q: torch.Tensor,
+        index_q_cos_sin_cache: torch.Tensor,
+        index_weights: torch.Tensor,
+        index_weights_softmax_scale: float,
+        index_weights_head_scale: float,
+        use_fp4: bool = False,
+    ):
+        from .impl.deepseek_v4_attn import fused_indexer_q_rope_quant_flaggems
+
+        return fused_indexer_q_rope_quant_flaggems(
+            positions, index_q, index_q_cos_sin_cache,
+            index_weights, index_weights_softmax_scale,
+            index_weights_head_scale, use_fp4,
+        )
+
+    def fused_inv_rope_fp8_quant(
+        self,
+        o: torch.Tensor,
+        positions: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        n_groups: int,
+        heads_per_group: int,
+        nope_dim: int = 448,
+        rope_dim: int = 64,
+        quant_group_size: int = 128,
+        tma_aligned_scales: bool = False
+    ):
+        from .impl.deepseek_v4_attn import fused_inv_rope_fp8_quant_flaggems
+
+        return fused_inv_rope_fp8_quant_flaggems(
+            o, positions, cos_sin_cache,
+            n_groups, heads_per_group, nope_dim, rope_dim,
+            quant_group_size, tma_aligned_scales,
+        )
+
+    def fused_q_kv_rmsnorm(
+        self,
+        qr: torch.Tensor,
+        kv: torch.Tensor,
+        q_weight: torch.Tensor,
+        kv_weight: torch.Tensor,
+        eps: float,
+    ):
+        from .impl.deepseek_v4_attn import fused_q_kv_rmsnorm_flaggems
+
+        return fused_q_kv_rmsnorm_flaggems(qr, kv, q_weight, kv_weight, eps)
+
+    def indexer_k_quant_and_cache(
+        self,
+        k: torch.Tensor,
+        kv_cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        quant_block_size: int,
+        scale_fmt: str,
+    ):
+        from .impl.deepseek_v4_attn import indexer_k_quant_and_cache_flaggems
+
+        indexer_k_quant_and_cache_flaggems(
+            k, kv_cache, slot_mapping, quant_block_size, scale_fmt,
+        )
+
+    def cp_gather_indexer_k_quant_cache(
+        self,
+        kv_cache: torch.Tensor,
+        dst_k: torch.Tensor,
+        dst_scale: torch.Tensor,
+        block_table: torch.Tensor,
+        cu_seq_lens: torch.Tensor,
+    ):
+        from .impl.deepseek_v4_attn import cp_gather_indexer_k_quant_cache_flaggems
+
+        cp_gather_indexer_k_quant_cache_flaggems(
+            kv_cache, dst_k, dst_scale, block_table, cu_seq_lens,
+        )
+
+    def top_k_per_row_prefill(
+        self,
+        logits: torch.Tensor,
+        cu_seqlen_ks: torch.Tensor,
+        cu_seqlen_ke: torch.Tensor,
+        raw_topk_indices: torch.Tensor,
+        num_rows: int,
+        stride0: int,
+        stride1: int,
+        topk_tokens: int,
+    ):
+        from .impl.deepseek_v4_attn import top_k_per_row_prefill_flaggems
+
+        top_k_per_row_prefill_flaggems(
+            logits, cu_seqlen_ks, cu_seqlen_ke, raw_topk_indices,
+            num_rows, stride0, stride1, topk_tokens,
+        )
+
+    def pack_seq_triton(
+        self,
+        x: torch.Tensor,
+        lengths: torch.Tensor,
+        pad_value: float | int = -float("inf"),
+    ):
+        from .impl.deepseek_v4_attn import pack_seq_triton_flaggems
+
+        return pack_seq_triton_flaggems(x, lengths, pad_value)
+
+    def top_k_per_row_decode(
+        self,
+        logits: torch.Tensor,
+        next_n: int,
+        seq_lens: torch.Tensor,
+        raw_topk_indices: torch.Tensor,
+        num_rows: int,
+        stride0: int,
+        stride1: int,
+        topk_tokens: int,
+    ):
+        from .impl.deepseek_v4_attn import top_k_per_row_decode_flaggems
+
+        top_k_per_row_decode_flaggems(
+            logits, next_n, seq_lens, raw_topk_indices,
+            num_rows, stride0, stride1, topk_tokens,
+        )
+
+    def unpack_seq_triton(
+        self,
+        packed_tensor: torch.Tensor,
+        lengths: torch.Tensor,
+    ):
+        from .impl.deepseek_v4_attn import unpack_seq_triton_flaggems
+
+        return unpack_seq_triton_flaggems(packed_tensor, lengths)
+
+    def flash_mla_with_kvcache(
+        self,
+        q,
+        k_cache,
+        block_table,
+        head_dim_v,
+        tile_scheduler_metadata,
+        cache_seqlens,
+        is_fp8_kvcache,
+        indices,
+        topk_length,
+        softmax_scale,
+        attn_sink,
+        extra_k_cache,
+        extra_indices_in_kvcache,
+        extra_topk_length,
+        out,
+    ):
+        from .impl.deepseek_v4_attn import flash_mla_with_kvcache_flaggems
+        return flash_mla_with_kvcache_flaggems(
+            q, k_cache, block_table, head_dim_v, tile_scheduler_metadata,
+            cache_seqlens, is_fp8_kvcache, indices, topk_length, softmax_scale,
+            attn_sink, extra_k_cache, extra_indices_in_kvcache, extra_topk_length,
+            out,
+        )
+
+    def flash_mla_sparse_fwd(
+        self,
+        q,
+        kv,
+        indices,
+        sm_scale,
+        attn_sink,
+        topk_length,
+        out,
+):
+        from .impl.deepseek_v4_attn import flash_mla_sparse_fwd_flaggems
+        return flash_mla_sparse_fwd_flaggems(
+            q, kv, indices, sm_scale, attn_sink, topk_length, out,
         )

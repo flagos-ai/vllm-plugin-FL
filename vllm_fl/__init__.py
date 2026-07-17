@@ -141,6 +141,8 @@ def register_router():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+    from vllm import ModelRegistry
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
@@ -158,6 +160,7 @@ def register_model():
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
 
+#feat/pcp-qwen36-hybrid
     # Re-apply Qwen3.6 PCP patches here (general-plugins hook, runs in every
     # worker via load_general_plugins() during init_worker, before the PCP
     # attention-compat guard). The copy in register() fires during early
@@ -168,3 +171,23 @@ def register_model():
     # take effect.
     from vllm_fl.patches.qwen36_pcp import apply_platform_patches as qwen36_pcp_platform
     qwen36_pcp_platform()
+
+    # Register DeepseekV4 model
+    try:
+        ModelRegistry.register_model(
+            "DeepseekV4ForCausalLM",
+            "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM"
+        )
+    except Exception as e:
+        logger.error(f"Register DeepseekV4 model error: {str(e)}")
+
+    
+    # Register DeepseekV4 model
+    try:
+        ModelRegistry.register_model(
+            "DeepSeekV4MTPModel",
+            "vllm_fl.models.deepseek_v4_mtp:DeepSeekV4MTP"
+        )
+    except Exception as e:
+        logger.error(f"Register DeepseekV4 model error: {str(e)}")
+ main

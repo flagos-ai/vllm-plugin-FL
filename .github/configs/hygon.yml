@@ -1,0 +1,37 @@
+# Hygon Hardware Configuration
+# This file defines CI/CD settings for Hygon DCU testing.
+
+platform: hygon
+
+# Docker image for this hardware.
+ci_image: harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6
+
+# Runner labels for this hardware.
+runner_labels:
+  - hg-cicd-vllm-plugin
+
+# Container volumes (hardware-specific paths).
+container_volumes:
+  - /opt/hyhal:/opt/hyhal
+  - /data:/data
+  - /workspace:/workspace
+
+# Container options (hardware-specific settings).
+container_options: >-
+  --hostname vllm-plugin-fl
+  --ipc=host
+  --env DTK_HOME=/opt/dtk
+  --env GEMS_VENDOR=hygon
+  --env ROCM_PATH=/opt/dtk
+  --env HIP_PATH=/opt/dtk/hip
+  --env HSA_PATH=/opt/dtk/hsa
+  --env HIP_CLANG_PATH=/opt/dtk/llvm/bin
+  --env DEVICE_LIB_PATH=/opt/dtk/amdgcn/bitcode
+  --env PATH=/opt/dtk/bin:/opt/dtk/hip/bin:/opt/dtk/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  --env LD_LIBRARY_PATH=/opt/hyhal/lib/criu:/opt/hyhal/lib/rocprofiler:/opt/hyhal/lib:/opt/dtk/hip/lib:/opt/dtk/lib:/opt/dtk/llvm/lib:/opt/dtk/dcc/lib:/opt/dtk/aillvm/lib:/opt/dtk/hsa/lib
+  --device=/dev/kfd
+  --device=/dev/mkfd
+  --device=/dev/dri
+  --group-add video
+  --cap-add=SYS_PTRACE
+  --security-opt seccomp=unconfined
