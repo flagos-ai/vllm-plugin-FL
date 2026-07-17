@@ -8,6 +8,7 @@ from .layernorm import *  # noqa F403 F401
 from .activation import *  # noqa F403 F401
 from .rotary_embedding import *  # noqa F403 F401
 from .fused_moe import *  # noqa F403 F401
+from .deepseek_v4_attention import DeepseekV4MultiHeadLatentAttentionFLWrapper # noqa F403 F401
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 OOT_OPS = {
     "silu_and_mul": (SiluAndMulFL, "SiluAndMul"),  # noqa F405
     "gelu_and_mul": (GeluAndMulFL, "GeluAndMul"),  # noqa F405
+    "silu_and_mul_with_clamp": (SiluAndMulWithClampFL, "SiluAndMulWithClamp"),  # noqa F405
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
     "fused_moe": (FusedMoEFL, "FusedMoE"),  # noqa F405
@@ -27,6 +29,11 @@ OOT_OPS = {
         UnquantizedFusedMoEMethodFL,  # noqa F405
         "UnquantizedFusedMoEMethod",
     ),
+    "deepseek_v4_multi_head_latent_attention": (
+        DeepseekV4MultiHeadLatentAttentionFLWrapper,
+        "DeepseekV4MultiHeadLatentAttentionWrapper"
+    ),  # noqa F405
+    "gated_layer": (GateLinearFL, "GateLinear"),
 }
 
 def _patch_unquantized_moe_oracle() -> None:

@@ -34,6 +34,8 @@ from vllm.model_executor.layers.fused_moe.config import (
 )
 
 from .fused_moe_utils import select_unquantized_moe_backend_oot
+from .mxfp4_selector import select_fixed_mxfp4_method
+from vllm_fl.quantization.mxfp4.mxfp4_marlin import MarlinExpertsFL
 
 class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
     """OOT replacement for UnquantizedFusedMoEMethod that routes computation through flaggems."""
@@ -78,6 +80,17 @@ class FusedMoEFL(FusedMoE):
         if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(self.quant_method, UnquantizedFusedMoEMethodFL):
             self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
             self.base_quant_method = self.quant_method
+        else:
+            from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod
+            from vllm.model_executor.layers.fused_moe.fused_marlin_moe import MarlinExperts
+
+            if isinstance(self.quant_method, Mxfp4MoEMethod):
+                self.quant_method = select_fixed_mxfp4_method(
+                    self.quant_method, self.moe_config
+                )
+                self.base_quant_method = self.quant_method
+            elif getattr(self.quant_method, "experts_cls", None) is MarlinExperts:
+                self.quant_method.experts_cls = MarlinExpertsFL
         # Replace router with FL version that uses call_op for flaggems dispatch.
         # NOTE: shared_experts / gate / routed transforms are passed through to
         # the runner rather than stored as attributes on this layer.  Assigning

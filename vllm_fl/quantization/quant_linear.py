@@ -1,6 +1,13 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+import os
 from vllm.platforms import PlatformEnum, current_platform
+from vllm_fl.utils import use_flaggems_op
+
+from .fp8 import FlagGemsFp8BlockScaledMMLinearKernel
+
+
+FLAGGEMS_FP8_BLOCK_GEMM_OP = "flaggems_fp8_block_gemm"
 
 
 def _resolve_source_platform() -> PlatformEnum:
@@ -57,4 +64,14 @@ def add_oot_quant_kernel() -> None:
     if PlatformEnum.OOT not in _POSSIBLE_FP8_BLOCK_KERNELS:
         _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT] = list(
             _POSSIBLE_FP8_BLOCK_KERNELS.get(source, [])
+        )
+
+    if (
+        current_platform.supports_fp8()
+        and use_flaggems_op(FLAGGEMS_FP8_BLOCK_GEMM_OP)
+        and FlagGemsFp8BlockScaledMMLinearKernel
+        not in _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT]
+    ):
+        _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT].insert(
+            0, FlagGemsFp8BlockScaledMMLinearKernel
         )

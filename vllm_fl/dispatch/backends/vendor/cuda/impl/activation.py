@@ -49,3 +49,26 @@ def gelu_and_mul_cuda(obj, x: torch.Tensor) -> torch.Tensor:
     else:
         torch.ops._C.gelu_and_mul(out, x)
     return out
+
+
+def silu_and_mul_with_clamp_cuda(x: torch.Tensor, swiglu_limit: float) -> torch.Tensor:
+    """
+    SiLU activation with clamping followed by element-wise multiplication.
+
+    Computes:
+        gate = clamp(x[..., :d], max=swiglu_limit)
+        up   = clamp(x[..., d:], min=-swiglu_limit, max=swiglu_limit)
+        out  = silu(gate) * up
+
+    Args:
+        x: Input tensor of shape [..., 2*d]
+        swiglu_limit: Clamping threshold
+
+    Returns:
+        Output tensor of shape [..., d]
+    """
+    d = x.shape[-1] // 2
+    output_shape = x.shape[:-1] + (d,)
+    out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
+    torch.ops._C.silu_and_mul_with_clamp(out, x, swiglu_limit)
+    return out
