@@ -375,7 +375,7 @@ def patch_gdn_triton_ops():
                         state_idx = ssi_cpu[i_n].item()
                     else:
                         state_idx = ssi_cpu[i_n, i_t_init].item()
-                    if state_idx <= 0:
+                    if state_idx < 0:
                         continue
                 else:
                     state_idx = bos
@@ -419,7 +419,7 @@ def patch_gdn_triton_ops():
                             fidx = ssi_cpu[i_n].item()
                         else:
                             fidx = ssi_cpu[i_n, t_offset].item()
-                        if fidx > 0:
+                        if fidx >= 0:
                             final_state[fidx] = h.to(final_state.dtype)
                     else:
                         final_state[state_idx] = h.to(final_state.dtype)
@@ -477,7 +477,7 @@ def patch_gdn_triton_ops():
 
             for i_n in range(B_batch):
                 state_idx = ssi_cpu[i_n]
-                if state_idx <= 0:
+                if state_idx < 0:
                     out[i_n, 0, :, :] = 0
                     continue
 
@@ -498,6 +498,10 @@ def patch_gdn_triton_ops():
                     b_k = b_k.repeat_interleave(groups, dim=0)  # [HV, K]
 
                 h = initial_state[state_idx].float()  # [HV, V, K]
+                # Sanitize: zero out if state contains garbage (NaN/Inf or uninitialized large values)
+                if torch.isnan(h).any() or torch.isinf(h).any() or h.abs().max().item() > 1e6:
+                    h = torch.zeros_like(h)
+
                 gt = g_vals[i_n]  # [HV]
                 bt = beta_vals[i_n]  # [HV]
 
