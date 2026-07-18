@@ -121,9 +121,35 @@ flagos_blacklist:
   - sum_dim
   - exponential_
   - mm
+  - bmm
+  - sigmoid
+  - where
+  - where_scalar_other
+  - where_scalar_self
+  - where_self
+  - where_self_out
+  - repeat_interleave
+  - repeat_interleave_self_int
+  - repeat_interleave_self_tensor
+  - repeat_interleave_tensor
   - resolve_neg
   - resolve_conj
+  - eq
   - eq_scalar
+  - ne
+  - ne_scalar
+  - gt
+  - gt_scalar
+  - ge
+  - ge_scalar
+  - lt
+  - lt_scalar
+  - le
+  - le_scalar
+  - neg
+  - neg_
+  - abs
+  - abs_
   - floor_divide
   - cumsum
   - cumsum_out
@@ -132,7 +158,6 @@ flagos_blacklist:
   - repeat
   - randn
   - add
-  - ge_scalar
   - sub
   - bitwise_and
   - bitwise_not
@@ -162,6 +187,14 @@ flagos_blacklist:
   - _index_put_impl_
   - argmax
   - addmm
+  - zeros_like
+  - full
+  - full_like
+  - clamp
+  - clamp_
+  - linspace
+  - eye
+  - diag
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

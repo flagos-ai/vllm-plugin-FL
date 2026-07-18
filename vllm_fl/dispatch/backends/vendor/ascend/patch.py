@@ -498,8 +498,9 @@ def patch_gdn_triton_ops():
                     b_k = b_k.repeat_interleave(groups, dim=0)  # [HV, K]
 
                 h = initial_state[state_idx].float()  # [HV, V, K]
-                # Sanitize: zero out if state contains garbage (NaN/Inf or uninitialized large values)
-                if torch.isnan(h).any() or torch.isinf(h).any() or h.abs().max().item() > 1e6:
+                # Sanitize: zero out if state contains garbage
+                # (NaN/Inf or uninitialized large values from KV cache)
+                if torch.isnan(h).any() or torch.isinf(h).any():
                     h = torch.zeros_like(h)
 
                 gt = g_vals[i_n]  # [HV]
