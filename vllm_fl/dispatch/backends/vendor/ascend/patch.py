@@ -19,6 +19,7 @@ def apply_ascend_patches():
     patch_op_cls()
     patch_fused_moe()
     patch_qwen3_5_attention()
+    patch_qwen3_6_gdn()
     patch_qwen3_mtp()
     patch_graph()
     patch_npugraph_ex()
@@ -49,9 +50,26 @@ def patch_causal_conv1d():
         logger.warning("Failed to patch causal_conv1d ops: %s", e)
 
 def patch_fused_moe():
-    """Patch fused MoE ops with Ascend implementations."""
+    """Patch fused MoE ops with Ascend implementations.
+
+    Always replaces ``fused_experts_impl`` (it dispatches between the AscendC
+    custom-op path and the legacy torch_npu path at call time based on the
+    weight layout).  When the AscendC MoE custom ops are available
+    (``ascendc_moe_available``), additionally:
+
+    * replace ``fused_topk`` with the fused AscendC ``moe_gating_top_k``
+      kernel (softmax + top-k + renorm in one launch);
+    * wrap ``UnquantizedFusedMoEMethod.process_weights_after_loading`` so
+      expert weights are stored pre-transposed, removing the per-forward
+      ``transpose(1, 2).contiguous()`` copies of the legacy path.
+    """
     # TODO ops' triton implementation is not ready yet
-    from .impl.fused_moe import fused_experts_impl
+    from .impl.fused_moe import (
+        ascendc_moe_available,
+        convert_moe_weights_pretransposed,
+        fused_experts_impl,
+        fused_topk_ascend,
+    )
     try:
         import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
 
@@ -60,6 +78,34 @@ def patch_fused_moe():
         logger.info("Patched fused_moe for Ascend")
     except Exception as e:
         logger.warning("Failed to patch fused_moe ops: %s", e)
+        fused_moe_lib = None
+
+    if fused_moe_lib is None or not ascendc_moe_available():
+        return
+
+    try:
+        fused_moe_lib.fused_topk = fused_topk_ascend
+        logger.info("Patched fused_topk with AscendC moe_gating_top_k")
+    except Exception as e:
+        logger.warning("Failed to patch fused_topk: %s", e)
+
+    try:
+        from vllm.model_executor.layers.fused_moe.layer import (
+            UnquantizedFusedMoEMethod,
+        )
+
+        orig_process_weights = UnquantizedFusedMoEMethod.process_weights_after_loading
+
+        def process_weights_after_loading_pretransposed(self, layer):
+            orig_process_weights(self, layer)
+            convert_moe_weights_pretransposed(layer)
+
+        UnquantizedFusedMoEMethod.process_weights_after_loading = (
+            process_weights_after_loading_pretransposed
+        )
+        logger.info("Patched MoE weight loading with pre-transposed layout for AscendC ops")
+    except Exception as e:
+        logger.warning("Failed to patch MoE process_weights_after_loading: %s", e)
 
 def patch_qwen3_5_attention():
     """Patch Qwen3.5/Qwen3.6 attention to use the fused Ascend kernel."""
@@ -69,6 +115,20 @@ def patch_qwen3_5_attention():
         _do_patch()
     except Exception as e:
         logger.warning("Failed to patch Qwen3NextAttention for Ascend: %s", e)
+
+
+def patch_qwen3_6_gdn():
+    """Patch Qwen3.5/Qwen3.6 GatedDeltaNet and GemmaRMSNorm with AscendC ops.
+
+    Falls back to the existing Triton path when the CANN custom-op package
+    is not available at runtime.
+    """
+    try:
+        from .patches.patch_qwen3_6_gdn import patch_qwen3_6_gdn as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch Qwen3.6 GDN AscendC ops: %s", e)
 
 
 def patch_qwen3_mtp():

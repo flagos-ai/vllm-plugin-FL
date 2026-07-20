@@ -566,10 +566,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
             logger.info(
                 "AscendAttentionBackendImpl: head_size=%d is not supported by "
                 "npu_fused_infer_attention_score TND layout, falling back to "
-                "npu_fusion_attention.", self.head_size)
-
-    _fusion_causal_mask: Optional[torch.Tensor] = None
-    _fusion_causal_mask_device: Optional[torch.device] = None
+                "head-split attention (2x%d).", self.head_size,
+                self.head_size // 2)
 
     @classmethod
     def update_graph_params(
@@ -679,48 +677,74 @@ class AscendAttentionBackendImpl(AttentionImpl):
             )
         return key, value
 
-    def _get_fusion_causal_mask(self, device: torch.device) -> torch.Tensor:
-        """Get a 2048x2048 lower-triangular bool mask for npu_fusion_attention.
-
-        npu_fusion_attention expects a bool causal mask where True means the
-        position is allowed to attend.  The mask is cached per-device.
-        """
-        cls = AscendAttentionBackendImpl
-        if (cls._fusion_causal_mask is None
-                or cls._fusion_causal_mask_device != device):
-            cls._fusion_causal_mask = torch.ones(
-                2048, 2048, dtype=torch.bool, device=device).tril_()
-            cls._fusion_causal_mask_device = device
-        return cls._fusion_causal_mask
-
     def _gather_kv_cache(
         self,
         attn_metadata: AscendMetadata,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Gather paged KV cache into dense (T_kv, num_kv_heads, head_size)."""
+        """Gather paged KV cache into dense (T_kv, num_kv_heads, head_size).
+
+        Only the blocks actually referenced by each request's sequence length
+        are gathered.  The block table is padded to ``max_num_blocks_per_req``,
+        so gathering the whole table would allocate ``batch_size`` times more
+        memory than necessary and can OOM on long-context configs.
+        """
         if self.key_cache is None or self.value_cache is None:
             raise RuntimeError(
                 "key_cache/value_cache is not initialized for KV gather")
 
         seq_lens = attn_metadata.seq_lens_list
         batch_size = len(seq_lens)
+        block_size = self.key_cache.shape[1]
         block_table = attn_metadata.block_tables[:batch_size]
-        flat_ids = block_table.reshape(-1).long()
-
-        gathered_k = self.key_cache[flat_ids]
-        gathered_v = self.value_cache[flat_ids]
-        gathered_k = gathered_k.view(
-            batch_size, -1, self.num_kv_heads, self.head_size)
-        gathered_v = gathered_v.view(
-            batch_size, -1, self.num_kv_heads, self.head_size)
 
         k_list: List[torch.Tensor] = []
         v_list: List[torch.Tensor] = []
         for i, sl in enumerate(seq_lens):
-            k_list.append(gathered_k[i, :sl])
-            v_list.append(gathered_v[i, :sl])
+            num_blocks = (sl + block_size - 1) // block_size
+            block_ids = block_table[i, :num_blocks].long()
+            gathered_k = self.key_cache[block_ids].view(
+                -1, self.num_kv_heads, self.head_size)[:sl]
+            gathered_v = self.value_cache[block_ids].view(
+                -1, self.num_kv_heads, self.head_size)[:sl]
+            k_list.append(gathered_k)
+            v_list.append(gathered_v)
 
         return torch.cat(k_list, dim=0), torch.cat(v_list, dim=0)
+
+    def _split_heads_for_pfa(
+        self,
+        x: torch.Tensor,
+        num_heads: int,
+    ) -> torch.Tensor:
+        """Split head dimension to a supported PFA TND head size.
+
+        Ascend's npu_fused_infer_attention_score TND layout only supports
+        head_dim in {64, 128, 192}.  For unsupported head sizes such as 256,
+        we split each head into two heads of half the dimension and double the
+        head count, which is mathematically equivalent for self-attention.
+
+        Accepts either 2D input [T, num_heads * head_size] or 3D input
+        [T, num_heads, head_size].  Output shape: [T, num_heads * 2,
+        head_size // 2].
+        """
+        head_size_128 = self.head_size // 2
+        if x.dim() == 2:
+            x = x.view(-1, num_heads, self.head_size)
+        return x.view(-1, num_heads, 2, head_size_128).reshape(
+            -1, num_heads * 2, head_size_128)
+
+    def _merge_heads_from_pfa(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        """Merge split heads back to original head dimension.
+
+        Input shape:  [T, num_heads * 2, head_size // 2]
+        Output shape: [T, num_heads * head_size]
+        """
+        head_size_128 = self.head_size // 2
+        return x.view(-1, self.num_heads, 2, head_size_128).reshape(
+            -1, self.num_heads * self.head_size)
 
     def _forward_fusion_attention(
         self,
@@ -730,7 +754,14 @@ class AscendAttentionBackendImpl(AttentionImpl):
         attn_metadata: AscendMetadata,
         output: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass using npu_fusion_attention for unsupported head sizes."""
+        """Forward pass for unsupported head sizes using head-split PFA.
+
+        Splits head_dim into two supported heads and runs
+        npu_fused_infer_attention_score (PFA) with the standard TND path.
+        This keeps the implementation compatible with ACL graph capture while
+        avoiding the per-batch dense causal mask limitation of
+        npu_fusion_attention.
+        """
         num_tokens = attn_metadata.actual_seq_lengths_q[-1]
         query = query[:num_tokens]
 
@@ -745,26 +776,27 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 for i in range(len(attn_metadata.seq_lens_list))
             ]
 
-        if attn_metadata.causal:
-            attn_mask = self._get_fusion_causal_mask(query.device)
-            sparse_mode = 3
-        else:
-            attn_mask = None
-            sparse_mode = 0
+        query = self._split_heads_for_pfa(query, self.num_heads)
+        key = self._split_heads_for_pfa(key, self.num_kv_heads)
+        value = self._split_heads_for_pfa(value, self.num_kv_heads)
 
-        attn_output = torch_npu.npu_fusion_attention(
+        attn_output, _ = torch_npu.npu_fused_infer_attention_score(
             query=query,
             key=key,
             value=value,
-            head_num=self.num_heads,
+            atten_mask=attn_metadata.attn_mask,
+            block_table=None,
             input_layout="TND",
+            block_size=AscendAttentionBackend.get_supported_block_size()[0],
+            actual_seq_lengths=attn_metadata.actual_seq_lengths_q,
+            actual_seq_lengths_kv=actual_seq_kvlen,
+            num_key_value_heads=self.num_kv_heads * 2,
+            num_heads=self.num_heads * 2,
             scale=self.scale,
-            sparse_mode=sparse_mode,
-            atten_mask=attn_mask,
-            actual_seq_qlen=attn_metadata.actual_seq_lengths_q,
-            actual_seq_kvlen=actual_seq_kvlen,
-        )[0]
+            sparse_mode=3,
+        )
 
+        attn_output = self._merge_heads_from_pfa(attn_output)
         attn_output = attn_output.view(num_tokens, self.num_heads, self.head_size)
         output[:num_tokens] = attn_output[:num_tokens]
         return output
@@ -947,7 +979,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
             return output.fill_(0)
 
         # Reshape and cache KV
-        if attn_metadata != AscendAttentionState.DecodeOnly:
+        # NOTE: compare attn_state (not the metadata object itself) — the
+        # previous `attn_metadata != AscendAttentionState.DecodeOnly` was
+        # always True and forced a full-cache .contiguous() copy on every
+        # call. With the contiguous (2, num_blocks, ...) cache layout this
+        # is a no-op; only non-decode states ever need it.
+        if attn_metadata.attn_state != AscendAttentionState.DecodeOnly:
             kv_cache = [i.contiguous() for i in kv_cache]
         if key is not None and value is not None:
             key = key.contiguous()
