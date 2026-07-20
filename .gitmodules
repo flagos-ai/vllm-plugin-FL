@@ -1,6 +1,0 @@
-[submodule "csrc/ascend/third_party/catlass"]
-	path = csrc/ascend/third_party/catlass
-	url = https://gitcode.com/cann/catlass.git
-[submodule "csrc/ascend/third_party/pto-isa"]
-	path = csrc/ascend/third_party/pto-isa
-	url = https://gitcode.com/cann/pto-isa.git
