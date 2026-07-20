@@ -5,6 +5,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
+import sys
 from typing import TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -46,6 +47,23 @@ dist_backend_dict = {
     "musa": "mccl",
 }
 
+def _resolve_flagcx_backend() -> bool:
+    """Check whether the flagcx torch distributed backend is available."""
+    flagcx_path = os.environ.get("FLAGCX_PATH")
+    if not flagcx_path:
+        return False
+    try:
+        if flagcx_path not in sys.path:
+            sys.path.insert(0, flagcx_path)
+        import plugin.torch.flagcx  # triggers _C.so load and backend registration
+        return torch.distributed.is_backend_available("flagcx")
+    except Exception:
+        logger.warning(
+            "FLAGCX_PATH=%s is set but flagcx torch backend could not be loaded.",
+            flagcx_path,
+        )
+        return False
+
 
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
@@ -64,7 +82,9 @@ class PlatformFL(Platform):
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     dist_backend: str = (
-        "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
+        "flagcx"
+        if _resolve_flagcx_backend()
+        else dist_backend_dict.get(device_name, "nccl")
     )
     ### TODO(lms): dispatch device_control_env_var
     # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
