@@ -221,12 +221,26 @@ class WorkerFL(WorkerBase):
         profiler_config = vllm_config.profiler_config
         if profiler_config.profiler == "torch":
             worker_name = f"{vllm_config.instance_id}-rank-{self.rank}"
-            self.profiler = TorchProfilerWrapper(
-                profiler_config,
-                worker_name=worker_name,
-                local_rank=self.local_rank,
-                activities=["CPU", "CUDA"],
-            )
+            try:
+                import torch_npu  # noqa: F401
+                is_npu = torch.npu.is_available()
+            except ImportError:
+                is_npu = False
+
+            if is_npu:
+                from vllm_fl.profiler.ascend import AscendTorchProfilerWrapper
+                self.profiler = AscendTorchProfilerWrapper(
+                    profiler_config,
+                    worker_name=worker_name,
+                    local_rank=self.local_rank,
+                )
+            else:
+                self.profiler = TorchProfilerWrapper(
+                    profiler_config,
+                    worker_name=worker_name,
+                    local_rank=self.local_rank,
+                    activities=["CPU", "CUDA"],
+                )
         else:
             self.profiler = None
 

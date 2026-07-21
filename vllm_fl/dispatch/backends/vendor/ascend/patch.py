@@ -18,6 +18,12 @@ def apply_ascend_patches():
     patch_fla_ops()
     patch_op_cls()
     patch_fused_moe()
+    patch_qwen3_5_attention()
+    patch_qwen3_6_gdn()
+    patch_qwen3_mtp()
+    patch_graph()
+    patch_npugraph_ex()
+    patch_dynamo_safe_ops()
 
 def patch_mamba_config():
     """Patch HybridAttentionMambaModelConfig for Ascend."""
@@ -55,6 +61,60 @@ def patch_fused_moe():
         logger.info("Patched fused_moe for Ascend")
     except Exception as e:
         logger.warning("Failed to patch fused_moe ops: %s", e)
+
+def patch_qwen3_5_attention():
+    """Patch Qwen3.5/Qwen3.6 attention to use the fused Ascend kernel."""
+    try:
+        from .patches.patch_qwen3_5 import patch_qwen3_5_attention as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch Qwen3NextAttention for Ascend: %s", e)
+
+
+def patch_qwen3_6_gdn():
+    """Patch Qwen3.5/Qwen3.6 GatedDeltaNet and GemmaRMSNorm with AscendC ops.
+
+    Falls back to the existing Triton path when the CANN custom-op package
+    is not available at runtime.
+    """
+    try:
+        from .patches.patch_qwen3_6_gdn import patch_qwen3_6_gdn as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch Qwen3.6 GDN AscendC ops: %s", e)
+
+
+def patch_qwen3_mtp():
+    """Patch Qwen3.5/Qwen3.6 Multi-Token Prediction for Ascend."""
+    try:
+        from .patches.patch_qwen3_mtp import patch_qwen3_mtp as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch Qwen3 MTP for Ascend: %s", e)
+
+
+def patch_graph():
+    """Patch GraphWrapper with Ascend ACL graph behavior."""
+    try:
+        from .patches.patch_graph import patch_graph as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch GraphWrapper for Ascend: %s", e)
+
+
+def patch_npugraph_ex():
+    """Patch npugraph_ex/torchair ValuePack handling."""
+    try:
+        from .patches.patch_npugraph_ex import patch_npugraph_ex as _do_patch
+
+        _do_patch()
+    except Exception as e:
+        logger.warning("Failed to patch npugraph_ex for Ascend: %s", e)
+
 
 def patch_fla_ops():
     """Patch FLA ops and fused_gdn_gating with Ascend implementations."""
@@ -107,6 +167,101 @@ def patch_op_cls():
         logger.info("Patched MMEncoderAttention for NPU (matmul attention)")
     except Exception as e:
         logger.warning("Failed to patch MMEncoderAttention: %s", e)
+
+def patch_dynamo_safe_ops():
+    """Bypass the FL dispatch manager for OOT ops when running on NPU.
+
+    vLLM v1 graph mode compiles model forward with torch.compile(fullgraph=True).
+    The FL dispatch manager's call_op uses Python RLock/context managers that
+    Dynamo cannot trace, so on NPU we replace the OOT forward methods with
+    direct calls to the Ascend (or reference PyTorch) implementations.  This
+    keeps the dispatch manager available for eager-mode / non-graph use.
+    """
+    try:
+        from vllm.platforms import current_platform
+
+        if getattr(current_platform, "device_type", None) != "npu":
+            return
+
+        from vllm_fl.ops.activation import GeluAndMulFL, SiluAndMulFL
+        from vllm_fl.ops.layernorm import RMSNormFL
+        from vllm_fl.ops.rotary_embedding import RotaryEmbeddingFL
+
+        from .impl.activation import silu_and_mul_ascend
+        from .impl.normalization import rms_norm_ascend
+        from .impl.rotary import rotary_embedding_ascend
+        from vllm_fl.dispatch.backends.reference.impl.activation import (
+            gelu_and_mul_torch,
+            silu_and_mul_torch,
+        )
+
+        SiluAndMulFL.forward_oot = silu_and_mul_ascend
+        GeluAndMulFL.forward_oot = gelu_and_mul_torch
+        RMSNormFL.forward_oot = rms_norm_ascend
+        RotaryEmbeddingFL.forward_oot = _make_rotary_forward_oot(
+            rotary_embedding_ascend
+        )
+
+        logger.info("Patched FL OOT ops for Dynamo-safe NPU execution")
+    except Exception as e:
+        logger.warning("Failed to patch FL OOT ops for NPU: %s", e)
+
+
+def _make_rotary_forward_oot(rotary_impl):
+    """Build a RotaryEmbeddingFL.forward_oot that calls ``rotary_impl`` directly.
+
+    The original forward_oot reshapes query/key and extracts cos/sin before
+    calling the operator; we keep that logic and only bypass call_op.
+    """
+
+    def forward_oot(
+        self,
+        positions: "torch.Tensor",
+        query: "torch.Tensor",
+        key: "torch.Tensor | None" = None,
+    ) -> tuple["torch.Tensor", "torch.Tensor | None"]:
+        # Use a local tensor instead of assigning back to the buffer; assigning
+        # to self.cos_sin_cache inside forward is forbidden when cudagraph is
+        # used inside torch.compile.
+        cos_sin_cache = self.cos_sin_cache.to(positions.device)
+        positions = positions.flatten()
+        num_tokens = positions.shape[0]
+
+        query_shape = query.shape
+        key_shape = key.shape
+        query = query.view(num_tokens, -1, self.head_size)
+        key = key.view(num_tokens, -1, self.head_size)
+
+        query_rot = query[..., : self.rotary_dim]
+        key_rot = key[..., : self.rotary_dim]
+        if self.rotary_dim < self.head_size:
+            query_pass = query[..., self.rotary_dim :]
+            key_pass = key[..., self.rotary_dim :]
+
+        cos, sin = cos_sin_cache.chunk(2, dim=-1)
+
+        q_embed, k_embed = rotary_impl(
+            self,
+            query_rot,
+            key_rot,
+            cos,
+            sin,
+            positions,
+            not self.is_neox_style,
+            True,
+        )
+
+        if self.rotary_dim < self.head_size:
+            query = torch.cat((q_embed, query_pass), dim=-1).reshape(query_shape)
+            key = torch.cat((k_embed, key_pass), dim=-1).reshape(key_shape)
+        else:
+            query = q_embed.reshape(query_shape)
+            key = k_embed.reshape(key_shape)
+
+        return query, key
+
+    return forward_oot
+
 
 def refresh_block_size(vllm_config, block_size = 128):
     """

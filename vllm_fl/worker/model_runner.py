@@ -99,7 +99,7 @@ from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import is_pin_memory_available
 
 from vllm.platforms import current_platform
-if current_platform.dist_backend == "flagcx":
+if current_platform.dist_backend in ("flagcx", "hccl"):
     @contextmanager
     def graph_capture(device: torch.device):
         """
@@ -2078,6 +2078,7 @@ class ModelRunnerFL(
             draft_token_ids=draft_token_ids,
             num_draft_tokens=num_draft_tokens.tolist(),
             cu_num_draft_tokens=cu_num_draft_tokens,
+            cu_num_sampled_tokens=cu_num_sampled_tokens,
             target_logits_indices=target_logits_indices,
             bonus_logits_indices=bonus_logits_indices,
             logits_indices=logits_indices,
@@ -5298,28 +5299,21 @@ class ModelRunnerFL(
         self, kv_caches: dict[str, torch.Tensor]
     ) -> None:
         """
-        Update the layout of attention layers from (2, num_blocks, ...) to
-        (num_blocks, 2, ...).
+        Keep the attention KV cache in the contiguous (2, num_blocks, ...)
+        layout.
 
-        Args:
-            kv_caches: The KV cache buffer of each layer.
+        Upstream vLLM re-strides the cache into an interleaved
+        (num_blocks, 2, ...) layout here, which makes ``kv_cache[0]`` /
+        ``kv_cache[1]`` non-contiguous views. The Ascend attention impl
+        (``vllm_fl/dispatch/backends/vendor/ascend/impl/attention.py``)
+        requires contiguous k/v caches and was paying one full-cache
+        ``.contiguous()`` copy per attention layer per step (~1ms per copy
+        at typical cache sizes, seen as the ``aclnnInplaceCopy_SliceAiCore``
+        hotspot in profiles). Skipping the re-stride keeps the views
+        contiguous; all accesses go through the same views, so this is
+        semantically transparent.
         """
-
-        for group in self._kv_cache_spec_attn_group_iterator():
-            kv_cache_spec = group.kv_cache_spec
-            for layer_name in group.layer_names:
-                kv_cache = kv_caches[layer_name]
-                if isinstance(kv_cache_spec, AttentionSpec) and kv_cache.shape[0] == 2:
-                    assert kv_cache.shape[1] != 2, (
-                        "Fail to determine whether the layout is "
-                        "(2, num_blocks, ...) or (num_blocks, 2, ...) for "
-                        f"a tensor of shape {kv_cache.shape}"
-                    )
-                    hidden_size = kv_cache.shape[2:].numel()
-                    kv_cache.as_strided_(
-                        size=kv_cache.shape,
-                        stride=(hidden_size, 2 * hidden_size, *kv_cache.stride()[2:]),
-                    )
+        return
 
     def initialize_kv_cache_tensors(
         self, kv_cache_config: KVCacheConfig, kernel_block_sizes: list[int]

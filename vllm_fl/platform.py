@@ -207,6 +207,34 @@ class PlatformFL(Platform):
             compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
         # --------------------------------------------------------
+        # NPU specific: inductor is not supported by default, but keep
+        # cudagraph mode unchanged so FULL_DECODE_ONLY can be profiled.
+        # If ascend_compilation_config.enable_npugraph_ex is set, leave the
+        # backend alone so that the AscendCompiler can be used.
+        if cls.device_type == "npu":
+            ascend_compilation_config = (
+                vllm_config.additional_config or {}
+            ).get("ascend_compilation_config", {})
+            enable_npugraph_ex = ascend_compilation_config.get(
+                "enable_npugraph_ex", False)
+
+            # The default post-grad fusion passes are CUDA-specific and will
+            # reference undefined pass classes on NPU.  Disable them here.
+            compilation_config.pass_config.fuse_norm_quant = False
+            compilation_config.pass_config.fuse_act_quant = False
+            compilation_config.pass_config.fuse_attn_quant = False
+            compilation_config.pass_config.fuse_allreduce_rms = False
+
+            backend = getattr(compilation_config, "backend", "")
+            if backend in ("", "inductor") and not enable_npugraph_ex:
+                compilation_config.backend = "eager"
+                logger.warning(
+                    "NPU does not support torch inductor compilation. "
+                    "Switching backend from '%s' to 'eager'.",
+                    backend or "<default>",
+                )
+
+        # --------------------------------------------------------
         # maca specific config updates
         if cls.vendor_name == "metax":
             if model_config is not None:
@@ -295,6 +323,45 @@ class PlatformFL(Platform):
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
         return "vllm_fl.compilation.graph.GraphWrapper"
+
+    @classmethod
+    def get_pass_manager_cls(cls) -> str:
+        # Only use the Ascend graph-fusion pass manager when npugraph_ex is
+        # explicitly enabled; otherwise keep the upstream default so that
+        # ordinary graph-mode serving works with the installed vllm version.
+        if cls.device_type == "npu" and cls._is_npugraph_ex_enabled():
+            return "vllm_fl.dispatch.backends.vendor.ascend.compilation.graph_fusion_pass_manager.GraphFusionPassManager"
+        return "vllm.compilation.pass_manager.PostGradPassManager"
+
+    @classmethod
+    def get_compile_backend(cls) -> str:
+        if cls.device_type == "npu" and cls._is_npugraph_ex_enabled():
+            return "vllm_fl.dispatch.backends.vendor.ascend.compilation.compiler_interface.AscendCompiler"
+        return "vllm.compilation.compiler_interface.EagerAdaptor"
+
+    @classmethod
+    def _is_npugraph_ex_enabled(cls) -> bool:
+        """Check whether npugraph_ex compilation is explicitly enabled.
+
+        npugraph_ex is an advanced Ascend compilation path that requires
+        compatible vllm/torchair versions.  It is disabled by default and must
+        be turned on explicitly via the environment variable
+        VLLM_FL_ENABLE_NPUGRAPH_EX=1 or via
+        additional_config.ascend_compilation_config.enable_npugraph_ex=true.
+        """
+        import os
+        if os.environ.get("VLLM_FL_ENABLE_NPUGRAPH_EX", "0") == "1":
+            return True
+        try:
+            from vllm.config import get_current_vllm_config
+            vllm_config = get_current_vllm_config()
+            if vllm_config is None:
+                return False
+            ascend_cfg = (vllm_config.additional_config or {}).get(
+                "ascend_compilation_config", {})
+            return ascend_cfg.get("enable_npugraph_ex", False)
+        except Exception:
+            return False
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
