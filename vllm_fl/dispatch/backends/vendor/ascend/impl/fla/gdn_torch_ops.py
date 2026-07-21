@@ -73,15 +73,15 @@ def chunk_gated_delta_rule_torch(
                 bt = beta[0, t].float()            # [HV]
 
                 # Gated decay: h *= exp(g)  [HV, V, K] *= [HV, 1, 1]
-                hi = hi * torch.exp(gt).unsqueeze(-1).unsqueeze(-1)
+                hi = hi * torch.ops.aten.exp(gt).unsqueeze(-1).unsqueeze(-1)
                 # h @ k: [HV, V, K] x [HV, K] -> [HV, V]
-                hk = torch.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
+                hk = torch.ops.aten.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
                 # v' = beta * (v - hk)
                 vp = (vt - hk) * bt.unsqueeze(-1)
                 # h += v' outer k: [HV, V, 1] x [HV, 1, K] -> [HV, V, K]
-                hi = hi + torch.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
+                hi = hi + torch.ops.aten.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
                 # o = h @ q: [HV, V, K] x [HV, K] -> [HV, V]
-                o[0, t] = torch.bmm(hi, qt.unsqueeze(-1)).squeeze(-1).to(o.dtype)
+                o[0, t] = torch.ops.aten.bmm(hi, qt.unsqueeze(-1)).squeeze(-1).to(o.dtype)
             h[i_n] = hi
     else:
         for i_n in range(B):
@@ -93,11 +93,11 @@ def chunk_gated_delta_rule_torch(
                 gt = g[i_n, t].float()
                 bt = beta[i_n, t].float()
 
-                hi = hi * torch.exp(gt).unsqueeze(-1).unsqueeze(-1)
-                hk = torch.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
+                hi = hi * torch.ops.aten.exp(gt).unsqueeze(-1).unsqueeze(-1)
+                hk = torch.ops.aten.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
                 vp = (vt - hk) * bt.unsqueeze(-1)
-                hi = hi + torch.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
-                o[i_n, t] = torch.bmm(hi, qt.unsqueeze(-1)).squeeze(-1).to(o.dtype)
+                hi = hi + torch.ops.aten.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
+                o[i_n, t] = torch.ops.aten.bmm(hi, qt.unsqueeze(-1)).squeeze(-1).to(o.dtype)
             h[i_n] = hi
 
     if output_final_state:
