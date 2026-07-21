@@ -48,13 +48,10 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
     # Registered backend: vendor/hygon
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
-<<<<<<< HEAD
      # Registered backend: vendor/txda
     "tsingmicro": {"device_type": "txda", "device_name": "txda"},
-=======
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
->>>>>>> ab3393316d1db7c7c412674604f4a805e4dc38c2
 }
 
 
