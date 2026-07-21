@@ -606,15 +606,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 self.key_cache, self.value_cache = kv_cache[0], kv_cache[1]
             slots = attn_metadata.slot_mapping
             # torch_npu requires int32 for slot_indices
-            # TODO(yxa): block_table.py: CUDA uses int64, NPU uses int32.
             if slots.dtype != torch.int32:
                 slots = slots.to(torch.int32)
+
+            num_actual = attn_metadata.num_actual_tokens
             torch_npu._npu_reshape_and_cache(
-                key=key[:attn_metadata.num_actual_tokens],
-                value=value[:attn_metadata.num_actual_tokens],
+                key=key[:num_actual],
+                value=value[:num_actual],
                 key_cache=self.key_cache,
                 value_cache=self.value_cache,
-                slot_indices=slots[:attn_metadata.num_actual_tokens]
+                slot_indices=slots[:num_actual]
             )
         return key, value
 
