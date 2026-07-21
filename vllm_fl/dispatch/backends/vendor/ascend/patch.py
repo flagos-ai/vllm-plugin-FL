@@ -24,12 +24,7 @@ def apply_ascend_patches():
     patch_gdn_triton_ops()
     patch_gdn_state_gather()
     patch_gdn_state_dtype_float32()
-    _patch_compute_logits_debug()
     patch_vit_pos_embed()
-
-def _patch_compute_logits_debug():
-    """No-op: debug logging removed after fixing KV cache overlap."""
-    pass
 
 def patch_mamba_config():
     """Patch HybridAttentionMambaModelConfig for Ascend."""
@@ -87,21 +82,6 @@ def patch_causal_conv1d():
                     if pad_slot_id is not None and csi_cpu is not None and idx == pad_slot_id:
                         continue
                     state = conv_state[idx]  # (dim, state_len)
-                    # DEBUG: log conv state around transition point
-                    if not hasattr(causal_conv1d_update_torch, '_debug_count'):
-                        causal_conv1d_update_torch._debug_count = 0
-                    causal_conv1d_update_torch._debug_count += 1
-                    n = causal_conv1d_update_torch._debug_count
-                    # First call per token is always layer 0 (first GDN layer)
-                    # For 30 GDN layers, token K starts at call 30*(K-1)+1
-                    # Token 25 starts at call 721, token 30 at 871
-                    if n <= 3 or (n >= 871 and n <= 873) or (n >= 901 and n <= 903):
-                        sa = state.abs()
-                        with open('/workspace/vllm-plugin-FL/conv_decode_debug.txt', 'a') as f:
-                            f.write(f"conv_decode #{n}: "
-                                    f"idx={idx}, state_mean={sa.mean().item():.6e}, "
-                                    f"state_max={sa.max().item():.6e}, "
-                                    f"state_nonzero={(sa > 1e-10).sum().item()}/{state.numel()}\n")
                     xi = x[i]  # (dim, seqlen)
                     seqlen = xi.shape[-1]
                     combined = torch.cat([state[..., -(width-1):], xi], dim=-1)
@@ -542,20 +522,6 @@ def patch_gdn_triton_ops():
 
                 out[i_n, 0] = b_o.to(out.dtype)
                 initial_state[state_idx] = h.to(initial_state.dtype)
-
-            # DEBUG: log output norm for first 300 decode calls (covers ~10 tokens x 30 layers)
-            if not hasattr(_proper_packed_decode, '_out_count'):
-                _proper_packed_decode._out_count = 0
-            _proper_packed_decode._out_count += 1
-            cnt = _proper_packed_decode._out_count
-            if cnt <= 900 and cnt % 30 == 1:  # Every 30th call = first GDN layer of each token
-                token_num = (cnt - 1) // 30 + 1
-                out_abs = out.abs()
-                with open('/workspace/vllm-plugin-FL/gdn_output_debug.txt', 'a') as f:
-                    f.write(f"token {token_num}: out_mean={out_abs.mean().item():.6e}, "
-                            f"out_max={out_abs.max().item():.6e}, "
-                            f"h_mean={h.abs().mean().item():.6e}, "
-                            f"h_max={h.abs().max().item():.6e}\n")
 
             return out, initial_state
 

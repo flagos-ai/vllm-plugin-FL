@@ -19,5 +19,11 @@ test-results-*
 *.out
 *.log
 
-*.sh
-*.py
+# Debug artifacts
+*_debug.txt
+*debug*.log
+torch_compile_debug/
+
+# Root-level dev/test scripts (not part of the package)
+/*.sh
+/*.py
