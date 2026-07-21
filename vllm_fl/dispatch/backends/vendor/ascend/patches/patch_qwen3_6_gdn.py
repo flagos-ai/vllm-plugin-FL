@@ -403,11 +403,26 @@ class AscendCGatedDeltaNet(Qwen3NextGatedDeltaNet):
         a = a[:num_actual_tokens]
 
         # 1. Convolution sequence transformation
-        conv_weights = self.conv1d.weight.view(
-            self.conv1d.weight.size(0), self.conv1d.weight.size(2)
-        )
-        # The AscendC kernel expects the conv weight as (width, dim).
-        conv_weights_t = conv_weights.transpose(0, 1)
+        if os.environ.get("VLLM_FL_DISABLE_CONV1D_PREPACK", "0") == "1":
+            # A/B kill switch: keep the old per-forward transpose view.
+            conv_weights_t = self.conv1d.weight.view(
+                self.conv1d.weight.size(0), self.conv1d.weight.size(2)
+            ).transpose(0, 1)
+        else:
+            if not getattr(self, "_fl_conv1d_weight_packed", False):
+                # Pack the conv weight once (dim, 1, width) -> (width, 1, dim):
+                # the AscendC kernel consumes (width, dim), and packing here
+                # avoids materializing a transpose view on every forward
+                # (backport of vllm-ascend PR #7555's post-load packing, done
+                # lazily because the vLLM 0.13 loader has no GDN post-load hook).
+                w = self.conv1d.weight
+                self.conv1d.weight.data = (
+                    w.squeeze(1).transpose(0, 1).contiguous().unsqueeze(1))
+                self._fl_conv1d_weight_packed = True
+            # After packing this view is already (width, dim) and contiguous.
+            conv_weights_t = self.conv1d.weight.view(
+                self.conv1d.weight.size(0), self.conv1d.weight.size(2)
+            )
         activation_mode = 1 if self.activation else 0
 
         if spec_sequence_masks is not None:
