@@ -213,9 +213,6 @@ def register_model():
             "vllm_fl.models.bge_m3:BgeM3EmbeddingModel",
         )
     except Exception as e:
-<<<<<<< HEAD
-        logger.error(f"Register BgeM3EmbeddingModel error: {str(e)}")
-=======
         logger.error(f"Register BgeM3EmbeddingModel error: {str(e)}")
 
     # Ensure Qwen3NextMTP draft configs are treated as text-only even when
@@ -249,4 +246,3 @@ def register_model():
         logger.error(f"Apply cudagraph env patch error: {str(e)}")
 
     return "vllm_fl.platform.PlatformFL"
->>>>>>> ab3393316d1db7c7c412674604f4a805e4dc38c2
