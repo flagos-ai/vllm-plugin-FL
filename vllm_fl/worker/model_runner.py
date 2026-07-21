@@ -99,6 +99,21 @@ from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import is_pin_memory_available
 
 from vllm.platforms import current_platform
+
+try:
+    # Ascend-only Triton slot mapping kernel backported from vllm-ascend
+    # PR #12096. Guarded so other vendors can import this module without
+    # Triton/Ascend dependencies.
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.compute_slot_mapping import (  # noqa: E501
+        compute_slot_mapping_npu)
+except ImportError:
+    compute_slot_mapping_npu = None
+
+# Kill switch for A/B testing and fallback: set VLLM_FL_DISABLE_NPU_SLOT_MAPPING=1
+# to force the upstream NumPy + H2D commit path.
+if os.environ.get("VLLM_FL_DISABLE_NPU_SLOT_MAPPING", "0") == "1":
+    compute_slot_mapping_npu = None
+
 if current_platform.dist_backend in ("flagcx", "hccl"):
     @contextmanager
     def graph_capture(device: torch.device):
@@ -1443,8 +1458,17 @@ class ModelRunnerFL(
 
                 output_idx += num_sched
 
-        self.input_batch.block_table.compute_slot_mapping(req_indices, positions_np)
-        self.input_batch.block_table.commit_slot_mapping(total_num_scheduled_tokens)
+        # On Ascend NPU, compute slot mapping directly on the device with the
+        # Triton kernel backported from vllm-ascend PR #12096 (writes into
+        # slot_mapping.gpu, so the CPU->GPU commit must be skipped). Other
+        # platforms and PCP/DCP keep the upstream NumPy path.
+        if compute_slot_mapping_npu is None or not compute_slot_mapping_npu(
+                self.input_batch.block_table, num_reqs, num_scheduled_tokens,
+                positions_np):
+            self.input_batch.block_table.compute_slot_mapping(
+                req_indices, positions_np)
+            self.input_batch.block_table.commit_slot_mapping(
+                total_num_scheduled_tokens)
 
         # Prepare the attention metadata.
         self.query_start_loc.np[0] = 0
