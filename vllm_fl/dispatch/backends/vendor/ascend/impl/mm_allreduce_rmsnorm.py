@@ -84,6 +84,9 @@ def fused_mm_allreduce_add_rmsnorm(
         (normed_output [M, N], new_residual [M, N]).
     """
     group_name, tp_size, tp_rank = _tp_ctx()
+    logger.info_once(
+        "matmul_allreduce_add_rmsnorm fused call: M=%d K=%d N=%d",
+        x.shape[0], x.shape[1], weight.shape[0])
     return torch.ops._C_ascend.matmul_allreduce_add_rmsnorm(
         x,
         weight,
