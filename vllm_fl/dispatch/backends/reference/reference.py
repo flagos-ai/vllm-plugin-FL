@@ -19,47 +19,58 @@ from vllm_fl.dispatch.backends.base import Backend
 
 logger = init_logger(__name__)
 
-_flash_attn_patched = False
+_metax_mla_patched = False
 
 
 def _patch_flash_attn_for_metax():
     """
-    On MetaX platform, patch flash_attn_varlen_func into vLLM's MLA module.
+    On MetaX platform, patch vLLM's MLA modules for MACA compatibility:
 
-    vLLM's MLACommonImpl.__init__ checks for flash_attn_varlen_func (imported
-    from vllm.vllm_flash_attn, a CUDA C extension). On MetaX this import fails
-    so the variable is None, causing a RuntimeError. MetaX ships its own
-    flash_attn package (MACA-adapted) that provides flash_attn_varlen_func.
-    This function patches it in so TritonMLAImpl prefill works.
+    1. flash_attn_varlen_func: vLLM imports from vllm.vllm_flash_attn (CUDA C
+       extension) which is unavailable on MetaX. Patch in the MACA-adapted
+       flash_attn package version for prefill.
+
+    2. decode_attention_fwd: vLLM's native Triton decode kernel uses block sizes
+       that exceed MetaX's 64KB shared memory limit. Patch in the MetaX-adapted
+       version with reduced block sizes.
     """
-    global _flash_attn_patched
-    if _flash_attn_patched:
+    global _metax_mla_patched
+    if _metax_mla_patched:
         return
 
     from vllm.platforms import current_platform
     if current_platform.vendor_name != "metax":
-        _flash_attn_patched = True
+        _metax_mla_patched = True
         return
 
+    # --- Patch 1: flash_attn_varlen_func for prefill ---
     import vllm.model_executor.layers.attention.mla_attention as mla_mod
 
-    if mla_mod.flash_attn_varlen_func is not None:
-        _flash_attn_patched = True
-        return
+    if mla_mod.flash_attn_varlen_func is None:
+        try:
+            from flash_attn import flash_attn_varlen_func
+        except ImportError as e:
+            raise RuntimeError(
+                "MetaX platform requires flash_attn package for MLA prefill. "
+                "Please install the MACA-adapted flash_attn."
+            ) from e
 
-    try:
-        from flash_attn import flash_attn_varlen_func
-    except ImportError as e:
-        raise RuntimeError(
-            "MetaX platform requires flash_attn package for MLA prefill. "
-            "Please install the MACA-adapted flash_attn."
-        ) from e
+        mla_mod.flash_attn_varlen_func = flash_attn_varlen_func
+        mla_mod.is_vllm_fa = False
+        logger.info("Patched flash_attn_varlen_func from flash_attn package "
+                    "for MetaX MLA prefill support")
 
-    mla_mod.flash_attn_varlen_func = flash_attn_varlen_func
-    mla_mod.is_vllm_fa = False
-    _flash_attn_patched = True
-    logger.info("Patched flash_attn_varlen_func from flash_attn package "
-                "for MetaX MLA prefill support")
+    # --- Patch 2: decode_attention_fwd for decode (shmem limit) ---
+    import vllm.v1.attention.backends.mla.triton_mla as triton_mla_mod
+
+    from vllm_fl.dispatch.backends.vendor.metax.impl.attention.ops.triton_decode_attention import (
+        decode_attention_fwd as metax_decode_attention_fwd,
+    )
+    triton_mla_mod.decode_attention_fwd = metax_decode_attention_fwd
+    logger.info("Patched decode_attention_fwd with MetaX version "
+                "(reduced block size for 64KB shmem limit)")
+
+    _metax_mla_patched = True
 
 
 class ReferenceBackend(Backend):
