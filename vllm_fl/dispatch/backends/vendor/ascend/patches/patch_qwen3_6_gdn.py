@@ -31,6 +31,18 @@ FL plugin on vLLM 0.13:
   implementation by ``patch_fla_ops``).
 * ``npu_gemma_rms_norm`` / ``npu_add_rms_norm_bias`` back
   ``GemmaRMSNorm.forward_oot``.
+* Non-speculative decode batches run the q/k L2 norm + delta-rule state
+  update as one fused Triton kernel (``fused_recurrent_delta_rule_update``,
+  adapted from vllm-ascend's fused_sigmoid_gating_delta_rule_update) on top
+  of the AscendC ``npu_fused_gdn_gating`` op, replacing the separate
+  2x l2norm_fwd + npu_recurrent_gated_delta_rule calls. The in-kernel
+  sigmoid-gating section of the upstream kernel is miscompiled by the
+  Ascend Triton pipeline in this environment, so the gating stays on the
+  AscendC op. Set ``VLLM_FL_DISABLE_FUSED_DECODE_GDN=1`` to fall back to
+  the AscendC recurrent op.
+* ``RMSNormGated.forward_oot`` runs the fused Triton
+  ``layer_norm_fwd_1pass`` kernel (ported from vllm-ascend) instead of the
+  decomposed eager ``forward_native`` chain.
 * Fresh (all-zero ``initial_state``) prefill batches run the fused
   PTO/Bisheng megakernel (vllm-ascend PR #8872 port,
   ``vllm_fl/ops/pto_chunk_gdn``): all six GDN stages in a single launch.
@@ -78,7 +90,7 @@ import torch
 from vllm.attention.backends.abstract import AttentionMetadata
 from vllm.attention.backends.utils import PAD_SLOT_ID
 from vllm.forward_context import get_forward_context
-from vllm.model_executor.layers.layernorm import GemmaRMSNorm
+from vllm.model_executor.layers.layernorm import GemmaRMSNorm, RMSNormGated
 from vllm.model_executor.layers.mamba.mamba_utils import MambaStateShapeCalculator
 from vllm.model_executor.models.qwen3_next import Qwen3NextGatedDeltaNet
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
@@ -86,7 +98,9 @@ from vllm.v1.kv_cache_interface import MambaSpec
 
 import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
 
+from ..impl.fla.fused_recurrent import fused_recurrent_delta_rule_update
 from ..impl.fla.l2norm import l2norm_fwd
+from ..impl.linearnorm.layernorm_gated import rmsnorm_gated_oot
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +201,13 @@ def _build_actual_seq_lengths(
         out=actual_seq_lengths[1:],
     )
     return actual_seq_lengths
+
+
+def _fused_decode_gdn_enabled() -> bool:
+    """Whether to use the fused Triton decode kernel (q/k L2 norm +
+    recurrent delta-rule state update in a single launch, adapted from
+    vllm-ascend) for non-speculative decode batches."""
+    return os.environ.get("VLLM_FL_DISABLE_FUSED_DECODE_GDN", "0") != "1"
 
 
 # ---------------------------------------------------------------------------
@@ -573,24 +594,44 @@ class AscendCGatedDeltaNet(Qwen3NextGatedDeltaNet):
                 last_recurrent_state.transpose(-1, -2).contiguous().to(ssm_state.dtype)
             )
         elif attn_metadata.num_decodes > 0:
-            actual_seq_lengths = _build_actual_seq_lengths(
-                non_spec_query_start_loc, attn_metadata.num_decodes
-            )
-            query_non_spec = l2norm_fwd(query_non_spec)
-            key_non_spec = l2norm_fwd(key_non_spec)
-            core_attn_out_non_spec = torch.ops._C_ascend.npu_recurrent_gated_delta_rule(
-                query=query_non_spec.squeeze(0),
-                key=key_non_spec.squeeze(0),
-                value=value_non_spec.squeeze(0),
-                g=g_non_spec.squeeze(0),
-                beta=beta_non_spec.squeeze(0),
-                state=ssm_state,
-                scale=key_non_spec.shape[-1] ** -0.5,
-                actual_seq_lengths=actual_seq_lengths,
-                ssm_state_indices=non_spec_state_indices_tensor[
-                    : attn_metadata.num_decodes
-                ],
-            ).unsqueeze(0)
+            if _fused_decode_gdn_enabled():
+                # One fused Triton launch: q/k L2 norm + delta-rule state
+                # update (state kept in the (Hv, Dv, Dk) AscendC layout,
+                # which the kernel accesses in its native v-major
+                # orientation). The sigmoid gating above stays on the
+                # AscendC npu_fused_gdn_gating op.
+                core_attn_out_non_spec = fused_recurrent_delta_rule_update(
+                    q=query_non_spec.contiguous(),
+                    k=key_non_spec.contiguous(),
+                    v=value_non_spec.contiguous(),
+                    g=g_non_spec.squeeze(0).contiguous(),
+                    beta=beta_non_spec.squeeze(0).contiguous(),
+                    initial_state_source=ssm_state,
+                    initial_state_indices=non_spec_state_indices_tensor[
+                        : attn_metadata.num_decodes
+                    ],
+                    cu_seqlens=non_spec_query_start_loc,
+                    use_qk_l2norm_in_kernel=True,
+                )
+            else:
+                actual_seq_lengths = _build_actual_seq_lengths(
+                    non_spec_query_start_loc, attn_metadata.num_decodes
+                )
+                query_non_spec = l2norm_fwd(query_non_spec)
+                key_non_spec = l2norm_fwd(key_non_spec)
+                core_attn_out_non_spec = torch.ops._C_ascend.npu_recurrent_gated_delta_rule(
+                    query=query_non_spec.squeeze(0),
+                    key=key_non_spec.squeeze(0),
+                    value=value_non_spec.squeeze(0),
+                    g=g_non_spec.squeeze(0),
+                    beta=beta_non_spec.squeeze(0),
+                    state=ssm_state,
+                    scale=key_non_spec.shape[-1] ** -0.5,
+                    actual_seq_lengths=actual_seq_lengths,
+                    ssm_state_indices=non_spec_state_indices_tensor[
+                        : attn_metadata.num_decodes
+                    ],
+                ).unsqueeze(0)
         else:
             core_attn_out_non_spec, last_recurrent_state = None, None
 
@@ -632,6 +673,33 @@ class AscendCGemmaRMSNorm(GemmaRMSNorm):
         return x
 
 
+class AscendCRMSNormGated(RMSNormGated):
+    """RMSNormGated backed by the fused Triton ``layer_norm_fwd_1pass`` kernel.
+
+    The upstream OOT fallback (``forward_native``) decomposes the gated RMS
+    norm into a long chain of eager ops (silu/pow/mean/rsqrt/mul), which is
+    a major decode-stage cost for GDN layers; the fused kernel runs the
+    whole norm (+ SiLU gating) in one launch, same as vllm-ascend's
+    ``AscendRMSNormGated``.
+    """
+
+    def forward_oot(
+        self,
+        x: torch.Tensor,
+        z: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if z is None:
+            return RMSNormGated.forward_native(self, x, z)
+        return rmsnorm_gated_oot(
+            x,
+            self.weight,
+            z,
+            eps=self.eps,
+            group_size=self.group_size,
+            norm_before_gate=self.norm_before_gate,
+        )
+
+
 def patch_qwen3_6_gdn() -> bool:
     """Apply the AscendC GDN patch for Qwen3.5/Qwen3.6.
 
@@ -645,12 +713,15 @@ def patch_qwen3_6_gdn() -> bool:
     Qwen3NextGatedDeltaNet._forward_core = AscendCGatedDeltaNet._forward_core
     _patch_mamba_cache_dense_layout()
     GemmaRMSNorm.forward_oot = AscendCGemmaRMSNorm.forward_oot
+    RMSNormGated.forward_oot = AscendCRMSNormGated.forward_oot
     if _pto_available():
         _patch_gdn_metadata_host_flags()
     logger.info(
-        "Patched Qwen3NextGatedDeltaNet and GemmaRMSNorm for Ascend "
+        "Patched Qwen3NextGatedDeltaNet and GemmaRMSNorm/RMSNormGated for Ascend "
         "(AscendC causal_conv1d / fused_gdn_gating / recurrent_gated_delta_rule "
-        "/ gemma_rms_norm, PTO megakernel for fresh prefill: %s)",
+        "/ gemma_rms_norm, fused Triton delta-rule decode update: %s, "
+        "PTO megakernel for fresh prefill: %s)",
+        "on" if _fused_decode_gdn_enabled() else "off",
         "on" if _pto_available() else "off",
     )
     return True
