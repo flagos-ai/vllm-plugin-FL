@@ -45,8 +45,14 @@ def apply_ssm_patch():
     causal_conv1d_update = gdn_mod.causal_conv1d_update
     fused_post_conv_prep = gdn_mod.fused_post_conv_prep
 
+    from vllm.model_executor.layers.fla.ops.fused_sigmoid_gating import (
+        fused_sigmoid_gating_delta_rule_update,
+    )
     from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.fused_recurrent import (
         fused_recurrent_gated_delta_rule as klx_fused_recurrent,
+    )
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.chunk import (
+        chunk_gated_delta_rule as klx_chunk_gated_delta_rule,
     )
     from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_gdn_gating import (
         fused_gdn_gating_kunlunxin,
@@ -175,7 +181,7 @@ def apply_ssm_patch():
             query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
                 mixed_qkv_non_spec
             )
-            # l2norm on q and k (replaces apply_l2norm=True in fused_post_conv_prep)
+            # Manual l2norm on q and k (avoids xtorch_ops l2norm precision issues)
             query_non_spec = torch.nn.functional.normalize(query_non_spec, p=2, dim=-1)
             key_non_spec = torch.nn.functional.normalize(key_non_spec, p=2, dim=-1)
             # Compute g/beta via kunlunxin fused_gdn_gating
@@ -184,20 +190,11 @@ def apply_ssm_patch():
                 self.A_log, a_non_spec, b_non_spec, self.dt_bias
             )
         elif attn_metadata.num_decodes > 0 and mixed_qkv_non_spec is not None:
-            # Decode path: compute g/beta via kunlunxin fused_gdn_gating
+            # Decode path: just rearrange qkv (gating computed later in recurrent section)
             query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
                 mixed_qkv_non_spec
             )
-            if spec_sequence_masks is not None:
-                a_non_spec = a.index_select(0, non_spec_token_indx)
-                b_non_spec = b.index_select(0, non_spec_token_indx)
-            else:
-                a_non_spec = a
-                b_non_spec = b
-            # fused_gdn_gating returns [1, num_tokens, HV]
-            g_non_spec, beta_non_spec = fused_gdn_gating_kunlunxin(
-                self.A_log, a_non_spec, b_non_spec, self.dt_bias
-            )
+            g_non_spec, beta_non_spec = None, None
         else:
             query_non_spec, key_non_spec, value_non_spec = None, None, None
             g_non_spec, beta_non_spec = None, None
@@ -227,7 +224,7 @@ def apply_ssm_patch():
                 ],
                 ssm_state_indices=spec_state_indices_tensor,
                 num_accepted_tokens=num_accepted_tokens,
-                use_qk_l2norm_in_kernel=True,
+                use_qk_l2norm_in_kernel=False,
             )
         else:
             core_attn_out_spec, last_recurrent_state = None, None
@@ -238,10 +235,13 @@ def apply_ssm_patch():
             initial_state = ssm_state[non_spec_state_indices_tensor].contiguous()
             assert has_initial_state is not None
             initial_state[~has_initial_state, ...] = 0
+            # klx fix: use xtorch_ops chunk kernel (replaces FLA Triton which
+            # produces numerically incorrect SSM final_state on XPU).
+            # q/k already L2-normalized above, so use_qk_l2norm_in_kernel=False.
             (
                 core_attn_out_non_spec,
                 last_recurrent_state,
-            ) = self.chunk_gated_delta_rule(
+            ) = klx_chunk_gated_delta_rule(
                 q=query_non_spec,
                 k=key_non_spec,
                 v=value_non_spec,
@@ -250,8 +250,6 @@ def apply_ssm_patch():
                 initial_state=initial_state,
                 output_final_state=True,
                 cu_seqlens=non_spec_query_start_loc,
-                chunk_indices=attn_metadata.chunk_indices,
-                chunk_offsets=attn_metadata.chunk_offsets,
                 use_qk_l2norm_in_kernel=False,
             )
             # klx diff: write ssm cache
@@ -259,7 +257,22 @@ def apply_ssm_patch():
                 ssm_state, last_recurrent_state, non_spec_state_indices_tensor
             )
         elif attn_metadata.num_decodes > 0:
-            # klx: use fused_recurrent instead of fused_sigmoid_gating Triton kernel
+            # klx: compute g/beta manually in PyTorch (avoiding xtorch_ops precision issues)
+            # fused_sigmoid_gating_delta_rule_update is not registered for XPU, cannot use
+            if spec_sequence_masks is not None:
+                a_dec = a.index_select(0, non_spec_token_indx)
+                b_dec = b.index_select(0, non_spec_token_indx)
+            else:
+                a_dec = a
+                b_dec = b
+            # g = -exp(A_log) * softplus(a + dt_bias), shape [num_tokens, HV] -> [1, num_tokens, HV]
+            x = (a_dec + self.dt_bias).float()
+            sp = torch.nn.functional.softplus(x)
+            g_non_spec = (-torch.exp(self.A_log.float()) * sp).unsqueeze(0)
+            beta_non_spec = torch.sigmoid(b_dec.float()).to(torch.bfloat16).unsqueeze(0)
+            # Manual L2 norm
+            query_non_spec = torch.nn.functional.normalize(query_non_spec, p=2, dim=-1)
+            key_non_spec = torch.nn.functional.normalize(key_non_spec, p=2, dim=-1)
             core_attn_out_non_spec, last_recurrent_state = klx_fused_recurrent(
                 q=query_non_spec,
                 k=key_non_spec,
@@ -272,7 +285,7 @@ def apply_ssm_patch():
                     : attn_metadata.num_decodes + 1
                 ],
                 ssm_state_indices=non_spec_state_indices_tensor,
-                use_qk_l2norm_in_kernel=True,
+                use_qk_l2norm_in_kernel=False,
             )
         else:
             core_attn_out_non_spec, last_recurrent_state = None, None

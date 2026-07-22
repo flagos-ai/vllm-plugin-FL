@@ -117,8 +117,10 @@ def select_unquantized_moe_backend_oot(
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
 
-    if current_platform.is_out_of_tree():
+    if current_platform.is_out_of_tree() and use_flaggems():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
+    elif current_platform.is_out_of_tree():
+        return UnquantizedMoeBackend.TRITON, None
 
     if moe_config.is_lora_enabled:
         return UnquantizedMoeBackend.TRITON, backend_to_kernel_cls(
