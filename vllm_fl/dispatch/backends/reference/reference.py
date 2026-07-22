@@ -63,6 +63,7 @@ def _patch_flash_attn_for_metax():
     # --- Patch 2: decode_attention_fwd for decode (shmem limit) ---
     import vllm.v1.attention.backends.mla.triton_mla as triton_mla_mod
 
+    # 实际上是使用了沐曦metax 特化版本的 triton decode attention。因为沐曦需要调整shm大小
     from vllm_fl.dispatch.backends.vendor.metax.impl.attention.ops.triton_decode_attention import (
         decode_attention_fwd as metax_decode_attention_fwd,
     )
@@ -225,7 +226,9 @@ class ReferenceBackend(Backend):
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
         if use_mla:
-            _patch_flash_attn_for_metax()
+            from vllm.platforms import current_platform
+            if current_platform.vendor_name == "metax":
+                _patch_flash_attn_for_metax()
             logger.info("attention backend reference dispatch: "
                         "using TritonMLA for MLA attention")
             return AttentionBackendEnum.TRITON_MLA.get_path()
