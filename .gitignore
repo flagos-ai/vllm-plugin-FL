@@ -245,3 +245,5 @@ csrc/ascend/third_party/ascend_protobuf/
 csrc/ascend/third_party/json/
 csrc/ascend/third_party/makeself/
 csrc/ascend/third_party/pkg/
+# csrc/ascend/third_party/pto-isa/
+# csrc/ascend/third_party/catlass
