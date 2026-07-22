@@ -54,35 +54,33 @@ def patch_block_table_slot_mapping():
     Kunlunxin XPU (err_code -714). Replace with a numpy-based approach.
     """
     try:
-        import numpy as np
         import torch
         from vllm.v1.worker.block_table import BlockTable
 
         PAD_SLOT_ID = -1
 
-        def compute_slot_mapping_cpu(self, num_reqs, query_start_loc, positions):
-            query_start_loc_cpu = query_start_loc.cpu().numpy()
-            positions_cpu = positions.cpu().numpy()
-            num_tokens = positions_cpu.shape[0]
+        def compute_slot_mapping_xpu(self, num_reqs, query_start_loc, positions):
+            device = positions.device
+            num_tokens = positions.shape[0]
 
             total_cp_world_size = self.pcp_world_size * self.dcp_world_size
             total_cp_rank = self.pcp_rank * self.dcp_world_size + self.dcp_rank
 
-            # Build req_indices from query_start_loc
-            req_indices = np.zeros(num_tokens, dtype=np.int64)
-            for i in range(num_reqs):
-                start = int(query_start_loc_cpu[i])
-                end = int(query_start_loc_cpu[i + 1])
-                req_indices[start:end] = i
+            # Build req_indices: repeat_interleave on XPU, no CPU copy
+            counts = query_start_loc[1:num_reqs + 1] - query_start_loc[:num_reqs]
+            req_indices = torch.repeat_interleave(
+                torch.arange(num_reqs, device=device), counts
+            )
 
+            # Direct GPU indexing: use .gpu tensors, skip .np and copy_to_gpu
             if total_cp_world_size > 1:
                 virtual_block_size = self.block_size * total_cp_world_size
-                block_table_indices = (
+                bt_indices = (
                     req_indices * self.max_num_blocks_per_req
-                    + positions_cpu // virtual_block_size
+                    + positions // virtual_block_size
                 )
-                block_numbers = self.block_table.np.ravel()[block_table_indices]
-                virtual_block_offsets = positions_cpu % virtual_block_size
+                block_numbers = self.block_table.gpu.view(-1)[bt_indices]
+                virtual_block_offsets = positions % virtual_block_size
                 mask = (
                     virtual_block_offsets // self.cp_kv_cache_interleave_size
                     % total_cp_world_size == total_cp_rank
@@ -93,28 +91,27 @@ def patch_block_table_slot_mapping():
                     * self.cp_kv_cache_interleave_size
                     + virtual_block_offsets % self.cp_kv_cache_interleave_size
                 )
-                slot_mapping = block_numbers * self.block_size + block_offsets
-                self.slot_mapping.np[:num_tokens] = np.where(mask, slot_mapping, PAD_SLOT_ID)
-            else:
-                block_table_indices = (
-                    req_indices * self.max_num_blocks_per_req
-                    + positions_cpu // self.block_size
+                slot_vals = block_numbers * self.block_size + block_offsets
+                self.slot_mapping.gpu[:num_tokens] = torch.where(
+                    mask, slot_vals,
+                    torch.full((), PAD_SLOT_ID, dtype=slot_vals.dtype, device=device)
                 )
-                block_numbers = self.block_table.np.ravel()[block_table_indices]
-                block_offsets = positions_cpu % self.block_size
-                np.add(
-                    block_numbers * self.block_size,
-                    block_offsets,
-                    out=self.slot_mapping.np[:num_tokens],
+            else:
+                bt_indices = (
+                    req_indices * self.max_num_blocks_per_req
+                    + positions // self.block_size
+                )
+                block_numbers = self.block_table.gpu.view(-1)[bt_indices]
+                block_offsets = positions % self.block_size
+                self.slot_mapping.gpu[:num_tokens] = (
+                    block_numbers * self.block_size + block_offsets
                 )
 
             # Pad remaining slots
-            self.slot_mapping.np[num_tokens:self.max_num_batched_tokens] = PAD_SLOT_ID
-            # Copy to GPU
-            self.slot_mapping.copy_to_gpu(self.max_num_batched_tokens)
+            self.slot_mapping.gpu[num_tokens:self.max_num_batched_tokens] = PAD_SLOT_ID
 
-        BlockTable.compute_slot_mapping = compute_slot_mapping_cpu
-        logger.info("Patched BlockTable.compute_slot_mapping to CPU numpy path for Kunlunxin")
+        BlockTable.compute_slot_mapping = compute_slot_mapping_xpu
+        logger.info("Patched BlockTable.compute_slot_mapping to XPU torch path for Kunlunxin")
     except Exception as e:
         logger.warning("Failed to patch compute_slot_mapping: %s", e)
 

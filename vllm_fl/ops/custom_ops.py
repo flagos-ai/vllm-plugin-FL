@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 OOT_OPS = {
     "silu_and_mul": (SiluAndMulFL, "SiluAndMul"),  # noqa F405
     "gelu_and_mul": (GeluAndMulFL, "GeluAndMul"),  # noqa F405
-    "silu_and_mul_with_clamp": (SiluAndMulWithClampFL, "SiluAndMulWithClamp"),  # noqa F405
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
     "fused_moe": (FusedMoEFL, "FusedMoE"),  # noqa F405
@@ -185,7 +184,5 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         # Apply Kunlunxin monkey-patches if running on Kunlunxin hardware.
         from vllm_fl.dispatch.config.utils import get_platform_name
         if get_platform_name() == "kunlunxin":
-            from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (ensure_fla_compat,)
-            ensure_fla_compat()
             from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import apply_kunlunxin_patches
             apply_kunlunxin_patches()
