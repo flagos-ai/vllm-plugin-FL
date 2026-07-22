@@ -44,17 +44,17 @@ op_backends:
   # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
   attention_backend:
     - flagos
-    - vendor:hygon
+    #- vendor:hygon
     - reference
 
   rms_norm:
     - flagos
-    - vendor:hygon
+    #- vendor:hygon
     - reference
 
   silu_and_mul:
     - flagos
-    - vendor:hygon
+    #- vendor:hygon
     - reference
 
   gelu_and_mul:
@@ -64,7 +64,7 @@ op_backends:
 
   rotary_embedding:
     - flagos
-    - vendor:hygon
+    #- vendor:hygon
     - reference
 
   moe_align_block_size:
