@@ -24,6 +24,8 @@ FL plugin on vLLM 0.13:
 
 * ``npu_causal_conv1d_custom`` replaces the Triton ``causal_conv1d_fn`` /
   ``causal_conv1d_update`` calls inside ``Qwen3NextGatedDeltaNet._forward_core``.
+  Its ``(width, dim)`` weight layout is materialized once after checkpoint
+  loading instead of being transposed implicitly on every forward.
 * ``npu_fused_gdn_gating`` replaces the Triton ``fused_gdn_gating``.
 * ``npu_recurrent_gated_delta_rule`` replaces ``fused_recurrent_gated_delta_rule``
   on the (speculative-)decode paths.  The chunked prefill path keeps the
@@ -210,6 +212,47 @@ def _fused_decode_gdn_enabled() -> bool:
     return os.environ.get("VLLM_FL_DISABLE_FUSED_DECODE_GDN", "0") != "1"
 
 
+def _cache_conv1d_weight_transposed(layer: Qwen3NextGatedDeltaNet) -> None:
+    """Materialize the AscendC conv weight layout once after weight loading."""
+    weight = layer.conv1d.weight
+    conv_weights = weight.detach().view(weight.size(0), weight.size(2))
+    cached_weight = conv_weights.transpose(0, 1).contiguous()
+    if "_ascendc_conv_weights_t" in layer._buffers:
+        layer._ascendc_conv_weights_t = cached_weight
+    elif hasattr(layer, "_ascendc_conv_weights_t"):
+        layer._ascendc_conv_weights_t = cached_weight
+    else:
+        # Qwen3_5GatedDeltaNet deliberately skips the upstream GDN __init__,
+        # so it does not receive the loader-time buffer registration below.
+        layer.register_buffer(
+            "_ascendc_conv_weights_t", cached_weight, persistent=False
+        )
+
+
+def _patch_gdn_conv_weight_loader() -> None:
+    """Cache ``(width, dim)`` conv weights instead of transposing per token."""
+    orig_init = Qwen3NextGatedDeltaNet.__init__
+    if getattr(orig_init, "_vllm_fl_ascendc_conv_cache", False):
+        return
+
+    def init_with_conv_cache(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        self.register_buffer(
+            "_ascendc_conv_weights_t", None, persistent=False
+        )
+        orig_weight_loader = self.conv1d.weight.weight_loader
+
+        def weight_loader_with_conv_cache(param, *loader_args, **loader_kwargs):
+            result = orig_weight_loader(param, *loader_args, **loader_kwargs)
+            _cache_conv1d_weight_transposed(self)
+            return result
+
+        self.conv1d.weight.weight_loader = weight_loader_with_conv_cache
+
+    init_with_conv_cache._vllm_fl_ascendc_conv_cache = True
+    Qwen3NextGatedDeltaNet.__init__ = init_with_conv_cache
+
+
 # ---------------------------------------------------------------------------
 # PTO megakernel for the chunked-prefill path (vllm-ascend PR #8872 port)
 # ---------------------------------------------------------------------------
@@ -257,7 +300,13 @@ def _patch_gdn_metadata_host_flags() -> None:
 
     orig_build = GDNAttentionMetadataBuilder.build
 
-    def build_with_host_flags(self, common_prefix_len, common_attn_metadata, *args, **kwargs):
+    def build_with_host_flags(
+        self,
+        common_prefix_len,
+        common_attn_metadata,
+        *args,
+        **kwargs,
+    ):
         attn_metadata = orig_build(
             self, common_prefix_len, common_attn_metadata, *args, **kwargs
         )
@@ -424,11 +473,13 @@ class AscendCGatedDeltaNet(Qwen3NextGatedDeltaNet):
         a = a[:num_actual_tokens]
 
         # 1. Convolution sequence transformation
-        conv_weights = self.conv1d.weight.view(
-            self.conv1d.weight.size(0), self.conv1d.weight.size(2)
-        )
-        # The AscendC kernel expects the conv weight as (width, dim).
-        conv_weights_t = conv_weights.transpose(0, 1)
+        # The AscendC kernel expects (width, dim). The loader normally creates
+        # this contiguous layout once; the fallback also covers non-standard
+        # loading paths that bypass the parameter's weight_loader.
+        conv_weights_t = getattr(self, "_ascendc_conv_weights_t", None)
+        if conv_weights_t is None:
+            _cache_conv1d_weight_transposed(self)
+            conv_weights_t = self._ascendc_conv_weights_t
         activation_mode = 1 if self.activation else 0
 
         if spec_sequence_masks is not None:
@@ -709,6 +760,7 @@ def patch_qwen3_6_gdn() -> bool:
     if not _ascendc_ops_available():
         return False
 
+    _patch_gdn_conv_weight_loader()
     Qwen3NextGatedDeltaNet.get_state_shape = AscendCGatedDeltaNet.get_state_shape
     Qwen3NextGatedDeltaNet._forward_core = AscendCGatedDeltaNet._forward_core
     _patch_mamba_cache_dense_layout()

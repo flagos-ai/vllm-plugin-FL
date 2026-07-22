@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 import weakref
 from dataclasses import dataclass
 from typing import Any, ClassVar, Optional
@@ -83,7 +84,6 @@ _graph_params: Optional[GraphParams] = None
 _draft_graph_params: Optional[GraphParams] = None
 _draft_graph_prefill_params: Optional[GraphParams] = None
 
-
 def reset_graph_params() -> None:
     global _graph_params, _draft_graph_params, _draft_graph_prefill_params
     _graph_params = None
@@ -108,6 +108,30 @@ def set_graph_params(aclgraph_capture_sizes: list[int]) -> None:
     if _graph_params is not None:
         raise ValueError("Graph parameters have already been set!")
     _graph_params = _make_empty_graph_params(aclgraph_capture_sizes)
+
+
+def ensure_graph_params(aclgraph_capture_sizes: list[int]) -> GraphParams:
+    """Initialize graph bookkeeping and add any newly resolved capture sizes.
+
+    The final ACL graph sizes are not known until attention backends have
+    resolved the cudagraph mode.  This helper is deliberately idempotent so a
+    worker can run that resolution more than once without losing graph handles
+    that have already been registered.
+    """
+    global _graph_params
+    if _graph_params is None:
+        _graph_params = _make_empty_graph_params(aclgraph_capture_sizes)
+        return _graph_params
+
+    for size in aclgraph_capture_sizes:
+        _graph_params.events.setdefault(size, [])
+        _graph_params.workspaces.setdefault(size, None)
+        _graph_params.handles.setdefault(size, [])
+        _graph_params.attn_params.setdefault(size, [])
+        _graph_params.conv1d_params.setdefault(size, [])
+        _graph_params.conv1d_handles.setdefault(size, [])
+        _graph_params.conv1d_events.setdefault(size, [])
+    return _graph_params
 
 
 def update_graph_params_workspaces(num_tokens: int, workspace: torch.Tensor) -> None:
@@ -171,8 +195,36 @@ def weak_ref_workspaces(params: Optional[GraphParams]) -> None:
             params.workspaces[num_tokens])
 
 
+def _has_runtime_graph_updates(
+    params: Optional[GraphParams], num_tokens: Optional[int]
+) -> bool:
+    """Whether replay can race with graph-task parameter updates.
+
+    The host-blocking replay barrier inherited from vLLM-Ascend is only
+    required when captured attention/conv1d graph tasks are updated on a
+    separate stream. Empty maps let graph paths without such tasks skip it.
+    """
+    if params is None:
+        return False
+
+    runtime_update_maps = (
+        params.events,
+        params.handles,
+        params.attn_params,
+        params.conv1d_events,
+        params.conv1d_handles,
+        params.conv1d_params,
+    )
+    if num_tokens is None:
+        return any(
+            any(bucket for bucket in values.values())
+            for values in runtime_update_maps
+        )
+    return any(values.get(num_tokens) for values in runtime_update_maps)
+
+
 def update_full_graph_params(
-    attn_backend,
+    attn_backends,
     update_stream,
     forward_context,
     num_tokens: int,
@@ -182,8 +234,21 @@ def update_full_graph_params(
     draft_attn_metadatas=None,
 ) -> None:
     """Dispatch graph-param updates to the attention backend and GDN conv1d."""
-    impl_cls = attn_backend.get_impl_cls()
-    if hasattr(impl_cls, "update_graph_params"):
+    if not isinstance(attn_backends, (list, tuple, set)):
+        attn_backends = (attn_backends,)
+
+    updated_impls = set()
+    for attn_backend in attn_backends:
+        try:
+            impl_cls = attn_backend.get_impl_cls()
+        except NotImplementedError:
+            # Hybrid state-space/GDN backends may implement attention through
+            # custom ops without exposing the standard AttentionImpl hook.
+            # Their graph-task updates are handled by the conv1d path below.
+            continue
+        if impl_cls in updated_impls or not hasattr(impl_cls, "update_graph_params"):
+            continue
+        updated_impls.add(impl_cls)
         impl_cls.update_graph_params(
             update_stream,
             forward_context,
@@ -192,6 +257,21 @@ def update_full_graph_params(
             speculative_config,
             num_dcp_pcp_tokens,
             draft_attn_metadatas,
+        )
+
+    has_attention_tasks = any(
+        params is not None and params.handles.get(num_tokens)
+        for params in (
+            get_graph_params(),
+            get_draft_graph_params(),
+            get_draft_graph_prefill_params(),
+        )
+    )
+    if has_attention_tasks and not updated_impls:
+        raise RuntimeError(
+            "FULL ACL graph has captured attention task handles, but no "
+            "attention graph-parameter updater was resolved. Replaying would "
+            "deadlock while waiting for an unrecorded ExternalEvent."
         )
 
     # Optional GDN conv1d update (only available when vllm-ascend gdn is present).
@@ -246,6 +326,11 @@ class ACLGraphBackendMixin:
         self.aclgraph_options = wrapper.graph_options
         self.use_eagle = getattr(wrapper, "use_eagle", False)
         self.enable_enpu = getattr(wrapper, "enable_enpu", False)
+        # Emergency rollback/A-B switch for stacks that update graph tasks
+        # outside the GraphParams bookkeeping used below.
+        self.force_replay_sync = os.environ.get(
+            "VLLM_FL_FORCE_ACLGRAPH_REPLAY_SYNC", "0"
+        ).lower() in ("1", "true", "yes", "on")
         self.is_debugging_mode = wrapper.is_debugging_mode
         self._runnable_str = str(
             wrapper.runnable) if self.is_debugging_mode else None
@@ -270,6 +355,9 @@ class ACLGraphBackendMixin:
 
     def before_capture(self, entry, args, kwargs) -> None:
         self._sync_offloader_before_capture()
+        forward_context = get_forward_context()
+        self._previous_capturing = getattr(forward_context, "capturing", False)
+        forward_context.capturing = True
 
     def wrap_capture_context(self, entry, stack) -> None:
         # For NPU, torch.npu.empty_cache is the function that needs to be
@@ -281,6 +369,11 @@ class ACLGraphBackendMixin:
     def after_capture(self, entry, output, args, kwargs) -> Any:
         self._join_offloader_after_forward()
 
+        forward_context = get_forward_context()
+        forward_context.capturing = getattr(
+            self, "_previous_capturing", False
+        )
+
         # Convert attention workspace tensors to weak refs to save memory.
         weak_ref_workspaces(get_graph_params())
         weak_ref_workspaces(get_draft_graph_params())
@@ -291,6 +384,13 @@ class ACLGraphBackendMixin:
         return output
 
     def capture_error_handler(self, exc: BaseException) -> None:
+        try:
+            forward_context = get_forward_context()
+            forward_context.capturing = getattr(
+                self, "_previous_capturing", False
+            )
+        except Exception:
+            pass
         if isinstance(exc, RuntimeError) and self._is_stream_resource_capture_error(exc):
             _raise_stream_resource_capture_error(exc)
 
@@ -307,7 +407,20 @@ class ACLGraphBackendMixin:
             pass
 
         need_sync = self.runtime_mode == CUDAGraphMode.FULL and not is_draft_eagle
-        if not self.enable_enpu and need_sync:
+        num_tokens = getattr(entry.batch_descriptor, "num_tokens", None)
+        has_runtime_updates = any(
+            _has_runtime_graph_updates(params, num_tokens)
+            for params in (
+                get_graph_params(),
+                get_draft_graph_params(),
+                get_draft_graph_prefill_params(),
+            )
+        )
+        if (
+            not self.enable_enpu
+            and need_sync
+            and (self.force_replay_sync or has_runtime_updates)
+        ):
             torch.npu.current_stream().synchronize()
 
     def weak_ref_tensors(self, tensor: Any) -> Any:
