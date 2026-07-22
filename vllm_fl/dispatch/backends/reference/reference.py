@@ -19,6 +19,48 @@ from vllm_fl.dispatch.backends.base import Backend
 
 logger = init_logger(__name__)
 
+_flash_attn_patched = False
+
+
+def _patch_flash_attn_for_metax():
+    """
+    On MetaX platform, patch flash_attn_varlen_func into vLLM's MLA module.
+
+    vLLM's MLACommonImpl.__init__ checks for flash_attn_varlen_func (imported
+    from vllm.vllm_flash_attn, a CUDA C extension). On MetaX this import fails
+    so the variable is None, causing a RuntimeError. MetaX ships its own
+    flash_attn package (MACA-adapted) that provides flash_attn_varlen_func.
+    This function patches it in so TritonMLAImpl prefill works.
+    """
+    global _flash_attn_patched
+    if _flash_attn_patched:
+        return
+
+    from vllm.platforms import current_platform
+    if current_platform.vendor_name != "metax":
+        _flash_attn_patched = True
+        return
+
+    import vllm.model_executor.layers.attention.mla_attention as mla_mod
+
+    if mla_mod.flash_attn_varlen_func is not None:
+        _flash_attn_patched = True
+        return
+
+    try:
+        from flash_attn import flash_attn_varlen_func
+    except ImportError as e:
+        raise RuntimeError(
+            "MetaX platform requires flash_attn package for MLA prefill. "
+            "Please install the MACA-adapted flash_attn."
+        ) from e
+
+    mla_mod.flash_attn_varlen_func = flash_attn_varlen_func
+    mla_mod.is_vllm_fa = False
+    _flash_attn_patched = True
+    logger.info("Patched flash_attn_varlen_func from flash_attn package "
+                "for MetaX MLA prefill support")
+
 
 class ReferenceBackend(Backend):
     """
@@ -172,7 +214,7 @@ class ReferenceBackend(Backend):
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
         if use_mla:
-            # Use Triton MLA backend — pure Triton kernels, hardware-agnostic
+            _patch_flash_attn_for_metax()
             logger.info("attention backend reference dispatch: "
                         "using TritonMLA for MLA attention")
             return AttentionBackendEnum.TRITON_MLA.get_path()
