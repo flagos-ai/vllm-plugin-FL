@@ -14,7 +14,10 @@ from typing import Optional, Union
 
 import torch
 
+from vllm.logger import init_logger
 from vllm_fl.dispatch.backends.base import Backend
+
+logger = init_logger(__name__)
 
 
 class ReferenceBackend(Backend):
@@ -165,14 +168,14 @@ class ReferenceBackend(Backend):
         Returns:
             Fully qualified class path string (vLLM native backend)
         """
-        # Return vLLM's native flash attention backend as reference
+        # Return vLLM's native attention backend as reference
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
         if use_mla:
-            # vLLM native MLA backend
-            if use_sparse:
-                return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
-            return AttentionBackendEnum.FLASHMLA.get_path()
+            # Use Triton MLA backend — pure Triton kernels, hardware-agnostic
+            logger.info("attention backend reference dispatch: "
+                        "using TritonMLA for MLA attention")
+            return AttentionBackendEnum.TRITON_MLA.get_path()
         return AttentionBackendEnum.FLASH_ATTN.get_path()
 
     def moe_align_block_size(
