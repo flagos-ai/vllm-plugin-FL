@@ -23,7 +23,6 @@ def apply_ascend_patches():
     patch_gdn_warmup()
     patch_gdn_triton_ops()
     patch_gdn_state_gather()
-    patch_gdn_state_dtype_float32()
     patch_vit_pos_embed()
 
 def patch_mamba_config():
@@ -661,37 +660,4 @@ def patch_vit_pos_embed():
         logger.warning("Failed to patch ViT pos-embed interpolation: %s", e)
 
 
-def patch_gdn_state_dtype_float32():
-    """Force GDN SSM state to float32 to prevent precision degradation.
 
-    On Ascend NPU the SSM recurrent state is stored in bfloat16 by default
-    (when --mamba-ssm-cache-dtype is "auto"). Every decode step reads the
-    state to float32 for computation, then truncates back to bfloat16.
-    With bfloat16's 7-bit mantissa, the accumulated quantization error over
-    hundreds of decode steps corrupts the hidden state, causing:
-      - Garbled / repetitive output on long generations
-      - Degraded quality especially with temperature > 0 (where softmax
-        amplifies small logit errors into wrong token probabilities)
-
-    Fix: override get_state_dtype() to always return float32 for the SSM
-    state tensor, so no truncation occurs between decode steps.
-    """
-    try:
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as _gdn
-
-        cls = _gdn.GatedDeltaNetAttention
-        _orig_get_state_dtype = cls.get_state_dtype
-
-        def _get_state_dtype_fp32(self):
-            conv_dtype, _ssm_dtype = _orig_get_state_dtype(self)
-            # Keep conv_state in original dtype (small, no accumulation issue)
-            # Force SSM state to float32 to avoid bfloat16 truncation
-            return (conv_dtype, torch.float32)
-
-        cls.get_state_dtype = _get_state_dtype_fp32
-        logger.info(
-            "Patched GDN get_state_dtype to use float32 SSM state "
-            "(prevents bfloat16 precision degradation on long sequences)."
-        )
-    except Exception as e:
-        logger.warning("Failed to patch GDN state dtype: %s", e)
