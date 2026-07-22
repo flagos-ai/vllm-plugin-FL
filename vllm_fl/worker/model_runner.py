@@ -1621,7 +1621,16 @@ class ModelRunnerFL(
             # Fill unused with -1. Needed for reshape_and_cache in full cuda
             # graph mode. `blk_table_tensor` -1 to match mamba PAD_SLOT_ID
             slot_mapping[num_tokens:num_tokens_padded].fill_(-1)
-            blk_table_tensor[num_reqs:num_reqs_padded].fill_(-1)
+            # Pad block-table rows with block id 0 rather than -1: when a
+            # decode batch shrinks below the captured size (e.g. the first
+            # request finishes at max concurrency), the full-attention FIA
+            # kernel receives the padded rows and dereferences the block ids
+            # even for seq_len==0 rows, and block id -1 makes it fault
+            # (fftsplus aicore error / CCU instruction address check error,
+            # surfacing as aclrtSynchronizeEvent 507011). The mamba/GDN pad
+            # slots keep their PAD_SLOT_ID=-1 convention via the metadata
+            # builder's own fills, so this only affects the attention path.
+            blk_table_tensor[num_reqs:num_reqs_padded].fill_(0)
 
             return blk_table_tensor, slot_mapping
 
