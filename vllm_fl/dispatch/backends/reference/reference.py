@@ -211,3 +211,62 @@ class ReferenceBackend(Backend):
             block_shape=block_shape,
             B_bias=B_bias,
         )
+
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map=None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ):
+        from vllm.model_executor.layers.fused_moe.moe_align_block_size import (
+            moe_align_block_size,
+        )
+
+        return moe_align_block_size(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map,
+            pad_sorted_ids,
+            ignore_invalid_experts,
+        )
+
+    def moe_sum(self, inp, out):
+        from vllm._custom_ops import moe_sum
+
+        moe_sum(inp, out)
+
+    def topk_softmax(
+        self,
+        topk_weights,
+        topk_indices,
+        token_expert_indices,
+        gating_output,
+        renormalize=False,
+    ):
+        from vllm._custom_ops import topk_softmax
+
+        return topk_softmax(
+            topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
+        )
+
+    def grouped_topk(
+        self,
+        scores,
+        n_group,
+        topk_group,
+        topk,
+        renormalize,
+        routed_scaling_factor,
+        bias,
+        scoring_func=0,
+    ):
+        from vllm._custom_ops import grouped_topk
+
+        return grouped_topk(
+            scores, n_group, topk_group, topk,
+            renormalize, routed_scaling_factor, bias, scoring_func,
+        )
