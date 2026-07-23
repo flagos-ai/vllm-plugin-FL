@@ -35,6 +35,7 @@ from vllm.attention.backends.abstract import (
     AttentionType,
 )
 from vllm.config import VllmConfig, get_current_vllm_config
+from vllm.forward_context import get_forward_context
 from vllm.utils.math_utils import cdiv
 from vllm.v1.attention.backends.utils import AttentionCGSupport, CommonAttentionMetadata
 
@@ -47,6 +48,7 @@ from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_graph import (
     get_graph_params,
     update_draft_graph_params_workspaces,
     update_graph_params_workspaces,
+    weak_ref_tensors,
 )
 
 logger = logging.getLogger(__name__)
@@ -580,21 +582,50 @@ class AscendAttentionBackendImpl(AttentionImpl):
         num_dcp_pcp_tokens=None,
         draft_attn_metadatas=None,
     ) -> None:
-        """Update graph parameters for ACL graph capture.
+        """Update captured paged-attention tasks with this step's seq_lens."""
+        graph_params = get_graph_params()
+        if graph_params is None or not graph_params.handles.get(num_tokens):
+            return
 
-        This is called by the model runner before graph replay to prepare
-        attention-specific workspaces and handles for the given capture size.
-        """
-        logger.debug(
-            "Updating graph params for AscendAttentionBackendImpl "
-            "num_tokens=%s", num_tokens)
-        # Workspace creation is backend-specific.  For the native torch_npu
-        # path the actual workspace is allocated lazily inside the attention
-        # kernels, so we only record the metadata here.
-        params = get_graph_params()
-        if params is not None and num_tokens in params.workspaces:
-            if params.workspaces[num_tokens] is None:
-                params.workspaces[num_tokens] = True  # marker
+        with torch.npu.stream(update_stream):
+            captured_params = graph_params.attn_params[num_tokens]
+            handles = graph_params.handles[num_tokens]
+            events = graph_params.events[num_tokens]
+            if not (len(captured_params) == len(handles) == len(events)):
+                raise RuntimeError(
+                    "Mismatched FULL ACL graph attention metadata: "
+                    f"params={len(captured_params)}, handles={len(handles)}, "
+                    f"events={len(events)}, num_tokens={num_tokens}"
+                )
+            for param, handle, event in zip(captured_params, handles, events):
+                (
+                    layer_name,
+                    query,
+                    key_cache,
+                    value_cache,
+                    num_kv_heads,
+                    num_heads,
+                    scale,
+                    block_table,
+                    output,
+                ) = param
+                attn_metadata = forward_context.attn_metadata[layer_name]
+
+                torch.npu.graph_task_update_begin(update_stream, handle)
+                torch_npu._npu_paged_attention(
+                    query=query,
+                    key_cache=key_cache,
+                    value_cache=value_cache,
+                    num_kv_heads=num_kv_heads,
+                    num_heads=num_heads,
+                    scale_value=scale,
+                    block_table=block_table,
+                    context_lens=attn_metadata.seq_lens,
+                    out=output,
+                    workspace=graph_params.workspaces.get(num_tokens),
+                )
+                torch.npu.graph_task_update_end(update_stream)
+                event.record(update_stream)
 
     def _get_fia_params(
         self,
@@ -603,9 +634,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
         attn_metadata: AscendMetadata,
     ):
         """Get parameters for fused_infer_attention."""
-
+        block_size = 128
         if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
-            block_size = 128
             block_table = None
             actual_seq_lengths_kv = attn_metadata.actual_seq_lengths_q
         elif attn_metadata.attn_state == AscendAttentionState.PrefillCacheHit:
@@ -853,8 +883,73 @@ class AscendAttentionBackendImpl(AttentionImpl):
         query: torch.Tensor,
         attn_metadata: AscendMetadata,
         output: Optional[torch.Tensor] = None,
+        layer_name: Optional[str] = None,
     ) -> torch.Tensor:
         """Forward pass using paged attention for decode."""
+        forward_context = get_forward_context()
+        num_tokens = query.shape[0]
+        if getattr(forward_context, "capturing", False):
+            graph_params = get_graph_params()
+            if graph_params is None:
+                raise RuntimeError(
+                    "ACL graph parameters were not initialized before capture"
+                )
+            if layer_name is None:
+                raise RuntimeError(
+                    "Attention layer name is required for FULL ACL graph capture"
+                )
+
+            workspace = graph_params.workspaces.get(num_tokens)
+            if workspace is None:
+                workspace = torch_npu._npu_paged_attention_get_workspace(
+                    query=query,
+                    key_cache=self.key_cache,
+                    value_cache=self.value_cache,
+                    num_kv_heads=self.num_kv_heads,
+                    num_heads=self.num_heads,
+                    scale_value=self.scale,
+                    block_table=attn_metadata.block_tables,
+                    context_lens=attn_metadata.seq_lens,
+                    out=output,
+                )
+                update_graph_params_workspaces(num_tokens, workspace)
+
+            stream = torch.npu.current_stream()
+            event = torch.npu.ExternalEvent()
+            event.wait(stream)
+            event.reset(stream)
+            graph_params.events[num_tokens].append(event)
+            graph_params.attn_params[num_tokens].append(
+                (
+                    layer_name,
+                    weak_ref_tensors(query),
+                    weak_ref_tensors(self.key_cache),
+                    weak_ref_tensors(self.value_cache),
+                    self.num_kv_heads,
+                    self.num_heads,
+                    self.scale,
+                    weak_ref_tensors(attn_metadata.block_tables),
+                    weak_ref_tensors(output),
+                )
+            )
+
+            torch.npu.graph_task_group_begin(stream)
+            torch_npu._npu_paged_attention(
+                query=query,
+                key_cache=self.key_cache,
+                value_cache=self.value_cache,
+                num_kv_heads=self.num_kv_heads,
+                num_heads=self.num_heads,
+                scale_value=self.scale,
+                block_table=attn_metadata.block_tables,
+                context_lens=attn_metadata.seq_lens,
+                out=output,
+                workspace=workspace,
+            )
+            handle = torch.npu.graph_task_group_end(stream)
+            graph_params.handles[num_tokens].append(handle)
+            return output
+
         torch_npu._npu_paged_attention(
             query=query,
             key_cache=self.key_cache,
@@ -914,6 +1009,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         kv_cache: Tuple[torch.Tensor],
         attn_metadata: AscendMetadata,
         output: torch.Tensor,
+        layer_name: Optional[str] = None,
     ):
         """Forward implementation dispatching to appropriate attention method."""
         num_tokens = query.shape[0]
@@ -921,7 +1017,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
         # Use paged attention for decode-only state
         if (attn_metadata.attn_state == AscendAttentionState.DecodeOnly
                 and self.sliding_window is None):
-            output = self.forward_paged_attention(query, attn_metadata, output)
+            output = self.forward_paged_attention(
+                query, attn_metadata, output, layer_name=layer_name)
         else:
             output = self.forward_fused_infer_attention(
                 query, key, value, attn_metadata, output)
@@ -1000,7 +1097,14 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         # Standard forward
         output = self.forward_impl(
-            query, key, value, kv_cache, attn_metadata, output)
+            query,
+            key,
+            value,
+            kv_cache,
+            attn_metadata,
+            output,
+            layer_name=layer.layer_name,
+        )
         return output
 
 
