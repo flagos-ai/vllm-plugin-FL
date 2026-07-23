@@ -8,8 +8,6 @@
 #   vllm/model_executor/layers/mamba/gdn_linear_attn.py (fused_gdn_gating)
 #   vllm/model_executor/layers/fla/ops/l2norm.py
 
-import math
-
 import torch
 import torch.nn.functional as F
 
@@ -73,18 +71,20 @@ def chunk_gated_delta_rule_torch(
                 bt = beta[0, t].float()            # [HV]
 
                 # Gated decay: h *= exp(g)  [HV, V, K] *= [HV, 1, 1]
-                hi = hi * torch.ops.aten.exp(gt).unsqueeze(-1).unsqueeze(-1)
+                hi = hi * torch.exp(gt).unsqueeze(-1).unsqueeze(-1)
                 # h @ k: [HV, V, K] x [HV, K] -> [HV, V]
-                hk = torch.ops.aten.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
+                hk = torch.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
                 # v' = beta * (v - hk)
                 vp = (vt - hk) * bt.unsqueeze(-1)
-                # h += v' outer k: [HV, V, 1] x [HV, 1, K] -> [HV, V, K]
-                hi = hi + torch.ops.aten.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
+                # h += v' outer k: [HV, V, 1] x [HV, 1, K]
+                hi = hi + torch.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
                 # o = h @ q: [HV, V, K] x [HV, K] -> [HV, V]
-                o[0, t] = torch.ops.aten.bmm(hi, qt.unsqueeze(-1)).squeeze(-1).to(o.dtype)
+                ot = torch.bmm(hi, qt.unsqueeze(-1)).squeeze(-1)
+                o[0, t] = ot.to(o.dtype)
+
             h[i_n] = hi
     else:
-        for i_n in range(B):
+        for i_n in range(N):
             hi = h[i_n]
             for t in range(T):
                 qt = q_exp[i_n, t].float() * scale
@@ -93,48 +93,24 @@ def chunk_gated_delta_rule_torch(
                 gt = g[i_n, t].float()
                 bt = beta[i_n, t].float()
 
-                hi = hi * torch.ops.aten.exp(gt).unsqueeze(-1).unsqueeze(-1)
-                hk = torch.ops.aten.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
+                hi = hi * torch.exp(gt).unsqueeze(-1).unsqueeze(-1)
+                hk = torch.bmm(hi, kt.unsqueeze(-1)).squeeze(-1)
                 vp = (vt - hk) * bt.unsqueeze(-1)
-                hi = hi + torch.ops.aten.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
-                o[i_n, t] = torch.ops.aten.bmm(hi, qt.unsqueeze(-1)).squeeze(-1).to(o.dtype)
+                hi = hi + torch.bmm(vp.unsqueeze(-1), kt.unsqueeze(-2))
+                ot = torch.bmm(hi, qt.unsqueeze(-1)).squeeze(-1)
+                o[i_n, t] = ot.to(o.dtype)
+
             h[i_n] = hi
 
-    if output_final_state:
-        return o, h.to(initial_state.dtype if initial_state is not None else torch.float32)
-    return o, None
+    final_state = h if output_final_state else None
+    return o, final_state
 
 
-def l2norm_fwd_torch(
-    x: torch.Tensor, eps: float = 1e-6, output_dtype: torch.dtype | None = None
-) -> torch.Tensor:
-    """Pure-PyTorch L2 normalization along the last dimension.
-
-    Matches the Triton kernel: y = x * rsqrt(sum(x^2) + eps)
-    Note: this is NOT the same as x / (||x|| + eps).
-    """
-    x_shape_og = x.shape
+def l2norm_fwd_torch(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """L2-normalize along the last dimension."""
     x_flat = x.reshape(-1, x.shape[-1]).float()
     y = x_flat * torch.rsqrt(torch.sum(x_flat * x_flat, dim=-1, keepdim=True) + eps)
-    if output_dtype is not None:
-        y = y.to(output_dtype)
-    else:
-        y = y.to(x.dtype)
-    return y.view(x_shape_og)
-
-
-def _softplus(x: torch.Tensor, beta: float = 1.0, threshold: float = 20.0):
-    """Numerically stable softplus matching the Triton kernel implementation."""
-    # Use the stable formulation: softplus(x) = x + log(1+exp(-x)) for x > 0
-    #                              softplus(x) = log(1+exp(x)) for x <= 0
-    bx = beta * x
-    sp = torch.where(
-        bx > 0,
-        bx + torch.log(1.0 + torch.exp(-bx)),
-        torch.log(1.0 + torch.exp(bx)),
-    )
-    sp = sp / beta
-    return torch.where(bx <= threshold, sp, x)
+    return y.reshape(x.shape).to(x.dtype)
 
 
 def fused_gdn_gating_torch(
@@ -145,24 +121,14 @@ def fused_gdn_gating_torch(
     beta: float = 1.0,
     threshold: float = 20.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Pure-PyTorch fused GDN gating.
+    """Pure-PyTorch replacement for the fused_gdn_gating Triton kernel.
 
     Computes:
         g = -exp(A_log) * softplus(a + dt_bias)
         beta_output = sigmoid(b)
-
-    Args:
-        A_log: [num_heads]
-        a: [batch, num_heads]
-        b: [batch, num_heads]
-        dt_bias: [num_heads]
-
-    Returns:
-        g: [1, batch, num_heads] float32
-        beta_output: [1, batch, num_heads] same dtype as b
     """
     x = a.float() + dt_bias.float().unsqueeze(0)
-    sp = _softplus(x, beta, threshold)
+    sp = F.softplus(x, beta=beta, threshold=threshold)
     g = -torch.exp(A_log.float()).unsqueeze(0) * sp
     beta_output = torch.sigmoid(b.float()).to(b.dtype)
     return g.unsqueeze(0), beta_output.unsqueeze(0)
@@ -180,23 +146,7 @@ def fused_post_conv_prep_torch(
     apply_l2norm: bool = True,
     output_g_exp: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Pure-PyTorch fused post-conv1d prep: split + l2norm + gating.
-
-    Args:
-        conv_output: [L, qkv_dim] contiguous conv'd mixed_qkv
-        a: [L, HV] gating input
-        b: [L, HV] gating input
-        A_log: [HV] log decay parameter
-        dt_bias: [HV] dt bias parameter
-        num_k_heads: number of K heads (H)
-        head_k_dim: dimension per K head (K)
-        head_v_dim: dimension per V head (V)
-        apply_l2norm: whether to L2-normalize q and k
-        output_g_exp: if True, output exp(g) instead of g
-
-    Returns:
-        q: [L, H, K], k: [L, H, K], v: [L, HV, V], g: [L, HV], beta: [L, HV]
-    """
+    """Pure-PyTorch replacement for fused_post_conv_prep Triton kernel."""
     L = conv_output.shape[0]
     H = num_k_heads
     K = head_k_dim
@@ -235,7 +185,7 @@ def fused_post_conv_prep_torch(
 
     # Gating: g = -exp(A_log) * softplus(a + dt_bias)
     x = a.float() + dt_bias.float().unsqueeze(0)    # [L, HV]
-    sp = _softplus(x)
+    sp = F.softplus(x)
     g = -torch.exp(A_log.float()).unsqueeze(0) * sp  # [L, HV]
 
     if output_g_exp:

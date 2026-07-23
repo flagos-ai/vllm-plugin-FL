@@ -77,124 +77,46 @@ op_backends:
 
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
+# Operators are blacklisted because their FlagGems Triton kernels are either
+# incorrect, imprecise, or crash on Ascend NPU during inference.
 flagos_blacklist:
-  # index (advanced-index gather `tensor[idx]`): the FlagGems Triton index kernel
-  # corrupts gathers on Ascend NPU (same NPU-indexing failure class as the GDN
-  # ssm_state gather). The Qwen3-VL ViT 2D rotary gathers per-position cos/sin via
-  # `cos[pos_ids]` / `sin[pos_ids]`; a corrupted gather scrambles the rotary
-  # positions, so over the 27 ViT blocks the image embeddings lose fine spatial
-  # detail -> OCR / thin shapes decode as garbage while coarse features survive.
-  # The LLM rope uses the vendor rotary_embedding op (not aten index), so text is
-  # unaffected. Fall back to torch (correct on NPU) for index.
-  - index
-  # exp / log: the FlagGems Triton exp/log kernels are imprecise AND slow on
-  # Ascend NPU. The GDN linear-attention recurrent path applies the gated decay
-  # `h *= exp(g)` once per timestep and computes the gate via exp/log (softplus),
-  # so for a long prefill they run tens of thousands of times across the GDN
-  # layers. The per-step error compounds and corrupts the recurrent state at long
-  # context (35B begin-of-context retrieval degenerates), and the per-call Triton
-  # launch overhead makes the prefill ~150x slower. The LLM softmax/attention use
-  # vendor ops (not aten exp/log), so falling back to torch is correct and fast.
+  # --- Crash: GDN recurrent path precision ---
   - exp
+  - exp_
   - log
-  - masked_scatter_
-  - masked_scatter
-  - scatter_add_
-  - ones
-  - ones_like
-  - isclose
-  - allclose
-  - mean_dim
-  - chunk_gated_delta_rule_fwd
-  - rsqrt # performance loss
-  - index_select
+  # --- Crash: Indexing (corrupts ViT rotary cos[pos_ids]) ---
+  - index
+  # --- Crash: Fill (ZeroDivisionError on zero-size slices) ---
+  - fill_scalar_
+  - fill_tensor_
+  # --- Crash: Conv (assertion failure with grouped conv) ---
+  - conv1d
+  # --- Arithmetic (Triton compilation hang on MoE 256-expert shapes) ---
+  - mm
+  - addmm
+  - add
+  - sub
+  - mul
   - true_divide
   - true_divide_
-  - silu
-  - silu_and_mul # performance loss end
-  - to_copy
-  - _to_copy
-  - zeros
-  - acos
-  - copy_
-  - fill_scalar_
-  - sum_dim
-  - exponential_
-  - mm
-  - bmm
-  - sigmoid
-  - where
-  - where_scalar_other
-  - where_scalar_self
-  - where_self
-  - where_self_out
-  - repeat_interleave
-  - repeat_interleave_self_int
-  - repeat_interleave_self_tensor
-  - repeat_interleave_tensor
-  - resolve_neg
-  - resolve_conj
-  - eq
-  - eq_scalar
-  - ne
-  - ne_scalar
-  - gt
-  - gt_scalar
-  - ge
-  - ge_scalar
-  - lt
-  - lt_scalar
-  - le
-  - le_scalar
+  - floor_divide
+  - reciprocal
   - neg
   - neg_
   - abs
   - abs_
-  - floor_divide
-  - cumsum
-  - cumsum_out
-  - mul
-  - reciprocal
-  - repeat
-  - randn
-  - add
-  - sub
-  - bitwise_and
-  - bitwise_not
-  - slice_scatter
-  - fill_tensor_
-  - conv1d
-  - conv2d
-  - uniform_
-  - prod
-  - max
-  - amax
-  - cat
-  - stack
-  - flatten
-  - reshape
-  - view
-  - tensor
-  - rand
-  - rand_like
-  - gather
-  - _log_softmax
-  - _flash_attention_forward
+  # --- Scatter/Gather (worker hard-crash, NPU segfault) ---
+  - masked_scatter_
+  - masked_scatter
+  - scatter_add_
   - scatter
   - scatter_
+  - gather
   - index_put
   - index_put_
   - _index_put_impl_
+  # --- Reduction (argmax only - Invalid Runtime Function on NPU) ---
   - argmax
-  - addmm
-  - zeros_like
-  - full
-  - full_like
-  - clamp
-  - clamp_
-  - linspace
-  - eye
-  - diag
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

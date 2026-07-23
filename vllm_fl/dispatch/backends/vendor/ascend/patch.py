@@ -322,15 +322,8 @@ def patch_gdn_triton_ops():
             a_f = a.float()
             b_f = b.float()
             x = a_f + dt_bias.float().unsqueeze(0)
-            # Numerically stable softplus: use x + log(1+exp(-x)) for x > 0
-            bx = beta * x
-            sp = torch.where(
-                bx > 0,
-                bx + torch.log(1.0 + torch.exp(-bx)),
-                torch.log(1.0 + torch.exp(bx)),
-            ) / beta
-            sp = torch.where(bx <= threshold, sp, x)
-            g_vals = -torch.exp(A_log.float()).unsqueeze(0) * sp  # [tokens, HV]
+            sp = F.softplus(x, beta=beta, threshold=threshold)
+            g_vals = -torch.exp(A_log.float()).unsqueeze(0) * sp
             beta_vals = torch.sigmoid(b_f)  # [tokens, HV]
 
             N = B if cu_seqlens is None else len(cu_seqlens) - 1
@@ -468,14 +461,9 @@ def patch_gdn_triton_ops():
             groups = HV // H
             ssi_cpu = ssm_state_indices.cpu().tolist()
 
-            # Compute gating for all tokens at once (numerically stable softplus)
+            # Compute gating for all tokens at once
             x = a.float() + dt_bias.float().unsqueeze(0)
-            sp = torch.where(
-                x > 0,
-                x + torch.log(1.0 + torch.exp(-x)),
-                torch.log(1.0 + torch.exp(x)),
-            )
-            sp = torch.where(x <= 20.0, sp, x)
+            sp = F.softplus(x, beta=1.0, threshold=20.0)
             g_vals = (-torch.exp(A_log.float()).unsqueeze(0) * sp)  # [B, HV]
             beta_vals = torch.sigmoid(b.float())  # [B, HV]
 
@@ -498,8 +486,8 @@ def patch_gdn_triton_ops():
 
                 # Expand q/k heads to match value heads (multi-query attention)
                 if groups > 1:
-                    b_q = b_q.repeat_interleave(groups, dim=0)  # [HV, K]
-                    b_k = b_k.repeat_interleave(groups, dim=0)  # [HV, K]
+                    b_q = b_q.repeat_interleave(groups, dim=0)
+                    b_k = b_k.repeat_interleave(groups, dim=0)
 
                 h = initial_state[state_idx].float()  # [HV, V, K]
                 # Safety net: zero out if state contains garbage
@@ -510,14 +498,14 @@ def patch_gdn_triton_ops():
                 gt = g_vals[i_n]  # [HV]
                 bt = beta_vals[i_n]  # [HV]
 
-                # Gated decay - use aten ops directly to bypass FlagGems
-                h = h * torch.ops.aten.exp(gt).unsqueeze(-1).unsqueeze(-1)
+                # Gated decay
+                h = h * torch.exp(gt).unsqueeze(-1).unsqueeze(-1)
                 # Delta rule update: h += beta * (v - h@k) ⊗ k
-                hk = torch.ops.aten.bmm(h, b_k.unsqueeze(-1)).squeeze(-1)  # [HV, V]
+                hk = torch.bmm(h, b_k.unsqueeze(-1)).squeeze(-1)  # [HV, V]
                 vp = (b_v - hk) * bt.unsqueeze(-1)
-                h = h + torch.ops.aten.bmm(vp.unsqueeze(-1), b_k.unsqueeze(-2))
+                h = h + torch.bmm(vp.unsqueeze(-1), b_k.unsqueeze(-2))
                 # Output: o = h @ q
-                b_o = torch.ops.aten.bmm(h, b_q.unsqueeze(-1)).squeeze(-1)  # [HV, V]
+                b_o = torch.bmm(h, b_q.unsqueeze(-1)).squeeze(-1)  # [HV, V]
 
                 out[i_n, 0] = b_o.to(out.dtype)
                 initial_state[state_idx] = h.to(initial_state.dtype)
