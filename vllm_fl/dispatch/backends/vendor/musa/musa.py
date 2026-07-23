@@ -141,3 +141,41 @@ class MusaBackend(Backend):
             return AttentionBackendEnum.TRITON_MLA.get_path()
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
+
+    def topk_softmax(
+        self,
+        topk_weights: torch.Tensor,
+        topk_indices: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
+        renormalize: bool = False,
+        e_score_correction_bias: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """MoE top-k softmax via FlagGems (no _moe_C CUDA extension needed).
+
+        ``torch.ops._moe_C.topk_softmax`` is a CUDA-only custom op that is
+        not available on MUSA.  FlagGems ships a portable triton implementation
+        that runs on MUSA devices.
+
+        Args:
+            topk_weights: Output tensor for top-k weights (modified in-place).
+            topk_indices: Output tensor for top-k expert indices (modified in-place).
+            token_expert_indices: Token-to-expert index mapping.
+            gating_output: Raw logits from the router gate.
+            renormalize: Whether to renormalize top-k weights to sum to 1.
+            e_score_correction_bias: Optional per-expert bias for score correction.
+
+        Returns:
+            Tuple of (topk_weights, topk_indices).
+        """
+        from vllm_fl.dispatch.backends.flaggems.impl.fused_moe import (
+            topk_softmax_flaggems,
+        )
+
+        return topk_softmax_flaggems(
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+        )

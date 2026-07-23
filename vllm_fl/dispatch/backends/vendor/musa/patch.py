@@ -22,100 +22,84 @@ def apply_musa_patches():
     patch_cuda_get_device_properties()
     patch_accelerator_missing_attrs()
     patch_cuda_stream_for_musa()
+    patch_inductor_triton_for_musa()
+    patch_moe_topk_softmax_for_musa()
 
 
 def patch_topk_topp_sampler():
     """Force PyTorch-native top-k/top-p on MUSA.
 
-    The vLLM Triton top-k/top-p kernel uses mixed uint32/int32 arithmetic
-    that the MUSA Triton compiler rejects. Route through the PyTorch path
-    instead, which works correctly on MUSA.
+    vllm's default ``apply_top_k_top_p`` calls CUDA kernels via
+    ``torch.ops._C_cache_ops`` which are not available on MUSA.  Replace
+    with the pure-PyTorch fallback that vllm ships alongside.
     """
     try:
-        import vllm.v1.sample.ops.topk_topp_sampler as sampler_mod
         from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p_pytorch
+        import vllm.v1.sample.ops.topk_topp_sampler as _sampler_mod
 
-        # Direct assignment works: apply_top_k_top_p_pytorch accepts the same
-        # (logits, k, p) positional args; its extra allow_cpu_sync=False is defaulted.
-        sampler_mod.apply_top_k_top_p = apply_top_k_top_p_pytorch
+        _sampler_mod.apply_top_k_top_p = apply_top_k_top_p_pytorch
         logger.info("Patched apply_top_k_top_p to use PyTorch-native path for MUSA")
     except Exception as e:
-        # May fail in the main process due to circular imports during early init;
-        # worker processes will retry and succeed independently.
-        logger.debug("Failed to patch top-k/top-p sampler for MUSA: %s", e)
-
+        logger.warning("Failed to patch apply_top_k_top_p for MUSA: %s", e)
 
 
 def patch_triton_reshape_and_cache_flash():
-    """Patch triton_reshape_and_cache_flash to avoid torch.cuda calls on MUSA.
-
-    The function calls torch.cuda.get_device_capability() unconditionally in
-    the else branch, which fails on MUSA devices. Patch torch.cuda to handle
-    MUSA devices gracefully by returning a safe capability value.
-    """
-    try:
-        import torch.cuda as torch_cuda
-
-        if getattr(torch_cuda, "_musa_get_device_capability_patched", False):
-            return
-
-        _orig_get_device_capability = torch_cuda.get_device_capability
-
-        def _get_device_capability_musa(device=None):
-            try:
-                return _orig_get_device_capability(device)
-            except (ValueError, RuntimeError):
-                # MUSA device: return a safe capability that avoids fp8 paths
-                return (8, 0)
-
-        torch_cuda.get_device_capability = _get_device_capability_musa
-        torch_cuda._musa_get_device_capability_patched = True
-        logger.info("Patched torch.cuda.get_device_capability for MUSA")
-    except Exception as e:
-        logger.warning("Failed to patch torch.cuda.get_device_capability for MUSA: %s", e)
+    """No-op stub: reshape_and_cache_flash is handled by vllm_fl attention backends."""
+    pass
 
 
 def patch_cuda_get_device_properties():
-    """Patch vllm.utils.platform_utils.cuda_get_device_properties for MUSA.
+    """Patch torch.cuda.get_device_capability to return a MUSA-safe value.
 
-    The original implementation spawns a subprocess via ProcessPoolExecutor
-    when CUDA is not initialized. On MUSA this always triggers the subprocess
-    path, which fails with AssertionError when called from a daemon thread
-    (e.g. vllm's usage-reporting thread). Replace it with a direct
-    torch_musa call so no subprocess is needed.
+    Some vllm code paths query CUDA compute capability to decide which kernels
+    to use.  On MUSA the call would fail or return wrong values.  We return
+    (8, 0) which is sufficient to enable bf16/fp16 paths without triggering
+    Ampere/Hopper-specific code that MUSA does not support.
     """
     try:
+        import torch
         import torch_musa
-        import vllm.utils.platform_utils as pu_mod
 
-        if getattr(pu_mod, "_musa_cuda_get_device_properties_patched", False):
+        if getattr(torch.cuda, "_musa_device_props_patched", False):
             return
+
+        def _get_device_capability_musa(device=None):
+            return (8, 0)
+
+        torch.cuda.get_device_capability = _get_device_capability_musa
+        logger.info("Patched torch.cuda.get_device_capability for MUSA")
+
+        _orig_get_props = torch.cuda.get_device_properties
 
         def _cuda_get_device_properties_musa(device, names, init_cuda=False):
             props = torch_musa.get_device_properties(device)
-            return tuple(getattr(props, name) for name in names)
+            return props
 
-        pu_mod.cuda_get_device_properties = _cuda_get_device_properties_musa
-        # Also patch the reference already imported into usage_lib.
-        try:
-            import vllm.usage.usage_lib as ul_mod
-            ul_mod.cuda_get_device_properties = _cuda_get_device_properties_musa
-        except Exception:
-            pass
-        pu_mod._musa_cuda_get_device_properties_patched = True
-        logger.info("Patched cuda_get_device_properties to use torch_musa for MUSA")
+        import vllm.utils as _vllm_utils
+        if hasattr(_vllm_utils, "cuda_get_device_properties"):
+            _vllm_utils.cuda_get_device_properties = _cuda_get_device_properties_musa
+            logger.info("Patched cuda_get_device_properties to use torch_musa for MUSA")
+
+        torch.cuda._musa_device_props_patched = True
     except Exception as e:
         logger.warning("Failed to patch cuda_get_device_properties for MUSA: %s", e)
 
 
 def patch_accelerator_missing_attrs():
-    """Patch missing torch.accelerator attributes for MUSA compatibility.
+    """Patch missing/broken torch.accelerator attributes for MUSA compatibility.
 
     Some vLLM modules call APIs that were added to torch.accelerator in newer
-    PyTorch versions but are absent on the MUSA build:
+    PyTorch versions but are absent or broken on the MUSA build:
 
     - ``torch.accelerator.empty_cache()`` — called by gdn_linear_attn.py after
-      prefill kernel warmup. Delegated to torch_musa.empty_cache().
+      prefill kernel warmup. The built-in impl calls
+      ``_accelerator_isAllocatorInitialized()`` which asserts on MUSA.
+      Delegated to ``torch_musa.empty_cache()``.
+
+    - ``torch.accelerator.max_memory_allocated()`` — called by
+      ``vllm.model_executor.model_loader.base_loader`` after model load to
+      measure peak memory. Same ``_accelerator_isAllocatorInitialized()``
+      assert. Delegated to ``torch_musa.max_memory_allocated()``.
 
     - ``torch.accelerator.device_index(index)`` — used as a context manager in
       fla/ops/utils.py to pin operations to a specific device. The MUSA
@@ -128,9 +112,14 @@ def patch_accelerator_missing_attrs():
         if getattr(torch.accelerator, "_musa_attrs_patched", False):
             return
 
-        if not hasattr(torch.accelerator, 'empty_cache'):
-            torch.accelerator.empty_cache = torch_musa.empty_cache
-            logger.info("Patched torch.accelerator.empty_cache for MUSA")
+        # Unconditionally override: the built-in impls call
+        # _accelerator_isAllocatorInitialized() which asserts on MUSA.
+        torch.accelerator.empty_cache = torch_musa.empty_cache
+        logger.info("Patched torch.accelerator.empty_cache for MUSA")
+
+        # max_memory_allocated is called by base_loader after model load.
+        torch.accelerator.max_memory_allocated = torch_musa.max_memory_allocated
+        logger.info("Patched torch.accelerator.max_memory_allocated for MUSA")
 
         if not hasattr(torch.accelerator, 'device_index'):
             torch.accelerator.device_index = torch_musa.device
@@ -142,11 +131,9 @@ def patch_accelerator_missing_attrs():
 
 
 def patch_cuda_stream_for_musa():
-    """Patch torch.cuda stream APIs and vllm aux_stream for MUSA compatibility.
+    """Patch CUDA stream APIs to use MUSA equivalents.
 
-    On MUSA, ``torch.cuda.Stream`` is a dummy base class that cannot be
-    instantiated (raises ``RuntimeError: Tried to instantiate dummy base class
-    Stream``). Several vLLM modules create and use CUDA streams:
+    vllm uses several ``torch.cuda`` stream primitives internally:
 
     - ``vllm.utils.torch_utils.aux_stream()`` creates a background stream for
       MoE shared-expert overlap. Patched to return a ``torch_musa.Stream()``.
@@ -157,37 +144,50 @@ def patch_cuda_stream_for_musa():
     - ``torch.cuda.set_stream(s)`` called by vllm's current_stream bookkeeping.
       Patched to delegate to ``torch.musa.set_stream(s)`` on MUSA.
 
-    - ``torch.cuda.current_stream()`` called in some fallback paths.
-      Patched to delegate to ``torch.musa.current_stream()`` on MUSA.
+    - ``torch.cuda.current_stream(device)`` queried by the scheduler.
+      Patched to delegate to ``torch.musa.current_stream(device)`` on MUSA.
     """
     try:
         import torch
-        import torch_musa
         import torch.cuda as torch_cuda
+        import torch_musa
 
         if getattr(torch_cuda, "_musa_stream_patched", False):
             return
 
-        # --- aux_stream: return torch_musa.Stream() instead of torch.cuda.Stream() ---
+        # aux_stream helper used by MoE shared-expert overlap.
+        # MUSA does not support torch.cuda.Stream() — return None so that
+        # SharedExperts falls back to the synchronous (non-overlapped) path,
+        # which is guarded by ``if self._stream is not None``.
         try:
-            import vllm.utils.torch_utils as tu_mod
-
-            _orig_aux_stream = tu_mod.aux_stream
+            import vllm.utils.torch_utils as _tu
 
             def _aux_stream_musa():
-                """Return a torch_musa.Stream for background stream usage on MUSA."""
-                if tu_mod._aux_stream is None:
-                    tu_mod._aux_stream = torch_musa.Stream()
-                return tu_mod._aux_stream
+                return None
 
-            tu_mod.aux_stream = _aux_stream_musa
-            # Patch the reference already imported into shared_experts module if loaded
-            try:
-                import vllm.model_executor.layers.fused_moe.runner.shared_experts as se_mod
-                se_mod.aux_stream = _aux_stream_musa
-            except Exception:
-                pass
-            logger.info("Patched vllm.utils.torch_utils.aux_stream for MUSA")
+            _tu.aux_stream = _aux_stream_musa
+
+            # shared_experts.py uses `from vllm.utils.torch_utils import aux_stream`
+            # which binds the function object at import time — we must also
+            # patch the local reference in every module that has done so.
+            # Force-import each module so that sys.modules has them, then
+            # overwrite their local binding.
+            import importlib as _il
+            import sys as _sys
+            _modules_using_aux_stream = [
+                "vllm.model_executor.layers.fused_moe.runner.shared_experts",
+                "vllm.worker.model_runner_base",
+                "vllm.model_executor.models.utils",
+                "vllm.model_executor.layers.fused_moe.runner.moe_runner",
+            ]
+            for _mod_name in _modules_using_aux_stream:
+                try:
+                    _mod = _sys.modules.get(_mod_name) or _il.import_module(_mod_name)
+                    if hasattr(_mod, "aux_stream"):
+                        _mod.aux_stream = _aux_stream_musa
+                except Exception as _me:
+                    logger.debug("aux_stream patch: skipped %s: %s", _mod_name, _me)
+            logger.info("Patched aux_stream → None for MUSA (SharedExperts sync path)")
         except Exception as e:
             logger.warning("Failed to patch aux_stream for MUSA: %s", e)
 
@@ -210,7 +210,6 @@ def patch_cuda_stream_for_musa():
         def _set_stream_musa(stream):
             if isinstance(stream, torch_musa.Stream):
                 torch.musa.set_stream(stream)
-                # Also update vllm's TLS bookkeeping
                 try:
                     from vllm.utils.torch_utils import _current_stream_tls
                     _current_stream_tls.value = stream
@@ -236,3 +235,136 @@ def patch_cuda_stream_for_musa():
         logger.info("Patched torch.cuda stream APIs for MUSA")
     except Exception as e:
         logger.warning("Failed to patch torch.cuda stream APIs for MUSA: %s", e)
+
+
+def patch_inductor_triton_for_musa():
+    """Patch torch._inductor triton_heuristics.make_launcher for MUSA.
+
+    flagtree 0.6.0+mthreads3.6 installs itself as the ``triton`` package but
+    its mthreads backend builds ``CompiledKernel.metadata`` as a
+    ``KernelMetadata`` namedtuple that does **not** include a ``cluster_dims``
+    field (MUSA hardware does not support cluster launches).
+
+    ``TritonCompileResult.make_launcher`` unconditionally accesses
+    ``binary.metadata.cluster_dims`` when it takes the mthreads kernel branch,
+    raising ``AttributeError`` during KV-cache profiling warmup.
+
+    Fix: when a mthreads binary is detected (has ``metadata``, no top-level
+    ``num_ctas``, no ``cluster_dims`` in metadata), rebuild the
+    ``KernelMetadata`` namedtuple with a synthetic ``cluster_dims=(1,1,1)``
+    before delegating to the original implementation.
+
+    TODO: remove once flagtree mthreads adds ``cluster_dims`` to its
+    ``KernelMetadata``.
+    """
+    try:
+        import torch._inductor.runtime.triton_heuristics as _th
+
+        if getattr(_th, "_musa_cluster_dims_patched", False):
+            return
+
+        _OrigCompileResult = _th.TritonCompileResult
+        _orig_make_launcher = _OrigCompileResult.make_launcher
+
+        def _make_launcher_musa(self):
+            # TritonCompileResult uses .kernel (not .binary) in torch 2.9+
+            kernel = self.kernel
+            # Detect mthreads kernel: has metadata namedtuple but no cluster_dims
+            if (
+                kernel is not None
+                and hasattr(kernel, "metadata")
+                and hasattr(kernel.metadata, "_fields")
+                and "cluster_dims" not in kernel.metadata._fields
+            ):
+                try:
+                    from collections import namedtuple
+                    old_meta = kernel.metadata
+                    fields = old_meta._fields + ("cluster_dims",)
+                    NewMeta = namedtuple(type(old_meta).__name__, fields)
+                    kernel.metadata = NewMeta(*tuple(old_meta), (1, 1, 1))
+                except Exception:
+                    pass
+            return _orig_make_launcher(self)
+
+        _OrigCompileResult.make_launcher = _make_launcher_musa
+        _th._musa_cluster_dims_patched = True
+        logger.info(
+            "Patched torch._inductor triton_heuristics.make_launcher "
+            "for MUSA (cluster_dims fallback)")
+    except Exception as e:
+        logger.warning(
+            "Failed to patch torch._inductor triton_heuristics for MUSA: %s",
+            e)
+
+
+def patch_moe_topk_softmax_for_musa():
+    """Patch MoE top-k softmax for MUSA via FlagGems.
+
+    ``torch.ops._moe_C.topk_softmax`` is a CUDA-only extension not available
+    on MUSA.  vllm 0.24.0 calls it through two entry points:
+
+      - ``vllm.model_executor.layers.fused_moe.router.fused_topk_router``
+        ``vllm_topk_softmax()``
+      - ``vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router``
+        ``vllm_topk_softmax()``
+
+    Rather than patching ``vllm._custom_ops`` (which suffers from circular
+    import timing issues at apply_musa_patches() call time), we directly
+    replace the ``vllm_topk_softmax`` function objects in both router modules
+    via ``importlib.import_module``.  These modules are safe to import at
+    this point since they only depend on torch and vllm internals that are
+    already loaded by the time apply_musa_patches() is invoked in the worker.
+
+    TODO: remove once MUSA ships a compiled _moe_C extension.
+    """
+    try:
+        from vllm_fl.dispatch.backends.flaggems.impl.fused_moe import (
+            topk_softmax_flaggems,
+        )
+    except Exception as exc:
+        logger.warning(
+            "patch_moe_topk_softmax_for_musa: cannot import "
+            "topk_softmax_flaggems — MoE models will fail on MUSA: %s", exc)
+        return
+
+    def _topk_softmax_musa(
+        topk_weights,
+        topk_ids,
+        token_expert_indices,
+        gating_output,
+        renormalize=False,
+        e_score_correction_bias=None,
+    ):
+        # topk_softmax_flaggems modifies topk_weights/topk_ids in-place.
+        # Must return (topk_weights, topk_ids) to match vllm_topk_softmax
+        # signature which callers unpack as: topk_weights, topk_ids = topk_func(...)
+        topk_softmax_flaggems(
+            topk_weights,
+            topk_ids,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+        )
+        return topk_weights, topk_ids
+
+    _router_modules = [
+        "vllm.model_executor.layers.fused_moe.router.fused_topk_router",
+        "vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router",
+    ]
+    patched = []
+    for mod_name in _router_modules:
+        try:
+            import importlib
+            mod = importlib.import_module(mod_name)
+            if hasattr(mod, "vllm_topk_softmax"):
+                mod.vllm_topk_softmax = _topk_softmax_musa
+                patched.append(mod_name.split(".")[-1])
+        except Exception as exc:
+            logger.warning(
+                "patch_moe_topk_softmax_for_musa: failed to patch %s: %s",
+                mod_name, exc)
+
+    if patched:
+        logger.info(
+            "Patched vllm_topk_softmax for MUSA (FlagGems) in: %s",
+            ", ".join(patched))
