@@ -47,7 +47,9 @@ from vllm.triton_utils import tl
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import use_flaggems
-
+# Kunlunxin: always use TritonExpertsFL regardless of flaggems setting
+# (avoids _moe_C arg mismatch when flaggems is off)
+from vllm_fl.dispatch.config.utils import get_platform_name
 _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
 _moe_sum = CachedOp("moe_sum")
@@ -120,7 +122,11 @@ def select_unquantized_moe_backend_oot(
     if current_platform.is_out_of_tree() and use_flaggems():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
     elif current_platform.is_out_of_tree():
-        return UnquantizedMoeBackend.TRITON, None
+        # Kunlunxin uses TritonExpertsFL unconditionally because its
+        # fused_experts_impl is patched to xtorch_ops, not flaggems.
+        if get_platform_name() == "kunlunxin":
+            return UnquantizedMoeBackend.TRITON, TritonExpertsFL
+        return UnquantizedMoeBackend.TRITON, TritonExperts
 
     if moe_config.is_lora_enabled:
         return UnquantizedMoeBackend.TRITON, backend_to_kernel_cls(
