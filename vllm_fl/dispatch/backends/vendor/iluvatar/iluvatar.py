@@ -9,11 +9,106 @@ Iluvatar uses a CUDA-compatible architecture.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional, Union
 
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
+
+logger = logging.getLogger(__name__)
+
+
+def patch_triton_language_for_iluvatar() -> None:
+    """Add make_tensor_descriptor stub to triton.language for triton < 3.3.
+
+    triton JIT's DependencyFinder walks all @triton.jit function bodies at
+    cache_key computation time (first compile, not import). Even dead-code
+    branches guarded by ``USE_TD: tl.constexpr = False`` cause AttributeError
+    when ``tl.make_tensor_descriptor`` does not exist, because DependencyFinder
+    resolves ``tl.*`` attributes to compute a stable kernel hash.
+
+    The _Stub below is a plain Python callable + hashable object that satisfies
+    attribute lookup. It raises at call-time so accidental USE_TD=True usage is
+    caught immediately.
+
+    TODO: Remove once minimum supported triton version is >= 3.3.
+    """
+    try:
+        import triton.language as tl
+
+        if hasattr(tl, "make_tensor_descriptor"):
+            return  # triton >= 3.3, nothing to do
+
+        class _TensorDescriptorStub:
+            """Stub for tl.make_tensor_descriptor — callable and hashable."""
+
+            def __call__(self, *args, **kwargs):
+                raise RuntimeError(
+                    "tl.make_tensor_descriptor is not available on triton < 3.3. "
+                    "Ensure VLLM_TRITON_ATTN_USE_TD=0 (the default on iluvatar)."
+                )
+
+            def __hash__(self):
+                return hash("_tl_make_tensor_descriptor_stub")
+
+            def __repr__(self):
+                return "<tl.make_tensor_descriptor stub for triton<3.3>"
+
+        tl.make_tensor_descriptor = _TensorDescriptorStub()
+        logger.info(
+            "Patched triton.language: added make_tensor_descriptor stub "
+            "(triton < 3.3 detected; USE_TD=False assumed on iluvatar)."
+        )
+    except Exception as e:
+        logger.warning("Failed to patch triton.language for iluvatar: %s", e)
+
+
+def patch_torch_inductor_for_iluvatar() -> None:
+    """
+    Patch torch._inductor.runtime.triton_heuristics to use 'corex' as the
+    triton target backend instead of 'cuda', so that iluvatar's triton backend
+    (which requires target.backend == 'corex') is selected by make_backend().
+
+    torch._inductor constructs GPUTarget(compile_meta["device_type"], ...)
+    where device_type is always 'cuda' for CUDA-compatible devices.
+    Iluvatar's flagtree-triton only has a 'corex' backend, so we patch the
+    module-level GPUTarget reference in triton_heuristics to intercept the
+    constructor call and substitute 'corex' for 'cuda'.
+
+    TODO: Remove this patch once torch._inductor natively supports custom
+    triton backend names for CUDA-compatible non-NVIDIA devices.
+    """
+    try:
+        import torch._inductor.runtime.triton_heuristics as _th
+        from triton.backends.compiler import GPUTarget as _OrigGPUTarget
+
+        # Guard: skip if already patched
+        if getattr(_th, '_iluvatar_gputarget_patched', False):
+            return
+
+        class _IluvatarGPUTarget(_OrigGPUTarget):
+            """GPUTarget wrapper that remaps 'cuda' → 'corex' for iluvatar."""
+            def __new__(cls, backend, *args, **kwargs):
+                if backend == 'cuda':
+                    backend = 'corex'
+                return super().__new__(cls)
+
+            def __init__(self, backend, *args, **kwargs):
+                if backend == 'cuda':
+                    backend = 'corex'
+                super().__init__(backend, *args, **kwargs)
+
+        # Replace the module-level GPUTarget used in _precompile_config
+        _th.GPUTarget = _IluvatarGPUTarget
+        _th._iluvatar_gputarget_patched = True
+        logger.info(
+            "Patched torch._inductor triton GPUTarget: 'cuda' -> 'corex' (iluvatar)"
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to patch torch._inductor for iluvatar triton backend: %s", e
+        )
 
 
 class IluvatarBackend(Backend):
@@ -161,4 +256,10 @@ class IluvatarBackend(Backend):
                 return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
             return AttentionBackendEnum.FLASHMLA.get_path()
 
-        return AttentionBackendEnum.FLASH_ATTN.get_path()
+        # flash_attn is not available on iluvatar. Use TRITON_ATTN (the vllm
+        # default), but patch tl.make_tensor_descriptor so that triton JIT's
+        # DependencyFinder can hash the kernel without AttributeError on
+        # triton < 3.3.  The kernel itself uses USE_TD=False at runtime, so
+        # the stub is never called.
+        patch_triton_language_for_iluvatar()
+        return AttentionBackendEnum.TRITON_ATTN.get_path()
