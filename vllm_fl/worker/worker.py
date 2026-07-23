@@ -468,6 +468,14 @@ class WorkerFL(WorkerBase):
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
+        if current_platform.device_type == "txda":
+            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
+            # e.g., 20 GiB or similar default cache memory size.
+            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
+            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
+                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
+            return fallback_val
+
         GiB = lambda b: b / GiB_bytes
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
@@ -528,6 +536,7 @@ class WorkerFL(WorkerBase):
         )
         logger.debug(
             "Free memory after profiling: %.2f GiB (total), %.2f GiB (within requested)",
+
             GiB(free_gpu_memory),
             GiB(free_gpu_memory - unrequested_memory),
         )
@@ -742,7 +751,7 @@ class WorkerFL(WorkerBase):
         all_gather_tensors = {}
         compilation_config = self.vllm_config.compilation_config
         parallel_config = self.vllm_config.parallel_config
-
+        
         if (
             parallel_config.pipeline_parallel_size > 1
             and compilation_config.pass_config.enable_sp
