@@ -33,15 +33,18 @@ FL plugin on vLLM 0.13:
   implementation by ``patch_fla_ops``).
 * ``npu_gemma_rms_norm`` / ``npu_add_rms_norm_bias`` back
   ``GemmaRMSNorm.forward_oot``.
-* Non-speculative decode batches run the q/k L2 norm + delta-rule state
+* Non-speculative decode batches can run the q/k L2 norm + delta-rule state
   update as one fused Triton kernel (``fused_recurrent_delta_rule_update``,
   adapted from vllm-ascend's fused_sigmoid_gating_delta_rule_update) on top
   of the AscendC ``npu_fused_gdn_gating`` op, replacing the separate
   2x l2norm_fwd + npu_recurrent_gated_delta_rule calls. The in-kernel
   sigmoid-gating section of the upstream kernel is miscompiled by the
   Ascend Triton pipeline in this environment, so the gating stays on the
-  AscendC op. Set ``VLLM_FL_DISABLE_FUSED_DECODE_GDN=1`` to fall back to
-  the AscendC recurrent op.
+  AscendC op. The fused kernel is OFF by default: it was only verified on
+  910B4-1 and faults on 910B3 with the CANN 8.5.0 bishengir pipeline
+  (aivec MPU access error surfacing as aclrtSynchronizeEvent 507035).
+  Set ``VLLM_FL_DISABLE_FUSED_DECODE_GDN=0`` to opt in; the default falls
+  back to the AscendC recurrent op.
 * ``RMSNormGated.forward_oot`` runs the fused Triton
   ``layer_norm_fwd_1pass`` kernel (ported from vllm-ascend) instead of the
   decomposed eager ``forward_native`` chain.
@@ -208,8 +211,14 @@ def _build_actual_seq_lengths(
 def _fused_decode_gdn_enabled() -> bool:
     """Whether to use the fused Triton decode kernel (q/k L2 norm +
     recurrent delta-rule state update in a single launch, adapted from
-    vllm-ascend) for non-speculative decode batches."""
-    return os.environ.get("VLLM_FL_DISABLE_FUSED_DECODE_GDN", "0") != "1"
+    vllm-ascend) for non-speculative decode batches.
+
+    Off by default: the kernel was verified on 910B4-1 but faults on 910B3
+    (vector-core MPU access error, CANN 507035), so the AscendC recurrent
+    op remains the safe default. Opt in with
+    ``VLLM_FL_DISABLE_FUSED_DECODE_GDN=0``.
+    """
+    return os.environ.get("VLLM_FL_DISABLE_FUSED_DECODE_GDN", "1") != "1"
 
 
 def _cache_conv1d_weight_transposed(layer: Qwen3NextGatedDeltaNet) -> None:
