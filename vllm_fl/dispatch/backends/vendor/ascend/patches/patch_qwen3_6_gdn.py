@@ -114,6 +114,7 @@ _REQUIRED_OPS = (
     "npu_causal_conv1d_custom",
     "npu_fused_gdn_gating",
     "npu_recurrent_gated_delta_rule",
+    "npu_chunk_gated_delta_rule",
     "npu_gemma_rms_norm",
     "npu_add_rms_norm_bias",
 )
@@ -360,6 +361,71 @@ def _chunk_gdn_pto(q, k, v, g, beta, cu_seqlens, attn_metadata):
         total_chunks=total_chunks,
     )
     return o.to(q.dtype), fs.to(q.dtype)
+
+
+def _chunk_gated_delta_rule_aclnn(
+    query, key, value, g, beta, ssm_state, state_indices, has_initial_state, cu_seqlens
+):
+    """Run the aclnn npu_chunk_gated_delta_rule operator for prefill.
+
+    This is a unified path for both fresh and non-fresh prefills, replacing
+    the PTO megakernel (fresh only) and Triton chunk_gated_delta_rule (non-fresh).
+    Matches the vllm-ascend PR #12607 implementation.
+
+    Args:
+        query: (1, T, Nk, Dk) - head_first=False
+        key: (1, T, Nk, Dk)
+        value: (1, T, Nv, Dv)
+        g: (1, T, Nv) - log-gate values (fp32)
+        beta: (1, T, Nv)
+        ssm_state: full state cache tensor
+        state_indices: indices into ssm_state for this batch
+        has_initial_state: (B,) bool tensor indicating which sequences have non-zero initial state
+        cu_seqlens: (B+1,) cumulative sequence lengths [0, s1, s1+s2, ...]
+
+    Returns:
+        out: (1, T, Nv, Dv) bf16
+        final_state: (B, Nv, Dk, Dv) - transposed back to ssm_state layout
+    """
+    # Extract initial_state from ssm_state cache: (B, Nv, Dk, Dv) -> (B, Nv, Dv, Dk)
+    initial_state = ssm_state[state_indices].transpose(-1, -2).contiguous()
+
+    # Clear states for fresh sequences (equivalent to PR's clear_ssm_states)
+    initial_state[~has_initial_state, ...] = 0
+
+    # Convert to TND layout (drop batch dim, squeeze from [1, T, N, D] to [T, N, D])
+    # The aclnn op does NOT l2-normalize q/k internally, so do it here
+    q_tnd = l2norm_fwd(query.squeeze(0))   # (T, Nk, Dk)
+    k_tnd = l2norm_fwd(key.squeeze(0))     # (T, Nk, Dk)
+    v_tnd = value.squeeze(0)               # (T, Nv, Dv)
+    beta_tnd = beta.squeeze(0)             # (T, Nv)
+    g_tnd = g.squeeze(0)                   # (T, Nv), fp32 log-gate
+
+    # Convert cu_seqlens [0, s1, s1+s2, ...] to per-sequence lengths (B,) int32
+    actual_seq_lengths = (cu_seqlens[1:] - cu_seqlens[:-1]).to(torch.int32).contiguous()
+
+    # Compute scale
+    scale = q_tnd.shape[-1] ** -0.5
+
+    # Call the aclnn operator
+    out_tnd, final_state = torch.ops._C_ascend.npu_chunk_gated_delta_rule(
+        q_tnd,
+        k_tnd,
+        v_tnd,
+        beta_tnd,
+        initial_state,
+        actual_seq_lengths,
+        g_tnd,
+        scale,
+    )
+
+    # Restore batch dim: (T, Nv, Dv) -> (1, T, Nv, Dv)
+    out = out_tnd.unsqueeze(0)
+
+    # Transpose final_state back to ssm_state layout: (B, Nv, Dv, Dk) -> (B, Nv, Dk, Dv)
+    final_state = final_state.transpose(-1, -2).contiguous()
+
+    return out, final_state
 
 
 def _patch_mamba_cache_dense_layout() -> None:
@@ -614,7 +680,26 @@ class AscendCGatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         # 2.2: Process the remaining part
         if attn_metadata.num_prefills > 0:
-            if _pto_prefill_usable(attn_metadata):
+            # Environment variable control for aclnn chunk_gated_delta_rule integration:
+            # VLLM_FL_USE_ACLNN_CHUNK_GDN=0 (default): use PTO + Triton (current behavior)
+            # VLLM_FL_USE_ACLNN_CHUNK_GDN=1: use aclnn to replace both PTO and Triton
+            use_aclnn = int(os.environ.get("VLLM_FL_USE_ACLNN_CHUNK_GDN", "0"))
+
+            if use_aclnn == 1:
+                # Use the new aclnn chunk_gated_delta_rule operator for all prefills
+                # (both fresh and non-fresh), matching vllm-ascend PR #12607.
+                core_attn_out_non_spec, last_recurrent_state = _chunk_gated_delta_rule_aclnn(
+                    query_non_spec,
+                    key_non_spec,
+                    value_non_spec,
+                    g_non_spec,
+                    beta_non_spec,
+                    ssm_state,
+                    non_spec_state_indices_tensor,
+                    has_initial_state,
+                    non_spec_query_start_loc,
+                )
+            elif _pto_prefill_usable(attn_metadata):
                 # Fresh prefill batch: the fused PTO megakernel runs all six
                 # GDN stages in a single launch. The decision is made from
                 # CPU-side metadata (no device sync).
