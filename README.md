@@ -147,12 +147,6 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Run a Task
 
-#### Compressed-tensors WNA16 models
-
-The plugin supports compressed-tensors `pack-quantized` W4A16/W8A16
-checkpoints. Its WNA16 adapter calls kernels owned by this plugin directly;
-Marlin remains an optional vLLM-native path on NVIDIA CUDA.
-
 #### Offline Batched Inference
 With vLLM and vLLM-fl installed, you can start generating texts for list of input prompts (i.e. offline batch inferencing). See the example script: [offline_inference](./examples/offline_inference.py). Or use blow python script directly.
 ```python
