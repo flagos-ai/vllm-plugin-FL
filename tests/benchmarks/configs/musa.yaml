@@ -1,0 +1,23 @@
+serve:
+  - name: serve_smoke_dummy
+    model: qwen3
+    case: 4b_tp2_eager_musa
+    server_parameters:
+      served_model_name: smoke-model
+      tensor_parallel_size: 1
+      max_model_len: 1024
+      gpu_memory_utilization: 0.7
+      max_num_seqs: 4
+      enforce_eager: true
+      disable_custom_all_reduce: true
+      load_format: dummy
+    client_parameters:
+      model: smoke-model
+      backend: openai-chat
+      endpoint: /v1/chat/completions
+      dataset_name: random
+      random_input_len: 32
+      random_output_len: 4
+      num_prompts: 5
+      percentile_metrics: ttft,tpot,itl,e2el
+      goodput: e2el:10000

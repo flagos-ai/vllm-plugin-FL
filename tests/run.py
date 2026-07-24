@@ -350,7 +350,14 @@ class TestRunner:
         else:
             selected_types = set(selected_smoke)
 
-        config_path = Path("tests/benchmarks/configs/smoke.yaml")
+        platform_config_path = Path(
+            f"tests/benchmarks/configs/{self.config.platform}.yaml"
+        )
+        config_path = (
+            platform_config_path
+            if platform_config_path.exists()
+            else Path("tests/benchmarks/configs/smoke.yaml")
+        )
         if not config_path.exists():
             print(f"[run] Warning: benchmark config not found: {config_path}")
             return []
