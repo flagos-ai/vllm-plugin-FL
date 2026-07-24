@@ -64,6 +64,74 @@ def patch_triton_language_for_iluvatar() -> None:
         logger.warning("Failed to patch triton.language for iluvatar: %s", e)
 
 
+def patch_triton_chained_or_for_iluvatar() -> None:
+    """Rewrite chained boolean 'or' chains in vllm triton kernels.
+
+    Iluvatar's triton version raises UnsupportedLanguageConstruct for
+    chained boolean operators like ``A or B or C`` inside @triton.jit
+    functions.  We rewrite the affected source file in-place (once) so
+    that every such chain is replaced with a nested pair:
+        ``(A or B) or C``
+
+    This is a no-op if the file has already been patched or does not exist.
+
+    TODO: Remove once Iluvatar triton supports chained boolean operators.
+    """
+    import re
+    import importlib.util
+    import pathlib
+
+    _MARKER = "# _iluvatar_chained_or_patched"
+
+    spec = importlib.util.find_spec("vllm.v1.attention.ops.triton_attention_helpers")
+    if spec is None or spec.origin is None:
+        logger.warning(
+            "patch_triton_chained_or_for_iluvatar: "
+            "vllm.v1.attention.ops.triton_attention_helpers not found, skipping."
+        )
+        return
+
+    fpath = pathlib.Path(spec.origin)
+    try:
+        src = fpath.read_text()
+    except Exception as e:
+        logger.warning("patch_triton_chained_or_for_iluvatar: cannot read %s: %s", fpath, e)
+        return
+
+    if _MARKER in src:
+        return  # already patched
+
+    # Replace: A or B or C  →  (A or B) or C
+    # Only inside lines that look like triton constexpr conditionals.
+    # Pattern: three operands joined by ' or ', where each operand may be
+    # a simple identifier, a `not X`, or a parenthesised expression.
+    _OPERAND = r'(?:not\s+)?(?:\([^)]*\)|\w+)'
+    pattern = re.compile(
+        r'(' + _OPERAND + r')\s+or\s+(' + _OPERAND + r')\s+or\s+(' + _OPERAND + r')'
+    )
+
+    def _rewrite(m: re.Match) -> str:
+        return f"({m.group(1)} or {m.group(2)}) or {m.group(3)}"
+
+    new_src, count = re.subn(pattern, _rewrite, src)
+    if count == 0:
+        return  # nothing to patch
+
+    new_src += f"\n{_MARKER}\n"
+    try:
+        fpath.write_text(new_src)
+    except Exception as e:
+        logger.warning(
+            "patch_triton_chained_or_for_iluvatar: cannot write %s: %s", fpath, e
+        )
+        return
+
+    logger.info(
+        "patch_triton_chained_or_for_iluvatar: rewrote %d chained-or expression(s) in %s",
+        count, fpath,
+    )
+
+
 def patch_triton_perf_model_for_iluvatar() -> None:
     """
     Patch triton.ops.matmul_perf_model.get_clock_rate_in_khz for iluvatar.
@@ -106,6 +174,7 @@ def patch_triton_perf_model_for_iluvatar() -> None:
 # (which do not call pre_register_and_update) also get the patches applied.
 patch_triton_language_for_iluvatar()
 patch_triton_perf_model_for_iluvatar()
+patch_triton_chained_or_for_iluvatar()
 
 
 class IluvatarBackend(Backend):
