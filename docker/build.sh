@@ -31,6 +31,12 @@ UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 VLLM_VERSION="${VLLM_VERSION:-0.19.0}"
 CANN_VERSION="${CANN_VERSION:-8.5.1}"
 CANN_CHIP="${CANN_CHIP:-910b}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-registry.mthreads.com/mcconline/inference/vllm:v0.20.2-ph1-4.3.5-torch2.7.1-v1.1.0}"
+MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
+MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.20.2}"
+MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
+MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.7.1}"
+FLAGGEMS_VERSION="${FLAGGEMS_VERSION:-5.0.0}"
 
 # ---- Build options ----
 PLATFORM="${PLATFORM:-cuda}"
@@ -62,7 +68,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, musa (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -82,6 +88,13 @@ VERSIONS (override via environment variables):
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
+  MUSA:
+    MUSA_BASE_IMAGE      Moore Threads base image (default: ${MUSA_BASE_IMAGE})
+    MUSA_VERSION         MUSA version used in image tag (default: ${MUSA_VERSION})
+    MUSA_VLLM_VERSION    vLLM empty-mode version (default: ${MUSA_VLLM_VERSION})
+    MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
+    MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
+    FLAGGEMS_VERSION     FlagGems version in base image (default: ${FLAGGEMS_VERSION})
 
 EXAMPLES:
     # Build CUDA dev image
@@ -92,6 +105,9 @@ EXAMPLES:
 
     # Build Ascend CI image for A3
     CANN_CHIP=a3 ./build.sh --platform ascend --target ci --build-arg SOC_VERSION=ascend910_9391
+
+    # Build Moore Threads MUSA dev image
+    ./build.sh --platform musa --target dev
 
     # Build with custom PyPI mirror
     ./build.sh --target dev --index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -155,6 +171,12 @@ fi
 # Build context is the platform-specific directory (e.g. docker/ascend/)
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 
+# MUSA uses the Python and vLLM versions provided by its vendor base image.
+if [[ "${PLATFORM}" == "musa" ]]; then
+    PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
+    VLLM_VERSION="${MUSA_VLLM_VERSION}"
+fi
+
 # Platform-specific build args and auto-tag
 BUILD_ARGS=(
     --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
@@ -180,8 +202,16 @@ elif [[ "${PLATFORM}" == "ascend" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="cann${CANN_VERSION}-${CANN_CHIP}-ubuntu${UBUNTU_VERSION}-py${PYTHON_VERSION}-${TARGET}"
     fi
+elif [[ "${PLATFORM}" == "musa" ]]; then
+    BUILD_ARGS+=(
+        --build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}"
+        --build-arg "FLAGGEMS_VERSION=${FLAGGEMS_VERSION}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="musa${MUSA_VERSION}-vllm${VLLM_VERSION}-torch${MUSA_TORCH_VERSION}-py${MUSA_PYTHON_VERSION}-${TARGET}"
+    fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda' or 'ascend'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', or 'musa'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -194,6 +224,11 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  CANN:           ${CANN_VERSION}"
     msg "  Chip:           ${CANN_CHIP}"
+elif [[ "${PLATFORM}" == "musa" ]]; then
+    msg "  MUSA:           ${MUSA_VERSION}"
+    msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
+    msg "  MUSA PyTorch:   ${MUSA_TORCH_VERSION}"
+    msg "  FlagGems:       ${FLAGGEMS_VERSION}"
 fi
 msg "  Ubuntu:         ${UBUNTU_VERSION}"
 msg "  Python:         ${PYTHON_VERSION}"
