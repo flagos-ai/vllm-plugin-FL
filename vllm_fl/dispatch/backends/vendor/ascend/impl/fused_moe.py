@@ -205,8 +205,7 @@ def _ascendc_fused_experts_impl(
 
     # Activation.
     if activation == "silu":
-        d = gate_up.shape[-1] // 2
-        gate_up = F.silu(gate_up[..., :d]) * gate_up[..., d:]
+        gate_up = torch_npu.npu_swiglu(gate_up)
     elif activation == "gelu":
         d = gate_up.shape[-1] // 2
         gate_up = F.gelu(gate_up[..., :d]) * gate_up[..., d:]
@@ -334,8 +333,7 @@ def _torch_fused_experts_impl(
 
     # Activation.
     if activation == "silu":
-        d = gate_up.shape[-1] // 2
-        gate_up = F.silu(gate_up[..., :d]) * gate_up[..., d:]
+        gate_up = torch_npu.npu_swiglu(gate_up)
     elif activation == "gelu":
         d = gate_up.shape[-1] // 2
         gate_up = F.gelu(gate_up[..., :d]) * gate_up[..., d:]
