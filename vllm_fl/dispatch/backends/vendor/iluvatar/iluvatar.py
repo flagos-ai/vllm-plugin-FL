@@ -104,6 +104,7 @@ def patch_triton_perf_model_for_iluvatar() -> None:
 
 
 
+class IluvatarBackend(Backend):
     """
     Iluvatar backend for operator implementations.
 
