@@ -64,7 +64,46 @@ def patch_triton_language_for_iluvatar() -> None:
         logger.warning("Failed to patch triton.language for iluvatar: %s", e)
 
 
-class IluvatarBackend(Backend):
+def patch_triton_perf_model_for_iluvatar() -> None:
+    """
+    Patch triton.ops.matmul_perf_model.get_clock_rate_in_khz for iluvatar.
+
+    On iluvatar, neither `ixsmi` nor `libnvidia-ml.so` is available, so the
+    default implementation crashes. We replace it with a fixed value that
+    matches typical iluvatar BI-V150 SM clock (1500 MHz = 1500000 kHz).
+
+    The function is decorated with @functools.lru_cache so assigning a new
+    callable to the module attribute is sufficient — callers import the name
+    directly, so we also patch the reference in the testing helper.
+
+    TODO: Remove once iluvatar triton natively handles missing nvsmi/nvml.
+    """
+    try:
+        import triton.ops.matmul_perf_model as _mpm
+
+        if getattr(_mpm, '_iluvatar_clock_patched', False):
+            return
+
+        import functools
+
+        @functools.lru_cache()
+        def _iluvatar_get_clock_rate_in_khz():
+            # BI-V150 SM clock ~1500 MHz; used only for perf-model heuristics.
+            return 1500 * 1e3
+
+        _mpm.get_clock_rate_in_khz = _iluvatar_get_clock_rate_in_khz
+        _mpm._iluvatar_clock_patched = True
+        logger.info(
+            "Patched triton.ops.matmul_perf_model.get_clock_rate_in_khz "
+            "for iluvatar (fixed 1500 MHz, no nvsmi/nvml available)."
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to patch triton perf model for iluvatar: %s", e
+        )
+
+
+
     """
     Iluvatar backend for operator implementations.
 
@@ -215,4 +254,5 @@ class IluvatarBackend(Backend):
         # triton < 3.3.  The kernel itself uses USE_TD=False at runtime, so
         # the stub is never called.
         patch_triton_language_for_iluvatar()
+        patch_triton_perf_model_for_iluvatar()
         return AttentionBackendEnum.TRITON_ATTN.get_path()

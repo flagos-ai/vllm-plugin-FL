@@ -390,6 +390,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_uuid(cls, device_id: int = 0) -> str:
+        if cls.device_type == "cuda" and cls.vendor_name == "iluvatar":
+            # Iluvatar is CUDA-compatible but has no NVML library.
+            # Return a synthetic UUID based on device index.
+            return f"ILUVATAR-{device_id}"
         if cls.device_type == "cuda":
             import pynvml
             pynvml.nvmlInit()
