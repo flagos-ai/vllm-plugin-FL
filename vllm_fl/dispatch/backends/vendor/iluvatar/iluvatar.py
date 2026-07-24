@@ -64,53 +64,6 @@ def patch_triton_language_for_iluvatar() -> None:
         logger.warning("Failed to patch triton.language for iluvatar: %s", e)
 
 
-def patch_torch_inductor_for_iluvatar() -> None:
-    """
-    Patch torch._inductor.runtime.triton_heuristics to use 'corex' as the
-    triton target backend instead of 'cuda', so that iluvatar's triton backend
-    (which requires target.backend == 'corex') is selected by make_backend().
-
-    torch._inductor constructs GPUTarget(compile_meta["device_type"], ...)
-    where device_type is always 'cuda' for CUDA-compatible devices.
-    Iluvatar's flagtree-triton only has a 'corex' backend, so we patch the
-    module-level GPUTarget reference in triton_heuristics to intercept the
-    constructor call and substitute 'corex' for 'cuda'.
-
-    TODO: Remove this patch once torch._inductor natively supports custom
-    triton backend names for CUDA-compatible non-NVIDIA devices.
-    """
-    try:
-        import torch._inductor.runtime.triton_heuristics as _th
-        from triton.backends.compiler import GPUTarget as _OrigGPUTarget
-
-        # Guard: skip if already patched
-        if getattr(_th, '_iluvatar_gputarget_patched', False):
-            return
-
-        class _IluvatarGPUTarget(_OrigGPUTarget):
-            """GPUTarget wrapper that remaps 'cuda' → 'corex' for iluvatar."""
-            def __new__(cls, backend, *args, **kwargs):
-                if backend == 'cuda':
-                    backend = 'corex'
-                return super().__new__(cls)
-
-            def __init__(self, backend, *args, **kwargs):
-                if backend == 'cuda':
-                    backend = 'corex'
-                super().__init__(backend, *args, **kwargs)
-
-        # Replace the module-level GPUTarget used in _precompile_config
-        _th.GPUTarget = _IluvatarGPUTarget
-        _th._iluvatar_gputarget_patched = True
-        logger.info(
-            "Patched torch._inductor triton GPUTarget: 'cuda' -> 'corex' (iluvatar)"
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to patch torch._inductor for iluvatar triton backend: %s", e
-        )
-
-
 class IluvatarBackend(Backend):
     """
     Iluvatar backend for operator implementations.
