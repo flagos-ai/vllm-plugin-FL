@@ -1,3 +1,5 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
+
 import pytest
 import torch
 

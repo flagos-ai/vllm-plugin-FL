@@ -1,21 +1,16 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+import os
 from vllm.platforms import PlatformEnum, current_platform
+from vllm_fl.utils import use_flaggems_op
 
 from .fp8 import FlagGemsFp8BlockScaledMMLinearKernel
-from vllm_fl.utils import use_flaggems_op
+
 
 FLAGGEMS_FP8_BLOCK_GEMM_OP = "flaggems_fp8_block_gemm"
 
 
-def _merge_candidates(registry, candidates) -> None:
-    destination = registry.setdefault(PlatformEnum.OOT, [])
-    for kernel in candidates:
-        if kernel not in destination:
-            destination.append(kernel)
-
-
-def _resolve_source_platform() -> PlatformEnum | None:
+def _resolve_source_platform() -> PlatformEnum:
     """
     Determine which upstream platform's kernel list to clone for OOT.
 
@@ -23,18 +18,16 @@ def _resolve_source_platform() -> PlatformEnum | None:
     - nvidia, metax, musa, etc. (cuda_alike) -> CUDA kernels
     - rocm-alike OOT                         -> ROCM kernels
     - cpu-alike OOT                          -> CPU kernels
-    - unknown                                -> no cloned kernels
+    - fallback                               -> CUDA kernels
     """
+    if current_platform.is_cuda_alike():
+        return PlatformEnum.CUDA
     if current_platform.is_rocm():
         return PlatformEnum.ROCM
     if current_platform.is_cpu():
         return PlatformEnum.CPU
-    if current_platform.is_cuda_alike():
-        return PlatformEnum.CUDA
-    # Copying CUDA kernels to an unrelated platform can pass registration and
-    # fail much later during model loading. Unknown platforms must provide
-    # explicit FL kernels instead.
-    return None
+    # Fallback: try CUDA as the most common case
+    return PlatformEnum.CUDA
 
 
 def add_oot_quant_kernel() -> None:
@@ -46,26 +39,32 @@ def add_oot_quant_kernel() -> None:
     is_supported() / can_implement() will filter at runtime.
     """
     from vllm.model_executor.kernels.linear import (
-        _POSSIBLE_FP8_BLOCK_KERNELS,
-        _POSSIBLE_FP8_KERNELS,
         _POSSIBLE_INT8_KERNELS,
+        _POSSIBLE_FP8_KERNELS,
         _POSSIBLE_KERNELS,
+        _POSSIBLE_FP8_BLOCK_KERNELS,
     )
-
     source = _resolve_source_platform()
-    source_kernels = _POSSIBLE_KERNELS.get(source, []) if source else []
-    source_int8 = _POSSIBLE_INT8_KERNELS.get(source, []) if source else []
-    source_fp8 = _POSSIBLE_FP8_KERNELS.get(source, []) if source else []
-    source_fp8_block = _POSSIBLE_FP8_BLOCK_KERNELS.get(source, []) if source else []
 
-    _merge_candidates(_POSSIBLE_KERNELS, source_kernels)
-    _merge_candidates(_POSSIBLE_INT8_KERNELS, source_int8)
-    _merge_candidates(_POSSIBLE_FP8_KERNELS, source_fp8)
-    _merge_candidates(_POSSIBLE_FP8_BLOCK_KERNELS, source_fp8_block)
+    if PlatformEnum.OOT not in _POSSIBLE_KERNELS:
+        _POSSIBLE_KERNELS[PlatformEnum.OOT] = list(
+            _POSSIBLE_KERNELS.get(source, [])
+        )
 
-    from .wna16.linear import register_fl_wna16_linear_kernel
+    if PlatformEnum.OOT not in _POSSIBLE_INT8_KERNELS:
+        _POSSIBLE_INT8_KERNELS[PlatformEnum.OOT] = list(
+            _POSSIBLE_INT8_KERNELS.get(source, [])
+        )
 
-    register_fl_wna16_linear_kernel(_POSSIBLE_KERNELS)
+    if PlatformEnum.OOT not in _POSSIBLE_FP8_KERNELS:
+        _POSSIBLE_FP8_KERNELS[PlatformEnum.OOT] = list(
+            _POSSIBLE_FP8_KERNELS.get(source, [])
+        )
+
+    if PlatformEnum.OOT not in _POSSIBLE_FP8_BLOCK_KERNELS:
+        _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT] = list(
+            _POSSIBLE_FP8_BLOCK_KERNELS.get(source, [])
+        )
 
     if (
         current_platform.supports_fp8()
@@ -77,6 +76,10 @@ def add_oot_quant_kernel() -> None:
             0, FlagGemsFp8BlockScaledMMLinearKernel
         )
 
+    # WNA16 hooks below are self-gated on kernel availability and are a
+    # no-op until the plugin's csrc-side operators are built.
+    from .wna16.linear import register_fl_wna16_linear_kernel
     from .compressed_tensors import register_compressed_tensors_oot
 
+    register_fl_wna16_linear_kernel(_POSSIBLE_KERNELS)
     register_compressed_tensors_oot()

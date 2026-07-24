@@ -1,4 +1,16 @@
 # Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """Compatibility glue for standard compressed-tensors WNA16 checkpoints.
 
 The checkpoint contract remains owned by compressed-tensors. This module only
@@ -142,8 +154,19 @@ def inspect_vllm_compressed_tensors_api() -> CompatibilityReport:
 
 
 def register_compressed_tensors_oot() -> CompatibilityReport:
-    """Configure upstream WNA16 runtime selection for the FL platform."""
+    """Configure upstream WNA16 runtime selection for the FL platform.
+
+    No-op unless the plugin-local WNA16 MoE operator is actually built.
+    This keeps the upstream vLLM path (Marlin on CUDA, generic elsewhere)
+    fully untouched until the FL kernel is available.
+    """
     report = inspect_vllm_compressed_tensors_api()
+
+    from vllm_fl.quantization.wna16.kernels import is_wna16_moe_available
+
+    if not is_wna16_moe_available():
+        return report
+
     if not report.supported:
         logger.warning(
             "compressed-tensors WNA16 compatibility is incomplete for vLLM %s: %s",
