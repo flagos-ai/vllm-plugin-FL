@@ -7,7 +7,6 @@ llm:
   max_model_len: 8192
   gpu_memory_utilization: 0.90
   enforce_eager: true
-  enable_log_requests: false
   enable_prefix_caching: false
   trust_remote_code: false
   disable_custom_all_reduce: true
