@@ -382,6 +382,11 @@ class PlatformFL(Platform):
     def pre_register_and_update(cls, parser=None) -> None:
         if cls.device_name == "npu":
             import vllm_fl.dispatch.backends.vendor.ascend
+        if cls.vendor_name == "iluvatar":
+            from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+                patch_triton_perf_model_for_iluvatar,
+            )
+            patch_triton_perf_model_for_iluvatar()
 
     def supports_fp8(cls) -> bool:
         if cls.vendor_name == "nvidia":
