@@ -102,6 +102,10 @@ def patch_triton_perf_model_for_iluvatar() -> None:
             "Failed to patch triton perf model for iluvatar: %s", e
         )
 
+# Apply triton patches at module import time so that Worker subprocesses
+# (which do not call pre_register_and_update) also get the patches applied.
+patch_triton_language_for_iluvatar()
+patch_triton_perf_model_for_iluvatar()
 
 
 class IluvatarBackend(Backend):
