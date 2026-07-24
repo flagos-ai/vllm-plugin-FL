@@ -365,7 +365,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "kunlunxin", "hygon"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "kunlunxin", "hygon", "txda"]:
             return True
         return False
 
@@ -426,6 +426,8 @@ class PlatformFL(Platform):
         if cls.device_type == "musa":
             major, minor = torch.musa.get_device_capability(device_id)
             return DeviceCapability(major=major, minor=minor)
+        elif cls.device_type == "txda":
+            return DeviceCapability(major=8, minor=1)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 

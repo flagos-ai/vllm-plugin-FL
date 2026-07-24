@@ -115,6 +115,8 @@ class PyFlagcxCommunicator:
         # change the current device to the specified one
         if self.device.type == "musa":
             device_ctx = torch.musa.device(self.device)
+        elif self.device.type == "txda":
+            device_ctx = torch.txda.device(self.device)
         else:
             device_ctx = torch.cuda.device(self.device)
 

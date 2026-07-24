@@ -225,6 +225,12 @@ vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/*.so
 csrc/ascend/build/
 csrc/ascend/build_out/
 
+#benchmark result
+benchmark_results
+
+#documents design
+docs/*
+
 # Exception: these are source patches, not build artifacts.
 # The parent directories must also be un-ignored because the generic
 # 'build/' rule above ignores every directory named 'build'.
@@ -240,3 +246,5 @@ csrc/ascend/third_party/ascend_protobuf/
 csrc/ascend/third_party/json/
 csrc/ascend/third_party/makeself/
 csrc/ascend/third_party/pkg/
+# csrc/ascend/third_party/pto-isa/
+# csrc/ascend/third_party/catlass
