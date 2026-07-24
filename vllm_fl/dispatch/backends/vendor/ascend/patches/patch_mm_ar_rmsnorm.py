@@ -29,7 +29,6 @@ from vllm.model_executor.models.qwen3_next import (
 
 from ..impl.mm_allreduce_rmsnorm import (
     MM_AR_RMSNORM_MIN_TOKENS,
-    fused_mm_allreduce_add_rmsnorm,
     mm_ar_rmsnorm_enabled,
 )
 
@@ -168,7 +167,7 @@ def _decoder_layer_forward(
         if (not self.layer_scale
                 and attn_pre_proj.shape[0] > MM_AR_RMSNORM_MIN_TOKENS):
             # Fuse projection + TP all-reduce + residual add + RMSNorm.
-            hidden_states, residual = fused_mm_allreduce_add_rmsnorm(
+            hidden_states, residual = torch.ops.vllm.fused_mm_allreduce_add_rmsnorm(
                 attn_pre_proj,
                 proj.weight,
                 residual,

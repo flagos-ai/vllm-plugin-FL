@@ -64,11 +64,9 @@ try:
     # (VLLM_FL_ENABLE_MM_AR_RMSNORM=1). Guarded for other vendors.
     from vllm_fl.dispatch.backends.vendor.ascend.impl.mm_allreduce_rmsnorm import (  # noqa: E501
         MM_AR_RMSNORM_MIN_TOKENS,
-        fused_mm_allreduce_add_rmsnorm,
         mm_ar_rmsnorm_enabled,
     )
 except ImportError:
-    fused_mm_allreduce_add_rmsnorm = None
     MM_AR_RMSNORM_MIN_TOKENS = 1 << 62
 
     def mm_ar_rmsnorm_enabled() -> bool:
@@ -958,7 +956,7 @@ class Qwen3NextDecoderLayer(nn.Module):
                 # Fuse projection + TP all-reduce + residual add + RMSNorm.
                 # Only worth it above the token threshold; small-M steps
                 # (decode) take the unfused path below.
-                hidden_states, residual = fused_mm_allreduce_add_rmsnorm(
+                hidden_states, residual = torch.ops.vllm.fused_mm_allreduce_add_rmsnorm(
                     attn_pre_proj,
                     proj.weight,
                     residual,

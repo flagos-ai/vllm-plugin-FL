@@ -2,9 +2,9 @@
 # New test: aclnn chunk_gated_delta_rule, graph mode (35B-A3B)
 
 export VLLM_FL_USE_ACLNN_CHUNK_GDN=1
-# 3 features: all ON
+# 3 features: conv1d_prepack + slot_mapping ON, mm_ar_rmsnorm OFF
 export VLLM_FL_DISABLE_CONV1D_PREPACK=0
-export VLLM_FL_ENABLE_MM_AR_RMSNORM=1
+export VLLM_FL_ENABLE_MM_AR_RMSNORM=0
 export VLLM_FL_DISABLE_NPU_SLOT_MAPPING=0
 
 echo "=========================================="
@@ -33,4 +33,4 @@ echo ""
     --no-bench-profile \
     --skip-analyse \
     --package none \
-    --run-label aclnn_chunk_3feat_on_c64_4case_i1k_4k_16k_64k_graph_noprof
+    --run-label aclnn_chunk_2feat_on_c64_4case_i1k_4k_16k_64k_graph_noprof

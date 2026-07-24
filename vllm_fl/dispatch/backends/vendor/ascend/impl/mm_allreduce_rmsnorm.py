@@ -23,6 +23,7 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
 from vllm.distributed.parallel_state import get_tp_group
 from vllm.logger import logger
+from vllm.utils.torch_utils import direct_register_custom_op
 
 _ENABLED = None
 _TP_CTX = None  # (hccl_group_name, tp_size, tp_rank)
@@ -39,10 +40,14 @@ def mm_ar_rmsnorm_enabled() -> bool:
     global _ENABLED
     if _ENABLED is None:
         _ENABLED = (os.environ.get("VLLM_FL_ENABLE_MM_AR_RMSNORM", "0") == "1")
+        # Logging is skipped under torch.compile tracing: Dynamo does not
+        # support logger calls in non-export cases and would error out.
+        tracing = torch.compiler.is_compiling()
         if _ENABLED and get_tensor_model_parallel_world_size() <= 1:
-            logger.info("mm_allreduce_rmsnorm fusion needs TP > 1, disabled")
+            if not tracing:
+                logger.info("mm_allreduce_rmsnorm fusion needs TP > 1, disabled")
             _ENABLED = False
-        if _ENABLED:
+        if _ENABLED and not tracing:
             logger.info(
                 "mm_allreduce_rmsnorm eager fusion enabled "
                 "(VLLM_FL_ENABLE_MM_AR_RMSNORM=1)")
@@ -101,4 +106,28 @@ def fused_mm_allreduce_add_rmsnorm(
         # the reduce-scattered partial chunk (rest is garbage); the op then
         # runs an extra all-gather so add_out is complete on every rank.
         True,
+    )
+
+
+def fused_mm_allreduce_add_rmsnorm_fake(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    residual: torch.Tensor,
+    gamma: torch.Tensor,
+    epsilon: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return torch.empty_like(residual), torch.empty_like(residual)
+
+
+# Registered as an opaque custom op so Dynamo can trace call sites inside
+# compiled (piecewise) regions: the eager body touches ProcessGroup/HCCL
+# internals (torch.device, get_hccl_comm_name) and logging, none of which
+# are traceable.
+if not hasattr(torch.ops.vllm, "fused_mm_allreduce_add_rmsnorm"):
+    direct_register_custom_op(
+        op_name="fused_mm_allreduce_add_rmsnorm",
+        op_func=fused_mm_allreduce_add_rmsnorm,
+        fake_impl=fused_mm_allreduce_add_rmsnorm_fake,
+        mutates_args=[],
+        dispatch_key="PrivateUse1",
     )
