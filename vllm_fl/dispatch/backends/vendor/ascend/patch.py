@@ -20,6 +20,7 @@ def apply_ascend_patches():
     patch_fused_moe()
     patch_qwen3_5_attention()
     patch_qwen3_6_gdn()
+    patch_mm_ar_rmsnorm()
     patch_qwen3_mtp()
     patch_graph()
     patch_npugraph_ex()
@@ -129,6 +130,21 @@ def patch_qwen3_6_gdn():
         _do_patch()
     except Exception as e:
         logger.warning("Failed to patch Qwen3.6 GDN AscendC ops: %s", e)
+
+
+def patch_mm_ar_rmsnorm():
+    """Patch upstream Qwen3Next forwards for the mm+AR+RMSNorm MC2 fusion.
+
+    Qwen3.5/3.6 uses the upstream vLLM Qwen3Next classes, so the fusion
+    wiring must patch those (the vendored-model copy is covered separately).
+    Behavior is unchanged unless VLLM_FL_ENABLE_MM_AR_RMSNORM=1.
+    """
+    try:
+        from .patches.patch_mm_ar_rmsnorm import patch_mm_ar_rmsnorm as _do
+
+        _do()
+    except Exception as e:
+        logger.warning("Failed to patch mm_ar_rmsnorm fusion: %s", e)
 
 
 def patch_qwen3_mtp():
