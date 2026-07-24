@@ -1,0 +1,23 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+platform: musa
+
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:29ceebd-musa-ci
+
+runner_labels:
+  - mt-cicd-vllm-plugin
+
+container_volumes:
+  - /data:/data
+  - /workspace:/workspace
+  - /hsdatapool:/hsdatapool
+
+container_options: >-
+  --hostname vllm-plugin-fl
+  --privileged
+  --ipc=host
+  --shm-size=64g
+  --env GEMS_VENDOR=mthreads
+  --env VLLM_PLUGINS=fl
+  --env MTHREADS_VISIBLE_DEVICES=all
