@@ -32,10 +32,14 @@ MODEL_NAME = "BAAI/bge-m3"
 
 SENTENCES_1 = ["What is BGE M3?", "Defination of BM25"]
 SENTENCES_2 = [
-    "BGE M3 is an embedding model supporting dense retrieval, "
-    "lexical matching and multi-vector interaction.",
-    "BM25 is a bag-of-words retrieval function that ranks a set "
-    "of documents based on the query terms appearing in each document",
+    (
+        "BGE M3 is an embedding model supporting dense retrieval, "
+        "lexical matching and multi-vector interaction."
+    ),
+    (
+        "BM25 is a bag-of-words retrieval function that ranks a set "
+        "of documents based on the query terms appearing in each document"
+    ),
 ]
 
 SIMILARITY_REFERENCE = [[0.6265, 0.3477], [0.3499, 0.678]]
