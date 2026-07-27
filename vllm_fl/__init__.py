@@ -164,7 +164,7 @@ def register_model():
     except Exception as e:
         logger.error(f"Register DeepseekV4 model error: {str(e)}")
 
-    
+
     # Register DeepseekV4 model
     try:
         ModelRegistry.register_model(

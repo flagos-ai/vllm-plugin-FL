@@ -238,6 +238,36 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
+        # Ascend NPU: torch_npu inductor codegen has issues with
+        # multi-device compilation (e.g. reduction scheduling on npu:1).
+        # Disable torch.compile and CUDAGraphs until torch_npu inductor
+        # is stable. check_and_update_config runs after VllmConfig.__init__
+        # processes enforce_eager, so we must set compilation_config directly.
+        if cls.device_type == "npu":
+            from vllm.config import CompilationMode
+            if compilation_config.mode != CompilationMode.NONE:
+                logger.warning(
+                    "Disabling torch.compile for Ascend NPU to avoid "
+                    "torch_npu inductor codegen issues."
+                )
+                compilation_config.mode = CompilationMode.NONE
+                compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+
+        # Ascend NPU: force float32 SSM state cache for GDN linear attention.
+        # The pure-PyTorch recurrence accumulates state in float32 but writes
+        # back to initial_state.dtype each step. If the cache is bf16, the
+        # round-trip truncation compounds across hundreds of tokens, degrading
+        # output quality (especially at temperature > 0). Forcing float32 cache
+        # eliminates this precision loss with negligible memory impact (the SSM
+        # state is small relative to the KV cache).
+        if cls.device_type == "npu":
+            if cache_config and cache_config.mamba_ssm_cache_dtype is None:
+                cache_config.mamba_ssm_cache_dtype = "float32"
+                logger.info(
+                    "Forcing mamba_ssm_cache_dtype to float32 for Ascend NPU "
+                    "to avoid recurrence precision loss in GDN decode."
+                )
+
         if (
             cls.device_type == "musa"
             and compilation_config.cudagraph_mode.has_full_cudagraphs()

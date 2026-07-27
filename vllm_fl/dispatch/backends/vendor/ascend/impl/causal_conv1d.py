@@ -713,3 +713,97 @@ def causal_conv1d_update_npu(
     if unsqueeze:
         out = out.squeeze(-1)
     return out.to(original_x_dtype)
+
+
+def causal_conv1d_update_ref(
+    x: torch.Tensor,
+    conv_state: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    activation: bool | str | None = None,
+    conv_state_indices: torch.Tensor | None = None,
+    num_accepted_tokens: torch.Tensor | None = None,
+    query_start_loc: torch.Tensor | None = None,
+    max_query_len: int = -1,
+    pad_slot_id: int = PAD_SLOT_ID,
+    block_idx_last_scheduled_token: torch.Tensor | None = None,
+    initial_state_idx: torch.Tensor | None = None,
+    validate_data=False,
+):
+    """Pure-PyTorch causal_conv1d_update for decode (single token per seq).
+
+    Handles the simple case: x is [batch, dim] (single token), conv_state
+    is [num_cache_lines, dim, width-1], and we do a sliding window update.
+    """
+    if isinstance(activation, bool):
+        activation = "silu" if activation is True else None
+    elif activation is not None:
+        assert activation in ["silu", "swish"]
+
+    original_x_dtype = x.dtype
+    x = x.to(conv_state.dtype)
+    unsqueeze = query_start_loc is None and x.dim() == 2
+    if unsqueeze:
+        x = x.unsqueeze(-1)  # [batch, dim, 1]
+
+    if query_start_loc is not None:
+        # varlen mode
+        batch = conv_state_indices.size(0)
+        dim = x.size(1)
+    else:
+        batch, dim, seqlen = x.shape
+
+    _, width = weight.shape
+    state_len = width - 1
+
+    out = torch.empty_like(x)
+
+    if query_start_loc is None:
+        # Simple batched mode: x is [batch, dim, seqlen]
+        seqlen = x.shape[-1]
+        for b_idx in range(batch):
+            if conv_state_indices is not None:
+                s_idx = conv_state_indices[b_idx].item()
+                if pad_slot_id is not None and s_idx == pad_slot_id:
+                    out[b_idx] = 0
+                    continue
+            else:
+                s_idx = b_idx
+
+            state = conv_state[s_idx]  # [dim, state_len]
+            for t in range(seqlen):
+                # Shift state left, append new token
+                state = torch.cat([state[:, 1:], x[b_idx, :, t:t+1]], dim=-1)
+                # Dot product with weight for each channel (depthwise conv)
+                val = (state * weight).sum(dim=-1)  # [dim]
+                if bias is not None:
+                    val = val + bias
+                if activation in ["silu", "swish"]:
+                    val = val * torch.sigmoid(val)
+                out[b_idx, :, t] = val
+            conv_state[s_idx] = state
+    else:
+        # Varlen mode
+        cu_cpu = query_start_loc.cpu().tolist()
+        for b_idx in range(batch):
+            s_idx = conv_state_indices[b_idx].item()
+            if pad_slot_id is not None and s_idx == pad_slot_id:
+                continue
+
+            bos = cu_cpu[b_idx] if b_idx < len(cu_cpu) else cu_cpu[-1]
+            eos = cu_cpu[b_idx + 1] if b_idx + 1 < len(cu_cpu) else cu_cpu[-1]
+
+            state = conv_state[s_idx]  # [dim, state_len]
+            for t in range(bos, eos):
+                state = torch.cat([state[:, 1:], x[t:t+1, :].T], dim=-1)
+                val = (state * weight).sum(dim=-1)
+                if bias is not None:
+                    val = val + bias
+                if activation in ["silu", "swish"]:
+                    val = val * torch.sigmoid(val)
+                out[t, :] = val  # varlen: out is [num_tokens, dim]
+            conv_state[s_idx] = state
+
+    if unsqueeze:
+        out = out.squeeze(-1)
+    return out.to(original_x_dtype)

@@ -1,0 +1,49 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Qwen3.6-35B-A3B Hygon smoke configuration (TP=2, eager).
+
+llm:
+  model: "/workspace/Qwen3.6-35B-A3B"
+  tensor_parallel_size: 2
+  pipeline_parallel_size: 1
+  max_model_len: 262144
+  gpu_memory_utilization: 0.90
+  enforce_eager: true
+  trust_remote_code: false
+  disable_custom_all_reduce: true
+
+generate:
+  prompts:
+    - "介绍一下北京"
+  sampling:
+    max_tokens: 100
+    temperature: 0.0
+
+serve:
+  served_model_name: "qwen"
+  extra_engine:
+    enforce_eager: false
+    disable_custom_all_reduce: false
+    enable_log_requests: false
+    enable_prefix_caching: false
+  startup_retries: 120
+  endpoints: ["chat"]
+  stream: false
+  max_tokens: 256
+  chat_messages:
+    - role: "user"
+      content: "介绍一下北京"
+  sampling:
+    temperature: 0.7
