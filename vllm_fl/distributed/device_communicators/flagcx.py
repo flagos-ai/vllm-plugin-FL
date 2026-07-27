@@ -98,7 +98,7 @@ class PyFlagcxCommunicator:
 
         if self.rank == 0:
             # get the unique id from NCCL
-            self.unique_id = self.flagcx.flagcxGetUniqueId().contents
+            self.unique_id = self.flagcx.flagcxGetUniqueId()
         else:
             # construct an empty unique id
             self.unique_id = flagcxUniqueId()
@@ -134,7 +134,7 @@ class PyFlagcxCommunicator:
 
         with device_ctx:
             self.comm = self.flagcx.flagcxCommInitRank(
-                self.world_size, ctypes.byref(self.unique_id), self.rank)
+                self.world_size, self.unique_id, self.rank)
 
             stream = current_stream()
             # A small all_reduce for warmup.
