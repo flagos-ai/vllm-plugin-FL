@@ -16,7 +16,7 @@ name: "Pull Request Labeler"
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -24,6 +24,12 @@ permissions:
 
 jobs:
   label:
+    # Skip: fork-internal PRs, draft PRs, PRs with WIP/wip in title
+    if: |
+      github.repository == 'flagos-ai/vllm-plugin-FL' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.title, 'WIP') &&
+      !contains(github.event.pull_request.title, 'wip')
     runs-on: ubuntu-latest
 
     steps:

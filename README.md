@@ -155,7 +155,7 @@ import torch
 from vllm.config.compilation import CompilationConfig
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]

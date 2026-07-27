@@ -488,6 +488,42 @@ class CudaBackend(Backend):
             out, k_cache, seq_lens, gather_lens, block_table, block_size, offset
         )
 
+    def gather_k_cache(
+        self,
+        out: torch.Tensor,
+        k_cache: torch.Tensor,
+        seq_lens: torch.Tensor,
+        gather_lens: torch.Tensor | None,
+        block_table: torch.Tensor,
+        block_size: int,
+        offset: int,
+    ):
+        from .impl.deepseek_v4_ops import gather_k_cache_cuda
+
+        gather_k_cache_cuda(
+            out, k_cache, seq_lens, gather_lens, block_table, block_size, offset
+        )
+
+    def fused_indexer_q_rope(
+        self,
+        positions: torch.Tensor,
+        index_q: torch.Tensor,
+        index_q_cos_sin_cache: torch.Tensor,
+        index_weights: torch.Tensor,
+        index_weights_softmax_scale: float,
+        index_weights_head_scale: float,
+    ):
+        from .impl.deepseek_v4_ops import fused_indexer_q_rope_cuda
+
+        return fused_indexer_q_rope_cuda(
+            positions,
+            index_q,
+            index_q_cos_sin_cache,
+            index_weights,
+            index_weights_softmax_scale,
+            index_weights_head_scale,
+        )
+
 
     def fused_indexer_q_rope_quant(
         self,
@@ -662,4 +698,34 @@ class CudaBackend(Backend):
         from .impl.deepseek_v4_attn import flash_mla_sparse_fwd_cuda
         return flash_mla_sparse_fwd_cuda(
             q, kv, indices, sm_scale, attn_sink, topk_length, out,
+        )
+
+    def gather_bf16_kv_from_pages(
+        self,
+        kv_cache,
+        block_table,
+        cu_seq_lens,
+        token_to_seq,
+        total_seq_lens,
+        dst=None,
+    ):
+        from .impl.deepseek_v4_ops import gather_bf16_kv_from_pages_cuda
+
+        return gather_bf16_kv_from_pages_cuda(
+            kv_cache, block_table, cu_seq_lens, token_to_seq, total_seq_lens, dst
+        )
+
+    def bf16_mqa_logits(
+        self,
+        q,
+        kv,
+        weights,
+        cu_seq_len_k_start,
+        cu_seq_len_k_end,
+        clean_logits=True,
+    ):
+        from .impl.deepseek_v4_ops import bf16_mqa_logits_cuda
+
+        return bf16_mqa_logits_cuda(
+            q, kv, weights, cu_seq_len_k_start, cu_seq_len_k_end, clean_logits
         )

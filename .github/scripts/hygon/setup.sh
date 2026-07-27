@@ -5,97 +5,104 @@ set -euo pipefail
 
 git config --global --add safe.directory "$(pwd)"
 
-export GEMS_VENDOR="${GEMS_VENDOR:-hygon}"
-export DTK_HOME="${DTK_HOME:-/opt/dtk}"
-export ROCM_PATH="${ROCM_PATH:-${DTK_HOME}}"
-export HIP_PATH="${HIP_PATH:-${DTK_HOME}/hip}"
-export HSA_PATH="${HSA_PATH:-${DTK_HOME}/hsa}"
-export HIP_CLANG_PATH="${HIP_CLANG_PATH:-${DTK_HOME}/llvm/bin}"
-export DEVICE_LIB_PATH="${DEVICE_LIB_PATH:-${DTK_HOME}/amdgcn/bitcode}"
+: "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
+: "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
+: "${DTK_HOME:?DTK_HOME is not set}"
+: "${ROCM_PATH:?ROCM_PATH is not set}"
+: "${HIP_PATH:?HIP_PATH is not set}"
+: "${HSA_PATH:?HSA_PATH is not set}"
+: "${HIP_CLANG_PATH:?HIP_CLANG_PATH is not set}"
+: "${DEVICE_LIB_PATH:?DEVICE_LIB_PATH is not set}"
+: "${LD_LIBRARY_PATH:?LD_LIBRARY_PATH is not set}"
 
-DTK_PATH="${DTK_HOME}/bin:${HIP_PATH}/bin:${HIP_CLANG_PATH}"
-DTK_LIBRARY_PATH="/opt/hyhal/lib/criu:/opt/hyhal/lib/rocprofiler:/opt/hyhal/lib:${HIP_PATH}/lib:${DTK_HOME}/lib:${DTK_HOME}/llvm/lib:${DTK_HOME}/dcc/lib:${DTK_HOME}/aillvm/lib:${HSA_PATH}/lib"
-export PATH="${DTK_PATH}:${PATH}"
-export LD_LIBRARY_PATH="${DTK_LIBRARY_PATH}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+USE_IMAGE_PLUGIN="${HYGON_USE_IMAGE_PLUGIN:-1}"
 
-if [[ -n "${GITHUB_ENV:-}" ]]; then
-  for name in \
-    GEMS_VENDOR \
-    DTK_HOME \
-    ROCM_PATH \
-    HIP_PATH \
-    HSA_PATH \
-    HIP_CLANG_PATH \
-    DEVICE_LIB_PATH \
-    PATH \
-    LD_LIBRARY_PATH; do
-    echo "${name}=${!name}" >> "${GITHUB_ENV}"
-  done
+if [[ "${USE_IMAGE_PLUGIN}" == "1" ]]; then
+    IMAGE_PLUGIN_ROOT="${VLLM_FL_IMAGE_PLUGIN_ROOT:-/opt/vllm-src/vllm-plugin-FL}"
+    test -d "${IMAGE_PLUGIN_ROOT}/vllm_fl"
+
+    # The Hygon CI image already contains the validated plugin commit. Keep the
+    # checkout available for tests and configs, but load vllm_fl from the image.
+    HYGON_SITE_DIR="${RUNNER_TEMP:-/tmp}/hygon-python-site"
+    mkdir -p "${HYGON_SITE_DIR}"
+    cat > "${HYGON_SITE_DIR}/sitecustomize.py" <<'PY'
+import importlib.abc
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+
+class _ImageVllmFLFinder(importlib.abc.MetaPathFinder):
+    def __init__(self, root):
+        self.package_dir = Path(root) / "vllm_fl"
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != "vllm_fl":
+            return None
+        init_file = self.package_dir / "__init__.py"
+        if not init_file.exists():
+            return None
+        return importlib.util.spec_from_file_location(
+            fullname,
+            init_file,
+            submodule_search_locations=[str(self.package_dir)],
+        )
+
+
+_root = os.environ.get("VLLM_FL_IMAGE_PLUGIN_ROOT")
+if _root:
+    sys.meta_path.insert(0, _ImageVllmFLFinder(_root))
+PY
+
+    export VLLM_FL_IMAGE_PLUGIN_ROOT="${IMAGE_PLUGIN_ROOT}"
+    export PYTHONPATH="${HYGON_SITE_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+        {
+            echo "VLLM_FL_IMAGE_PLUGIN_ROOT=${VLLM_FL_IMAGE_PLUGIN_ROOT}"
+            echo "PYTHONPATH=${PYTHONPATH}"
+        } >> "${GITHUB_ENV}"
+    fi
+else
+    unset VLLM_FL_IMAGE_PLUGIN_ROOT
 fi
+
+export HYGON_USE_IMAGE_PLUGIN="${USE_IMAGE_PLUGIN}"
 
 echo "DTK_HOME=${DTK_HOME}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+echo "HYGON_USE_IMAGE_PLUGIN=${HYGON_USE_IMAGE_PLUGIN}"
+if [[ "${USE_IMAGE_PLUGIN}" == "1" ]]; then
+    echo "VLLM_FL_IMAGE_PLUGIN_ROOT=${VLLM_FL_IMAGE_PLUGIN_ROOT}"
+    echo "PYTHONPATH=${PYTHONPATH}"
+fi
 test -e "${HIP_PATH}/lib/libgalaxyhip.so.5"
 test -e "${DTK_HOME}/llvm/lib/libomp.so"
 
-TEST_DEPS=(
-  pytest
-  pytest-cov
-  pytest-timeout
-  pytest-json-report
-  scikit-build-core==0.11
-  pybind11
-  ninja
-  cmake
-  numpy
-  requests
-  openai
-  decorator
-  pyyaml
-  sqlalchemy
-)
-
-FLAGGEMS_REF="8d23621eb1381ae96b315a9287ce3cc555433824"
-FLAGGEMS_SOURCE="${FLAGGEMS_PATH:-/workspace/FlagGems}"
-
-if command -v uv >/dev/null 2>&1; then
-  uv pip install --system --upgrade pip
-  uv pip install --system --no-build-isolation -e . --no-deps
-  uv pip install --system "${TEST_DEPS[@]}"
-else
-  python -m pip install --upgrade pip
-  python -m pip install --no-build-isolation -e . --no-deps
-  python -m pip install "${TEST_DEPS[@]}"
-fi
-
-test -d "${FLAGGEMS_SOURCE}/src/flag_gems"
-git config --global --add safe.directory "${FLAGGEMS_SOURCE}"
-
-FLAGGEMS_HEAD="$(git -C "${FLAGGEMS_SOURCE}" rev-parse HEAD)"
-if [[ "${FLAGGEMS_HEAD}" != "${FLAGGEMS_REF}" ]]; then
-  echo "Unexpected FlagGems commit: ${FLAGGEMS_HEAD}; expected ${FLAGGEMS_REF}."
-  exit 1
-fi
-
-if ! grep -q 'kwargs.pop("num_ldmatrixes", None)' \
-  "${FLAGGEMS_SOURCE}/src/flag_gems/runtime/configloader.py"; then
-  echo "FlagGems num_ldmatrixes compatibility patch is missing."
-  exit 1
-fi
-
-FLAGGEMS_DIR="$(mktemp -d)/FlagGems"
-cp -a "${FLAGGEMS_SOURCE}" "${FLAGGEMS_DIR}"
-
-if command -v uv >/dev/null 2>&1; then
-  uv pip install --system --no-build-isolation -e "${FLAGGEMS_DIR}" --no-deps
-else
-  python -m pip install --no-build-isolation -e "${FLAGGEMS_DIR}" --no-deps
-fi
-
 python - <<'PY'
+import os
+from pathlib import Path
+
 import flag_gems
 import torch
+import vllm
+import vllm_fl
 
+if os.environ.get("HYGON_USE_IMAGE_PLUGIN", "1") == "1":
+    image_plugin_root = Path(os.environ["VLLM_FL_IMAGE_PLUGIN_ROOT"]).resolve()
+    expected_package = image_plugin_root / "vllm_fl"
+    plugin_file = Path(vllm_fl.__file__).resolve()
+    if (
+        plugin_file != expected_package / "__init__.py"
+        and expected_package not in plugin_file.parents
+    ):
+        raise RuntimeError(
+            f"Unexpected vllm_fl path: {plugin_file}; expected under {expected_package}"
+        )
+
+print(f"vLLM import ok: {vllm.__version__}")
+print(f"vLLM-FL import ok: {vllm_fl.__file__}")
 print(f"FlagGems import ok: {getattr(flag_gems, '__version__', 'unknown')}")
 print(f"Torch import ok: {torch.__version__}")
 print(f"Accelerator available: {torch.cuda.is_available()}")

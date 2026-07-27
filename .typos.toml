@@ -32,8 +32,10 @@ npu = "npu"
 NPU = "NPU"
 hccl = "hccl"
 HCCL = "HCCL"
+hsa = "hsa"
 cann = "cann"
 CANN = "CANN"
+HSA = "HSA"
 
 [files]
 extend-exclude = [

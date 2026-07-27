@@ -301,7 +301,8 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
-        # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
+        # Fast path (no LoRA, NVIDIA only): single fused FlagGems call. This
+        # implementation supports both quantized and BF16 experts.
         if self._lora_context is None and current_platform.is_cuda():
             import flag_gems
 
