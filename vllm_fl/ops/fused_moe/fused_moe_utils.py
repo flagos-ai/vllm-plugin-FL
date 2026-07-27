@@ -301,9 +301,14 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
-        # Fast path (no LoRA, NVIDIA only): single fused FlagGems call. This
-        # implementation supports both quantized and BF16 experts.
-        if self._lora_context is None and current_platform.is_cuda():
+        # Fast path (no LoRA): let FlagGems own activation quantization and
+        # both expert GEMMs. This is also the W8A8 path for OOT devices,
+        # where vLLM's CUDA-only INT8 oracle would otherwise reject the
+        # configuration before reaching the multi-chip kernel. The same
+        # implementation also supports unquantized BF16 experts.
+        from vllm_fl.utils import use_flaggems_op
+
+        if self._lora_context is None and use_flaggems_op("fused_moe"):
             import flag_gems
 
             output.copy_(flag_gems.fused_experts_impl(

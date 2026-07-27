@@ -56,6 +56,16 @@ def _patch_unquantized_moe_oracle() -> None:
     logger.info("Patched select_unquantized_moe_backend to bypass OOT short-circuit")
 
 
+def _patch_w8a8_moe_oracle() -> None:
+    """Route canonical dynamic-token INT8 MoE to the FL experts path."""
+    from vllm_fl.quantization.w8a8.moe import (
+        install_fl_w8a8_moe_selector,
+    )
+
+    install_fl_w8a8_moe_selector()
+    logger.info("Configured dynamic-token W8A8 MoE for the FL OOT platform")
+
+
 def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     """
     Register OOT (out-of-tree) custom operators.
@@ -73,6 +83,14 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     so it picks native CUDA backends instead of returning (OOT, None).
     """
     from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
+
+    # This is independent of PluggableLayer registration. In particular, MUSA
+    # skips the generic linear-kernel import path, but still needs the INT8 MoE
+    # oracle patched before model construction.
+    try:
+        _patch_w8a8_moe_oracle()
+    except (ImportError, AttributeError, OSError, RuntimeError) as exc:
+        logger.warning("Could not configure FL W8A8 MoE: %s", exc)
 
     # Check if OOT registration is enabled
     if not is_oot_enabled():
