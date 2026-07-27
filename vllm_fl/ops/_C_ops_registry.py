@@ -59,6 +59,40 @@ def _concat_and_cache_mla_impl(
     )
 
 
+def _gather_and_maybe_dequant_cache_impl(
+    src_cache: torch.Tensor,     # [NUM_BLOCKS, BLOCK_SIZE, entry_size]
+    dst: torch.Tensor,           # [num_tokens, entry_size]
+    block_table: torch.Tensor,   # [BATCH, max_blocks_per_seq]
+    cu_seq_lens: torch.Tensor,   # [BATCH+1]
+    token_to_seq: torch.Tensor,  # [num_tokens]
+    num_tokens: int,
+    kv_cache_dtype: str,
+    scale: torch.Tensor,
+    seq_starts: "torch.Tensor | None" = None,
+) -> None:
+    """Pure-torch fallback for _C_cache_ops::gather_and_maybe_dequant_cache.
+
+    Gathers KV cache entries from paged blocks into a flat destination tensor.
+    """
+    block_size = src_cache.size(1)
+
+    token_ids = torch.arange(num_tokens, device=src_cache.device)
+    batch_ids = token_to_seq[:num_tokens].long()
+    batch_starts = cu_seq_lens[batch_ids]
+    batch_offsets = (token_ids - batch_starts).int()
+
+    if seq_starts is not None:
+        batch_offsets = batch_offsets + seq_starts[batch_ids]
+
+    block_table_ids = batch_offsets // block_size
+    slot_ids = batch_offsets % block_size
+
+    block_ids = block_table[batch_ids, block_table_ids.long()]
+    entries = src_cache[block_ids.long(), slot_ids.long()]
+    entry_size = min(entries.size(-1), dst.size(-1))
+    dst[:num_tokens, :entry_size] = entries[:, :entry_size].to(dst.dtype)
+
+
 def _apply_repetition_penalties_impl(
     logits: torch.Tensor,
     prompt_mask: torch.Tensor,
@@ -143,17 +177,21 @@ def register_op_schemas():
 # Schema and fallback for _C_cache_ops namespace (normally compiled in vllm._C)
 _CACHE_OPS_SCHEMAS = [
     'concat_and_cache_mla(Tensor kv_c, Tensor k_pe, Tensor(a!) kv_cache, Tensor slot_mapping, str kv_cache_dtype, Tensor scale) -> ()',
+    'gather_and_maybe_dequant_cache(Tensor src_cache, Tensor(a!) dst, Tensor block_table, Tensor cu_seq_lens, Tensor token_to_seq, int num_tokens, str kv_cache_dtype, Tensor scale, Tensor? seq_starts) -> ()',
 ]
 
 _CACHE_OPS_IMPLS = [
     ("concat_and_cache_mla", _concat_and_cache_mla_impl),
+    ("gather_and_maybe_dequant_cache", _gather_and_maybe_dequant_cache_impl),
 ]
 
 
 def _register_cache_ops_fallbacks():
     """Register _C_cache_ops schemas and Python fallbacks."""
-    if hasattr(torch.ops, "_C_cache_ops") and hasattr(
-        torch.ops._C_cache_ops, "concat_and_cache_mla"
+    # Check if ALL required ops are already present
+    _required_ops = [name for name, _ in _CACHE_OPS_IMPLS]
+    if hasattr(torch.ops, "_C_cache_ops") and all(
+        hasattr(torch.ops._C_cache_ops, op) for op in _required_ops
     ):
         return
 
