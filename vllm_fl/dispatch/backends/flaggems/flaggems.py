@@ -202,7 +202,7 @@ class FlagGemsBackend(Backend):
             )
 
         if use_mla:
-            raise NotImplementedError("NOT support mla now!")
+            return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
 
         if use_sparse:
             raise ValueError("use_sparse=True requires use_mla=True.")
