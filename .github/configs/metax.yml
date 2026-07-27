@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # MetaX Hardware Configuration
-# This file defines CI/CD settings for MetaX C550 testing.
+# This file defines CI/CD settings for MetaX C550 testing
 
 platform: metax
 
