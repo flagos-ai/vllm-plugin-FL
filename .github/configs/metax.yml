@@ -28,7 +28,6 @@ runner_labels:
 # Container volumes (hardware-specific paths).
 container_volumes:
   - /data:/data
-  - /workspace:/workspace
 
 # Container options (hardware-specific settings).
 container_options: >-
