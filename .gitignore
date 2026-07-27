@@ -14,16 +14,3 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
-
-# log
-*.out
-*.log
-
-# Debug artifacts
-*_debug.txt
-*debug*.log
-torch_compile_debug/
-
-# Root-level dev/test scripts (not part of the package)
-/*.sh
-/*.py
