@@ -32,7 +32,64 @@ def apply_kunlunxin_patches():
     patch_fused_gdn_gating()
     patch_op_cls()
     patch_ssm_cache_update()
+    patch_sampler_rng()
     logger.info("Applied all Kunlunxin patches")
+
+
+# ── sampler RNG (TP-consistent unseeded sampling) ──
+def patch_sampler_rng():
+    """Make random sampling TP-consistent on Kunlunxin XPU.
+
+    Root cause: on torch_xmlir the *default/global* RNG does NOT honor
+    ``manual_seed`` for ``Tensor.exponential_()`` and is non-deterministic
+    across processes. vLLM's ``random_sample`` uses the default RNG (no
+    explicit ``generator``) whenever a request has no per-request seed, and
+    relies on every tensor-parallel rank drawing *identical* noise (which
+    holds on CUDA). On XPU the TP ranks diverge -> each rank's
+    ``argmax(probs / q)`` picks a different next token -> per-rank model/KV
+    state diverges -> the following all-reduce combines inconsistent states
+    -> garbled / repetitive output. Greedy (argmax, no RNG) and TP=1 (single
+    rank) are unaffected.
+
+    (Note: an explicit ``torch.Generator`` is reproducible on XPU but does not
+    advance across calls, so seeding a shared generator would make sampling
+    deterministic with no diversity -- not acceptable as a default.)
+
+    Fix: keep the per-rank default RNG (so sampling stays varied),so every rank
+    proceeds with the same next token and can no longer diverge.
+    """
+    try:
+        import torch
+        import vllm.v1.sample.ops.topk_topp_sampler as _sampler_mod
+
+        def _tp_consistent_random_sample(probs, generators):
+            q = torch.empty_like(probs)
+            if len(generators) != probs.shape[0]:
+                q.uniform_()
+                q = -torch.log(1-q)
+                q = q.clamp(min=1e-12)
+            if generators:
+                # TODO(woosuk): This can be slow because we handle each request
+                # one by one. Optimize this.
+                if os.getenv("FAST_RANDOM_SAMPLE") == "1":
+                    for i, generator in generators.items():
+                        q[i].uniform_(generator=generator)
+                    q = -torch.log(1-q)
+                    q = q.clamp(min=1e-12)
+                else:
+                    for i, generator in generators.items():
+                        q[i].uniform_(generator=generator)
+                        q[i] = -torch.log(1-q[i])
+                        q[i] = q[i].clamp(min=1e-12)
+
+            return probs.div_(q).argmax(dim=-1).view(-1)
+
+        _sampler_mod.random_sample = _tp_consistent_random_sample
+        logger.info(
+            "Patched sampler random_sample for TP-consistent sampling on Kunlunxin"
+        )
+    except Exception as e:
+        logger.warning("Failed to patch sampler RNG: %s", e)
 
 
 # ── causal_conv1d ──
