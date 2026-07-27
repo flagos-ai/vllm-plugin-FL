@@ -82,10 +82,46 @@ def _patch_flash_attn_import():
             pass
 
         if _fa_varlen_func is not None:
+            _real_fa = _fa_varlen_func
+
+            def _wrapped_flash_attn_varlen_func(*args, **kwargs):
+                """Adapter: translate vLLM's vllm_flash_attn API to standalone flash_attn."""
+                # vLLM uses return_softmax_lse; standalone uses return_attn_probs
+                return_lse = kwargs.pop("return_softmax_lse", False)
+                # Strip kwargs the standalone flash_attn doesn't understand
+                kwargs.pop("fa_version", None)
+                kwargs.pop("scheduler_metadata", None)
+                kwargs.pop("q_descale", None)
+                kwargs.pop("k_descale", None)
+                kwargs.pop("v_descale", None)
+                kwargs.pop("num_splits", None)
+                kwargs.pop("s_aux", None)
+
+                # vLLM uses 'seqused_k'; standalone flash_attn 2.x doesn't have it,
+                # but some ROCm builds accept it. Try passing it; strip if it fails.
+                seqused_k = kwargs.pop("seqused_k", None)
+
+                if return_lse:
+                    kwargs["return_attn_probs"] = True
+
+                try:
+                    result = _real_fa(*args, **kwargs)
+                except TypeError:
+                    # Fallback: strip any remaining unexpected kwargs
+                    kwargs.pop("return_attn_probs", None)
+                    result = _real_fa(*args, **kwargs)
+
+                if return_lse:
+                    if isinstance(result, tuple) and len(result) >= 2:
+                        # flash_attn returns (out, softmax_lse, S_dmask)
+                        return result[0], result[1]
+                    return result, None
+                return result
+
             stub.FA2_AVAILABLE = True
             stub.FA3_AVAILABLE = False
             stub.fa_version_unsupported_reason = lambda *a, **kw: None
-            stub.flash_attn_varlen_func = _fa_varlen_func
+            stub.flash_attn_varlen_func = _wrapped_flash_attn_varlen_func
             stub.get_scheduler_metadata = None
             stub.is_fa_version_supported = lambda version, *a, **kw: version == 2
         else:
