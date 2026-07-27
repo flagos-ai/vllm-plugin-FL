@@ -18,7 +18,7 @@
 platform: hygon
 
 # Docker image for this hardware.
-ci_image: harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-plugin-fl-hygon-vllm0.20.2-dtk26.04-py3.10-ci
 
 # Runner labels for this hardware.
 runner_labels:
@@ -27,6 +27,7 @@ runner_labels:
 # Container volumes (hardware-specific paths).
 container_volumes:
   - /opt/hyhal:/opt/hyhal
+  - /usr/local/hyhal:/usr/local/hyhal
   - /data:/data
   - /workspace:/workspace
 
@@ -42,7 +43,7 @@ container_options: >-
   --env HIP_CLANG_PATH=/opt/dtk/llvm/bin
   --env DEVICE_LIB_PATH=/opt/dtk/amdgcn/bitcode
   --env PATH=/opt/dtk/bin:/opt/dtk/hip/bin:/opt/dtk/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-  --env LD_LIBRARY_PATH=/opt/hyhal/lib/criu:/opt/hyhal/lib/rocprofiler:/opt/hyhal/lib:/opt/dtk/hip/lib:/opt/dtk/lib:/opt/dtk/llvm/lib:/opt/dtk/dcc/lib:/opt/dtk/aillvm/lib:/opt/dtk/hsa/lib
+  --env LD_LIBRARY_PATH=/opt/hyhal/lib/criu:/opt/hyhal/lib/rocprofiler:/opt/hyhal/lib:/usr/local/hyhal/lib:/opt/dtk/hip/lib:/opt/dtk/lib:/opt/dtk/llvm/lib:/opt/dtk/dcc/lib:/opt/dtk/aillvm/lib:/opt/dtk/hsa/lib
   --device=/dev/kfd
   --device=/dev/mkfd
   --device=/dev/dri

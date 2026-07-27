@@ -237,6 +237,24 @@ def register_builtins(registry) -> None:
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
+        # BF16 paged KV gather
+        OpImpl(
+            op_name="gather_k_cache",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.gather_k_cache, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
+        # BF16 sparse-indexer RoPE
+        OpImpl(
+            op_name="fused_indexer_q_rope",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.fused_indexer_q_rope, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
         # fused_indexer_q_rope_quant
         OpImpl(
             op_name="fused_indexer_q_rope_quant",
@@ -333,6 +351,22 @@ def register_builtins(registry) -> None:
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.flash_mla_sparse_fwd, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="gather_bf16_kv_from_pages",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.gather_bf16_kv_from_pages, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="bf16_mqa_logits",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.bf16_mqa_logits, is_avail),
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),

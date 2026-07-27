@@ -39,9 +39,9 @@ bw1000:
   tests:
     e2e:
       inference:
-        qwen3_6: ["27b_tp2_eager"]
+        qwen3_6: ["27b_tp2_eager_hygon"]
       serving:
-        qwen3_6: ["35b_a3b_tp2_eager"]
+        qwen3_6: ["35b_a3b_tp2_eager_hygon"]
     functional:
       include: "*"
       exclude: []
