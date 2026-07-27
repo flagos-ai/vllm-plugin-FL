@@ -58,7 +58,13 @@ def _register_flagcx_connector():
 
 
 def _patch_flash_attn_import():
-    """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
+    """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing.
+
+    When the bundled vllm C extension is unavailable (e.g. on ROCm/Hygon), we
+    try to bridge to the standalone ``flash_attn`` package so that downstream
+    code (e.g. TritonMLA) that checks ``vllm.vllm_flash_attn`` still finds a
+    working ``flash_attn_varlen_func``.
+    """
     import sys
     if "vllm.vllm_flash_attn" in sys.modules:
         return
@@ -67,12 +73,29 @@ def _patch_flash_attn_import():
     except ImportError:
         import types
         stub = types.ModuleType("vllm.vllm_flash_attn")
-        stub.FA2_AVAILABLE = False
-        stub.FA3_AVAILABLE = False
-        stub.fa_version_unsupported_reason = lambda *a, **kw: "flash_attn C extensions not available"
-        stub.flash_attn_varlen_func = None
-        stub.get_scheduler_metadata = None
-        stub.is_fa_version_supported = lambda *a, **kw: False
+
+        # Try bridging to the standalone flash_attn package.
+        _fa_varlen_func = None
+        try:
+            from flash_attn import flash_attn_varlen_func as _fa_varlen_func
+        except (ImportError, ModuleNotFoundError):
+            pass
+
+        if _fa_varlen_func is not None:
+            stub.FA2_AVAILABLE = True
+            stub.FA3_AVAILABLE = False
+            stub.fa_version_unsupported_reason = lambda *a, **kw: None
+            stub.flash_attn_varlen_func = _fa_varlen_func
+            stub.get_scheduler_metadata = None
+            stub.is_fa_version_supported = lambda version, *a, **kw: version == 2
+        else:
+            stub.FA2_AVAILABLE = False
+            stub.FA3_AVAILABLE = False
+            stub.fa_version_unsupported_reason = lambda *a, **kw: "flash_attn C extensions not available"
+            stub.flash_attn_varlen_func = None
+            stub.get_scheduler_metadata = None
+            stub.is_fa_version_supported = lambda *a, **kw: False
+
         sys.modules["vllm.vllm_flash_attn"] = stub
 
 
