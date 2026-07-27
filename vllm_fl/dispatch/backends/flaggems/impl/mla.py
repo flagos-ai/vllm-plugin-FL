@@ -119,6 +119,15 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
             return attn_out, lse
         return attn_out
 
+    def forward_mqa(
+        self,
+        q: Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+        kv_c_and_k_pe_cache: torch.Tensor,
+        attn_metadata: MLACommonMetadata,
+        layer: AttentionLayer,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        return self._forward_decode(q, kv_c_and_k_pe_cache, attn_metadata, layer)
+
     def _forward_decode(
         self,
         q: Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
