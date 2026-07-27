@@ -173,3 +173,9 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register DeepseekV4 model error: {str(e)}")
+    # Register TeleChat mHC patches for DeepSeekV3-based models
+    try:
+        from vllm_fl.patches.deepseek_v2_mhc import apply_model_patches as telechat_mhc
+        telechat_mhc()
+    except Exception as e:
+        logger.error("Register TeleChat mHC patch error: %s", str(e))
