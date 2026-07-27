@@ -384,8 +384,12 @@ class PlatformFL(Platform):
             import vllm_fl.dispatch.backends.vendor.ascend
         if cls.vendor_name == "iluvatar":
             # Patches are applied at module import time in iluvatar.py.
-            # Nothing extra needed here.
-            pass
+            # Also call chained-or patch here explicitly from the main process,
+            # so the vllm source file is rewritten before Worker subprocesses start.
+            from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+                patch_triton_chained_or_for_iluvatar,
+            )
+            patch_triton_chained_or_for_iluvatar()
 
     def supports_fp8(cls) -> bool:
         if cls.vendor_name == "nvidia":

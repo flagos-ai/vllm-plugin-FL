@@ -67,19 +67,31 @@ def patch_triton_language_for_iluvatar() -> None:
 def patch_triton_chained_or_for_iluvatar() -> None:
     """Rewrite chained boolean 'or' chains in vllm triton kernels.
 
-    Iluvatar's triton version raises UnsupportedLanguageConstruct for
-    chained boolean operators like ``A or B or C`` inside @triton.jit
-    functions.  We rewrite the affected source file in-place (once) so
-    that every such chain is replaced with a nested pair:
-        ``(A or B) or C``
+    Iluvatar's triton version (3.2.x) raises UnsupportedLanguageConstruct for
+    chained boolean operators like ``A or B or C`` inside @triton.jit functions.
+    Rewrites the affected source file in-place (idempotent).
 
-    This is a no-op if the file has already been patched or does not exist.
+    Must be called from the main process BEFORE Worker subprocesses start,
+    so the patched file is on disk when Workers import the module.
 
-    TODO: Remove once Iluvatar triton supports chained boolean operators.
+    Applies only when triton < 3.3 — later versions support chained boolean
+    operators natively.
+
+    TODO: Remove once minimum supported Iluvatar triton version is >= 3.3.
     """
     import re
     import importlib.util
     import pathlib
+    import sys
+
+    # Only needed for triton < 3.3.
+    try:
+        import triton as _triton
+        _tv = tuple(int(x) for x in _triton.__version__.split(".")[:2])
+        if _tv >= (3, 3):
+            return
+    except Exception:
+        pass  # cannot determine version — apply patch defensively
 
     _MARKER = "# _iluvatar_chained_or_patched"
 
@@ -102,9 +114,6 @@ def patch_triton_chained_or_for_iluvatar() -> None:
         return  # already patched
 
     # Replace: A or B or C  →  (A or B) or C
-    # Only inside lines that look like triton constexpr conditionals.
-    # Pattern: three operands joined by ' or ', where each operand may be
-    # a simple identifier, a `not X`, or a parenthesised expression.
     _OPERAND = r'(?:not\s+)?(?:\([^)]*\)|\w+)'
     pattern = re.compile(
         r'(' + _OPERAND + r')\s+or\s+(' + _OPERAND + r')\s+or\s+(' + _OPERAND + r')'
@@ -125,6 +134,18 @@ def patch_triton_chained_or_for_iluvatar() -> None:
             "patch_triton_chained_or_for_iluvatar: cannot write %s: %s", fpath, e
         )
         return
+
+    # Clear pycache so Python and triton both see the patched source.
+    pycache = fpath.parent / "__pycache__"
+    if pycache.exists():
+        import shutil
+        try:
+            shutil.rmtree(pycache)
+        except Exception:
+            pass  # non-fatal
+
+    # Evict from sys.modules so this process reimports the patched source.
+    sys.modules.pop("vllm.v1.attention.ops.triton_attention_helpers", None)
 
     logger.info(
         "patch_triton_chained_or_for_iluvatar: rewrote %d chained-or expression(s) in %s",
