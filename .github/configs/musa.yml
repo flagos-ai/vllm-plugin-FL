@@ -10,8 +10,6 @@ runner_labels:
 
 container_volumes:
   - /data:/data
-  - /workspace:/workspace
-  - /hsdatapool:/hsdatapool
 
 container_options: >-
   --hostname vllm-plugin-fl
