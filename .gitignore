@@ -230,6 +230,9 @@ benchmark_results
 #documents design
 docs/*
 
+#bash scripts
+bash/*
+
 # Exception: these are source patches, not build artifacts.
 # The parent directories must also be un-ignored because the generic
 # 'build/' rule above ignores every directory named 'build'.
