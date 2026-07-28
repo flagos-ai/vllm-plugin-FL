@@ -19,7 +19,7 @@ llm:
   tensor_parallel_size: 2
   pipeline_parallel_size: 1
   max_model_len: 8192
-  gpu_memory_utilization: 0.95
+  gpu_memory_utilization: 0.90
   enforce_eager: true
   trust_remote_code: false
   disable_custom_all_reduce: true
