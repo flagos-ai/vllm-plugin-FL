@@ -76,6 +76,17 @@ if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
 
 
+def _patch_accelerator_empty_cache():
+    """Patch torch.accelerator.empty_cache for NPU compatibility.
+
+    torch.accelerator.empty_cache() crashes on NPU with
+    'Allocator for npu is not a DeviceAllocator'. Redirect to
+    torch.npu.empty_cache() which works correctly.
+    """
+    import torch.accelerator
+    torch.accelerator.empty_cache = torch.npu.empty_cache
+
+
 @dataclass
 class MemorySnapshot:
     """Platform-agnostic memory snapshot for FL worker."""
@@ -382,6 +393,10 @@ class WorkerFL(WorkerBase):
                     init_device_properties_triton,
             )
             init_device_properties_triton()
+            import torch_npu._inductor  # noqa: F401
+            # Patch torch.accelerator.empty_cache which crashes on NPU
+            # (device_allocator ASSERT FAILED). Use torch.npu.empty_cache instead.
+            _patch_accelerator_empty_cache()
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -439,6 +454,10 @@ class WorkerFL(WorkerBase):
         """Profiles the peak memory usage of the model to determine how much
         memory can be used for KV cache without OOMs.
 
+        On Ascend NPU, the full profile_run forward pass can crash the worker
+        due to incompatible Triton kernels. In that case, we fall back to a
+        conservative memory estimate based on model weight size.
+
         The engine will first conduct a profiling of the existing memory usage.
         Then, it calculates the free memory that can be used for KV cache in
         bytes.
@@ -479,46 +498,83 @@ class WorkerFL(WorkerBase):
         current_platform.empty_cache()
         current_platform.torch_device_fn.reset_peak_memory_stats()
 
-        # Execute a forward pass with dummy inputs to profile the memory usage
-        # of the model.
-        with memory_profiling_fl(
-            self.init_snapshot,
-            weights_memory=int(self.model_runner.model_memory_usage),
-        ) as profile_result:
-            self.model_runner.profile_run()
+        # On Ascend NPU, the profile_run forward pass crashes the worker
+        # process (SIGKILL from the NPU driver due to incompatible Triton
+        # kernels in the GDN/FLA layers). Skip profile_run and estimate
+        # KV cache memory from the current free memory after model loading.
+        if current_platform.device_type == "npu":
+            current_platform.empty_cache()
+            free_mem = current_platform.torch_device_fn.mem_get_info(
+                self.device
+            )
+            free_bytes = free_mem[0]
+            total_bytes = free_mem[1]
+            # Respect gpu_memory_utilization: total KV cache + model must
+            # fit within gpu_memory_utilization * total_memory.
+            # model_used = total_bytes - free_bytes
+            model_used = total_bytes - free_bytes
+            util = self.cache_config.gpu_memory_utilization
+            budget = int(util * total_bytes) - model_used
+            # Reserve 50% of the budget for activations and the one-time
+            # contiguous copy of non-contiguous kv_cache views.
+            # The kv_cache is allocated as [2, N, B, H, D] and split into
+            # key/value views that are non-contiguous. The first forward
+            # call creates contiguous copies that coexist temporarily with
+            # the original non-contiguous views.
+            activation_reserve = int(budget * 0.5)
+            self.available_kv_cache_memory_bytes = max(
+                budget - activation_reserve, 0
+            )
+            self.non_torch_memory = 0
+            self.peak_activation_memory = activation_reserve
+            logger.info(
+                "Ascend NPU: Skipped profile_run. Free memory: %.2f GiB, "
+                "KV cache budget: %.2f GiB",
+                GiB(free_bytes),
+                GiB(self.available_kv_cache_memory_bytes),
+            )
+        else:
+            # Execute a forward pass with dummy inputs to profile the memory usage
+            # of the model.
+            with memory_profiling_fl(
+                self.init_snapshot,
+                weights_memory=int(self.model_runner.model_memory_usage),
+            ) as profile_result:
+                self.model_runner.profile_run()
 
-        self.non_torch_memory = profile_result.non_torch_increase
-        self.peak_activation_memory = profile_result.torch_peak_increase
+            self.non_torch_memory = profile_result.non_torch_increase
+            self.peak_activation_memory = profile_result.torch_peak_increase
 
-        free_gpu_memory = profile_result.after_profile.free_memory
-        # NOTE(woosuk): Here we assume that the other processes using the same
-        # GPU did not change their memory usage during the profiling.
-        assert self.init_snapshot.free_memory > free_gpu_memory, (
-            "Error in memory profiling. "
-            f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
-            f"current free memory {GiB(free_gpu_memory)} GiB. "
-            "This happens when other processes sharing the same container "
-            "release GPU memory while vLLM is profiling during initialization. "
-            "To fix this, ensure consistent GPU memory allocation or "
-            "isolate vLLM in its own container."
-        )
-        self.available_kv_cache_memory_bytes = (
-            self.requested_memory - profile_result.non_kv_cache_memory
-        )
+            free_gpu_memory = profile_result.after_profile.free_memory
+            # NOTE(woosuk): Here we assume that the other processes using the same
+            # GPU did not change their memory usage during the profiling.
+            assert self.init_snapshot.free_memory > free_gpu_memory, (
+                "Error in memory profiling. "
+                f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
+                f"current free memory {GiB(free_gpu_memory)} GiB. "
+                "This happens when other processes sharing the same container "
+                "release GPU memory while vLLM is profiling during initialization. "
+                "To fix this, ensure consistent GPU memory allocation or "
+                "isolate vLLM in its own container."
+            )
+            self.available_kv_cache_memory_bytes = (
+                self.requested_memory - profile_result.non_kv_cache_memory
+            )
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
-        logger.debug(
-            "Initial free memory: %.2f GiB; Requested memory: %.2f (util), %.2f GiB",
-            GiB(self.init_snapshot.free_memory),
-            self.cache_config.gpu_memory_utilization,
-            GiB(self.requested_memory),
-        )
-        logger.debug(
-            "Free memory after profiling: %.2f GiB (total), %.2f GiB (within requested)",
-            GiB(free_gpu_memory),
-            GiB(free_gpu_memory - unrequested_memory),
-        )
-        logger.debug(profile_result)
+        if current_platform.device_type != "npu":
+            logger.debug(
+                "Initial free memory: %.2f GiB; Requested memory: %.2f (util), %.2f GiB",
+                GiB(self.init_snapshot.free_memory),
+                self.cache_config.gpu_memory_utilization,
+                GiB(self.requested_memory),
+            )
+            logger.debug(
+                "Free memory after profiling: %.2f GiB (total), %.2f GiB (within requested)",
+                GiB(free_gpu_memory),
+                GiB(free_gpu_memory - unrequested_memory),
+            )
+            logger.debug(profile_result)
         logger.info_once(
             "Available KV cache memory: %.2f GiB",
             GiB(self.available_kv_cache_memory_bytes),
@@ -671,7 +727,9 @@ class WorkerFL(WorkerBase):
         # fragmentation issue.
         # NOTE: This is called after `capture_model` on purpose to prevent
         # memory buffers from being cleared by `torch.cuda.empty_cache`.
-        if get_pp_group().is_last_rank:
+        # NOTE: On Ascend NPU, skip _dummy_run because the GDN/FLA Triton
+        # kernels crash the worker process during the model forward pass.
+        if get_pp_group().is_last_rank and current_platform.device_type != "npu":
             max_num_reqs = min(
                 self.scheduler_config.max_num_seqs,
                 self.scheduler_config.max_num_batched_tokens,

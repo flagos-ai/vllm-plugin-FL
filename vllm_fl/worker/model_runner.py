@@ -6595,13 +6595,55 @@ class ModelRunnerFL(
             dict[str, torch.Tensor]: A map between layer names to their
             corresponding memory buffer for KV cache.
         """
+        from vllm.platforms import current_platform
+        from vllm.v1.kv_cache_interface import AttentionSpec, MambaSpec
+
+        # On NPU, hybrid attention-mamba models cannot share raw tensors
+        # between attention and mamba layers. The contiguous layout required
+        # by NPU attention kernels overlaps in memory with mamba's strided
+        # page-aligned layout when using the same underlying buffer.
+        # Fix: allocate separate tensors for attention vs mamba layers.
+        is_npu_hybrid = (
+            current_platform.device_type == "npu"
+            and kv_cache_config.has_mamba_layers
+        )
+
+        # Build layer→group type mapping for hybrid separation
+        attn_layer_names: set[str] = set()
+        if is_npu_hybrid:
+            for group in kv_cache_config.kv_cache_groups:
+                if isinstance(group.kv_cache_spec, AttentionSpec):
+                    attn_layer_names.update(group.layer_names)
+
         kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
-            tensor = torch.zeros(
-                kv_cache_tensor.size, dtype=torch.int8, device=self.device
-            )
-            for layer_name in kv_cache_tensor.shared_by:
-                kv_cache_raw_tensors[layer_name] = tensor
+            if is_npu_hybrid:
+                # Split into attention and mamba tensors
+                mamba_layers = [n for n in kv_cache_tensor.shared_by
+                                if n not in attn_layer_names]
+                attn_layers = [n for n in kv_cache_tensor.shared_by
+                               if n in attn_layer_names]
+                if mamba_layers:
+                    tensor = torch.zeros(
+                        kv_cache_tensor.size, dtype=torch.int8,
+                        device=self.device
+                    )
+                    for layer_name in mamba_layers:
+                        kv_cache_raw_tensors[layer_name] = tensor
+                if attn_layers:
+                    tensor = torch.zeros(
+                        kv_cache_tensor.size, dtype=torch.int8,
+                        device=self.device
+                    )
+                    for layer_name in attn_layers:
+                        kv_cache_raw_tensors[layer_name] = tensor
+            else:
+                tensor = torch.zeros(
+                    kv_cache_tensor.size, dtype=torch.int8,
+                    device=self.device
+                )
+                for layer_name in kv_cache_tensor.shared_by:
+                    kv_cache_raw_tensors[layer_name] = tensor
 
         layer_names = set()
         for group in kv_cache_config.kv_cache_groups:
@@ -6757,10 +6799,19 @@ class ModelRunnerFL(
         Update the layout of attention layers from (2, num_blocks, ...) to
         (num_blocks, 2, ...).
 
+        On Ascend NPU, skip the re-striding because _npu_reshape_and_cache
+        and npu_fused_infer_attention_score require contiguous kv_cache
+        views. The interleaved layout from as_strided_ makes kv_cache[0]
+        and kv_cache[1] non-contiguous, causing OOM when .contiguous()
+        is called during inference.
+
         Args:
             kv_caches: The KV cache buffer of each layer.
             kernel_block_sizes: The kernel block sizes for each KV cache group.
         """
+        from vllm.platforms import current_platform
+        if current_platform.device_type == "npu":
+            return
 
         for group in self._kv_cache_spec_attn_group_iterator():
             kv_cache_spec = group.kv_cache_spec

@@ -342,7 +342,28 @@ class DeepSeekV4MTP(nn.Module):
             else ".weight_scale_inv"
         )
 
+        # These shared weights live at checkpoint top level instead of under
+        # mtp.{i}, so load them explicitly into the draft model parameters.
+        shared_weight_map: dict[str, str] = {
+            "embed.weight": "model.embed_tokens.weight",
+            "head.weight": (
+                f"model.layers.{self.config.num_hidden_layers}."
+                "shared_head.head.weight"
+            ),
+        }
+
         for name, loaded_weight in weights:
+            if name in shared_weight_map:
+                target_name = shared_weight_map[name]
+                if target_name not in loaded_params:
+                    param = params_dict[target_name]
+                    weight_loader = getattr(
+                        param, "weight_loader", default_weight_loader
+                    )
+                    weight_loader(param, loaded_weight)
+                    loaded_params.add(target_name)
+                continue
+
             mtp_layer_idx = _find_mtp_layer_idx(name)
             # V4 checkpoints store MTP weights as `mtp.{i}.*`; remap to
             # `model.layers.{num_hidden_layers + i}.*` so that

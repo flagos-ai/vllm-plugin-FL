@@ -74,6 +74,42 @@ def register_builtins(registry: OpRegistry) -> None:
             vendor="ascend",
             priority=BackendPriority.VENDOR,
         ),
+        # Fused MoE kernel (torch.mm fallback for Triton UB overflow)
+        OpImpl(
+            op_name="invoke_fused_moe_triton_kernel",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
+        # MoE align block size (torch fallback for Triton DDR OOB)
+        OpImpl(
+            op_name="moe_align_block_size",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
+        # MoE sum (torch fallback for Triton crash)
+        OpImpl(
+            op_name="moe_sum",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_sum, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
+        # topk_softmax (torch fallback for Triton crash)
+        OpImpl(
+            op_name="topk_softmax",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.topk_softmax, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
     ]
 
     registry.register_many(impls)

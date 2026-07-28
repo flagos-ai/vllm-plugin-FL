@@ -90,6 +90,7 @@ jobs:
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: benchmark-${{ inputs.platform }}
           path: |

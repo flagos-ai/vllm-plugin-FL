@@ -78,6 +78,8 @@ jobs:
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
       - name: Install project
+        env:
+          HYGON_USE_IMAGE_PLUGIN: "0"
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run unit tests
@@ -89,6 +91,7 @@ jobs:
       - name: Upload coverage report
         if: inputs.upload_coverage && always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: coverage-${{ inputs.platform }}
           path: |
