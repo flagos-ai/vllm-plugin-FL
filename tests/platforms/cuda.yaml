@@ -15,7 +15,7 @@
 # CUDA-Based Platform Configuration
 # Flexible test selection mechanism for NVIDIA GPU environments
 #
-# This platform configuration supports multiple device types (a100, a800, h100)
+# This platform configuration supports multiple NVIDIA device types.
 # Users can modify the following:
 # - functional: Add/remove test case names in the support lists
 #   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
@@ -45,6 +45,10 @@ device_types:
     compute_capability: "9.0"
     memory_gb: 80
     tags: [hopper, fp8, bf16]
+  h20:
+    compute_capability: "9.0"
+    memory_gb: 140
+    tags: [hopper, fp8, bf16, china-variant]
 
 # Default numerical tolerance for result comparison (used when device doesn't override)
 tolerance:
@@ -69,20 +73,12 @@ env_defaults:
   NCCL_ALGO: "Ring"
 
 # ---- Device-specific test configurations ------------------------------------
-a100:
-  name: "a100"
+h20:
+  name: "h20"
   tests:
     e2e:
-      # Add or remove test cases per model
-      inference:
-        qwen3: ["4b_tp2", "next_tp8"]
-        qwen3_5: ["35b_tp4"]
-        minicpm: ["o45_tp4"]
       serving:
-        qwen3: ["next_tp8"]
-        # The bug is that MiniCPMOBaseModel.load_weights
-        # doesn't call _ensure_resampler_device().
-        # minicpm: ["o45_tp4"]
+        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_eager"]
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

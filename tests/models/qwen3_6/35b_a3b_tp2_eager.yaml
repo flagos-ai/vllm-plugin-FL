@@ -12,17 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Qwen3.6-35B-A3B Hygon smoke configuration (TP=2, eager).
+# Qwen3.6-35B-A3B CUDA H20 serving configuration (TP=2).
 
 llm:
-  model: "/workspace/Qwen3.6-35B-A3B"
+  model: "/data/models/Qwen/Qwen3.6-35B-A3B"
   tensor_parallel_size: 2
   pipeline_parallel_size: 1
-  max_model_len: 8192
-  gpu_memory_utilization: 0.95
-  enforce_eager: true
+  max_model_len: 262144
   trust_remote_code: false
-  disable_custom_all_reduce: true
 
 generate:
   prompts:
@@ -35,10 +32,13 @@ serve:
   served_model_name: "qwen"
   startup_retries: 120
   endpoints: ["chat"]
-  stream: false
-  max_tokens: 256
-  chat_messages:
-    - role: "user"
-      content: "Introduce yourself,please"
-  sampling:
-    temperature: 0.0
+  stream: true
+  max_tokens: 1024
+  chat_cases:
+    - name: text
+      messages:
+        - role: "user"
+          content: "introduce llm"
+    - name: image
+      generated_image: true
+      prompt: "introduce this picture."
