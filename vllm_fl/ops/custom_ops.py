@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 OOT_OPS = {
     "silu_and_mul": (SiluAndMulFL, "SiluAndMul"),  # noqa F405
     "gelu_and_mul": (GeluAndMulFL, "GeluAndMul"),  # noqa F405
+    "silu_and_mul_with_clamp": (SiluAndMulWithClampFL, "SiluAndMulWithClamp"),  # noqa F405
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
     "fused_moe": (FusedMoEFL, "FusedMoE"),  # noqa F405
