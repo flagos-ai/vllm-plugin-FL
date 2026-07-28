@@ -20,6 +20,8 @@ def test_benchmark_serve(tmp_path):
     model = server_params.pop("model")
     served_model_name = server_params.pop("served_model_name", "")
     tp_size = int(server_params.pop("tensor_parallel_size", 1))
+    startup_retries = int(server_params.pop("startup_retries", 60))
+    poll_interval = int(server_params.pop("poll_interval", 10))
     server_extra_args = to_cli_args(server_params)
 
     result_json = tmp_path / "serve_result.json"
@@ -28,6 +30,8 @@ def test_benchmark_serve(tmp_path):
         model=model,
         tp_size=tp_size,
         served_model_name=served_model_name,
+        max_retries=startup_retries,
+        poll_interval=poll_interval,
         extra_args=server_extra_args,
     ) as server:
         command = [

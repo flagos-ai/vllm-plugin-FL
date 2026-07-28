@@ -51,4 +51,5 @@ c550:
       exclude: []
     benchmark:
       enabled: true
+      config_path: "tests/benchmarks/configs/smoke_metax.yaml"
       smoke: ["serve"]
