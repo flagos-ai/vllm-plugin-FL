@@ -42,7 +42,11 @@ c550:
       inference:
         qwen3_6: ["27b_tp2_eager_metax"]
       serving:
-        qwen3_6: ["35b_a3b_tp2_eager_metax"]
+        qwen3_6:
+          - "27b_tp2_eager_metax"
+          - "27b_tp2_graph_metax"
+          - "35b_a3b_tp2_eager_metax"
+          - "35b_a3b_tp2_graph_metax"
     functional:
       include: "*"
       exclude: []
