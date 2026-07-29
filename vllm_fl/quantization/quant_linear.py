@@ -75,3 +75,11 @@ def add_oot_quant_kernel() -> None:
         _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT].insert(
             0, FlagGemsFp8BlockScaledMMLinearKernel
         )
+
+    # WNA16 hooks below are self-gated on kernel availability and are a
+    # no-op until the plugin's csrc-side operators are built.
+    from .wna16.linear import register_fl_wna16_linear_kernel
+    from .compressed_tensors import register_compressed_tensors_oot
+
+    register_fl_wna16_linear_kernel(_POSSIBLE_KERNELS)
+    register_compressed_tensors_oot()
