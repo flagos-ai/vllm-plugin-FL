@@ -17,7 +17,7 @@
 
 platform: musa
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:29ceebd-musa-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci
 
 runner_labels:
   - mt-cicd-vllm-plugin
