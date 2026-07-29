@@ -17,7 +17,7 @@
 set -e
 
 # Arguments
-MODEL_PATH=${1:?"Please provide model path, e.g.: ./run_benchmark.sh /workspace/Qwen3-4B/"}
+MODEL_PATH=${1:?"Please provide model path, e.g.: ./run_benchmark.sh /data/models/Qwen/Qwen3-4B/"}
 
 # Output directory
 OUTPUT_DIR=bench_results

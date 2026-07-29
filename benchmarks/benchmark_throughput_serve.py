@@ -17,7 +17,7 @@
 
 # Usage:
 #  1. Start the server as follows (adjust model path and args as needed):
-# vllm serve /models/Qwen3.6-27B --tensor-parallel-size 2 --max-model-len 262144 --no-enable-log-requests --no-enable-prefix-caching
+# vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 2 --max-model-len 262144 --no-enable-log-requests --no-enable-prefix-caching
 
 #  2. Run this benchmark script (default: 4 test cases):
 # python benchmarks/benchmark_throughput_serve.py
@@ -35,7 +35,7 @@ import time
 from datetime import datetime
 from statistics import mean
 
-MODEL = "/models/Qwen3.6-27B"
+MODEL = "/data/models/Qwen/Qwen3.6-27B"
 
 # total runs for each case
 RUNS = 4
