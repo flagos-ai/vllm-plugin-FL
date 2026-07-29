@@ -61,12 +61,7 @@ def resolve_task_dir(task_key: str) -> str:
 def resolve_e2e_timeout(config: dict, device: str, task_dir: str) -> int:
     """Return timeout for an E2E task, allowing platform YAML overrides."""
     default = DEFAULT_TIMEOUT.get(task_dir, 60)
-    timeouts = (
-        config.get(device, {})
-        .get("tests", {})
-        .get("timeouts", {})
-        .get("e2e", {})
-    )
+    timeouts = config.get(device, {}).get("tests", {}).get("timeouts", {}).get("e2e", {})
     value = timeouts.get(task_dir, default)
     return int(value)
 
