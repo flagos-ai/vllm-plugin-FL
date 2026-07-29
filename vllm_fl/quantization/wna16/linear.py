@@ -27,7 +27,12 @@ from . import kernels
 
 
 class FLWNA16LinearKernel(MPLinearKernel):
-    """Consume standard uint4b8 weights through the fixed local kernel."""
+    """Consume standard uint4b8 weights through the fixed local operator.
+
+    vLLM's MPLinear registry selects this adapter only when
+    ``vllm_fl::wna16_gemm`` is registered. The execution path does not fall
+    through to CUDA, FlagGems, or the test-only reference implementation.
+    """
 
     @classmethod
     def get_min_capability(cls) -> int:

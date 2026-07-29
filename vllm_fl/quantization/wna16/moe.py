@@ -21,11 +21,10 @@ import torch
 
 from . import kernels
 
-
 _ADAPTER_MARKER = "_vllm_fl_local_wna16_moe"
-_UPSTREAM_MODULE = (
+_UPSTREAM_MODULES = (
     "vllm.model_executor.layers.quantization.compressed_tensors."
-    "compressed_tensors_moe.compressed_tensors_moe_wna16"
+    "compressed_tensors_moe.compressed_tensors_moe_wna16",
 )
 
 
@@ -55,9 +54,7 @@ def _build_local_moe_method(base_method):
                 num_bits=self.num_bits,
                 group_size=self.group_size,
                 activation=layer.activation,
-                apply_router_weight_on_input=(
-                    layer.apply_router_weight_on_input
-                ),
+                apply_router_weight_on_input=(layer.apply_router_weight_on_input),
                 global_num_experts=layer.global_num_experts,
                 expert_map=layer.expert_map,
                 inplace=not self.moe.disable_inplace,
@@ -67,12 +64,24 @@ def _build_local_moe_method(base_method):
 
 
 def install_fl_wna16_moe_method() -> bool:
-    """Use the local MoE adapter when the fixed plugin operator is built."""
+    """Install the local MoE method when the fixed plugin operator is built.
+
+    vLLM 0.20.2 selects WNA16 MoE through a scheme class rather than a kernel
+    registry, so replacing that class is the installation point.
+    """
     if not kernels.is_wna16_moe_available():
         return False
 
-    module = import_module(_UPSTREAM_MODULE)
-    current = module.CompressedTensorsWNA16MoEMethod
+    module = None
+    for module_name in _UPSTREAM_MODULES:
+        try:
+            module = import_module(module_name)
+            current = module.CompressedTensorsWNA16MoEMethod
+            break
+        except (ImportError, AttributeError):
+            continue
+    if module is None:
+        raise ImportError("Could not find vLLM's WNA16 MoE method")
     if getattr(current, _ADAPTER_MARKER, False):
         return True
     module.CompressedTensorsWNA16MoEMethod = _build_local_moe_method(current)

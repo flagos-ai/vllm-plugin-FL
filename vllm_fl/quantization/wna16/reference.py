@@ -11,7 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Torch WNA16 reference used for correctness tests, not kernel selection."""
+"""Torch WNA16 reference used only by unit tests.
+
+This module is deliberately absent from the MPLinear and MoE registration
+paths. It materializes the dequantized weight and must not be selected for
+model inference.
+"""
 
 from __future__ import annotations
 

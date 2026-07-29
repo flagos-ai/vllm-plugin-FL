@@ -20,12 +20,25 @@ adapts vLLM's runtime implementation to the FL out-of-tree platform.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
+
+_LINEAR_WNA16_MODULES = (
+    "vllm.model_executor.layers.quantization.compressed_tensors.schemes."
+    "compressed_tensors_wNa16",
+    # Keep working if upstream normalizes the historical mixed-case filename.
+    "vllm.model_executor.layers.quantization.compressed_tensors.schemes."
+    "compressed_tensors_wna16",
+)
+_MOE_WNA16_MODULES = (
+    "vllm.model_executor.layers.quantization.compressed_tensors."
+    "compressed_tensors_moe.compressed_tensors_moe_wna16",
+)
 
 
 @dataclass(frozen=True)
@@ -99,6 +112,32 @@ class CompatibilityReport:
         return self.linear_wna16 and self.moe_wna16
 
 
+def _class_is_available(
+    module_names: tuple[str, ...], class_name: str
+) -> tuple[
+    bool,
+    str | None,
+]:
+    """Find an upstream class without pinning its method implementation.
+
+    The adapters intentionally rely on vLLM's public scheme classes rather
+    than a frozen list of methods. Methods may move to a base class or be
+    refactored between vLLM releases while the integration point remains
+    compatible.
+    """
+    failures: list[str] = []
+    for module_name in module_names:
+        try:
+            candidate = getattr(import_module(module_name), class_name)
+        except (ImportError, AttributeError, OSError, RuntimeError) as exc:
+            failures.append(f"{module_name}: {exc}")
+            continue
+        if isinstance(candidate, type):
+            return True, None
+        failures.append(f"{module_name}: {class_name} is not a class")
+    return False, "; ".join(failures)
+
+
 def inspect_vllm_compressed_tensors_api() -> CompatibilityReport:
     """Probe the narrow upstream API surface used by this plugin."""
     try:
@@ -107,43 +146,19 @@ def inspect_vllm_compressed_tensors_api() -> CompatibilityReport:
         vllm_version = "unknown"
 
     details: list[str] = []
-    linear_wna16 = False
-    moe_wna16 = False
-    try:
-        from vllm.model_executor.layers.quantization.compressed_tensors.schemes.compressed_tensors_wNa16 import (  # noqa: E501
-            CompressedTensorsWNA16,
-        )
+    linear_wna16, linear_error = _class_is_available(
+        _LINEAR_WNA16_MODULES,
+        "CompressedTensorsWNA16",
+    )
+    if linear_error:
+        details.append(f"linear WNA16 unavailable: {linear_error}")
 
-        linear_wna16 = all(
-            hasattr(CompressedTensorsWNA16, name)
-            for name in (
-                "create_weights",
-                "process_weights_after_loading",
-                "apply_weights",
-            )
-        )
-        if not linear_wna16:
-            details.append("CompressedTensorsWNA16 API is incomplete")
-    except (ImportError, AttributeError, OSError, RuntimeError) as exc:
-        details.append(f"linear WNA16 unavailable: {exc}")
-
-    try:
-        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16 import (  # noqa: E501
-            CompressedTensorsWNA16MoEMethod,
-        )
-
-        moe_wna16 = all(
-            hasattr(CompressedTensorsWNA16MoEMethod, name)
-            for name in (
-                "create_weights",
-                "process_weights_after_loading",
-                "get_fused_moe_quant_config",
-            )
-        )
-        if not moe_wna16:
-            details.append("CompressedTensorsWNA16MoEMethod API is incomplete")
-    except (ImportError, AttributeError, OSError, RuntimeError) as exc:
-        details.append(f"MoE WNA16 unavailable: {exc}")
+    moe_wna16, moe_error = _class_is_available(
+        _MOE_WNA16_MODULES,
+        "CompressedTensorsWNA16MoEMethod",
+    )
+    if moe_error:
+        details.append(f"MoE WNA16 unavailable: {moe_error}")
 
     return CompatibilityReport(
         vllm_version=vllm_version,
@@ -167,9 +182,12 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
     if not is_wna16_moe_available():
         return report
 
-    if not report.supported:
+    # Linear registration is independent and handled by
+    # register_fl_wna16_linear_kernel. Do not disable the MoE adapter merely
+    # because a vLLM release moved or removed its linear WNA16 scheme.
+    if not report.moe_wna16:
         logger.warning(
-            "compressed-tensors WNA16 compatibility is incomplete for vLLM %s: %s",
+            "compressed-tensors WNA16 MoE is unavailable for vLLM %s: %s",
             report.vllm_version,
             "; ".join(report.details),
         )
@@ -184,7 +202,12 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
                 install_fl_wna16_moe_method,
             )
 
-            install_fl_wna16_moe_method()
+            if not install_fl_wna16_moe_method():
+                logger.warning(
+                    "FL WNA16 MoE operator disappeared during registration; "
+                    "leaving vLLM's upstream backend selection unchanged"
+                )
+                return report
             backend = configure_wna16_moe_backend()
             logger.info(
                 "compressed-tensors WNA16 MoE backend for FL: %s",
@@ -192,7 +215,8 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
             )
         except (ImportError, AttributeError, OSError, RuntimeError) as exc:
             logger.warning(
-                "Could not configure FL compressed-tensors WNA16 MoE: %s",
+                "Could not configure FL compressed-tensors WNA16 MoE; "
+                "vLLM's upstream backend selection remains unchanged: %s",
                 exc,
             )
     return report

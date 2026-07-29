@@ -27,7 +27,14 @@ def is_marlin_moe_platform(platform: Any) -> bool:
 
 
 def _install_platform_guard() -> None:
-    """Prevent vLLM 0.20.2 from choosing Marlin on non-NVIDIA OOT devices."""
+    """Prevent vLLM 0.20.2 from choosing Marlin on non-NVIDIA OOT devices.
+
+    Upstream's shape check excludes ROCm but otherwise assumes CUDA. FL uses
+    ``PlatformEnum.OOT`` for several vendors, so a compatible shape alone can
+    incorrectly select the PTX-only Marlin implementation. When the local
+    operator exists, returning false also routes selection through the WNA16
+    method replaced by ``install_fl_wna16_moe_method``.
+    """
     from vllm.platforms import current_platform
 
     moe_module = import_module(

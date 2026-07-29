@@ -4,8 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from vllm_fl.quantization import compressed_tensors
 from vllm_fl.quantization.compressed_tensors import (
+    CompatibilityReport,
     WNA16Scheme,
+    inspect_vllm_compressed_tensors_api,
+    register_compressed_tensors_oot,
     validate_compressed_tensors_wna16_config,
 )
 from vllm_fl.quantization.marlin import is_marlin_moe_platform
@@ -103,3 +107,92 @@ def test_local_moe_adapter_replaces_only_the_upstream_wna16_method(
         UpstreamMethod,
     )
     assert module.CompressedTensorsWNA16MoEMethod._vllm_fl_local_wna16_moe
+
+
+def test_compatibility_probe_accepts_refactored_scheme_classes(monkeypatch):
+    """Class integration points remain valid when method ownership changes."""
+
+    class UpstreamClass:
+        pass
+
+    def fake_import(module_name):
+        if module_name.endswith("compressed_tensors_wNa16"):
+            raise ImportError("historical module name is unavailable")
+        return SimpleNamespace(
+            CompressedTensorsWNA16=UpstreamClass,
+            CompressedTensorsWNA16MoEMethod=UpstreamClass,
+        )
+
+    monkeypatch.setattr(compressed_tensors, "import_module", fake_import)
+    report = inspect_vllm_compressed_tensors_api()
+
+    assert report.linear_wna16 is True
+    assert report.moe_wna16 is True
+    assert report.details == ()
+
+
+def test_moe_registration_does_not_require_linear_scheme(monkeypatch):
+    report = CompatibilityReport(
+        vllm_version="test",
+        linear_wna16=False,
+        moe_wna16=True,
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        compressed_tensors,
+        "inspect_vllm_compressed_tensors_api",
+        lambda: report,
+    )
+    monkeypatch.setattr(
+        "vllm_fl.quantization.wna16.kernels.is_wna16_moe_available",
+        lambda: True,
+    )
+    monkeypatch.setattr("vllm_fl.utils.is_oot_enabled", lambda: True)
+    monkeypatch.setattr(
+        "vllm_fl.quantization.wna16.moe.install_fl_wna16_moe_method",
+        lambda: calls.append("install") or True,
+    )
+    monkeypatch.setattr(
+        "vllm_fl.quantization.marlin.configure_wna16_moe_backend",
+        lambda: calls.append("configure") or "plugin-local",
+    )
+
+    assert register_compressed_tensors_oot() is report
+    assert calls == ["install", "configure"]
+
+
+def test_moe_install_failure_leaves_upstream_selection_unchanged(monkeypatch):
+    report = CompatibilityReport(
+        vllm_version="test",
+        linear_wna16=True,
+        moe_wna16=True,
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        compressed_tensors,
+        "inspect_vllm_compressed_tensors_api",
+        lambda: report,
+    )
+    monkeypatch.setattr(
+        "vllm_fl.quantization.wna16.kernels.is_wna16_moe_available",
+        lambda: True,
+    )
+    monkeypatch.setattr("vllm_fl.utils.is_oot_enabled", lambda: True)
+
+    def fail_install():
+        calls.append("install")
+        raise ImportError("changed upstream API")
+
+    monkeypatch.setattr(
+        "vllm_fl.quantization.wna16.moe.install_fl_wna16_moe_method",
+        fail_install,
+    )
+    monkeypatch.setattr(
+        "vllm_fl.quantization.marlin.configure_wna16_moe_backend",
+        lambda: calls.append("configure") or "plugin-local",
+    )
+
+    assert register_compressed_tensors_oot() is report
+    assert calls == ["install"]
