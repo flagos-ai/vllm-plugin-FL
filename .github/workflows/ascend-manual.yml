@@ -1,0 +1,37 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Ascend runners are scarce shared resources. Validate the image and selected
+# cases directly on the host first, then dispatch this workflow when a recorded
+# full CI result is needed.
+name: Ascend Manual CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: ascend-manual-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-ascend:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'run-ascend-ci'
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: ascend
+    secrets: inherit

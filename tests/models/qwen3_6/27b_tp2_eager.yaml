@@ -15,7 +15,7 @@
 # Qwen3.6-27B Hygon smoke configuration (TP=2, eager).
 
 llm:
-  model: "/workspace/Qwen3.6-27B"
+  model: "/data/models/Qwen/Qwen3.6-27B"
   tensor_parallel_size: 2
   pipeline_parallel_size: 1
   max_model_len: 8192

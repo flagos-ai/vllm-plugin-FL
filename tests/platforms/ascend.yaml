@@ -33,7 +33,7 @@ platform: ascend
 vendor: huawei
 
 device_types:
-  910b:
+  910c:
     memory_gb: 64
     tags: [ascend, bf16]
 
@@ -57,14 +57,14 @@ unsupported_features: []
 env_defaults: {}
 
 # ---- Device-specific test configurations ------------------------------------
-910b:
-  name: "910b"
+910c:
+  name: "910c"
   tests:
     e2e:
       # Add or remove test cases per model
       inference: {}
       serving:
-        qwen3: ["4b_tp2"]
+        qwen3: ["06b_tp2"]
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

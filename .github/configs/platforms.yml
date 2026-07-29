@@ -23,6 +23,8 @@ platforms:
   cuda:
     enabled: true
   ascend:
+    # Ascend uses a scarce self-hosted NPU runner. Run it explicitly through
+    # the "Ascend Manual CI" workflow after host-side smoke validation.
     enabled: false
   hygon:
     enabled: true
