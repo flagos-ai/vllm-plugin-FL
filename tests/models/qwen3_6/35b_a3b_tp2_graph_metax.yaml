@@ -33,7 +33,7 @@ generate:
 
 serve:
   served_model_name: "qwen"
-  startup_retries: 120
+  startup_retries: 300
   endpoints: ["chat"]
   stream: false
   max_tokens: 256

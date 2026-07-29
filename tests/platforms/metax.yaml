@@ -44,9 +44,12 @@ c550:
       serving:
         qwen3_6:
           - "27b_tp2_eager_metax"
-          - "27b_tp2_graph_metax"
           - "35b_a3b_tp2_eager_metax"
+          - "27b_tp2_graph_metax"
           - "35b_a3b_tp2_graph_metax"
+    timeouts:
+      e2e:
+        serving: 180
     functional:
       include: "*"
       exclude: []
