@@ -38,26 +38,6 @@ def apply_kunlunxin_patches():
 
 # ── sampler RNG (TP-consistent unseeded sampling) ──
 def patch_sampler_rng():
-    """Make random sampling TP-consistent on Kunlunxin XPU.
-
-    Root cause: on torch_xmlir the *default/global* RNG does NOT honor
-    ``manual_seed`` for ``Tensor.exponential_()`` and is non-deterministic
-    across processes. vLLM's ``random_sample`` uses the default RNG (no
-    explicit ``generator``) whenever a request has no per-request seed, and
-    relies on every tensor-parallel rank drawing *identical* noise (which
-    holds on CUDA). On XPU the TP ranks diverge -> each rank's
-    ``argmax(probs / q)`` picks a different next token -> per-rank model/KV
-    state diverges -> the following all-reduce combines inconsistent states
-    -> garbled / repetitive output. Greedy (argmax, no RNG) and TP=1 (single
-    rank) are unaffected.
-
-    (Note: an explicit ``torch.Generator`` is reproducible on XPU but does not
-    advance across calls, so seeding a shared generator would make sampling
-    deterministic with no diversity -- not acceptable as a default.)
-
-    Fix: keep the per-rank default RNG (so sampling stays varied),so every rank
-    proceeds with the same next token and can no longer diverge.
-    """
     try:
         import torch
         import vllm.v1.sample.ops.topk_topp_sampler as _sampler_mod
