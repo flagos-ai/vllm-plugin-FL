@@ -56,7 +56,7 @@ def _resolve_flagcx_backend() -> bool:
     try:
         if flagcx_path not in sys.path:
             sys.path.insert(0, flagcx_path)
-        import plugin.torch.flagcx  # triggers _C.so load and backend registration
+        import flagcx  # triggers _C.so load and backend registration
         return torch.distributed.is_backend_available("flagcx")
     except Exception:
         logger.warning(

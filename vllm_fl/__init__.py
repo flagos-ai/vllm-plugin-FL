@@ -117,8 +117,10 @@ def register():
 def register_quant_linear():
     from vllm.platforms import current_platform
     # vllm.model_executor.kernels.linear triggers cutlass_scaled_mm_supports_fp8
-    # at module level, which requires torch.ops._C — not available on MUSA.
+    # at module level, which requires torch.ops._C — not available on MUSA and Tsingmicro.
     if current_platform.device_type == "musa":
+        return
+    elif current_platform.device_type == "txda":
         return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
     add_oot_quant_kernel()
