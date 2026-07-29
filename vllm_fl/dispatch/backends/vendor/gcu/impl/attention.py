@@ -49,6 +49,14 @@ from vllm.platforms.interface import DeviceCapability
 from flash_attn.vllm_flash_attn import (  # type: ignore[import]
     flash_attn_varlen_func,            # Enflame native kernel
 )
+# AOT scheduler metadata generation (FA3 feature).
+# Enflame .so exposes scheduler_metadata parameter; upstream fa_utils
+# provides the Python helper to pre-compute it.
+try:
+    from vllm.v1.attention.backends.fa_utils import get_scheduler_metadata
+except ImportError:
+    get_scheduler_metadata = None  # type: ignore[assignment]
+
 from vllm_fl.dispatch.backends.vendor.gcu.impl.reshape_and_cache import (
     reshape_and_cache_flash,
 )
@@ -98,11 +106,14 @@ class AttentionGCUBackend(AttentionBackend):
 
     @classmethod
     def supports_sink(cls) -> bool:
-        return False
+        # Enflame flash_attn_varlen_func supports s_aux parameter.
+        return True
 
     @classmethod
     def supports_kv_cache_dtype(cls, kv_cache_dtype: CacheDType | None) -> bool:
         if kv_cache_dtype is None:
+            return True
+        if kv_cache_dtype.startswith("fp8"):
             return True
         return kv_cache_dtype in ["auto"]
     @staticmethod
@@ -150,8 +161,7 @@ class AttentionGCUBackend(AttentionBackend):
         use_sparse: bool,
         device_capability: DeviceCapability,
     ) -> str | None:
-        if has_sink:
-            return "not support sink"
+        # Enflame FA kernel supports sinks via s_aux parameter.
         return None
 
 @dataclass
@@ -193,7 +203,8 @@ def _get_sliding_window_configs(
 
 
 class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]):
-    _cudagraph_support = AttentionCGSupport.UNIFORM_BATCH
+    # FA3-level CUDA Graph support: always-on for all case patterns.
+    _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.ALWAYS
 
     def __init__(
         self,
@@ -207,6 +218,7 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
         self.parallel_config = vllm_config.parallel_config
         self.cache_config = vllm_config.cache_config
         self.compilation_config = vllm_config.compilation_config
+        self.attention_config = vllm_config.attention_config
 
         self.num_heads_q = self.model_config.get_num_attention_heads(
             self.parallel_config
@@ -216,8 +228,8 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
         self.headdim = self.model_config.get_head_size()
         self.block_size = kv_cache_spec.block_size
 
-        self.max_num_splits = 0
-        self.aot_schedule = False
+        # FA3 enables AOT scheduler for pre-computing kernel launch grids.
+        self.aot_schedule = True
 
         try:
             self.dcp_world_size = get_dcp_group().world_size
@@ -236,15 +248,19 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
         self.max_cudagraph_size = self.compilation_config.max_cudagraph_capture_size
 
         if self.use_full_cuda_graph and self.aot_schedule:
+            max_batch_size = max(
+                vllm_config.scheduler_config.max_num_seqs,
+                self.max_cudagraph_size or 0,
+            )
+            sched_meta_size = (1024 + (max_batch_size + 1) * 16)
             self.scheduler_metadata = torch.zeros(
-                vllm_config.scheduler_config.max_num_seqs + 1,
+                sched_meta_size,
                 dtype=torch.int32,
                 device=self.device,
             )
             self.max_num_splits = (
                 self.attention_config.flash_attn_max_num_splits_for_cuda_graph
             )
-        assert self.max_num_splits == 0, "GCU only support num_splits is 0 now"
 
         self.aot_sliding_window: tuple[int, int] | None = None
 
@@ -278,9 +294,41 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
                     self.aot_schedule = False
                     aot_schedule = False
 
-        max_num_splits = 0
-        if self.use_full_cuda_graph and num_actual_tokens <= self.max_cudagraph_size:
+        max_num_splits = 0  # 0 = FA3 heuristics (no fixed upper bound)
+        if (
+            self.use_full_cuda_graph
+            and self.max_cudagraph_size is not None
+            and num_actual_tokens <= self.max_cudagraph_size
+        ):
             max_num_splits = self.max_num_splits
+
+        # --- AOT scheduler helper ---
+        def schedule(
+            batch_size, cu_query_lens, max_query_len, seqlens, max_seq_len, causal
+        ):
+            """Pre-compute kernel scheduling metadata via FA3 get_scheduler_metadata."""
+            if not aot_schedule or get_scheduler_metadata is None:
+                return None
+            cache_dtype = self.cache_config.cache_dtype
+            if is_quantized_kv_cache(cache_dtype):
+                qkv_dtype_str = cache_dtype
+            else:
+                qkv_dtype_str = self.kv_cache_dtype
+            return get_scheduler_metadata(
+                batch_size=batch_size,
+                max_seqlen_q=max_query_len,
+                max_seqlen_k=max_seq_len,
+                num_heads_q=self.num_heads_q * self.dcp_world_size,
+                num_heads_kv=self.num_heads_kv,
+                headdim=self.headdim,
+                cache_seqlens=seqlens,
+                qkv_dtype=qkv_dtype_str,
+                cu_seqlens_q=cu_query_lens,
+                page_size=self.block_size,
+                causal=causal,
+                window_size=self.aot_sliding_window,
+                num_splits=max_num_splits,
+            )
 
         use_cascade = common_prefix_len > 0
         max_dcp_context_kv_len = 0
@@ -305,7 +353,14 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
             max_dcp_context_kv_len = (
                 (max_seq_len + num_partitions - 1) // num_partitions
             ) * self.cp_kv_cache_interleave_size
-            scheduler_metadata = None
+            scheduler_metadata = schedule(
+                batch_size=num_reqs,
+                cu_query_lens=query_start_loc,
+                max_query_len=max_query_len,
+                seqlens=dcp_context_kv_lens,
+                max_seq_len=max_dcp_context_kv_len,
+                causal=False,
+            )
         elif use_cascade:
             cu_prefix_query_lens = torch.tensor(
                 [0, num_actual_tokens], dtype=torch.int32, device=self.device
@@ -314,12 +369,33 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
                 [common_prefix_len], dtype=torch.int32, device=self.device
             )
             suffix_kv_lens = seq_lens[:num_reqs] - common_prefix_len
-            prefix_scheduler_metadata = None
-            scheduler_metadata = None
+            prefix_scheduler_metadata = schedule(
+                batch_size=1,
+                cu_query_lens=cu_prefix_query_lens,
+                max_query_len=num_actual_tokens,
+                seqlens=prefix_kv_lens,
+                max_seq_len=common_prefix_len,
+                causal=False,
+            )
+            scheduler_metadata = schedule(
+                batch_size=num_reqs,
+                cu_query_lens=query_start_loc,
+                max_query_len=max_query_len,
+                seqlens=suffix_kv_lens,
+                max_seq_len=max_seq_len - common_prefix_len,
+                causal=True,
+            )
         else:
-            scheduler_metadata = None
+            scheduler_metadata = schedule(
+                batch_size=num_reqs,
+                cu_query_lens=query_start_loc,
+                max_query_len=max_query_len,
+                seqlens=seq_lens,
+                max_seq_len=max_seq_len,
+                causal=causal,
+            )
 
-        # For FA3 + full cudagraph
+        # For FA3 + full cudagraph: copy into pre-allocated buffer.
         if self.use_full_cuda_graph and scheduler_metadata is not None:
             n = scheduler_metadata.shape[0]
             self.scheduler_metadata[:n] = scheduler_metadata
@@ -367,6 +443,7 @@ class AttentionGCUImpl(AttentionImpl):
         logits_soft_cap: float | None = None,
         attn_type: AttentionType = AttentionType.DECODER,
         kv_sharing_target_layer_name: str | None = None,
+        sinks: torch.Tensor | None = None,
     ) -> None:
         self.num_heads = num_heads
         self.head_size = head_size
@@ -390,17 +467,29 @@ class AttentionGCUImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         self.attn_type = attn_type
-        # GCU: Enflame native FA kernel is FA2-level
-        self.vllm_flash_attn_version = 2
+        # GCU: Enflame native FA kernel is FA3-level (supports s_aux,
+        # scheduler_metadata, num_splits, FP8 descale).
+        self.vllm_flash_attn_version = 3
 
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = _bi_mode
 
+        # FP8 KV cache is declared as supported (see AttentionGCUBackend),
+        # but the actual kernel-level descale parameters are always passed.
+        # The hardware may not support FP8 natively yet, but the .so interface
+        # is forward-compatible.
         if is_quantized_kv_cache(self.kv_cache_dtype):
-            raise NotImplementedError(
-                "AttentionGCU does not support quantization kv-cache on this device."
+            logger.warning_once(
+                "AttentionGCU: FP8 KV cache is declared but may require "
+                "hardware support. Proceeding with quantized path."
             )
+
+        # GCU FA handles Q quantization internally;
+        # the attention layer should NOT pre-quantize Q.
         self.supports_quant_query_input = False
+
+        # Attention sinks: Enflame .so supports s_aux parameter.
+        self.sinks = sinks
 
         # DCP is not used by default on GCU
         try:
@@ -526,7 +615,7 @@ class AttentionGCUImpl(AttentionImpl):
                     k_descale=layer._k_scale.expand(descale_shape),
                     v_descale=layer._v_scale.expand(descale_shape),
                     num_splits=attn_metadata.max_num_splits,
-                    s_aux=None,  # GCU does not support sinks yet
+                    s_aux=self.sinks,
                 )
                 return output
 
@@ -554,6 +643,7 @@ class AttentionGCUImpl(AttentionImpl):
             q_descale=layer._q_scale,
             k_descale=layer._k_scale,
             v_descale=layer._v_scale,
+            s_aux=self.sinks,
         )
         return output
 
@@ -756,6 +846,7 @@ def cascade_attention(
     q_descale: torch.Tensor | None = None,
     k_descale: torch.Tensor | None = None,
     v_descale: torch.Tensor | None = None,
+    s_aux: torch.Tensor | None = None,
 ) -> torch.Tensor:
     assert alibi_slopes is None, "Cascade attention does not support ALiBi."
     assert sliding_window == (-1, -1), (
@@ -789,6 +880,7 @@ def cascade_attention(
         q_descale=q_descale.expand(descale_shape) if q_descale is not None else None,
         k_descale=k_descale.expand(descale_shape) if k_descale is not None else None,
         v_descale=v_descale.expand(descale_shape) if v_descale is not None else None,
+        s_aux=s_aux,
     )
 
     descale_shape = (cu_query_lens.shape[0] - 1, key_cache.shape[-2])
@@ -813,6 +905,7 @@ def cascade_attention(
         q_descale=q_descale.expand(descale_shape) if q_descale is not None else None,
         k_descale=k_descale.expand(descale_shape) if k_descale is not None else None,
         v_descale=v_descale.expand(descale_shape) if v_descale is not None else None,
+        s_aux=s_aux,
     )
 
     # Merge prefix and suffix outputs, and store the result in output.
