@@ -1,0 +1,41 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# MetaX Hardware Configuration
+# This file defines CI/CD settings for MetaX C550 testing
+
+platform: metax
+
+# Docker image for this hardware.
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-metax-ci
+
+# Runner labels for this hardware.
+# Keep this aligned with the MetaX C550 runner label.
+runner_labels:
+  - metax-c550-124
+
+# Container volumes (hardware-specific paths).
+container_volumes:
+  - /data:/data
+
+# Container options (hardware-specific settings).
+container_options: >-
+  --hostname vllm-plugin-fl
+  --ipc=host
+  --shm-size=64g
+  --device /dev/dri:/dev/dri:rwm
+  --device /dev/mxcd:/dev/mxcd:rwm
+  --env GEMS_VENDOR=metax
+  --env VLLM_PLUGINS=fl
+  --env MACA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7

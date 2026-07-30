@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Qwen3.6-35B-A3B Hygon smoke configuration (TP=2, eager).
+# Qwen3.6-35B-A3B MetaX smoke configuration (TP=2, eager).
 
 llm:
   model: "/data/models/Qwen/Qwen3.6-35B-A3B"
   tensor_parallel_size: 2
   pipeline_parallel_size: 1
   max_model_len: 8192
-  gpu_memory_utilization: 0.95
+  gpu_memory_utilization: 0.90
   enforce_eager: true
   trust_remote_code: false
   disable_custom_all_reduce: true

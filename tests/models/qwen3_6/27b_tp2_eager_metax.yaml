@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Qwen3.6-35B-A3B Hygon smoke configuration (TP=2, eager).
+# Qwen3.6-27B MetaX smoke configuration (TP=2, eager).
 
 llm:
-  model: "/data/models/Qwen/Qwen3.6-35B-A3B"
+  model: "/data/models/Qwen/Qwen3.6-27B"
   tensor_parallel_size: 2
   pipeline_parallel_size: 1
   max_model_len: 8192
@@ -33,7 +33,6 @@ generate:
 
 serve:
   served_model_name: "qwen"
-  startup_retries: 120
   endpoints: ["chat"]
   stream: false
   max_tokens: 256
