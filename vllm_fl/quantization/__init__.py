@@ -11,3 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Quantization compatibility and out-of-tree kernel registration."""
+
+from .compressed_tensors import (
+    CompatibilityReport,
+    WNA16Scheme,
+    inspect_vllm_compressed_tensors_api,
+    validate_compressed_tensors_wna16_config,
+)
+
+__all__ = [
+    "CompatibilityReport",
+    "WNA16Scheme",
+    "inspect_vllm_compressed_tensors_api",
+    "validate_compressed_tensors_wna16_config",
+]

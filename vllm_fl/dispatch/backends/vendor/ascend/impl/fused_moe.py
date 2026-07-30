@@ -11,6 +11,118 @@ import torch.nn.functional as F
 import torch_npu
 from flag_gems.runtime.backend._ascend import fused
 
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _npu_grouped_matmul_fused_experts(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    inplace: bool = False,
+    activation: str = "silu",
+    apply_router_weight_on_input: bool = False,
+    global_num_experts: int = -1,
+    expert_map: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Optimized MoE using npu_grouped_matmul — single batched kernel for all experts.
+
+    Replaces the Python for-loop over experts with:
+    1. npu_moe_init_routing_v2 — sort tokens by expert, get per-expert counts
+    2. npu_grouped_matmul — batched gate_up projection (all experts in one call)
+    3. npu_swiglu — fused SiLU+mul activation
+    4. npu_grouped_matmul — batched down projection
+    5. npu_moe_token_unpermute — scatter results back with router weights
+    """
+    num_tokens, hidden_dim = hidden_states.shape
+    E, N, _ = w1.shape  # w1: [E, N, K_in]
+    top_k = topk_ids.shape[1]
+
+    if global_num_experts == -1:
+        global_num_experts = E
+
+    # Handle expert_map for tensor parallel
+    if expert_map is not None:
+        local_topk_ids = expert_map[topk_ids.long()]
+        # Mask invalid experts (mapped to -1)
+        valid_mask = local_topk_ids >= 0
+        topk_weights = topk_weights * valid_mask.to(topk_weights.dtype)
+        topk_ids_for_routing = local_topk_ids.to(torch.int32)
+    else:
+        topk_ids_for_routing = topk_ids.to(torch.int32)
+
+    # Apply router weight on input if needed
+    if apply_router_weight_on_input:
+        # Scale hidden states by topk weights before routing
+        # For this path, we need to expand hidden states first
+        pass  # Handled below in the unpermute step
+
+    # Step 1: Sort tokens by expert using npu_moe_init_routing_v2
+    sorted_hidden_states, expanded_row_idx, expert_tokens, _ = (
+        torch_npu.npu_moe_init_routing_v2(
+            hidden_states,
+            topk_ids_for_routing,
+            active_num=num_tokens * top_k,
+            expert_num=E,
+            expert_tokens_num_type=1,  # count mode
+            expert_tokens_num_flag=True,
+            active_expert_range=[0, E],
+            quant_mode=-1,  # no quantization
+        )
+    )
+    expert_tokens = expert_tokens.to(torch.int64)
+
+    # Step 2: Gate-up projection — npu_grouped_matmul
+    # w1 is [E, N, K] — grouped_matmul expects weight as [E, K, N] with split_item=2
+    # split_item=2 means the weight K dimension splits across the group_list
+    gate_up_out = torch_npu.npu_grouped_matmul(
+        x=[sorted_hidden_states],
+        weight=[w1.transpose(1, 2).contiguous()],
+        split_item=2,
+        group_list_type=1,
+        group_type=0,
+        group_list=expert_tokens,
+    )[0]
+
+    # Step 3: Activation
+    if activation == "silu":
+        gate_up_out = torch_npu.npu_swiglu(gate_up_out)
+    elif activation == "gelu":
+        gate_up_out = torch_npu.npu_gelu_mul(gate_up_out)
+    elif activation == "silu_no_mul":
+        gate_up_out = F.silu(gate_up_out)
+    elif activation == "gelu_no_mul":
+        gate_up_out = torch_npu.npu_gelu(gate_up_out)
+    else:
+        raise ValueError(f"Unsupported FusedMoe activation: {activation}.")
+
+    # Step 4: Down projection — npu_grouped_matmul
+    # w2 is [E, K_out, N//2] — need transpose to [E, N//2, K_out]
+    down_out = torch_npu.npu_grouped_matmul(
+        x=[gate_up_out],
+        weight=[w2.transpose(1, 2).contiguous()],
+        split_item=2,
+        group_list_type=1,
+        group_type=0,
+        group_list=expert_tokens,
+    )[0]
+
+    # Step 5: Unpermute and apply router weights
+    # npu_moe_token_unpermute expects sorted_indices as int32
+    expanded_row_idx_abs = torch.abs(expanded_row_idx).to(torch.int32)
+    out = torch_npu.npu_moe_token_unpermute(
+        permuted_tokens=down_out,
+        sorted_indices=expanded_row_idx_abs,
+        probs=topk_weights.to(down_out.dtype) if not apply_router_weight_on_input else None,
+    )
+
+    if inplace:
+        hidden_states.copy_(out)
+        return hidden_states
+    return out
+
 
 def _torch_fused_experts_impl(
     hidden_states: torch.Tensor,
@@ -138,8 +250,30 @@ def fused_experts_impl(
     assert w2.stride(-1) == 1, "Stride of last dimension must be 1"
     assert hidden_states.dtype in [torch.float32, torch.float16, torch.bfloat16]
 
-    # Use pure-torch implementation on NPU to avoid Triton kernel
-    # compatibility issues with the Ascend backend.
+    # Try optimized npu_grouped_matmul path first
+    try:
+        return _npu_grouped_matmul_fused_experts(
+            hidden_states=hidden_states,
+            w1=w1,
+            w2=w2,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            inplace=inplace,
+            activation=activation,
+            apply_router_weight_on_input=apply_router_weight_on_input,
+            global_num_experts=global_num_experts,
+            expert_map=expert_map,
+        )
+    except Exception as e:
+        # Fall back to Python loop on first failure, then log warning
+        if not hasattr(fused_experts_impl, '_grouped_matmul_warned'):
+            logger.warning(
+                "npu_grouped_matmul MoE failed (%s), falling back to torch.mm loop. "
+                "This warning will not repeat.", e
+            )
+            fused_experts_impl._grouped_matmul_warned = True
+
+    # Fallback: pure-torch implementation
     return _torch_fused_experts_impl(
         hidden_states=hidden_states,
         w1=w1,

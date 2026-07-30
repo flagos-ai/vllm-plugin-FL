@@ -667,3 +667,33 @@ class FlagGemsBackend(Backend):
         return flash_mla_sparse_fwd_flaggems(
             q, kv, indices, sm_scale, attn_sink, topk_length, out,
         )
+
+    def gather_bf16_kv_from_pages(
+        self,
+        kv_cache,
+        block_table,
+        cu_seq_lens,
+        token_to_seq,
+        total_seq_lens,
+        dst=None,
+    ):
+        from .impl.deepseek_v4_ops import gather_bf16_kv_from_pages_flaggems
+
+        return gather_bf16_kv_from_pages_flaggems(
+            kv_cache, block_table, cu_seq_lens, token_to_seq, total_seq_lens, dst
+        )
+
+    def bf16_mqa_logits(
+        self,
+        q,
+        kv,
+        weights,
+        cu_seq_len_k_start,
+        cu_seq_len_k_end,
+        clean_logits=True,
+    ):
+        from .impl.deepseek_v4_ops import bf16_mqa_logits_flaggems
+
+        return bf16_mqa_logits_flaggems(
+            q, kv, weights, cu_seq_len_k_start, cu_seq_len_k_end, clean_logits
+        )

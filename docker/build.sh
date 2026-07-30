@@ -31,6 +31,11 @@ UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 VLLM_VERSION="${VLLM_VERSION:-0.19.0}"
 CANN_VERSION="${CANN_VERSION:-8.5.1}"
 CANN_CHIP="${CANN_CHIP:-910b}"
+METAX_BASE_IMAGE="${METAX_BASE_IMAGE:-harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-metax-0.20.0-maca.ai3.7.0.107-torch2.8-py312-ubuntu22.04-amd64}"
+METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
+METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
+METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
+METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
 HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6}"
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.20.2}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
@@ -137,7 +142,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -157,6 +162,12 @@ VERSIONS (override via environment variables):
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
+  MetaX:
+    METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
+    METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
+    METAX_PYTHON_VERSION Python version used in generated image tag (default: ${METAX_PYTHON_VERSION})
+    METAX_PYTHON_TAG     Python tag fragment used in generated image tag (default: ${METAX_PYTHON_TAG})
+    METAX_VLLM_VERSION   vLLM version installed in empty mode (default: ${METAX_VLLM_VERSION})
   Hygon:
     HYGON_BASE_IMAGE     Base image (default: ${HYGON_BASE_IMAGE})
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
@@ -179,6 +190,9 @@ EXAMPLES:
 
     # Build Hygon CI image
     ./build.sh --platform hygon --target ci
+
+    # Build MetaX CI image
+    ./build.sh --platform metax --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
 
     # Build with custom PyPI mirror
     ./build.sh --target dev --index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -284,8 +298,21 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="hygon-vllm${VLLM_VERSION}-dtk${HYGON_DTK_VERSION}-py${HYGON_PYTHON_VERSION}-${TARGET}"
     fi
+elif [[ "${PLATFORM}" == "metax" ]]; then
+    PYTHON_VERSION="${METAX_PYTHON_VERSION}"
+    VLLM_VERSION="${METAX_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
+    BUILD_ARGS+=(
+        --build-arg "METAX_BASE_IMAGE=${METAX_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${METAX_VLLM_VERSION}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="vllm-metax-${METAX_VLLM_VERSION}-maca.ai${METAX_MACA_VERSION}-torch2.8-${METAX_PYTHON_TAG}-ubuntu22.04-amd64-ci-git"
+    fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', or 'hygon'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', or 'metax'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -305,6 +332,10 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  Runtime libs:   ${HYGON_RUNTIME_LIB_DIR}"
     msg "  FlagGems:       ${FLAGGEMS_VERSION}"
     msg "  Plugin:         ${VLLM_PLUGIN_FL_VERSION}"
+elif [[ "${PLATFORM}" == "metax" ]]; then
+    msg "  MACA:           ${METAX_MACA_VERSION}"
+    msg "  MetaX Python:   ${METAX_PYTHON_VERSION}"
+    msg "  Base image:     ${METAX_BASE_IMAGE}"
 fi
 msg "  Ubuntu:         ${UBUNTU_VERSION}"
 msg "  Python:         ${PYTHON_VERSION}"

@@ -26,3 +26,5 @@ platforms:
     enabled: false
   hygon:
     enabled: true
+  metax:
+    enabled: true

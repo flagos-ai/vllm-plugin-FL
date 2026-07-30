@@ -36,6 +36,10 @@ from vllm.v1.kv_cache_interface import (
     MLAAttentionSpec,
     SlidingWindowMLASpec,
 )
+from vllm_fl.dispatch.backends.vendor.cuda.impl.deepseek_v4_ops.fused_compress import (
+    _fused_kv_compress_norm_rope_insert_sparse_attn_bf16,
+    _fused_kv_compress_norm_rope_insert_indexer_attn_bf16,
+)
 
 
 class CompressorBackend(AttentionBackend):
@@ -193,6 +197,7 @@ class DeepseekCompressor(nn.Module):
         self.rotate = rotate
         self.prefix = prefix
         self.k_cache_prefix = k_cache_prefix
+        self.quant_config = vllm_config.quant_config
         self.use_fp4_cache = use_fp4_cache
 
         config = vllm_config.model_config.hf_config
@@ -240,34 +245,43 @@ class DeepseekCompressor(nn.Module):
             vllm_config.compilation_config.static_forward_context
         )
 
-        if self.head_dim == 512:
-            assert not use_fp4_cache, (
-                "MXFP4 cache is only supported for indexer (head=128)"
-            )
-            self._fused_kernel = _fused_kv_compress_norm_rope_insert_sparse_attn
-            self._quant_block = 64
-            self._token_stride = self.nope_head_dim + self.rope_head_dim * 2
-            self._scale_dim = self.nope_head_dim // 64 + 1  # 7 real + 1 pad
-            self._num_warps = 4
-        elif self.head_dim == 128:
-            if use_fp4_cache:
-                self._fused_kernel = (
-                    _fused_kv_compress_norm_rope_insert_indexer_mxfp4_attn
+        if self.quant_config is not None:
+            if self.head_dim == 512:
+                assert not use_fp4_cache, (
+                    "MXFP4 cache is only supported for indexer (head=128)"
                 )
-                self._quant_block = MXFP4_BLOCK_SIZE
-                self._token_stride = self.head_dim // 2
-                self._scale_dim = self.head_dim // MXFP4_BLOCK_SIZE
-            else:
-                self._fused_kernel = _fused_kv_compress_norm_rope_insert_indexer_attn
-                self._quant_block = 128
-                self._token_stride = self.head_dim
-                self._scale_dim = 4  # single float32 scale
-            self._num_warps = 1
+                self._fused_kernel = _fused_kv_compress_norm_rope_insert_sparse_attn
+                self._quant_block = 64
+                self._token_stride = self.nope_head_dim + self.rope_head_dim * 2
+                self._scale_dim = self.nope_head_dim // 64 + 1  # 7 real + 1 pad
+                self._num_warps = 4
+            elif self.head_dim == 128:
+                if use_fp4_cache:
+                    self._fused_kernel = (
+                        _fused_kv_compress_norm_rope_insert_indexer_mxfp4_attn
+                    )
+                    self._quant_block = MXFP4_BLOCK_SIZE
+                    self._token_stride = self.head_dim // 2
+                    self._scale_dim = self.head_dim // MXFP4_BLOCK_SIZE
+                else:
+                    self._fused_kernel = _fused_kv_compress_norm_rope_insert_indexer_attn
+                    self._quant_block = 128
+                    self._token_stride = self.head_dim
+                    self._scale_dim = 4  # single float32 scale
+                self._num_warps = 1
         else:
-            raise ValueError(
-                f"Unsupported head_dim for fused quant+cache: {self.head_dim}"
-            )
-
+            ### USE BF16 KERNELS
+            if self.head_dim == 512:
+                self._fused_kernel = _fused_kv_compress_norm_rope_insert_sparse_attn_bf16
+                self._token_stride = self.head_dim * 2
+                self._num_warps = 4
+            elif self.head_dim == 128:
+                self._fused_kernel = _fused_kv_compress_norm_rope_insert_indexer_attn_bf16
+                self._token_stride = self.head_dim * 2
+                self._num_warps = 1
+            self._scale_dim = None
+            self._quant_block = None
+            
     def forward(
         self,
         # [num_tokens, 2 * self.coff * self.head_dim]
@@ -338,6 +352,14 @@ class DeepseekCompressor(nn.Module):
         k_cache_metadata = cast(Any, attn_metadata[self.k_cache_prefix])
         kv_cache = self._static_forward_context[self.k_cache_prefix].kv_cache
 
+        quant_kwargs = {}
+        if self._scale_dim is not None:
+            quant_kwargs = {
+                "FP8_MAX": 448.0,
+                "QUANT_BLOCK": self._quant_block,
+                "SCALE_DIM": self._scale_dim,
+            }
+
         self._fused_kernel[(num_actual,)](
             # state cache
             state_cache,
@@ -367,13 +389,11 @@ class DeepseekCompressor(nn.Module):
             COMPRESS_RATIO=self.compress_ratio,
             OVERLAP=self.overlap,
             ROPE_HEAD_DIM=self.rope_head_dim,
-            FP8_MAX=448.0,
-            QUANT_BLOCK=self._quant_block,
             TOKEN_STRIDE=self._token_stride,
-            SCALE_DIM=self._scale_dim,
             KV_BLOCK_STRIDE=kv_cache.stride(0),
             num_warps=self._num_warps,
             launch_pdl=False,
+            **quant_kwargs,
         )
 
 
