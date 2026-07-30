@@ -133,3 +133,14 @@ jobs:
     with:
       platform: hygon
     secrets: inherit
+
+  # ============================================================
+  # Job 4d: MetaX platform testing
+  # ============================================================
+  test-metax:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: metax
+    secrets: inherit
