@@ -320,6 +320,26 @@ class WorkerFL(WorkerBase):
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
     def init_device(self):
+        # Iluvatar: patch sampler ops to disable torch.compile (flagtree triton
+        # does not support cuda inductor target). Must run in Worker process,
+        # after module imports, before any forward pass.
+        # _iluvatar_worker_sampler_patch
+        # TODO: Remove once flagtree triton supports cuda inductor target.
+        if getattr(current_platform, "vendor_name", "") == "iluvatar":
+            try:
+                from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+                    patch_sampler_compile_for_iluvatar,
+                    patch_torch_inductor_for_iluvatar,
+                )
+                # Remap inductor GPUTarget cuda->corex so flagtree triton
+                # backend selection works. Must run in every Worker process.
+                patch_torch_inductor_for_iluvatar()
+                patch_sampler_compile_for_iluvatar()
+            except Exception as _e:
+                import logging as _lg
+                _lg.getLogger(__name__).warning(
+                    "iluvatar worker patch failed: %s", _e
+                )
         # This env var set by Ray causes exceptions with graph building.
         if (
             self.parallel_config.data_parallel_size > 1

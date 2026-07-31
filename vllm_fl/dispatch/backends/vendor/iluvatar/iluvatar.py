@@ -191,11 +191,171 @@ def patch_triton_perf_model_for_iluvatar() -> None:
             "Failed to patch triton perf model for iluvatar: %s", e
         )
 
-# Apply triton patches at module import time so that Worker subprocesses
-# (which do not call pre_register_and_update) also get the patches applied.
-patch_triton_language_for_iluvatar()
-patch_triton_perf_model_for_iluvatar()
+def patch_triton_testing_tflops_for_iluvatar() -> None:
+    """Patch triton.ops.matmul_perf_model.get_max_tensorcore_tflops for iluvatar.
+
+    On BI-V150, torch.cuda.get_device_capability() returns a value < 8,
+    which triggers `assert dtype == torch.float16` in the original flagtree
+    triton implementation. BF16 models fail this assert.
+
+    NOTE: patching triton.testing.get_max_tensorcore_tflops is insufficient
+    because matmul_perf_model.py binds the function directly via
+    `from ..testing import get_max_tensorcore_tflops`, so the module-level
+    name in matmul_perf_model must be patched directly.
+
+    TODO: Remove once flagtree triton handles non-NVIDIA capability correctly.
+    """
+    try:
+        import triton.testing as _tt
+        import triton.ops.matmul_perf_model as _mpm_ops
+        import torch as _torch
+        if getattr(_mpm_ops, "_iluvatar_tflops_patched", False):
+            return
+        from triton.runtime import driver as _driver
+
+        def _get_max_tensorcore_tflops(dtype, clock_rate, device=None):
+            if not device:
+                device = _torch.cuda.current_device()
+            num_subcores = (
+                _driver.active.utils.get_device_properties(device)
+                ["multiprocessor_count"] * 4)
+            if dtype in [_torch.float32, _torch.int32]:
+                ops_per_sub_core = 256
+            elif dtype in [_torch.float16, _torch.bfloat16, _torch.int16]:
+                ops_per_sub_core = 512
+            else:
+                ops_per_sub_core = 512  # safe fallback for unknown dtypes
+            return num_subcores * clock_rate * ops_per_sub_core * 1e-9
+
+        # Patch both the testing module and the matmul_perf_model module
+        # (the latter binds the function directly at import time).
+        _tt.get_max_tensorcore_tflops = _get_max_tensorcore_tflops
+        _mpm_ops.get_max_tensorcore_tflops = _get_max_tensorcore_tflops
+        _mpm_ops._iluvatar_tflops_patched = True
+        logger.info(
+            "Patched triton.ops.matmul_perf_model.get_max_tensorcore_tflops "
+            "for iluvatar (bfloat16 support, no capability assert)."
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to patch triton.testing.get_max_tensorcore_tflops "
+            "for iluvatar: %s", e
+        )
+
 patch_triton_chained_or_for_iluvatar()
+
+
+def patch_sampler_compile_for_iluvatar() -> None:
+    # Disable torch.compile on vllm sampler ops for Iluvatar.
+    # flagtree triton only supports Iluvatar backend, not cuda target.
+    # TODO: Remove once flagtree triton supports cuda inductor target.
+    try:
+        import importlib
+        _tts = importlib.import_module('vllm.v1.sample.ops.topk_topp_sampler')
+        if not getattr(_tts, '_iluvatar_compile_patched', False):
+            _orig = _tts.compiled_random_sample
+            _tts.compiled_random_sample = getattr(_orig, '__wrapped__', _orig)
+            _tts._iluvatar_compile_patched = True
+            logger.info('patch_sampler_compile_for_iluvatar: unwrapped topk_topp_sampler.compiled_random_sample')
+    except Exception as e:
+        logger.warning('patch_sampler_compile_for_iluvatar (topk_topp): %s', e)
+    try:
+        import importlib
+        _lp = importlib.import_module('vllm.v1.sample.ops.logprobs')
+        if not getattr(_lp, '_iluvatar_compile_patched', False):
+            _orig = _lp.batched_count_greater_than
+            _lp.batched_count_greater_than = getattr(_orig, '__wrapped__', _orig)
+            _lp._iluvatar_compile_patched = True
+            logger.info('patch_sampler_compile_for_iluvatar: unwrapped logprobs.batched_count_greater_than')
+    except Exception as e:
+        logger.warning('patch_sampler_compile_for_iluvatar (logprobs): %s', e)
+
+patch_sampler_compile_for_iluvatar()
+
+
+def patch_torch_inductor_for_iluvatar() -> None:
+    """Patch torch._inductor GPUTarget to use the correct triton backend name.
+
+    torch._inductor always passes device_type='cuda' to GPUTarget, but
+    flagtree triton only registers an 'iluvatar' (3.6.x) or 'corex' (3.2.x)
+    backend -- never 'cuda'.
+
+    Fix: subclass GPUTarget to intercept 'cuda' and remap it to whatever
+    backend name flagtree triton actually registered.
+
+    Compatibility: safe to call when not using flagtree -- if triton
+    has a 'cuda' backend or no backends at all, the patch is skipped.
+
+    Hardware gate: Iluvatar only.
+    TODO: Remove once torch._inductor or flagtree natively handles this.
+    """
+    try:
+        import triton.backends as _tb
+        _registered = list(getattr(_tb, 'backends', {}).keys())
+        # If 'cuda' is already registered (standard triton), no patch needed
+        if 'cuda' in _registered or not _registered:
+            logger.debug('patch_torch_inductor_for_iluvatar: triton has cuda backend or no backends, skipping')
+            return
+        # Probe the actual target string expected by supports_target().
+        # In flagtree triton 3.6.x, the registered backend name is 'iluvatar'
+        # but its supports_target() checks backend == 'corex', so we must
+        # discover the correct probe string at runtime.
+        _target = None
+        try:
+            from triton.backends.compiler import GPUTarget as _GPUTarget
+            for _probe in ('corex', 'iluvatar') + tuple(_registered):
+                try:
+                    _t = object.__new__(_GPUTarget)
+                    _GPUTarget.__init__(_t, _probe, 90, False)
+                    for _bname in _registered:
+                        if _tb.backends[_bname].compiler.supports_target(_t):
+                            _target = _probe
+                            break
+                except Exception:
+                    pass
+                if _target:
+                    break
+        except Exception:
+            pass
+        if not _target:
+            _target = 'corex'  # safe default for all known flagtree versions
+    except Exception:
+        logger.debug('patch_torch_inductor_for_iluvatar: cannot inspect triton backends, skipping')
+        return
+
+    try:
+        import torch._inductor.runtime.triton_heuristics as _th
+        from triton.backends.compiler import GPUTarget as _OrigGPUTarget
+
+        if getattr(_th, '_iluvatar_gputarget_patched', False):
+            return
+
+        _remap_target = _target
+
+        class _IluvatarGPUTarget(_OrigGPUTarget):
+            """GPUTarget wrapper that remaps 'cuda' to the flagtree backend."""
+            def __new__(cls, backend, *args, **kwargs):
+                if backend == 'cuda':
+                    backend = _remap_target
+                return super().__new__(cls)
+
+            def __init__(self, backend, *args, **kwargs):
+                if backend == 'cuda':
+                    backend = _remap_target
+                super().__init__(backend, *args, **kwargs)
+
+        _th.GPUTarget = _IluvatarGPUTarget
+        _th._iluvatar_gputarget_patched = True
+        logger.info(
+            "Patched torch._inductor GPUTarget: 'cuda' -> '%s' (iluvatar)",
+            _remap_target,
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to patch torch._inductor for iluvatar triton backend: %s", e
+        )
+
+patch_torch_inductor_for_iluvatar()
 
 
 class IluvatarBackend(Backend):
