@@ -22,7 +22,15 @@ if current_platform.is_out_of_tree():
             return None
 
     get_scheduler_metadata = _dummy_ops.get_scheduler_metadata
-    reshape_and_cache_flash = ops.reshape_and_cache_flash
+    # Route reshape_and_cache_flash through the FL dispatch manager instead of
+    # binding vllm._custom_ops.reshape_and_cache_flash directly. On an empty
+    # vllm wheel (VLLM_TARGET_DEVICE=empty) the latter dispatches to the missing
+    # torch.ops._C_cache_ops C kernel and raises at the first forward pass.
+    # CachedOp resolves to the flag_gems (Triton) implementation registered
+    # under op_name "reshape_and_cache_flash", with policy-driven fallback.
+    from vllm_fl.dispatch import CachedOp
+
+    reshape_and_cache_flash = CachedOp("reshape_and_cache_flash")
 
 
 def get_flash_attn_version(
