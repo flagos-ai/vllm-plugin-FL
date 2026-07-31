@@ -62,7 +62,8 @@ env_defaults: {}
   tests:
     e2e:
       # Add or remove test cases per model
-      inference: {}
+      inference:
+        qwen3: ["06b_tp2"]
       serving:
         qwen3: ["06b_tp2"]
     functional:
