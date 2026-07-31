@@ -147,33 +147,6 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Run a Task
 
-#### FlagOS-Compressor INT8 inference
-
-The plugin consumes the standard compressed-tensors `pack-quantized` INT8
-checkpoints written by FlagOS-Compressor:
-
-- channelwise weights run as dynamic per-token W8A8 by default;
-- groupwise weights run as W8A16;
-- routed-expert W8A16 uses the FlagGems fused-MoE implementation.
-
-Set `VLLM_FL_INT8_MODE` before starting vLLM when an explicit activation mode
-is required:
-
-```sh
-# auto: channel -> W8A8, group -> W8A16 (default)
-export VLLM_FL_INT8_MODE=auto
-
-# Force channelwise packed weights to retain W8A16 activations.
-export VLLM_FL_INT8_MODE=w8a16
-
-# Require W8A8; groupwise checkpoints are rejected with a clear error.
-export VLLM_FL_INT8_MODE=w8a8
-```
-
-W8A8 requires a checkpoint quantized with
-`flagos-compressor quantize --bits 8 --strategy channel`. W8A16 accepts either
-channelwise weights or the default groupwise INT8 format.
-
 #### Offline Batched Inference
 With vLLM and vLLM-fl installed, you can start generating texts for list of input prompts (i.e. offline batch inferencing). See the example script: [offline_inference](./examples/offline_inference.py). Or use blow python script directly.
 ```python
