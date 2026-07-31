@@ -14,10 +14,12 @@
 
 from .reference import (
     dynamic_per_token_quant_int8,
+    unpack_uint8b128_int32,
     w8a8_linear_reference,
 )
 
 __all__ = [
     "dynamic_per_token_quant_int8",
+    "unpack_uint8b128_int32",
     "w8a8_linear_reference",
 ]

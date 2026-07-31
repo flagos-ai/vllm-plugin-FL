@@ -16,9 +16,8 @@ from vllm_fl.quantization.compressed_tensors import (
     validate_compressed_tensors_wna16_config,
 )
 from vllm_fl.quantization.marlin import is_marlin_moe_platform
-from vllm_fl.quantization.w8a8 import moe as w8a8_moe_adapter
-from vllm_fl.quantization.wna16 import kernels as wna16_kernels
-from vllm_fl.quantization.wna16 import moe as moe_adapter
+from vllm_fl.quantization.w8a8 import moe as w8a8_moe_adapter, packed as packed_w8a8
+from vllm_fl.quantization.wna16 import kernels as wna16_kernels, moe as moe_adapter
 
 
 def _config():
@@ -133,13 +132,18 @@ def test_w8a8_registration_does_not_depend_on_wna16_kernel(monkeypatch):
         lambda: calls.append("w8a8"),
     )
     monkeypatch.setattr(
+        packed_w8a8,
+        "install_packed_w8a8_scheme",
+        lambda: calls.append("packed-w8a8"),
+    )
+    monkeypatch.setattr(
         wna16_kernels,
         "is_wna16_moe_available",
         lambda: False,
     )
 
     assert compressed_tensors.register_compressed_tensors_oot() is report
-    assert calls == ["w8a8"]
+    assert calls == ["packed-w8a8", "w8a8"]
 
 
 def test_accepts_standard_w4a16_group_config():
@@ -185,6 +189,11 @@ def test_local_moe_adapter_is_not_installed_without_kernel(monkeypatch):
     monkeypatch.setattr(
         moe_adapter.kernels,
         "is_wna16_moe_available",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        moe_adapter,
+        "is_flaggems_wna16_moe_available",
         lambda: False,
     )
     assert moe_adapter.install_fl_wna16_moe_method() is False

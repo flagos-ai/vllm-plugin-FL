@@ -16,8 +16,23 @@ import torch
 
 from vllm_fl.quantization.w8a8.reference import (
     dynamic_per_token_quant_int8,
+    unpack_uint8b128_int32,
     w8a8_linear_reference,
 )
+
+
+def test_flagos_uint8b128_unpack_roundtrip():
+    values = torch.tensor(
+        [
+            [-128, -127, -1, 0, 1, 126, 127, 42],
+            [127, 0, -128, 1, -1, 64, -64, 7],
+        ],
+        dtype=torch.int8,
+    )
+    codes = (values.to(torch.int16) + 128).to(torch.uint8)
+    packed = codes.contiguous().view(torch.int32)
+
+    assert torch.equal(unpack_uint8b128_int32(packed), values)
 
 
 def test_dynamic_per_token_quant_uses_independent_row_scales():

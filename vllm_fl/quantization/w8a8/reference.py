@@ -17,6 +17,22 @@ from __future__ import annotations
 import torch
 
 
+def unpack_uint8b128_int32(
+    weight_packed: torch.Tensor,
+    *,
+    in_features: int | None = None,
+) -> torch.Tensor:
+    """Unpack compressed-tensors offset-binary INT8 words."""
+    if weight_packed.ndim != 2 or weight_packed.dtype != torch.int32:
+        raise ValueError("weight_packed must be a 2D int32 tensor")
+    codes = weight_packed.contiguous().view(torch.uint8)
+    if in_features is not None:
+        if in_features < 0 or in_features > codes.shape[1]:
+            raise ValueError("in_features is incompatible with weight_packed")
+        codes = codes[:, :in_features]
+    return (codes.to(torch.int16) - 128).to(torch.int8)
+
+
 def dynamic_per_token_quant_int8(
     x: torch.Tensor,
     *,
@@ -34,12 +50,7 @@ def dynamic_per_token_quant_int8(
     x_2d = x.reshape(-1, original_shape[-1])
     absmax = x_2d.abs().amax(dim=-1, keepdim=True)
     scale = absmax.clamp(min=eps).to(torch.float32) / 127.0
-    quantized = (
-        (x_2d.to(torch.float32) / scale)
-        .round()
-        .clamp(-127, 127)
-        .to(torch.int8)
-    )
+    quantized = (x_2d.to(torch.float32) / scale).round().clamp(-127, 127).to(torch.int8)
     return (
         quantized.reshape(original_shape),
         scale.reshape(*original_shape[:-1], 1),
@@ -87,4 +98,8 @@ def w8a8_linear_reference(
     return output.to(x.dtype).reshape(*x.shape[:-1], weight.shape[0])
 
 
-__all__ = ["dynamic_per_token_quant_int8", "w8a8_linear_reference"]
+__all__ = [
+    "dynamic_per_token_quant_int8",
+    "unpack_uint8b128_int32",
+    "w8a8_linear_reference",
+]

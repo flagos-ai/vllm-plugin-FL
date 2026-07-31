@@ -244,9 +244,8 @@ def inspect_vllm_compressed_tensors_api() -> CompatibilityReport:
 def register_compressed_tensors_oot() -> CompatibilityReport:
     """Configure compressed-tensors runtime selection for the FL platform.
 
-    W8A8 uses FlagGems and is registered independently. WNA16 remains a no-op
-    unless the plugin-local MoE operator is built, keeping vLLM's native
-    Marlin/generic selection untouched otherwise.
+    W8A8 uses FlagGems and is registered independently. W8A16 linear uses the
+    portable Triton kernel, while routed MoE uses FlagGems when enabled.
     """
     report = inspect_vllm_compressed_tensors_api()
 
@@ -257,7 +256,11 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
             from vllm_fl.quantization.w8a8.moe import (
                 install_fl_w8a8_moe_selector,
             )
+            from vllm_fl.quantization.w8a8.packed import (
+                install_packed_w8a8_scheme,
+            )
 
+            install_packed_w8a8_scheme()
             install_fl_w8a8_moe_selector()
         except (ImportError, AttributeError, OSError, RuntimeError) as exc:
             logger.warning(
@@ -265,9 +268,11 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
                 exc,
             )
 
-    from vllm_fl.quantization.wna16.kernels import is_wna16_moe_available
+    from vllm_fl.quantization.wna16.moe import (
+        is_fl_wna16_moe_available,
+    )
 
-    if not is_wna16_moe_available():
+    if not is_fl_wna16_moe_available():
         return report
 
     # Linear registration is independent and handled by
@@ -290,7 +295,7 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
 
             if not install_fl_wna16_moe_method():
                 logger.warning(
-                    "FL WNA16 MoE operator disappeared during registration; "
+                    "FL WNA16 MoE backend disappeared during registration; "
                     "leaving vLLM's upstream backend selection unchanged"
                 )
                 return report

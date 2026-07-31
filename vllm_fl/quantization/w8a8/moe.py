@@ -13,6 +13,7 @@
 """Route vLLM's W8A8 INT8 MoE scheme to the FL experts implementation."""
 
 from importlib import import_module
+from importlib.util import find_spec
 
 _ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe"
 _CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config"
@@ -67,9 +68,7 @@ def install_fl_w8a8_moe_selector() -> bool:
             _CONFIG_BUILDER_MARKER,
             True,
         )
-        scheme_module.make_int8_moe_quant_config = (
-            make_int8_moe_quant_config_fl
-        )
+        scheme_module.make_int8_moe_quant_config = make_int8_moe_quant_config_fl
 
     current_selector = oracle_module.select_int8_moe_backend
     if getattr(current_selector, _ADAPTER_MARKER, False):
@@ -91,14 +90,15 @@ def install_fl_w8a8_moe_selector() -> bool:
 
         from vllm_fl.utils import is_oot_enabled, use_flaggems_op
 
-        canonical_w8a8 = (
-            weight_key in (None, kInt8StaticChannelSym)
-            and activation_key in (None, kInt8DynamicTokenSym)
-        )
+        canonical_w8a8 = weight_key in (
+            None,
+            kInt8StaticChannelSym,
+        ) and activation_key in (None, kInt8DynamicTokenSym)
         use_fl = (
             current_platform.is_out_of_tree()
             and is_oot_enabled()
             and use_flaggems_op("fused_moe")
+            and find_spec("flag_gems") is not None
             and canonical_w8a8
         )
         if not use_fl:
