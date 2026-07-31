@@ -228,10 +228,11 @@ def _ascendc_fused_experts_impl(
     )[0]
 
     # Scatter/sum the expert outputs back to the token dimension.
+    # Match vllm-ascend: npu_moe_token_unpermute expects bf16 probs.
     out = torch_npu.npu_moe_token_unpermute(
         permuted_tokens=down,
         sorted_indices=expanded_row_idx.abs(),
-        probs=probs,
+        probs=probs.to(down.dtype) if probs is not None else None,
     )
 
     if inplace:
@@ -357,10 +358,11 @@ def _torch_fused_experts_impl(
     )[0]
 
     # Scatter/sum the expert outputs back to the token dimension.
+    # Match vllm-ascend: npu_moe_token_unpermute expects bf16 probs.
     out = torch_npu.npu_moe_token_unpermute(
         permuted_tokens=down,
         sorted_indices=sorted_indices,
-        probs=probs,
+        probs=probs.to(down.dtype) if probs is not None else None,
     )
 
     if inplace:

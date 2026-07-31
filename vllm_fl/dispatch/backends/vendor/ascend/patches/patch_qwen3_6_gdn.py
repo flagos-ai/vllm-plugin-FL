@@ -274,7 +274,11 @@ def _pto_available() -> bool:
     global _PTO_AVAILABLE
     if _PTO_AVAILABLE is not None:
         return _PTO_AVAILABLE
-    if os.environ.get("VLLM_FL_DISABLE_PTO_GDN", "0") == "1":
+    # Default OFF: the PTO megakernel carries A/A_inv/recurrent state in fp16
+    # (see vllm_fl/ops/pto_chunk_gdn/mega_kernel.py), which measurably degrades
+    # accuracy vs the fp32-state Triton chunk path. Re-enable with
+    # VLLM_FL_DISABLE_PTO_GDN=0 once the kernel is reworked to fp32 state.
+    if os.environ.get("VLLM_FL_DISABLE_PTO_GDN", "1") == "1":
         logger.info("VLLM_FL_DISABLE_PTO_GDN=1, keep Triton chunk path")
         _PTO_AVAILABLE = False
         return False
