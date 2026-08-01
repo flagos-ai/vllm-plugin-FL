@@ -14,6 +14,8 @@
 import sys
 from types import SimpleNamespace
 
+import vllm.platforms as platforms
+
 from vllm_fl.quantization.w8a8 import moe as moe_adapter
 
 
@@ -65,6 +67,8 @@ def test_w8a8_moe_selector_patches_oracle_and_scheme(monkeypatch):
         w2_scale="w2",
         a1_scale=None,
         a2_scale=None,
+        w1_bias="b1",
+        w2_bias="b2",
         per_act_token_quant=True,
     )
     assert dynamic_config == {
@@ -72,6 +76,8 @@ def test_w8a8_moe_selector_patches_oracle_and_scheme(monkeypatch):
         "w2_scale": "w2",
         "a1_scale": None,
         "a2_scale": None,
+        "w1_bias": "b1",
+        "w2_bias": "b2",
         "per_act_token_quant": True,
     }
     assert (
@@ -82,6 +88,62 @@ def test_w8a8_moe_selector_patches_oracle_and_scheme(monkeypatch):
         )
         == "upstream-config"
     )
+
+
+def test_w8a8_moe_selector_uses_vllm_functional_experts(monkeypatch):
+    upstream_calls = []
+
+    def upstream_selector(*args, **kwargs):
+        upstream_calls.append((args, kwargs))
+        return "upstream"
+
+    oracle = SimpleNamespace(
+        Int8MoeBackend=SimpleNamespace(TRITON="triton"),
+        select_int8_moe_backend=upstream_selector,
+    )
+    scheme = SimpleNamespace(
+        select_int8_moe_backend=upstream_selector,
+        make_int8_moe_quant_config=lambda **kwargs: kwargs,
+    )
+    modules = {
+        moe_adapter._ORACLE_MODULE: oracle,
+        moe_adapter._SCHEME_MODULE: scheme,
+    }
+    monkeypatch.setattr(
+        moe_adapter,
+        "import_module",
+        lambda name: modules[name],
+    )
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_out_of_tree",
+        lambda self: True,
+    )
+
+    import vllm_fl.utils as fl_utils
+
+    monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
+
+    moe_adapter.install_fl_w8a8_moe_selector()
+    config = SimpleNamespace(
+        moe_parallel_config=SimpleNamespace(
+            use_batched_activation_format=False,
+        )
+    )
+
+    backend, experts_cls = oracle.select_int8_moe_backend(
+        config,
+        weight_key=None,
+        activation_key=None,
+    )
+
+    from vllm_fl.quantization.w8a8.moe_experts import (
+        VllmFunctionalW8A8Experts,
+    )
+
+    assert backend == "triton"
+    assert experts_cls is VllmFunctionalW8A8Experts
+    assert upstream_calls == []
 
 
 def test_w8a8_moe_selector_install_is_idempotent(monkeypatch):

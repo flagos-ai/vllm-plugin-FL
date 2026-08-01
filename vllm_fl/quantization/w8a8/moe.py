@@ -10,10 +10,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Route vLLM's W8A8 INT8 MoE scheme to the FL experts implementation."""
+"""Route vLLM's W8A8 INT8 MoE scheme to native functional experts."""
 
 from importlib import import_module
-from importlib.util import find_spec
+from inspect import Parameter, signature
 
 _ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe"
 _CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config"
@@ -24,14 +24,26 @@ _SCHEME_MODULE = (
 )
 
 
+def _call_with_supported_kwargs(function, /, **kwargs):
+    """Call a vLLM helper while tolerating additive signature differences."""
+    parameters = signature(function).parameters
+    if any(
+        parameter.kind is Parameter.VAR_KEYWORD for parameter in parameters.values()
+    ):
+        return function(**kwargs)
+    return function(
+        **{name: value for name, value in kwargs.items() if name in parameters}
+    )
+
+
 def install_fl_w8a8_moe_selector() -> bool:
-    """Let canonical W8A8 MoE checkpoints reach FlagGems on OOT devices."""
+    """Use vLLM's functional Triton path for canonical W8A8 MoE."""
     oracle_module = import_module(_ORACLE_MODULE)
     scheme_module = import_module(_SCHEME_MODULE)
 
-    # vLLM 0.20.2 treats missing activation scales as W8A16 in the shared
-    # helper. Dynamic per-token W8A8 intentionally has no checkpoint scale, so
-    # preserve the scheme's explicit per_act_token_quant signal instead.
+    # vLLM 0.20.2 through 0.24.0 treat missing activation scales as W8A16 in
+    # the shared helper. Dynamic per-token W8A8 intentionally has no checkpoint
+    # scale, so preserve the scheme's explicit per_act_token_quant signal.
     current_builder = scheme_module.make_int8_moe_quant_config
     if not getattr(current_builder, _CONFIG_BUILDER_MARKER, False):
 
@@ -40,14 +52,19 @@ def install_fl_w8a8_moe_selector() -> bool:
             w2_scale,
             a1_scale=None,
             a2_scale=None,
+            w1_bias=None,
+            w2_bias=None,
             per_act_token_quant=False,
         ):
             if not per_act_token_quant:
-                return current_builder(
+                return _call_with_supported_kwargs(
+                    current_builder,
                     w1_scale=w1_scale,
                     w2_scale=w2_scale,
                     a1_scale=a1_scale,
                     a2_scale=a2_scale,
+                    w1_bias=w1_bias,
+                    w2_bias=w2_bias,
                     per_act_token_quant=False,
                 )
 
@@ -55,11 +72,14 @@ def install_fl_w8a8_moe_selector() -> bool:
                 int8_w8a8_moe_quant_config,
             )
 
-            return int8_w8a8_moe_quant_config(
+            return _call_with_supported_kwargs(
+                int8_w8a8_moe_quant_config,
                 w1_scale=w1_scale,
                 w2_scale=w2_scale,
                 a1_scale=a1_scale,
                 a2_scale=a2_scale,
+                w1_bias=w1_bias,
+                w2_bias=w2_bias,
                 per_act_token_quant=True,
             )
 
@@ -88,18 +108,14 @@ def install_fl_w8a8_moe_selector() -> bool:
         )
         from vllm.platforms import current_platform
 
-        from vllm_fl.utils import is_oot_enabled, use_flaggems_op
+        from vllm_fl.utils import is_oot_enabled
 
         canonical_w8a8 = weight_key in (
             None,
             kInt8StaticChannelSym,
         ) and activation_key in (None, kInt8DynamicTokenSym)
         use_fl = (
-            current_platform.is_out_of_tree()
-            and is_oot_enabled()
-            and use_flaggems_op("fused_moe")
-            and find_spec("flag_gems") is not None
-            and canonical_w8a8
+            current_platform.is_out_of_tree() and is_oot_enabled() and canonical_w8a8
         )
         if not use_fl:
             return current_selector(
@@ -108,15 +124,24 @@ def install_fl_w8a8_moe_selector() -> bool:
                 activation_key=activation_key,
             )
 
+        if getattr(config, "is_lora_enabled", False):
+            raise NotImplementedError(
+                "The vLLM functional W8A8 MoE adapter does not support LoRA"
+            )
         if config.moe_parallel_config.use_batched_activation_format:
             raise ValueError(
                 "FL W8A8 MoE currently requires the standard activation "
                 "format; batched-experts dispatch is not supported"
             )
 
-        from vllm_fl.ops.fused_moe.fused_moe_utils import TritonExpertsFL
+        from vllm_fl.quantization.w8a8.moe_experts import (
+            VllmFunctionalW8A8Experts,
+        )
 
-        return oracle_module.Int8MoeBackend.TRITON, TritonExpertsFL
+        return (
+            oracle_module.Int8MoeBackend.TRITON,
+            VllmFunctionalW8A8Experts,
+        )
 
     setattr(select_int8_moe_backend_fl, _ADAPTER_MARKER, True)
     oracle_module.select_int8_moe_backend = select_int8_moe_backend_fl

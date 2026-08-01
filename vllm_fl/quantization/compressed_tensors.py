@@ -244,8 +244,9 @@ def inspect_vllm_compressed_tensors_api() -> CompatibilityReport:
 def register_compressed_tensors_oot() -> CompatibilityReport:
     """Configure compressed-tensors runtime selection for the FL platform.
 
-    W8A8 uses FlagGems and is registered independently. W8A16 linear uses the
-    portable Triton kernel, while routed MoE uses FlagGems when enabled.
+    W8A8 uses vLLM's native INT8 Linear and functional Triton MoE kernels.
+    W8A16 linear uses the portable Triton kernel, while routed WNA16 MoE uses
+    an FL backend when enabled.
     """
     report = inspect_vllm_compressed_tensors_api()
 

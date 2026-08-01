@@ -312,11 +312,16 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
-        # Fast path (no LoRA): let FlagGems own activation quantization and
-        # both expert GEMMs. This is also the INT8 W8A8/W8A16 path for OOT,
-        # where vLLM's CUDA-only INT8 oracle would otherwise reject the
-        # configuration before reaching the multi-chip kernel. The same
-        # implementation also supports unquantized BF16 experts.
+        # Dynamic W8A8 is handled by VllmFunctionalW8A8Experts so vLLM owns
+        # activation quantization. Do not allow it to fall back into the
+        # FlagGems contract, which expects floating-point input here.
+        if self.quant_config.use_int8_w8a8:
+            raise RuntimeError(
+                "W8A8 MoE must use VllmFunctionalW8A8Experts, not TritonExpertsFL"
+            )
+
+        # Fast path (no LoRA): let FlagGems own both expert GEMMs for
+        # unquantized and W8A16 inputs.
         from vllm_fl.utils import use_flaggems_op
 
         if self._lora_context is None and use_flaggems_op("fused_moe"):
@@ -333,7 +338,7 @@ class TritonExpertsFL(TritonExperts):
                     activation=activation.value,
                     apply_router_weight_on_input=apply_router_weight_on_input,
                     use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
-                    use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                    use_int8_w8a8=False,
                     use_int8_w8a16=self.quant_config.use_int8_w8a16,
                     use_int4_w4a16=self.quant_config.use_int4_w4a16,
                     per_channel_quant=self.per_act_token_quant,

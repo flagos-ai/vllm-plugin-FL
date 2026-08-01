@@ -63,7 +63,7 @@ def _patch_unquantized_moe_oracle() -> None:
 
 
 def _patch_w8a8_moe_oracle() -> None:
-    """Route canonical dynamic-token INT8 MoE to the FL experts path."""
+    """Route dynamic-token INT8 MoE to vLLM's functional experts path."""
     from vllm_fl.quantization.w8a8.moe import (
         install_fl_w8a8_moe_selector,
     )

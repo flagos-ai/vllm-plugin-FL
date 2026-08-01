@@ -36,11 +36,7 @@ from .int8_mode import (
     is_packed_int8_weight_only,
     should_use_packed_w8a8,
 )
-from .linear import (
-    W8A8_LINEAR_BACKEND_ENV,
-    create_w8a8_linear_kernel,
-    get_w8a8_linear_backend,
-)
+from .linear import create_w8a8_linear_kernel
 from .reference import unpack_uint8b128_int32
 
 _PATCH_MARKER = "_vllm_fl_packed_w8a8"
@@ -168,8 +164,7 @@ def install_packed_w8a8_scheme() -> bool:
             try:
                 return FLPackedW8A8Scheme(layer_name=layer_name)
             except RuntimeError as exc:
-                backend = get_w8a8_linear_backend()
-                if get_int8_inference_mode() == "w8a8" or backend != "auto":
+                if get_int8_inference_mode() == "w8a8":
                     raise RuntimeError(
                         f"Packed W8A8 was requested but is unavailable: {exc}"
                     ) from exc
@@ -189,9 +184,7 @@ def install_packed_w8a8_scheme() -> bool:
 __all__ = [
     "FLPackedW8A8Scheme",
     "INT8_MODE_ENV",
-    "W8A8_LINEAR_BACKEND_ENV",
     "get_int8_inference_mode",
-    "get_w8a8_linear_backend",
     "install_packed_w8a8_scheme",
     "is_packed_int8_weight_only",
     "should_use_packed_w8a8",
