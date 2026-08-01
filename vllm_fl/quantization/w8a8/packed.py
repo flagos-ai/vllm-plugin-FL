@@ -36,7 +36,11 @@ from .int8_mode import (
     is_packed_int8_weight_only,
     should_use_packed_w8a8,
 )
-from .linear import FLW8A8DynamicLinearKernel
+from .linear import (
+    W8A8_LINEAR_BACKEND_ENV,
+    create_w8a8_linear_kernel,
+    get_w8a8_linear_backend,
+)
 from .reference import unpack_uint8b128_int32
 
 _PATCH_MARKER = "_vllm_fl_packed_w8a8"
@@ -45,14 +49,14 @@ _PATCH_MARKER = "_vllm_fl_packed_w8a8"
 class FLPackedW8A8Scheme(CompressedTensorsScheme):
     """Load ``weight_packed`` and execute dynamic-token/per-channel W8A8."""
 
-    def __init__(self) -> None:
+    def __init__(self, layer_name: str | None = None) -> None:
         self.input_size_per_partition = 0
         config = Int8ScaledMMLinearLayerConfig(
             is_channelwise=True,
             is_static_input_scheme=False,
             input_symmetric=True,
         )
-        self.kernel = FLW8A8DynamicLinearKernel(
+        self.kernel = create_w8a8_linear_kernel(
             config,
             [
                 "weight_packed",
@@ -61,6 +65,7 @@ class FLPackedW8A8Scheme(CompressedTensorsScheme):
                 "input_zero_point",
                 "azp_adj",
             ],
+            layer_name or self.__class__.__name__,
         )
 
     @classmethod
@@ -83,6 +88,7 @@ class FLPackedW8A8Scheme(CompressedTensorsScheme):
             )
         self.input_size_per_partition = input_size_per_partition
         output_size_per_partition = sum(output_partition_sizes)
+        layer.logical_widths = output_partition_sizes
         weight = PackedvLLMParameter(
             input_dim=1,
             output_dim=0,
@@ -99,7 +105,7 @@ class FLPackedW8A8Scheme(CompressedTensorsScheme):
             data=torch.empty(
                 output_size_per_partition,
                 1,
-                dtype=params_dtype,
+                dtype=torch.float32,
             ),
             output_dim=0,
             weight_loader=weight_loader,
@@ -159,13 +165,14 @@ def install_packed_w8a8_scheme() -> bool:
             input_quant,
             effective_format,
         ):
-            supported, reason = FLW8A8DynamicLinearKernel.is_supported()
-            if supported:
-                return FLPackedW8A8Scheme()
-            if get_int8_inference_mode() == "w8a8":
-                raise RuntimeError(
-                    f"Packed W8A8 was requested but is unavailable: {reason}"
-                )
+            try:
+                return FLPackedW8A8Scheme(layer_name=layer_name)
+            except RuntimeError as exc:
+                backend = get_w8a8_linear_backend()
+                if get_int8_inference_mode() == "w8a8" or backend != "auto":
+                    raise RuntimeError(
+                        f"Packed W8A8 was requested but is unavailable: {exc}"
+                    ) from exc
         return current(
             self,
             weight_quant,
@@ -182,7 +189,9 @@ def install_packed_w8a8_scheme() -> bool:
 __all__ = [
     "FLPackedW8A8Scheme",
     "INT8_MODE_ENV",
+    "W8A8_LINEAR_BACKEND_ENV",
     "get_int8_inference_mode",
+    "get_w8a8_linear_backend",
     "install_packed_w8a8_scheme",
     "is_packed_int8_weight_only",
     "should_use_packed_w8a8",

@@ -12,12 +12,14 @@
 # limitations under the License.
 
 import pytest
+import torch
 from compressed_tensors.quantization import (
     QuantizationArgs,
     QuantizationStrategy,
     QuantizationType,
 )
 
+from vllm_fl.quantization.w8a8 import packed
 from vllm_fl.quantization.w8a8.int8_mode import (
     INT8_MODE_ENV,
     should_use_packed_w8a8,
@@ -66,3 +68,40 @@ def test_w8a8_mode_rejects_groupwise_checkpoint(monkeypatch):
             None,
             "pack-quantized",
         )
+
+
+def test_packed_scheme_uses_native_compatible_layer_contract(monkeypatch):
+    class FakeKernel:
+        def process_weights_after_loading(self, layer):
+            pass
+
+        def apply_weights(self, layer, x, bias):
+            raise AssertionError("not used")
+
+    monkeypatch.setattr(
+        packed,
+        "create_w8a8_linear_kernel",
+        lambda *args, **kwargs: FakeKernel(),
+    )
+    monkeypatch.setattr(
+        "vllm.model_executor.parameter.get_tensor_model_parallel_rank",
+        lambda: 0,
+    )
+    monkeypatch.setattr(
+        "vllm.model_executor.parameter.get_tensor_model_parallel_world_size",
+        lambda: 1,
+    )
+    scheme = packed.FLPackedW8A8Scheme(layer_name="model.linear")
+    layer = torch.nn.Module()
+    scheme.create_weights(
+        layer,
+        output_partition_sizes=[4, 4],
+        input_size_per_partition=8,
+        params_dtype=torch.bfloat16,
+        weight_loader=lambda *args, **kwargs: None,
+    )
+
+    assert layer.logical_widths == [4, 4]
+    assert layer.weight_packed.shape == (8, 2)
+    assert layer.weight_scale.shape == (8, 1)
+    assert layer.weight_scale.dtype == torch.float32
