@@ -73,6 +73,24 @@ def register_builtins(registry) -> None:
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),
+        # MoE align
+        OpImpl(
+            op_name="moe_align_block_size",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
+        # MoE sum
+        OpImpl(
+            op_name="moe_sum",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_sum, is_avail),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
         # topk softmax
         OpImpl(
             op_name="topk_softmax",

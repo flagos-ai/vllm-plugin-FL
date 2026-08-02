@@ -54,6 +54,7 @@ op_backends:
     - flagos
     - reference
   topk_softmax:
+    - vendor:metax
     - flagos
     - reference
 

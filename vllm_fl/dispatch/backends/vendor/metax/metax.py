@@ -160,6 +160,31 @@ class MacaBackend(Backend):
         # Default to FLASH_ATTN
         return AttentionBackendEnum.FLASH_ATTN.get_path()
 
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: Optional[torch.Tensor] = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ):
+        from .impl.fused_moe import moe_align_block_size_maca
+
+        return moe_align_block_size_maca(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map,
+            pad_sorted_ids,
+            ignore_invalid_experts,
+        )
+
+    def moe_sum(self, inp, out):
+        from .impl.fused_moe import moe_sum_maca
+
+        moe_sum_maca(inp, out)
+
     def topk_softmax(
         self,
         topk_weights,
@@ -196,6 +221,7 @@ class MacaBackend(Backend):
         per_channel_quant=False,
         block_shape=None,
         B_bias=None,
+        _topk_ids=None,
     ):
         from .impl.fused_moe import invoke_fused_moe_triton_kernel_maca
 
@@ -220,4 +246,5 @@ class MacaBackend(Backend):
             per_channel_quant=per_channel_quant,
             block_shape=block_shape,
             B_bias=B_bias,
+            _topk_ids=_topk_ids,
         )
