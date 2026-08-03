@@ -477,16 +477,24 @@ class TestWrapAttentionOpsForBreakGraph:
         registry, impl = self._make_registry_with_attention()
         original_fn = impl.fn
         bg.wrap_attention_ops_for_break_graph(registry)
-        assert impl.fn is not original_fn
+        # OpImpl is frozen — wrap creates a new impl and re-registers it.
+        # Check the fn in the registry is now different from the original.
+        new_impls = registry.get_implementations("attention_backend")
+        assert any(i.fn is not original_fn for i in new_impls)
 
     def test_idempotent_double_call(self, monkeypatch):
         import vllm_fl.compilation.break_graph as bg
         monkeypatch.setattr(bg, "is_breakable_cudagraph_enabled", lambda: True)
         registry, impl = self._make_registry_with_attention()
         bg.wrap_attention_ops_for_break_graph(registry)
-        fn_after_first = impl.fn
+        # Capture the wrapped fn after first call
+        fns_after_first = [i.fn for i in registry.get_implementations("attention_backend")]
         bg.wrap_attention_ops_for_break_graph(registry)
-        assert impl.fn is fn_after_first
+        fns_after_second = [i.fn for i in registry.get_implementations("attention_backend")]
+        # Second call must not add more impls or re-wrap
+        assert len(fns_after_first) == len(fns_after_second)
+        for f1, f2 in zip(fns_after_first, fns_after_second):
+            assert f1 is f2
 
     def test_non_attention_op_not_touched(self, monkeypatch):
         import vllm_fl.compilation.break_graph as bg
@@ -513,7 +521,9 @@ class TestWrapAttentionOpsForBreakGraph:
         def attn_fn(q, k, v, out): log.append((q, k, v))
         registry, impl = self._make_registry_with_attention(fn=attn_fn)
         bg.wrap_attention_ops_for_break_graph(registry)
-        impl.fn(1, 2, 3, None)
+        # Call through the new impl in the registry (original impl is frozen)
+        new_impl = registry.get_implementations("attention_backend")[-1]
+        new_impl.fn(1, 2, 3, None)
         assert log == [(1, 2, 3)]
 
     def test_empty_registry_no_crash(self, monkeypatch):
@@ -545,9 +555,11 @@ class TestWrapAttentionOpsForBreakGraph:
         registry, impl = self._make_registry_with_attention(fn=attn_fn)
         bg.wrap_attention_ops_for_break_graph(registry)
 
+        # Call through the new impl in the registry
+        new_impl = registry.get_implementations("attention_backend")[-1]
         cap = BreakableCUDAGraphCapture()
         with cap:
-            impl.fn(1, 2, 3, None)
+            new_impl.fn(1, 2, 3, None)
 
         assert log == ["attn"]
         assert cap.num_eager_breaks == 1
