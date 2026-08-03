@@ -24,6 +24,8 @@ def apply_musa_patches():
     patch_cuda_stream_for_musa()
     patch_inductor_triton_for_musa()
     patch_moe_topk_softmax_for_musa()
+    patch_triton_mtgpu_alias_for_musa()
+    patch_device_config_for_musa()
 
 
 def patch_topk_topp_sampler():
@@ -368,3 +370,100 @@ def patch_moe_topk_softmax_for_musa():
         logger.info(
             "Patched vllm_topk_softmax for MUSA (FlagGems) in: %s",
             ", ".join(patched))
+
+
+def patch_triton_mtgpu_alias_for_musa():
+    """Alias triton.backends.mtgpu -> triton.backends.mthreads.
+
+    flagtree >= 3.6 renamed the mthreads backend from ``mtgpu`` to
+    ``mthreads``.  torch_musa's inductor code still imports from the old
+    ``triton.backends.mtgpu`` namespace (e.g.
+    ``torch_musa/_inductor/utils.py`` does
+    ``from triton.backends.mtgpu.musa_testing import do_bench``).
+
+    We insert ``mtgpu`` as an alias in ``sys.modules`` and as an attribute
+    on ``triton.backends`` so both attribute access and import statements
+    work transparently.
+
+    TODO: remove once torch_musa updates its inductor code to use
+    ``triton.backends.mthreads``.
+    """
+    try:
+        import sys
+        import triton.backends as _tb
+
+        if hasattr(_tb, "mtgpu"):
+            return  # already present, nothing to do
+
+        if not hasattr(_tb, "mthreads"):
+            logger.debug(
+                "patch_triton_mtgpu_alias_for_musa: "
+                "triton.backends.mthreads not found, skipping")
+            return
+
+        # Attribute alias
+        _tb.mtgpu = _tb.mthreads
+
+        # sys.modules alias: triton.backends.mtgpu -> triton.backends.mthreads
+        parent = sys.modules.get("triton.backends.mthreads")
+        if parent is not None:
+            sys.modules.setdefault("triton.backends.mtgpu", parent)
+            # Also alias every sub-module
+            for k, v in list(sys.modules.items()):
+                if k.startswith("triton.backends.mthreads."):
+                    alias = k.replace(
+                        "triton.backends.mthreads.",
+                        "triton.backends.mtgpu.",
+                        1,
+                    )
+                    sys.modules.setdefault(alias, v)
+
+        logger.info(
+            "Aliased triton.backends.mtgpu -> triton.backends.mthreads "
+            "(torch_musa inductor compatibility)")
+    except Exception as exc:
+        logger.warning(
+            "patch_triton_mtgpu_alias_for_musa failed: %s", exc)
+
+
+def patch_device_config_for_musa():
+    """Patch vllm DeviceConfig so that device_type='musa' is accepted.
+
+    vllm 0.24.0's ``DeviceConfig.__post_init__`` calls
+    ``torch.device(self.device_type)`` which raises
+    ``RuntimeError: Device string must not be empty`` when device_type is
+    ``'musa'`` because plain ``torch.device('musa')`` is invalid without an
+    index — ``torch.device('musa:0')`` works after torch_musa is imported.
+
+    We monkey-patch ``__post_init__`` to intercept the ``'musa'`` case and
+    substitute ``torch.device('musa:0')`` before the original logic runs.
+
+    TODO: remove once vllm DeviceConfig handles non-CUDA device strings
+    natively, or torch_musa registers 'musa' as a valid bare device string.
+    """
+    try:
+        import torch
+        import torch_musa  # noqa: F401 — registers musa device type with torch
+        import vllm.config.device as _dc_mod
+
+        if getattr(_dc_mod.DeviceConfig, "_musa_post_init_patched", False):
+            return
+
+        _orig_post_init = _dc_mod.DeviceConfig.__post_init__
+
+        def _patched_post_init(self):
+            # Intercept before torch.device("musa") is called (invalid).
+            if getattr(self, "device", None) == "musa":
+                self.device_type = "musa"
+                self.device = torch.device("musa:0")
+                return
+            _orig_post_init(self)
+
+        _dc_mod.DeviceConfig.__post_init__ = _patched_post_init
+        _dc_mod.DeviceConfig._musa_post_init_patched = True
+        logger.info(
+            "Patched DeviceConfig.__post_init__ for MUSA "
+            "(torch.device('musa:0') workaround)")
+    except Exception as exc:
+        logger.warning(
+            "patch_device_config_for_musa failed: %s", exc)
