@@ -383,44 +383,69 @@ def patch_triton_mtgpu_alias_for_musa():
 
     We insert ``mtgpu`` as an alias in ``sys.modules`` and as an attribute
     on ``triton.backends`` so both attribute access and import statements
-    work transparently.
+    work transparently.  We also create a ``musa_testing`` stub module that
+    exposes ``do_bench`` from ``triton.testing`` so that torch_musa inductor
+    code that benchmarks kernels continues to work when flagtree no longer
+    ships ``triton.backends.mtgpu.musa_testing``.
 
     TODO: remove once torch_musa updates its inductor code to use
-    ``triton.backends.mthreads``.
+    ``triton.backends.mthreads`` and the current triton.testing API.
     """
     try:
         import sys
+        import types
         import triton.backends as _tb
 
-        if hasattr(_tb, "mtgpu"):
-            return  # already present, nothing to do
+        # ------------------------------------------------------------------ #
+        # 1. Alias triton.backends.mtgpu -> triton.backends.mthreads          #
+        # ------------------------------------------------------------------ #
+        if not hasattr(_tb, "mtgpu"):
+            if hasattr(_tb, "mthreads"):
+                _tb.mtgpu = _tb.mthreads
+                parent = sys.modules.get("triton.backends.mthreads")
+                if parent is not None:
+                    sys.modules.setdefault("triton.backends.mtgpu", parent)
+                    for k, v in list(sys.modules.items()):
+                        if k.startswith("triton.backends.mthreads."):
+                            alias = k.replace(
+                                "triton.backends.mthreads.",
+                                "triton.backends.mtgpu.",
+                                1,
+                            )
+                            sys.modules.setdefault(alias, v)
+                logger.info(
+                    "Aliased triton.backends.mtgpu -> triton.backends.mthreads "
+                    "(torch_musa inductor compatibility)")
+            else:
+                logger.debug(
+                    "patch_triton_mtgpu_alias_for_musa: "
+                    "triton.backends.mthreads not found, skipping alias")
 
-        if not hasattr(_tb, "mthreads"):
-            logger.debug(
-                "patch_triton_mtgpu_alias_for_musa: "
-                "triton.backends.mthreads not found, skipping")
-            return
+        # ------------------------------------------------------------------ #
+        # 2. Create triton.backends.mtgpu.musa_testing stub if missing        #
+        # ------------------------------------------------------------------ #
+        stub_key = "triton.backends.mtgpu.musa_testing"
+        if stub_key not in sys.modules:
+            # Try to get do_bench from triton.testing (always present)
+            try:
+                from triton.testing import do_bench as _do_bench
+            except ImportError:
+                _do_bench = None
 
-        # Attribute alias
-        _tb.mtgpu = _tb.mthreads
+            stub = types.ModuleType(stub_key)
+            if _do_bench is not None:
+                stub.do_bench = _do_bench
+            sys.modules[stub_key] = stub
 
-        # sys.modules alias: triton.backends.mtgpu -> triton.backends.mthreads
-        parent = sys.modules.get("triton.backends.mthreads")
-        if parent is not None:
-            sys.modules.setdefault("triton.backends.mtgpu", parent)
-            # Also alias every sub-module
-            for k, v in list(sys.modules.items()):
-                if k.startswith("triton.backends.mthreads."):
-                    alias = k.replace(
-                        "triton.backends.mthreads.",
-                        "triton.backends.mtgpu.",
-                        1,
-                    )
-                    sys.modules.setdefault(alias, v)
+            # Also expose as attribute on the mtgpu package if it exists
+            mtgpu_mod = sys.modules.get("triton.backends.mtgpu")
+            if mtgpu_mod is not None:
+                mtgpu_mod.musa_testing = stub
 
-        logger.info(
-            "Aliased triton.backends.mtgpu -> triton.backends.mthreads "
-            "(torch_musa inductor compatibility)")
+            logger.info(
+                "Created triton.backends.mtgpu.musa_testing stub "
+                "(do_bench -> triton.testing.do_bench)")
+
     except Exception as exc:
         logger.warning(
             "patch_triton_mtgpu_alias_for_musa failed: %s", exc)
