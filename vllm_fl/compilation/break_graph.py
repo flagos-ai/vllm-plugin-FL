@@ -300,7 +300,7 @@ def wrap_attention_ops_for_break_graph(registry: Any) -> None:
     wrapped_count = 0
     for op_name in _BREAK_POINT_OP_NAMES:
         try:
-            impls = registry.get(op_name)
+            impls = registry.get_implementations(op_name)
         except Exception:
             continue
         if not impls:
