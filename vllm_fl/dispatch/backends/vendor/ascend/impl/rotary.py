@@ -36,6 +36,26 @@ def rotary_embedding_ascend(
     Returns:
         Tuple of (embedded_query, embedded_key)
     """
+    # The ATB rotary kernel used by torch-npu does not support FP32 inputs.
+    # Launch failures are reported asynchronously and otherwise surface in a
+    # later, unrelated operator. Keep the optimized path for model dtypes and
+    # use the reference implementation for unsupported dtypes.
+    if query.dtype not in (torch.float16, torch.bfloat16):
+        from vllm_fl.dispatch.backends.reference.impl.rotary import (
+            rotary_embedding_torch,
+        )
+
+        return rotary_embedding_torch(
+            obj,
+            query,
+            key,
+            cos,
+            sin,
+            position_ids,
+            rotary_interleaved=rotary_interleaved,
+            inplace=inplace,
+        )
+
     import torch_npu
 
     # query/key shape: [num_tokens, num_heads, rotary_dim]
