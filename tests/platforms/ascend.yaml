@@ -63,9 +63,9 @@ env_defaults: {}
     e2e:
       # Add or remove test cases per model
       inference:
-        qwen3: ["06b_tp2"]
+        qwen3_6: ["27b_tp2_eager_ascend", "35b_a3b_tp2_eager_ascend"]
       serving:
-        qwen3: ["06b_tp2"]
+        qwen3_6: ["27b_tp2_eager_ascend", "35b_a3b_tp2_eager_ascend"]
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

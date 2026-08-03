@@ -21,19 +21,24 @@ export FL_MODEL_BASE_PATH="${FL_MODEL_BASE_PATH:-/data/models}"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
 QWEN_ROOT="${FL_MODEL_BASE_PATH}/Qwen"
-MODEL_ID="Qwen/Qwen3-0.6B"
-MODEL_DIR="${QWEN_ROOT}/Qwen3-0.6B"
+MODEL_IDS=(
+    "Qwen/Qwen3-0.6B"
+    "Qwen/Qwen3.6-27B"
+    "Qwen/Qwen3.6-35B-A3B"
+)
 
 mkdir -p "${QWEN_ROOT}"
 
-if [[ -f "${MODEL_DIR}/config.json" ]]; then
-    echo "Model already available: ${MODEL_DIR}"
-    exit 0
-fi
+for MODEL_ID in "${MODEL_IDS[@]}"; do
+    MODEL_DIR="${QWEN_ROOT}/${MODEL_ID#Qwen/}"
+    if [[ -f "${MODEL_DIR}/config.json" ]]; then
+        echo "Model already available: ${MODEL_DIR}"
+        continue
+    fi
 
-export MODEL_ID MODEL_DIR
-echo "Downloading ${MODEL_ID} from ${HF_ENDPOINT} to ${MODEL_DIR}"
-python - <<'PY'
+    export MODEL_ID MODEL_DIR
+    echo "Downloading ${MODEL_ID} from ${HF_ENDPOINT} to ${MODEL_DIR}"
+    python - <<'PY'
 import os
 
 from huggingface_hub import snapshot_download
@@ -45,5 +50,6 @@ snapshot_download(
 )
 PY
 
-test -f "${MODEL_DIR}/config.json"
-echo "Model ready: ${MODEL_DIR}"
+    test -f "${MODEL_DIR}/config.json"
+    echo "Model ready: ${MODEL_DIR}"
+done
