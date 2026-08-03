@@ -2,13 +2,19 @@
 
 """Tests for the Ascend rotary embedding implementation."""
 
+import pytest
 import torch
 
 from vllm_fl.dispatch.backends.reference.impl.rotary import rotary_embedding_torch
-from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import rotary_embedding_ascend
+
+pytest.importorskip("torch_npu")
 
 
 def test_ascend_rotary_falls_back_for_float32():
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
+        rotary_embedding_ascend,
+    )
+
     num_tokens = 4
     num_heads = 2
     head_size = 8
