@@ -36,6 +36,10 @@ generate:
 serve:
   served_model_name: "qwen"
   startup_retries: 180
+  extra_args:
+    - "--no-enable-chunked-prefill"
+    - "--no-async-scheduling"
+    - "--no-enable-prefix-caching"
   endpoints: ["chat"]
   stream: true
   max_tokens: 1024

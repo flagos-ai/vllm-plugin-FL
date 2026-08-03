@@ -104,6 +104,7 @@ class ServeConfig:
     Fields:
         api_key: Optional API key for authenticated endpoints.
         extra_engine: Engine param overrides for serving (e.g. dtype).
+        extra_args: Raw command-line arguments appended to ``vllm serve``.
         endpoints: List of endpoints to test (``"completion"``, ``"chat"``,
                    ``"embedding"``).
         completion_prompt: Prompt string for ``/v1/completions`` endpoint.
@@ -124,6 +125,7 @@ class ServeConfig:
 
     api_key: str = ""
     extra_engine: dict[str, Any] = field(default_factory=dict)
+    extra_args: list[str] = field(default_factory=list)
     endpoints: list[str] = field(default_factory=list)
     completion_prompt: str = "Hello"
     chat_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -144,6 +146,7 @@ class ServeConfig:
         return cls(
             api_key=raw.get("api_key", ""),
             extra_engine=raw.get("extra_engine", {}),
+            extra_args=raw.get("extra_args", []),
             endpoints=raw.get("endpoints", []),
             completion_prompt=raw.get("completion_prompt", "Hello"),
             chat_messages=raw.get("chat_messages", []),

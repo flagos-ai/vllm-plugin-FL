@@ -21,27 +21,25 @@ export FL_MODEL_BASE_PATH="${FL_MODEL_BASE_PATH:-/data/models}"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
 QWEN_ROOT="${FL_MODEL_BASE_PATH}/Qwen"
-MODEL_IDS=(
-    "Qwen/Qwen3-0.6B"
+HF_MODEL_ID="Qwen/Qwen3-0.6B"
+MODELSCOPE_MODEL_IDS=(
     "Qwen/Qwen3.6-27B"
     "Qwen/Qwen3.6-35B-A3B"
 )
 
 mkdir -p "${QWEN_ROOT}"
 
-for MODEL_ID in "${MODEL_IDS[@]}"; do
-    MODEL_DIR="${QWEN_ROOT}/${MODEL_ID#Qwen/}"
-    if [[ -f "${MODEL_DIR}/config.json" ]]; then
-        echo "Model already available: ${MODEL_DIR}"
-        continue
-    fi
-
-    export MODEL_ID MODEL_DIR
+MODEL_DIR="${QWEN_ROOT}/${HF_MODEL_ID#Qwen/}"
+if [[ -f "${MODEL_DIR}/config.json" ]]; then
+    echo "Model already available: ${MODEL_DIR}"
+else
+    export MODEL_ID="${HF_MODEL_ID}" MODEL_DIR
     echo "Downloading ${MODEL_ID} from ${HF_ENDPOINT} to ${MODEL_DIR}"
     python - <<'PY'
 import os
 
 from huggingface_hub import snapshot_download
+
 
 snapshot_download(
     repo_id=os.environ["MODEL_ID"],
@@ -49,7 +47,23 @@ snapshot_download(
     endpoint=os.environ["HF_ENDPOINT"],
 )
 PY
+    test -f "${MODEL_DIR}/config.json"
+    echo "Model ready: ${MODEL_DIR}"
+fi
 
+if ! command -v modelscope >/dev/null 2>&1; then
+    pip install modelscope --break-system-packages
+fi
+
+for MODEL_ID in "${MODELSCOPE_MODEL_IDS[@]}"; do
+    MODEL_DIR="${QWEN_ROOT}/${MODEL_ID#Qwen/}"
+    if [[ -f "${MODEL_DIR}/config.json" ]]; then
+        echo "Model already available: ${MODEL_DIR}"
+        continue
+    fi
+
+    echo "Downloading ${MODEL_ID} from ModelScope to ${MODEL_DIR}"
+    modelscope download --model "${MODEL_ID}" --local_dir "${MODEL_DIR}"
     test -f "${MODEL_DIR}/config.json"
     echo "Model ready: ${MODEL_DIR}"
 done

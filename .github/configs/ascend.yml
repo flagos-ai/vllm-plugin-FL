@@ -40,6 +40,8 @@ container_options: >-
   --hostname vllm-plugin-fl
   --ipc=host
   --privileged
+  --env ASCEND_RT_VISIBLE_DEVICES=14,15
+  --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
   --device /dev/davinci0
   --device /dev/davinci1
   --device /dev/davinci2

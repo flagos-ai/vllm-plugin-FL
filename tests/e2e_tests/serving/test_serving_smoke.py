@@ -56,7 +56,7 @@ def server():
     serve = _CFG.serve
 
     # Build extra_args from engine config + serve-specific overrides
-    extra_args = _CFG.serve_args(**serve.extra_engine)
+    extra_args = [*_CFG.serve_args(**serve.extra_engine), *serve.extra_args]
 
     with VllmServer(
         model=_CFG.model,
