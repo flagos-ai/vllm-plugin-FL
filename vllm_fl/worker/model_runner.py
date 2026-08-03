@@ -3292,6 +3292,10 @@ class ModelRunnerFL(
         if isinstance(self.model, (GraphWrapper, UBatchWrapper)):
             # get raw model out of the cudagraph wrapper.
             return self.model.unwrap()
+        # BreakableCUDAGraphWrapper (vLLM 0.24.0+) wraps the model but is not
+        # an nn.Module. Unwrap it so callers always get the raw model.
+        if isinstance(self.model, BreakableCUDAGraphWrapper):
+            return self.model.unwrap()
         return self.model
 
     def apply_sparse_weight_patches(self, patches: Iterable[SparseWeightPatch]) -> None:
