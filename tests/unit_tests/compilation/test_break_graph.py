@@ -474,11 +474,14 @@ class TestWrapAttentionOpsForBreakGraph:
     def test_wraps_attention_backend_when_enabled(self, monkeypatch):
         import vllm_fl.compilation.break_graph as bg
         monkeypatch.setattr(bg, "is_breakable_cudagraph_enabled", lambda: True)
+        # Force FL fallback decorator so the wrap always happens regardless
+        # of whether the vLLM-delegated eager_break_during_capture checks
+        # its own internal env var instead of our monkeypatched one.
+        monkeypatch.setattr(bg, "eager_break_during_capture",
+                            _fl_eager_break_decorator(enabled=True))
         registry, impl = self._make_registry_with_attention()
         original_fn = impl.fn
         bg.wrap_attention_ops_for_break_graph(registry)
-        # OpImpl is frozen — wrap creates a new impl and re-registers it.
-        # Check the fn in the registry is now different from the original.
         new_impls = registry.get_implementations("attention_backend")
         assert any(i.fn is not original_fn for i in new_impls)
 
