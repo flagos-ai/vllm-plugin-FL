@@ -17,56 +17,37 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import torch
+from compressed_tensors.quantization import QuantizationStrategy
 
-from vllm.model_executor.kernels.linear import (
-    Int8ScaledMMLinearLayerConfig,
-)
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
-    CompressedTensorsScheme,
+    CompressedTensorsW8A8Int8,
 )
 from vllm.model_executor.parameter import (
     BasevLLMParameter,
-    ChannelQuantScaleParameter,
     PackedvLLMParameter,
 )
 
 from .int8_mode import (
-    INT8_MODE_ENV,
-    get_int8_inference_mode,
-    is_packed_int8_weight_only,
+    is_dynamic_token_int8,
+    is_packed_int8_weight,
     should_use_packed_w8a8,
 )
-from .linear import create_w8a8_linear_kernel
 from .reference import unpack_uint8b128_int32
 
 _PATCH_MARKER = "_vllm_fl_packed_w8a8"
 
 
-class FLPackedW8A8Scheme(CompressedTensorsScheme):
-    """Load ``weight_packed`` and execute dynamic-token/per-channel W8A8."""
+class CompressedTensorsPackedW8A8Int8(CompressedTensorsW8A8Int8):
+    """Adapt packed weights to vLLM's native dynamic-token W8A8 scheme."""
 
     def __init__(self, layer_name: str | None = None) -> None:
-        self.input_size_per_partition = 0
-        config = Int8ScaledMMLinearLayerConfig(
-            is_channelwise=True,
+        super().__init__(
+            strategy=QuantizationStrategy.CHANNEL,
             is_static_input_scheme=False,
             input_symmetric=True,
         )
-        self.kernel = create_w8a8_linear_kernel(
-            config,
-            [
-                "weight_packed",
-                "weight_scale",
-                "input_scale",
-                "input_zero_point",
-                "azp_adj",
-            ],
-            layer_name or self.__class__.__name__,
-        )
-
-    @classmethod
-    def get_min_capability(cls) -> int:
-        return -1
+        self.input_size_per_partition = 0
+        self.layer_name = layer_name
 
     def create_weights(
         self,
@@ -77,14 +58,23 @@ class FLPackedW8A8Scheme(CompressedTensorsScheme):
         weight_loader: Callable,
         **kwargs,
     ) -> None:
-        del kwargs
         if input_size_per_partition % 4:
             raise ValueError(
                 "Packed INT8 requires input_size_per_partition divisible by 4"
             )
+
+        super().create_weights(
+            layer=layer,
+            output_partition_sizes=output_partition_sizes,
+            input_size_per_partition=input_size_per_partition,
+            params_dtype=params_dtype,
+            weight_loader=weight_loader,
+            **kwargs,
+        )
         self.input_size_per_partition = input_size_per_partition
         output_size_per_partition = sum(output_partition_sizes)
-        layer.logical_widths = output_partition_sizes
+
+        delattr(layer, "weight")
         weight = PackedvLLMParameter(
             input_dim=1,
             output_dim=0,
@@ -97,44 +87,24 @@ class FLPackedW8A8Scheme(CompressedTensorsScheme):
                 dtype=torch.int32,
             ),
         )
-        weight_scale = ChannelQuantScaleParameter(
-            data=torch.empty(
-                output_size_per_partition,
-                1,
-                dtype=torch.float32,
-            ),
-            output_dim=0,
-            weight_loader=weight_loader,
-        )
         weight_shape = BasevLLMParameter(
             data=torch.empty(2, dtype=torch.int64),
             weight_loader=weight_loader,
         )
         layer.register_parameter("weight_packed", weight)
-        layer.register_parameter("weight_scale", weight_scale)
         layer.register_parameter("weight_shape", weight_shape)
-        layer.register_parameter("input_scale", None)
-        layer.register_parameter("input_zero_point", None)
-        layer.register_parameter("azp_adj", None)
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         unpacked = unpack_uint8b128_int32(
             layer.weight_packed,
             in_features=self.input_size_per_partition,
         )
-        layer.weight_packed = torch.nn.Parameter(
-            unpacked,
-            requires_grad=False,
+        delattr(layer, "weight_packed")
+        layer.register_parameter(
+            "weight",
+            torch.nn.Parameter(unpacked, requires_grad=False),
         )
-        self.kernel.process_weights_after_loading(layer)
-
-    def apply_weights(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        bias: torch.Tensor | None,
-    ) -> torch.Tensor:
-        return self.kernel.apply_weights(layer, x, bias)
+        super().process_weights_after_loading(layer)
 
 
 def install_packed_w8a8_scheme() -> bool:
@@ -161,13 +131,7 @@ def install_packed_w8a8_scheme() -> bool:
             input_quant,
             effective_format,
         ):
-            try:
-                return FLPackedW8A8Scheme(layer_name=layer_name)
-            except RuntimeError as exc:
-                if get_int8_inference_mode() == "w8a8":
-                    raise RuntimeError(
-                        f"Packed W8A8 was requested but is unavailable: {exc}"
-                    ) from exc
+            return CompressedTensorsPackedW8A8Int8(layer_name=layer_name)
         return current(
             self,
             weight_quant,
@@ -182,10 +146,9 @@ def install_packed_w8a8_scheme() -> bool:
 
 
 __all__ = [
-    "FLPackedW8A8Scheme",
-    "INT8_MODE_ENV",
-    "get_int8_inference_mode",
+    "CompressedTensorsPackedW8A8Int8",
     "install_packed_w8a8_scheme",
-    "is_packed_int8_weight_only",
+    "is_dynamic_token_int8",
+    "is_packed_int8_weight",
     "should_use_packed_w8a8",
 ]

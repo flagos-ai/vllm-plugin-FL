@@ -312,19 +312,17 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
-        # Dynamic W8A8 is handled by VllmFunctionalW8A8Experts so vLLM owns
+        # Dynamic W8A8 is handled by TritonW8A8Experts so vLLM owns
         # activation quantization. Do not allow it to fall back into the
         # FlagGems contract, which expects floating-point input here.
         if self.quant_config.use_int8_w8a8:
             raise RuntimeError(
-                "W8A8 MoE must use VllmFunctionalW8A8Experts, not TritonExpertsFL"
+                "W8A8 MoE must use TritonW8A8Experts, not TritonExpertsFL"
             )
 
-        # Fast path (no LoRA): let FlagGems own both expert GEMMs for
-        # unquantized and W8A16 inputs.
-        from vllm_fl.utils import use_flaggems_op
-
-        if self._lora_context is None and use_flaggems_op("fused_moe"):
+        # Fast path (no LoRA, NVIDIA only): let FlagGems own both expert GEMMs
+        # for unquantized and W8A16 inputs.
+        if self._lora_context is None and current_platform.is_cuda():
             import flag_gems
 
             output.copy_(

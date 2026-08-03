@@ -41,7 +41,7 @@ except ModuleNotFoundError as exc:
 _FUSED_EXPERTS_HAS_INPLACE = "inplace" in signature(fused_experts).parameters
 
 
-class VllmFunctionalW8A8Experts(TritonExperts):
+class TritonW8A8Experts(TritonExperts):
     """Run W8A8 MoE through vLLM's functional Triton implementation.
 
     The modular prepare stage must leave the first activation unquantized.
@@ -74,9 +74,7 @@ class VllmFunctionalW8A8Experts(TritonExperts):
         del a2_scale, workspace13, workspace2, expert_tokens_meta
 
         if not self.quant_config.use_int8_w8a8:
-            raise ValueError(
-                "VllmFunctionalW8A8Experts requires an INT8 W8A8 quant config"
-            )
+            raise ValueError("TritonW8A8Experts requires an INT8 W8A8 quant config")
         if getattr(self, "_lora_context", None) is not None:
             raise NotImplementedError(
                 "The vLLM functional W8A8 MoE adapter does not support LoRA"
@@ -127,5 +125,5 @@ class VllmFunctionalW8A8Experts(TritonExperts):
 
 
 __all__ = [
-    "VllmFunctionalW8A8Experts",
+    "TritonW8A8Experts",
 ]
