@@ -297,6 +297,8 @@ def wrap_attention_ops_for_break_graph(registry: Any) -> None:
         import logging
         _log = logging.getLogger(__name__)
 
+    import dataclasses
+
     wrapped_count = 0
     for op_name in _BREAK_POINT_OP_NAMES:
         try:
@@ -316,7 +318,10 @@ def wrap_attention_ops_for_break_graph(registry: Any) -> None:
                 wrapped_fn._break_graph_wrapped = True
             except (AttributeError, TypeError):
                 pass
-            impl.fn = wrapped_fn
+            # OpImpl is a frozen dataclass — create a new instance with the
+            # wrapped fn and re-register it (same impl_id overwrites the old).
+            new_impl = dataclasses.replace(impl, fn=wrapped_fn)
+            registry.register_impl(new_impl)
             wrapped_count += 1
 
     if wrapped_count:
