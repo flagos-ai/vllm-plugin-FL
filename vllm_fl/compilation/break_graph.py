@@ -319,9 +319,12 @@ def wrap_attention_ops_for_break_graph(registry: Any) -> None:
             except (AttributeError, TypeError):
                 pass
             # OpImpl is a frozen dataclass — create a new instance with the
-            # wrapped fn and re-register it (same impl_id overwrites the old).
+            # wrapped fn, then overwrite the entry in the registry directly
+            # (bypassing register_impl's duplicate-id check which is intentional
+            # here: we are *replacing* the impl, not adding a second one).
             new_impl = dataclasses.replace(impl, fn=wrapped_fn)
-            registry.register_impl(new_impl)
+            with registry._lock:
+                registry._impls_by_op[op_name][impl.impl_id] = new_impl
             wrapped_count += 1
 
     if wrapped_count:
