@@ -76,3 +76,6 @@ env_defaults: {}
       include: "*"
       # Exclude patterns: empty list or list paths to exclude
       exclude: []
+    benchmark:
+      enabled: true
+      smoke: ["serve"]
