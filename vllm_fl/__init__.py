@@ -77,19 +77,20 @@ def _patch_flash_attn_import():
 
 
 def _patch_custom_ops():
-    """Register torch.ops._C op schemas when vllm._C is unavailable."""
-    try:
-        import vllm._C  # noqa: F401
+    """Load native vLLM ops before registering missing fallback schemas."""
+    from vllm_fl.ops._C_ops_registry import (
+        load_vllm_native_extensions,
+        register_op_schemas,
+    )
+
+    if load_vllm_native_extensions():
         return
-    except (ImportError, OSError):
-        pass
 
     try:
         import vllm_fl._C  # noqa: F401
     except (ImportError, OSError) as e:
         logger.debug("Failed to import vllm_fl._C: %s", e)
 
-    from vllm_fl.ops._C_ops_registry import register_op_schemas
     register_op_schemas()
 
 
