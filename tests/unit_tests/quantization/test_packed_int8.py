@@ -77,10 +77,13 @@ def test_packed_w8a8_rejects_groupwise_weights():
         )
 
 
-def test_static_activation_config_does_not_select_dynamic_w8a8():
+def test_static_tensor_activation_config_does_not_select_dynamic_w8a8():
     assert not should_use_packed_w8a8(
         _weight_args(QuantizationStrategy.CHANNEL),
-        _activation_args(dynamic=False),
+        _activation_args(
+            strategy=QuantizationStrategy.TENSOR,
+            dynamic=False,
+        ),
         "pack-quantized",
     )
 
