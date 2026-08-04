@@ -122,10 +122,8 @@ def test_w8a8_moe_selector_uses_vllm_functional_experts(monkeypatch):
         activation_key=None,
     )
 
-    from vllm_fl.quantization.w8a8.moe_experts import (
-        VllmFunctionalW8A8Experts,
-    )
+    from vllm_fl.quantization.w8a8.moe_experts import TritonW8A8Experts
 
     assert backend == "triton"
-    assert experts_cls is VllmFunctionalW8A8Experts
+    assert experts_cls is TritonW8A8Experts
     assert upstream_calls == []

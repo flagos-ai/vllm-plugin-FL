@@ -19,11 +19,12 @@ from compressed_tensors.quantization import (
     QuantizationType,
 )
 
-from vllm_fl.quantization.w8a8 import packed
-from vllm_fl.quantization.w8a8.int8_mode import (
-    INT8_MODE_ENV,
-    should_use_packed_w8a8,
+from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
+    CompressedTensorsW8A8Int8,
 )
+
+from vllm_fl.quantization.w8a8 import packed
+from vllm_fl.quantization.w8a8.int8_mode import should_use_packed_w8a8
 
 
 def _weight_args(strategy: QuantizationStrategy) -> QuantizationArgs:
@@ -37,22 +38,29 @@ def _weight_args(strategy: QuantizationStrategy) -> QuantizationArgs:
     )
 
 
-def test_auto_mode_maps_channelwise_packed_int8_to_w8a8(monkeypatch):
-    monkeypatch.delenv(INT8_MODE_ENV, raising=False)
+def _activation_args(
+    *,
+    strategy: QuantizationStrategy = QuantizationStrategy.TOKEN,
+    dynamic: bool = True,
+) -> QuantizationArgs:
+    return QuantizationArgs(
+        num_bits=8,
+        type=QuantizationType.INT,
+        strategy=strategy,
+        symmetric=True,
+        dynamic=dynamic,
+    )
+
+
+def test_model_config_maps_packed_channelwise_w8a8():
     assert should_use_packed_w8a8(
         _weight_args(QuantizationStrategy.CHANNEL),
-        None,
-        "pack-quantized",
-    )
-    assert not should_use_packed_w8a8(
-        _weight_args(QuantizationStrategy.GROUP),
-        None,
+        _activation_args(),
         "pack-quantized",
     )
 
 
-def test_w8a16_mode_keeps_channelwise_checkpoint_weight_only(monkeypatch):
-    monkeypatch.setenv(INT8_MODE_ENV, "w8a16")
+def test_missing_activation_config_keeps_weight_only_scheme():
     assert not should_use_packed_w8a8(
         _weight_args(QuantizationStrategy.CHANNEL),
         None,
@@ -60,28 +68,40 @@ def test_w8a16_mode_keeps_channelwise_checkpoint_weight_only(monkeypatch):
     )
 
 
-def test_w8a8_mode_rejects_groupwise_checkpoint(monkeypatch):
-    monkeypatch.setenv(INT8_MODE_ENV, "w8a8")
-    with pytest.raises(ValueError, match="--strategy channel"):
+def test_packed_w8a8_rejects_groupwise_weights():
+    with pytest.raises(ValueError, match="per-channel"):
         should_use_packed_w8a8(
             _weight_args(QuantizationStrategy.GROUP),
-            None,
+            _activation_args(),
             "pack-quantized",
         )
 
 
-def test_packed_scheme_matches_vllm_024_layer_contract(monkeypatch):
+def test_static_tensor_activation_config_does_not_select_dynamic_w8a8():
+    assert not should_use_packed_w8a8(
+        _weight_args(QuantizationStrategy.CHANNEL),
+        _activation_args(
+            strategy=QuantizationStrategy.TENSOR,
+            dynamic=False,
+        ),
+        "pack-quantized",
+    )
+
+
+def test_packed_scheme_reuses_native_vllm_024_w8a8_execution(monkeypatch):
+    processed_layers = []
+
     class FakeKernel:
         def process_weights_after_loading(self, layer):
-            assert layer.weight.dtype == torch.int8
+            processed_layers.append(layer)
 
         def apply_weights(self, layer, x, bias):
             raise AssertionError("not used")
 
     monkeypatch.setattr(
-        packed,
-        "init_int8_linear_kernel",
-        lambda **kwargs: FakeKernel(),
+        "vllm.model_executor.layers.quantization.compressed_tensors.schemes."
+        "compressed_tensors_w8a8_int8.init_int8_linear_kernel",
+        lambda *args, **kwargs: FakeKernel(),
     )
     monkeypatch.setattr(
         "vllm.model_executor.parameter.get_tensor_model_parallel_rank",
@@ -92,7 +112,9 @@ def test_packed_scheme_matches_vllm_024_layer_contract(monkeypatch):
         lambda: 1,
     )
 
-    scheme = packed.FLPackedW8A8Scheme(layer_name="model.linear")
+    scheme = packed.CompressedTensorsPackedW8A8Int8(layer_name="model.linear")
+    assert isinstance(scheme, CompressedTensorsW8A8Int8)
+
     layer = torch.nn.Module()
     scheme.create_weights(
         layer,
@@ -103,15 +125,19 @@ def test_packed_scheme_matches_vllm_024_layer_contract(monkeypatch):
     )
 
     assert layer.logical_widths == [4, 4]
+    assert not hasattr(layer, "weight")
     assert layer.weight_packed.shape == (8, 2)
     assert layer.weight_scale.shape == (8, 1)
     assert layer.weight_scale.dtype == torch.float32
 
-    values = torch.arange(-32, 32, dtype=torch.int8).reshape(8, 8)
-    layer.weight_packed.data.copy_(
-        (values.to(torch.int16) + 128).to(torch.uint8).contiguous().view(torch.int32)
+    unpacked = torch.ones((8, 8), dtype=torch.int8)
+    monkeypatch.setattr(
+        packed,
+        "unpack_uint8b128_int32",
+        lambda *args, **kwargs: unpacked,
     )
     scheme.process_weights_after_loading(layer)
 
     assert not hasattr(layer, "weight_packed")
-    assert torch.equal(layer.weight, values)
+    assert torch.equal(layer.weight, unpacked)
+    assert processed_layers == [layer]

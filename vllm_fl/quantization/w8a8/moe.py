@@ -117,13 +117,11 @@ def install_fl_w8a8_moe_selector() -> bool:
                 "format; batched-experts dispatch is not supported"
             )
 
-        from vllm_fl.quantization.w8a8.moe_experts import (
-            VllmFunctionalW8A8Experts,
-        )
+        from vllm_fl.quantization.w8a8.moe_experts import TritonW8A8Experts
 
         return (
             oracle_module.Int8MoeBackend.TRITON,
-            VllmFunctionalW8A8Experts,
+            TritonW8A8Experts,
         )
 
     setattr(select_int8_moe_backend_fl, _ADAPTER_MARKER, True)

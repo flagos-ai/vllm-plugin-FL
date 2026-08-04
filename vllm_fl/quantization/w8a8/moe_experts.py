@@ -24,7 +24,7 @@ from vllm.model_executor.layers.fused_moe.experts.triton_moe import (
 from vllm.model_executor.layers.fused_moe.fused_moe import fused_experts
 
 
-class VllmFunctionalW8A8Experts(TritonExperts):
+class TritonW8A8Experts(TritonExperts):
     """Let vLLM own both dynamic per-token activation quantization steps."""
 
     @property
@@ -52,9 +52,7 @@ class VllmFunctionalW8A8Experts(TritonExperts):
         del a2_scale, workspace13, workspace2, expert_tokens_meta
 
         if not self.quant_config.use_int8_w8a8:
-            raise ValueError(
-                "VllmFunctionalW8A8Experts requires an INT8 W8A8 quant config"
-            )
+            raise ValueError("TritonW8A8Experts requires an INT8 W8A8 quant config")
         if getattr(self, "_lora_context", None) is not None:
             raise NotImplementedError(
                 "The vLLM functional W8A8 MoE adapter does not support LoRA"
@@ -89,4 +87,4 @@ class VllmFunctionalW8A8Experts(TritonExperts):
         output.copy_(result)
 
 
-__all__ = ["VllmFunctionalW8A8Experts"]
+__all__ = ["TritonW8A8Experts"]

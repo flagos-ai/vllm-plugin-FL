@@ -45,8 +45,7 @@ def _apply_arguments():
 def test_functional_experts_defer_activation_quantization():
     instance = SimpleNamespace()
     assert (
-        moe_experts.VllmFunctionalW8A8Experts.expects_unquantized_inputs.fget(instance)
-        is True
+        moe_experts.TritonW8A8Experts.expects_unquantized_inputs.fget(instance) is True
     )
 
 
@@ -62,7 +61,7 @@ def test_functional_experts_calls_vllm_024_with_float_input(monkeypatch):
     instance = SimpleNamespace(quant_config=quant_config)
     arguments = _apply_arguments()
 
-    moe_experts.VllmFunctionalW8A8Experts.apply(instance, **arguments)
+    moe_experts.TritonW8A8Experts.apply(instance, **arguments)
 
     assert calls[0]["hidden_states"].dtype == torch.bfloat16
     assert calls[0]["quant_config"] is quant_config
@@ -87,4 +86,4 @@ def test_functional_experts_rejects_prequantized_input(monkeypatch):
     arguments["a1q_scale"] = torch.ones((2, 1), dtype=torch.float32)
 
     with pytest.raises(ValueError, match="quantized before"):
-        moe_experts.VllmFunctionalW8A8Experts.apply(instance, **arguments)
+        moe_experts.TritonW8A8Experts.apply(instance, **arguments)
