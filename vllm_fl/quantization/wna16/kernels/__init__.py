@@ -11,20 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Fixed kernel entry points used by the WNA16 quantization adapters.
 
-# Platform registry — controls which platforms are tested in CI.
-#
-# Each key under `platforms` must match a config file name in this directory
-# (e.g., "cuda" -> cuda.yml, "ascend" -> ascend.yml).
-#
-# Set `enabled: false` to skip a platform without removing its config file.
+Implementations live in this package and are called directly. They are not
+registered with vllm-fl's general operator dispatch.
+"""
 
-platforms:
-  cuda:
-    enabled: true
-  ascend:
-    enabled: false
-  hygon:
-    enabled: true
-  metax:
-    enabled: true
+from .gemm import is_wna16_gemm_available, wna16_gemm
+from .moe import is_wna16_moe_available, wna16_moe
+
+__all__ = [
+    "is_wna16_gemm_available",
+    "is_wna16_moe_available",
+    "wna16_gemm",
+    "wna16_moe",
+]
