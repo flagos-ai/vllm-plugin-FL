@@ -11,15 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
-
 import vllm_fl
 from vllm_fl.ops import _C_ops_registry as registry
 
 
-def test_nvidia_loads_legacy_and_stable_extensions_for_vllm_020(monkeypatch):
+def test_loads_legacy_and_stable_extensions_on_every_platform(monkeypatch):
     calls = []
-    monkeypatch.setattr(registry, "_get_vendor_name", lambda: "nvidia")
     monkeypatch.setattr(registry, "_import_extension", calls.append)
 
     assert registry.load_vllm_native_extensions()
@@ -29,9 +26,7 @@ def test_nvidia_loads_legacy_and_stable_extensions_for_vllm_020(monkeypatch):
     ]
 
 
-def test_nvidia_loads_stable_extension_without_legacy_for_vllm_024(
-    monkeypatch,
-):
+def test_loads_stable_extension_without_legacy(monkeypatch):
     calls = []
 
     def import_extension(module_name):
@@ -39,7 +34,6 @@ def test_nvidia_loads_stable_extension_without_legacy_for_vllm_024(
         if module_name == registry._LEGACY_C_EXTENSION:
             raise ModuleNotFoundError(module_name)
 
-    monkeypatch.setattr(registry, "_get_vendor_name", lambda: "nvidia")
     monkeypatch.setattr(registry, "_import_extension", import_extension)
 
     assert registry.load_vllm_native_extensions()
@@ -49,17 +43,21 @@ def test_nvidia_loads_stable_extension_without_legacy_for_vllm_024(
     ]
 
 
-@pytest.mark.parametrize("vendor_name", ["metax", "ascend", "mthreads"])
-def test_non_nvidia_does_not_preload_cuda_stable_extension(
-    monkeypatch,
-    vendor_name,
-):
+def test_loads_legacy_extension_without_stable(monkeypatch):
     calls = []
-    monkeypatch.setattr(registry, "_get_vendor_name", lambda: vendor_name)
-    monkeypatch.setattr(registry, "_import_extension", calls.append)
+
+    def import_extension(module_name):
+        calls.append(module_name)
+        if module_name == registry._STABLE_C_EXTENSION:
+            raise ModuleNotFoundError(module_name)
+
+    monkeypatch.setattr(registry, "_import_extension", import_extension)
 
     assert registry.load_vllm_native_extensions()
-    assert calls == [registry._LEGACY_C_EXTENSION]
+    assert calls == [
+        registry._LEGACY_C_EXTENSION,
+        registry._STABLE_C_EXTENSION,
+    ]
 
 
 def test_fallback_schema_registration_skipped_when_native_extension_loaded(

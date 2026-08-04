@@ -6,7 +6,6 @@
 
 import importlib
 import logging
-from functools import cache
 
 import torch
 
@@ -16,18 +15,6 @@ _LEGACY_C_EXTENSION = "vllm._C"
 _STABLE_C_EXTENSION = "vllm._C_stable_libtorch"
 
 
-@cache
-def _get_vendor_name() -> str | None:
-    """Return the detected FlagOS vendor without resolving vLLM's platform."""
-    try:
-        from vllm_fl.utils import DeviceInfo
-
-        return DeviceInfo().vendor_name
-    except Exception as exc:
-        logger.debug("Could not detect the device vendor: %s", exc)
-        return None
-
-
 def _import_extension(module_name: str) -> None:
     importlib.import_module(module_name)
 
@@ -35,14 +22,13 @@ def _import_extension(module_name: str) -> None:
 def load_vllm_native_extensions() -> bool:
     """Load native vLLM extensions before defining fallback ``_C`` schemas.
 
-    vLLM 0.20 CUDA wheels use both ``vllm._C`` and
-    ``vllm._C_stable_libtorch``. vLLM 0.24 CUDA wheels no longer ship the
-    legacy module, so each extension must be attempted independently.
+    vLLM wheels may split native operators between ``vllm._C`` and
+    ``vllm._C_stable_libtorch`` on any supported platform. Some versions ship
+    only one of them, so each extension must be attempted independently.
     """
     module_names = (
-        (_LEGACY_C_EXTENSION, _STABLE_C_EXTENSION)
-        if _get_vendor_name() == "nvidia"
-        else (_LEGACY_C_EXTENSION,)
+        _LEGACY_C_EXTENSION,
+        _STABLE_C_EXTENSION,
     )
     loaded = False
     for module_name in module_names:
