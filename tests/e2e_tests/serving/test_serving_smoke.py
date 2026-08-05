@@ -167,6 +167,9 @@ def _run_chat(base_url: str, headers: dict) -> None:
         if expected:
             is_correct = expected.casefold() in response_text.casefold()
             print(f"Answer validation: {'CORRECT' if is_correct else 'INCORRECT'}")
+            assert is_correct, (
+                f"Chat case '{case_name}' expected response to contain: {expected}"
+            )
 
 
 def _generated_image_messages(prompt: str) -> list[dict]:
