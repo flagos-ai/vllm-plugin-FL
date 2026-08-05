@@ -42,6 +42,18 @@ def _apply_arguments():
     }
 
 
+def _quant_config():
+    return SimpleNamespace(
+        use_int8_w8a8=True,
+        per_act_token_quant=True,
+        block_shape=None,
+        w1_scale=torch.ones((2, 8, 1), dtype=torch.float32),
+        w2_scale=torch.ones((2, 4, 1), dtype=torch.float32),
+        w1_bias=None,
+        w2_bias=None,
+    )
+
+
 def test_functional_experts_defer_activation_quantization():
     instance = SimpleNamespace()
     assert (
@@ -49,23 +61,38 @@ def test_functional_experts_defer_activation_quantization():
     )
 
 
-def test_functional_experts_calls_vllm_024_with_float_input(monkeypatch):
+def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch):
     calls = []
 
-    def fake_fused_experts(**kwargs):
+    def fake_fused_experts_impl(**kwargs):
         calls.append(kwargs)
         return torch.full_like(kwargs["hidden_states"], 3)
 
-    monkeypatch.setattr(moe_experts, "fused_experts", fake_fused_experts)
-    quant_config = SimpleNamespace(use_int8_w8a8=True)
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        fake_fused_experts_impl,
+    )
+    quant_config = _quant_config()
     instance = SimpleNamespace(quant_config=quant_config)
     arguments = _apply_arguments()
 
     moe_experts.TritonW8A8Experts.apply(instance, **arguments)
 
     assert calls[0]["hidden_states"].dtype == torch.bfloat16
-    assert calls[0]["quant_config"] is quant_config
-    assert "inplace" not in calls[0]
+    assert calls[0]["hidden_states"].shape == (2, 4)
+    assert calls[0]["w1"].shape == (2, 8, 4)
+    assert calls[0]["w2"].shape == (2, 4, 4)
+    assert calls[0]["w1_scale"] is quant_config.w1_scale
+    assert calls[0]["w2_scale"] is quant_config.w2_scale
+    assert calls[0]["w1_scale"].shape == (2, 8, 1)
+    assert calls[0]["w2_scale"].shape == (2, 4, 1)
+    assert calls[0]["a1_scale"] is None
+    assert calls[0]["a2_scale"] is None
+    assert calls[0]["use_int8_w8a8"] is True
+    assert calls[0]["per_channel_quant"] is True
+    assert calls[0]["activation"] == MoEActivation.SILU.value
+    assert calls[0]["inplace"] is False
     assert torch.equal(
         arguments["output"],
         torch.full_like(arguments["output"], 3),
@@ -75,11 +102,11 @@ def test_functional_experts_calls_vllm_024_with_float_input(monkeypatch):
 def test_functional_experts_rejects_prequantized_input(monkeypatch):
     monkeypatch.setattr(
         moe_experts,
-        "fused_experts",
-        lambda **kwargs: pytest.fail("fused_experts must not run"),
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("FlagGems fused_experts must not run"),
     )
     instance = SimpleNamespace(
-        quant_config=SimpleNamespace(use_int8_w8a8=True),
+        quant_config=_quant_config(),
     )
     arguments = _apply_arguments()
     arguments["hidden_states"] = torch.ones((2, 4), dtype=torch.int8)
@@ -87,3 +114,47 @@ def test_functional_experts_rejects_prequantized_input(monkeypatch):
 
     with pytest.raises(ValueError, match="quantized before"):
         moe_experts.TritonW8A8Experts.apply(instance, **arguments)
+
+
+def test_functional_experts_rejects_activation_not_supported_by_flaggems(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("FlagGems fused_experts must not run"),
+    )
+    arguments = _apply_arguments()
+    arguments["activation"] = MoEActivation.GELU
+
+    with pytest.raises(NotImplementedError, match="only silu"):
+        moe_experts.TritonW8A8Experts.apply(
+            SimpleNamespace(quant_config=_quant_config()),
+            **arguments,
+        )
+
+
+@pytest.mark.parametrize(
+    ("scale_name", "bad_scale"),
+    [
+        ("w1_scale", torch.ones((2, 1, 8), dtype=torch.float32)),
+        ("w2_scale", torch.ones((2, 1, 4), dtype=torch.float32)),
+        ("w1_scale", torch.ones((2, 8, 1), dtype=torch.bfloat16)),
+    ],
+)
+def test_functional_experts_rejects_incompatible_weight_scale(
+    monkeypatch,
+    scale_name,
+    bad_scale,
+):
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("FlagGems fused_experts must not run"),
+    )
+    quant_config = _quant_config()
+    setattr(quant_config, scale_name, bad_scale)
+    instance = SimpleNamespace(quant_config=quant_config)
+
+    with pytest.raises((TypeError, ValueError), match="weight scales|scale must"):
+        moe_experts.TritonW8A8Experts.apply(instance, **_apply_arguments())
