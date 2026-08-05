@@ -184,7 +184,9 @@ def _missing_keyword_groups(
         alternatives = (
             keyword_group if isinstance(keyword_group, list) else [keyword_group]
         )
-        if not any(keyword.casefold() in normalized_response for keyword in alternatives):
+        if not any(
+            keyword.casefold() in normalized_response for keyword in alternatives
+        ):
             missing.append(" / ".join(alternatives))
     return missing
 
