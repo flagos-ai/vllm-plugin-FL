@@ -38,7 +38,8 @@ serve:
     - name: text
       messages:
         - role: "user"
-          content: "introduce llm"
+          content: "Where is the capital of France?"
+      expected: "Paris"
     - name: image
       generated_image: true
       prompt: "introduce this picture."
