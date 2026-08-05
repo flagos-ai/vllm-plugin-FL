@@ -96,13 +96,10 @@ class PyFlagcxCommunicator:
         self.available = True
         self.disabled = False
 
-        try:
-            _flagcx_version = ctypes.c_int()
-            self.flagcx._funcs["flagcxGetVersion"](
-                ctypes.byref(_flagcx_version))
-            self._legacy_unique_id_api = _flagcx_version.value < 1300
-        except (AttributeError, KeyError, TypeError):
-            self._legacy_unique_id_api = False
+        self._legacy_unique_id_api = (
+            hasattr(self.flagcx, "handler")
+            and not hasattr(self.flagcx, "devHandle")
+        )
 
         if self.rank == 0:
             # get the unique id from NCCL
@@ -146,7 +143,7 @@ class PyFlagcxCommunicator:
         with device_ctx:
             if self._legacy_unique_id_api:
                 self.comm = self.flagcx.flagcxCommInitRank(
-                    self.world_size, ctypes.byref(self.unique_id), self.rank)
+                    self.world_size, ctypes.pointer(self.unique_id), self.rank)
             else:
                 self.comm = self.flagcx.flagcxCommInitRank(
                     self.world_size, self.unique_id, self.rank)
