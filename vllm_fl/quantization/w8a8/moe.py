@@ -10,7 +10,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Route vLLM 0.24 W8A8 INT8 MoE to native functional experts."""
+"""Route vLLM 0.24 W8A8 INT8 MoE by hardware backend."""
 
 from importlib import import_module
 
@@ -21,10 +21,13 @@ _SCHEME_MODULE = (
     "vllm.model_executor.layers.quantization.compressed_tensors."
     "compressed_tensors_moe.compressed_tensors_moe_w8a8_int8"
 )
+# Reuse the repository's existing MoE policy key so current platform
+# blacklists/whitelists keep governing the whole FL MoE pipeline.
+FLAGGEMS_W8A8_MOE_OP = "fused_moe"
 
 
 def install_fl_w8a8_moe_selector() -> bool:
-    """Use vLLM's functional Triton path for dynamic-token W8A8 MoE."""
+    """Keep NVIDIA native and route non-NVIDIA OOT W8A8 MoE to FlagGems."""
     oracle_module = import_module(_ORACLE_MODULE)
     scheme_module = import_module(_SCHEME_MODULE)
 
@@ -91,14 +94,31 @@ def install_fl_w8a8_moe_selector() -> bool:
         )
         from vllm.platforms import current_platform
 
-        from vllm_fl.utils import is_oot_enabled
+        from vllm_fl.utils import (
+            is_nvidia_platform,
+            is_oot_enabled,
+            use_flaggems_op,
+        )
 
         canonical_w8a8 = weight_key in (
             None,
             kInt8StaticChannelSym,
         ) and activation_key in (None, kInt8DynamicTokenSym)
+
+        # Keep the vLLM-native NVIDIA execution path unchanged even when a
+        # FlagGems whitelist overrides nvidia.yaml.
+        if canonical_w8a8 and is_nvidia_platform():
+            return current_selector(
+                config,
+                weight_key=weight_key,
+                activation_key=activation_key,
+            )
+
         use_fl = (
-            current_platform.is_out_of_tree() and is_oot_enabled() and canonical_w8a8
+            current_platform.is_out_of_tree()
+            and is_oot_enabled()
+            and use_flaggems_op(FLAGGEMS_W8A8_MOE_OP)
+            and canonical_w8a8
         )
         if not use_fl:
             return current_selector(
@@ -109,7 +129,7 @@ def install_fl_w8a8_moe_selector() -> bool:
 
         if getattr(config, "is_lora_enabled", False):
             raise NotImplementedError(
-                "The vLLM functional W8A8 MoE adapter does not support LoRA"
+                "The FlagGems W8A8 MoE adapter does not support LoRA"
             )
         if config.moe_parallel_config.use_batched_activation_format:
             raise ValueError(
@@ -131,4 +151,7 @@ def install_fl_w8a8_moe_selector() -> bool:
     return True
 
 
-__all__ = ["install_fl_w8a8_moe_selector"]
+__all__ = [
+    "FLAGGEMS_W8A8_MOE_OP",
+    "install_fl_w8a8_moe_selector",
+]

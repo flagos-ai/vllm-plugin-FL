@@ -38,7 +38,7 @@ _PATCH_MARKER = "_vllm_fl_packed_w8a8_v024"
 
 
 class CompressedTensorsPackedW8A8Int8(CompressedTensorsW8A8Int8):
-    """Adapt packed weights to vLLM's native dynamic-token W8A8 scheme."""
+    """Adapt packed weights to the selected dynamic-token W8A8 kernel."""
 
     def __init__(self, layer_name: str | None = None) -> None:
         super().__init__(

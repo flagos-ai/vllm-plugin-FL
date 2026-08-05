@@ -35,22 +35,34 @@ def unpack_uint8b128_int32(
 
 def dynamic_per_token_quant_int8(
     x: torch.Tensor,
-    *,
-    eps: float = 1e-10,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Symmetrically quantize the last dimension with one scale per token."""
-    if x.ndim < 2:
-        raise ValueError("x must have at least two dimensions")
+    """Match vLLM dynamic_scaled_int8_quant for symmetric per-token INT8."""
+    if x.ndim != 2:
+        raise ValueError("x must be a 2D [tokens, hidden_size] tensor")
     if not x.is_floating_point():
         raise TypeError(f"x must be floating point, got {x.dtype}")
-    if eps <= 0:
-        raise ValueError("eps must be positive")
 
     original_shape = x.shape
-    x_2d = x.reshape(-1, original_shape[-1])
+    # vLLM passes a contiguous input to dynamic_scaled_int8_quant. FlagGems'
+    # round kernel has the same contiguity requirement.
+    x_2d = x.to(torch.float32).contiguous()
+    int8_info = torch.iinfo(torch.int8)
     absmax = x_2d.abs().amax(dim=-1, keepdim=True)
-    scale = absmax.clamp(min=eps).to(torch.float32) / 127.0
-    quantized = (x_2d.to(torch.float32) / scale).round().clamp(-127, 127).to(torch.int8)
+    scale = absmax / int8_info.max
+    nonzero = absmax != 0
+    safe_absmax = torch.where(nonzero, absmax, torch.ones_like(absmax))
+    inv_scale = int8_info.max / safe_absmax
+    inv_scale = torch.where(
+        nonzero,
+        inv_scale,
+        torch.zeros_like(inv_scale),
+    )
+    quantized = (
+        (x_2d * inv_scale)
+        .round()
+        .clamp(int8_info.min, int8_info.max)
+        .to(torch.int8)
+    )
     return (
         quantized.reshape(original_shape),
         scale.reshape(*original_shape[:-1], 1),
@@ -81,10 +93,12 @@ def w8a8_linear_reference(
     if x.ndim < 2 or x.shape[-1] != weight.shape[1]:
         raise ValueError("x and weight have incompatible input dimensions")
 
-    x_q, x_scale = dynamic_per_token_quant_int8(x)
-    x_q_2d = x_q.reshape(-1, x_q.shape[-1]).to(torch.float32)
+    x_2d = x.reshape(-1, x.shape[-1])
+    x_q, x_scale = dynamic_per_token_quant_int8(x_2d)
+    x_q_2d = x_q.reshape(-1, x_q.shape[-1]).to(torch.int32)
     channel_scale = _normalize_channel_scale(weight_scale, weight.shape[0])
-    output = x_q_2d @ weight.to(torch.float32).t()
+    accumulator = x_q_2d @ weight.to(torch.int32).t()
+    output = accumulator.to(torch.float32)
     output = output * x_scale.reshape(-1, 1) * channel_scale
     if bias is not None:
         if bias.numel() != weight.shape[0]:

@@ -44,6 +44,14 @@ class ReferenceBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def dynamic_per_token_quant_int8(
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.quantization import dynamic_per_token_quant_int8_torch
+
+        return dynamic_per_token_quant_int8_torch(x)
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.

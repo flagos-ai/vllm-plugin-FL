@@ -5,6 +5,7 @@ import os
 from typing import Optional, Tuple
 
 import flag_gems
+
 try:
     # FlagGems<=5.0.2: DeviceDetector lives in device.
     from flag_gems.runtime.backend.device import DeviceDetector
@@ -79,6 +80,20 @@ def get_device_type(vendor_name: str) -> str:
 def get_device_name(vendor_name: str) -> str:
     """Return the configured device_name for the given vendor."""
     return _get_vendor_device_field(vendor_name, "device_name")
+
+
+def is_nvidia_platform() -> bool:
+    """Return whether the active vLLM platform represents NVIDIA hardware.
+
+    Do not use ``torch.cuda.is_available()`` for this check: several OOT
+    platforms are CUDA-alike but must not select vLLM's NVIDIA-only kernels.
+    """
+    from vllm.platforms import current_platform
+
+    return (
+        getattr(current_platform, "vendor_name", None) == "nvidia"
+        or getattr(current_platform, "device_name", None) == "nvidia"
+    )
 
 
 def use_flaggems(default: bool = True) -> bool:
