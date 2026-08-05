@@ -39,7 +39,12 @@ serve:
       messages:
         - role: "user"
           content: "Where is the capital of France?"
-      expected: "Paris"
+      expected_keywords:
+        - "Paris"
     - name: image
       generated_image: true
-      prompt: "introduce this picture."
+      prompt: "Describe all visible text, colors, and shapes in English."
+      expected_keywords:
+        - "Hello VLM"
+        - "blue"
+        - "rectangle"
