@@ -21,30 +21,24 @@ llm:
   max_model_len: 262144
   trust_remote_code: false
 
-generate:
-  prompts:
-    - "Introduce yourself,please"
-  sampling:
-    max_tokens: 100
-    temperature: 0.0
-
 serve:
   served_model_name: "qwen"
   startup_retries: 120
   endpoints: ["chat"]
   stream: true
   max_tokens: 1024
+  sampling:
+    temperature: 0.0
   chat_cases:
     - name: text
       messages:
         - role: "user"
           content: "Where is the capital of France?"
       expected_keywords:
-        - "Paris"
+        - "The capital of France is"
     - name: image
       generated_image: true
       prompt: "Describe all visible text, colors, and shapes in English."
       expected_keywords:
         - "Hello VLM"
-        - "blue"
-        - "rectangle"
+        - "blue rectangle"
