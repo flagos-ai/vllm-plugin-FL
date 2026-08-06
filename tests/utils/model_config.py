@@ -108,6 +108,7 @@ class ServeConfig:
                    ``"embedding"``).
         completion_prompt: Prompt string for ``/v1/completions`` endpoint.
         chat_messages: Messages list for ``/v1/chat/completions`` endpoint.
+        chat_cases: Named chat cases to run against one server instance.
         max_tokens: Max tokens for serving requests.
         served_model_name: Alias passed via ``--served-model-name``.
             Empty string means use the model path directly.
@@ -127,6 +128,7 @@ class ServeConfig:
     endpoints: list[str] = field(default_factory=list)
     completion_prompt: str = "Hello"
     chat_messages: list[dict[str, Any]] = field(default_factory=list)
+    chat_cases: list[dict[str, Any]] = field(default_factory=list)
     max_tokens: int = 50
     served_model_name: str = ""
     startup_retries: int = 60
@@ -147,6 +149,7 @@ class ServeConfig:
             endpoints=raw.get("endpoints", []),
             completion_prompt=raw.get("completion_prompt", "Hello"),
             chat_messages=raw.get("chat_messages", []),
+            chat_cases=raw.get("chat_cases", []),
             max_tokens=raw.get("max_tokens", 50),
             served_model_name=raw.get("served_model_name", ""),
             startup_retries=int(raw.get("startup_retries", 60)),
