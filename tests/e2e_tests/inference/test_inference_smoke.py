@@ -7,7 +7,7 @@ This test file is driven by two environment variables set by ``tests/run.py``:
 
 - ``FL_TEST_MODEL``: Model family (e.g. ``qwen3``, ``minicpm``)
 - ``FL_TEST_CASE``:  Case name within the family (e.g. ``06b_tp2``, ``o45_tp2``)
-
+- ``FL_TEST_PLATFORM``/``FL_TEST_DEVICE``: Apply platform device overrides
 It loads ``tests/models/<model>/<case>.yaml``, constructs the LLM engine,
 runs generation for each prompt (with optional parametrize combos), and
 asserts that outputs are non-empty.
@@ -30,6 +30,8 @@ from vllm.distributed import cleanup_dist_env_and_memory
 
 _MODEL = os.environ.get("FL_TEST_MODEL", "")
 _CASE = os.environ.get("FL_TEST_CASE", "")
+_PLATFORM = os.environ.get("FL_TEST_PLATFORM", "")
+_DEVICE = os.environ.get("FL_TEST_DEVICE", "")
 
 if not _MODEL or not _CASE:
     pytest.skip(
@@ -37,7 +39,7 @@ if not _MODEL or not _CASE:
         allow_module_level=True,
     )
 
-_CFG = ModelConfig.load(_MODEL, _CASE)
+_CFG = ModelConfig.load(_MODEL, _CASE, platform=_PLATFORM, device=_DEVICE)
 
 if not os.path.exists(_CFG.model):
     pytest.fail(

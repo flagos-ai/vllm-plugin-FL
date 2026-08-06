@@ -19,7 +19,7 @@ if __name__ == "__main__":
     sampling_params = SamplingParams(max_tokens=10, temperature=0.0)
     # Create an LLM.
     llm = LLM(
-        model="/models/GLM-5-FP8",
+        model="/data/models/GLM-5-FP8",
         tensor_parallel_size=8,
         pipeline_parallel_size=1,
         enforce_eager=False,

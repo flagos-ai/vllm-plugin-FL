@@ -380,7 +380,12 @@ class TestRunner:
                 runtime_case = dict(case_cfg)
                 model_name = str(runtime_case.pop("model"))
                 model_case = str(runtime_case.pop("case"))
-                model_cfg = ModelConfig.load(model_name, model_case)
+                model_cfg = ModelConfig.load(
+                    model_name,
+                    model_case,
+                    platform=self.config.platform,
+                    device=self.config.device,
+                )
 
                 if "parameters" in runtime_case:
                     params = {
@@ -452,9 +457,12 @@ class TestRunner:
 
         # Wait for sufficient device memory before e2e tests
         if tc.task in ("inference", "serving") and tc.model and tc.case:
-            gpu_util = ModelConfig.load(tc.model, tc.case).engine.get(
-                "gpu_memory_utilization", 0.9
-            )
+            gpu_util = ModelConfig.load(
+                tc.model,
+                tc.case,
+                platform=self.config.platform,
+                device=self.config.device,
+            ).engine.get("gpu_memory_utilization", 0.9)
             ok, info = wait_for_memory(self.config.platform, gpu_util)
             if not ok:
                 print("[run] FAILED: timed out waiting for device memory")

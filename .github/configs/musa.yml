@@ -12,6 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Keep the validated Ascend runtime compatible with FlagGems and
-# triton-ascend. The generic test extra otherwise resolves NumPy 2.x.
-numpy==1.26.4
+# MUSA Hardware Configuration
+# This file defines CI/CD settings for MUSA testing.
+
+platform: musa
+
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci
+
+runner_labels:
+  - mt-cicd-vllm-plugin
+
+container_volumes:
+  - /data:/data
+
+container_options: >-
+  --hostname vllm-plugin-fl
+  --privileged
+  --ipc=host
+  --shm-size=64g
+  --env GEMS_VENDOR=mthreads
+  --env VLLM_PLUGINS=fl
+  --env MTHREADS_VISIBLE_DEVICES=all

@@ -17,8 +17,8 @@
 set -e
 
 # Arguments
-MODEL_PATH=${1:?"Please provide model path, e.g.: ./run_eval.sh /workspace/Qwen3-4B/ hf_xxx"}
-HF_TOKEN=${2:?"Please provide HF_TOKEN, e.g.: ./run_eval.sh /workspace/Qwen3-4B/ hf_xxx"}
+MODEL_PATH=${1:?"Please provide model path, e.g.: ./run_eval.sh /data/models/Qwen/Qwen3-4B/ hf_xxx"}
+HF_TOKEN=${2:?"Please provide HF_TOKEN, e.g.: ./run_eval.sh /data/models/Qwen/Qwen3-4B/ hf_xxx"}
 
 # Environment variables
 export HF_ENDPOINT=https://hf-mirror.com            # China mirror (can be removed for overseas)

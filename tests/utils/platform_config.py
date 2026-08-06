@@ -297,6 +297,29 @@ class PlatformConfig:
 
         return Tolerance()
 
+    def get_device_case_overrides(self, case: str) -> dict[str, Any]:
+        """Return model config overrides for a case on the active device.
+
+        Expected YAML shape::
+
+            device_overrides:
+              a100:
+                27b_tp2_eager:
+                  llm:
+                    gpu_memory_utilization: 0.9
+
+        The ``tolerance`` key under the same device remains reserved for
+        numerical tolerance overrides and is not treated as a model case.
+        """
+        dev_override = self.device_overrides.get(self.device, {})
+        if not isinstance(dev_override, dict):
+            return {}
+
+        case_override = dev_override.get(case, {}) or {}
+        if not isinstance(case_override, dict):
+            raise TypeError(f"device_overrides.{self.device}.{case} must be a mapping")
+        return case_override
+
     def get_e2e_tests(self) -> FunctionalTests:
         """Return e2e test configuration (inference/serving) for the active device."""
         dt = self.device_tests.get(self.device, {})

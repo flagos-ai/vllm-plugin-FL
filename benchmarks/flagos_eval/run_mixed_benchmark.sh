@@ -30,12 +30,12 @@ set -e
 #   seed: Random seed for shuffle (default: 42)
 #
 # Example:
-#   ./run_mixed_benchmark.sh /workspace/Qwen3-4B/
-#   ./run_mixed_benchmark.sh /workspace/Qwen3-4B/ 123
+#   ./run_mixed_benchmark.sh /data/models/Qwen/Qwen3-4B/
+#   ./run_mixed_benchmark.sh /data/models/Qwen/Qwen3-4B/ 123
 # ============================================================================
 
 # Arguments
-MODEL_PATH=${1:?"Please provide model path, e.g.: ./run_mixed_benchmark.sh /workspace/Qwen3-4B/"}
+MODEL_PATH=${1:?"Please provide model path, e.g.: ./run_mixed_benchmark.sh /data/models/Qwen/Qwen3-4B/"}
 SEED=${2:-42}
 
 # Output directory

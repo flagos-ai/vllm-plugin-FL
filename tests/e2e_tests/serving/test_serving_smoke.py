@@ -7,7 +7,7 @@ Driven by environment variables set by ``tests/run.py``:
 
 - ``FL_TEST_MODEL``: Model family (e.g. ``qwen3``, ``minicpm``)
 - ``FL_TEST_CASE``:  Case name within the family (e.g. ``next_tp8``, ``o45_tp2``)
-
+- ``FL_TEST_PLATFORM``/``FL_TEST_DEVICE``: Apply platform device overrides
 Loads ``tests/models/<model>/<case>.yaml``, starts a vLLM server with the
 engine config, and validates configured endpoints (completion, chat, embedding).
 
@@ -31,6 +31,8 @@ from tests.utils.model_config import ModelConfig
 
 _MODEL = os.environ.get("FL_TEST_MODEL", "")
 _CASE = os.environ.get("FL_TEST_CASE", "")
+_PLATFORM = os.environ.get("FL_TEST_PLATFORM", "")
+_DEVICE = os.environ.get("FL_TEST_DEVICE", "")
 
 if not _MODEL or not _CASE:
     pytest.skip(
@@ -38,7 +40,7 @@ if not _MODEL or not _CASE:
         allow_module_level=True,
     )
 
-_CFG = ModelConfig.load(_MODEL, _CASE)
+_CFG = ModelConfig.load(_MODEL, _CASE, platform=_PLATFORM, device=_DEVICE)
 
 if not os.path.exists(_CFG.model):
     pytest.fail(
@@ -58,7 +60,7 @@ def server():
     serve = _CFG.serve
 
     # Build extra_args from engine config + serve-specific overrides
-    extra_args = _CFG.serve_args(**serve.extra_engine)
+    extra_args = [*_CFG.serve_args(**serve.extra_engine), *serve.extra_args]
 
     with VllmServer(
         model=_CFG.model,
