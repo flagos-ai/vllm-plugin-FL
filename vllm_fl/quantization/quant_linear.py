@@ -32,17 +32,16 @@ def add_oot_quant_kernel() -> None:
     is_supported() / can_implement() will filter at runtime.
     """
     from vllm.model_executor.kernels.linear import (
-        _POSSIBLE_INT8_KERNELS,
-        _POSSIBLE_FP8_KERNELS,
-        _POSSIBLE_KERNELS,
         _POSSIBLE_FP8_BLOCK_KERNELS,
+        _POSSIBLE_FP8_KERNELS,
+        _POSSIBLE_INT8_KERNELS,
+        _POSSIBLE_KERNELS,
     )
+
     source = _resolve_source_platform()
 
     if PlatformEnum.OOT not in _POSSIBLE_KERNELS:
-        _POSSIBLE_KERNELS[PlatformEnum.OOT] = list(
-            _POSSIBLE_KERNELS.get(source, [])
-        )
+        _POSSIBLE_KERNELS[PlatformEnum.OOT] = list(_POSSIBLE_KERNELS.get(source, []))
 
     if PlatformEnum.OOT not in _POSSIBLE_INT8_KERNELS:
         _POSSIBLE_INT8_KERNELS[PlatformEnum.OOT] = list(
@@ -58,3 +57,14 @@ def add_oot_quant_kernel() -> None:
         _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT] = list(
             _POSSIBLE_FP8_BLOCK_KERNELS.get(source, [])
         )
+
+    # compressed-tensors selects its Linear and MoE implementations while the
+    # model is being constructed. Install the FL adapters only after the OOT
+    # platform has inherited vLLM's native INT8 kernel candidates.
+    from .w8a8.linear import register_fl_w8a8_linear_kernel
+    from .w8a8.moe import install_fl_w8a8_moe_selector
+    from .w8a8.packed import install_packed_w8a8_scheme
+
+    register_fl_w8a8_linear_kernel(_POSSIBLE_INT8_KERNELS)
+    install_packed_w8a8_scheme()
+    install_fl_w8a8_moe_selector()
