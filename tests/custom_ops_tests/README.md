@@ -256,4 +256,6 @@ done
 | `test_gemma_rms_norm.py` | `npu_gemma_rms_norm` | CANN framework |
 | `test_recurrent_gated_delta_rule.py` | `npu_recurrent_gated_delta_rule` | CANN framework |
 | `test_chunk_gated_delta_rule_fwd_h.py` | `chunk_gated_delta_rule_fwd_h` | CANN framework |
+| `test_chunk_gated_delta_rule.py` | `npu_chunk_gated_delta_rule`（连接性） | CANN framework |
+| `test_chunk_gated_delta_rule_accuracy.py` | `npu_chunk_gated_delta_rule`（数值精度，fp32 参考 + Triton 交叉校验） | CANN framework |
 | `test_pto_chunk_gdn.py` | PTO GDN megakernel | Bisheng PTO |

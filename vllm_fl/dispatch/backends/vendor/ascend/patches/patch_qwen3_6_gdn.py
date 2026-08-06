@@ -391,8 +391,19 @@ def _chunk_gated_delta_rule_aclnn(
         out: (1, T, Nv, Dv) bf16
         final_state: (B, Nv, Dk, Dv) - transposed back to ssm_state layout
     """
-    # Extract initial_state from ssm_state cache: (B, Nv, Dk, Dv) -> (B, Nv, Dv, Dk)
-    initial_state = ssm_state[state_indices].transpose(-1, -2).contiguous()
+    # Extract initial_state from the ssm_state cache. The aclnn op expects
+    # initial_state in (B, Nv, Dv, Dk) layout (see the op's host-side shape
+    # check and kernel stage2 matmuls under
+    # csrc/ascend/attention/chunk_gated_delta_rule), which is exactly the
+    # ssm_state cache's native layout -- so NO transpose here, unlike the
+    # Triton chunk path which consumes the FLA (B, Nv, Dk, Dv) layout.
+    if not getattr(_chunk_gated_delta_rule_aclnn, "_path_logged", False):
+        logger.info(
+            "VLLM_FL_USE_ACLNN_CHUNK_GDN=1: GDN prefill runs the AscendC "
+            "aclnn npu_chunk_gated_delta_rule op"
+        )
+        _chunk_gated_delta_rule_aclnn._path_logged = True
+    initial_state = ssm_state[state_indices].contiguous()
 
     # Clear states for fresh sequences (equivalent to PR's clear_ssm_states)
     initial_state[~has_initial_state, ...] = 0
@@ -426,7 +437,9 @@ def _chunk_gated_delta_rule_aclnn(
     # Restore batch dim: (T, Nv, Dv) -> (1, T, Nv, Dv)
     out = out_tnd.unsqueeze(0)
 
-    # Transpose final_state back to ssm_state layout: (B, Nv, Dv, Dk) -> (B, Nv, Dk, Dv)
+    # The op returns final_state in its native (B, Nv, Dv, Dk) layout. Convert
+    # to the FLA (B, Nv, Dk, Dv) layout here: the shared write-back in the
+    # caller transposes it once more into the ssm_state cache layout.
     final_state = final_state.transpose(-1, -2).contiguous()
 
     return out, final_state
