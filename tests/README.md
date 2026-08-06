@@ -239,6 +239,7 @@ generate:
 | `serve.endpoints` | list | No | Endpoints to test: `completion`, `chat` |
 | `serve.completion_prompt` | str | No | Prompt for `/v1/completions` |
 | `serve.chat_messages` | list | No | Messages for `/v1/chat/completions` |
+| `serve.chat_cases` | list | No | Named chat requests run against one server; `expected` validates required response substrings and `generated_image: true` creates the local image fixture |
 | `serve.max_tokens` | int | No | Max tokens for serving requests (default: 50) |
 | `serve.api_key` | str | No | API key for authenticated endpoints |
 | `serve.extra_engine` | dict | No | Engine param overrides for serving only |

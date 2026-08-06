@@ -15,7 +15,9 @@ Supports both non-streaming (raw requests) and streaming (OpenAI SDK) modes,
 controlled by the ``serve.stream`` flag in the model YAML.
 """
 
+import base64
 import os
+from io import BytesIO
 
 import pytest
 import requests
@@ -138,12 +140,67 @@ def _run_chat(base_url: str, headers: dict) -> None:
     Otherwise, uses a plain requests POST.
     """
     serve = _CFG.serve
-    messages = serve.chat_messages or [{"role": "user", "content": "Hello"}]
+    chat_cases = serve.chat_cases or [
+        {
+            "name": "default",
+            "messages": serve.chat_messages or [{"role": "user", "content": "Hello"}],
+        }
+    ]
 
-    if serve.stream:
-        _run_chat_streaming(base_url, serve, messages)
-    else:
-        _run_chat_non_streaming(base_url, headers, serve, messages)
+    for chat_case in chat_cases:
+        case_name = chat_case.get("name", "unnamed")
+        if chat_case.get("generated_image"):
+            messages = _generated_image_messages(
+                chat_case.get("prompt", "Describe this image.")
+            )
+        else:
+            messages = chat_case.get("messages", [])
+
+        assert messages, f"Chat case '{case_name}' has no messages"
+        print(f"\nRunning chat case: {case_name}")
+        if serve.stream:
+            response_text = _run_chat_streaming(base_url, serve, messages)
+        else:
+            response_text = _run_chat_non_streaming(base_url, headers, serve, messages)
+
+        expected = chat_case.get("expected")
+        if expected:
+            expected_values = expected if isinstance(expected, list) else [expected]
+            normalized_response = response_text.casefold()
+            missing = [
+                value
+                for value in expected_values
+                if value.casefold() not in normalized_response
+            ]
+            is_correct = not missing
+            print(f"Answer validation: {'CORRECT' if is_correct else 'INCORRECT'}")
+            assert is_correct, f"Chat case '{case_name}' is missing expected: {missing}"
+
+
+def _generated_image_messages(prompt: str) -> list[dict]:
+    """Create the local image payload used by the Qwen multimodal smoke case."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (300, 200), color="white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((50, 50, 250, 150), fill="blue")
+    draw.text((90, 80), "Hello VLM", fill="yellow")
+
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
 
 
 def _run_chat_non_streaming(
@@ -151,7 +208,7 @@ def _run_chat_non_streaming(
     headers: dict,
     serve,
     messages: list[dict],
-) -> None:
+) -> str:
     """Non-streaming chat completions via raw requests."""
     payload: dict = {
         "model": _REQUEST_MODEL,
@@ -177,13 +234,14 @@ def _run_chat_non_streaming(
     content = data["choices"][0]["message"]["content"]
     assert len(content.strip()) > 0, "Assistant message is empty"
     print(f"\nResponse: {content}")
+    return content
 
 
 def _run_chat_streaming(
     base_url: str,
     serve,
     messages: list[dict],
-) -> None:
+) -> str:
     """Streaming chat completions via OpenAI SDK."""
     import httpx
     from openai import OpenAI
@@ -214,6 +272,7 @@ def _run_chat_streaming(
 
     assert len(text.strip()) > 0, "Streaming response is empty"
     print(f"\nStreaming response: {text}")
+    return text
 
 
 def _run_embedding(base_url: str, headers: dict) -> None:

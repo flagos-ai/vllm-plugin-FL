@@ -15,7 +15,7 @@
 # CUDA-Based Platform Configuration
 # Flexible test selection mechanism for NVIDIA GPU environments
 #
-# This platform configuration supports multiple device types (a100, a800, h100)
+# This platform configuration supports multiple device types (a100, a800, h100, h20)
 # Users can modify the following:
 # - functional: Add/remove test case names in the support lists
 #   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
@@ -45,6 +45,10 @@ device_types:
     compute_capability: "9.0"
     memory_gb: 80
     tags: [hopper, fp8, bf16]
+  h20:
+    compute_capability: "9.0"
+    memory_gb: 140
+    tags: [hopper, fp8, bf16, china-variant]
 
 # Default numerical tolerance for result comparison (used when device doesn't override)
 tolerance:
@@ -97,3 +101,10 @@ a100:
     benchmark:
       enabled: true
       smoke: ["throughput", "latency", "serve"]
+
+h20:
+  name: "h20"
+  tests:
+    e2e:
+      serving:
+        qwen3_6: ["27b_tp2_262k", "35b_a3b_tp2_262k"]
