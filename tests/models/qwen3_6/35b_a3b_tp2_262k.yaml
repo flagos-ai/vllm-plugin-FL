@@ -33,12 +33,11 @@ serve:
     - name: text
       messages:
         - role: "user"
-          content: "Where is the capital of France?"
-      expected_keywords:
-        - "The capital of France is"
+          content: "The capital of France is"
+      expected: "Paris"
     - name: image
       generated_image: true
       prompt: "Describe all visible text, colors, and shapes in English."
-      expected_keywords:
+      expected:
         - "Hello VLM"
         - "blue rectangle"

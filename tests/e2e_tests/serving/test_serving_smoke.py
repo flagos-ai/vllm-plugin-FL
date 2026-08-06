@@ -163,32 +163,18 @@ def _run_chat(base_url: str, headers: dict) -> None:
         else:
             response_text = _run_chat_non_streaming(base_url, headers, serve, messages)
 
-        expected_keywords = chat_case.get("expected_keywords", [])
-        if expected_keywords:
-            missing = _missing_keyword_groups(response_text, expected_keywords)
+        expected = chat_case.get("expected")
+        if expected:
+            expected_values = expected if isinstance(expected, list) else [expected]
+            normalized_response = response_text.casefold()
+            missing = [
+                value
+                for value in expected_values
+                if value.casefold() not in normalized_response
+            ]
             is_correct = not missing
-            print(f"Keyword validation: {'CORRECT' if is_correct else 'INCORRECT'}")
-            assert is_correct, (
-                f"Chat case '{case_name}' is missing keyword groups: {missing}"
-            )
-
-
-def _missing_keyword_groups(
-    response_text: str,
-    expected_keywords: list[str | list[str]],
-) -> list[str]:
-    """Return keyword groups for which no allowed alternative was found."""
-    normalized_response = response_text.casefold()
-    missing = []
-    for keyword_group in expected_keywords:
-        alternatives = (
-            keyword_group if isinstance(keyword_group, list) else [keyword_group]
-        )
-        if not any(
-            keyword.casefold() in normalized_response for keyword in alternatives
-        ):
-            missing.append(" / ".join(alternatives))
-    return missing
+            print(f"Answer validation: {'CORRECT' if is_correct else 'INCORRECT'}")
+            assert is_correct, f"Chat case '{case_name}' is missing expected: {missing}"
 
 
 def _generated_image_messages(prompt: str) -> list[dict]:
