@@ -17,7 +17,7 @@
 """Bisheng JIT compilation for the PTO GDN megakernel on Ascend NPU.
 
 The megakernel is compiled on first use and cached under
-``vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/``.
+``vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib/``.
 Re-compilation is triggered when the C++ source mtime changes.
 
 Environment variables:
@@ -37,13 +37,14 @@ from functools import lru_cache
 from pathlib import Path
 
 import torch
+import vllm_fl
 
 # ---------------------------------------------------------------------------
-# Paths — resolved relative to this file's installed location
+# Paths — resolved via vllm_fl package location
 # ---------------------------------------------------------------------------
 _THIS_DIR = Path(__file__).resolve().parent
-_VLLM_FL_DIR = _THIS_DIR.parent.parent           # vllm_fl/
-_PACKAGE_ROOT = _VLLM_FL_DIR.parent              # site-packages root
+_VLLM_FL_DIR = Path(vllm_fl.__file__).resolve().parent  # vllm_fl/
+_PACKAGE_ROOT = _VLLM_FL_DIR.parent                     # repo root (editable) or site-packages
 
 # C++ sources live in csrc/ascend/pto_chunk_gdn/ inside the source tree.
 # In editable installs (pip install -e .) _PACKAGE_ROOT == repo root.

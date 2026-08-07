@@ -26,8 +26,8 @@
 - **依赖头库**：`csrc/ascend/third_party/pto-isa/`。
 - **产物**：多个 `mega_kernel_H*_Hg*_D*_C*.so`。
 - **安装位置**：
-  - 预编译模式：安装到 Python site-packages 下的 `vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/`；
-  - JIT 模式：首次调用时由 `vllm_fl/ops/pto_chunk_gdn/compile.py` 自动编译并缓存到同一目录。
+  - 预编译模式：安装到 Python site-packages 下的 `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib/`；
+  - JIT 模式：首次调用时由 `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/compile.py` 自动编译并缓存到同一目录。
 - **运行时加载**：Python 代码通过 `ctypes.CDLL` / `torch.ops.load_library` 直接加载 `.so`，不经过 CANN `opp/vendors` 路径。
 
 ## 2. 环境准备
@@ -171,28 +171,28 @@ cmake --build build/temp.linux-aarch64-cpython-311 \
 产物会安装到当前 Python 环境 site-packages 下的：
 
 ```text
-vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/
+vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib/
 ├── mega_kernel_H16_Hg8_D128_C128.so
 ├── mega_kernel_H16_Hg16_D128_C128.so
 └── ...
 ```
 
-> 在 editable install（`pip install -e .`）下，`_PACKAGE_ROOT` 等于仓库根目录，因此也会写到仓库内的 `vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/`。
+> 在 editable install（`pip install -e .`）下，`_PACKAGE_ROOT` 等于仓库根目录，因此也会写到仓库内的 `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib/`。
 
 ### 方式 B：JIT 首次编译（开发调试用）
 
-不预编译，直接运行 `tests/custom_ops_tests/test_pto_chunk_gdn.py`。`vllm_fl/ops/pto_chunk_gdn/compile.py` 会：
+不预编译，直接运行 `tests/custom_ops_tests/test_pto_chunk_gdn.py`。`vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/compile.py` 会：
 
 1. 自动查找 `csrc/ascend/third_party/pto-isa`；
 2. 调用系统 `bisheng` 编译对应配置的 `mega_kernel_*.so`；
-3. 缓存到 `vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/`；
+3. 缓存到 `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib/`；
 4. 后续调用直接复用缓存。
 
 ## 7. 目录结构总览
 
 ```text
 csrc/ascend/
-├── CMakeLists.txt              # 构建 _C_ascend + 分发 pto_chunk_gdn
+├── CMakeLists.txt              # 构建 _C_ascend + PTO GDN 预编译
 ├── torch_binding.cpp           # torch.ops._C_ascend 注册
 ├── torch_binding_meta.cpp      # meta kernel 注册
 ├── camem_allocator.cpp         # NPU 显存分配器

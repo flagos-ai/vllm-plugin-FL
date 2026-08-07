@@ -42,7 +42,7 @@ def apply_pto_gdn_patch() -> None:
 
     import vllm.model_executor.layers.fla.ops as fla_ops
     import vllm_ascend.ops.triton.fla.chunk as _ascend_chunk_mod
-    from vllm_ascend.ops.pto_chunk_gdn.chunk_gated_delta_wrapper import (
+    from .chunk_gated_delta_wrapper import (
         chunk_gated_delta_rule_pto,
     )
 

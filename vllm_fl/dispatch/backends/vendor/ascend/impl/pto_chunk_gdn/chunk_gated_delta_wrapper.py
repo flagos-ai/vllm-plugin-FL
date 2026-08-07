@@ -105,7 +105,7 @@ def chunk_gated_delta_rule_pto(
     except Exception:
         pass
 
-    from vllm_fl.ops.pto_chunk_gdn.mega_kernel import run_mega_kernel
+    from .mega_kernel import run_mega_kernel
 
     kh = q.shape[2]
     cu32 = cu_seqlens.to(torch.int32).contiguous()

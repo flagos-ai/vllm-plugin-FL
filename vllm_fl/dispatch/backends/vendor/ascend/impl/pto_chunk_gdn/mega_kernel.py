@@ -25,7 +25,7 @@ GQA is supported: Q/K use ``Hg`` heads while V/gates use ``H ≥ Hg`` value head
 
 Usage::
 
-    from vllm_ascend.ops.pto_chunk_gdn.mega_kernel import run_mega_kernel
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.pto_chunk_gdn.mega_kernel import run_mega_kernel
 
     o = run_mega_kernel(q, k, v, g, beta, cu_seqlens, stream=stream,
                         chunk_size=128, scale=head_dim**-0.5, key_heads=Hg)
@@ -38,7 +38,7 @@ from functools import lru_cache
 
 import torch
 
-from vllm_fl.ops.pto_chunk_gdn.compile import BLOCK_DIM, KERNELS_PTO, compile_mega_kernel
+from .compile import BLOCK_DIM, KERNELS_PTO, compile_mega_kernel
 
 
 # ---------------------------------------------------------------------------

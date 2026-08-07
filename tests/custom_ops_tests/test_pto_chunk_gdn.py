@@ -16,6 +16,39 @@ import torch_npu
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, ROOT)
 
+# ---------------------------------------------------------------------------
+# Load mega_kernel via importlib, bypassing
+# vllm_fl.dispatch.backends.vendor.ascend.impl.__init__ (which eagerly
+# imports modules that require a fully-initialized vLLM runtime).
+#
+# We register the module under a dotted package name so that the relative
+# import "from .compile import ..." inside mega_kernel.py resolves correctly
+# against sibling modules registered in sys.modules under the same package.
+# ---------------------------------------------------------------------------
+import importlib.util as _ilu
+
+_PTO_PKG = "vllm_fl.dispatch.backends.vendor.ascend.impl.pto_chunk_gdn"
+_PTO_DIR = os.path.join(
+    ROOT,
+    "vllm_fl", "dispatch", "backends", "vendor", "ascend", "impl", "pto_chunk_gdn",
+)
+
+
+def _load_sibling(name, path):
+    """Load a Python file as a module of package _PTO_PKG."""
+    spec = _ilu.spec_from_file_location(f"{_PTO_PKG}.{name}", path)
+    mod = _ilu.module_from_spec(spec)
+    mod.__package__ = _PTO_PKG
+    sys.modules[f"{_PTO_PKG}.{name}"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# Load compile.py first (dependency of mega_kernel.py), then mega_kernel.py.
+_load_sibling("compile", os.path.join(_PTO_DIR, "compile.py"))
+_mega = _load_sibling("mega_kernel", os.path.join(_PTO_DIR, "mega_kernel.py"))
+run_mega_kernel = _mega.run_mega_kernel
+
 
 def main() -> int:
     torch.npu.config.allow_internal_format = True
@@ -23,8 +56,6 @@ def main() -> int:
     from vllm_fl.utils import enable_custom_op
 
     enable_custom_op()
-
-    from vllm_fl.ops.pto_chunk_gdn.mega_kernel import run_mega_kernel
 
     device = torch.device("npu:0")
     B, T, Hg, H, D = 1, 128, 8, 16, 128

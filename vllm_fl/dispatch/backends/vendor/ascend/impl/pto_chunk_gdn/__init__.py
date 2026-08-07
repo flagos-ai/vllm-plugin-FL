@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""PTO chunk-GDN megakernel module for vLLM-Ascend.
+"""PTO chunk-GDN megakernel module — Ascend dispatch impl.
 
 Provides a Bisheng-JIT-compiled fused Ascend NPU megakernel for the chunk
 GatedDeltaNet (GDN) recurrent layer used in Qwen3.5 / Qwen3.6 models,
@@ -25,9 +25,9 @@ Enable via:
 
 The decode phase always uses the original Triton implementation.
 """
-from vllm_fl.ops.pto_chunk_gdn.compile import BLOCK_DIM, PTO_LIB_PATH
-from vllm_fl.ops.pto_chunk_gdn.mega_kernel import run_mega_kernel
-from vllm_fl.ops.pto_chunk_gdn.worker_hook import apply_pto_gdn_patch, is_pto_gdn_patch_active
+from .compile import BLOCK_DIM, PTO_LIB_PATH
+from .mega_kernel import run_mega_kernel
+from .worker_hook import apply_pto_gdn_patch, is_pto_gdn_patch_active
 
 __all__ = [
     "BLOCK_DIM",
