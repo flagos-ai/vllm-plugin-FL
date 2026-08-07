@@ -54,10 +54,50 @@ def _quant_config():
     )
 
 
-def test_functional_experts_defer_activation_quantization():
+@pytest.mark.parametrize(
+    "experts_cls",
+    [
+        moe_experts.FlagGemsW8A8Experts,
+        moe_experts.VllmFunctionalW8A8Experts,
+    ],
+)
+def test_functional_experts_defer_activation_quantization(experts_cls):
     instance = SimpleNamespace()
-    assert (
-        moe_experts.TritonW8A8Experts.expects_unquantized_inputs.fget(instance) is True
+    assert experts_cls.expects_unquantized_inputs.fget(instance) is True
+
+
+def test_vllm_functional_experts_call_only_native_vllm(monkeypatch):
+    calls = []
+
+    def fake_vllm_fused_experts(**kwargs):
+        calls.append(kwargs)
+        return torch.full_like(kwargs["hidden_states"], 2)
+
+    monkeypatch.setattr(
+        moe_experts,
+        "_vllm_fused_experts",
+        fake_vllm_fused_experts,
+    )
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("NVIDIA must not dispatch through FlagGems"),
+    )
+    quant_config = _quant_config()
+    arguments = _apply_arguments()
+
+    moe_experts.VllmFunctionalW8A8Experts.apply(
+        SimpleNamespace(quant_config=quant_config),
+        **arguments,
+    )
+
+    assert calls[0]["hidden_states"].dtype == torch.bfloat16
+    assert calls[0]["quant_config"] is quant_config
+    assert calls[0]["activation"] is MoEActivation.SILU
+    assert "inplace" not in calls[0]
+    assert torch.equal(
+        arguments["output"],
+        torch.full_like(arguments["output"], 2),
     )
 
 
@@ -77,7 +117,7 @@ def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch)
     instance = SimpleNamespace(quant_config=quant_config)
     arguments = _apply_arguments()
 
-    moe_experts.TritonW8A8Experts.apply(instance, **arguments)
+    moe_experts.FlagGemsW8A8Experts.apply(instance, **arguments)
 
     assert calls[0]["hidden_states"].dtype == torch.bfloat16
     assert calls[0]["hidden_states"].shape == (2, 4)
@@ -113,7 +153,7 @@ def test_functional_experts_rejects_prequantized_input(monkeypatch):
     arguments["a1q_scale"] = torch.ones((2, 1), dtype=torch.float32)
 
     with pytest.raises(ValueError, match="quantized before"):
-        moe_experts.TritonW8A8Experts.apply(instance, **arguments)
+        moe_experts.FlagGemsW8A8Experts.apply(instance, **arguments)
 
 
 def test_functional_experts_rejects_activation_not_supported_by_flaggems(
@@ -128,7 +168,7 @@ def test_functional_experts_rejects_activation_not_supported_by_flaggems(
     arguments["activation"] = MoEActivation.GELU
 
     with pytest.raises(NotImplementedError, match="only silu"):
-        moe_experts.TritonW8A8Experts.apply(
+        moe_experts.FlagGemsW8A8Experts.apply(
             SimpleNamespace(quant_config=_quant_config()),
             **arguments,
         )
@@ -157,4 +197,4 @@ def test_functional_experts_rejects_incompatible_weight_scale(
     instance = SimpleNamespace(quant_config=quant_config)
 
     with pytest.raises((TypeError, ValueError), match="weight scales|scale must"):
-        moe_experts.TritonW8A8Experts.apply(instance, **_apply_arguments())
+        moe_experts.FlagGemsW8A8Experts.apply(instance, **_apply_arguments())

@@ -124,14 +124,14 @@ def test_w8a8_moe_selector_uses_fl_experts_on_non_nvidia_oot(monkeypatch):
         activation_key=None,
     )
 
-    from vllm_fl.quantization.w8a8.moe_experts import TritonW8A8Experts
+    from vllm_fl.quantization.w8a8.moe_experts import FlagGemsW8A8Experts
 
     assert backend == "triton"
-    assert experts_cls is TritonW8A8Experts
+    assert experts_cls is FlagGemsW8A8Experts
     assert upstream_calls == []
 
 
-def test_w8a8_moe_selector_keeps_nvidia_native(monkeypatch):
+def test_w8a8_moe_selector_uses_vllm_functional_experts_on_nvidia(monkeypatch):
     upstream_calls = []
 
     def upstream_selector(*args, **kwargs):
@@ -168,10 +168,53 @@ def test_w8a8_moe_selector_keeps_nvidia_native(monkeypatch):
         ),
     )
 
-    result = oracle.select_int8_moe_backend(
+    backend, experts_cls = oracle.select_int8_moe_backend(
         config,
         weight_key=None,
         activation_key=None,
+    )
+
+    from vllm_fl.quantization.w8a8.moe_experts import (
+        VllmFunctionalW8A8Experts,
+    )
+
+    assert backend == "triton"
+    assert experts_cls is VllmFunctionalW8A8Experts
+    assert upstream_calls == []
+
+
+def test_w8a8_moe_selector_nvidia_noncanonical_falls_back_without_flaggems(
+    monkeypatch,
+):
+    upstream_calls = []
+
+    def upstream_selector(*args, **kwargs):
+        upstream_calls.append((args, kwargs))
+        return "nvidia-native"
+
+    oracle, _ = _install_with_fake_modules(
+        monkeypatch,
+        upstream_selector,
+        lambda **kwargs: kwargs,
+    )
+
+    import vllm_fl.utils as fl_utils
+
+    monkeypatch.setattr(fl_utils, "is_nvidia_platform", lambda: True)
+    monkeypatch.setattr(
+        fl_utils,
+        "use_flaggems_op",
+        lambda op_name: (_ for _ in ()).throw(
+            AssertionError("NVIDIA must not consult the FlagGems W8A8 gate")
+        ),
+    )
+    moe_adapter.install_fl_w8a8_moe_selector()
+    config = SimpleNamespace()
+
+    result = oracle.select_int8_moe_backend(
+        config,
+        weight_key="noncanonical",
+        activation_key="noncanonical",
     )
 
     assert result == "nvidia-native"

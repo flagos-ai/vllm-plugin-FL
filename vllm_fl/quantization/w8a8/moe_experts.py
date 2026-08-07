@@ -10,7 +10,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""FlagGems experts adapter for dynamic per-token W8A8 MoE."""
+"""Hardware-specific experts adapters for dynamic per-token W8A8 MoE."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ import vllm.model_executor.layers.fused_moe.modular_kernel as mk
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 from vllm.model_executor.layers.fused_moe.experts.triton_moe import (
     TritonExperts,
+)
+from vllm.model_executor.layers.fused_moe.fused_moe import (
+    fused_experts as _vllm_fused_experts,
 )
 
 
@@ -97,7 +100,83 @@ def _validate_w8a8_contract(
         raise ValueError(f"w2_bias must have shape {expected_w2_bias}")
 
 
-class TritonW8A8Experts(TritonExperts):
+class VllmFunctionalW8A8Experts(TritonExperts):
+    """Run NVIDIA W8A8 MoE through vLLM's native functional operators.
+
+    The bridge changes only the modular input contract: prepare leaves the
+    first activation in floating point, then vLLM ``fused_experts`` performs
+    both dynamic per-token quantization steps and the Triton expert kernels.
+    It never imports or dispatches through FlagGems.
+    """
+
+    @property
+    def expects_unquantized_inputs(self) -> bool:
+        return True
+
+    def apply(
+        self,
+        output: torch.Tensor,
+        hidden_states: torch.Tensor,
+        w1: torch.Tensor,
+        w2: torch.Tensor,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+        activation: MoEActivation,
+        global_num_experts: int,
+        expert_map: torch.Tensor | None,
+        a1q_scale: torch.Tensor | None,
+        a2_scale: torch.Tensor | None,
+        workspace13: torch.Tensor,
+        workspace2: torch.Tensor,
+        expert_tokens_meta: mk.ExpertTokensMetadata | None,
+        apply_router_weight_on_input: bool,
+    ) -> None:
+        del workspace13, workspace2, expert_tokens_meta
+
+        quant_config = self.quant_config
+        if not quant_config.use_int8_w8a8:
+            raise ValueError(
+                "VllmFunctionalW8A8Experts requires an INT8 W8A8 quant config"
+            )
+        if not quant_config.per_act_token_quant or quant_config.block_shape is not None:
+            raise ValueError(
+                "VllmFunctionalW8A8Experts requires dynamic per-token/channel-wise INT8"
+            )
+        if getattr(self, "_lora_context", None) is not None:
+            raise NotImplementedError(
+                "The vLLM functional W8A8 MoE bridge does not support LoRA"
+            )
+        if a1q_scale is not None or a2_scale is not None:
+            raise ValueError(
+                "W8A8 activation was quantized before the vLLM functional "
+                "experts bridge; expected an unquantized floating-point input"
+            )
+        if hidden_states.dtype not in {
+            torch.float32,
+            torch.float16,
+            torch.bfloat16,
+        }:
+            raise TypeError(
+                "W8A8 functional experts require floating-point hidden states, "
+                f"got {hidden_states.dtype}"
+            )
+
+        result = _vllm_fused_experts(
+            hidden_states=hidden_states,
+            w1=w1,
+            w2=w2,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            activation=activation,
+            apply_router_weight_on_input=apply_router_weight_on_input,
+            global_num_experts=global_num_experts,
+            expert_map=expert_map,
+            quant_config=quant_config,
+        )
+        output.copy_(result)
+
+
+class FlagGemsW8A8Experts(TritonExperts):
     """Keep inputs floating-point and let FlagGems own the full W8A8 pipeline.
 
     The checkpoint contract is ``w1=[E,2I,K]``, ``w2=[E,K,I]`` with
@@ -132,10 +211,10 @@ class TritonW8A8Experts(TritonExperts):
 
         quant_config = self.quant_config
         if not quant_config.use_int8_w8a8:
-            raise ValueError("TritonW8A8Experts requires an INT8 W8A8 quant config")
+            raise ValueError("FlagGemsW8A8Experts requires an INT8 W8A8 quant config")
         if not quant_config.per_act_token_quant or quant_config.block_shape is not None:
             raise ValueError(
-                "TritonW8A8Experts requires dynamic per-token/channel-wise INT8"
+                "FlagGemsW8A8Experts requires dynamic per-token/channel-wise INT8"
             )
         if getattr(self, "_lora_context", None) is not None:
             raise NotImplementedError(
@@ -196,4 +275,7 @@ class TritonW8A8Experts(TritonExperts):
         output.copy_(result)
 
 
-__all__ = ["TritonW8A8Experts"]
+__all__ = [
+    "FlagGemsW8A8Experts",
+    "VllmFunctionalW8A8Experts",
+]

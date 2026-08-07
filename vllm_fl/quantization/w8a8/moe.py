@@ -14,6 +14,8 @@
 
 from importlib import import_module
 
+from vllm.logger import init_logger
+
 _ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe_v024"
 _CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config_v024"
 _ORACLE_MODULE = "vllm.model_executor.layers.fused_moe.oracle.int8"
@@ -24,10 +26,11 @@ _SCHEME_MODULE = (
 # Reuse the repository's existing MoE policy key so current platform
 # blacklists/whitelists keep governing the whole FL MoE pipeline.
 FLAGGEMS_W8A8_MOE_OP = "fused_moe"
+logger = init_logger(__name__)
 
 
 def install_fl_w8a8_moe_selector() -> bool:
-    """Keep NVIDIA native and route non-NVIDIA OOT W8A8 MoE to FlagGems."""
+    """Route NVIDIA to vLLM and non-NVIDIA OOT W8A8 MoE to FlagGems."""
     oracle_module = import_module(_ORACLE_MODULE)
     scheme_module = import_module(_SCHEME_MODULE)
 
@@ -105,20 +108,45 @@ def install_fl_w8a8_moe_selector() -> bool:
             kInt8StaticChannelSym,
         ) and activation_key in (None, kInt8DynamicTokenSym)
 
-        # Keep the vLLM-native NVIDIA execution path unchanged even when a
-        # FlagGems whitelist overrides nvidia.yaml.
-        if canonical_w8a8 and is_nvidia_platform():
-            return current_selector(
-                config,
-                weight_key=weight_key,
-                activation_key=activation_key,
+        # NVIDIA must never consult the FL/FlagGems operator policy. For the
+        # canonical W8A8 case, vLLM's stock TritonExperts asks the modular
+        # prepare stage to quantize the first activation, while its functional
+        # implementation expects floating-point input and owns both dynamic
+        # quantization steps. Use a thin bridge to correct that input contract.
+        if is_nvidia_platform():
+            if not canonical_w8a8:
+                return current_selector(
+                    config,
+                    weight_key=weight_key,
+                    activation_key=activation_key,
+                )
+            if getattr(config, "is_lora_enabled", False):
+                raise NotImplementedError(
+                    "The vLLM functional W8A8 MoE bridge does not support LoRA"
+                )
+            if config.moe_parallel_config.use_batched_activation_format:
+                raise ValueError(
+                    "The vLLM functional W8A8 MoE bridge requires the standard "
+                    "activation format; batched-experts dispatch is not supported"
+                )
+
+            from vllm_fl.quantization.w8a8.moe_experts import (
+                VllmFunctionalW8A8Experts,
+            )
+
+            logger.info_once(
+                "Using vLLM functional W8A8 MoE experts on NVIDIA (FlagGems bypassed)."
+            )
+            return (
+                oracle_module.Int8MoeBackend.TRITON,
+                VllmFunctionalW8A8Experts,
             )
 
         use_fl = (
-            current_platform.is_out_of_tree()
+            canonical_w8a8
+            and current_platform.is_out_of_tree()
             and is_oot_enabled()
             and use_flaggems_op(FLAGGEMS_W8A8_MOE_OP)
-            and canonical_w8a8
         )
         if not use_fl:
             return current_selector(
@@ -137,11 +165,14 @@ def install_fl_w8a8_moe_selector() -> bool:
                 "format; batched-experts dispatch is not supported"
             )
 
-        from vllm_fl.quantization.w8a8.moe_experts import TritonW8A8Experts
+        from vllm_fl.quantization.w8a8.moe_experts import FlagGemsW8A8Experts
 
+        logger.info_once(
+            "Using FlagGems W8A8 MoE experts on a non-NVIDIA OOT platform."
+        )
         return (
             oracle_module.Int8MoeBackend.TRITON,
-            TritonW8A8Experts,
+            FlagGemsW8A8Experts,
         )
 
     setattr(select_int8_moe_backend_fl, _ADAPTER_MARKER, True)
