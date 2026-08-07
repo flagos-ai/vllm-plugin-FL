@@ -99,7 +99,7 @@ FL 仓库已在 `csrc/ascend` 编译注册到 `torch.ops._C_ascend`（`TORCH_LIB
 
 ### 4.1 接入
 
-参照 vllm-ascend PR #8872（`/workspace/patch/pto_gdn.patch`）。FL 已内置 `vllm_fl/ops/pto_chunk_gdn/`（6 阶段融合：cumsum → scaled_dot_kkt → solve_tril → wy_fast → chunk_h → chunk_o，单次 launch）。
+参照 vllm-ascend PR #8872（`/workspace/patch/pto_gdn.patch`）。FL 已内置 `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/`（6 阶段融合：cumsum → scaled_dot_kkt → solve_tril → wy_fast → chunk_h → chunk_o，单次 launch）。
 
 适配（`chunk_gated_delta_wrapper.py`）：l2norm/run_mega_kernel 导入改 FL 路径；`_triton()` 回退调用去掉 FL chunk 不支持的 `prebuilt_meta`。`compile.py` 增加 `.so` 已存在则跳过（避免 4 个 TP worker 每次启动并发重编）。
 
@@ -124,7 +124,7 @@ Qwen3.6-27B TP4 → 每 rank `H=NV/TP=12, Hg=NK/TP=4`，而 `mega_transpose_TH_t
 - 数值：PTO vs Triton chunk，输出 o 与 final_state 一致（fp16 计算、bf16 往返）。
 - eager 自测：**TTFT +15%~95%**；A/B 输出逐 token 全等。
 - aclgraph 自测：**TTFT +18%~84%**，6 case 全过。
-- kernel `.so` 按 (H,Hg,D,C) 缓存于 `vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/`，新配置首用编译 ~9s。
+- kernel `.so` 按 (H,Hg,D,C) 缓存于 `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib/`，新配置首用编译 ~9s。
 
 ---
 
@@ -250,9 +250,9 @@ A/B 正确性：AscendC vs Triton 输出逐 token 全等；PTO vs 无 PTO 输出
 | `vllm_fl/dispatch/backends/vendor/ascend/patch.py` | 注册 `patch_qwen3_6_gdn` |
 | `vllm_fl/dispatch/backends/vendor/ascend/patches/README.md` | patch 条目 |
 | `vllm_fl/__init__.py` | `_bootstrap_cann_custom_op_env`（OPP 路径 + RTLD_LOCAL 预载） |
-| `vllm_fl/ops/pto_chunk_gdn/chunk_gated_delta_wrapper.py` | FL 导入适配、`_triton` 参数适配 |
-| `vllm_fl/ops/pto_chunk_gdn/compile.py` | `.so` 存在则跳过编译 |
-| `vllm_fl/ops/pto_chunk_gdn/mega_kernel.py` | `total_chunks` 可选参数 |
+| `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/chunk_gated_delta_wrapper.py` | FL 导入适配、`_triton` 参数适配 |
+| `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/compile.py` | `.so` 存在则跳过编译 |
+| `vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/mega_kernel.py` | `total_chunks` 可选参数 |
 | `csrc/ascend/pto_chunk_gdn/mega_kernel.cpp` | 头维 32B 补齐 |
 | `csrc/ascend/pto_chunk_gdn/chunk_h.cpp` | fs UB 写竞争排干 |
 | `vllm_fl/worker/model_runner.py` | `_update_hybrid_attention_mamba_layout` 跳过 re-stride |

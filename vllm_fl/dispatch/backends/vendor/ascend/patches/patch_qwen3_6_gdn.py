@@ -50,7 +50,7 @@ FL plugin on vLLM 0.13:
   decomposed eager ``forward_native`` chain.
 * Fresh (all-zero ``initial_state``) prefill batches run the fused
   PTO/Bisheng megakernel (vllm-ascend PR #8872 port,
-  ``vllm_fl/ops/pto_chunk_gdn``): all six GDN stages in a single launch.
+  ``vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn``): all six GDN stages in a single launch.
   The PTO-vs-Triton decision and the megakernel chunk counting are made
   from CPU-side flags attached to ``GDNAttentionMetadata`` by the builder
   wrap — no per-layer device→host syncs (the naive wrapper approach costs
@@ -275,7 +275,7 @@ def _pto_available() -> bool:
     if _PTO_AVAILABLE is not None:
         return _PTO_AVAILABLE
     # Default OFF: the PTO megakernel carries A/A_inv/recurrent state in fp16
-    # (see vllm_fl/ops/pto_chunk_gdn/mega_kernel.py), which measurably degrades
+    # (see vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/mega_kernel.py), which measurably degrades
     # accuracy vs the fp32-state Triton chunk path. Re-enable with
     # VLLM_FL_DISABLE_PTO_GDN=0 once the kernel is reworked to fp32 state.
     if os.environ.get("VLLM_FL_DISABLE_PTO_GDN", "1") == "1":
@@ -283,7 +283,7 @@ def _pto_available() -> bool:
         _PTO_AVAILABLE = False
         return False
     try:
-        from vllm_fl.ops.pto_chunk_gdn.mega_kernel import run_mega_kernel  # noqa: F401
+        from vllm_fl.dispatch.backends.vendor.ascend.impl.pto_chunk_gdn.mega_kernel import run_mega_kernel  # noqa: F401
 
         _PTO_AVAILABLE = True
     except Exception as e:
@@ -337,7 +337,7 @@ def _patch_gdn_metadata_host_flags() -> None:
 
 def _chunk_gdn_pto(q, k, v, g, beta, cu_seqlens, attn_metadata):
     """Run the PTO megakernel for a fresh (all-zero initial state) prefill batch."""
-    from vllm_fl.ops.pto_chunk_gdn.mega_kernel import run_mega_kernel
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.pto_chunk_gdn.mega_kernel import run_mega_kernel
 
     Hg, D = q.shape[2], q.shape[3]
     q16 = l2norm_fwd(q.to(torch.float16))

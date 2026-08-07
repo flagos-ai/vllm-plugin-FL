@@ -218,7 +218,7 @@ csrc/output/
 vllm_plugin_fl.egg-info/
 /vllm_fl/_cann_ops_custom/*
 !/vllm_fl/_cann_ops_custom/.gitkeep
-vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib/*.so
+vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib/*.so
 
 # CANN framework operator build directories
 csrc/ascend/build/

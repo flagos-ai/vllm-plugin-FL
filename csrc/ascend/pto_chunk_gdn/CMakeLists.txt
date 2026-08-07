@@ -75,7 +75,7 @@ if(NOT DEFINED Python_SITELIB)
     )
 endif()
 set(PTO_COMPILED_INSTALL_DIR
-    "${Python_SITELIB}/vllm_fl/ops/pto_chunk_gdn/kernels/compiled_lib"
+    "${Python_SITELIB}/vllm_fl/dispatch/backends/vendor/ascend/impl/pto_chunk_gdn/kernels/compiled_lib"
 )
 
 # ── Common compiler flags ──────────────────────────────────────────────────────
