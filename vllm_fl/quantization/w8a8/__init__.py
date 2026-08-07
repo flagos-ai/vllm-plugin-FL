@@ -5,28 +5,21 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Quantization compatibility and out-of-tree kernel registration."""
+"""W8A8 adapters for dynamic per-token INT8 inference."""
 
-from .compressed_tensors import (
-    CompatibilityReport,
-    W8A8DynamicTokenScheme,
-    WNA16Scheme,
-    inspect_vllm_compressed_tensors_api,
-    validate_compressed_tensors_w8a8_config,
-    validate_compressed_tensors_wna16_config,
+from .reference import (
+    dynamic_per_token_quant_int8,
+    unpack_uint8b128_int32,
+    w8a8_linear_reference,
 )
 
 __all__ = [
-    "CompatibilityReport",
-    "W8A8DynamicTokenScheme",
-    "WNA16Scheme",
-    "inspect_vllm_compressed_tensors_api",
-    "validate_compressed_tensors_w8a8_config",
-    "validate_compressed_tensors_wna16_config",
+    "dynamic_per_token_quant_int8",
+    "unpack_uint8b128_int32",
+    "w8a8_linear_reference",
 ]

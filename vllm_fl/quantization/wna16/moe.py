@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from importlib import import_module
+from importlib.util import find_spec
 
 import torch
 
@@ -28,11 +29,46 @@ _UPSTREAM_MODULES = (
 )
 
 
+def is_flaggems_wna16_moe_available() -> bool:
+    from vllm_fl.utils import is_oot_enabled, use_flaggems_op
+
+    return (
+        is_oot_enabled()
+        and use_flaggems_op("fused_moe")
+        and find_spec("flag_gems") is not None
+    )
+
+
+def is_fl_wna16_moe_available() -> bool:
+    return kernels.is_wna16_moe_available() or is_flaggems_wna16_moe_available()
+
+
 def _build_local_moe_method(base_method):
     class FLCompressedTensorsWNA16MoEMethod(base_method):
-        """Keep vLLM weight loading but call the fixed plugin operator."""
+        """Keep vLLM loading and route execution to an FL backend."""
 
         _vllm_fl_local_wna16_moe = True
+
+        def select_gemm_impl(
+            self,
+            prepare_finalize,
+            layer,
+        ):
+            if not is_flaggems_wna16_moe_available():
+                return super().select_gemm_impl(
+                    prepare_finalize,
+                    layer,
+                )
+            from vllm_fl.ops.fused_moe.fused_moe_utils import (
+                TritonExpertsFL,
+            )
+
+            layer.w13_weight = layer.w13_weight_packed
+            layer.w2_weight = layer.w2_weight_packed
+            return TritonExpertsFL(
+                moe_config=self.moe,
+                quant_config=self.moe_quant_config,
+            )
 
         def apply(
             self,
@@ -42,6 +78,14 @@ def _build_local_moe_method(base_method):
             topk_ids: torch.Tensor,
             shared_experts_input: torch.Tensor | None,
         ) -> torch.Tensor:
+            if not kernels.is_wna16_moe_available():
+                return super().apply(
+                    layer,
+                    x,
+                    topk_weights,
+                    topk_ids,
+                    shared_experts_input,
+                )
             del shared_experts_input
             return kernels.wna16_moe(
                 x=x,
@@ -64,12 +108,12 @@ def _build_local_moe_method(base_method):
 
 
 def install_fl_wna16_moe_method() -> bool:
-    """Install the local MoE method when the fixed plugin operator is built.
+    """Install the local MoE method when an FL backend is available.
 
     vLLM 0.20.2 selects WNA16 MoE through a scheme class rather than a kernel
     registry, so replacing that class is the installation point.
     """
-    if not kernels.is_wna16_moe_available():
+    if not is_fl_wna16_moe_available():
         return False
 
     module = None
@@ -88,4 +132,8 @@ def install_fl_wna16_moe_method() -> bool:
     return True
 
 
-__all__ = ["install_fl_wna16_moe_method"]
+__all__ = [
+    "install_fl_wna16_moe_method",
+    "is_fl_wna16_moe_available",
+    "is_flaggems_wna16_moe_available",
+]
