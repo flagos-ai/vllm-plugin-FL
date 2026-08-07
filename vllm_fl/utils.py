@@ -31,23 +31,62 @@ _OP_CONFIG: Optional[dict[str, str]] = None
 #
 # Values are normalized to lowercase and matched against available backend
 # subdirectories (for example, cuda/ascend/metax/iluvatar/mthreads).
+#
+# - device_control_env_var: the environment variable the runtime honours to
+#   restrict visible devices (the vLLM ``Platform.device_control_env_var``
+#   contract). Needed to translate a logical device ID into the ordinal that
+#   is actually visible to the process, which matters whenever a launcher
+#   isolates devices per worker (for example Ray in multi-node deployments).
+#   CUDA-alike vendors reuse CUDA_VISIBLE_DEVICES; others declare their own.
 VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/cuda
-    "nvidia": {"device_type": "cuda", "device_name": "nvidia"},
+    "nvidia": {
+        "device_type": "cuda",
+        "device_name": "nvidia",
+        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+    },
     # Registered backend: vendor/ascend
-    "ascend": {"device_type": "npu", "device_name": "npu"},
+    "ascend": {
+        "device_type": "npu",
+        "device_name": "npu",
+        "device_control_env_var": "ASCEND_RT_VISIBLE_DEVICES",
+    },
     # Registered backend: vendor/iluvatar
-    "iluvatar": {"device_type": "cuda", "device_name": "cuda"},
+    "iluvatar": {
+        "device_type": "cuda",
+        "device_name": "cuda",
+        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+    },
     # Registered backend: vendor/metax
-    "metax": {"device_type": "cuda", "device_name": "metax"},
+    "metax": {
+        "device_type": "cuda",
+        "device_name": "metax",
+        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+    },
     # Registered backend: vendor/musa
-    "mthreads": {"device_type": "musa", "device_name": "musa"},
+    "mthreads": {
+        "device_type": "musa",
+        "device_name": "musa",
+        "device_control_env_var": "MUSA_VISIBLE_DEVICES",
+    },
     # Registered backend: vendor/sunrise
-    "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
+    "sunrise": {
+        "device_type": "ptpu",
+        "device_name": "ptpu",
+        "device_control_env_var": "PTPU_VISIBLE_DEVICES",
+    },
     # Registered backend: vendor/hygon
-    "hygon": {"device_type": "cuda", "device_name": "cuda"},
+    "hygon": {
+        "device_type": "cuda",
+        "device_name": "cuda",
+        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+    },
     # Registered backend: vendor/thead (PPU)
-    "thead": {"device_type": "cuda", "device_name": "thead"},
+    "thead": {
+        "device_type": "cuda",
+        "device_name": "thead",
+        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+    },
 }
 
 
@@ -80,6 +119,25 @@ def get_device_type(vendor_name: str) -> str:
 def get_device_name(vendor_name: str) -> str:
     """Return the configured device_name for the given vendor."""
     return _get_vendor_device_field(vendor_name, "device_name")
+
+
+def get_device_control_env_var(vendor_name: str) -> str:
+    """Return the visible-devices environment variable for the given vendor.
+
+    ``FLAGOS_DEVICE_CONTROL_ENV_VAR`` overrides the table, so a vendor whose
+    runtime is not covered here can be enabled without a code change.
+    Unknown vendors fall back to CUDA_VISIBLE_DEVICES because every
+    CUDA-alike backend honours it.
+    """
+    override = os.environ.get("FLAGOS_DEVICE_CONTROL_ENV_VAR", "").strip()
+    if override:
+        return override
+    device_info = VENDOR_DEVICE_MAP.get(vendor_name)
+    if isinstance(device_info, dict):
+        value = device_info.get("device_control_env_var")
+        if isinstance(value, str) and value.strip():
+            return value
+    return "CUDA_VISIBLE_DEVICES"
 
 
 def is_nvidia_platform() -> bool:
