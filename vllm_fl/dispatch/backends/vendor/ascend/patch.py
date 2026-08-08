@@ -9,23 +9,6 @@ import vllm
 logger = logging.getLogger(__name__)
 _patches_applied = False
 
-
-def patch_accelerator_empty_cache():
-    """Redirect generic accelerator cache cleanup to torch-npu.
-
-    ``torch.accelerator.empty_cache`` uses an incompatible allocator on NPU.
-    Patch it during Ascend backend import so cleanup also works in the engine
-    parent process, not only in worker processes.
-    """
-    npu = getattr(torch, "npu", None)
-    accelerator = getattr(torch, "accelerator", None)
-    if npu is None or accelerator is None or not hasattr(npu, "empty_cache"):
-        return
-
-    accelerator.empty_cache = npu.empty_cache
-    logger.info("Patched torch.accelerator.empty_cache for Ascend NPU")
-
-
 def apply_ascend_patches():
     """Apply all Ascend-specific patches."""
     global _patches_applied

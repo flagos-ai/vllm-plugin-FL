@@ -19,7 +19,7 @@ if __name__ == "__main__":
     sampling_params = SamplingParams(max_tokens=10, temperature=0.0)
     # Create an LLM.
     llm = LLM(
-        model="/data/models/MiniMax-M2.7",
+        model="/models/MiniMax-M2.7",
         tensor_parallel_size=8,
         pipeline_parallel_size=1,
         enforce_eager=False,

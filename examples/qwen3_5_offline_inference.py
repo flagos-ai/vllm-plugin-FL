@@ -19,7 +19,7 @@ if __name__ == "__main__":
     sampling_params = SamplingParams(max_tokens=10, temperature=0.0)
     # Create an LLM.
     llm = LLM(
-        model="/data/models/Qwen/Qwen3.5-397B-A17B",
+        model="/models/Qwen3.5-397B-A17B",
         tensor_parallel_size=8,
         pipeline_parallel_size=2,
         enforce_eager=False,

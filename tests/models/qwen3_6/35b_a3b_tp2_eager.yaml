@@ -26,7 +26,8 @@ llm:
 
 generate:
   prompts:
-    - "Where is the capital of France"
+    - text: "The capital of France is"
+      expected: "Paris"
   sampling:
     max_tokens: 100
     temperature: 0.0
@@ -37,14 +38,11 @@ serve:
   endpoints: ["chat"]
   stream: false
   max_tokens: 256
-  chat_messages:
-    - role: "user"
-      content: "Where is the capital of France"
   chat_cases:
     - name: text
       messages:
         - role: "user"
-          content: "Where is the capital of France"
+          content: "The capital of France is"
       expected: "Paris"
     - name: image
       generated_image: true

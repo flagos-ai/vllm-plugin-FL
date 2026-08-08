@@ -30,14 +30,3 @@ generate:
   parametrize:
     enforce_eager: [true, false]
     dtype: ["bfloat16"]
-
-serve:
-  served_model_name: "qwen"
-  endpoints: ["chat"]
-  stream: false
-  max_tokens: 64
-  chat_messages:
-    - role: "user"
-      content: "Introduce large language models briefly."
-  sampling:
-    temperature: 0.0

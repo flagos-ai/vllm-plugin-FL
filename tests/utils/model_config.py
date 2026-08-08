@@ -30,7 +30,11 @@ Usage::
     gen = cfg.generate
     print(gen.modality, gen.prompts, gen.assets)
 
-    # Apply device-specific case overrides from platform YAML
+    # Apply device-specific case overrides from platform YAML.
+    # This first loads tests/models/qwen3_6/27b_tp2_eager.yaml, then looks up
+    # tests/platforms/cuda.yaml -> device_overrides.h20. If the device's
+    # cases list contains qwen3_6/27b_tp2_eager, its llm/serve overrides are
+    # merged into the base model config.
     cfg = ModelConfig.load("qwen3_6", "27b_tp2_eager", platform="cuda", device="h20")
 
 """
@@ -67,12 +71,12 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 def _apply_device_case_overrides(
     raw: dict[str, Any],
+    model: str,
     case: str | None,
     platform: str | None,
     device: str | None,
-    platforms_dir: Path | None,
 ) -> dict[str, Any]:
-    """Apply ``device_overrides.<device>.<case>`` from platform YAML."""
+    """Apply ``device_overrides.<device>.cases`` from platform YAML."""
     config = copy.deepcopy(raw)
     active_platform = platform or os.environ.get("FL_TEST_PLATFORM", "")
     if not active_platform or not case:
@@ -85,9 +89,8 @@ def _apply_device_case_overrides(
     platform_config = PlatformConfig.load(
         active_platform,
         active_device or None,
-        platforms_dir=platforms_dir,
     )
-    return _deep_merge(config, platform_config.get_device_case_overrides(case))
+    return _deep_merge(config, platform_config.get_device_case_overrides(model, case))
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +236,7 @@ class ModelConfig:
           prompts: [...]
           sampling: {max_tokens: 5}
         # Device differences live in tests/platforms/<platform>.yaml under
-        # device_overrides.<device>.<case>.
+        # device_overrides.<device>.cases.
 
     **Legacy layout** (``tests/models/<name>.yaml``)::
 
@@ -258,7 +261,6 @@ class ModelConfig:
         models_dir: Path | None = None,
         platform: str | None = None,
         device: str | None = None,
-        platforms_dir: Path | None = None,
     ) -> ModelConfig:
         """Load model config from YAML.
 
@@ -268,11 +270,10 @@ class ModelConfig:
                   If ``None``, falls back to legacy flat file ``<model>.yaml``.
             models_dir: Override directory for model configs.
             platform: Optional platform name used to apply
-                ``device_overrides.<device>.<case>``. Defaults to
+                ``device_overrides.<device>.cases``. Defaults to
                 ``FL_TEST_PLATFORM`` when unset.
             device: Optional device name used to apply device-level overrides.
                 Defaults to ``FL_TEST_DEVICE`` when unset.
-            platforms_dir: Override directory for platform configs.
 
         Raises:
             FileNotFoundError: If the config file does not exist.
@@ -297,10 +298,10 @@ class ModelConfig:
 
         raw = _apply_device_case_overrides(
             raw,
+            model,
             case,
             platform,
             device,
-            platforms_dir,
         )
 
         return cls._from_dict(raw)

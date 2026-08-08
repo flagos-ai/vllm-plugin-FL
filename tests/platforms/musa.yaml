@@ -20,21 +20,14 @@ tolerance:
 
 device_overrides:
   s5000:
-    27b_tp4_eager:
-      llm:
-        gpu_memory_utilization: 0.90
-        enable_prefix_caching: false
-      serve:
-        startup_retries: 120
-        sampling:
-          temperature: 0.0
-    35b_a3b_tp4_eager:
-      llm:
-        gpu_memory_utilization: 0.90
-        enable_prefix_caching: false
-      serve:
-        sampling:
-          temperature: 0.0
+    cases:
+      - qwen3_6/27b_tp4_eager
+      - qwen3_6/27b_tp4_graph
+      - qwen3_6/35b_a3b_tp4_eager
+      - qwen3_6/35b_a3b_tp4_graph
+    llm:
+      gpu_memory_utilization: 0.90
+      trust_remote_code: true
 
 env_defaults:
   GEMS_VENDOR: "mthreads"
@@ -47,10 +40,14 @@ s5000:
   tests:
     e2e:
       inference:
-        qwen3: ["4b_tp2_eager_musa"]
+        qwen3: ["4b_tp2"]
         qwen3_6: ["27b_tp4_eager"]
       serving:
-        qwen3_6: ["35b_a3b_tp4_eager"]
+        qwen3_6:
+          - "27b_tp4_eager"
+          - "27b_tp4_graph"
+          - "35b_a3b_tp4_eager"
+          - "35b_a3b_tp4_graph"
     functional:
       include: "*"
       exclude: []

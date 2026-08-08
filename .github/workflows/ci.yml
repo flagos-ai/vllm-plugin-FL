@@ -134,6 +134,7 @@ jobs:
       platform: hygon
     secrets: inherit
 
+  # ============================================================
   # Job 4d: MetaX platform testing
   # ============================================================
   test-metax:
