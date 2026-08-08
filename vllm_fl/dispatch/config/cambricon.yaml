@@ -1,0 +1,20 @@
+# vLLM-FL Dispatch Configuration for Cambricon MLU (torch_mlu)
+# Auto-loaded when running on Cambricon MLU hardware (vendor_name == "cambricon").
+#
+# There is no dedicated vendor/cambricon dispatch backend; ops route through
+# FlagOS (flag_gems, Triton). Only per-op exceptions are listed below.
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# FlagOS operator blacklist
+flagos_blacklist:
+  # flag_gems `empty` computes a Triton launch grid from the element count
+  # (e.g. 607744 for the Qwen3 vocab embedding), which exceeds the MLU Triton
+  # grid limit of 65535 and raises OutOfResources. Fall back to torch_mlu.
+  - empty
