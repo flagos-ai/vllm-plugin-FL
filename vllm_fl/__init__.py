@@ -58,10 +58,24 @@ def _register_flagcx_connector():
 
 
 def _patch_flash_attn_import():
-    """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
+    """Alias vendor flash_attn for GCU; stub vllm.vllm_flash_attn otherwise."""
     import sys
     if "vllm.vllm_flash_attn" in sys.modules:
         return
+    
+    # Enflame/GCU: alias vendor flash_attn package over vllm.vllm_flash_attn so
+    # version detection resolves to the vendor module. Gated on torch_gcu (the enflame
+    # torch backend, exclusive to this stack) because current_platform is not yet
+    # resolved at plugin-register time. Best-effort: any failure falls through.
+    import importlib.util
+    if importlib.util.find_spec("torch_gcu") is not None:
+        try:
+            import flash_attn.vllm_flash_attn
+            sys.modules["vllm.vllm_flash_attn"] = flash_attn.vllm_flash_attn
+            return
+        except ImportError:
+            pass  # vendor flash_attn unavailable; fall through to stub
+    
     try:
         import vllm.vllm_flash_attn  # noqa: F401
     except ImportError:

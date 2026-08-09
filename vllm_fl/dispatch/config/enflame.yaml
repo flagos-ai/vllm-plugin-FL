@@ -24,3 +24,9 @@ op_backends:
 
 flagos_blacklist:
   - scaled_dot_product_attention
+  # L1 int64: flag_gems ops that emit 64-bit IR, rejected by GCU300 PassManager
+  - zeros
+  - zeros_like
+  - zero_
+  - add
+  - sub
