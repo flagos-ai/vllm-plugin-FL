@@ -11,7 +11,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-# Keep the validated Ascend runtime compatible with FlagGems and
-# triton-ascend. The generic test extra otherwise resolves NumPy 2.x.
-numpy==1.26.4

@@ -7,7 +7,6 @@ git config --global --add safe.directory "$(pwd)"
 
 pip install --upgrade pip "setuptools>=77.0.3"
 pip install \
-    --constraint requirements/ascend.txt \
     --no-build-isolation \
     --no-deps \
     -e .

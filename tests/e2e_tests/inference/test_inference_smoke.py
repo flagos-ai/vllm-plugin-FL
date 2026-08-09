@@ -53,6 +53,19 @@ if not os.path.exists(_CFG.model):
 # ---------------------------------------------------------------------------
 
 
+def _prepare_cleanup_for_platform() -> None:
+    """Apply test-scope cleanup compatibility hooks."""
+    if _PLATFORM != "ascend":
+        return
+
+    import torch
+
+    npu = getattr(torch, "npu", None)
+    accelerator = getattr(torch, "accelerator", None)
+    if npu is not None and accelerator is not None and hasattr(npu, "empty_cache"):
+        accelerator.empty_cache = npu.empty_cache
+
+
 def _load_assets(modality: str, asset_names: list[str], count: int) -> dict:
     """Load vllm built-in assets for multimodal input.
 
@@ -267,4 +280,5 @@ def test_inference(combo: dict) -> None:
             _run_multimodal_test(llm, sampling_params)
     finally:
         del llm
+        _prepare_cleanup_for_platform()
         cleanup_dist_env_and_memory()
