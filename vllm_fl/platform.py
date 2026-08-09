@@ -98,7 +98,7 @@ class PlatformFL(Platform):
             return True
         if self.vendor_name == "hygon":
             return False
-        if self.vendor_name == "gcu":
+        if self.vendor_name == "enflame":
             return True
         return self.device_type == "cuda"
 
@@ -309,7 +309,7 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
 
-        if cls.vendor_name == "gcu":
+        if cls.vendor_name == "enflame":
             parallel_config.disable_custom_all_reduce = True
 
     @classmethod
@@ -396,7 +396,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead", "gcu"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead", "enflame"]:
             return True
         return False
 
@@ -454,7 +454,7 @@ class PlatformFL(Platform):
         if cls.vendor_name == "mthreads":
             return True
 
-        if cls.vendor_name == "gcu":
+        if cls.vendor_name == "enflame":
             cc = cls.get_device_capability()
             return cc is not None and cc.major >= 4
 
