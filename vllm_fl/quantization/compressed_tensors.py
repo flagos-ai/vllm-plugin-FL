@@ -79,6 +79,79 @@ class WNA16Scheme:
             raise ValueError("WNA16 is weight-only; input_activations must be omitted")
 
 
+@dataclass(frozen=True)
+class W8A8DynamicTokenScheme:
+    weight_num_bits: int
+    weight_type: str
+    weight_strategy: str
+    weight_symmetric: bool
+    weight_dynamic: bool
+    weight_group_size: int | None
+    input_num_bits: int
+    input_type: str
+    input_strategy: str
+    input_symmetric: bool
+    input_dynamic: bool
+
+    @classmethod
+    def from_group(cls, group: dict[str, Any]) -> W8A8DynamicTokenScheme:
+        weights = group.get("weights") or {}
+        inputs = group.get("input_activations") or {}
+        return cls(
+            weight_num_bits=int(weights.get("num_bits", 0)),
+            weight_type=str(weights.get("type", "")),
+            weight_strategy=str(weights.get("strategy", "")),
+            weight_symmetric=bool(weights.get("symmetric", False)),
+            weight_dynamic=bool(weights.get("dynamic", False)),
+            weight_group_size=weights.get("group_size"),
+            input_num_bits=int(inputs.get("num_bits", 0)),
+            input_type=str(inputs.get("type", "")),
+            input_strategy=str(inputs.get("strategy", "")),
+            input_symmetric=bool(inputs.get("symmetric", False)),
+            input_dynamic=bool(inputs.get("dynamic", False)),
+        )
+
+    def validate(self) -> None:
+        if self.weight_num_bits != 8 or self.input_num_bits != 8:
+            raise ValueError("W8A8 requires 8-bit weights and activations")
+        if self.weight_type != "int" or self.input_type != "int":
+            raise ValueError("W8A8 requires integer weights and activations")
+        if self.weight_strategy != "channel":
+            raise ValueError("W8A8 requires per-channel weights")
+        if self.weight_dynamic:
+            raise ValueError("W8A8 checkpoint weights must be statically quantized")
+        if self.weight_group_size is not None:
+            raise ValueError("Per-channel W8A8 weights must not set group_size")
+        if self.input_strategy != "token":
+            raise ValueError("W8A8 requires per-token input activations")
+        if not self.weight_symmetric or not self.input_symmetric:
+            raise ValueError("FL W8A8 currently requires symmetric quantization")
+        if not self.input_dynamic:
+            raise ValueError("W8A8 per-token input quantization must be dynamic")
+
+
+def validate_compressed_tensors_w8a8_config(
+    config: dict[str, Any],
+) -> list[W8A8DynamicTokenScheme]:
+    """Validate the canonical compressed-tensors dynamic-token W8A8 subset."""
+    if config.get("quant_method") != "compressed-tensors":
+        raise ValueError("quant_method must be 'compressed-tensors'")
+    if config.get("format") != "int-quantized":
+        raise ValueError("W8A8 requires compressed-tensors format 'int-quantized'")
+    groups = config.get("config_groups")
+    if not isinstance(groups, dict) or not groups:
+        raise ValueError("compressed-tensors config_groups must be a non-empty mapping")
+
+    schemes: list[W8A8DynamicTokenScheme] = []
+    for name, group in groups.items():
+        if not isinstance(group, dict) or not group.get("targets"):
+            raise ValueError(f"config group {name!r} must declare targets")
+        scheme = W8A8DynamicTokenScheme.from_group(group)
+        scheme.validate()
+        schemes.append(scheme)
+    return schemes
+
+
 def validate_compressed_tensors_wna16_config(
     config: dict[str, Any],
 ) -> list[WNA16Scheme]:
@@ -169,17 +242,38 @@ def inspect_vllm_compressed_tensors_api() -> CompatibilityReport:
 
 
 def register_compressed_tensors_oot() -> CompatibilityReport:
-    """Configure upstream WNA16 runtime selection for the FL platform.
+    """Configure compressed-tensors runtime selection for the FL platform.
 
-    No-op unless the plugin-local WNA16 MoE operator is actually built.
-    This keeps the upstream vLLM path (Marlin on CUDA, generic elsewhere)
-    fully untouched until the FL kernel is available.
+    W8A8 uses vLLM's native INT8 Linear and functional Triton MoE kernels.
+    W8A16 linear uses the portable Triton kernel, while routed WNA16 MoE uses
+    an FL backend when enabled.
     """
     report = inspect_vllm_compressed_tensors_api()
 
-    from vllm_fl.quantization.wna16.kernels import is_wna16_moe_available
+    from vllm_fl.utils import is_oot_enabled
 
-    if not is_wna16_moe_available():
+    if is_oot_enabled():
+        try:
+            from vllm_fl.quantization.w8a8.moe import (
+                install_fl_w8a8_moe_selector,
+            )
+            from vllm_fl.quantization.w8a8.packed import (
+                install_packed_w8a8_scheme,
+            )
+
+            install_packed_w8a8_scheme()
+            install_fl_w8a8_moe_selector()
+        except (ImportError, AttributeError, OSError, RuntimeError) as exc:
+            logger.warning(
+                "Could not configure FL compressed-tensors W8A8 MoE: %s",
+                exc,
+            )
+
+    from vllm_fl.quantization.wna16.moe import (
+        is_fl_wna16_moe_available,
+    )
+
+    if not is_fl_wna16_moe_available():
         return report
 
     # Linear registration is independent and handled by
@@ -193,8 +287,6 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
         )
         return report
 
-    from vllm_fl.utils import is_oot_enabled
-
     if is_oot_enabled():
         try:
             from vllm_fl.quantization.marlin import configure_wna16_moe_backend
@@ -204,7 +296,7 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
 
             if not install_fl_wna16_moe_method():
                 logger.warning(
-                    "FL WNA16 MoE operator disappeared during registration; "
+                    "FL WNA16 MoE backend disappeared during registration; "
                     "leaving vLLM's upstream backend selection unchanged"
                 )
                 return report

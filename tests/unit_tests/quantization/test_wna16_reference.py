@@ -5,6 +5,8 @@ import torch
 
 from vllm_fl.quantization.wna16.reference import (
     unpack_uint4b8,
+    unpack_uint8b128,
+    w8a16_gemm_reference,
     wna16_gemm_reference,
 )
 
@@ -41,3 +43,24 @@ def test_wna16_reference_rejects_incompatible_scales():
     packed = torch.zeros((2, 1), dtype=torch.int32)
     with pytest.raises(ValueError, match="weight_scale"):
         wna16_gemm_reference(x, packed, torch.ones((2, 1)), 4)
+
+
+def test_w8a16_reference_matches_flagos_groupwise_checkpoint():
+    values = torch.tensor(
+        [
+            [-128, -64, -1, 0, 1, 32, 64, 127],
+            [127, 64, 32, 1, 0, -1, -64, -128],
+        ],
+        dtype=torch.int8,
+    )
+    codes = (values.to(torch.int16) + 128).to(torch.uint8)
+    packed = codes.contiguous().view(torch.int32)
+    scales = torch.tensor([[0.5, 2.0], [1.5, 0.25]])
+    x = torch.arange(16, dtype=torch.float32).reshape(2, 8) / 8
+
+    expected_weight = values.float() * scales.repeat_interleave(4, dim=1)
+    expected = x @ expected_weight.t()
+    actual = w8a16_gemm_reference(x, packed, scales, 4)
+
+    assert torch.equal(unpack_uint8b128(packed), values)
+    assert torch.allclose(actual, expected)

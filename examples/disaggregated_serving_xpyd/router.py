@@ -124,7 +124,11 @@ app = FastAPI(lifespan=lifespan)
 
 async def send_to_prefill(prefill_client, endpoint, req_data, request_id):
     data = req_data.copy()
-    data["kv_transfer_params"] = {"do_remote_decode": True, "do_remote_prefill": False}
+    data["kv_transfer_params"] = {
+        "do_remote_decode": True,
+        "do_remote_prefill": False,
+        "transfer_id": f"fgx-{request_id}",
+    }
     data["stream"] = False
     data["max_tokens"] = 1
     if "max_completion_tokens" in data:
@@ -153,6 +157,7 @@ async def stream_from_decode(
         "do_remote_decode": False,
         "remote_host": prefill_client["remote_host"],
         "remote_port": prefill_client["side_channel_port"],
+        "transfer_id": f"fgx-{request_id}",
     }
     headers = {"X-Request-Id": request_id}
     api_key = os.environ.get("OPENAI_API_KEY", "")
