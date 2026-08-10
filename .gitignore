@@ -1,3 +1,16 @@
 *.egg-info
 __pycache__/
+build/
+dist/
+vllm_fl/_version.py
 
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage*.json
+coverage.xml
+
+# Reports
+report*.json
+test-results-*

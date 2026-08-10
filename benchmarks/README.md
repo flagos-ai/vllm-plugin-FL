@@ -1,30 +1,83 @@
-To use the benchmark_throughput_flagos feature from vllm-plugin-fl, you must first complete the following preliminary steps:
+## Benchmark Overview
 
-1. Start an LLM inference service compliant with the OpenAI API protocol using the --served-model-name Qwen3-Next argument, or use a different name and update the string on line 11 of benchmark_throughput_flagos.py to match your chosen --served-model-name exactly (character-for-character).
+This directory provides two workflows:
+- `benchmark_throughput_flagos.py`: throughput benchmarking for a served model.
+- `benchmark_throughput_autotune.py`: auto-tune FlagGems operator selection by throughput.
 
-2. Run the benchmark_throughput_flagos script on the same machine where the inference service is hosted.
+---
 
-3. Ensure the host machine has stable global network bandwidth of at least 10 Mbps, with 100 Mbps recommended for reliable benchmarking.
+## benchmark_throughput_flagos.py
 
-4. The benchmark_throughput_flagos feature has been validated in environments using vLLM versions 0.11.0 and 0.12.0. Using higher or lower vLLM versions—or serving the model with alternative frameworks such as SGLang—may result in compatibility issues.
+### Note
+- Start an OpenAI-compatible inference service with `--served-model-name Qwen3-Next`.
+  If you use a different name, update the string in `benchmark_throughput_flagos.py`.
+- Run the benchmark on the same host as the service.
 
-Once the above prerequisites are met, you can simply run the following command from the directory containing this file: 
-
+### Run
 ```bash
 python3 benchmark_throughput_flagos.py
 ```
 
-If the command runs successfully, it will generate a directory named vllm_bench_logs in the current working directory. After the execution completes, follow these two steps to verify the benchmark ran correctly and to obtain the performance evaluation results: 
-
-1. Check for failed requests by running the following command in the current directory:
+### Verify Results
+1) Check failed requests:
 ```bash
 grep "Fail" -rn vllm_bench_logs
 ```
+All matches should show `Fail: 0`.
 
-All matching lines should report zero failed requests (i.e., Fail: 0).
-
-2. Generate performance statistics by executing:
+2) Generate statistics:
 ```bash
 python3 benchmark_throughput_flagos_statistics.py
 ```
-This will output the final performance evaluation results based on the collected logs.
+
+---
+
+## benchmark_throughput_autotune.py
+
+
+### Command
+```bash
+python benchmarks/benchmark_throughput_autotune.py [vllm args] [autotune options]
+```
+
+### vLLM Args
+All arguments are passed directly to `vllm bench throughput`.
+
+### Autotune Options
+- `--background` (true/false): run in background mode, default `false`.
+- `--ops`: comma-separated list of operator names to tune. If empty, auto-discovers ops.
+- `--num-runs`: number of runs per configuration, default `2` (uses the second round to skip warmup).
+- `--csv-path`: output CSV filename, default `history.csv` under the run directory.
+
+Example:
+```bash
+python benchmarks/benchmark_throughput_autotune.py \
+  --model /models/Qwen3-Next-80B-A3B-Instruct \
+  --tensor-parallel-size 4 \
+  --dataset-name random \
+  --input-len 6144 \
+  --output-len 1024 \
+  --num-prompts 1000 \
+  --max-num-batched-tokens 16384 \
+  --max-num-seqs 2048 \
+  --load-format "dummy" \
+  --gpu-memory-utilization 0.85 \
+  --compilation-config '{"cudagraph_mode": "FULL_AND_PIECEWISE"}' \
+  --background true
+```
+
+### Environment Variables
+See [environment variables usage](../vllm_fl/dispatch/README.md#environment-variables) for the full dispatch and FlagGems configuration reference.
+
+### Outputs
+Each run creates a directory under `autotune_logs/autotune_xxx` with:
+- `autotune.log`: full run log when setting `background` as `true`
+- `history.csv`: throughput results for all rounds
+- `autotune_ops.yaml`: final op list used for tuning
+- `autotune_configs/`: per-round config snapshots
+- `best_config.yaml`: selected best config
+
+### Notes
+- Round 1 runs baseline throughput without FlagGems.
+- Round 2 benchmarks each op in isolation (whitelist).
+- Round 3 validates the best-performing set.

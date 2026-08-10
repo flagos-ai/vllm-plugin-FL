@@ -1,0 +1,53 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+platform: hygon
+vendor: hygon
+
+device_types:
+  bw1000:
+    memory_gb: 64
+    tags: [bf16, fp16, fp32]
+
+tolerance:
+  inference:
+    default:
+      rtol: 1e-5
+      atol: 1e-8
+    bfloat16:
+      rtol: 1e-3
+      atol: 1e-3
+
+env_defaults:
+  GEMS_VENDOR: "hygon"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  VLLM_FL_FLAGOS_BLACKLIST: "pow_scalar,pow_tensor_scalar,pow_tensor_tensor,pow_tensor_scalar_,pow_tensor_tensor_,cat"
+
+bw1000:
+  name: "bw1000"
+  tests:
+    e2e:
+      inference:
+        qwen3_6: ["27b_tp2_eager_hygon"]
+      serving:
+        qwen3_6: ["35b_a3b_tp2_eager_hygon"]
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []
+    benchmark:
+      enabled: true
+      smoke: ["serve"]

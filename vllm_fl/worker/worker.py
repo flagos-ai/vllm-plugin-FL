@@ -1,15 +1,14 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/v1/worker/gpu_model_runner.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/v1/worker/gpu_worker.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import copy
 import gc
 import os
-from contextlib import AbstractContextManager, nullcontext, contextmanager
+from contextlib import nullcontext, contextmanager
 from types import NoneType
-from typing import TYPE_CHECKING, Any, Optional, cast, Generator, Union
+from typing import TYPE_CHECKING, Any, Optional, cast, Generator
 from dataclasses import dataclass
 
 import numpy as np
@@ -17,18 +16,31 @@ import torch
 import torch.distributed
 import torch.nn as nn
 
-import vllm.envs as envs
-from vllm.config import CUDAGraphMode,VllmConfig
+from vllm.config import CUDAGraphMode, VllmConfig, set_current_vllm_config
 from vllm.config.compilation import CompilationMode
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
+from vllm.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+    set_custom_all_reduce,
+)
 from vllm.distributed.ec_transfer import ensure_ec_transfer_initialized
 from vllm.distributed.kv_transfer import (
     ensure_kv_transfer_initialized,
+    ensure_kv_transfer_shutdown,
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
-from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
+try:
+    from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
+except ImportError:
+    # deep_gemm may be broken in some environments; provide a fallback
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "kernel_warmup import failed (likely deep_gemm issue), "
+        "using no-op kernel_warmup"
+    )
+    def kernel_warmup(worker):
+        pass
 from vllm.distributed.parallel_state import (
     get_pcp_group,
     get_pp_group,
@@ -36,35 +48,49 @@ from vllm.distributed.parallel_state import (
 )
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
-from vllm.model_executor import set_random_seed
+from vllm.utils.torch_utils import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
-from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 from vllm.platforms import current_platform
-from vllm.profiler.wrapper import TorchProfilerWrapper
+from vllm.profiler.wrapper import CudaProfilerWrapper, TorchProfilerWrapper
 
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
-from vllm.utils.mem_utils import GiB_bytes#, MemorySnapshot, memory_profiling
+from vllm.utils.mem_utils import GiB_bytes  # , MemorySnapshot, memory_profiling
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
-from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
-                             DraftTokenIds, ModelRunnerOutput)
+from vllm.v1.outputs import AsyncModelRunnerOutput, DraftTokenIds, ModelRunnerOutput
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
-from vllm.v1.worker.worker_base import WorkerBase
+from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
-from vllm.v1.core.sched.output import SchedulerOutput
+import vllm_fl.envs as fl_envs
+
+from vllm_fl.ops.custom_ops import register_oot_ops
+from vllm_fl.dispatch.io_common import managed_inference_mode
+from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
-    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+
+def _patch_accelerator_empty_cache():
+    """Patch torch.accelerator.empty_cache for NPU compatibility.
+
+    torch.accelerator.empty_cache() crashes on NPU with
+    'Allocator for npu is not a DeviceAllocator'. Redirect to
+    torch.npu.empty_cache() which works correctly.
+    """
+    import torch.accelerator
+    torch.accelerator.empty_cache = torch.npu.empty_cache
+
 
 @dataclass
 class MemorySnapshot:
     """Platform-agnostic memory snapshot for FL worker."""
+
     torch_peak: int = 0
     free_memory: int = 0
     total_memory: int = 0
@@ -80,12 +106,14 @@ class MemorySnapshot:
 
     def measure(self):
         import time
+
         torch_device_fn = current_platform.torch_device_fn
 
         # Get peak memory stats using platform-agnostic API
         try:
             self.torch_peak = torch_device_fn.memory_stats().get(
-                "allocated_bytes.all.peak", 0)
+                "allocated_bytes.all.peak", 0
+            )
         except (AttributeError, RuntimeError):
             self.torch_peak = 0
 
@@ -102,7 +130,7 @@ class MemorySnapshot:
         self.non_torch_memory = self.cuda_memory - self.torch_memory
         self.timestamp = time.time()
 
-    def __sub__(self, other: 'MemorySnapshot') -> 'MemorySnapshot':
+    def __sub__(self, other: "MemorySnapshot") -> "MemorySnapshot":
         result = MemorySnapshot(auto_measure=False)
         result.torch_peak = self.torch_peak - other.torch_peak
         result.free_memory = self.free_memory - other.free_memory
@@ -117,6 +145,7 @@ class MemorySnapshot:
 @dataclass
 class MemoryProfilingResult:
     """Platform-agnostic memory profiling result."""
+
     before_create: MemorySnapshot = None
     before_profile: MemorySnapshot = None
     after_profile: MemorySnapshot = None
@@ -135,8 +164,8 @@ class MemoryProfilingResult:
 
 @contextmanager
 def memory_profiling_fl(
-        baseline_snapshot: MemorySnapshot,
-        weights_memory: int) -> Generator[MemoryProfilingResult, None, None]:
+    baseline_snapshot: MemorySnapshot, weights_memory: int
+) -> Generator[MemoryProfilingResult, None, None]:
     """Platform-agnostic memory profiling context manager for FL worker."""
     gc.collect()
     torch_device_fn = current_platform.torch_device_fn
@@ -168,11 +197,12 @@ def memory_profiling_fl(
 
     non_torch_memory = result.non_torch_increase
     peak_activation_memory = result.torch_peak_increase
-    result.non_kv_cache_memory = non_torch_memory + peak_activation_memory + result.weights_memory
+    result.non_kv_cache_memory = (
+        non_torch_memory + peak_activation_memory + result.weights_memory
+    )
 
 
 class WorkerFL(WorkerBase):
-
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -181,41 +211,66 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
-        super().__init__(vllm_config=vllm_config,
-                         local_rank=local_rank,
-                         rank=rank,
-                         distributed_init_method=distributed_init_method,
-                         is_driver_worker=is_driver_worker)
-
-        if self.model_config.trust_remote_code:
-            # note: lazy import to avoid importing torch before initializing
-            from vllm.utils.import_utils import init_cached_hf_modules
-            init_cached_hf_modules()
+        super().__init__(
+            vllm_config=vllm_config,
+            local_rank=local_rank,
+            rank=rank,
+            distributed_init_method=distributed_init_method,
+            is_driver_worker=is_driver_worker,
+        )
 
         # Buffers saved before sleep
         self._sleep_saved_buffers: dict[str, torch.Tensor] = {}
 
-        # Torch profiler. Enabled and configured through env vars:
-        # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
+        # Torch/CUDA profiler. Enabled and configured through profiler_config.
+        # Profiler wrapper is created lazily in profile() when start is called,
+        # so we have all the information needed for proper trace naming.
         self.profiler: Any | None = None
         profiler_config = vllm_config.profiler_config
-        if profiler_config.profiler == "torch":
-            worker_name = f"{vllm_config.instance_id}-rank-{self.rank}"
-            self.profiler = TorchProfilerWrapper(
-                profiler_config,
-                worker_name=worker_name,
-                local_rank=self.local_rank,
-                activities=["CPU", "CUDA"],
-            )
-        else:
-            self.profiler = None
-        
-        if "USE_FLAGGEMS" in os.environ and os.environ["USE_FLAGGEMS"] == "1":
-            from vllm_fl.ops.custom_ops import register_oot_ops
+        self.profiler_config = profiler_config
+
+        # Only validate profiler config is valid, don't instantiate yet
+        if self.profiler_config.profiler not in ("torch", "cuda", None):
+            raise ValueError(f"Unknown profiler type: {self.profiler_config.profiler}")
+
+        logger.debug("=== ENVIRONMENT VARIABLES ===")
+        for k, v in sorted(os.environ.items()):
+            logger.debug("%s=%r", k, v)
+
+        register_oot_ops()
+
+        if fl_envs.USE_FLAGGEMS:
             import flag_gems
-            register_oot_ops()
-            flag_gems.enable(record=False) #, unused=["index", "index_put_"])
+
+            # Get whitelist and blacklist from environment variables
+            whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+
+            # Only rank 0 records the oplist to avoid file truncation and
+            # interleaved writes when tensor-parallel-size > 1.
+            should_record = (rank == 0)
+
+            # Use whitelist if specified (takes precedence over blacklist)
+            if whitelist:
+                logger.info(f"[FlagGems] Enable only the following ops: {whitelist}")
+                flag_gems.only_enable(
+                    include=whitelist,
+                    record=should_record,
+                    once=True,
+                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                )
+            elif blacklist:
+                logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
+                flag_gems.enable(
+                    unused=blacklist,
+                    record=should_record,
+                    once=True,
+                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                )
+            else:
+                logger.info("[FlagGems] Enable all ops")
+                flag_gems.enable(
+                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
+                )
 
     # def sleep(self, level: int = 1) -> None:
     #     TODO(lms): rewrite CuMemAllocator
@@ -271,8 +326,7 @@ class WorkerFL(WorkerBase):
     #         context = nullcontext()
     #     return context
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
@@ -298,13 +352,19 @@ class WorkerFL(WorkerBase):
 
             # DP_LOCAL_RANK * TP_PP_WORLD_SIZE + TP_LOCAL_RANK
             self.local_rank += dp_local_rank * tp_pp_world_size
-            device_count = current_platform.torch_device_fn.device_count() if current_platform.torch_device_fn.is_available() else 0
+            device_count = (
+                current_platform.torch_device_fn.device_count()
+                if current_platform.torch_device_fn.is_available()
+                else 0
+            )
             assert self.local_rank < device_count, (
                 f"DP adjusted local rank {self.local_rank} is out of bounds. "
                 f"Device count: {device_count}"
             )
             visible_device_count = (
-                current_platform.torch_device_fn.device_count() if current_platform.torch_device_fn.is_available() else 0
+                current_platform.torch_device_fn.device_count()
+                if current_platform.torch_device_fn.is_available()
+                else 0
             )
             assert self.parallel_config.local_world_size <= visible_device_count, (
                 f"local_world_size ({self.parallel_config.local_world_size}) must "
@@ -320,12 +380,23 @@ class WorkerFL(WorkerBase):
         # memory snapshot
         # This ensures NCCL buffers are allocated before we measure
         # available memory
-        init_worker_distributed_environment(self.vllm_config,
-                                            self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank,
-                                            current_platform.dist_backend)
+        init_worker_distributed_environment(
+            self.vllm_config,
+            self.rank,
+            self.distributed_init_method,
+            self.local_rank,
+            current_platform.dist_backend,
+        )
 
+        if current_platform.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.triton_utils import (
+                    init_device_properties_triton,
+            )
+            init_device_properties_triton()
+            import torch_npu._inductor  # noqa: F401
+            # Patch torch.accelerator.empty_cache which crashes on NPU
+            # (device_allocator ASSERT FAILED). Use torch.npu.empty_cache instead.
+            _patch_accelerator_empty_cache()
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -336,8 +407,9 @@ class WorkerFL(WorkerBase):
         ### TODO(lms): patch MemorySnapshot in other platform
         # take current memory snapshot
         self.init_snapshot = MemorySnapshot()
-        self.requested_memory = (self.init_snapshot.total_memory *
-                                    self.cache_config.gpu_memory_utilization)
+        self.requested_memory = (
+            self.init_snapshot.total_memory * self.cache_config.gpu_memory_utilization
+        )
         if self.init_snapshot.free_memory < self.requested_memory:
             GiB = lambda b: round(b / GiB_bytes, 2)
             raise ValueError(
@@ -354,9 +426,9 @@ class WorkerFL(WorkerBase):
         init_workspace_manager(self.device, num_ubatches)
 
         from vllm_fl.worker.model_runner import ModelRunnerFL
+
         # Construct the model runner
-        self.model_runner = ModelRunnerFL(
-            self.vllm_config, self.device)
+        self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -364,10 +436,10 @@ class WorkerFL(WorkerBase):
 
     # FIXME(youkaichao & ywang96): Use TorchDispatchMode instead of memory pool
     # to hijack tensor allocation.
-    def load_model(self) -> None:
-        eep_scale_up = os.environ.get("VLLM_ELASTIC_EP_SCALE_UP_LAUNCH") == "1"
+    def load_model(self, *, load_dummy_weights: bool = False) -> None:
         ### TODO(lms): support manages a memory pool for device tensors.
-        self.model_runner.load_model(eep_scale_up=eep_scale_up)
+        with set_current_vllm_config(self.vllm_config):
+            self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
         # with self._maybe_get_memory_pool_context(tag="weights"):
         #     self.model_runner.load_model(eep_scale_up=eep_scale_up)
 
@@ -377,11 +449,14 @@ class WorkerFL(WorkerBase):
     def reload_weights(self) -> None:
         self.model_runner.reload_weights()
 
-
-    @torch.inference_mode()
+    @managed_inference_mode()
     def determine_available_memory(self) -> int:
         """Profiles the peak memory usage of the model to determine how much
         memory can be used for KV cache without OOMs.
+
+        On Ascend NPU, the full profile_run forward pass can crash the worker
+        due to incompatible Triton kernels. In that case, we fall back to a
+        conservative memory estimate based on model weight size.
 
         The engine will first conduct a profiling of the existing memory usage.
         Then, it calculates the free memory that can be used for KV cache in
@@ -391,6 +466,14 @@ class WorkerFL(WorkerBase):
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
+        if current_platform.device_type == "txda":
+            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
+            # e.g., 20 GiB or similar default cache memory size.
+            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
+            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
+                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
+            return fallback_val
+
         GiB = lambda b: b / GiB_bytes
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
@@ -407,61 +490,99 @@ class WorkerFL(WorkerBase):
                 "size. If OOM'ed, check the difference of initial free "
                 "memory between the current run and the previous run "
                 "where kv_cache_memory_bytes is suggested and update it "
-                "correspondingly.")
+                "correspondingly."
+            )
             logger.info(msg)
             return kv_cache_memory_bytes
 
         current_platform.empty_cache()
         current_platform.torch_device_fn.reset_peak_memory_stats()
 
-        # Execute a forward pass with dummy inputs to profile the memory usage
-        # of the model.
-        with memory_profiling_fl(
-            self.init_snapshot,
-            weights_memory=int(self.model_runner.model_memory_usage),
-        ) as profile_result:
-            self.model_runner.profile_run()
+        # On Ascend NPU, the profile_run forward pass crashes the worker
+        # process (SIGKILL from the NPU driver due to incompatible Triton
+        # kernels in the GDN/FLA layers). Skip profile_run and estimate
+        # KV cache memory from the current free memory after model loading.
+        if current_platform.device_type == "npu":
+            current_platform.empty_cache()
+            free_mem = current_platform.torch_device_fn.mem_get_info(
+                self.device
+            )
+            free_bytes = free_mem[0]
+            total_bytes = free_mem[1]
+            # Respect gpu_memory_utilization: total KV cache + model must
+            # fit within gpu_memory_utilization * total_memory.
+            # model_used = total_bytes - free_bytes
+            model_used = total_bytes - free_bytes
+            util = self.cache_config.gpu_memory_utilization
+            budget = int(util * total_bytes) - model_used
+            # Reserve 50% of the budget for activations and the one-time
+            # contiguous copy of non-contiguous kv_cache views.
+            # The kv_cache is allocated as [2, N, B, H, D] and split into
+            # key/value views that are non-contiguous. The first forward
+            # call creates contiguous copies that coexist temporarily with
+            # the original non-contiguous views.
+            activation_reserve = int(budget * 0.5)
+            self.available_kv_cache_memory_bytes = max(
+                budget - activation_reserve, 0
+            )
+            self.non_torch_memory = 0
+            self.peak_activation_memory = activation_reserve
+            logger.info(
+                "Ascend NPU: Skipped profile_run. Free memory: %.2f GiB, "
+                "KV cache budget: %.2f GiB",
+                GiB(free_bytes),
+                GiB(self.available_kv_cache_memory_bytes),
+            )
+        else:
+            # Execute a forward pass with dummy inputs to profile the memory usage
+            # of the model.
+            with memory_profiling_fl(
+                self.init_snapshot,
+                weights_memory=int(self.model_runner.model_memory_usage),
+            ) as profile_result:
+                self.model_runner.profile_run()
 
-        self.non_torch_memory = profile_result.non_torch_increase
-        self.peak_activation_memory = profile_result.torch_peak_increase
+            self.non_torch_memory = profile_result.non_torch_increase
+            self.peak_activation_memory = profile_result.torch_peak_increase
 
-        free_gpu_memory = profile_result.after_profile.free_memory
-        # NOTE(woosuk): Here we assume that the other processes using the same
-        # GPU did not change their memory usage during the profiling.
-        assert self.init_snapshot.free_memory > free_gpu_memory, (
-            "Error in memory profiling. "
-            f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
-            f"current free memory {GiB(free_gpu_memory)} GiB. "
-            "This happens when other processes sharing the same container "
-            "release GPU memory while vLLM is profiling during initialization. "
-            "To fix this, ensure consistent GPU memory allocation or "
-            "isolate vLLM in its own container.")
-        self.available_kv_cache_memory_bytes = self.requested_memory \
-            - profile_result.non_kv_cache_memory
+            free_gpu_memory = profile_result.after_profile.free_memory
+            # NOTE(woosuk): Here we assume that the other processes using the same
+            # GPU did not change their memory usage during the profiling.
+            assert self.init_snapshot.free_memory > free_gpu_memory, (
+                "Error in memory profiling. "
+                f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
+                f"current free memory {GiB(free_gpu_memory)} GiB. "
+                "This happens when other processes sharing the same container "
+                "release GPU memory while vLLM is profiling during initialization. "
+                "To fix this, ensure consistent GPU memory allocation or "
+                "isolate vLLM in its own container."
+            )
+            self.available_kv_cache_memory_bytes = (
+                self.requested_memory - profile_result.non_kv_cache_memory
+            )
 
-        unrequested_memory = self.init_snapshot.free_memory \
-            - self.requested_memory
-        logger.debug(
-            "Initial free memory: %.2f GiB; "
-            "Requested memory: %.2f (util), %.2f GiB",
-            GiB(self.init_snapshot.free_memory),
-            self.cache_config.gpu_memory_utilization,
-            GiB(self.requested_memory),
+        unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
+        if current_platform.device_type != "npu":
+            logger.debug(
+                "Initial free memory: %.2f GiB; Requested memory: %.2f (util), %.2f GiB",
+                GiB(self.init_snapshot.free_memory),
+                self.cache_config.gpu_memory_utilization,
+                GiB(self.requested_memory),
+            )
+            logger.debug(
+                "Free memory after profiling: %.2f GiB (total), %.2f GiB (within requested)",
+                GiB(free_gpu_memory),
+                GiB(free_gpu_memory - unrequested_memory),
+            )
+            logger.debug(profile_result)
+        logger.info_once(
+            "Available KV cache memory: %.2f GiB",
+            GiB(self.available_kv_cache_memory_bytes),
         )
-        logger.debug(
-            "Free memory after profiling: %.2f GiB (total), "
-            "%.2f GiB (within requested)",
-            GiB(free_gpu_memory),
-            GiB(free_gpu_memory - unrequested_memory),
-        )
-        logger.debug(profile_result)
-        logger.info_once("Available KV cache memory: %.2f GiB",
-                    GiB(self.available_kv_cache_memory_bytes),
-                    scope="local",)
         gc.collect()
 
         return int(self.available_kv_cache_memory_bytes)
-    
+
     def get_kv_connector_handshake_metadata(self) -> dict | None:
         """Get KV connector metadata from this worker if available."""
 
@@ -476,8 +597,14 @@ class WorkerFL(WorkerBase):
 
         tp_rank = get_tp_group().rank_in_group
         return {tp_rank: metadata}
+
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
+
+    def update_max_model_len(self, max_model_len: int) -> None:
+        """Update max_model_len after auto-fit to GPU memory."""
+        self.model_config.max_model_len = max_model_len
+        self.model_runner.max_model_len = max_model_len
 
     def initialize_from_config(self, kv_cache_config: KVCacheConfig) -> None:
         """Allocate GPU KV cache with the specified kv_cache_config."""
@@ -498,7 +625,7 @@ class WorkerFL(WorkerBase):
         #     context = nullcontext()
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
-    def compile_or_warm_up_model(self) -> None:
+    def compile_or_warm_up_model(self) -> CompilationTimes:
         warmup_sizes = []
         if self.vllm_config.compilation_config.mode == CompilationMode.VLLM_COMPILE:
             # warm up sizes that are not in cudagraph capture sizes,
@@ -526,9 +653,7 @@ class WorkerFL(WorkerBase):
         # We skip EPLB here since we don't want to record dummy metrics
         for size in sorted(warmup_sizes, reverse=True):
             logger.info("Compile and warming up model for size %d", size)
-            self.model_runner._dummy_run(size,
-                                         skip_eplb=True,
-                                         remove_lora=False)
+            self.model_runner._dummy_run(size, skip_eplb=True, remove_lora=False)
         self.model_runner.maybe_remove_all_loras(self.model_runner.lora_config)
 
         ### NOTE(lms): can add gems kernel pretune here
@@ -537,7 +662,7 @@ class WorkerFL(WorkerBase):
         kernel_warmup(self)
 
         cuda_graph_memory_bytes = 0
-        if not self.model_config.enforce_eager:
+        if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
             cuda_graph_memory_bytes = self.model_runner.capture_model()
 
         if self.cache_config.kv_cache_memory_bytes is None and hasattr(
@@ -602,36 +727,54 @@ class WorkerFL(WorkerBase):
         # fragmentation issue.
         # NOTE: This is called after `capture_model` on purpose to prevent
         # memory buffers from being cleared by `torch.cuda.empty_cache`.
-        if get_pp_group().is_last_rank:
-            max_num_reqs = min(self.scheduler_config.max_num_seqs,
-                               self.scheduler_config.max_num_batched_tokens)
+        # NOTE: On Ascend NPU, skip _dummy_run because the GDN/FLA Triton
+        # kernels crash the worker process during the model forward pass.
+        if get_pp_group().is_last_rank and current_platform.device_type != "npu":
+            max_num_reqs = min(
+                self.scheduler_config.max_num_seqs,
+                self.scheduler_config.max_num_batched_tokens,
+            )
 
             # We skip EPLB here since we don't want to record dummy metrics
-            hidden_states, last_hidden_states = \
-                self.model_runner._dummy_run(
-                    num_tokens=max_num_reqs,
-                    skip_eplb=True,
-                    cudagraph_runtime_mode=CUDAGraphMode.NONE,
-                )
+            hidden_states, last_hidden_states = self.model_runner._dummy_run(
+                num_tokens=max_num_reqs,
+                skip_eplb=True,
+                cudagraph_runtime_mode=CUDAGraphMode.NONE,
+            )
             if self.model_runner.is_pooling_model:
                 self.model_runner._dummy_pooler_run(hidden_states)
             else:
-                self.model_runner._dummy_sampler_run(
-                    hidden_states=last_hidden_states)
+                self.model_runner._dummy_sampler_run(hidden_states=last_hidden_states)
 
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
 
+        return CompilationTimes(
+            language_model=self.compilation_config.compilation_time,
+            encoder=self.compilation_config.encoder_compilation_time,
+        )
+
     def reset_mm_cache(self) -> None:
         self.model_runner.reset_mm_cache()
+
+    def reset_encoder_cache(self) -> None:
+        self.model_runner.reset_encoder_cache()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
 
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         return self.model_runner.get_supported_tasks()
-    
+
+    def get_compilation_match_table(self) -> dict[str, int]:
+        from vllm.compilation.passes.vllm_inductor_pass import get_match_table
+        return get_match_table()
+
+    def get_encoder_timing_stats(self) -> dict[str, dict[str, float | int]]:
+        """Get encoder timing stats from model runner."""
+        return self.model_runner.get_encoder_timing_stats()
+
     def annotate_profile(self, scheduler_output):
         # add trace annotation so that we can easily distinguish
         # new/cached request numbers in each iteration
@@ -646,14 +789,14 @@ class WorkerFL(WorkerBase):
         return self.profiler.annotate_context_manager(
             f"execute_new_{num_new}_cached_{num_cached}"
         )
-    @torch.inference_mode()
+
+    @managed_inference_mode()
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         return self.model_runner.sample_tokens(grammar_output)
 
-
-    @torch.inference_mode()
+    @managed_inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
@@ -687,8 +830,9 @@ class WorkerFL(WorkerBase):
                 )
             )
             all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(self.vllm_config,
-                                                batch_desc.num_tokens)
+                "residual": not is_residual_scattered_for_sp(
+                    self.vllm_config, batch_desc.num_tokens
+                )
             }
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict = get_pp_group().recv_tensor_dict(
@@ -707,28 +851,69 @@ class WorkerFL(WorkerBase):
 
         assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
-        assert parallel_config.distributed_executor_backend != (
-            "external_launcher") and not get_pp_group().is_last_rank
+        assert (
+            parallel_config.distributed_executor_backend != ("external_launcher")
+            and not get_pp_group().is_last_rank
+        )
 
-        get_pp_group().send_tensor_dict(output.tensors,
-                                        all_gather_group=get_tp_group(),
-                                        all_gather_tensors=all_gather_tensors)
+        get_pp_group().send_tensor_dict(
+            output.tensors,
+            all_gather_group=get_tp_group(),
+            all_gather_tensors=all_gather_tensors,
+        )
 
         return None
 
     def take_draft_token_ids(self) -> Optional[DraftTokenIds]:
         return self.model_runner.take_draft_token_ids()
 
-    def profile(self, is_start: bool = True):
-        if self.profiler is None:
-            raise RuntimeError("Profiling is not enabled.")
+    def profile(self, is_start: bool = True, profile_prefix: str | None = None):
+        if self.profiler_config is None or self.profiler_config.profiler is None:
+            raise RuntimeError(
+                "Profiling is not enabled. Please set --profiler-config to enable "
+                "profiling. Example: "
+                "'--profiler-config.profiler=torch --profiler-config.torch_profiler_dir"
+                "=YOUR_DIR_PATH_TO_DUMP_TRACE'"
+            )
+
         if is_start:
+            from vllm.distributed.utils import get_worker_rank_suffix
+
+            rank_suffix = get_worker_rank_suffix(global_rank=self.rank)
+            trace_name = (
+                f"{profile_prefix}_{rank_suffix}" if profile_prefix else rank_suffix
+            )
+
+            if self.profiler is None:
+                profiler_type = self.profiler_config.profiler
+                if profiler_type == "torch":
+                    self.profiler = TorchProfilerWrapper(
+                        self.profiler_config,
+                        worker_name=trace_name,
+                        local_rank=self.local_rank,
+                        activities=["CPU", "CUDA"],
+                    )
+                    logger.debug(
+                        "Starting torch profiler with trace name: %s", trace_name
+                    )
+                elif profiler_type == "cuda":
+                    self.profiler = CudaProfilerWrapper(self.profiler_config)
+                    logger.debug("Starting CUDA profiler")
+                else:
+                    raise ValueError(
+                        f"Invalid profiler value of {self.profiler_config.profiler}"
+                    )
+
             self.profiler.start()
         else:
+            if self.profiler is None:
+                logger.warning("Profiler was not started, nothing to stop.")
+                return
             self.profiler.stop()
 
     def execute_dummy_batch(self) -> None:
-        self.model_runner._dummy_run(1, uniform_decode=True)
+        num_tokens = getattr(self.model_runner, "uniform_decode_query_len", 1)
+        self.model_runner._dummy_run(num_tokens, uniform_decode=True)
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
@@ -746,48 +931,51 @@ class WorkerFL(WorkerBase):
         # worker will always be healthy as long as it's running.
         return
 
-    def _eplb_before_scale_down(self, old_ep_size: int,
-                                new_ep_size: int) -> None:
+    def _eplb_before_scale_down(self, old_ep_size: int, new_ep_size: int) -> None:
         from vllm.distributed.parallel_state import get_ep_group
+
         if get_ep_group().rank == 0:
-            logger.info("[Elastic EP] Starting expert resharding "
-                        "before scaling down...")
+            logger.info(
+                "[Elastic EP] Starting expert resharding before scaling down..."
+            )
         rank_mapping = {
             old_ep_rank: old_ep_rank if old_ep_rank < new_ep_size else -1
             for old_ep_rank in range(old_ep_size)
         }
         assert self.model_runner.eplb_state is not None
-        self.model_runner.eplb_state.rearrange(self.model_runner.model,
-                                               execute_shuffle=True,
-                                               global_expert_loads=None,
-                                               rank_mapping=rank_mapping)
+        self.model_runner.eplb_state.rearrange(
+            self.model_runner.model,
+            execute_shuffle=True,
+            global_expert_loads=None,
+            rank_mapping=rank_mapping,
+        )
         current_platform.torch_device_fn.synchronize()
         if get_ep_group().rank == 0:
             logger.info("[Elastic EP] Expert resharding completed!")
 
     def _eplb_after_scale_up(
-            self,
-            old_ep_size: int,
-            new_ep_size: int,
-            global_expert_loads: Optional[torch.Tensor]) -> None:
+        self,
+        old_ep_size: int,
+        new_ep_size: int,
+        global_expert_loads: Optional[torch.Tensor],
+    ) -> None:
         from vllm.distributed.parallel_state import get_ep_group
+
         if get_ep_group().rank == 0:
-            logger.info("[Elastic EP] Starting expert resharding "
-                        "after scaling up...")
-        rank_mapping = {
-            old_ep_rank: old_ep_rank
-            for old_ep_rank in range(old_ep_size)
-        }
+            logger.info("[Elastic EP] Starting expert resharding after scaling up...")
+        rank_mapping = {old_ep_rank: old_ep_rank for old_ep_rank in range(old_ep_size)}
         assert self.model_runner.eplb_state is not None
         self.model_runner.eplb_state.rearrange(
             execute_shuffle=True,
             global_expert_loads=global_expert_loads,
-            rank_mapping=rank_mapping)
+            rank_mapping=rank_mapping,
+        )
         if get_ep_group().rank == 0:
             logger.info("[Elastic EP] Expert resharding completed!")
 
     def _reconfigure_parallel_config(
-            self, reconfig_request: ReconfigureDistributedRequest) -> None:
+        self, reconfig_request: ReconfigureDistributedRequest
+    ) -> None:
         """
         Update parallel config with provided reconfig_request
         """
@@ -812,8 +1000,9 @@ class WorkerFL(WorkerBase):
             reconfig_request.new_data_parallel_master_port
         )
 
-    def _reconfigure_moe(self, old_ep_size: int,
-                         new_ep_size: int) -> Optional[torch.Tensor]:
+    def _reconfigure_moe(
+        self, old_ep_size: int, new_ep_size: int
+    ) -> Optional[torch.Tensor]:
         """
         Reconfigure MoE modules with provided reconfig_request
 
@@ -823,12 +1012,15 @@ class WorkerFL(WorkerBase):
         from vllm.distributed.parallel_state import (
             get_dp_group,
             get_ep_group,
-            prepare_communication_buffer_for_model)
+            prepare_communication_buffer_for_model,
+        )
         from vllm.model_executor.layers.fused_moe.layer import (
             FusedMoE,
-            FusedMoEParallelConfig)
+            FusedMoEParallelConfig,
+        )
 
         parallel_config = self.vllm_config.parallel_config
+
         def get_moe_modules(model: torch.nn.Module) -> list[FusedMoE]:
             return [
                 module
@@ -855,7 +1047,7 @@ class WorkerFL(WorkerBase):
                 )
                 module.moe_config.moe_parallel_config = module.moe_parallel_config
             return moe_modules
-        
+
         model_moe_modules = get_moe_modules(self.model_runner.model)
         num_local_experts = model_moe_modules[0].moe_config.num_local_experts
 
@@ -876,19 +1068,23 @@ class WorkerFL(WorkerBase):
         if new_ep_size < old_ep_size:
             num_local_physical_experts = num_local_experts
             assert self.model_runner.eplb_state is not None
-            new_physical_experts = \
+            new_physical_experts = (
                 self.model_runner.eplb_state.physical_to_logical_map.shape[1]
+            )
             parallel_config.eplb_config.num_redundant_experts = (
-                new_physical_experts -
-                self.model_runner.eplb_state.logical_replica_count.shape[1])
+                new_physical_experts
+                - self.model_runner.eplb_state.logical_replica_count.shape[1]
+            )
             global_expert_loads = None
         else:
-            num_local_physical_experts_tensor = torch.tensor([num_local_experts],
-                                                      dtype=torch.int32,
-                                                      device="cpu")
-            torch.distributed.broadcast(num_local_physical_experts_tensor,
-                                        group=get_ep_group().cpu_group,
-                                        group_src=0)
+            num_local_physical_experts_tensor = torch.tensor(
+                [num_local_experts], dtype=torch.int32, device="cpu"
+            )
+            torch.distributed.broadcast(
+                num_local_physical_experts_tensor,
+                group=get_ep_group().cpu_group,
+                group_src=0,
+            )
             num_local_physical_experts = int(num_local_physical_experts_tensor.item())
             new_physical_experts = num_local_physical_experts * new_ep_size
             assert self.model_runner.eplb_state is not None
@@ -897,17 +1093,20 @@ class WorkerFL(WorkerBase):
             )
             global_expert_loads = cast(list[torch.Tensor], global_expert_loads_any)
             parallel_config.eplb_config.num_redundant_experts = (
-                new_physical_experts - global_expert_loads[0].shape[1])
+                new_physical_experts - global_expert_loads[0].shape[1]
+            )
         prepare_communication_buffer_for_model(self.model_runner.model)
         if drafter_model is not None:
             prepare_communication_buffer_for_model(drafter_model)
         self.model_runner.model.update_physical_experts_metadata(
             num_physical_experts=new_physical_experts,
-            num_local_physical_experts=num_local_physical_experts)
+            num_local_physical_experts=num_local_physical_experts,
+        )
         return global_expert_loads
 
     def reinitialize_distributed(
-            self, reconfig_request: ReconfigureDistributedRequest) -> None:
+        self, reconfig_request: ReconfigureDistributedRequest
+    ) -> None:
         from vllm.config import set_current_vllm_config
         from vllm.distributed.parallel_state import (
             cleanup_dist_env_and_memory,
@@ -937,10 +1136,12 @@ class WorkerFL(WorkerBase):
         self._reconfigure_parallel_config(reconfig_request)
 
         with set_current_vllm_config(self.vllm_config):
-            init_worker_distributed_environment(self.vllm_config,
-                                                self.rank,
-                                                self.distributed_init_method,
-                                                self.local_rank)
+            init_worker_distributed_environment(
+                self.vllm_config,
+                self.rank,
+                self.distributed_init_method,
+                self.local_rank,
+            )
 
         global_expert_loads = self._reconfigure_moe(old_ep_size, new_ep_size)
 
@@ -955,6 +1156,7 @@ class WorkerFL(WorkerBase):
         max_size: Optional[int] = None,
     ) -> None:
         from vllm.model_executor.model_loader import ShardedStateLoader
+
         ShardedStateLoader.save_model(
             self.model_runner.model,
             path,
@@ -967,13 +1169,16 @@ class WorkerFL(WorkerBase):
         tensorizer_config: "TensorizerConfig",
     ) -> None:
         self.model_runner.save_tensorized_model(
-            tensorizer_config=tensorizer_config, )
+            tensorizer_config=tensorizer_config,
+        )
 
     def shutdown(self) -> None:
-        if runner := getattr(self, "model_runner", None):
-            runner.ensure_kv_transfer_shutdown()
+        if ensure_kv_transfer_shutdown is not None:
+            ensure_kv_transfer_shutdown()
         if self.profiler is not None:
             self.profiler.shutdown()
+        if model_runner := getattr(self, "model_runner", None):
+            model_runner.shutdown()
 
 
 def init_worker_distributed_environment(
@@ -984,11 +1189,11 @@ def init_worker_distributed_environment(
     backend: str = "nccl",
 ) -> None:
     """Initialize the distributed environment."""
-    attention_config = vllm_config.attention_config
     parallel_config = vllm_config.parallel_config
+    set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     from vllm.model_executor.layers.batch_invariant import init_batch_invariance
 
-    init_batch_invariance(attention_config.backend)
+    init_batch_invariance()
 
     init_method = distributed_init_method or "env://"
     init_distributed_environment(
@@ -999,9 +1204,9 @@ def init_worker_distributed_environment(
         parallel_config.tensor_parallel_size,
         parallel_config.pipeline_parallel_size,
         parallel_config.prefill_context_parallel_size,
-        parallel_config.decode_context_parallel_size)
+        parallel_config.decode_context_parallel_size,
+    )
 
     # Init ec connector here before KV caches caches init
     # NOTE: We do not init KV caches for Encoder-only instance in EPD disagg mode
     ensure_ec_transfer_initialized(vllm_config)
-

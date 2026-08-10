@@ -1,0 +1,110 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Code Scan
+
+on:
+  pull_request:
+    branches: [main, devops]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "examples/**"
+      - "docker/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  # ============================================================
+  # Job 1: CodeQL - Semantic code analysis
+  # Detects security vulnerabilities and code quality issues.
+  # ============================================================
+  codeql:
+    name: CodeQL Analysis
+    # Skip: fork-internal PRs, draft PRs, PRs with WIP/wip in title
+    if: |
+      github.repository == 'flagos-ai/vllm-plugin-FL' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.title, 'WIP') &&
+      !contains(github.event.pull_request.title, 'wip')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"
+
+  # ============================================================
+  # Job 2: Dependency review
+  # Checks for known vulnerabilities in new dependencies.
+  # Only runs on pull requests.
+  # ============================================================
+  dependency-review:
+    name: Dependency Review
+    # Skip: fork-internal PRs, draft PRs, PRs with WIP/wip in title
+    if: |
+      github.event_name == 'pull_request' &&
+      github.repository == 'flagos-ai/vllm-plugin-FL' &&
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.title, 'WIP') &&
+      !contains(github.event.pull_request.title, 'wip')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

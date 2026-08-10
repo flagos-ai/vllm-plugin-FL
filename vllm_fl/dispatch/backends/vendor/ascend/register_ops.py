@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import functools
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.registry import OpRegistry
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -24,7 +25,7 @@ def _bind_is_available(fn, is_available_fn):
     return wrapper
 
 
-def register_builtins(registry) -> None:
+def register_builtins(registry: OpRegistry) -> None:
     """
     Register all Ascend (VENDOR) operator implementations.
 
@@ -48,10 +49,10 @@ def register_builtins(registry) -> None:
         ),
         # Normalization
         OpImpl(
-            op_name="rmsnorm",
+            op_name="rms_norm",
             impl_id="vendor.ascend",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.rmsnorm, is_avail),
+            fn=_bind_is_available(backend.rms_norm, is_avail),
             vendor="ascend",
             priority=BackendPriority.VENDOR,
         ),
@@ -70,6 +71,42 @@ def register_builtins(registry) -> None:
             impl_id="vendor.ascend",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.attention_backend, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
+        # Fused MoE kernel (torch.mm fallback for Triton UB overflow)
+        OpImpl(
+            op_name="invoke_fused_moe_triton_kernel",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
+        # MoE align block size (torch fallback for Triton DDR OOB)
+        OpImpl(
+            op_name="moe_align_block_size",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
+        # MoE sum (torch fallback for Triton crash)
+        OpImpl(
+            op_name="moe_sum",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_sum, is_avail),
+            vendor="ascend",
+            priority=BackendPriority.VENDOR,
+        ),
+        # topk_softmax (torch fallback for Triton crash)
+        OpImpl(
+            op_name="topk_softmax",
+            impl_id="vendor.ascend",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.topk_softmax, is_avail),
             vendor="ascend",
             priority=BackendPriority.VENDOR,
         ),

@@ -11,27 +11,29 @@ import numpy as np
 import torch
 
 from vllm import envs
-from vllm.attention.backends.abstract import (
+from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionImpl,
     AttentionType,
     MultipleOf,
-    is_quantized_kv_cache,
 )
-from vllm.attention.layer import Attention
-from vllm.attention.ops.common import cp_lse_ag_out_rs
-from vllm.attention.ops.merge_attn_states import merge_attn_states
+from vllm.utils.torch_utils import is_quantized_kv_cache
+from vllm.model_executor.layers.attention.attention import Attention
+from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 
 
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm.model_executor.layers.batch_invariant import vllm_is_batch_invariant
+from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
 from vllm.utils.math_utils import cdiv
-from vllm.v1.attention.backends.utils import (
+from vllm.v1.attention.backend import (
     AttentionCGSupport,
     AttentionMetadataBuilder,
+)
+from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
     get_kv_cache_layout,
@@ -39,7 +41,7 @@ from vllm.v1.attention.backends.utils import (
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.platforms.interface import DeviceCapability
 from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
-# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash, 
+# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash,
 # from flag_gems import reshape_and_cache_flash
 
 logger = init_logger(__name__)
@@ -72,7 +74,7 @@ class AttentionFLBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "FL"
+        return "CUSTOM"
 
     @classmethod
     def supports_attn_type(cls, attn_type: str) -> bool:
@@ -86,11 +88,10 @@ class AttentionFLBackend(AttentionBackend):
     def get_impl_cls() -> type["AttentionFLImpl"]:
         return AttentionFLImpl
 
-
     @staticmethod
     def get_builder_cls() -> type["AttentionFLMetadataBuilder"]:
         return AttentionFLMetadataBuilder
-    
+
     @classmethod
     def supports_sink(cls) -> bool:
         return False
@@ -101,7 +102,6 @@ class AttentionFLBackend(AttentionBackend):
         if kv_cache_dtype is None:
             return True
         return kv_cache_dtype in ["auto"]
-    
     @staticmethod
     def get_kv_cache_shape(
         num_blocks: int,
@@ -248,7 +248,7 @@ class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
         self.block_size = kv_cache_spec.block_size
 
         self.max_num_splits = 0  # No upper bound on the number of splits.
-        self.aot_schedule = False #get_flash_attn_version() == 3
+        self.aot_schedule = False  #get_flash_attn_version() == 3
 
         try:
             from vllm.distributed.parallel_state import get_dcp_group
@@ -457,16 +457,44 @@ class AttentionFLImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         self.attn_type = attn_type
-        self.vllm_flash_attn_version = 3 # 2 #get_flash_attn_version()
+        self.vllm_flash_attn_version = 2  # FlagGems only supports FA2
         # Cache the batch invariant result for use in forward passes
-        self.batch_invariant_enabled = vllm_is_batch_invariant()
+        self.batch_invariant_enabled = _bi_mode
 
         if is_quantized_kv_cache(self.kv_cache_dtype):
             raise NotImplementedError(
                 "AttentionFL does not support quantization kv-cache on this device."
             )
-        ### TODO(lms): support quant to int8/int4 each query input and low precision compute 
+        ### TODO(lms): support quant to int8/int4 each query input and low precision compute
         self.supports_quant_query_input = False
+
+    def do_kv_cache_update(
+        self,
+        layer,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+    ):
+        """Write key/value into the paged KV cache.
+
+        This is called by vLLM's unified_kv_cache_update custom op
+        *before* forward(), so forward() should NOT repeat the write.
+        """
+        if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
+            return
+
+        key_cache, value_cache = kv_cache.unbind(0)
+        reshape_and_cache_flash(
+            key,
+            value,
+            key_cache,
+            value_cache,
+            slot_mapping,
+            self.kv_cache_dtype,
+            layer._k_scale,
+            layer._v_scale,
+        )
 
     def forward(
         self,
@@ -532,34 +560,10 @@ class AttentionFLImpl(AttentionImpl):
                 layer,
             )
 
-        # For decoder and cross-attention, use KV cache as before
+        # For decoder and cross-attention, use KV cache as before.
+        # NOTE: KV cache write is handled by do_kv_cache_update() which is
+        # called separately by vLLM's unified_kv_cache_update custom op.
         key_cache, value_cache = kv_cache.unbind(0)
-
-        # key and value may be None in the case of cross attention. They are
-        # calculated once based on the output from the encoder and then cached
-        # in KV cache.
-        if (
-            self.kv_sharing_target_layer_name is None
-            and key is not None
-            and value is not None
-        ):
-            # Reshape the input keys and values and store them in the cache.
-            # Skip this if sharing KV cache with an earlier attention layer.
-            # NOTE(woosuk): Here, key and value are padded while slot_mapping is
-            # not padded. However, we don't need to do key[:num_actual_tokens]
-            # and value[:num_actual_tokens] because the reshape_and_cache_flash
-            # op uses the slot_mapping's shape to determine the number of
-            # actual tokens.
-            reshape_and_cache_flash(
-                key,
-                value,
-                key_cache,
-                value_cache,
-                attn_metadata.slot_mapping,
-                self.kv_cache_dtype,
-                layer._k_scale,
-                layer._v_scale,
-            )
 
         if not attn_metadata.use_cascade:
             cu_seqlens_q = attn_metadata.query_start_loc
@@ -606,8 +610,8 @@ class AttentionFLImpl(AttentionImpl):
                     q_descale=layer._q_scale.expand(descale_shape),
                     k_descale=layer._k_scale.expand(descale_shape),
                     v_descale=layer._v_scale.expand(descale_shape),
-                    num_splits=attn_metadata.max_num_splits,
-                    s_aux=None, ### self.sinks is support in FA3
+                    num_splits=0,  # FlagGems does not support num_splits > 0
+                    s_aux=None,
                 )
                 return output
 
@@ -741,7 +745,8 @@ class AttentionFLImpl(AttentionImpl):
         # For encoder attention, process FP8 quantization if needed
         if self.kv_cache_dtype.startswith("fp8"):
             raise NotImplementedError(
-                "quantization is not supported for encoder attention")
+                "quantization is not supported for encoder attention"
+            )
 
         # Use encoder-specific metadata for sequence information
         cu_seqlens_q = attn_metadata.query_start_loc
@@ -777,6 +782,7 @@ class AttentionFLImpl(AttentionImpl):
         )
 
         return output
+
 
 def use_cascade_attention(
     common_prefix_len: int,

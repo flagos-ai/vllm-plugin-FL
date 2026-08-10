@@ -17,15 +17,29 @@ from vllm.utils.torch_utils import current_stream
 
 import os
 import sys
-sys.path.append(os.getenv('FLAGCX_PATH'))
-from plugin.interservice.flagcx_wrapper import (
-    FLAGCXLibrary,
-    buffer_type,
-    flagcxComm_t,
-    flagcxDataTypeEnum,
-    flagcxUniqueId,
-    flagcxRedOpTypeEnum,
-)
+
+_flagcx_path = os.getenv('FLAGCX_PATH')
+if _flagcx_path and os.path.isdir(_flagcx_path):
+    sys.path.append(_flagcx_path)
+
+try:
+    from plugin.interservice.flagcx_wrapper import (
+        FLAGCXLibrary,
+        buffer_type,
+        flagcxComm_t,
+        flagcxDataTypeEnum,
+        flagcxUniqueId,
+        flagcxRedOpTypeEnum,
+    )
+    _flagcx_available = True
+except (ImportError, ModuleNotFoundError):
+    _flagcx_available = False
+    FLAGCXLibrary = None
+    buffer_type = None
+    flagcxComm_t = None
+    flagcxDataTypeEnum = None
+    flagcxUniqueId = None
+    flagcxRedOpTypeEnum = None
 
 class PyFlagcxCommunicator:
     def __init__(
@@ -82,9 +96,17 @@ class PyFlagcxCommunicator:
         self.available = True
         self.disabled = False
 
+        self._legacy_unique_id_api = (
+            hasattr(self.flagcx, "handler")
+            and not hasattr(self.flagcx, "devHandle")
+        )
+
         if self.rank == 0:
             # get the unique id from NCCL
-            self.unique_id = self.flagcx.flagcxGetUniqueId().contents
+            if self._legacy_unique_id_api:
+                self.unique_id = self.flagcx.flagcxGetUniqueId().contents
+            else:
+                self.unique_id = self.flagcx.flagcxGetUniqueId()
         else:
             # construct an empty unique id
             self.unique_id = flagcxUniqueId()
@@ -107,11 +129,24 @@ class PyFlagcxCommunicator:
         assert isinstance(device, torch.device)
         self.device = device
         # nccl communicator and stream will use this device
-        # `torch.cuda.device` is a context manager that changes the
-        # current cuda device to the specified one
-        with torch.cuda.device(device):
-            self.comm = self.flagcx.flagcxCommInitRank(
-                self.world_size, ctypes.byref(self.unique_id), self.rank)
+        # `torch.cuda.device` / `torch.musa.device` are context managers that
+        # change the current device to the specified one
+        if self.device.type == "musa":
+            device_ctx = torch.musa.device(self.device)
+        elif self.device.type == "ptpu":
+            device_ctx = torch.device(self.device)
+        elif self.device.type == "txda":
+            device_ctx = torch.txda.device(self.device)
+        else:
+            device_ctx = torch.cuda.device(self.device)
+
+        with device_ctx:
+            if self._legacy_unique_id_api:
+                self.comm = self.flagcx.flagcxCommInitRank(
+                    self.world_size, ctypes.pointer(self.unique_id), self.rank)
+            else:
+                self.comm = self.flagcx.flagcxCommInitRank(
+                    self.world_size, self.unique_id, self.rank)
 
             stream = current_stream()
             # A small all_reduce for warmup.
@@ -119,7 +154,7 @@ class PyFlagcxCommunicator:
             self.all_reduce(data)
             stream.synchronize()
             del data
-            
+
     def all_reduce(self,
                    in_tensor: torch.Tensor,
                    out_tensor: torch.Tensor = None,

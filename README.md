@@ -1,76 +1,149 @@
-# vllm-FL
-A vLLM plugin built on the FlagOS unified multi-chip backend.
+# vllm-plugin-FL
+
+vllm-plugin-FL is a plugin for the [vLLM](https://github.com/vllm-project/vllm) inference/serving framework, built on FlagOS's unified multi-chip backend — including the unified operator library [FlagGems](https://github.com/flagos-ai/FlagGems) and the unified communication library [FlagCX](https://github.com/flagos-ai/FlagCX). It extends vLLM's capabilities and performance across diverse hardware environments. Without changing vLLM's original interfaces or usage patterns, the same command can run model inference/serving on different chips.
+
+## Supported Models and Chips
+
+In theory, vllm-plugin-FL can support all models available in vLLM, as long as no unsupported operators are involved. The tables below summarize the current support status of end-to-end verified models and chips, including both fully supported and in-progress ("Merging") entries.
+
+### Supported Models
+
+| Model | Status | Reference |
+|-------|--------|-----------|
+| Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
+| Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
+| Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
+| MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
+| GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
+| Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
+| BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
+| MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
+
+### Supported Chips
+
+| Chip Vendor | Status | Reference |
+|-------------|--------|-----------|
+| NVIDIA | Supported | - |
+| Ascend | Supported | - |
+| MetaX | Supported | - |
+| T-Head | Supported | - |
+| Iluvatar | Supported | - |
+| Tsingmicro | Supported | - |
+| Moore Threads | Supported | - |
+| Hygon | Supported | - |
+| Sunrise | Supported | - |
+| Enflame | Supported | - |
 
 ## Quick Start
 
 ### Setup
 
-0. Install vllm from the official [v0.13.0](https://github.com/vllm-project/vllm/tree/v0.13.0) (optional if the correct version is installed) or from the fork [vllm-FL](https://github.com/flagos-ai/vllm-FL).
+1. Install vllm from the official [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) (optional if the correct version is installed)
 
 
-1. Install FlagGems
-
-    1.1 Install Build Dependencies
-
-    ```sh
-    pip install -U scikit-build-core==0.11 pybind11 ninja cmake
-    ```
-
-    1.2 Installation FlagGems
-
-    ```sh
-    git clone https://github.com/flagos-ai/FlagGems
-    cd FlagGems
-    pip install --no-build-isolation .
-    # or editble install
-    pip install --no-build-isolation -e .
-    ```
-
-    2.4 Using FlagGems operators
-
-    ```sh
-    export USE_FLAGGEMS=1
-    ```
-
-3. Install FlagCX
+2. Install vllm-plugin-FL
 
     2.1 Clone the repository:
-    ```sh
-    git clone https://github.com/flagos-ai/FlagCX.git
-    git checkout -b v0.7.0
-    ```
-
-    2.2 Build the library with different flags targeting to different platforms:
-    ```sh
-    make USE_NVIDIA=1
-    ```
-
-    2.3 Set environment
-    ```sh
-    export FLAGCX_PATH="$pwd"
-    ```
-
-    3.4 Installation FlagCX
-    ```sh
-    cd plugin/torch/
-    python setup.py develop --adaptor nvidia/ascend
-    ```
-
-3. Install vllm-plugin-fl
-
-    3.1 Clone the repository:
 
     ```sh
     git clone https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
-    3.2 install
+    2.2 install
     ```sh
-    cd vllm-plugin-fl
+    cd vllm-plugin-FL
+    pip install --no-build-isolation .
+    # or editble install
     pip install --no-build-isolation -e .
     ```
 
+    For CUDA-like devices, including CUDA and HIP/ROCm environments that use
+    PyTorch's CUDA dispatch key, build the plugin native extension by setting
+    `VLLM_VENDOR=cuda` during installation:
+    ```sh
+    cd vllm-plugin-FL
+    VLLM_VENDOR=cuda pip install --no-build-isolation .
+    # or editable install
+    VLLM_VENDOR=cuda pip install --no-build-isolation -e .
+    ```
+
+    This builds and installs `vllm_fl._C`, which provides native C++ support
+    required by some graph/custom-op paths, especially when vLLM is installed
+    with `VLLM_TARGET_DEVICE=empty`.
+
+    If `VLLM_VENDOR` is not set, vllm-plugin-FL is installed as a Python-only
+    plugin and the native extension is skipped.
+
+3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/)
+
+    3.1 Install Build Dependencies
+
+    ```sh
+    pip install -U scikit-build-core==0.11 pybind11 ninja cmake
+    ```
+
+    3.2 Installation FlagGems
+
+    ```sh
+    git clone https://github.com/flagos-ai/FlagGems
+    cd FlagGems
+    git checkout 3b2b55c8eda5de44ba3476d26566ecf134db0662
+    pip install --no-build-isolation .
+    # or editble install
+    pip install --no-build-isolation -e .
+    ```
+
+4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
+
+    4.1 Clone the repository:
+    ```sh
+    git clone https://github.com/flagos-ai/FlagCX.git
+    cd FlagCX
+    git checkout -b v0.13.0
+    git submodule update --init --recursive
+    ```
+
+    4.2 Build the library with different flags targeting to different platforms:
+    ```sh
+    make USE_NVIDIA=1
+    ```
+
+    4.3 Set environment
+    ```sh
+    export FLAGCX_PATH="$PWD"
+    ```
+
+    4.4 Installation FlagCX
+    ```sh
+    cd plugin/torch/
+    FLAGCX_ADAPTOR=[xxx] pip install . --no-build-isolation
+    # or editable install
+    FLAGCX_ADAPTOR=[xxx] pip install -e . --no-build-isolation
+    ```
+    Note: [xxx] should be selected according to the current platform, e.g., nvidia, ascend, etc.
+
+
 If there are multiple plugins in the current environment, you can specify use vllm-plugin-fl via VLLM_PLUGINS='fl'.
+
+### Additional Steps for Ascend
+
+1. Install [FlagTree](https://resource.flagos.net)
+
+    ```sh
+    RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple --trusted-host=https://resource.flagos.net"
+    python3 -m pip install flagtree==0.4.0+ascend3.2 $RES
+    ```
+
+2. Set required environment variable
+
+    ```sh
+    export TRITON_ALL_BLOCKS_PARALLEL=1
+    ```
+
+3. Enable eager execution
+
+    Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
+
 
 ### Run a Task
 
@@ -82,7 +155,7 @@ import torch
 from vllm.config.compilation import CompilationConfig
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]
@@ -100,14 +173,16 @@ if __name__ == '__main__':
 
 ## Advanced use
 
-### Using CudaCommunication library
-If you want to use the original CudaCommunication, you can unset the following environment variables.
+For dispatch environment variable usage, see [environment variables usage](./vllm_fl/dispatch/README.md#environment-variables).
+
+### Using Cuda Communication library
+If you want to use the original Cuda Communication, you can unset the following environment variables.
 ```sh
 unset FLAGCX_PATH
 ```
 
 ### Using native CUDA operators
-If you want to use the original CUDA operators, you can unset the following environment variables.
+If you want to use the original CUDA operators, you can set the following environment variables.
 ```sh
-unset USE_FLAGGEMS
+export USE_FLAGGEMS=0
 ```

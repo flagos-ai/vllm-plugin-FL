@@ -1,71 +1,120 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/platforms/cuda.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.20.2/vllm/platforms/cuda.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
-from datetime import timedelta
-from functools import cache, wraps
-from typing import TYPE_CHECKING, Callable, Optional, TypeVar, Union
+import sys
+from typing import TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 
-from vllm.attention.backends.registry import AttentionBackendEnum, register_backend
-from vllm.logger import init_logger
+# import custom ops, trigger op registration (CUDA only)
+try:
+    import vllm._C  # noqa
+    import vllm._C_stable_libtorch  # noqa
+except (ImportError, OSError):
+    pass  # NPU or other platforms may not have vllm._C
 
+from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
 from vllm.platforms.interface import DeviceCapability
+from vllm.v1.attention.backends.registry import AttentionBackendEnum
+from vllm_fl.dispatch import CachedOp
 
 if TYPE_CHECKING:
-    from vllm.attention.selector import AttentionSelectorConfig
     from vllm.config import VllmConfig
     from vllm.config.cache import CacheDType
+    from vllm.v1.attention.selector import AttentionSelectorConfig
 else:
     VllmConfig = None
     CacheDType = None
 
-from vllm_fl.utils import DeviceInfo
+from vllm_fl.utils import DeviceInfo, get_device_name, get_device_type
 
 logger = init_logger(__name__)
+
+_attention_backend = CachedOp("attention_backend")
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-@cache
-def _get_backend(
-    use_mla: bool,
-    device_info: Optional[DeviceInfo] = None,
-) -> list[str]:
-    """Get backend priorities with lazy import to avoid circular dependency."""
-    if use_mla:
-        raise NotImplementedError("NOT support mla now!")
-    else:
-        if "USE_FLAGGEMS" in os.environ and os.environ["USE_FLAGGEMS"] == "1":
-            return [AttentionBackendEnum.TRITON_ATTN]
-        return [AttentionBackendEnum.FLASH_ATTN] 
-        
+dist_backend_dict = {
+    "npu": "hccl",
+    "cuda": "nccl",
+    "gcu": "eccl",
+    "musa": "mccl",
+}
+
+def _resolve_flagcx_backend() -> bool:
+    """Check whether the flagcx torch distributed backend is available."""
+    flagcx_path = os.environ.get("FLAGCX_PATH")
+    if not flagcx_path:
+        return False
+    try:
+        if flagcx_path not in sys.path:
+            sys.path.insert(0, flagcx_path)
+        import flagcx  # triggers _C.so load and backend registration
+        return torch.distributed.is_backend_available("flagcx")
+    except Exception:
+        logger.warning(
+            "FLAGCX_PATH=%s is set but flagcx torch backend could not be loaded.",
+            flagcx_path,
+        )
+        return False
+
 
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
-    device_name = device_info.device_type 
-    device_type = device_info.device_type 
+    vendor_name = device_info.vendor_name
+    device_type = get_device_type(vendor_name)
+    device_name = get_device_name(vendor_name)
+    # cuda_alike (nvidia/metax): device_name = vendor_name (not used in torch.device)
+    # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
+    device_name = device_info.vendor_name if (
+        device_info.device_type == "cuda"
+        and device_info.vendor_name not in ("iluvatar", "hygon")
+    ) else device_info.device_type
+    device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
-    ray_device_key: str = "flagos"
-    dist_backend: str = "flagcx" if "FLAGCX_PATH" in os.environ else "nccl"
+    ray_device_key: str = "GPU"
+    dist_backend: str = (
+        "flagcx"
+        if _resolve_flagcx_backend()
+        else dist_backend_dict.get(device_name, "nccl")
+    )
     ### TODO(lms): dispatch device_control_env_var
     # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
+        if self.vendor_name == "iluvatar":
+            return False
+        if self.device_type == "musa":
+            return True
+        if self.vendor_name == "hygon":
+            return False
+        if self.vendor_name == "gcu":
+            return True
         return self.device_type == "cuda"
-    
+
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        return self.device_type == "cuda"
+        return self.device_type == "cuda" and self.vendor_name == "nvidia"
+
+    def is_musa(self) -> bool:
+        if hasattr(torch, 'musa') and torch.musa.is_available():
+            return True
+        return False
+
+    def is_gcu(self) -> bool:
+        if hasattr(torch, 'gcu') and torch.gcu.is_available():
+            return True
+        return False
 
     @property
     def supported_dtypes(self) -> list[torch.dtype]:
@@ -79,9 +128,9 @@ class PlatformFL(Platform):
         pass
 
     @classmethod
-    def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
-                                 ) -> float:
+    def get_current_memory_usage(
+        cls, device: torch.types.Device | None = None
+    ) -> float:
         cls.torch_device_fn.empty_cache()
         cls.torch_device_fn.reset_peak_memory_stats(device)
         return cls.torch_device_fn.max_memory_allocated(device)
@@ -92,7 +141,7 @@ class PlatformFL(Platform):
         Set the device for the current platform.
         """
         cls.torch_device_fn.set_device(device)
-    
+
     @classmethod
     def empty_cache(cls) -> None:
         cls.torch_device_fn.empty_cache()
@@ -100,13 +149,48 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
         return cls.device_name
-        
+
     ### TODO(lms): change pin_memory depend device
     @classmethod
     def is_pin_memory_available(cls):
-        if cls.device_type in ["cuda", "xpu", "npu"]:
+        if cls.device_type in ["cuda", "xpu", "npu", "musa", "txda", "gcu"]:
             return True
         return False
+
+    @classmethod
+    def import_kernels(cls) -> None:
+        """Import device-specific kernels."""
+        logger.info(f"current vendor_name is: {cls.vendor_name}")
+
+        if cls.vendor_name == "metax":
+            try:
+                import mcoplib._C  # noqa: F401
+            except ImportError:
+                logger.warning("Failed to import mcoplib._C")
+
+            try:
+                import mcoplib._moe_C  # noqa: F401
+            except ImportError:
+                logger.warning("Failed to import mcoplib._moe_C")
+
+            try:
+                import vllm_fl.dispatch.backends.vendor.metax.patches  # noqa: F401
+            except Exception as e:
+                logger.warning(f"Failed to import maca patches: {e}")
+        else:
+            super().import_kernels()
+
+        if cls.device_type == "musa":
+            try:
+                from vllm_fl.dispatch.backends.vendor.musa.patch import apply_musa_patches
+                apply_musa_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply MUSA patches: {e}")
+
+    @classmethod
+    def import_ir_kernels(cls) -> None:
+        """Import IR kernel modules. OOT platforms override to import their own."""
+        import vllm.kernels  # noqa: F401
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
@@ -122,8 +206,15 @@ class PlatformFL(Platform):
             if cls.device_type == "npu":
                 cache_config.block_size = 128
                 logger.info("Setting kv cache block size to 128 for Ascend NPU.")
+            elif cls.device_type == "musa":
+                cache_config.block_size = 64
+                logger.info("Setting kv cache block size to 64 for MUSA.")
             else:
                 cache_config.block_size = 16
+        if cls.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.patch import refresh_block_size
+
+            refresh_block_size(vllm_config)
 
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
@@ -147,7 +238,51 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
-        if (parallel_config.data_parallel_size > 1
+        # Ascend NPU: torch_npu inductor codegen has issues with
+        # multi-device compilation (e.g. reduction scheduling on npu:1).
+        # Disable torch.compile and CUDAGraphs until torch_npu inductor
+        # is stable. check_and_update_config runs after VllmConfig.__init__
+        # processes enforce_eager, so we must set compilation_config directly.
+        if cls.device_type == "npu":
+            from vllm.config import CompilationMode
+            if compilation_config.mode != CompilationMode.NONE:
+                logger.warning(
+                    "Disabling torch.compile for Ascend NPU to avoid "
+                    "torch_npu inductor codegen issues."
+                )
+                compilation_config.mode = CompilationMode.NONE
+                compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+
+        # Ascend NPU: force float32 SSM state cache for GDN linear attention.
+        # The pure-PyTorch recurrence accumulates state in float32 but writes
+        # back to initial_state.dtype each step. If the cache is bf16, the
+        # round-trip truncation compounds across hundreds of tokens, degrading
+        # output quality (especially at temperature > 0). Forcing float32 cache
+        # eliminates this precision loss with negligible memory impact (the SSM
+        # state is small relative to the KV cache).
+        if cls.device_type == "npu":
+            if cache_config and cache_config.mamba_ssm_cache_dtype is None:
+                cache_config.mamba_ssm_cache_dtype = "float32"
+                logger.info(
+                    "Forcing mamba_ssm_cache_dtype to float32 for Ascend NPU "
+                    "to avoid recurrence precision loss in GDN decode."
+                )
+
+        if (
+            cls.device_type == "musa"
+            and compilation_config.cudagraph_mode.has_full_cudagraphs()
+        ):
+            logger.info(
+                "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
+                "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
+                "is not yet supported by torch_musa. PIECEWISE graphs still "
+                "provide graph capture benefits for non-TP-communication regions.",
+                compilation_config.cudagraph_mode,
+            )
+            compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+
+        if (
+            parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
             # TODO: Piecewise Cuda graph might be enabled
@@ -163,53 +298,45 @@ class PlatformFL(Platform):
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
+        # --------------------------------------------------------
+        # maca specific config updates
+        if cls.vendor_name == "metax":
+            if model_config is not None:
+                model_config.disable_cascade_attn = True
+            if attention_config := vllm_config.attention_config:
+                attention_config.use_cudnn_prefill = False
+                attention_config.use_trtllm_ragged_deepseek_prefill = False
+                attention_config.use_trtllm_attention = False
+                attention_config.disable_flashinfer_prefill = True
+
+        if cls.vendor_name == "gcu":
+            parallel_config.disable_custom_all_reduce = True
+
     @classmethod
     def get_attn_backend_cls(
         cls,
-        selected_backend: "AttentionBackendEnum",
+        selected_backend: "AttentionBackendEnum | None",
         attn_selector_config: "AttentionSelectorConfig",
-    ) -> list[str]:
+        num_heads: int | None = None,
+    ) -> str:
         """Get the attention backend class path using the dispatch mechanism."""
-        from vllm_fl.dispatch import call_op
-
         use_mla = attn_selector_config.use_mla
+        use_sparse = attn_selector_config.use_sparse
 
-        try:
-            backend_path = call_op("attention_backend", use_mla=use_mla)
+        backend_path = _attention_backend(use_mla=use_mla, use_sparse=use_sparse)
 
-            logger.info_once(
-                "Using attention backend via dispatch (use_mla=%s): %s",
-                use_mla, backend_path,
-                scope="local",
-            )
-            return backend_path
-
-        except RuntimeError as e:
-            # Fallback: if dispatch fails, use device-type based selection
-            logger.warning(
-                "Dispatch mechanism failed for attention_backend, "
-                "falling back to device-type based selection: %s", e
-            )
-
-            if cls.device_type == "npu":
-                if use_mla:
-                    backend_path = "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
-                else:
-                    backend_path = "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
-            else:
-                # For CUDA and other devices, use vLLM native backend
-                from vllm.attention.backends.registry import AttentionBackendEnum
-                if use_mla:
-                    backend_path = AttentionBackendEnum.MLA.get_path()
-                else:
-                    backend_path = AttentionBackendEnum.FLASH_ATTN.get_path()
-
-            logger.info_once(
-                "Using fallback attention backend (use_mla=%s): %s",
-                use_mla, backend_path,
-                scope="local",
-            )
-            return backend_path
+        logger.info_once(
+            "Using attention backend via dispatch (use_mla=%s, use_sparse=%s): %s",
+            use_mla,
+            use_sparse,
+            backend_path,
+            scope="local",
+        )
+        logger.info(
+            "Using attention backend via dispatch (use_mla=%s): %s"
+            % (use_mla, backend_path)
+        )
+        return backend_path
 
     @classmethod
     def get_supported_vit_attn_backends(cls) -> list["AttentionBackendEnum"]:
@@ -223,8 +350,11 @@ class PlatformFL(Platform):
         cls,
         head_size: int,
         dtype: torch.dtype,
-        backend: Optional["AttentionBackendEnum"] = None,
-    ) -> list[str]:
+        backend: "AttentionBackendEnum | None" = None,
+    ) -> "AttentionBackendEnum":
+        from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+        patch_mm_encoder_attention()
         if backend is not None:
             assert backend in cls.get_supported_vit_attn_backends(), (
                 f"Backend {backend} is not supported for vit attention. "
@@ -255,26 +385,21 @@ class PlatformFL(Platform):
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
             logger.info("Using CommunicatorFL for communication.")
-            return (
-                "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
-            )
+            return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
             logger.info("Using CudaCommunicator for communication.")
-            return (
-                "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator" # noqa
-            )
+            return "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
 
-    
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
         return "vllm_fl.compilation.graph.GraphWrapper"
-    
+
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.device_name in ["cuda", "npu"]:
+        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead", "gcu"]:
             return True
         return False
-    
+
     @classmethod
     def insert_blocks_to_device(
         cls,
@@ -307,31 +432,115 @@ class PlatformFL(Platform):
     @classmethod
     def opaque_attention_op(cls) -> bool:
         return True
-    
+
     @classmethod
     def use_custom_allreduce(cls) -> bool:
+        if cls.vendor_name == "hygon":
+            return False
         if cls.dist_backend == "flagcx":
             return False
         return True
+
+    @classmethod
+    def pre_register_and_update(cls, parser=None) -> None:
+        if cls.device_name == "npu":
+            import vllm_fl.dispatch.backends.vendor.ascend
+        elif cls.device_name == "gcu":
+            import vllm_fl.dispatch.backends.vendor.gcu  # noqa: F401
+
+    @classmethod
+    def supports_fp8(cls) -> bool:
+        """Return whether the current device architecture supports FP8."""
+        if cls.vendor_name == "mthreads":
+            return True
+
+        if cls.vendor_name == "gcu":
+            cc = cls.get_device_capability()
+            return cc is not None and cc.major >= 4
+
+        if cls.vendor_name != "nvidia":
+            return False
+        try:
+            capability = cls.get_device_capability()
+        except (AttributeError, RuntimeError):
+            return False
+        return capability is not None and capability >= DeviceCapability(8, 9)
+
+    @classmethod
+    def get_device_uuid(cls, device_id: int = 0) -> str:
+        if cls.device_type == "cuda":
+            import pynvml
+            pynvml.nvmlInit()
+            physical_device_id = cls.device_id_to_physical_device_id(device_id)
+            handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
+            uuid = pynvml.nvmlDeviceGetUUID(handle)
+            pynvml.nvmlShutdown()
+            return uuid
+        elif cls.device_type == "npu":
+            if os.getenv("ASCEND_RT_VISIBLE_DEVICES") is not None:
+                npu_visible_devices = os.environ["ASCEND_RT_VISIBLE_DEVICES"].split(",")
+                return "NPU-" + npu_visible_devices[device_id]
+            return f"NPU-{device_id}"
+        else:
+            return f"{cls.device_type}-{device_id}"
+
+    @classmethod
+    def get_device_total_memory(cls, device_id: int = 0) -> int:
+        return cls.torch_device_fn.get_device_properties(
+            device_id
+        ).total_memory
+
+    @classmethod
+    def use_custom_op_collectives(cls) -> bool:
+        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
+
+    @classmethod
+    def num_compute_units(cls, device_id: int = 0) -> int:
+        return cls.torch_device_fn.get_device_properties(device_id).multi_processor_count
+
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
         # TODO(yxa): For NPU/Ascend devices, return None (no capability version like CUDA)
         if cls.device_type == "npu":
             return None
-        # For CUDA devices
+        if cls.device_type == "musa":
+            major, minor = torch.musa.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
+        if cls.device_type == "txda":
+            major, minor = torch.txda.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
+        # TODO: For PTPU/Sunrise devices, return None
+        if cls.device_type == "ptpu":
+            return None        
+        if cls.device_type == "gcu":
+            gcu = getattr(torch, "gcu", None)
+            if gcu is None:
+                return None
+            major, minor = gcu.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
-    
+
+    @classmethod
+    def support_deep_gemm(cls) -> bool:
+        """Currently, only Hopper and Blackwell GPUs are supported."""
+        if cls.device_type == "cuda" and cls.vendor_name == "nvidia":
+            return cls.is_device_capability(90) or cls.is_device_capability_family(100)
+        return False
+
     @classmethod
     def is_fully_connected(cls, physical_device_ids: list[int]) -> bool:
         try:
             import pynvml
+
             pynvml.nvmlInit()
             """
             query if the set of gpus are fully connected by nvlink (1 hop)
             """
-            handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in physical_device_ids]
+            handles = [
+                pynvml.nvmlDeviceGetHandleByIndex(i) for i in physical_device_ids
+            ]
             for i, handle in enumerate(handles):
                 for j, peer_handle in enumerate(handles):
                     if i < j:
@@ -352,4 +561,23 @@ class PlatformFL(Platform):
             return True
         except:
             return False
-    
+
+    @classmethod
+    def manual_seed_all(cls, seed: int) -> None:
+        """Set RNG seed across all devices for the current platform."""
+        # torch_ptpu.ptpu doesn't have manual_seed_all, implement it manually
+        if hasattr(cls.torch_device_fn, 'manual_seed_all'):
+            cls.torch_device_fn.manual_seed_all(seed)
+        else:
+            # Fallback for devices without manual_seed_all (e.g., ptpu)
+            torch.manual_seed(seed)
+            if hasattr(cls.torch_device_fn, 'device_count') and hasattr(cls.torch_device_fn, '_get_or_create_default_generator'):
+                # Set seed for each device's default generator
+                for device_id in range(cls.torch_device_fn.device_count()):
+                    generator = cls.torch_device_fn._get_or_create_default_generator(device_id)
+                    generator.manual_seed(seed)
+
+    @classmethod
+    def is_integrated_gpu(cls, device_id: int = 0) -> bool:
+        """Returns whether the GPU is an integrated (UMA) device."""
+        return False

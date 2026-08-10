@@ -1,0 +1,124 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# vLLM-FL Dispatch Configuration for Ascend NPU
+# Auto-loaded when running on Ascend hardware
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Vendor Whitelist (Optional, allows all if not set)
+# allow_vendors:
+#  - ascend
+#  - cuda
+
+# Vendor Blacklist (Optional)
+# deny_vendors:
+#   - cuda
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos       : Default FlagOS implementation
+#   - reference     : PyTorch reference implementation
+#   - vendor        : Any available vendor backend (auto-detected)
+#   - vendor:ascend : Ascend-specific vendor backend
+op_backends:
+  # attention_backend: prioritize vendor as FlagGems implementation is incomplete
+  attention_backend:
+    - vendor
+    - flagos
+    - reference
+  rms_norm:
+    - vendor
+    - flagos
+    - reference
+  silu_and_mul:
+    - flagos
+    - vendor
+    - reference
+  rotary_embedding:
+    - vendor
+    - flagos
+    - reference
+  # invoke_fused_moe_triton_kernel: prioritize vendor (torch.mm) because
+  # FlagGems Triton kernel overflows NPU unified buffer on some model shapes
+  invoke_fused_moe_triton_kernel:
+    - vendor
+    - flagos
+  # moe_align_block_size: prioritize vendor (pure-torch) because
+  # FlagGems Triton kernel causes DDR address OOB on NPU
+  moe_align_block_size:
+    - vendor
+    - flagos
+  moe_sum:
+    - vendor
+    - flagos
+  topk_softmax:
+    - vendor
+    - flagos
+
+# FlagOS operator blacklist
+# These operators will NOT use FlagOS implementation even if FlagOS is enabled.
+# Operators are blacklisted because their FlagGems Triton kernels are either
+# incorrect, imprecise, or crash on Ascend NPU during inference.
+flagos_blacklist:
+  # --- Crash: GDN recurrent path precision ---
+  - exp
+  - exp_
+  - log
+  # --- Crash: Indexing (corrupts ViT rotary cos[pos_ids]) ---
+  - index
+  # --- Crash: Fill (ZeroDivisionError on zero-size slices) ---
+  - fill_scalar_
+  - fill_tensor_
+  # --- Crash: Conv (assertion failure with grouped conv) ---
+  - conv1d
+  # --- Arithmetic (Triton compilation hang on MoE 256-expert shapes) ---
+  - mm
+  - addmm
+  - add
+  - sub
+  - mul
+  - true_divide
+  - true_divide_
+  - floor_divide
+  - reciprocal
+  - neg
+  - neg_
+  - abs
+  - abs_
+  # --- Scatter/Gather (worker hard-crash, NPU segfault) ---
+  - masked_scatter_
+  - masked_scatter
+  - scatter_add_
+  - scatter
+  - scatter_
+  - gather
+  - index_put
+  - index_put_
+  - _index_put_impl_
+  # --- Reduction (argmax only - Invalid Runtime Function on NPU) ---
+  - argmax
+
+# OOT (Out-of-Tree) operator blacklist
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe

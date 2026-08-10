@@ -1,21 +1,23 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import warnings
-from typing import Optional, Union
 import os
 import torch
 
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.fla.ops.l2norm import l2norm_fwd
-from vllm.model_executor.layers.fla.ops.utils import input_guard
-from flag_gems.fused.FLA import chunk_gated_delta_rule_fwd
+from .utils import input_guard
+from vllm_fl.utils import use_flaggems_op
 
+if use_flaggems_op("chunk_gated_delta_rule_fwd"):
+    from flag_gems.fused.FLA import chunk_gated_delta_rule_fwd
+else:
+    from vllm.model_executor.layers.fla.ops.chunk import chunk_gated_delta_rule_fwd
 
 
 class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
     @staticmethod
     @input_guard
-    @torch.amp.custom_fwd(device_type="cuda")
     def forward(
         ctx,
         q: torch.Tensor,
@@ -47,7 +49,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         ctx.scale = scale
         ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel
         return o.to(q.dtype), final_state
-    
+
 
 @CustomOp.register("chunk_gated_delta_rule")
 class ChunkGatedDeltaRuleOp(CustomOp):
@@ -76,7 +78,7 @@ class ChunkGatedDeltaRuleOp(CustomOp):
         scale: float = None,
         initial_state: torch.Tensor = None,
         cu_seqlens: torch.LongTensor | None = None,
-        ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Args:
             q (torch.Tensor):
@@ -127,7 +129,10 @@ class ChunkGatedDeltaRuleOp(CustomOp):
                     f"The batch size is expected to be 1 rather than {q.shape[0]} when using `cu_seqlens`."
                     f"Please flatten variable-length inputs before processing."
                 )
-            if initial_state is not None and initial_state.shape[0] != len(cu_seqlens) - 1:
+            if (
+                initial_state is not None
+                and initial_state.shape[0] != len(cu_seqlens) - 1
+            ):
                 raise ValueError(
                     f"The number of initial states is expected to be equal to the number of input sequences, "
                     f"i.e., {len(cu_seqlens) - 1} rather than {initial_state.shape[0]}."

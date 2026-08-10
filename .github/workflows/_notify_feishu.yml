@@ -1,0 +1,56 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reusable workflow: Send CI status notification to Feishu
+name: Feishu Notification
+
+on:
+  workflow_call:
+    inputs:
+      status:
+        description: "Overall CI status (success / failure / cancelled)"
+        required: true
+        type: string
+      platform:
+        description: "Platform name (e.g. cuda, ascend). Included in the notification title when set."
+        required: false
+        type: string
+        default: ""
+    secrets:
+      FEISHU_APP_ID:
+        required: false
+      FEISHU_APP_SECRET:
+        required: false
+      FEISHU_CHAT_ID:
+        required: false
+
+jobs:
+  notify:
+    name: "Notify (${{ inputs.platform }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - name: Send Feishu notification
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_CHAT_ID: ${{ secrets.FEISHU_CHAT_ID }}
+          CI_STATUS: ${{ inputs.status }}
+          PLATFORM: ${{ inputs.platform }}
+        run: python .github/scripts/notify_feishu.py

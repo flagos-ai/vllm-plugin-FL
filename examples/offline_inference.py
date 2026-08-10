@@ -4,12 +4,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from vllm import LLM, SamplingParams
+import os
+
 import torch
-from vllm.config.compilation import CompilationConfig
 
+from vllm import LLM, SamplingParams
 
-if __name__ == '__main__':
+# Check Platform
+from vllm.platforms import current_platform
+
+print(f"Current Platform: {current_platform}")
+print(f"Platform Type: {type(current_platform)}")
+
+# Check if FlagGems is being used
+if "USE_FLAGGEMS" in os.environ:
+    print(f"USE_FLAGGEMS: {os.environ['USE_FLAGGEMS']}")
+
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]
@@ -27,3 +38,7 @@ if __name__ == '__main__':
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
+    del llm
+    torch.cuda.empty_cache()
+
+    print("\n Reasoning complete, resources cleared.")

@@ -15,11 +15,12 @@ class BackendImplKind(str, Enum):
     """
     Kind of backend implementation.
 
-    - DEFAULT: Default implementation (FlagGems)
+    - DEFAULT: Default implementation (FlagOS)
     - REFERENCE: Reference implementation (PyTorch native)
     - VENDOR: Vendor-specific implementation (CUDA, etc.)
     """
-    DEFAULT = "flaggems"
+
+    DEFAULT = "flagos"
     REFERENCE = "reference"
     VENDOR = "vendor"
 
@@ -33,9 +34,10 @@ class BackendPriority:
 
     Higher priority implementations are selected first when available.
     """
-    DEFAULT = 150     # Default implementations (FlagGems)
-    VENDOR = 100      # Vendor-specific implementations
-    REFERENCE = 50    # Reference implementations (PyTorch, lowest)
+
+    DEFAULT = 150  # Default implementations (FlagOS)
+    VENDOR = 100  # Vendor-specific implementations
+    REFERENCE = 50  # Reference implementations (PyTorch, lowest)
 
 
 @dataclass(frozen=True)
@@ -44,8 +46,8 @@ class OpImpl:
     Operator implementation descriptor.
 
     Attributes:
-        op_name: Name of the operator (e.g., "silu_and_mul", "rmsnorm")
-        impl_id: Unique identifier for this implementation (e.g., "default.flaggems")
+        op_name: Name of the operator (e.g., "silu_and_mul", "rms_norm")
+        impl_id: Unique identifier for this implementation (e.g., "default.flagos")
         kind: Type of implementation (DEFAULT, REFERENCE, VENDOR)
         fn: The actual implementation function
         vendor: Vendor name (required if kind is VENDOR)
@@ -53,6 +55,7 @@ class OpImpl:
         supported_dtypes: Set of supported data types (optional)
         min_arch: Minimum architecture requirement (optional)
     """
+
     op_name: str
     impl_id: str
     kind: BackendImplKind
@@ -85,7 +88,7 @@ class OpImpl:
 
 # Token patterns for matching implementations
 TOKEN_PATTERNS = {
-    "flaggems": lambda impl: impl.kind == BackendImplKind.DEFAULT,
+    "flagos": lambda impl: impl.kind == BackendImplKind.DEFAULT,
     "reference": lambda impl: impl.kind == BackendImplKind.REFERENCE,
     "vendor": lambda impl: impl.kind == BackendImplKind.VENDOR,
 }
@@ -96,11 +99,11 @@ def match_token(impl: OpImpl, token: str) -> bool:
     Check if an implementation matches a selection token.
 
     Supported token formats:
-    - "flaggems": Match DEFAULT implementations
+    - "flagos": Match DEFAULT implementations
     - "reference": Match REFERENCE implementations
     - "vendor": Match any VENDOR implementation
     - "vendor:CUDA": Match VENDOR with specific vendor name
-    - "impl:default.flaggems": Match specific impl_id
+    - "impl:default.flagos": Match specific impl_id
 
     Args:
         impl: Implementation to check

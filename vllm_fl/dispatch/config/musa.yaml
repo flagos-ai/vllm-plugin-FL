@@ -1,0 +1,72 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# vLLM-FL Dispatch Configuration for Musa GPU
+# Auto-loaded when running on Musa hardware
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Vendor Whitelist (Optional, allows all if not set)
+# allow_vendors:
+#   - musa
+
+# Vendor Blacklist (Optional)
+# deny_vendors:
+#   - ascend
+#   - cuda
+#   - metax
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+#
+# Supported tokens:
+#   - flagos      : Default FlagGems implementation (Triton)
+#   - reference   : PyTorch reference implementation
+#   - vendor      : Any available vendor backend (auto-detected)
+#   - vendor:musa : Musa-specific vendor backend
+op_backends:
+  # attention_backends: prioritize vendor, fallback to FlagGems (Triton), then reference, others: prioritize FlagGems (Triton), fallback to vendor, then reference
+  attention_backend:
+    - vendor:musa
+    - flagos
+    - reference
+  rms_norm:
+    - flagos
+    - vendor:musa
+    - reference
+  silu_and_mul:
+    - flagos
+    - vendor:musa
+    - reference
+  rotary_embedding:
+    - flagos
+    - vendor:musa
+    - reference
+
+# FlagOS operator blacklist
+# Musa is CUDA-compatible, so most FlagGems ops should work
+# Blacklist only ops that are known to have issues
+flagos_blacklist:
+  - scaled_dot_product_attention
+
+# OOT (Out-of-Tree) operator blacklist
+# These operators will NOT be registered as OOT replacements.
+# oot_blacklist:
+#   - fused_moe

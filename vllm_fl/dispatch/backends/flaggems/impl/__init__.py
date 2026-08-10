@@ -4,8 +4,8 @@
 FlagGems operator implementations.
 """
 
-from .activation import silu_and_mul_flaggems
-from .normalization import rmsnorm_flaggems
+from .activation import silu_and_mul_flaggems, gelu_and_mul_flaggems
+from .normalization import rms_norm_flaggems
 from .rotary import rotary_embedding_flaggems
 from .attention import (
     AttentionFLBackend,
@@ -21,7 +21,8 @@ from .custom_attention import register_attention
 
 __all__ = [
     "silu_and_mul_flaggems",
-    "rmsnorm_flaggems",
+    "gelu_and_mul_flaggems",
+    "rms_norm_flaggems",
     "rotary_embedding_flaggems",
     "AttentionFLBackend",
     "AttentionFLMetadata",

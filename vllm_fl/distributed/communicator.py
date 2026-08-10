@@ -142,7 +142,7 @@ class CommunicatorFL(DeviceCommunicatorBase):
         if self.all2all_manager is not None:
             self.all2all_manager.destroy()
             self.all2all_manager = None
-    
+
     def all_gatherv(self,
                     input_: Union[torch.Tensor, list[torch.Tensor]],
                     dim: int = 0,
@@ -207,7 +207,3 @@ class CommunicatorFL(DeviceCommunicatorBase):
         hidden_states = self.all2all_manager.combine(hidden_states,
                                                      is_sequence_parallel)
         return hidden_states
-
-
-
-

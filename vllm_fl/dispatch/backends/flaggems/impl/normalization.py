@@ -11,24 +11,26 @@ from typing import Optional, Union
 import torch
 
 
-def rmsnorm_flaggems(
+def rms_norm_flaggems(
+    obj,
     x: torch.Tensor,
-    residual: Optional[torch.Tensor],
-    weight: torch.Tensor,
-    epsilon: float,
+    residual: Optional[torch.Tensor] = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """
     RMS normalization using FlagGems.
 
     Args:
+        obj: The calling obj (e.g., RMSNorm layer)
         x: Input tensor
         residual: Optional residual tensor
-        weight: Normalization weight
-        epsilon: Small constant for numerical stability
 
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
     from flag_gems.modules.normalization import gems_rms_forward
+
+    # Get weight and epsilon from obj
+    weight = obj.weight
+    epsilon = obj.variance_epsilon
 
     return gems_rms_forward(x, residual, weight, epsilon)

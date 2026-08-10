@@ -44,6 +44,9 @@ def get_logger(name: str = "vllm_fl.dispatch") -> logging.Logger:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
+        # Prevent duplicate output from parent/root loggers
+        logger.propagate = False
+
         # Set log level from environment
         level = getattr(logging, _DEFAULT_LOG_LEVEL, logging.INFO)
         logger.setLevel(level)
