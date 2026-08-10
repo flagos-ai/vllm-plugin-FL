@@ -79,14 +79,20 @@ op_backends:
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
 flagos_blacklist:
+  # --- FlagGems ATen ops known broken on this platform ---
+  - argmax
+  - index_put_
+  - normal_
+  - copy_
+  - gelu
+  - masked_scatter_
+  # --- OOT ops never registered through FlagGems ---
   - chunk_gated_delta_rule_fwd
   - fused_recurrent_gated_delta_rule_fwd
   - causal_conv1d_fn
   - causal_conv1d_update
   - fused_gdn_gating
-  - contiguous
-  - copy_
-  - copy
+
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
