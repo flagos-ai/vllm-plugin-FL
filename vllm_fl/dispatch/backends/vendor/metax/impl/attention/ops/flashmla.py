@@ -236,6 +236,27 @@ def flash_mla_sparse_prefill(
     return results
 
 
+def flash_mla_sparse_fwd(
+    q: torch.Tensor,
+    kv: torch.Tensor,
+    indices: torch.Tensor,
+    sm_scale: float,
+    d_v: int = 512,
+    topk_length: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    all_valid = None
+    if topk_length is not None:
+        all_valid = (topk_length == indices.shape[-1]).reshape(-1, 1)
+    return flash_mla.flash_mla_interface.flash_mla_sparse_fwd(
+        q,
+        kv,
+        indices,
+        sm_scale,
+        d_v,
+        indices_all_valid_per_q=all_valid,
+    )
+
+
 #
 # TODO: Add fake functions
 #

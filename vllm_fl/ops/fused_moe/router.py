@@ -4,6 +4,7 @@
 import torch
 from functools import partial
 
+from vllm.platforms import current_platform
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
     rocm_aiter_grouped_topk,
@@ -95,6 +96,21 @@ def _fl_grouped_topk(
         "Number of tokens mismatch"
     )
 
+    if (
+        current_platform.vendor_name == "metax"
+        and e_score_correction_bias is not None
+    ):
+        return _metax_grouped_topk(
+            gating_output,
+            topk,
+            renormalize,
+            num_expert_group,
+            topk_group,
+            scoring_func,
+            routed_scaling_factor,
+            e_score_correction_bias,
+        )
+
     if e_score_correction_bias is not None:
         if scoring_func == "sigmoid":
             topk_values, topk_indices = _grouped_topk(
@@ -156,6 +172,46 @@ def _fl_grouped_topk(
         topk_weights = topk_weights * routed_scaling_factor
 
     return topk_weights.to(torch.float32), topk_ids.to(torch.int32)
+
+
+def _metax_grouped_topk(
+    gating_output: torch.Tensor,
+    topk: int,
+    renormalize: bool,
+    num_expert_group: int,
+    topk_group: int,
+    scoring_func: str,
+    routed_scaling_factor: float,
+    correction_bias: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if scoring_func == "softmax":
+        scores = torch.softmax(gating_output, dim=-1)
+    elif scoring_func == "sigmoid":
+        scores = torch.sigmoid(gating_output)
+    else:
+        raise ValueError(f"Unsupported scoring function: {scoring_func}")
+
+    selection_scores = (
+        scores if correction_bias is None else scores + correction_bias.unsqueeze(0)
+    )
+    grouped_scores = selection_scores.view(scores.size(0), num_expert_group, -1)
+    group_scores = (
+        grouped_scores.amax(dim=-1)
+        if correction_bias is None
+        else grouped_scores.topk(2, dim=-1).values.sum(dim=-1)
+    )
+    selected_groups = group_scores.topk(topk_group, dim=-1, sorted=False).indices
+    group_mask = torch.zeros_like(group_scores)
+    group_mask.scatter_(1, selected_groups, 1)
+    expert_mask = group_mask.unsqueeze(-1).expand_as(grouped_scores).reshape_as(scores)
+    selected_scores = selection_scores.masked_fill(~expert_mask.bool(), -torch.inf)
+    topk_ids = selected_scores.topk(topk, dim=-1, sorted=False).indices
+    topk_weights = scores.gather(1, topk_ids)
+
+    if renormalize:
+        topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
+    topk_weights *= routed_scaling_factor
+    return topk_weights.float(), topk_ids.int()
 
 
 class GroupedTopKRouterFL(GroupedTopKRouter):

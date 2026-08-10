@@ -20,6 +20,13 @@ from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_b
 # Register attention backends for MACA
 def register_attention_backends():
     register_backend(
+        AttentionBackendEnum.FLASHMLA_SPARSE,
+        class_path=(
+            "vllm_fl.dispatch.backends.vendor.metax.impl.attention.mla."
+            "flashmla_sparse.MacaFlashMLASparseBackend"
+        ),
+    )
+    register_backend(
         AttentionBackendEnum.FLASHMLA,
         class_path="vllm_fl.dispatch.backends.vendor.metax.impl.attention.mla.flashmla.MacaFlashMLABackend",
     )
@@ -153,9 +160,12 @@ class MacaBackend(Backend):
         register_attention_backends()
 
         if use_mla:
-            if use_sparse:
-                return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
-            return AttentionBackendEnum.FLASHMLA.get_path()
+            backend = (
+                AttentionBackendEnum.FLASHMLA_SPARSE
+                if use_sparse
+                else AttentionBackendEnum.FLASHMLA
+            )
+            return backend.get_path()
 
         # Default to FLASH_ATTN
         return AttentionBackendEnum.FLASH_ATTN.get_path()

@@ -261,6 +261,14 @@ class PlatformFL(Platform):
         """Get the attention backend class path using the dispatch mechanism."""
         from vllm_fl.dispatch import call_op
 
+        if selected_backend is not None and cls.vendor_name == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.metax import (
+                register_attention_backends,
+            )
+
+            register_attention_backends()
+            return selected_backend.get_path()
+
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
 

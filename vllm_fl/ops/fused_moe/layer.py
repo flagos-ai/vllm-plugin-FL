@@ -2,6 +2,8 @@
 # Adapted from vllm/model_executor/layers/fused_moe/layer.py (v0.24.0)
 
 import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
+from vllm.platforms import current_platform
+
 # Save the original FusedMoE factory BEFORE any monkey-patching occurs.
 # custom_ops.py patches _fused_moe_pkg.FusedMoE = FusedMoEFL at runtime,
 # so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
@@ -54,9 +56,17 @@ def FusedMoEFL(*args, **kwargs) -> MoERunner:
     #    _fused_moe_pkg.FusedMoE with FusedMoEFL.
     runner: MoERunner = _OrigFusedMoE(*args, **kwargs)
 
-    # 2. Replace quant_method with FL version.
-    fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
-    runner._replace_quant_method(fl_quant_method)
+    # MetaX W8A8 selects TritonExpertsFL through its quantization oracle.
+    # Other platforms retain the existing FL quant-method replacement.
+    keep_metax_quant_method = (
+        current_platform.vendor_name == "metax"
+        and not isinstance(
+            runner.routed_experts.quant_method, UnquantizedFusedMoEMethod
+        )
+    )
+    if not keep_metax_quant_method:
+        fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
+        runner._replace_quant_method(fl_quant_method)
 
     # 3. Replace router _compute_routing with FL version via monkey-patch.
     #    replace_router_with_fl() patches the class method so the router

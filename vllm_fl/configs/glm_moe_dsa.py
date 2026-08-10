@@ -11,6 +11,7 @@ from transformers import DeepseekV2Config
 
 class GlmMoeDsaConfig(DeepseekV2Config):
     model_type = "glm_moe_dsa"
+    llama_4_scaling = None
 
     def __init__(
         self,
