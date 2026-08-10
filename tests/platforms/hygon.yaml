@@ -45,6 +45,12 @@ device_overrides:
         disable_custom_all_reduce: false
         enable_log_requests: false
         enable_prefix_caching: false
+      chat_cases:
+        - name: text
+          messages:
+            - role: "user"
+              content: "The capital of France is"
+          expected: "Paris"
 
 env_defaults:
   GEMS_VENDOR: "hygon"
