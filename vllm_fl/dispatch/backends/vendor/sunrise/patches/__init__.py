@@ -13,7 +13,9 @@ Classification
   optional decode profiler, torch profiler PrivateUse1 bridge.
 * **Deferred** (``patch.apply_sunrise_patches``): CUDA stream shims, FlagCX
   comm/collectives, cudagraph, sampler/penalties, distributed runtime, OOT
-  layer registration, and other worker-init hooks.
+  layer registration, the ``_moe_C`` dispatch shims, and other worker-init
+  hooks. INT8 also re-asserts its MoE routing there, because
+  ``register_oot_ops`` installs the generic FL W8A8 selector in between.
 """
 
 from . import patch_fla_ops

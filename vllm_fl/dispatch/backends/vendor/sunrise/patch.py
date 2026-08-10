@@ -44,6 +44,32 @@ def apply_sunrise_patches():
     patch_ptpu_trunc_normal_init()
     patch_minicpmo_resampler_device()
     patch_moe_force_config()
+    patch_native_moe_ops()
+    patch_native_int8_routing()
+
+
+def patch_native_moe_ops() -> None:
+    """Give vLLM's fused-MoE path implementations that exist on PTPU.
+
+    Deferred rather than import-time: the shims resolve through the FL dispatch
+    registry, which is only populated once the backends have registered. Must
+    precede ``patch_native_int8_routing``, which routes W8A8 MoE onto them.
+    """
+    from .patches import patch_moe_native_ops
+
+    patch_moe_native_ops.apply_patch()
+
+
+def patch_native_int8_routing() -> None:
+    """Re-assert the INT8 routing that ``register_oot_ops`` can overwrite.
+
+    ``register_oot_ops`` installs ``install_fl_w8a8_moe_selector`` and clones the
+    CUDA linear kernels into the OOT slot before it calls us, so sunrise has to
+    re-run the order-sensitive INT8 patches afterwards to be the last writer.
+    """
+    from .patches import patch_int8_native
+
+    patch_int8_native.install_late_patches()
 
 
 def patch_moe_force_config() -> None:

@@ -5,38 +5,56 @@
 from __future__ import annotations
 
 import logging
-import os
 
 logger = logging.getLogger(__name__)
 
 _ENABLED = False
-_OOT_KERNEL_REGISTERED = False
+_OOT_KERNEL_CLS = None
+_MOE_DECISION_LOGGED = False
 _QUANT_PATCHED = False
-_MOE_ORACLE_PATCHED = False
-_MOE_QUANT_CFG_PATCHED = False
 _MOE_ACT_QUANT_PATCHED = False
 _MM_PATCHED = False
 _FG_MM_FN = None
 _MM_SHAPE_LOGGED = False
 
 
-def _register_oot_int8_kernel() -> bool:
-    """Register a Triton INT8 ScaledMM kernel that is ``is_supported`` on OOT."""
-    global _OOT_KERNEL_REGISTERED
-    if _OOT_KERNEL_REGISTERED:
-        return True
-    try:
-        from vllm.platforms import PlatformEnum
-        from vllm.model_executor.kernels.linear import (
-            _POSSIBLE_INT8_KERNELS,
-            register_linear_kernel,
+def _log_w8a8_moe_decision(selection) -> None:
+    """Record, once, which experts class the oracle actually handed back.
+
+    W8A8 MoE reaching the wrong experts class does not raise here; it shows up
+    much later as a dtype or contract mismatch deep inside the expert GEMMs, so
+    the resolved class is worth stating plainly in the server log.
+    """
+    global _MOE_DECISION_LOGGED
+    if _MOE_DECISION_LOGGED:
+        return
+    _MOE_DECISION_LOGGED = True
+
+    experts_cls = selection[1] if isinstance(selection, tuple) else None
+    experts_name = getattr(experts_cls, "__name__", repr(experts_cls))
+    if experts_name == "TritonW8A8Experts":
+        logger.info(
+            "native-int8: W8A8 MoE resolved to experts=TritonW8A8Experts -> "
+            "vLLM functional fused_experts."
         )
-        from vllm.model_executor.kernels.linear.scaled_mm.triton import (
-            TritonInt8ScaledMMLinearKernel,
+    else:
+        logger.warning(
+            "native-int8: W8A8 MoE resolved to experts=%s, not the expected "
+            "TritonW8A8Experts. On PTPU only the functional fused_experts path "
+            "is supported for compressed-tensors W8A8.",
+            experts_name,
         )
-    except Exception as e:  # noqa: BLE001
-        logger.debug("native-int8: vLLM kernel registry unavailable (%s)", e)
-        return False
+
+
+def _build_oot_int8_kernel_cls():
+    """Create (once) the OOT-enabled subclass of vLLM's Triton INT8 kernel."""
+    global _OOT_KERNEL_CLS
+    if _OOT_KERNEL_CLS is not None:
+        return _OOT_KERNEL_CLS
+
+    from vllm.model_executor.kernels.linear.scaled_mm.triton import (
+        TritonInt8ScaledMMLinearKernel,
+    )
 
     class OOTTritonInt8ScaledMMLinearKernel(TritonInt8ScaledMMLinearKernel):
         """``TritonInt8ScaledMMLinearKernel`` allowed on the OOT platform.
@@ -53,18 +71,48 @@ def _register_oot_int8_kernel() -> bool:
         def can_implement(cls, c):
             return True, None
 
-    existing = _POSSIBLE_INT8_KERNELS.get(PlatformEnum.OOT, [])
-    if any(k.__name__ == OOTTritonInt8ScaledMMLinearKernel.__name__ for k in existing):
-        _OOT_KERNEL_REGISTERED = True
+    _OOT_KERNEL_CLS = OOTTritonInt8ScaledMMLinearKernel
+    return _OOT_KERNEL_CLS
+
+
+def _register_oot_int8_kernel() -> bool:
+    """Put the sunrise Triton INT8 ScaledMM kernel first in the OOT candidates.
+
+    ``vllm_fl.quantization.quant_linear.add_oot_quant_kernel`` clones the CUDA
+    candidate list into ``PlatformEnum.OOT``, but only when that key is absent.
+    Whether it or this function runs first depends on how the engine was
+    launched, so do not rely on either order: register when missing, and always
+    move our kernel to the front. Calling this again after the clone therefore
+    keeps the CUDA kernels as fallbacks while still preferring ours.
+    """
+    try:
+        from vllm.platforms import PlatformEnum
+        from vllm.model_executor.kernels.linear import (
+            _POSSIBLE_INT8_KERNELS,
+            register_linear_kernel,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("native-int8: vLLM kernel registry unavailable (%s)", e)
+        return False
+
+    kernel_cls = _build_oot_int8_kernel_cls()
+
+    candidates = _POSSIBLE_INT8_KERNELS.get(PlatformEnum.OOT)
+    if candidates is None:
+        register_linear_kernel(kernel_cls, PlatformEnum.OOT, kernel_type="int8")
+        candidates = _POSSIBLE_INT8_KERNELS[PlatformEnum.OOT]
+    elif kernel_cls not in candidates:
+        candidates.insert(0, kernel_cls)
+    elif candidates[0] is not kernel_cls:
+        candidates.remove(kernel_cls)
+        candidates.insert(0, kernel_cls)
+    else:
         return True
 
-    register_linear_kernel(
-        OOTTritonInt8ScaledMMLinearKernel, PlatformEnum.OOT, kernel_type="int8"
-    )
-    _OOT_KERNEL_REGISTERED = True
     logger.info(
-        "native-int8: registered OOTTritonInt8ScaledMMLinearKernel for "
-        "PlatformEnum.OOT."
+        "native-int8: INT8 linear kernel candidates for PlatformEnum.OOT are "
+        "now %s.",
+        [k.__name__ for k in candidates],
     )
     return True
 
@@ -200,42 +248,39 @@ def _patch_triton_scaled_mm() -> bool:
 
 
 def _patch_int8_moe_oracle() -> bool:
-    """Make the int8 MoE oracle return ``TritonExpertsFL`` on OOT."""
-    global _MOE_ORACLE_PATCHED
-    if _MOE_ORACLE_PATCHED:
-        return True
+    """Publish the FL int8 MoE selector to importers that already bound a stale one.
+
+    ``install_fl_w8a8_moe_selector`` only rebinds the oracle module and the
+    compressed-tensors scheme module. Any module that did a
+    ``from ...oracle.int8 import select_int8_moe_backend`` beforehand still holds
+    the stock selector, whose support gate is CUDA/ROCm-only and would reject
+    PTPU. Re-runnable on purpose: ``register_oot_ops`` installs the FL selector
+    after the import-time patches, so sunrise has to be the last writer, and
+    ``apply_sunrise_patches`` calls this again once that has happened.
+
+    The wrapper is otherwise transparent; it exists to log which experts class
+    the oracle settles on.
+    """
     try:
         import sys
 
-        from vllm.platforms import current_platform
         import vllm.model_executor.layers.fused_moe.oracle.int8 as _int8_oracle
-        from vllm.model_executor.layers.fused_moe.oracle.int8 import Int8MoeBackend
-        from vllm_fl.ops.fused_moe.fused_moe_utils import TritonExpertsFL
-        from vllm_fl.utils import use_flaggems
     except Exception as e:  # noqa: BLE001
         logger.debug("native-int8: int8 MoE oracle unavailable (%s)", e)
         return False
 
     _orig = _int8_oracle.select_int8_moe_backend
     if getattr(_orig, "_fl_native_int8_moe", False):
-        _MOE_ORACLE_PATCHED = True
         return True
 
     def _select_int8_moe_backend_oot(config, *args, **kwargs):
-        # OOT + flaggems: force the FlagGems-routed experts class. This mirrors
-        # ``select_unquantized_moe_backend_oot`` and bypasses the CUDA/ROCm-only
-        # ``is_supported_config`` gate in the stock oracle.
-        if current_platform.is_out_of_tree() and use_flaggems():
-            return Int8MoeBackend.TRITON, TritonExpertsFL
-        return _orig(config, *args, **kwargs)
+        selection = _orig(config, *args, **kwargs)
+        _log_w8a8_moe_decision(selection)
+        return selection
 
     _select_int8_moe_backend_oot._fl_native_int8_moe = True  # type: ignore[attr-defined]
     _select_int8_moe_backend_oot._fl_original = _orig  # type: ignore[attr-defined]
 
-    # Patch the oracle module attribute (covers modules that import the symbol
-    # AFTER this runs). Then also rebind any module that already did a
-    # ``from ...oracle.int8 import select_int8_moe_backend`` (e.g. the
-    # compressed-tensors int8 MoE method), regardless of its module path.
     _int8_oracle.select_int8_moe_backend = _select_int8_moe_backend_oot
     for _mod in list(sys.modules.values()):
         if _mod is None:
@@ -243,79 +288,10 @@ def _patch_int8_moe_oracle() -> bool:
         if getattr(_mod, "select_int8_moe_backend", None) is _orig:
             _mod.select_int8_moe_backend = _select_int8_moe_backend_oot
 
-    _MOE_ORACLE_PATCHED = True
     logger.info(
-        "native-int8: patched select_int8_moe_backend -> TritonExpertsFL on OOT "
-        "(compressed-tensors INT8 W8A8 per-channel MoE routes through FlagGems)."
-    )
-    return True
-
-
-def _patch_int8_moe_quant_config() -> bool:
-    """Force dynamic per-token MoE configs onto W8A8 (not W8A16).
-
-    ``CompressedTensorsW8A8Int8MoEMethod`` sets ``w13_input_scale`` /
-    ``w2_input_scale`` to ``None`` for dynamic token quant, then calls
-    ``make_int8_moe_quant_config(..., per_act_token_quant=True)``. Upstream
-    interprets any ``None`` activation scale as W8A16 (``quant_dtype is None``),
-    so ``use_int8_w8a8`` stays False and experts run int8×bf16. Re-route that
-    case to ``int8_w8a8_moe_quant_config``.
-    """
-    global _MOE_QUANT_CFG_PATCHED
-    if _MOE_QUANT_CFG_PATCHED:
-        return True
-    try:
-        import sys
-
-        import vllm.model_executor.layers.fused_moe.oracle.int8 as _oracle
-        from vllm.model_executor.layers.fused_moe.config import (
-            int8_w8a8_moe_quant_config,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.debug("native-int8: MoE quant-config patch unavailable (%s)", e)
-        return False
-
-    _orig = _oracle.make_int8_moe_quant_config
-    if getattr(_orig, "_fl_native_int8_moe_qcfg", False):
-        _MOE_QUANT_CFG_PATCHED = True
-        return True
-
-    def _make_int8_moe_quant_config(
-        w1_scale,
-        w2_scale,
-        a1_scale=None,
-        a2_scale=None,
-        per_act_token_quant: bool = False,
-    ):
-        if per_act_token_quant and (a1_scale is None or a2_scale is None):
-            return int8_w8a8_moe_quant_config(
-                w1_scale=w1_scale,
-                w2_scale=w2_scale,
-                a1_scale=a1_scale,
-                a2_scale=a2_scale,
-                per_act_token_quant=True,
-            )
-        return _orig(
-            w1_scale,
-            w2_scale,
-            a1_scale=a1_scale,
-            a2_scale=a2_scale,
-            per_act_token_quant=per_act_token_quant,
-        )
-
-    _make_int8_moe_quant_config._fl_native_int8_moe_qcfg = True  # type: ignore[attr-defined]
-    _make_int8_moe_quant_config._fl_original = _orig  # type: ignore[attr-defined]
-    _oracle.make_int8_moe_quant_config = _make_int8_moe_quant_config
-    for _mod in list(sys.modules.values()):
-        if _mod is None:
-            continue
-        if getattr(_mod, "make_int8_moe_quant_config", None) is _orig:
-            _mod.make_int8_moe_quant_config = _make_int8_moe_quant_config
-
-    _MOE_QUANT_CFG_PATCHED = True
-    logger.info(
-        "native-int8: patched make_int8_moe_quant_config so dynamic "
-        "per-token MoE uses W8A8 (not W8A16)."
+        "native-int8: wrapped select_int8_moe_backend on OOT; the active "
+        "selector is %s.",
+        getattr(_orig, "__qualname__", _orig),
     )
     return True
 
@@ -325,7 +301,7 @@ def _patch_moe_per_token_quant_int8() -> bool:
 
     Stock kernel uses ``tl.extra.cuda.libdevice.round`` → TANG reports
     ``kernel function contain unknown call`` / ``TANG_ERROR_INVALID_IMAGE``.
-    Required once MoE runs true W8A8 (see ``_patch_int8_moe_quant_config``).
+    Required once MoE runs true W8A8 (see ``_ensure_dynamic_w8a8_quant_config``).
     """
     global _MOE_ACT_QUANT_PATCHED
     if _MOE_ACT_QUANT_PATCHED:
@@ -371,6 +347,55 @@ def _patch_moe_per_token_quant_int8() -> bool:
     return True
 
 
+def _ensure_dynamic_w8a8_quant_config() -> bool:
+    """Make sure dynamic per-token MoE builds a W8A8 (not W8A16) quant config.
+
+    ``CompressedTensorsW8A8Int8MoEMethod`` leaves ``w13_input_scale`` /
+    ``w2_input_scale`` at ``None`` for dynamic token quant, and upstream reads a
+    missing activation scale as W8A16, so ``use_int8_w8a8`` would stay False and
+    the experts would run int8xbf16. ``install_fl_w8a8_moe_selector`` fixes that
+    for every FL platform; sunrise only has to confirm it actually ran, since
+    ``register_oot_ops`` swallows the failure.
+    """
+    from importlib import import_module
+
+    try:
+        scheme_module = import_module(
+            "vllm.model_executor.layers.quantization.compressed_tensors."
+            "compressed_tensors_moe.compressed_tensors_moe_w8a8_int8"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("native-int8: W8A8 MoE scheme module unavailable (%s)", e)
+        return False
+
+    builder = getattr(scheme_module, "make_int8_moe_quant_config", None)
+    if not getattr(builder, "_vllm_fl_dynamic_w8a8_config", False):
+        from vllm_fl.quantization.w8a8.moe import install_fl_w8a8_moe_selector
+
+        install_fl_w8a8_moe_selector()
+        builder = scheme_module.make_int8_moe_quant_config
+        logger.info(
+            "native-int8: installed the FL dynamic W8A8 MoE quant-config "
+            "builder because register_oot_ops had not done so yet."
+        )
+
+    # The FL installer only rebinds the compressed-tensors scheme module. Other
+    # importers hold the stock builder by value (notably the online-INT8
+    # quantizer), so hand them the fixed one as well.
+    import sys
+
+    import vllm.model_executor.layers.fused_moe.oracle.int8 as _oracle
+
+    stock = _oracle.make_int8_moe_quant_config
+    if stock is not builder:
+        for module in list(sys.modules.values()):
+            if module is None:
+                continue
+            if getattr(module, "make_int8_moe_quant_config", None) is stock:
+                module.make_int8_moe_quant_config = builder
+    return True
+
+
 def enable_native_int8() -> None:
     """Enable the vLLM-native compressed-tensors INT8 path on sunrise/ptpu.
 
@@ -383,16 +408,22 @@ def enable_native_int8() -> None:
     ok_quant = _patch_scaled_int8_quant()
     ok_mm = _patch_triton_scaled_mm()
     ok_moe_act = _patch_moe_per_token_quant_int8()
-    ok_moe_qcfg = _patch_int8_moe_quant_config()
     ok_moe = _patch_int8_moe_oracle()
-    _ENABLED = (
-        ok_kernel
-        and ok_quant
-        and ok_mm
-        and ok_moe_act
-        and ok_moe_qcfg
-        and ok_moe
-    )
+    _ENABLED = ok_kernel and ok_quant and ok_mm and ok_moe_act and ok_moe
 
 
-__all__ = ["enable_native_int8"]
+def install_late_patches() -> None:
+    """Re-assert the INT8 routing that ``register_oot_ops`` overwrites.
+
+    ``apply_sunrise_patches`` runs inside ``register_oot_ops``, after it has
+    installed the generic FL W8A8 selector, and possibly after
+    ``add_oot_quant_kernel`` has cloned the CUDA linear kernels into the OOT
+    slot. Re-running the order-sensitive patches here makes sunrise the last
+    writer regardless of how the engine reached this point.
+    """
+    _ensure_dynamic_w8a8_quant_config()
+    _register_oot_int8_kernel()
+    _patch_int8_moe_oracle()
+
+
+__all__ = ["enable_native_int8", "install_late_patches"]

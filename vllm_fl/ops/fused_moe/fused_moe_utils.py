@@ -378,7 +378,6 @@ class TritonExpertsFL(TritonExperts):
             torch.bfloat16,
             torch.float8_e4m3fn,
             torch.float8_e4m3fnuz,
-            torch.int8,
         ]
 
         E, num_tokens, N, K, top_k_num = self.moe_problem_size(
@@ -406,7 +405,6 @@ class TritonExpertsFL(TritonExperts):
         elif (
             hidden_states.dtype == torch.float8_e4m3fn
             or hidden_states.dtype == torch.float8_e4m3fnuz
-            or hidden_states.dtype == torch.int8
         ):
             compute_type = tl.bfloat16
         else:
