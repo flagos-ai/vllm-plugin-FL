@@ -57,7 +57,7 @@ device_overrides:
       max_model_len: 4096
       gpu_memory_utilization: 0.8
       trust_remote_code: true
-      disable_custom_all_reduce: null
+      disable_custom_all_reduce: false
       enable_chunked_prefill: false
       async_scheduling: false
       enable_prefix_caching: false

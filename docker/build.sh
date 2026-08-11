@@ -45,6 +45,10 @@ MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.0.0}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.20.2}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3e6528cf04f5f964a7b0fa6628de6f0410dbfd02}"
+ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/plugin/enflame001-gems5.4.0-treenone-triton3.6.0-cxnone-plugin0.2.0-vllm0.20.2-cp312-pt211-x64-1.9.29:202607221058}"
+ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.9.29}"
+ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
+ENFLAME_VLLM_VERSION="${ENFLAME_VLLM_VERSION:-0.20.2}"
 HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6}"
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.20.2}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
@@ -151,7 +155,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -187,6 +191,11 @@ VERSIONS (override via environment variables):
     MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
     MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
     MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
+  Enflame:
+    ENFLAME_BASE_IMAGE     Base image (default: ${ENFLAME_BASE_IMAGE})
+    ENFLAME_DRIVER_VERSION Driver version used in generated image tag (default: ${ENFLAME_DRIVER_VERSION})
+    ENFLAME_PYTHON_VERSION Python version in the base image (default: ${ENFLAME_PYTHON_VERSION})
+    ENFLAME_VLLM_VERSION   vLLM version in the base image (default: ${ENFLAME_VLLM_VERSION})
   Hygon:
     HYGON_BASE_IMAGE     Base image (default: ${HYGON_BASE_IMAGE})
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
@@ -216,6 +225,9 @@ EXAMPLES:
 
     # Build Moore Threads MUSA dev image
     ./build.sh --platform musa --target dev
+
+    # Build Enflame CI image
+    ./build.sh --platform enflame --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
 
     # Build with custom PyPI mirror
     ./build.sh --target dev --index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -343,8 +355,22 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="musa${MUSA_VERSION}-vllm${VLLM_VERSION}-torch${MUSA_TORCH_VERSION}-py${MUSA_PYTHON_VERSION}-${TARGET}"
     fi
+elif [[ "${PLATFORM}" == "enflame" ]]; then
+    PYTHON_VERSION="${ENFLAME_PYTHON_VERSION}"
+    VLLM_VERSION="${ENFLAME_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
+    BUILD_ARGS+=(
+        --build-arg "ENFLAME_BASE_IMAGE=${ENFLAME_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${ENFLAME_VLLM_VERSION}"
+        --build-arg "DRIVER_VERSION=${ENFLAME_DRIVER_VERSION}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-ci"
+    fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', or 'musa'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', or 'enflame'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -373,6 +399,10 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
     msg "  MUSA PyTorch:   ${MUSA_TORCH_VERSION}"
     msg "  FlagGems:       ${MUSA_FLAGGEMS_VERSION}"
+elif [[ "${PLATFORM}" == "enflame" ]]; then
+    msg "  Driver:         ${ENFLAME_DRIVER_VERSION}"
+    msg "  Enflame Python: ${ENFLAME_PYTHON_VERSION}"
+    msg "  Base image:     ${ENFLAME_BASE_IMAGE}"
 fi
 if [[ "${PLATFORM}" != "ascend" ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"
