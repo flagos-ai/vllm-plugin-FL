@@ -259,35 +259,13 @@ class WorkerFL(WorkerBase):
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
                 )
             elif blacklist:
-                # On XPU (Kunlunxin), enable() / config_filter() triggers a Triton
-                # JIT _scatter_jit_function crash (err_code -714) during profile_run.
-                # Work around by converting the blacklist to a whitelist complement
-                # and calling only_enable() instead, which uses a different internal
-                # registration path that works correctly on this platform.
-                is_xpu = current_platform.vendor_name == "kunlunxin"
-                if is_xpu:
-                    all_op_names = [
-                        item[0] for item in flag_gems._FULL_CONFIG if len(item) >= 2 
-                    ]
-                    complement = [n for n in all_op_names if n not in blacklist]
-                    logger.info(
-                        f"[FlagGems] Blacklist mode (XPU): excluding {blacklist}, "
-                        f"enabling {len(complement)}/{len(all_op_names)} ATen ops"
-                    )
-                    flag_gems.only_enable(
-                        include=complement,
-                        record=True,
-                        once=True,
-                        path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-                    )
-                else:
-                    logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
-                    flag_gems.enable(
-                        unused=blacklist,
-                        record=True,
-                        once=True,
-                        path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-                    )
+                logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
+                flag_gems.enable(
+                    unused=blacklist,
+                    record=should_record,
+                    once=True,
+                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                )
             else:
                 logger.info("[FlagGems] Enable all ops")
                 flag_gems.enable(
