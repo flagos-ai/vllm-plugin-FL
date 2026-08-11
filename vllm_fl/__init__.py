@@ -1,5 +1,6 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+import importlib
 import os
 import logging
 import sys
@@ -77,12 +78,13 @@ def _patch_flash_attn_import():
 
 
 def _patch_custom_ops():
-    """Register torch.ops._C op schemas when vllm._C is unavailable."""
-    try:
-        import vllm._C  # noqa: F401
-        return
-    except (ImportError, OSError):
-        pass
+    """Register fallback schemas when neither vLLM extension ABI is present."""
+    for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
+        try:
+            importlib.import_module(module_name)
+            return
+        except (ImportError, OSError):
+            continue
 
     try:
         import vllm_fl._C  # noqa: F401

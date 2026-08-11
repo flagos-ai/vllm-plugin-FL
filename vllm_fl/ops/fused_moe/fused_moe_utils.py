@@ -154,9 +154,13 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
 
         return _return_or_raise(requested_backend, moe_config, activation_format)
 
-    # Handle explicit FlashInfer FP16 configuration.
-    if envs.is_set("VLLM_USE_FLASHINFER_MOE_FP16"):
-        if not envs.VLLM_USE_FLASHINFER_MOE_FP16:
+    # Handle explicit FlashInfer FP16 configuration. vLLM 0.24 removed
+    # this legacy name from vllm.envs, so read it directly from os.environ.
+    if "VLLM_USE_FLASHINFER_MOE_FP16" in os.environ:
+        use_flashinfer_moe_fp16 = os.environ[
+            "VLLM_USE_FLASHINFER_MOE_FP16"
+        ].strip().lower() in ("1", "true")
+        if not use_flashinfer_moe_fp16:
             if UnquantizedMoeBackend.FLASHINFER_TRTLLM in AVAILABLE_BACKENDS:
                 AVAILABLE_BACKENDS.remove(UnquantizedMoeBackend.FLASHINFER_TRTLLM)
             if UnquantizedMoeBackend.FLASHINFER_CUTLASS in AVAILABLE_BACKENDS:

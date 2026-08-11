@@ -463,7 +463,7 @@ from vllm.distributed.device_communicators.cuda_communicator import CudaCommunic
 
 def _compile_friendly_all_reduce(self, input_):
     """Use torch.distributed all_reduce which Dynamo can trace."""
-    dist.all_reduce(input_, op=dist.ReduceOp.SUM)
+    dist.all_reduce(input_, op=dist.ReduceOp.SUM, group=self.device_group)
     return input_
 
 

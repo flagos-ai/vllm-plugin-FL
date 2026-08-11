@@ -10,12 +10,15 @@ from typing_extensions import ParamSpec
 
 import torch
 
-# import custom ops, trigger op registration (CUDA only)
-try:
-    import vllm._C  # noqa
-    import vllm._C_stable_libtorch  # noqa
-except (ImportError, OSError):
-    pass  # NPU or other platforms may not have vllm._C
+# Import custom ops and trigger registration on both legacy and stable-ABI
+# vLLM wheels. Keep the attempts independent: official vLLM 0.24 wheels have
+# only the stable-ABI module, so failure of the legacy import must not skip it.
+import importlib
+for _extension in ("vllm._C", "vllm._C_stable_libtorch"):
+    try:
+        importlib.import_module(_extension)
+    except (ImportError, OSError):
+        pass  # Non-CUDA platforms may not ship either extension.
 
 from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
@@ -220,7 +223,8 @@ class PlatformFL(Platform):
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
-            parallel_config.data_parallel_size > 1
+            parallel_config.all2all_backend == "deepep_high_throughput"
+            and parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
             # TODO: Piecewise Cuda graph might be enabled

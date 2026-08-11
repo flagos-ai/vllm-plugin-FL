@@ -15,6 +15,14 @@ def patch_mm_encoder_attention():
     """
     import vllm.model_executor.layers.attention.mm_encoder_attention as mm_mod
     from vllm.v1.attention.backends.registry import AttentionBackendEnum
+    from vllm.platforms import current_platform
+
+    # PlatformFL is registered as an OOT platform, so CustomOp would otherwise
+    # bind MMEncoderAttention to forward_oot -> forward_native (Torch SDPA).
+    # NVIDIA must keep vLLM's CUDA dispatch so the selected FLASH_ATTN backend
+    # is actually used during multimodal profiling and inference.
+    if current_platform.is_cuda():
+        mm_mod.MMEncoderAttention.forward_oot = mm_mod.MMEncoderAttention.forward_cuda
 
     def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
         if attn_backend == AttentionBackendEnum.FLASH_ATTN:
