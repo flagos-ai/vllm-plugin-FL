@@ -299,8 +299,7 @@ def apply_moe_align_block_size_gcu_patch() -> None:
             except ImportError:
                 continue
             if hasattr(mod, "moe_align_block_size"):
-                # mod.moe_align_block_size = moe_align_block_size_gcu
-                mod.moe_align_block_size = moe_align_block_size_torch
+                mod.moe_align_block_size = moe_align_block_size_gcu
 
         _patched = True
         logger.info(
