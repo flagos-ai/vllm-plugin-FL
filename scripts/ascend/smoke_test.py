@@ -31,9 +31,11 @@ assert torch.allclose(torch.relu(a), torch.clamp(a, min=0), atol=1e-5), "flag_ge
 b = torch.randn(8, 16, device="npu")
 assert torch.allclose(torch.pow(b, 2), b * b, atol=1e-4), "flag_gems pow mismatch"
 
+# FlagCX 验证: libflagcx.so 已随 flagcx 包安装, 无需 FLAGCX_PATH
 flagcx_path = os.environ.get("FLAGCX_PATH", "")
 if flagcx_path:
     sys.path.insert(0, flagcx_path)
+try:
     import flagcx
     import torch.distributed as dist
     assert dist.is_backend_available("flagcx"), "flagcx backend not available"
@@ -44,7 +46,7 @@ if flagcx_path:
         f"communicator should be CommunicatorFL, got '{current_platform.get_device_communicator_cls()}'"
     print(f"[OK] FlagCX: dist_backend={current_platform.dist_backend}, "
           f"communicator={current_platform.get_device_communicator_cls()}")
-else:
-    print("[WARN] FLAGCX_PATH not set — multi-NPU (TP>1) will fail with NCCL error")
+except ImportError:
+    print("[WARN] flagcx not installed — multi-NPU (TP>1) will fail")
 
 print("FLAGOS SMOKE OK")

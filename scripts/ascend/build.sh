@@ -92,9 +92,14 @@ make USE_ASCEND=1 clean 2>/dev/null || true
 make USE_ASCEND=1
 cd "$ROOT/FlagCX/plugin/torch" && rm -rf build/
 FLAGCX_ADAPTOR=ascend pip install --no-build-isolation .
-export FLAGCX_PATH="$ROOT/FlagCX"
+
+# 把 libflagcx.so 拷到 flagcx Python 包目录, 让包自带 .so, 无需 FLAGCX_PATH
+FLAGCX_PKG_DIR=$($PY -c "import flagcx, os; print(os.path.dirname(os.path.abspath(flagcx.__file__)))")
+cp "$ROOT/FlagCX/build/lib/libflagcx.so" "$FLAGCX_PKG_DIR/libflagcx.so"
+echo "[OK] libflagcx.so copied to $FLAGCX_PKG_DIR (auto-discovered, no FLAGCX_PATH needed)"
+
 cd "$ROOT"
-echo "[OK] FlagCX installed. FLAGCX_PATH=$FLAGCX_PATH"
+echo "[OK] FlagCX installed"
 
 # ----------------------------------------------------------------------------
 # 4. FlagGems (上游, 无补丁)
