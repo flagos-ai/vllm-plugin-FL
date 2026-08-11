@@ -14,6 +14,7 @@ from .impl.moe_sum import apply_moe_sum_gcu_patch
 from .impl.per_token_group_quant_fp8 import (
     apply_per_token_group_quant_fp8_gcu_patch,
 )
+from .impl.quant_fp8 import apply_quant_fp8_gcu_patch
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
@@ -33,6 +34,7 @@ def apply_gcu_patches() -> None:
     apply_moe_sum_gcu_patch()
     apply_per_token_group_quant_fp8_gcu_patch()
     apply_fp8_config_gcu_patch()
+    apply_quant_fp8_gcu_patch()
     _patches_applied = True
 
 
