@@ -1,13 +1,19 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""GCU fix for _per_token_group_quant_fp8 / _per_token_group_quant_fp8_colmajor.
+"""GCU fix for per_token_group_quant_fp8 / per_token_group_quant_fp8_colmajor.
 
-GCU hardware limits grid.x to 65535 and grid.y/grid.z to 255.  The upstream
-launcher uses ``grid = (M,)`` where ``M = numel // group_size``, which exceeds
-the limit for large tensors (e.g. 8192 × 4096 ÷ 128 = 262144).
+GCU (L600/Libra) hardware limits:
+  - Grid (SP 数量): <= 48 (1-D only, no 2-D grid)
+  - DSM (片上共享存储): <= 448 KB
+  - num_warps: <= 4
+  - 禁止 int64 索引，统一使用 int32
 
-This patch converts the 1-D grid into a 2-D grid that respects GCU limits,
-following the same pattern as ``fused_recurrent_packed_decode.py``.
+The upstream launcher uses ``grid = (M,)`` where ``M = numel // group_size``,
+which exceeds the limit for large tensors (e.g. 8192 × 4096 ÷ 128 = 262144).
+
+This patch converts the launch to GCU Fixed-Grid + strided-loop pattern:
+  - grid = (min(M, GCU_NUM_GRID),)   — 1-D only
+  - kernel 内跨步循环 for g_id in range(pid, M, GCU_NUM_GRID)
 """
 
 from __future__ import annotations
@@ -20,8 +26,14 @@ from vllm.triton_utils import tl, triton
 
 logger = logging.getLogger(__name__)
 
-GCU_MAX_GRID_X = 65535
-GCU_MAX_GRID_YZ = 255
+# ---------------------------------------------------------------------------
+# GCU (L600 / Libra) hardware constants
+# ---------------------------------------------------------------------------
+# S60 板卡: GCU_NUM_GRID = 24,  GCU_MAX_DSM_MEMORY = int(1.5 * 1024 * 1024)
+# Libra 板卡: GCU_NUM_GRID = 48, GCU_MAX_DSM_MEMORY = 917504 // 2
+GCU_NUM_GRID = 48
+GCU_MAX_DSM_MEMORY = 917504 // 2  # 448 KB
+
 _patched = False
 
 
@@ -29,20 +41,19 @@ _patched = False
 # Grid helpers
 # ---------------------------------------------------------------------------
 
-def _gcu_grid(total: int) -> tuple[int, int]:
-    """Split *total* work-items into a 2-D grid respecting GCU hardware limits."""
-    grid_x = min(total, GCU_MAX_GRID_X)
-    grid_y = triton.cdiv(total, grid_x)
-    if grid_y > GCU_MAX_GRID_YZ:
-        grid_y = GCU_MAX_GRID_YZ
-        grid_x = triton.cdiv(total, grid_y)
-        grid_x = min(grid_x, GCU_MAX_GRID_X)
-    return grid_x, grid_y
+def _gcu_grid(total: int) -> tuple[int, ...]:
+    """Return a 1-D grid tuple respecting GCU hardware limits (grid <= GCU_NUM_GRID).
+
+    GCU only supports 1-D grid; the kernel uses a strided loop internally
+    to cover all *total* work-items.
+    """
+    return (min(total, GCU_NUM_GRID),)
 
 
 # ---------------------------------------------------------------------------
-# GCU-compatible Triton kernels
+# GCU-compatible Triton kernels (Fixed-Grid + strided loop)
 # ---------------------------------------------------------------------------
+
 
 @triton.jit
 def _per_token_group_quant_fp8_gcu(
@@ -50,6 +61,8 @@ def _per_token_group_quant_fp8_gcu(
     y_ptr,
     y_q_ptr,
     y_s_ptr,
+    # Total number of groups (M = numel // group_size)
+    total_groups,
     group_size,
     # Num columns of y
     y_num_columns,
@@ -62,46 +75,49 @@ def _per_token_group_quant_fp8_gcu(
     use_ue8m0: tl.constexpr,
     # Meta-parameters
     BLOCK: tl.constexpr,
+    NUM_SPC: tl.constexpr,
 ):
-    """A Triton-accelerated function to perform per-token-group
-    quantization on a tensor.
+    """GCU Fixed-Grid per-token-group FP8 quantization (row-major scales).
 
-    GCU variant: uses 2-D grid (program_id 0 + 1) so that grid.x never
-    exceeds the hardware limit of 65535.
+    Uses 1-D Fixed Grid + strided loop so that grid never exceeds
+    GCU_NUM_GRID (48 for L600).  Each program loops over multiple groups
+    via ``for g_id in range(pid, total_groups, NUM_SPC)``.
     """
     groups_per_row = y_num_columns // group_size
+    pid = tl.program_id(0)
 
-    # Map the 2-D program id to a flat group id.
-    g_id = tl.program_id(0) + tl.program_id(1) * tl.num_programs(0)
-    row = g_id // groups_per_row
-    row_g_id = g_id % groups_per_row
+    # Strided loop: each SP handles work items pid, pid+NUM_SPC, pid+2*NUM_SPC, ...
+    for g_id in range(pid, total_groups, NUM_SPC):
+        row = g_id // groups_per_row
+        row_g_id = g_id % groups_per_row
 
-    # Ensure offset calculations use int64 to prevent overflow
-    y_ptr_offset = (row.to(tl.int64) * y_row_stride) + (
-        row_g_id.to(tl.int64) * group_size
-    )
-    y_ptr += y_ptr_offset
+        # Offset calculations use int32 (GCU constraint: no int64 indexing)
+        y_ptr_offset = (
+            row.to(tl.int32) * y_row_stride.to(tl.int32)
+            + row_g_id.to(tl.int32) * group_size.to(tl.int32)
+        )
+        y_cur = y_ptr + y_ptr_offset
 
-    y_q_ptr_offset = g_id.to(tl.int64) * group_size
-    y_q_ptr += y_q_ptr_offset
-    y_s_ptr += g_id
+        y_q_cur = y_q_ptr + g_id.to(tl.int32) * group_size.to(tl.int32)
+        y_s_cur = y_s_ptr + g_id
 
-    cols = tl.arange(0, BLOCK)  # N <= BLOCK
-    mask = cols < group_size
+        cols = tl.arange(0, BLOCK)  # group_size <= BLOCK
+        mask = cols < group_size
 
-    y = tl.load(y_ptr + cols, mask=mask, other=0.0).to(tl.float32)
-    # Quant
-    # Use multiply-by-reciprocal instead of division to match PyTorch's
-    # tensor/scalar division precision (GPU fast-division for constexpr
-    # divisors can introduce 1-ULP error that flips FP8 quantization at
-    # representable-value boundaries).
-    _absmax = tl.maximum(tl.max(tl.abs(y)), eps)
-    scale_raw = _absmax * (1.0 / fp8_max)
-    y_s = tl.math.exp2(tl.ceil(tl.log2(scale_raw))) if use_ue8m0 else scale_raw
-    y_q = tl.clamp(y / y_s, fp8_min, fp8_max).to(y_q_ptr.dtype.element_ty)
+        y = tl.load(y_cur + cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(y_q_ptr + cols, y_q, mask=mask)
-    tl.store(y_s_ptr, y_s)
+        # Quant — multiply-by-reciprocal avoids GPU fast-division 1-ULP error
+        _absmax = tl.maximum(tl.max(tl.abs(y)), eps)
+        scale_raw = _absmax * (1.0 / fp8_max)
+        y_s = (
+            tl.math.exp2(tl.ceil(tl.log2(scale_raw)))
+            if use_ue8m0
+            else scale_raw
+        )
+        y_q = tl.clamp(y / y_s, fp8_min, fp8_max).to(y_q_ptr.dtype.element_ty)
+
+        tl.store(y_q_cur + cols, y_q, mask=mask)
+        tl.store(y_s_cur, y_s)
 
 
 @triton.jit
@@ -110,6 +126,8 @@ def _per_token_group_quant_fp8_colmajor_gcu(
     y_ptr,
     y_q_ptr,
     y_s_ptr,
+    # Total number of groups (M = numel // group_size)
+    total_groups,
     group_size,
     # Num columns of y
     y_num_columns,
@@ -124,50 +142,55 @@ def _per_token_group_quant_fp8_colmajor_gcu(
     use_ue8m0: tl.constexpr,
     # Meta-parameters
     BLOCK: tl.constexpr,
+    NUM_SPC: tl.constexpr,
 ):
-    """A Triton-accelerated function to perform per-token-group
-    quantization on a tensor (column-major scales).
+    """GCU Fixed-Grid per-token-group FP8 quantization (column-major scales).
 
-    GCU variant: uses 2-D grid (program_id 0 + 1) so that grid.x never
-    exceeds the hardware limit of 65535.
+    Uses 1-D Fixed Grid + strided loop.  Scale tensor is written in
+    column-major order (shape [M, sf_k], stride [1, tma_aligned_m]).
     """
     groups_per_row = y_num_columns // group_size
+    pid = tl.program_id(0)
 
-    # Map the 2-D program id to a flat group id.
-    g_id = tl.program_id(0) + tl.program_id(1) * tl.num_programs(0)
-    row = g_id // groups_per_row
-    row_g_id = g_id % groups_per_row
+    for g_id in range(pid, total_groups, NUM_SPC):
+        row = g_id // groups_per_row
+        row_g_id = g_id % groups_per_row
 
-    # Ensure offset calculations use int64 to prevent overflow
-    y_ptr_offset = (row.to(tl.int64) * y_row_stride) + (
-        row_g_id.to(tl.int64) * group_size
-    )
-    y_ptr += y_ptr_offset
+        y_ptr_offset = (
+            row.to(tl.int32) * y_row_stride.to(tl.int32)
+            + row_g_id.to(tl.int32) * group_size.to(tl.int32)
+        )
+        y_cur = y_ptr + y_ptr_offset
 
-    y_q_ptr_offset = g_id.to(tl.int64) * group_size
-    y_q_ptr += y_q_ptr_offset
+        y_q_cur = y_q_ptr + g_id.to(tl.int32) * group_size.to(tl.int32)
 
-    # Convert g_id the flattened block coordinate to 2D so we can index
-    # into the output y_scales matrix
-    blocks_per_row = y_num_columns // group_size
-    scale_col = g_id % blocks_per_row
-    scale_row = g_id // blocks_per_row
-    # Ensure offset calculation uses int64 for y_s_ptr
-    y_s_ptr_offset = (scale_col.to(tl.int64) * y_s_col_stride) + scale_row.to(tl.int64)
-    y_s_ptr += y_s_ptr_offset
+        # Column-major scale indexing
+        blocks_per_row = groups_per_row
+        scale_col = g_id % blocks_per_row
+        scale_row = g_id // blocks_per_row
+        y_s_offset = (
+            scale_col.to(tl.int32) * y_s_col_stride.to(tl.int32)
+            + scale_row.to(tl.int32)
+        )
+        y_s_cur = y_s_ptr + y_s_offset
 
-    cols = tl.arange(0, BLOCK)  # group_size <= BLOCK
-    mask = cols < group_size
+        cols = tl.arange(0, BLOCK)
+        mask = cols < group_size
 
-    y = tl.load(y_ptr + cols, mask=mask, other=0.0).to(tl.float32)
-    # Quant
-    _absmax = tl.maximum(tl.max(tl.abs(y)), eps)
-    scale_raw = _absmax * (1.0 / fp8_max)
-    y_s = tl.math.exp2(tl.ceil(tl.log2(scale_raw))) if use_ue8m0 else scale_raw
-    y_q = tl.clamp(y / y_s, fp8_min, fp8_max).to(y_q_ptr.dtype.element_ty)
+        y = tl.load(y_cur + cols, mask=mask, other=0.0).to(tl.float32)
 
-    tl.store(y_q_ptr + cols, y_q, mask=mask)
-    tl.store(y_s_ptr, y_s)
+        # Quant
+        _absmax = tl.maximum(tl.max(tl.abs(y)), eps)
+        scale_raw = _absmax * (1.0 / fp8_max)
+        y_s = (
+            tl.math.exp2(tl.ceil(tl.log2(scale_raw)))
+            if use_ue8m0
+            else scale_raw
+        )
+        y_q = tl.clamp(y / y_s, fp8_min, fp8_max).to(y_q_ptr.dtype.element_ty)
+
+        tl.store(y_q_cur + cols, y_q, mask=mask)
+        tl.store(y_s_cur, y_s)
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +210,8 @@ def per_token_group_quant_fp8_gcu(
     """GCU-compatible version of ``per_token_group_quant_fp8``.
 
     Identical semantics to the upstream function, but launches Triton kernels
-    with a 2-D grid that respects GCU hardware limits
-    (grid.x ≤ 65535, grid.y ≤ 255).
+    with GCU Fixed-Grid (1-D, ≤48) + strided-loop pattern instead of a
+    potentially oversized 1-D grid.
     """
     from vllm.model_executor.layers.quantization.utils.quant_utils import (
         get_fp8_min_max,
@@ -255,46 +278,60 @@ def per_token_group_quant_fp8_gcu(
         )
         return x_q, x_s
 
-    # TRITON FALLBACK – use 2-D grid for GCU
-    M = x.numel() // group_size
+    # --- GCU Triton fallback: Fixed-Grid + strided loop ---
+    M = x.numel() // group_size       # total number of groups
     N = group_size
     BLOCK = triton.next_power_of_2(N)
-    # heuristics for number of warps
-    num_warps = min(max(BLOCK // 256, 1), 8)
+
+    # Heuristics for number of warps (GCU: must be <= 4)
+    num_warps = min(max(BLOCK // 256, 1), 4)
     num_stages = 1
 
+    # DSM sanity check (GCU L600: ≤ 448 KB)
+    # Peak vectors per iteration: y (input) + y_q (output) ≈ 2
+    # For BLOCK=128, fp16: 2 * 128 * 2 = 512 bytes — well within 448 KB
+    _dsm_bytes = 2 * BLOCK * x.element_size()
+    assert _dsm_bytes <= GCU_MAX_DSM_MEMORY, (
+        f"DSM estimate {_dsm_bytes} bytes exceeds GCU limit "
+        f"{GCU_MAX_DSM_MEMORY} bytes. Reduce group_size or BLOCK."
+    )
+
+    # 1-D Fixed Grid (GCU only supports 1-D grid)
     grid = _gcu_grid(M)
+    assert grid[0] <= GCU_NUM_GRID, (
+        f"Grid {grid[0]} exceeds GCU_NUM_GRID {GCU_NUM_GRID}"
+    )
 
     if column_major_scales:
         _per_token_group_quant_fp8_colmajor_gcu[grid](
-            x,
-            x_q,
-            x_s,
-            group_size,
-            x.shape[1],
-            x.stride(0),
-            x_s.stride(1),
-            eps,
+            x, x_q, x_s,
+            total_groups=M,
+            group_size=group_size,
+            y_num_columns=x.shape[1],
+            y_row_stride=x.stride(0),
+            y_s_col_stride=x_s.stride(1),
+            eps=eps,
             fp8_min=fp8_min,
             fp8_max=fp8_max,
             use_ue8m0=use_ue8m0,
             BLOCK=BLOCK,
+            NUM_SPC=GCU_NUM_GRID,
             num_warps=num_warps,
             num_stages=num_stages,
         )
     else:
         _per_token_group_quant_fp8_gcu[grid](
-            x,
-            x_q,
-            x_s,
-            group_size,
-            x.shape[1],
-            x.stride(0),
-            eps,
+            x, x_q, x_s,
+            total_groups=M,
+            group_size=group_size,
+            y_num_columns=x.shape[1],
+            y_row_stride=x.stride(0),
+            eps=eps,
             fp8_min=fp8_min,
             fp8_max=fp8_max,
             use_ue8m0=use_ue8m0,
             BLOCK=BLOCK,
+            NUM_SPC=GCU_NUM_GRID,
             num_warps=num_warps,
             num_stages=num_stages,
         )
@@ -493,15 +530,15 @@ def apply_per_token_group_quant_fp8_gcu_patch() -> None:
             except ImportError:
                 continue
             if hasattr(mod, "per_token_group_quant_fp8"):
-                # mod.per_token_group_quant_fp8 = per_token_group_quant_fp8_gcu
-                mod.per_token_group_quant_fp8 = per_token_group_quant_fp8_torch
+                mod.per_token_group_quant_fp8 = per_token_group_quant_fp8_gcu
 
         _patched = True
         logger.info(
             "Patched per_token_group_quant_fp8 for GCU "
-            "(grid.x <= %d, grid.y <= %d) in %d modules",
-            GCU_MAX_GRID_X,
-            GCU_MAX_GRID_YZ,
+            "(grid <= %d, 1-D only, NUM_SPC=%d, DSM <= %d KB) in %d modules",
+            GCU_NUM_GRID,
+            GCU_NUM_GRID,
+            GCU_MAX_DSM_MEMORY // 1024,
             len(_IMPORTERS),
         )
     except Exception as exc:
