@@ -6938,7 +6938,6 @@ class ModelRunnerFL(
             kv_cache_config: Configuration for the KV cache, including the KV
             cache size of each layer
         """
-        print(f'**************** vllm_fl -> model_runner.py -> initialize_kv_cache start', flush=True)
         kv_cache_config = deepcopy(kv_cache_config)
         self.kv_cache_config = kv_cache_config
         self._mamba_copy_bufs = None
@@ -6959,18 +6958,13 @@ class ModelRunnerFL(
         self._kernel_block_sizes = kernel_block_sizes
 
         # create metadata builders
-        print(f'**************** vllm_fl -> model_runner.py -> initialize_metadata_builders start', flush=True)
         self.initialize_metadata_builders(kv_cache_config, kernel_block_sizes)
 
         # Reinitialize need to after initialize_attn_backend
-        print(f'**************** vllm_fl -> model_runner.py -> may_reinitialize_input_batch start', flush=True)
         self.may_reinitialize_input_batch(kv_cache_config, kernel_block_sizes)
-        print(f'**************** vllm_fl -> model_runner.py -> initialize_kv_cache_tensors start', flush=True)
         kv_caches = self.initialize_kv_cache_tensors(
             kv_cache_config, kernel_block_sizes
         )
-        print(f'**************** vllm_fl -> model_runner.py -> initialize_kv_cache_tensors done', flush=True)
-
         if (
             self.speculative_config
             and self.speculative_config.uses_extract_hidden_states()
@@ -6990,8 +6984,6 @@ class ModelRunnerFL(
             else:
                 kv_transfer_group.register_kv_caches(kv_caches)
             kv_transfer_group.set_host_xfer_buffer_ops(copy_kv_blocks)
-        print(f'**************** vllm_fl -> model_runner.py -> initialize_kv_cache done', flush=True)
-        # print(f'**************** aa: {aa}', flush=True)
 
     def _get_attention_kv_cache_gid(self) -> int:
         """Find the KV cache group index for attention layers."""
