@@ -92,6 +92,7 @@ make USE_ASCEND=1 clean 2>/dev/null || true
 make USE_ASCEND=1
 cd "$ROOT/FlagCX/plugin/torch" && rm -rf build/
 FLAGCX_ADAPTOR=ascend pip install --no-build-isolation .
+cd "$ROOT/FlagCX"
 
 # 把 libflagcx.so 拷到 flagcx Python 包目录, 让包自带 .so
 FLAGCX_PKG_DIR=$($PY -c "import flagcx, os; print(os.path.dirname(os.path.abspath(flagcx.__file__)))")
