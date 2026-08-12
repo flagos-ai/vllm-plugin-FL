@@ -1,0 +1,43 @@
+# vLLM-FL Dispatch Configuration for GCU (Enflame / torch_gcu)
+
+prefer: flagos
+
+strict: false
+
+op_backends:
+  attention_backend:
+    - vendor:gcu
+    - flagos
+    - reference
+  rms_norm:
+    - flagos
+    - vendor:gcu
+    - reference
+  silu_and_mul:
+    - flagos
+    - vendor:gcu
+    - reference
+  rotary_embedding:
+    - flagos
+    - vendor:gcu
+    - reference
+
+flagos_blacklist:
+  - scaled_dot_product_attention
+  # L1 int64: flag_gems ops that emit 64-bit IR, rejected by GCU300 PassManager
+  - zeros
+  - zeros_like
+  - zero_
+  - add
+  - sub
+  # Sampling (temp>0): top-k/top-p sort path. flag_gems gcu300 radix_sort emits
+  # int64 IR -> GCU300 PassManager rejects. Route to torch_gcu.
+  - sort
+  - sort_stable
+  # top-k mask `logits_sort.size(1) - k.to(torch.long)` -> rsub, int64 -> same wall.
+  - rsub_scalar
+  - rsub_tensor
+  # Gumbel-max sampling `probs.div(q).argmax(-1)`: flag_gems gcu300 argmax returns
+  # out-of-bounds token ids for large-vocab rows (silent garbage, not a crash).
+  # torch_gcu argmax matches CPU reference. Route to torch_gcu.
+  - argmax
