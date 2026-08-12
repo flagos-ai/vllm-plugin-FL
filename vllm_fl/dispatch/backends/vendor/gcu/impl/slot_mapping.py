@@ -40,8 +40,6 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-_patched = False
-
 
 def _compute_slot_mapping_int32(self, num_reqs, query_start_loc, positions):
     from vllm.v1.attention.backends.utils import PAD_SLOT_ID
@@ -105,11 +103,10 @@ def _compute_slot_mapping_int32(self, num_reqs, query_start_loc, positions):
 
 def apply_slot_mapping_gcu_patch() -> None:
     """Replace BlockTable.compute_slot_mapping with the on-device int32 version."""
-    global _patched
-    if _patched:
-        return
     from vllm.v1.worker.block_table import BlockTable
 
+    if BlockTable.compute_slot_mapping is _compute_slot_mapping_int32:
+        return
+
     BlockTable.compute_slot_mapping = _compute_slot_mapping_int32
-    _patched = True
     logger.info("GCU: patched BlockTable.compute_slot_mapping (on-device int32)")

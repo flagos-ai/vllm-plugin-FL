@@ -38,15 +38,12 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-_patched = False
-
 _FA_UTILS = "vllm.v1.attention.backends.fa_utils"
 _FLASH_ATTN = "vllm.v1.attention.backends.flash_attn"
 
 
 def apply_flash_attn_backend_gcu_patch() -> None:
-    global _patched
-    if _patched:
+    if getattr(sys.modules.get(_FA_UTILS), "_gcu_flash_attn_patched", False):
         return
 
     try:
@@ -72,6 +69,7 @@ def apply_flash_attn_backend_gcu_patch() -> None:
     fa_utils.get_scheduler_metadata = get_scheduler_metadata
     fa_utils.reshape_and_cache_flash = reshape_and_cache_flash
     fa_utils._GCU_FLASH_ATTN_AVAILABLE = True
+    fa_utils._gcu_flash_attn_patched = True
     fa_utils.is_flash_attn_varlen_func_available = lambda: True
 
     # If flash_attn.py already imported (its gate ran False and it skipped the
@@ -84,7 +82,6 @@ def apply_flash_attn_backend_gcu_patch() -> None:
         flash_attn_mod.flash_attn_supports_sinks = fa_utils.flash_attn_supports_sinks
         flash_attn_mod.is_flash_attn_varlen_func_available = lambda: True
 
-    _patched = True
     logger.info(
         "GCU: enabled native FLASH_ATTN backend "
         "(vendor flash_attn_varlen_func + flag_gems reshape_and_cache_flash)"
