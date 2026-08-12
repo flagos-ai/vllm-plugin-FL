@@ -124,56 +124,6 @@ class TritonW8A8Experts(TritonExperts):
         output.copy_(result)
 
 
-class MetaXTritonW8A8Experts(TritonW8A8Experts):
-    def apply(
-        self,
-        output: torch.Tensor,
-        hidden_states: torch.Tensor,
-        w1: torch.Tensor,
-        w2: torch.Tensor,
-        topk_weights: torch.Tensor,
-        topk_ids: torch.Tensor,
-        activation: MoEActivation,
-        global_num_experts: int,
-        expert_map: torch.Tensor | None,
-        a1q_scale: torch.Tensor | None,
-        a2_scale: torch.Tensor | None,
-        workspace13: torch.Tensor,
-        workspace2: torch.Tensor,
-        expert_tokens_meta: mk.ExpertTokensMetadata | None,
-        apply_router_weight_on_input: bool,
-    ) -> None:
-        from vllm_metax.model_executor.layers.fused_moe.fused_moe import (
-            fused_experts_impl,
-        )
-
-        result = fused_experts_impl(
-            hidden_states=hidden_states,
-            w1=w1,
-            w2=w2,
-            topk_weights=topk_weights,
-            topk_ids=topk_ids,
-            inplace=False,
-            activation=activation.value,
-            apply_router_weight_on_input=apply_router_weight_on_input,
-            use_int8_w8a8=True,
-            per_channel_quant=self.quant_config.per_act_token_quant,
-            global_num_experts=global_num_experts,
-            expert_map=expert_map,
-            w1_scale=self.quant_config.w1_scale,
-            w2_scale=self.quant_config.w2_scale,
-            w1_zp=self.quant_config.w1_zp,
-            w2_zp=self.quant_config.w2_zp,
-            a1_scale=self.quant_config.a1_scale,
-            a2_scale=self.quant_config.a2_scale,
-            block_shape=self.quant_config.block_shape,
-            w1_bias=self.quant_config.w1_bias,
-            w2_bias=self.quant_config.w2_bias,
-        )
-        output.copy_(result)
-
-
 __all__ = [
-    "MetaXTritonW8A8Experts",
     "TritonW8A8Experts",
 ]
