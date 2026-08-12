@@ -90,8 +90,11 @@ def patch_triton_chained_or_for_iluvatar() -> None:
         _tv = tuple(int(x) for x in _triton.__version__.split(".")[:2])
         if _tv >= (3, 3):
             return
-    except Exception:
-        pass  # cannot determine version — apply patch defensively
+    except Exception as e:
+        logger.warning(
+            "patch_triton_chained_or_for_iluvatar: cannot determine triton version, "
+            "applying patch defensively: %s", e
+        )
 
     _MARKER = "# _iluvatar_chained_or_patched"
 
