@@ -58,6 +58,16 @@ def resolve_task_dir(task_key: str) -> str:
     return TASK_DIR_MAP.get(task_key, task_key)
 
 
+def resolve_e2e_timeout(config: dict, device: str, task_dir: str) -> int:
+    """Return timeout for an E2E task, allowing platform YAML overrides."""
+    default = DEFAULT_TIMEOUT.get(task_dir, 60)
+    timeouts = (
+        config.get(device, {}).get("tests", {}).get("timeouts", {}).get("e2e", {})
+    )
+    value = timeouts.get(task_dir, default)
+    return int(value)
+
+
 def get_device_sections(config: dict) -> list[str]:
     """Return device section names present in the config.
 
@@ -108,7 +118,7 @@ def build_e2e_matrix(
     # Build one matrix entry per (task, device) group
     entries = []
     for (task_dir, device), case_list in groups.items():
-        timeout = DEFAULT_TIMEOUT.get(task_dir, 60)
+        timeout = resolve_e2e_timeout(config, device, task_dir)
         entries.append(
             {
                 "task": task_dir,

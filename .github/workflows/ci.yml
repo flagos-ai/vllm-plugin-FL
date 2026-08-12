@@ -144,3 +144,14 @@ jobs:
     with:
       platform: metax
     secrets: inherit
+
+  # ============================================================
+  # Job 4e: MUSA platform testing
+  # ============================================================
+  test-musa:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: musa
+    secrets: inherit

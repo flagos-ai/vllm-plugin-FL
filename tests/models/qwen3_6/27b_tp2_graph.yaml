@@ -12,21 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Qwen3.6-35B-A3B MetaX smoke configuration (TP=2, eager).
+# Qwen3.6-27B CUDA baseline smoke configuration (TP=2, graph).
 
 llm:
-  model: "/data/models/Qwen/Qwen3.6-35B-A3B"
+  model: "/data/models/Qwen/Qwen3.6-27B"
   tensor_parallel_size: 2
   pipeline_parallel_size: 1
   max_model_len: 8192
-  gpu_memory_utilization: 0.90
-  enforce_eager: true
+  gpu_memory_utilization: 0.95
+  enforce_eager: false
   trust_remote_code: false
   disable_custom_all_reduce: true
 
 generate:
   prompts:
-    - "Introduce yourself,please"
+    - text: "The capital of France is"
+      expected: "Paris"
   sampling:
     max_tokens: 100
     temperature: 0.0
@@ -37,8 +38,17 @@ serve:
   endpoints: ["chat"]
   stream: false
   max_tokens: 256
-  chat_messages:
-    - role: "user"
-      content: "Introduce yourself,please"
+  chat_cases:
+    - name: text
+      messages:
+        - role: "user"
+          content: "The capital of France is"
+      expected: "Paris"
+    - name: image
+      generated_image: true
+      prompt: "Describe all visible text, colors, and shapes in English."
+      expected:
+        - "Hello VLM"
+        - "blue rectangle"
   sampling:
     temperature: 0.0

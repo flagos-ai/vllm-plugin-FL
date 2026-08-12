@@ -61,6 +61,17 @@ device_overrides:
     tolerance:
       inference:
         default: {rtol: 1e-4, atol: 1e-7}
+  h20:
+    cases:
+      - qwen3_6/27b_tp2_eager
+      - qwen3_6/27b_tp2_graph
+      - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_graph
+    llm:
+      max_model_len: 262144
+    serve:
+      stream: true
+      max_tokens: 1024
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.
@@ -84,20 +95,12 @@ a100:
         minicpm: ["o45_tp4"]
       serving:
         qwen3: ["next_tp8"]
-        # The bug is that MiniCPMOBaseModel.load_weights
-        # doesn't call _ensure_resampler_device().
-        # minicpm: ["o45_tp4"]
     functional:
-      # Include patterns: "*" for all, or list specific paths
       include: "*"
-      # Exclude patterns: empty list or list paths to exclude
       exclude: []
     unit:
-      # Include patterns: "*" for all, or list specific paths
       include: "*"
-      # Exclude patterns: empty list or list paths to exclude
       exclude: []
-    
     benchmark:
       enabled: true
       smoke: ["throughput", "latency", "serve"]
@@ -106,5 +109,7 @@ h20:
   name: "h20"
   tests:
     e2e:
+      inference:
+        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
       serving:
-        qwen3_6: ["27b_tp2_262k", "35b_a3b_tp2_262k"]
+        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
