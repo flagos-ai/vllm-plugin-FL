@@ -86,6 +86,14 @@ flagos_blacklist:
   - copy_
   - gelu
   - masked_scatter_
+  - scatter
+  - scatter_
+  - scatter_add_
+  - select_scatter
+  - slice_scatter
+  - softmax
+  - topk_softmax
+  - attention_backend
   # --- OOT ops never registered through FlagGems ---
   - chunk_gated_delta_rule_fwd
   - fused_recurrent_gated_delta_rule_fwd

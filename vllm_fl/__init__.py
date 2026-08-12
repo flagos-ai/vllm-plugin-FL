@@ -96,14 +96,8 @@ def _patch_custom_ops():
 
 def register():
     """Register the FL platform."""
-    # Prevent torch.xpu.get_device_name crash in FLA utils before any model import
-    try:
-        from vllm_fl.dispatch.config.utils import get_platform_name
-        if get_platform_name() == "kunlunxin":
-            from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import ensure_fla_compat
-            ensure_fla_compat()
-    except Exception:
-        pass
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import _patch_xpu_get_device
+    _patch_xpu_get_device()
 
     _patch_custom_ops()
     _patch_flash_attn_import()
