@@ -7,16 +7,8 @@ platform: musa
 ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-musa-ci
 
 # Runner labels for this hardware
-# runner_labels:
-#   - self-hosted
-#   - Linux
-#   - X64
-#   - mthreads
-#   - gpu-8
-
-# Runner labels for this hardware (platform-hosted)
 runner_labels:
-  - ci-vllm-plugin-fl-musa
+  - mt-cicd-vllm-plugin
 
 # Container volumes (hardware-specific paths)
 container_volumes:

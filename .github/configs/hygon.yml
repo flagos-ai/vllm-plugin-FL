@@ -8,11 +8,7 @@ ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.1.0-hygon-ci
 
 # Runner labels for this hardware (self-hosted)
 runner_labels:
-  - self-hosted
-  - Linux
-  - X64
-  - hygon
-  - dcu-8
+  - hg-cicd-vllm-plugin
 
 # Runner labels for this hardware (Platform hosted)
 # runner_labels:
