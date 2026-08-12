@@ -121,12 +121,6 @@ def select_unquantized_moe_backend_oot(
 
     if current_platform.is_out_of_tree() and use_flaggems():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
-    elif current_platform.is_out_of_tree():
-        # Kunlunxin uses TritonExpertsFL unconditionally because its
-        # fused_experts_impl is patched to xtorch_ops, not flaggems.
-        if get_platform_name() == "kunlunxin":
-            return UnquantizedMoeBackend.TRITON, TritonExpertsFL
-        return UnquantizedMoeBackend.TRITON, TritonExperts
 
     if moe_config.is_lora_enabled:
         return UnquantizedMoeBackend.TRITON, backend_to_kernel_cls(
@@ -396,6 +390,8 @@ class TritonExpertsFL(TritonExperts):
                         w2_bias=self.w2_bias,
                     )
                 )
+                return
+
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
         # adapters can be injected between GEMM1/activation/GEMM2.
         # Check constraints.
