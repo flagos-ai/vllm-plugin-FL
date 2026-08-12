@@ -303,6 +303,7 @@ Unit tests should be fast, isolated, and not require GPU or model weights. Use t
 import pytest
 import torch
 
+
 class TestMyOp:
     def test_basic(self, device):
         """The `device` fixture returns cuda:0 or npu:0 automatically."""
@@ -321,6 +322,7 @@ import pytest
 import torch
 
 pytestmark = pytest.mark.gpu
+
 
 def test_my_kernel(device):
     x = torch.randn(16, 256, device=device)
