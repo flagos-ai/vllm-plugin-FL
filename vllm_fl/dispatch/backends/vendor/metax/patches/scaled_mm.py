@@ -3,12 +3,10 @@
 import torch
 
 from vllm import _custom_ops as ops
-from vllm.model_executor.kernels import linear
 from vllm.model_executor.kernels.linear.scaled_mm.cutlass import (
     CutlassInt8ScaledMMLinearKernel,
     Int8ScaledMMLinearLayerConfig,
 )
-from vllm.platforms import PlatformEnum
 from vllm_metax.model_executor.layers.quantization import _python_api_ops
 
 
@@ -56,9 +54,3 @@ class MctlassInt8ScaledMMLinearKernel(CutlassInt8ScaledMMLinearKernel):
             out_dtype=x.dtype,
             bias=bias,
         )
-
-
-def register_mctlass_int8_kernel() -> None:
-    linear._POSSIBLE_INT8_KERNELS[PlatformEnum.OOT] = [
-        MctlassInt8ScaledMMLinearKernel
-    ]

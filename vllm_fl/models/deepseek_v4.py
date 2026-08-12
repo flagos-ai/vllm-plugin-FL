@@ -1716,6 +1716,10 @@ class DeepseekV4ForCausalLM(nn.Module):
         config = vllm_config.model_config.hf_config
         self.config = config
         expert_dtype = getattr(config, "expert_dtype", "fp4")
+        if current_platform.vendor_name == "metax" and expert_dtype == "int8":
+            from vllm_fl.quantization.w8a8.deepseek_v4 import DeepseekV4W8A8Config
+
+            vllm_config.quant_config.__class__ = DeepseekV4W8A8Config
         if expert_dtype != "fp4":
             self.hf_to_vllm_mapper = _make_deepseek_v4_weights_mapper(expert_dtype)
 
