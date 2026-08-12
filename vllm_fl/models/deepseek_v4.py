@@ -69,11 +69,6 @@ from vllm.model_executor.models.utils import (
 from vllm_fl.ops.deepseek_v4_attention import (
     DeepseekV4Indexer as DeepseekV4IndexerFP8,
 )
-from vllm_fl.ops.deepseek_v4_attention_bf16 import (
-    DeepseekV4Indexer as DeepseekV4IndexerBF16,
-    DeepseekV4MultiHeadLatentAttentionBF16Wrapper,
-)
-
 _DEEPSEEK_V4_EXPERT_DTYPES = ("bf16", "fp4", "fp8")
 
 
@@ -160,6 +155,8 @@ class WOAColumnParallelLinear(ColumnParallelLinear):
             if not getattr(layer, "is_bmm", False):
                 return
             w = layer.weight
+            if w.dtype == torch.int8:
+                return
             if w.ndim != 2:
                 # Already reshaped by the kernel (e.g. DeepGemm kernel)
                 return
@@ -1161,10 +1158,8 @@ class DeepseekV4Attention(nn.Module):
             prefix=f"{prefix}.wo_b",
         )
         self.softmax_scale = self.head_dim**-0.5
-        hf_quant_config = getattr(config, "quantization_config", None)
-        self.scale_fmt = (
-            hf_quant_config["scale_fmt"] if hf_quant_config is not None else None
-        )
+        hf_quant_config = getattr(config, "quantization_config", None) or {}
+        self.scale_fmt = hf_quant_config.get("scale_fmt")
 
         self.rope_parameters = config.rope_scaling
 
@@ -1193,11 +1188,12 @@ class DeepseekV4Attention(nn.Module):
         self.indexer = None
         if self.compress_ratio == 4:
             # Only C4A uses sparse attention and hence has indexer.
-            indexer_cls = (
-                DeepseekV4IndexerBF16
-                if getattr(config, "expert_dtype", "fp4") == "bf16"
-                else DeepseekV4IndexerFP8
-            )
+            if getattr(config, "expert_dtype", "fp4") == "bf16":
+                from vllm_fl.ops.deepseek_v4_attention_bf16 import (
+                    DeepseekV4Indexer as indexer_cls,
+                )
+            else:
+                indexer_cls = DeepseekV4IndexerFP8
             self.indexer = indexer_cls(
                 vllm_config,
                 config=config,
@@ -1230,11 +1226,12 @@ class DeepseekV4Attention(nn.Module):
         use_bf16_attention = isinstance(
             self.wo_a.quant_method, UnquantizedLinearMethod
         )
-        attention_wrapper_cls = (
-            DeepseekV4MultiHeadLatentAttentionBF16Wrapper
-            if use_bf16_attention
-            else DeepseekV4MultiHeadLatentAttentionWrapper
-        )
+        if use_bf16_attention:
+            from vllm_fl.ops.deepseek_v4_attention_bf16 import (
+                DeepseekV4MultiHeadLatentAttentionBF16Wrapper as attention_wrapper_cls,
+            )
+        else:
+            attention_wrapper_cls = DeepseekV4MultiHeadLatentAttentionWrapper
         self.mla_attn = attention_wrapper_cls(
             hidden_size=self.hidden_size,
             num_heads=self.n_local_heads,
@@ -1273,9 +1270,8 @@ class DeepseekV4DecoderLayer(nn.Module):
     ):
         super().__init__()
 
-        # Lazy import to avoid top-level tilelang dependency.
-        # Registers both torch.ops.vllm.mhc_pre and mhc_post
-        import vllm.model_executor.layers.mhc  # noqa: F401
+        if current_platform.vendor_name != "metax":
+            import vllm.model_executor.layers.mhc  # noqa: F401
 
         config = vllm_config.model_config.hf_config
         self.hidden_size = config.hidden_size
@@ -1674,6 +1670,10 @@ def _make_deepseek_v4_weights_mapper(expert_dtype: str) -> WeightsMapper:
         scale_regex = {
             re.compile(r"(\.experts\.\d+\.w[123])\.scale$"): r"\1.weight_scale",
             re.compile(r"\.scale$"): ".weight_scale_inv",
+        }
+    elif expert_dtype == "int8":
+        scale_regex = {
+            re.compile(r"\.scale$"): ".weight_scale",
         }
     else:
         # FP8 experts use Fp8MoEMethod (block_quant=True), which registers

@@ -43,6 +43,30 @@ RADIX_TOPK_WORKSPACE_SIZE = 1024 * 1024
 MXFP4_BLOCK_SIZE = 32
 
 
+def _dequantize_fp8(values: torch.Tensor, scales: torch.Tensor) -> torch.Tensor:
+    return values.to(torch.bfloat16) * scales.to(torch.bfloat16).unsqueeze(-1)
+
+
+def _gather_paged_fp8_cache(
+    kv_cache: torch.Tensor,
+    block_table: torch.Tensor,
+    context_len: int,
+    head_dim: int,
+) -> torch.Tensor:
+    num_blocks, block_size, _ = kv_cache.shape
+    cache = kv_cache.view(num_blocks, -1)
+    values = cache[:, : block_size * head_dim].view(
+        current_platform.fp8_dtype()
+    )
+    values = values.view(num_blocks, block_size, head_dim)
+    scales = cache[:, block_size * head_dim :].view(torch.float32)
+    scales = scales.view(num_blocks, block_size)
+    block_ids = block_table[: (context_len + block_size - 1) // block_size]
+    values = values[block_ids].reshape(-1, head_dim)[:context_len]
+    scales = scales[block_ids].reshape(-1)[:context_len]
+    return _dequantize_fp8(values, scales)
+
+
 def _gather_workspace_shapes(
     total_seq_lens: int,
     head_dim: int,
@@ -224,15 +248,25 @@ def sparse_attn_indexer_fl(
                 k_quant_cast = k_quant
                 k_scale_cast = k_scale.view(torch.float32).squeeze(-1)
                 
-            ### TODO(lms) replace
-            logits = fp8_fp4_mqa_logits(
-                (q_slice_cast, q_scale_slice),
-                (k_quant_cast, k_scale_cast),
-                weights[chunk.token_start : chunk.token_end],
-                chunk.cu_seqlen_ks,
-                chunk.cu_seqlen_ke,
-                clean_logits=False,
-            )
+            if current_platform.vendor_name == "metax" and not use_fp4_cache:
+                from vllm_metax.utils.deep_gemm import bf16_mqa_logits
+
+                logits = bf16_mqa_logits(
+                    q_slice_cast.to(torch.bfloat16),
+                    _dequantize_fp8(k_quant_cast, k_scale_cast),
+                    weights[chunk.token_start : chunk.token_end],
+                    chunk.cu_seqlen_ks,
+                    chunk.cu_seqlen_ke,
+                )
+            else:
+                logits = fp8_fp4_mqa_logits(
+                    (q_slice_cast, q_scale_slice),
+                    (k_quant_cast, k_scale_cast),
+                    weights[chunk.token_start : chunk.token_end],
+                    chunk.cu_seqlen_ks,
+                    chunk.cu_seqlen_ke,
+                    clean_logits=False,
+                )
             num_rows = logits.shape[0]
 
             topk_indices = topk_indices_buffer[
@@ -301,17 +335,48 @@ def sparse_attn_indexer_fl(
             else padded_q_quant_decode_tokens
         )
 
-        ### TODO(lms) replace
-        logits = fp8_fp4_paged_mqa_logits(
-            (padded_q_quant_cast, padded_q_scale),
-            kv_cache,
-            weights[:num_padded_tokens],
-            seq_lens,
-            decode_metadata.block_table,
-            decode_metadata.schedule_metadata,
-            max_model_len=max_model_len,
-            clean_logits=False,
-        )
+        if current_platform.vendor_name == "metax" and not use_fp4_cache:
+            from vllm_metax.utils.deep_gemm import bf16_mqa_logits
+
+            max_context_len = int(seq_lens.max().item())
+            logits = torch.full(
+                (num_padded_tokens, max_context_len),
+                -float("inf"),
+                dtype=torch.float32,
+                device=kv_cache.device,
+            )
+            for batch_idx in range(batch_size):
+                context_lens = seq_lens[batch_idx].reshape(-1)
+                context_len = int(context_lens.max().item())
+                k_bf16 = _gather_paged_fp8_cache(
+                    kv_cache.squeeze(-2),
+                    decode_metadata.block_table[batch_idx],
+                    context_len,
+                    head_dim,
+                )
+                q_bf16 = padded_q_quant_cast[batch_idx].to(torch.bfloat16)
+                starts = torch.zeros_like(context_lens)
+                row_start = batch_idx * next_n
+                logits[row_start : row_start + next_n, :context_len] = (
+                    bf16_mqa_logits(
+                        q_bf16,
+                        k_bf16,
+                        weights[row_start : row_start + next_n],
+                        starts,
+                        context_lens,
+                    )
+                )
+        else:
+            logits = fp8_fp4_paged_mqa_logits(
+                (padded_q_quant_cast, padded_q_scale),
+                kv_cache,
+                weights[:num_padded_tokens],
+                seq_lens,
+                decode_metadata.block_table,
+                decode_metadata.schedule_metadata,
+                max_model_len=max_model_len,
+                clean_logits=False,
+            )
         num_rows = logits.shape[0]
         topk_indices = topk_indices_buffer[:num_padded_tokens, :topk_tokens]
         _top_k_per_row_decode(

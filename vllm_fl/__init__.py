@@ -134,6 +134,12 @@ def register_quant_linear():
         return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
     add_oot_quant_kernel()
+    if current_platform.vendor_name == "metax":
+        from vllm_fl.dispatch.backends.vendor.metax.patches.scaled_mm import (
+            register_mctlass_int8_kernel,
+        )
+
+        register_mctlass_int8_kernel()
 
 def register_router():
     from vllm.platforms import current_platform

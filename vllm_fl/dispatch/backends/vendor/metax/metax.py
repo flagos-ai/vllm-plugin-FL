@@ -174,6 +174,28 @@ class MacaBackend(Backend):
             topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
         )
 
+    def fused_indexer_q_rope_quant(
+        self,
+        positions: torch.Tensor,
+        index_q: torch.Tensor,
+        index_q_cos_sin_cache: torch.Tensor,
+        index_weights: torch.Tensor,
+        index_weights_softmax_scale: float,
+        index_weights_head_scale: float,
+        use_fp4: bool = False,
+    ):
+        from .impl.deepseek_v4_attn import fused_indexer_q_rope_quant_maca
+
+        return fused_indexer_q_rope_quant_maca(
+            positions,
+            index_q,
+            index_q_cos_sin_cache,
+            index_weights,
+            index_weights_softmax_scale,
+            index_weights_head_scale,
+            use_fp4,
+        )
+
     def invoke_fused_moe_triton_kernel(
         self,
         A,
