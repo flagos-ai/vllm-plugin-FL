@@ -360,7 +360,7 @@ class TritonExpertsFL(TritonExperts):
                 )
                 return
 
-            elif current_platform.is_cuda():
+            elif current_platform.device_name == "nvidia":
                 # NVIDIA: let FlagGems own both expert GEMMs for unquantized and W8A16 inputs
                 import flag_gems
 
