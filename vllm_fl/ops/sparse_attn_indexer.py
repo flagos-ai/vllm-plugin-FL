@@ -47,26 +47,6 @@ def _dequantize_fp8(values: torch.Tensor, scales: torch.Tensor) -> torch.Tensor:
     return values.to(torch.bfloat16) * scales.to(torch.bfloat16).unsqueeze(-1)
 
 
-def _gather_paged_fp8_cache(
-    kv_cache: torch.Tensor,
-    block_table: torch.Tensor,
-    context_len: int,
-    head_dim: int,
-) -> torch.Tensor:
-    num_blocks, block_size, _ = kv_cache.shape
-    cache = kv_cache.view(num_blocks, -1)
-    values = cache[:, : block_size * head_dim].view(
-        current_platform.fp8_dtype()
-    )
-    values = values.view(num_blocks, block_size, head_dim)
-    scales = cache[:, block_size * head_dim :].view(torch.float32)
-    scales = scales.view(num_blocks, block_size)
-    block_ids = block_table[: (context_len + block_size - 1) // block_size]
-    values = values[block_ids].reshape(-1, head_dim)[:context_len]
-    scales = scales[block_ids].reshape(-1)[:context_len]
-    return _dequantize_fp8(values, scales)
-
-
 def _gather_workspace_shapes(
     total_seq_lens: int,
     head_dim: int,
@@ -338,7 +318,37 @@ def sparse_attn_indexer_fl(
         if current_platform.vendor_name == "metax" and not use_fp4_cache:
             from vllm_metax.utils.deep_gemm import bf16_mqa_logits
 
-            max_context_len = int(seq_lens.max().item())
+            context_lens_per_batch = seq_lens.amax(dim=1)
+            cu_seq_lens = torch.zeros(
+                batch_size + 1,
+                dtype=torch.int32,
+                device=seq_lens.device,
+            )
+            torch.cumsum(context_lens_per_batch, dim=0, out=cu_seq_lens[1:])
+            seq_offsets = cu_seq_lens.tolist()
+
+            workspace_manager = current_workspace_manager()
+            values_spec, scales_spec = _gather_workspace_shapes(
+                total_seq_lens, head_dim, fp8_dtype, False
+            )
+            k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
+                values_spec,
+                scales_spec,
+            )
+            total_context_len = seq_offsets[-1]
+            k_quant = k_quant_full[:total_context_len]
+            k_scale = k_scale_full[:total_context_len]
+            _cp_gather_indexer_k_quant_cache(
+                kv_cache,
+                k_quant,
+                k_scale,
+                decode_metadata.block_table,
+                cu_seq_lens,
+            )
+
+            max_context_len = max(
+                seq_offsets[i + 1] - seq_offsets[i] for i in range(batch_size)
+            )
             logits = torch.full(
                 (num_padded_tokens, max_context_len),
                 -float("inf"),
@@ -347,17 +357,16 @@ def sparse_attn_indexer_fl(
             )
             for batch_idx in range(batch_size):
                 context_lens = seq_lens[batch_idx].reshape(-1)
-                context_len = int(context_lens.max().item())
-                k_bf16 = _gather_paged_fp8_cache(
-                    kv_cache.squeeze(-2),
-                    decode_metadata.block_table[batch_idx],
-                    context_len,
-                    head_dim,
+                seq_start = seq_offsets[batch_idx]
+                seq_end = seq_offsets[batch_idx + 1]
+                k_bf16 = _dequantize_fp8(
+                    k_quant[seq_start:seq_end],
+                    k_scale[seq_start:seq_end].view(torch.float32).squeeze(-1),
                 )
                 q_bf16 = padded_q_quant_cast[batch_idx].to(torch.bfloat16)
                 starts = torch.zeros_like(context_lens)
                 row_start = batch_idx * next_n
-                logits[row_start : row_start + next_n, :context_len] = (
+                logits[row_start : row_start + next_n, : seq_end - seq_start] = (
                     bf16_mqa_logits(
                         q_bf16,
                         k_bf16,
