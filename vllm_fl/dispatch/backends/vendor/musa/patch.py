@@ -158,9 +158,12 @@ def patch_cuda_stream_for_musa():
             return
 
         # aux_stream helper used by MoE shared-expert overlap.
-        # MUSA does not support torch.cuda.Stream() — return None so that
-        # SharedExperts falls back to the synchronous (non-overlapped) path,
-        # which is guarded by ``if self._stream is not None``.
+        # torch_musa currently does not support parallel CUDA streams for
+        # compute overlap (torch.cuda.Stream() raises or returns a non-functional
+        # stream on MUSA devices).  Return None so that SharedExperts falls back
+        # to the synchronous (non-overlapped) path, which is guarded by
+        # ``if self._stream is not None``.
+        # TODO: Enable parallel stream overlap once torch_musa supports it.
         try:
             import vllm.utils.torch_utils as _tu
 
@@ -300,7 +303,7 @@ def patch_inductor_triton_for_musa():
 
 
 def patch_moe_topk_softmax_for_musa():
-    """Patch MoE top-k softmax for MUSA via FlagGems.
+    """Patch MoE top-k softmax for MUSA via the dispatch system.
 
     ``torch.ops._moe_C.topk_softmax`` is a CUDA-only extension not available
     on MUSA.  vllm 0.24.0 calls it through two entry points:
@@ -317,16 +320,18 @@ def patch_moe_topk_softmax_for_musa():
     this point since they only depend on torch and vllm internals that are
     already loaded by the time apply_musa_patches() is invoked in the worker.
 
+    The actual implementation is resolved through the dispatch system's
+    op_backends configuration (musa.yaml: topk_softmax -> [flagos, reference]),
+    rather than directly importing from the flaggems backend.
+
     TODO: remove once MUSA ships a compiled _moe_C extension.
     """
     try:
-        from vllm_fl.dispatch.backends.flaggems.impl.fused_moe import (
-            topk_softmax_flaggems,
-        )
+        from vllm_fl.dispatch import call_op
     except Exception as exc:
         logger.warning(
             "patch_moe_topk_softmax_for_musa: cannot import "
-            "topk_softmax_flaggems — MoE models will fail on MUSA: %s", exc)
+            "dispatch call_op — MoE models will fail on MUSA: %s", exc)
         return
 
     def _topk_softmax_musa(
@@ -337,10 +342,13 @@ def patch_moe_topk_softmax_for_musa():
         renormalize=False,
         e_score_correction_bias=None,
     ):
-        # topk_softmax_flaggems modifies topk_weights/topk_ids in-place.
+        # Delegate to the dispatch system which resolves the best available
+        # implementation based on musa.yaml op_backends configuration.
+        # The dispatch call modifies topk_weights/topk_ids in-place.
         # Must return (topk_weights, topk_ids) to match vllm_topk_softmax
         # signature which callers unpack as: topk_weights, topk_ids = topk_func(...)
-        topk_softmax_flaggems(
+        call_op(
+            "topk_softmax",
             topk_weights,
             topk_ids,
             token_expert_indices,
@@ -368,7 +376,7 @@ def patch_moe_topk_softmax_for_musa():
 
     if patched:
         logger.info(
-            "Patched vllm_topk_softmax for MUSA (FlagGems) in: %s",
+            "Patched vllm_topk_softmax for MUSA (via dispatch) in: %s",
             ", ".join(patched))
 
 

@@ -76,15 +76,6 @@ def register_builtins(registry) -> None:
             vendor="musa",
             priority=BackendPriority.VENDOR,
         ),
-        # MoE top-k softmax (no _moe_C CUDA extension on MUSA, use FlagGems)
-        OpImpl(
-            op_name="topk_softmax",
-            impl_id="vendor.musa",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.topk_softmax, is_avail),
-            vendor="musa",
-            priority=BackendPriority.VENDOR,
-        ),
     ]
 
     registry.register_many(impls)

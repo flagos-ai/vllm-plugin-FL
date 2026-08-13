@@ -45,6 +45,11 @@ op_backends:
     - flagos
     - vendor:musa
     - reference
+  # MoE top-k softmax: MUSA has no _moe_C CUDA extension,
+  # use FlagGems triton implementation with reference as fallback
+  topk_softmax:
+    - flagos
+    - reference
 
 # FlagOS operator blacklist
 # Musa is CUDA-compatible, so most FlagGems ops should work
