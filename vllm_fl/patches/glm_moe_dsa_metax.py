@@ -144,6 +144,8 @@ def _patch_sparse_indexer() -> None:
         indexer_k_quant_and_cache,
     )
     from flag_gems.ops import fp8_mqa_logits, fp8_paged_mqa_logits
+    from flag_gems.ops.fp8_mqa_logits import _fp8_mqa_logits_kernel
+    from flag_gems.ops.fp8_paged_mqa_logits import fp8_paged_mqa_logits_kernel
     from flag_gems.runtime.backend._metax.fused.top_k_per_row_prefill import (
         top_k_per_row_prefill,
     )
@@ -153,6 +155,16 @@ def _patch_sparse_indexer() -> None:
     ops.indexer_k_quant_and_cache = indexer_k_quant_and_cache
     ops.cp_gather_indexer_k_quant_cache = cp_gather_indexer_k_quant_cache
     ops.top_k_per_row_prefill = top_k_per_row_prefill
+    _fp8_mqa_logits_kernel.fn.configs = [
+        config
+        for config in _fp8_mqa_logits_kernel.fn.configs
+        if config.kwargs["BLOCK_M"] >= 16
+    ]
+    fp8_paged_mqa_logits_kernel.configs = [
+        config
+        for config in fp8_paged_mqa_logits_kernel.configs
+        if config.kwargs["BLOCK_H"] >= 16
+    ]
 
     def mqa_logits(q, kv, weights, starts, ends, clean_logits=False):
         q = q[0] if isinstance(q, tuple) else q
