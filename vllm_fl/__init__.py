@@ -144,12 +144,17 @@ def register_model():
     register_quant_linear()
     register_router()
 
-    from vllm.model_executor.models import ModelRegistry
     from vllm.transformers_utils.config import _CONFIG_REGISTRY
     from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
 
     _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
-    ModelRegistry.register_model(
-        "GlmMoeDsaForCausalLM",
-        "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
-    )
+
+    from vllm.platforms import current_platform
+
+    if current_platform.vendor_name == "metax":
+        from vllm.model_executor.models import ModelRegistry
+
+        ModelRegistry.register_model(
+            "GlmMoeDsaForCausalLM",
+            "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
+        )

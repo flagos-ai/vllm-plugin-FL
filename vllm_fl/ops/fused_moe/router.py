@@ -4,7 +4,6 @@
 import torch
 from functools import partial
 
-from vllm.platforms import current_platform
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
     rocm_aiter_grouped_topk,
@@ -20,6 +19,7 @@ from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
     fused_topk_bias
 )
 from vllm_fl.dispatch import CachedOp
+from vllm_fl.patches.glm_moe_dsa_metax import is_glm_moe_dsa_metax_active
 
 _topk_softmax = CachedOp("topk_softmax")
 _grouped_topk = CachedOp("grouped_topk")
@@ -96,11 +96,8 @@ def _fl_grouped_topk(
         "Number of tokens mismatch"
     )
 
-    if (
-        current_platform.vendor_name == "metax"
-        and e_score_correction_bias is not None
-    ):
-        return _metax_grouped_topk(
+    if is_glm_moe_dsa_metax_active() and e_score_correction_bias is not None:
+        return _glm_grouped_topk(
             gating_output,
             topk,
             renormalize,
@@ -174,7 +171,7 @@ def _fl_grouped_topk(
     return topk_weights.to(torch.float32), topk_ids.to(torch.int32)
 
 
-def _metax_grouped_topk(
+def _glm_grouped_topk(
     gating_output: torch.Tensor,
     topk: int,
     renormalize: bool,

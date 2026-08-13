@@ -5,6 +5,12 @@ from __future__ import annotations
 
 import torch
 
+_glm_moe_dsa_metax_active = False
+
+
+def is_glm_moe_dsa_metax_active() -> bool:
+    return _glm_moe_dsa_metax_active
+
 
 def _quantize_indexer_query_fp8(
     x: torch.Tensor,
@@ -213,6 +219,9 @@ def _patch_int8_moe() -> None:
 
 
 def apply_model_patches() -> None:
+    global _glm_moe_dsa_metax_active
+
     _patch_model_loader()
     _patch_sparse_indexer()
     _patch_int8_moe()
+    _glm_moe_dsa_metax_active = True

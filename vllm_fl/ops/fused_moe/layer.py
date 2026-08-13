@@ -2,7 +2,6 @@
 # Adapted from vllm/model_executor/layers/fused_moe/layer.py (v0.24.0)
 
 import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
-from vllm.platforms import current_platform
 
 # Save the original FusedMoE factory BEFORE any monkey-patching occurs.
 # custom_ops.py patches _fused_moe_pkg.FusedMoE = FusedMoEFL at runtime,
@@ -16,6 +15,7 @@ from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
 )
 
 from vllm_fl.ops.fused_moe.router import replace_router_with_fl
+from vllm_fl.patches.glm_moe_dsa_metax import is_glm_moe_dsa_metax_active
 from .fused_moe_utils import select_unquantized_moe_backend_oot
 
 
@@ -56,15 +56,15 @@ def FusedMoEFL(*args, **kwargs) -> MoERunner:
     #    _fused_moe_pkg.FusedMoE with FusedMoEFL.
     runner: MoERunner = _OrigFusedMoE(*args, **kwargs)
 
-    # MetaX W8A8 selects TritonExpertsFL through its quantization oracle.
-    # Other platforms retain the existing FL quant-method replacement.
-    keep_metax_quant_method = (
-        current_platform.vendor_name == "metax"
+    # GLM W8A8 selects TritonExpertsFL through its quantization oracle.
+    # Other models retain the existing FL quant-method replacement.
+    keep_glm_quant_method = (
+        is_glm_moe_dsa_metax_active()
         and not isinstance(
             runner.routed_experts.quant_method, UnquantizedFusedMoEMethod
         )
     )
-    if not keep_metax_quant_method:
+    if not keep_glm_quant_method:
         fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
         runner._replace_quant_method(fl_quant_method)
 

@@ -5,7 +5,9 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 import torch
+import vllm_fl
 from vllm import platforms
+from vllm.model_executor.models import ModelRegistry
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 from vllm_fl import dispatch
@@ -19,7 +21,7 @@ from vllm_fl.dispatch.backends.vendor.metax.impl.attention.ops import (
     flashmla as metax_flashmla,
 )
 from vllm_fl.ops.fused_moe import layer, router
-from vllm_fl.ops.fused_moe.router import _metax_grouped_topk
+from vllm_fl.ops.fused_moe.router import _glm_grouped_topk
 from vllm_fl.patches import glm_moe_dsa_metax
 from vllm_fl.platform import PlatformFL
 from vllm_fl.patches.glm_moe_dsa_metax import (
@@ -81,11 +83,11 @@ def test_dynamic_activation_int8_moe_keeps_w8a8_without_static_scales():
     assert not config.use_int8_w8a16
 
 
-def test_metax_grouped_topk_uses_bias_only_for_expert_selection():
+def test_glm_grouped_topk_uses_bias_only_for_expert_selection():
     logits = torch.zeros(1, 4)
     correction_bias = torch.tensor([0.0, 0.0, 10.0, 9.0])
 
-    weights, ids = _metax_grouped_topk(
+    weights, ids = _glm_grouped_topk(
         logits,
         topk=1,
         renormalize=False,
@@ -100,7 +102,7 @@ def test_metax_grouped_topk_uses_bias_only_for_expert_selection():
     assert weights.item() == 0.5
 
 
-def test_non_metax_grouped_topk_keeps_existing_dispatch(monkeypatch):
+def test_non_glm_grouped_topk_keeps_existing_dispatch(monkeypatch):
     expected_weights = torch.tensor([[0.75]], dtype=torch.float32)
     expected_ids = torch.tensor([[3]], dtype=torch.int32)
     captured = {}
@@ -109,9 +111,7 @@ def test_non_metax_grouped_topk_keeps_existing_dispatch(monkeypatch):
         captured["args"] = args
         return expected_weights, expected_ids
 
-    monkeypatch.setattr(
-        router, "current_platform", SimpleNamespace(vendor_name="cuda")
-    )
+    monkeypatch.setattr(router, "is_glm_moe_dsa_metax_active", lambda: False)
     monkeypatch.setattr(router, "_grouped_topk", grouped_topk)
 
     hidden_states = torch.zeros(1, 2)
@@ -143,6 +143,32 @@ def test_non_metax_grouped_topk_keeps_existing_dispatch(monkeypatch):
     )
 
 
+def test_glm_grouped_topk_uses_model_adaptation(monkeypatch):
+    expected_weights = torch.tensor([[0.5]], dtype=torch.float32)
+    expected_ids = torch.tensor([[2]], dtype=torch.int32)
+
+    monkeypatch.setattr(router, "is_glm_moe_dsa_metax_active", lambda: True)
+    monkeypatch.setattr(
+        router,
+        "_glm_grouped_topk",
+        lambda *args: (expected_weights, expected_ids),
+    )
+
+    weights, ids = router._fl_grouped_topk(
+        torch.zeros(1, 2),
+        torch.zeros(1, 4),
+        topk=1,
+        renormalize=True,
+        num_expert_group=2,
+        topk_group=1,
+        scoring_func="sigmoid",
+        e_score_correction_bias=torch.ones(4),
+    )
+
+    assert weights is expected_weights
+    assert ids is expected_ids
+
+
 def test_non_metax_model_entry_does_not_apply_metax_patches(monkeypatch):
     called = False
 
@@ -163,6 +189,54 @@ def test_non_metax_model_entry_does_not_apply_metax_patches(monkeypatch):
     sys.modules.pop(module_name, None)
 
     assert not called
+
+
+def test_non_metax_registration_keeps_upstream_glm_model(monkeypatch):
+    registered = []
+
+    monkeypatch.setattr(vllm_fl, "_register_flagcx_connector", lambda: None)
+    monkeypatch.setattr(vllm_fl, "register_quant_linear", lambda: None)
+    monkeypatch.setattr(vllm_fl, "register_router", lambda: None)
+    monkeypatch.setattr(
+        platforms, "current_platform", SimpleNamespace(vendor_name="cuda")
+    )
+    monkeypatch.setattr(
+        ModelRegistry,
+        "register_model",
+        lambda *args, **kwargs: registered.append((args, kwargs)),
+    )
+
+    vllm_fl.register_model()
+
+    assert not registered
+
+
+def test_metax_registration_uses_glm_plugin_entry(monkeypatch):
+    registered = []
+
+    monkeypatch.setattr(vllm_fl, "_register_flagcx_connector", lambda: None)
+    monkeypatch.setattr(vllm_fl, "register_quant_linear", lambda: None)
+    monkeypatch.setattr(vllm_fl, "register_router", lambda: None)
+    monkeypatch.setattr(
+        platforms, "current_platform", SimpleNamespace(vendor_name="metax")
+    )
+    monkeypatch.setattr(
+        ModelRegistry,
+        "register_model",
+        lambda *args, **kwargs: registered.append((args, kwargs)),
+    )
+
+    vllm_fl.register_model()
+
+    assert registered == [
+        (
+            (
+                "GlmMoeDsaForCausalLM",
+                "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
+            ),
+            {},
+        )
+    ]
 
 
 def test_non_metax_attention_backend_keeps_dispatch_path(monkeypatch):
@@ -287,7 +361,7 @@ def test_metax_sparse_mla_backend_dispatches_kernel(monkeypatch):
     assert captured["lengths"] is lengths
 
 
-def test_non_metax_quantized_moe_keeps_existing_fl_replacement(monkeypatch):
+def test_non_glm_quantized_moe_keeps_existing_fl_replacement(monkeypatch):
     class UnquantizedMethod:
         pass
 
@@ -301,9 +375,7 @@ def test_non_metax_quantized_moe_keeps_existing_fl_replacement(monkeypatch):
 
     runner = Runner()
     replacement = object()
-    monkeypatch.setattr(
-        layer, "current_platform", SimpleNamespace(vendor_name="cuda")
-    )
+    monkeypatch.setattr(layer, "is_glm_moe_dsa_metax_active", lambda: False)
     monkeypatch.setattr(layer, "UnquantizedFusedMoEMethod", UnquantizedMethod)
     monkeypatch.setattr(
         layer, "UnquantizedFusedMoEMethodFL", lambda config: replacement
@@ -313,3 +385,20 @@ def test_non_metax_quantized_moe_keeps_existing_fl_replacement(monkeypatch):
 
     assert layer.FusedMoEFL() is runner
     assert runner.replacement is replacement
+
+
+def test_glm_quantized_moe_keeps_oracle_quant_method(monkeypatch):
+    class UnquantizedMethod:
+        pass
+
+    quant_method = object()
+    runner = SimpleNamespace(
+        routed_experts=SimpleNamespace(quant_method=quant_method),
+    )
+    monkeypatch.setattr(layer, "is_glm_moe_dsa_metax_active", lambda: True)
+    monkeypatch.setattr(layer, "UnquantizedFusedMoEMethod", UnquantizedMethod)
+    monkeypatch.setattr(layer, "_OrigFusedMoE", lambda *args, **kwargs: runner)
+    monkeypatch.setattr(layer, "replace_router_with_fl", lambda: None)
+
+    assert layer.FusedMoEFL() is runner
+    assert runner.routed_experts.quant_method is quant_method

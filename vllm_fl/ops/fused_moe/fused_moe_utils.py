@@ -26,6 +26,7 @@ from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
 from vllm.triton_utils import tl, triton
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
+from vllm_fl.patches.glm_moe_dsa_metax import is_glm_moe_dsa_metax_active
 from vllm_fl.utils import use_flaggems
 
 _moe_align_block_size = CachedOp("moe_align_block_size")
@@ -285,7 +286,7 @@ class TritonExpertsFL(TritonExperts):
         )
 
         if (
-            current_platform.vendor_name == "metax"
+            is_glm_moe_dsa_metax_active()
             and (weight_key, activation_key)
             == (kInt8StaticChannelSym, kInt8DynamicTokenSym)
         ):
@@ -362,7 +363,7 @@ class TritonExpertsFL(TritonExperts):
             torch.float8_e4m3fnuz,
         ]
         if (
-            current_platform.vendor_name == "metax"
+            is_glm_moe_dsa_metax_active()
             and self.quant_config.use_int8_w8a8
         ):
             supported_dtypes.append(torch.int8)
@@ -385,7 +386,7 @@ class TritonExpertsFL(TritonExperts):
         )
 
         if (
-            current_platform.vendor_name == "metax"
+            is_glm_moe_dsa_metax_active()
             and self.quant_config.use_int8_w8a8
         ):
             config = config.copy()
@@ -404,7 +405,7 @@ class TritonExpertsFL(TritonExperts):
             compute_type = tl.bfloat16
         elif (
             hidden_states.dtype == torch.int8
-            and current_platform.vendor_name == "metax"
+            and is_glm_moe_dsa_metax_active()
             and self.quant_config.use_int8_w8a8
         ):
             compute_type = tl.bfloat16
