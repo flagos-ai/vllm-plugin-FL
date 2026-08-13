@@ -30,25 +30,15 @@
 #include "utils.h"
 #include "aclnn_torch_adapter/op_api_common.h"
 #include "moe/add_rms_norm_bias/add_rms_norm_bias_torch_adpt.h"
-#include "moe/apply_top_k_top_p_custom/apply_top_k_top_p_custom_torch_adpt.h"
+#include "moe/moe_gating_top_k/moe_gating_top_k_torch_adpt.h"
+#include "moe/moe_init_routing_custom/moe_init_routing_custom_torch_adpt.h"
 #ifdef VLLM_ENABLE_ATB_AND_DIRECT_KERNELS
 #include "batch_matmul_transpose/batch_matmul_transpose_torch_adpt.h"
 #include "mla_preprocess/mla_preprocess_torch_adpt.h"
 #endif
-#include "mc2/dispatch_ffn_combine/dispatch_ffn_combine_torch_adpt.h"
-#include "gmm/grouped_matmul_swiglu_quant_weight_nz_tensor_list/grouped_matmul_swiglu_quant_torch_adpt.h"
-#include "gmm/grouped_matmul_swiglu_quant_v2/grouped_matmul_swiglu_quant_v2_torch_adpt.h"
-#include "attention/lightning_indexer/lightning_indexer_torch_adpt.h"
 #include "mc2/matmul_allreduce_add_rmsnorm/matmul_allreduce_add_rmsnorm_torch_adpt.h"
-#include "moe/moe_gating_top_k/moe_gating_top_k_torch_adpt.h"
-#include "moe/moe_init_routing_custom/moe_init_routing_custom_torch_adpt.h"
-#include "attention/sparse_flash_attention/sparse_flash_attention_torch_adpt.h"
-#include "attention/kv_quant_sparse_flash_attention/kv_quant_sparse_flash_attention_torch_adpt.h"
-#include "attention/lightning_indexer_quant/lightning_indexer_quant_torch_adpt.h"
-#include "attention/ngram_spec_decode/ngram_spec_decode_torch_adpt.h"
 #include "attention/recurrent_gated_delta_rule/recurrent_gated_delta_rule_torch_adpt.h"
 #include "attention/chunk_gated_delta_rule/chunk_gated_delta_rule_torch_adpt.h"
-#include "attention/store_kv_block/store_kv_block_torch_adpt.h"
 #include "attention/fused_gdn_gating/fused_gdn_gating_torch_adpt.h"
 #include <c10/core/Device.h>
 #include <c10/core/Scalar.h>
@@ -2137,12 +2127,10 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
     ops.def(
         "chunk_gated_delta_rule_fwd_h(Tensor k, Tensor w, Tensor u, Tensor? g=None, *, Tensor? gk=None, Tensor? initial_state=None, bool? output_final_state=False, int? chunk_size=None, bool? save_new_value=True, int[]? cu_seqlens=None, int[]? chunk_indices=None, bool? use_exp2=False, bool? transpose_state_layout=False) -> (Tensor h_out, Tensor v_new_out, Tensor final_state_out)"
     );
-    ops.impl("chunk_gated_delta_rule_fwd_h", torch::kPrivateUse1, &vllm_fl::chunk_gated_delta_rule_fwd_h);
 
     ops.def(
         "chunk_fwd_o(Tensor q, Tensor k, Tensor v, Tensor h, float scale, *, Tensor? g=None, Tensor? g_gamma=None, int[]? cu_seqlens=None, int[]? chunk_indices=None, int? chunk_size=None, bool? transpose_state_layout=False) -> Tensor"
     );
-    ops.impl("chunk_fwd_o", torch::kPrivateUse1, &vllm_fl::chunk_fwd_o);
 }
 #else
 // Pybind on other platform
@@ -2247,14 +2235,12 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                            Tensor group_list, *, Tensor? bias=None,"
         "                            Tensor? offset=None, float swiglu_limit=0.0) ->"
         "                            (Tensor output, Tensor output_scale, Tensor output_offset)");
-    ops.impl("grouped_matmul_swiglu_quant", torch::kPrivateUse1, &vllm_fl::grouped_matmul_swiglu_quant);
 
     ops.def(
         "grouped_matmul_swiglu_quant_weight_nz(Tensor x, Tensor weight, Tensor weight_scale, Tensor x_scale,"
         "                                      Tensor group_list, *, Tensor? bias=None,"
         "                                      Tensor? offset=None, float swiglu_limit=0.0) -> "
         "                                      (Tensor output, Tensor output_scale, Tensor output_offset)");
-    ops.impl("grouped_matmul_swiglu_quant_weight_nz", torch::kPrivateUse1, &vllm_fl::grouped_matmul_swiglu_quant_weight_nz);
 
     ops.def(
         "grouped_matmul_swiglu_quant_weight_nz_tensor_list(Tensor x, Tensor[] weight, Tensor[] weight_scale, Tensor x_scale,"
@@ -2262,7 +2248,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                                                  Tensor? bias=None, Tensor? offset=None, float swiglu_limit=0.0) ->"
         "                                                  (Tensor output, Tensor output_scale, Tensor output_offset)"
     );
-    ops.impl("grouped_matmul_swiglu_quant_weight_nz_tensor_list", torch::kPrivateUse1, &vllm_fl::grouped_matmul_swiglu_quant_weight_nz_tensor_list);
 
     ops.def(
         "grouped_matmul_swiglu_quant_v2(Tensor x, Tensor[] weight, Tensor[] weight_scale, Tensor x_scale,  Tensor group_list,  Tensor? smooth_scale=None,"
@@ -2270,7 +2255,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                                                 int? quant_dtype=0, bool transpose_weight=False, int group_list_type=0, int[2] tuning_config=[],float swiglu_limit=0.0) ->"
         "                                                  (Tensor output, Tensor output_scale)"
     );
-    ops.impl("grouped_matmul_swiglu_quant_v2", torch::kPrivateUse1, &vllm_fl::grouped_matmul_swiglu_quant_v2);
 
     ops.def(
         "npu_lightning_indexer("
@@ -2286,7 +2270,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "bool return_value=False"
         ") -> (Tensor sparse_indices, Tensor sparse_values)"
     );
-    ops.impl("npu_lightning_indexer", torch::kPrivateUse1, &vllm_fl::npu_lightning_indexer);
 
     ops.def(
         "npu_sparse_flash_attention(Tensor query, Tensor key, Tensor value,"
@@ -2299,7 +2282,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                           int next_tokens=9223372036854775807, int attention_mode=2,"
         "                           bool return_softmax_lse=False) -> (Tensor attention_out, Tensor softmax_max, Tensor softmax_sum)"
     );
-    ops.impl("npu_sparse_flash_attention", torch::kPrivateUse1, &vllm_fl::npu_sparse_flash_attention);
 
     ops.def(
         "npu_kv_quant_sparse_flash_attention(Tensor query, Tensor key, Tensor value,"
@@ -2322,15 +2304,12 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                                    bool return_softmax_lse=False)"
         " -> (Tensor attention_out, Tensor softmax_max, Tensor softmax_sum)"
     );
-    ops.impl("npu_kv_quant_sparse_flash_attention", torch::kPrivateUse1,
-             &vllm_fl::npu_kv_quant_sparse_flash_attention);
 
     ops.def(
         "dispatch_ffn_combine(Tensor x, Tensor[] weight1, Tensor[] weight2, Tensor expert_idx,"
         "                     Tensor[] scale1, Tensor[] scale2, Tensor[] bias1, Tensor[] bias2, Tensor probs, str group,"
         "                     int max_output_size, Tensor! out, Tensor! expert_token_nums, Tensor? x_active_mask=None, float swiglu_limit=1000000.0) -> (Tensor out, Tensor expert_token_nums)"
     );
-    ops.impl("dispatch_ffn_combine", torch::kPrivateUse1, &vllm_fl::dispatch_ffn_combine);
 
     ops.def("matmul_allreduce_add_rmsnorm(Tensor x1, Tensor x2, Tensor residual, Tensor gamma, \
         str groupTp, int tpRankSize, int tpRankId, float epsilon, bool isTransB, bool isGatherAddOut) -> (Tensor output, Tensor add_out)");
@@ -2343,6 +2322,7 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                            int row_idx_type=0) -> (Tensor, Tensor, Tensor, Tensor)"
     );
     ops.impl("npu_moe_init_routing_custom", torch::kPrivateUse1, &vllm_fl::npu_moe_init_routing_custom);
+
     // vLLM-Ascend custom ops
     ops.def(
         "moe_gating_top_k(Tensor x, "
@@ -2359,7 +2339,7 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
 
         "-> (Tensor y ,Tensor expert_idx, Tensor out)"
         );
-    ops.impl("moe_gating_top_k", torch::kPrivateUse1,&vllm_fl::moe_gating_top_k);
+    ops.impl("moe_gating_top_k", torch::kPrivateUse1, &vllm_fl::moe_gating_top_k);
 
     ops.def(
         "npu_add_rms_norm_bias(Tensor x1, "
@@ -2371,8 +2351,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         );
     ops.impl("npu_add_rms_norm_bias", torch::kPrivateUse1, &vllm_fl::npu_add_rms_norm_bias);
 
-    ops.def("npu_apply_top_k_top_p(Tensor logits, Tensor? p=None, Tensor? k=None) -> Tensor");
-    ops.impl("npu_apply_top_k_top_p", torch::kPrivateUse1, &vllm_fl::npu_apply_top_k_top_p);
 
     ops.def(
         "npu_hamming_dist_top_k(Tensor q, Tensor k_comp, Tensor k_comp_rope, Tensor k,"
@@ -2380,18 +2358,15 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                      int? max_seq_len=None, int? sink=None, int? recent=None, int? support_offload=None,"
         "                      Tensor? key_block_table=None, Tensor? mask=None, Tensor? indices=None) -> Tensor"
     );
-    ops.impl("npu_hamming_dist_top_k", torch::kPrivateUse1, &vllm_fl::npu_hamming_dist_top_k);
 
     ops.def(
         "npu_reshape_and_cache_bnsd(Tensor q, Tensor k_comp, Tensor slot_mapping, Tensor seq_len, Tensor k_out) -> Tensor"
     );
-    ops.impl("npu_reshape_and_cache_bnsd", torch::kPrivateUse1, &vllm_fl::npu_reshape_and_cache_bnsd);
 
 
     ops.def(
         "transpose_kv_cache_by_block(Tensor[] kCache, Tensor[] vCache, Tensor blockIDs, int blockSize, int headNum, int headDim, int splitNum, int layerNum) -> ()"
     );
-    ops.impl("transpose_kv_cache_by_block", torch::kPrivateUse1, &vllm_fl::transpose_kv_cache_by_block);
 
     ops.def(
         "npu_copy_and_expand_eagle_inputs(Tensor target_token_ids, Tensor target_positions, "
@@ -2401,7 +2376,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "(Tensor out_input_ids, Tensor out_positions, Tensor out_is_rejected_token_mask, "
         "Tensor out_is_masked_token_mask, Tensor out_new_token_indices, Tensor out_hidden_state_mapping)"
     );
-    ops.impl("npu_copy_and_expand_eagle_inputs", torch::kPrivateUse1, &vllm_fl::npu_copy_and_expand_eagle_inputs);
     ops.def(
         "npu_causal_conv1d_custom(Tensor output, Tensor x, "
         "                         Tensor weight, "
@@ -2427,7 +2401,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
 
         "-> Tensor[]"
     );
-    ops.impl("moe_grouped_matmul", torch::kPrivateUse1,&vllm_fl::moe_grouped_matmul);
 
     ops.def(
         "moe_gating_top_k_hash("
@@ -2446,7 +2419,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "bool out_flag=False"
         ") -> (Tensor y, Tensor expert_idx, Tensor out)"
         );
-    ops.impl("moe_gating_top_k_hash", torch::kPrivateUse1,&vllm_fl::moe_gating_top_k_hash);
 
     ops.def(
         "compressor("
@@ -2459,7 +2431,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "float norm_eps, int rotary_mode, int cache_mode"
         ") -> Tensor"
         );
-    ops.impl("compressor", torch::kPrivateUse1, &vllm_fl::compressor);
 
     ops.def(
         "compressor_metadata("
@@ -2469,7 +2440,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "int num_reqs_actual"
         ") -> (Tensor, Tensor, Tensor)"
         );
-    ops.impl("compressor_metadata", torch::kPrivateUse1, &vllm_fl::compressor_metadata);
 
     ops.def(
         "compressor_metadata_out("
@@ -2479,7 +2449,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "Tensor(a!) compress_cos, Tensor(b!) compress_sin, Tensor(c!) slot_mapping"
         ") -> (Tensor(a!), Tensor(b!), Tensor(c!))"
         );
-    ops.impl("compressor_metadata_out", torch::kPrivateUse1, &vllm_fl::compressor_metadata_out);
 
     ops.def(
         "npu_vllm_quant_lightning_indexer("
@@ -2497,7 +2466,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "int cmp_ratio=1, bool return_value=False"
         ") -> (Tensor sparse_indices, Tensor sparse_values)"
         );
-    ops.impl("npu_vllm_quant_lightning_indexer", torch::kPrivateUse1, &vllm_fl::npu_vllm_quant_lightning_indexer_npu);
 
     ops.def(
         "npu_sparse_attn_sharedkv("
@@ -2526,7 +2494,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "bool return_softmax_lse=False"
         ") -> (Tensor out, Tensor softmax_lse)"
         );
-    ops.impl("npu_sparse_attn_sharedkv", torch::kPrivateUse1, &vllm_fl::npu_sparse_attn_sharedkv_npu);
 
     ops.def(
         "npu_sparse_attn_sharedkv_metadata("
@@ -2555,7 +2522,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "str device=\"npu\""
         ") -> (Tensor metadata)"
         );
-    ops.impl("npu_sparse_attn_sharedkv_metadata", torch::kPrivateUse1, &vllm_fl::npu_sparse_attn_sharedkv_metadata_npu);
 
     ops.def(
         "npu_vllm_quant_lightning_indexer_metadata("
@@ -2579,7 +2545,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "str device=\"npu\""
         ") -> (Tensor metadata)"
         );
-    ops.impl("npu_vllm_quant_lightning_indexer_metadata", torch::kPrivateUse1, &vllm_fl::npu_vllm_quant_lightning_indexer_metadata_npu);
 
     ops.def(
           "npu_hc_post("
@@ -2589,7 +2554,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "Tensor comb"
         ") -> (Tensor out)"
         );
-    ops.impl("npu_hc_post", torch::kPrivateUse1, &vllm_fl::npu_hc_post_npu);
 
     ops.def(
         "npu_hc_pre("
@@ -2598,7 +2562,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "float norm_eps, float hc_eps"
         ") -> (Tensor out0, Tensor out1, Tensor out2)"
         );
-    ops.impl("npu_hc_pre", torch::kPrivateUse1, &vllm_fl::npu_hc_pre_npu);
 
     ops.def(
         "npu_hc_pre_v2("
@@ -2607,14 +2570,12 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "float norm_eps, float hc_eps"
         ") -> (Tensor out0, Tensor out1, Tensor out2)"
         );
-    ops.impl("npu_hc_pre_v2", torch::kPrivateUse1, &vllm_fl::npu_hc_pre_v2_npu);
 
     ops.def(
         "npu_hc_pre_inv_rms("
             "Tensor x, float epsilon=1e-20"
         ") -> (Tensor out)"
         );
-    ops.impl("npu_hc_pre_inv_rms", torch::kPrivateUse1, &vllm_fl::npu_hc_pre_inv_rms_npu);
 
     ops.def(
         "npu_hc_pre_sinkhorn("
@@ -2622,14 +2583,12 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "int hc_mult, int hc_sinkhorn_iters, float hc_eps"
         ") -> (Tensor out0, Tensor out1, Tensor out2)"
         );
-    ops.impl("npu_hc_pre_sinkhorn", torch::kPrivateUse1, &vllm_fl::npu_hc_pre_sinkhorn_npu);
 
     ops.def(
         "inplace_partial_rotary_mul("
             "Tensor(a!) x, Tensor r1, Tensor r2, str rotary_mode, int[] partial_slice"
         ") -> ()"
     );
-    ops.impl("inplace_partial_rotary_mul", torch::kPrivateUse1, &vllm_fl::inplace_partial_rotary_mul_npu);
 
 
 
@@ -2651,14 +2610,12 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
             "float glu_bias=0.0"
         ") -> (Tensor y, Tensor scale)"
     );
-    ops.impl("npu_dequant_swiglu_quant", torch::kPrivateUse1, &vllm_fl::npu_dequant_swiglu_quant);
 
     ops.def(
         "npu_scatter_nd_update_v2("
                 "Tensor(a!) var, Tensor indices, Tensor update"
             ") -> ()"
     );
-    ops.impl("npu_scatter_nd_update_v2", torch::kPrivateUse1, &vllm_fl::npu_scatter_nd_update_v2);
 
     // This operator is planned to be integrated into PTA in the near future.
     // Once that happens, the implementation in csrc will be removed.
@@ -2670,7 +2627,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "                            str layout_query='BSND', str layout_key='BSND',"
         "                            int sparse_count=2048, int sparse_mode=3) -> Tensor"
     );
-    ops.impl("npu_lightning_indexer_quant", torch::kPrivateUse1, &vllm_fl::npu_lightning_indexer_quant);
     // N-gram spec decode
     ops.def(
         "npu_ngram_spec_decode(Tensor(a!) token_ids, Tensor num_tokens_no_spec, "
@@ -2678,23 +2634,18 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
         "int vocab_size, int min_n, int max_n, int k) -> "
         "(Tensor token_ids, Tensor next_token_ids, Tensor draft_token_ids, Tensor num_valid_draft_tokens)"
     );
-    ops.impl("npu_ngram_spec_decode", torch::kPrivateUse1,
-             &vllm_fl::npu_ngram_spec_decode);
 
     ops.def(
         "chunk_gated_delta_rule_fwd_h(Tensor k, Tensor w, Tensor u, Tensor? g=None, *, Tensor? gk=None, Tensor? initial_state=None, bool? output_final_state=False, int? chunk_size=None, bool? save_new_value=True, int[]? cu_seqlens=None, int[]? chunk_indices=None, bool? use_exp2=False, bool? transpose_state_layout=False) -> (Tensor h_out, Tensor v_new_out, Tensor final_state_out)"
     );
-    ops.impl("chunk_gated_delta_rule_fwd_h", torch::kPrivateUse1, &vllm_fl::chunk_gated_delta_rule_fwd_h);
 
     ops.def(
         "chunk_fwd_o(Tensor q, Tensor k, Tensor v, Tensor h, float scale, *, Tensor? g=None, Tensor? g_gamma=None, int[]? cu_seqlens=None, int[]? chunk_indices=None, int? chunk_size=None, bool? transpose_state_layout=False) -> Tensor"
     );
-    ops.impl("chunk_fwd_o", torch::kPrivateUse1, &vllm_fl::chunk_fwd_o);
 
     ops.def(
         "store_kv_block(Tensor key_in, Tensor key_cache_in, Tensor group_len, Tensor group_key_idx,Tensor group_key_cache_idx, int block_size=0) -> ()"
     );
-    ops.impl("store_kv_block", torch::kPrivateUse1, &vllm_fl::store_kv_block);
     
     // Fused GDN gating.
     ops.def(

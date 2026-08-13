@@ -223,7 +223,9 @@ python tests/custom_ops_tests/test_causal_conv1d.py
 python tests/custom_ops_tests/test_fused_gdn_gating.py
 python tests/custom_ops_tests/test_gemma_rms_norm.py
 python tests/custom_ops_tests/test_recurrent_gated_delta_rule.py
-python tests/custom_ops_tests/test_chunk_gated_delta_rule_fwd_h.py
+python tests/custom_ops_tests/test_chunk_gated_delta_rule.py
+python tests/custom_ops_tests/test_chunk_gated_delta_rule_accuracy.py
+python tests/custom_ops_tests/test_moe_fused_custom.py
 
 # PTO GDN 算子（首次运行会触发 Bisheng JIT 编译）
 python tests/custom_ops_tests/test_pto_chunk_gdn.py
@@ -255,7 +257,7 @@ done
 | `test_fused_gdn_gating.py` | `npu_fused_gdn_gating` | CANN framework |
 | `test_gemma_rms_norm.py` | `npu_gemma_rms_norm` | CANN framework |
 | `test_recurrent_gated_delta_rule.py` | `npu_recurrent_gated_delta_rule` | CANN framework |
-| `test_chunk_gated_delta_rule_fwd_h.py` | `chunk_gated_delta_rule_fwd_h` | CANN framework |
 | `test_chunk_gated_delta_rule.py` | `npu_chunk_gated_delta_rule`（连接性） | CANN framework |
 | `test_chunk_gated_delta_rule_accuracy.py` | `npu_chunk_gated_delta_rule`（数值精度，fp32 参考 + Triton 交叉校验） | CANN framework |
+| `test_moe_fused_custom.py` | `moe_gating_top_k` / `npu_moe_init_routing_custom` | CANN framework |
 | `test_pto_chunk_gdn.py` | PTO GDN megakernel | Bisheng PTO |
