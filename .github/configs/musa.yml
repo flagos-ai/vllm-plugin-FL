@@ -12,21 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Platform registry — controls which platforms are tested in CI.
-#
-# Each key under `platforms` must match a config file name in this directory
-# (e.g., "cuda" -> cuda.yml, "ascend" -> ascend.yml).
-#
-# Set `enabled: false` to skip a platform without removing its config file.
+# MUSA Hardware Configuration
+# This file defines CI/CD settings for MUSA testing.
 
-platforms:
-  cuda:
-    enabled: true
-  ascend:
-    enabled: false
-  hygon:
-    enabled: true
-  metax:
-    enabled: true
-  musa:
-    enabled: true
+platform: musa
+
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci
+
+runner_labels:
+  - mt-cicd-vllm-plugin
+
+container_volumes:
+  - /data:/data
+
+container_options: >-
+  --hostname vllm-plugin-fl
+  --privileged
+  --ipc=host
+  --shm-size=64g
+  --env GEMS_VENDOR=mthreads
+  --env VLLM_PLUGINS=fl
+  --env MTHREADS_VISIBLE_DEVICES=all

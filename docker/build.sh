@@ -36,6 +36,15 @@ METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
 METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-registry.mthreads.com/mcconline/inference/vllm:v0.20.2-ph1-4.3.5-torch2.7.1-v1.1.0}"
+MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
+MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.20.2}"
+MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
+MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.7.1}"
+MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.0.0}"
+ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.20.2}"
+ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
+ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3e6528cf04f5f964a7b0fa6628de6f0410dbfd02}"
 HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6}"
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.20.2}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
@@ -142,7 +151,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -162,12 +171,22 @@ VERSIONS (override via environment variables):
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
+    ASCEND_VLLM_VERSION  vLLM version in the validated image (default: ${ASCEND_VLLM_VERSION})
+    ASCEND_BASE_IMAGE    Validated Ascend vLLM base image (default: ${ASCEND_BASE_IMAGE})
+    ASCEND_FLAGGEMS_VERSION FlagGems git ref for Ascend (default: ${ASCEND_FLAGGEMS_VERSION})
   MetaX:
     METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
     METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
     METAX_PYTHON_VERSION Python version used in generated image tag (default: ${METAX_PYTHON_VERSION})
     METAX_PYTHON_TAG     Python tag fragment used in generated image tag (default: ${METAX_PYTHON_TAG})
     METAX_VLLM_VERSION   vLLM version installed in empty mode (default: ${METAX_VLLM_VERSION})
+  MUSA:
+    MUSA_BASE_IMAGE      Moore Threads base image (default: ${MUSA_BASE_IMAGE})
+    MUSA_VERSION         MUSA version used in image tag (default: ${MUSA_VERSION})
+    MUSA_VLLM_VERSION    vLLM empty-mode version (default: ${MUSA_VLLM_VERSION})
+    MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
+    MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
+    MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
   Hygon:
     HYGON_BASE_IMAGE     Base image (default: ${HYGON_BASE_IMAGE})
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
@@ -182,17 +201,21 @@ EXAMPLES:
     # Build CUDA dev image
     ./build.sh --target dev
 
-    # Build Ascend CI image for 910b
+    # Build the validated Ascend CI image
     ./build.sh --platform ascend --target ci
 
-    # Build Ascend CI image for A3
-    CANN_CHIP=a3 ./build.sh --platform ascend --target ci --build-arg SOC_VERSION=ascend910_9391
+    # Override the Ascend base image when validating a new stack
+    ASCEND_BASE_IMAGE=quay.io/ascend/vllm-ascend:v0.20.2rc1-a3 \
+        ./build.sh --platform ascend --target ci
 
     # Build Hygon CI image
     ./build.sh --platform hygon --target ci
 
     # Build MetaX CI image
     ./build.sh --platform metax --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
+
+    # Build Moore Threads MUSA dev image
+    ./build.sh --platform musa --target dev
 
     # Build with custom PyPI mirror
     ./build.sh --target dev --index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -257,12 +280,11 @@ fi
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 
 # Platform-specific build args and auto-tag
-BUILD_ARGS=(
-    --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
-)
+BUILD_ARGS=()
 
 if [[ "${PLATFORM}" == "cuda" ]]; then
     BUILD_ARGS+=(
+        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
         --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
         --build-arg "VLLM_VERSION=${VLLM_VERSION}"
@@ -274,19 +296,19 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
         IMAGE_TAG="cuda${CUDA_VERSION}-ubuntu${UBUNTU_VERSION}-py${PYTHON_VERSION}-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
+    VLLM_VERSION="${ASCEND_VLLM_VERSION}"
     BUILD_ARGS+=(
-        --build-arg "CANN_VERSION=${CANN_VERSION}"
-        --build-arg "CANN_CHIP=${CANN_CHIP}"
-        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
-        --build-arg "VLLM_VERSION=${VLLM_VERSION}"
+        --build-arg "ASCEND_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
+        --build-arg "FLAGGEMS_VERSION=${ASCEND_FLAGGEMS_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="cann${CANN_VERSION}-${CANN_CHIP}-ubuntu${UBUNTU_VERSION}-py${PYTHON_VERSION}-${TARGET}"
+        IMAGE_TAG="ascend-vllm${VLLM_VERSION}-a3-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     PYTHON_VERSION="${HYGON_PYTHON_VERSION}"
     VLLM_VERSION="${HYGON_VLLM_VERSION}"
     BUILD_ARGS+=(
+        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
         --build-arg "HYGON_BASE_IMAGE=${HYGON_BASE_IMAGE}"
         --build-arg "PYTHON_VERSION=${HYGON_PYTHON_VERSION}"
         --build-arg "VLLM_VERSION=${HYGON_VLLM_VERSION}"
@@ -311,8 +333,18 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="vllm-metax-${METAX_VLLM_VERSION}-maca.ai${METAX_MACA_VERSION}-torch2.8-${METAX_PYTHON_TAG}-ubuntu22.04-amd64-ci-git"
     fi
+elif [[ "${PLATFORM}" == "musa" ]]; then
+    PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
+    VLLM_VERSION="${MUSA_VLLM_VERSION}"
+    BUILD_ARGS+=(
+        --build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}"
+        --build-arg "FLAGGEMS_VERSION=${MUSA_FLAGGEMS_VERSION}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="musa${MUSA_VERSION}-vllm${VLLM_VERSION}-torch${MUSA_TORCH_VERSION}-py${MUSA_PYTHON_VERSION}-${TARGET}"
+    fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', or 'metax'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', or 'musa'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -323,8 +355,8 @@ msg "  Target:         ${TARGET}"
 if [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
-    msg "  CANN:           ${CANN_VERSION}"
-    msg "  Chip:           ${CANN_CHIP}"
+    msg "  Base image:     ${ASCEND_BASE_IMAGE}"
+    msg "  FlagGems:       ${ASCEND_FLAGGEMS_VERSION}"
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  DTK:            ${HYGON_DTK_VERSION}"
     msg "  Hygon Python:   ${HYGON_PYTHON_VERSION}"
@@ -336,9 +368,16 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
     msg "  MACA:           ${METAX_MACA_VERSION}"
     msg "  MetaX Python:   ${METAX_PYTHON_VERSION}"
     msg "  Base image:     ${METAX_BASE_IMAGE}"
+elif [[ "${PLATFORM}" == "musa" ]]; then
+    msg "  MUSA:           ${MUSA_VERSION}"
+    msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
+    msg "  MUSA PyTorch:   ${MUSA_TORCH_VERSION}"
+    msg "  FlagGems:       ${MUSA_FLAGGEMS_VERSION}"
 fi
-msg "  Ubuntu:         ${UBUNTU_VERSION}"
-msg "  Python:         ${PYTHON_VERSION}"
+if [[ "${PLATFORM}" != "ascend" ]]; then
+    msg "  Ubuntu:         ${UBUNTU_VERSION}"
+    msg "  Python:         ${PYTHON_VERSION}"
+fi
 msg "  vLLM:           ${VLLM_VERSION}"
 msg ""
 

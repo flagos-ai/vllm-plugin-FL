@@ -168,7 +168,7 @@ pytest -m multi_gpu         # Only multi-GPU tests
 
 ## Model YAML Config Format
 
-E2E tests are driven by YAML configs under `tests/models/<model>/<case>.yaml`. Each config defines the LLM engine parameters and test behavior.
+E2E tests are driven by YAML configs under `tests/models/<model>/<case>.yaml`. Each config defines the base LLM engine parameters and test behavior. For shared model families, keep these files as CUDA baseline configs and put platform/device differences in `tests/platforms/<platform>.yaml`.
 
 ### Text model example
 
@@ -244,6 +244,8 @@ generate:
 | `serve.api_key` | str | No | API key for authenticated endpoints |
 | `serve.extra_engine` | dict | No | Engine param overrides for serving only |
 
+Platform `device_overrides.<device>.<case>` can override any `llm`, `generate`, or `serve` field for that device. A `null` value removes the inherited key from the base model YAML.
+
 ## Platform Config Format
 
 Platform configs (`tests/platforms/<platform>.yaml`) define which tests to run per device type, tolerance settings, and environment defaults.
@@ -262,6 +264,17 @@ device_types:
 tolerance:
   inference:
     default: {exact: true}
+
+device_overrides:
+  my_device:
+    tolerance:
+      inference:
+        default: {rtol: 1e-4, atol: 1e-7}
+    27b_tp2_eager:
+      llm:
+        gpu_memory_utilization: 0.9
+      serve:
+        startup_retries: 120
 
 unsupported_features: []        # Strings to match against model names for skipping
 
@@ -291,9 +304,10 @@ a100:
 
 ### Adding a new E2E model test
 
-1. Create a YAML config: `tests/models/<model>/<case>.yaml`
-2. Register it in the platform config: `tests/platforms/cuda.yaml` (and/or `ascend.yaml`)
-3. Done — no Python code needed. The unified smoke tests handle the rest.
+1. Create or reuse a baseline YAML config: `tests/models/<model>/<case>.yaml`
+2. Put device-specific differences in `tests/platforms/<platform>.yaml` under `device_overrides.<device>.<case>`
+3. Register the shared case name in the target device's E2E test list
+4. Done — no Python code needed. The unified smoke tests handle the rest.
 
 ### Adding a unit test
 
@@ -371,5 +385,5 @@ def test_my_kernel(device):
 | `mock_tensor` | function | `torch.randn(2, 4, 8)` on test device |
 | `platform_config` | session | Loaded `PlatformConfig` (when `--platform` is set) |
 | `tolerance` | session | Tolerance lookup helper from platform config |
-| `model_config` | session | `ModelConfig.load` callable |
+| `model_config` | session | Platform-aware `ModelConfig.load` callable |
 | `save_gold_mode` | session | Whether `--save-gold` was passed |

@@ -29,6 +29,19 @@ tolerance:
       rtol: 1e-2
       atol: 1e-2
 
+device_overrides:
+  c550:
+    cases:
+      - qwen3_6/27b_tp4_eager
+      - qwen3_6/27b_tp4_graph
+      - qwen3_6/35b_a3b_tp4_eager
+      - qwen3_6/35b_a3b_tp4_graph
+    llm:
+      gpu_memory_utilization: 0.90
+      trust_remote_code: true
+    serve:
+      startup_retries: 300
+
 env_defaults:
   GEMS_VENDOR: "metax"
   VLLM_PLUGINS: "fl"
@@ -40,9 +53,16 @@ c550:
   tests:
     e2e:
       inference:
-        qwen3_6: ["27b_tp2_eager_metax"]
+        qwen3_6: ["27b_tp4_eager"]
       serving:
-        qwen3_6: ["35b_a3b_tp2_eager_metax"]
+        qwen3_6:
+          - "27b_tp4_eager"
+          - "35b_a3b_tp4_eager"
+          - "27b_tp4_graph"
+          - "35b_a3b_tp4_graph"
+    timeouts:
+      e2e:
+        serving: 180
     functional:
       include: "*"
       exclude: []
