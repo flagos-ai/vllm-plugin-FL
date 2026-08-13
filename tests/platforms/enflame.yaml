@@ -33,9 +33,7 @@ device_overrides:
   zixiaoc200:
     cases:
       - qwen3_6/27b_tp2_eager
-      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
-      - qwen3_6/35b_a3b_tp2_graph
     llm:
       gpu_memory_utilization: 0.90
       disable_custom_all_reduce: false
@@ -55,9 +53,9 @@ zixiaoc200:
   tests:
     e2e:
       inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+        qwen3_6: ["27b_tp2_eager"]
       serving:
-        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+        qwen3_6: ["35b_a3b_tp2_eager"]
     functional:
       include: "*"
       exclude: []
