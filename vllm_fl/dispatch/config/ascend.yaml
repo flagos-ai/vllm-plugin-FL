@@ -57,17 +57,16 @@ flagos_blacklist:
   - allclose
   - mean_dim
   - chunk_gated_delta_rule_fwd
-  - rsqrt # performance loss
   - index_select
-  - true_divide
   - silu
-  - silu_and_mul # performance loss end
+  - silu_and_mul # performance loss
   - to_copy
   - _to_copy
   - zeros
   - acos
   - copy_
-  - fill_scalar_
+  - fill_scalar_ # broken on ascend: ZeroDivisionError when filling empty tensor (grid=min(40,N)=0)
+  - fill_tensor_ # same empty-tensor bug as fill_scalar_
   - sum_dim
   - exponential_
   - mm
@@ -77,17 +76,21 @@ flagos_blacklist:
   - floor_divide
   - cumsum
   - cumsum_out
-  - mul
   - reciprocal
   - repeat
   - randn
-  - add
   - ge_scalar
-  - sub
+  - pow_scalar # broken on ascend: tl_extra_shim.pow is a libdevice stub returning None
+  - pow_tensor_scalar # same broken shim pow
+  - pow_tensor_scalar_ # same broken shim pow
+  - pow_tensor_tensor # same broken shim pow
+  - pow_tensor_tensor_ # same broken shim pow
+  - gelu # broken on ascend: gelu_tanh kernel calls the stubbed shim pow
+  - gelu_ # same broken shim pow
+  - gelu_backward # same broken shim pow
   - bitwise_and
   - bitwise_not
   - slice_scatter
-  - fill_tensor_
   - conv1d
   - conv2d
   - uniform_
@@ -107,6 +110,69 @@ flagos_blacklist:
   - _flash_attention_forward
   - scatter
   - scatter_
+  # top5 kernel flaggems(1>%)
+  - addmm
+  - argmax
+  - add
+  - mul
+  - index_put_
+  # torch_npu's index_put_ internally dispatches to aten::_index_put_impl_, which
+  # FlagGems also registers -- blacklisting index_put_ alone is NOT enough.
+  # Its triton kernel launches with grid=0 on empty indices (coreDim=0 -> crash).
+  - _index_put_impl_
+
+  # --- Added from full-op sweep (scripts/flaggems_sweep.py, 2026-08-07) ---
+  # Triton compile failures on ascend (stubbed libdevice shims etc.)
+  - tan
+  - tan_
+  - tanh
+  - tanh_
+  - atan
+  - atan_
+  - atan2
+  - atan2_out
+  - sigmoid
+  - sigmoid_
+  - glu
+  - nan_to_num
+  - isfinite
+  - isinf
+  - isnan
+  - floor_divide_
+  - silu_backward
+  - nll_loss_backward
+  - batch_norm
+  - weight_norm_interface_backward
+  # MLIR lowering failures (triton-ascend adapter)
+  - var
+  - var_correction
+  - var_dim
+  - softmax_backward
+  # FlagGems impls that hard-require CUDA tensors
+  - arcsinh
+  - arcsinh_out
+  - i0_
+  - prelu
+  - special_i0e
+  - special_i0e_out
+  - special_i1
+  - select_backward
+  - soft_margin_loss
+  - _safe_softmax
+  - t_copy
+  - t_copy_out
+  - lift_fresh_copy
+  - zero
+  - zero_out
+  # Real limitation: FlagGems impl raises "varlen is not supported yet".
+  # (the yaml entry "_flash_attention_forward" above never matched this func name)
+  - flash_attention_forward
+  # constant_pad_nd hangs the aicore in the ViT attention pad path
+  # (head_size 72->128 F.pad on large dummy images), found by bisect 2026-08-13.
+  - pad
+  # aten::constant_pad_nd is bound to func 'constant_pad_nd', NOT 'pad' --
+  # blacklisting 'pad' alone does NOT disable it (F.pad constant mode dispatches here).
+  - constant_pad_nd
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
