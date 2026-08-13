@@ -7,6 +7,7 @@ from . import utils_patch
 from . import chunk_delta_h
 from . import topk_topp_sampler
 from . import gdn_linear_attn  # noqa: F401 — register MacaGatedDeltaNetAttention
+from . import vllm024_compat  # noqa: F401 — vLLM 0.24.0 shims (load_ptr, penalties, UVA)
 
 # --------------------------------------------------
 # MetaX C550 does not support third-party Triton kernels (Triton upgrade required).

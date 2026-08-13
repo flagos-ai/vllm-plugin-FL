@@ -22,7 +22,11 @@ if current_platform.is_out_of_tree():
             return None
 
     get_scheduler_metadata = _dummy_ops.get_scheduler_metadata
-    reshape_and_cache_flash = ops.reshape_and_cache_flash
+    # empty wheel ships no compiled _C_cache_ops; use the pure-Triton
+    # flag_gems implementation (same approach as the 0.20.2 fix, #333).
+    # Re-exported for the metax FA backend (flash_attn.py imports it from
+    # this module), so it is intentionally unused here.
+    from flag_gems import reshape_and_cache_flash  # noqa: F401
 
 
 def get_flash_attn_version(
