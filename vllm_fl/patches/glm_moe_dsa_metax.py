@@ -23,6 +23,23 @@ def is_glm_w8a8_int8_moe(quant_method) -> bool:
     return isinstance(quant_method, CompressedTensorsW8A8Int8MoEMethod)
 
 
+def _patch_mla_prefill() -> None:
+    from flash_attn import flash_attn_varlen_func
+    from vllm import _custom_ops as ops
+    from vllm.v1.attention.backends import fa_utils
+
+    def get_scheduler_metadata(*args, **kwargs):
+        return None
+
+    def is_available() -> bool:
+        return True
+
+    fa_utils.flash_attn_varlen_func = flash_attn_varlen_func
+    fa_utils.reshape_and_cache_flash = ops.reshape_and_cache_flash
+    fa_utils.get_scheduler_metadata = get_scheduler_metadata
+    fa_utils.is_flash_attn_varlen_func_available = is_available
+
+
 def _quantize_indexer_query_fp8(
     x: torch.Tensor,
     group_size: int,
@@ -243,6 +260,7 @@ def _patch_int8_moe() -> None:
 def apply_model_patches() -> None:
     global _glm_moe_dsa_metax_active
 
+    _patch_mla_prefill()
     _patch_model_loader()
     _patch_sparse_indexer()
     _patch_int8_moe()

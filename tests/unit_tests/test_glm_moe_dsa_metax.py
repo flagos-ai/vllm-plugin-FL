@@ -102,6 +102,31 @@ def test_model_loader_delegates_non_int8_indexer_weights(monkeypatch):
     assert delegated == [args]
 
 
+def test_mla_prefill_uses_metax_flash_attention(monkeypatch):
+    from vllm import _custom_ops as ops
+    from vllm.v1.attention.backends import fa_utils
+
+    expected_flash_attn = object()
+    flash_attn_module = ModuleType("flash_attn")
+    flash_attn_module.flash_attn_varlen_func = expected_flash_attn
+    monkeypatch.setitem(sys.modules, "flash_attn", flash_attn_module)
+    monkeypatch.setattr(fa_utils, "flash_attn_varlen_func", None, raising=False)
+    monkeypatch.setattr(fa_utils, "reshape_and_cache_flash", None, raising=False)
+    monkeypatch.setattr(fa_utils, "get_scheduler_metadata", None, raising=False)
+    monkeypatch.setattr(
+        fa_utils,
+        "is_flash_attn_varlen_func_available",
+        lambda: False,
+    )
+
+    glm_moe_dsa_metax._patch_mla_prefill()
+
+    assert fa_utils.flash_attn_varlen_func is expected_flash_attn
+    assert fa_utils.reshape_and_cache_flash is ops.reshape_and_cache_flash
+    assert fa_utils.get_scheduler_metadata() is None
+    assert fa_utils.is_flash_attn_varlen_func_available()
+
+
 def test_dynamic_activation_int8_moe_keeps_w8a8_without_static_scales():
     scale = torch.ones(2)
     config = _make_int8_moe_quant_config(
