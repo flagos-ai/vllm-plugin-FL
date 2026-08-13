@@ -241,6 +241,42 @@ def inspect_vllm_compressed_tensors_api() -> CompatibilityReport:
     )
 
 
+def _configure_hygon_generic_wna16_moe(
+    report: CompatibilityReport,
+) -> None:
+    """Route Hygon WNA16 MoE away from NVIDIA Marlin."""
+
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", None) != "hygon":
+        return
+
+    if not report.moe_wna16:
+        return
+
+    from vllm_fl.utils import is_oot_enabled
+
+    if not is_oot_enabled():
+        return
+
+    try:
+        from vllm_fl.quantization.marlin import (
+            configure_wna16_moe_backend,
+        )
+
+        backend = configure_wna16_moe_backend()
+        logger.info(
+            "compressed-tensors WNA16 MoE backend for Hygon: %s",
+            backend,
+        )
+    except (ImportError, AttributeError, OSError, RuntimeError) as exc:
+        logger.warning(
+            "Could not configure Hygon compressed-tensors WNA16 MoE; "
+            "vLLM's upstream backend selection remains unchanged: %s",
+            exc,
+        )
+
+
 def register_compressed_tensors_oot() -> CompatibilityReport:
     """Configure compressed-tensors runtime selection for the FL platform.
 
@@ -274,6 +310,7 @@ def register_compressed_tensors_oot() -> CompatibilityReport:
     )
 
     if not is_fl_wna16_moe_available():
+        _configure_hygon_generic_wna16_moe(report)
         return report
 
     # Linear registration is independent and handled by

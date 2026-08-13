@@ -31,6 +31,12 @@ _UPSTREAM_MODULES = (
 
 def is_flaggems_wna16_moe_available() -> bool:
     from vllm_fl.utils import is_oot_enabled, use_flaggems_op
+    from vllm.platforms import current_platform
+
+    # Hygon WNA16 packed MoE weights require the generic vLLM loading path.
+    # The FlagGems path currently creates an incompatible parameter layout.
+    if getattr(current_platform, "vendor_name", None) == "hygon":
+        return False
 
     return (
         is_oot_enabled()

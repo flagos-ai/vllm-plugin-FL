@@ -23,6 +23,11 @@ from vllm.model_executor.kernels.linear import (
 )
 from vllm.scalar_type import scalar_types
 
+from vllm.model_executor.kernels.linear.mixed_precision.triton_w4a16 import (
+    TRITON_W4A16_SUPPORTED_GROUP_SIZES,
+    TritonW4A16LinearKernel,
+)
+
 from . import kernels
 
 
@@ -102,17 +107,103 @@ class FLWNA16LinearKernel(MPLinearKernel):
         )
         return output.reshape(*original_shape[:-1], output.shape[-1])
 
+class HygonTritonWNA16LinearKernel(TritonW4A16LinearKernel):
+    """Reuse vLLM's Triton W4A16 kernel on Hygon OOT devices."""
+
+    @classmethod
+    def can_implement(
+        cls,
+        config: MPLinearLayerConfig,
+    ) -> tuple[bool, str | None]:
+        from vllm.platforms import current_platform
+
+        if getattr(current_platform, "vendor_name", None) != "hygon":
+            return False, "Hygon Triton WNA16 only targets Hygon"
+
+        if config.weight_type not in cls.SUPPORTED_QUANT_TYPES:
+            return (
+                False,
+                f"Quant type {config.weight_type} not supported; "
+                f"supported: {cls.SUPPORTED_QUANT_TYPES}",
+            )
+
+        if config.act_type not in (torch.float16, torch.bfloat16):
+            return False, "Only float16/bfloat16 activations are supported"
+
+        output_size = config.partition_weight_shape[1]
+        if output_size % 8 != 0:
+            return (
+                False,
+                f"Output features ({output_size}) must be divisible by 8 "
+                "(8 int4 values packed per int32)",
+            )
+
+        if config.has_g_idx:
+            return (
+                False,
+                "Activation reordering (g_idx) is not supported by "
+                "HygonTritonWNA16LinearKernel",
+            )
+
+        group_size = config.group_size
+        full_input_size = config.full_weight_shape[0]
+
+        if (
+            group_size != -1
+            and group_size not in TRITON_W4A16_SUPPORTED_GROUP_SIZES
+            and group_size != full_input_size
+        ):
+            return (
+                False,
+                f"Group size {group_size} not supported; "
+                f"supported: {TRITON_W4A16_SUPPORTED_GROUP_SIZES} "
+                f"or full K ({full_input_size})",
+            )
+
+        input_size = config.partition_weight_shape[0]
+        effective_group_size = (
+            group_size if group_size != -1 else input_size
+        )
+
+        if input_size % effective_group_size != 0:
+            return (
+                False,
+                f"Input features {input_size} not divisible by "
+                f"group size {effective_group_size}",
+            )
+
+        return True, None
+
 
 def register_fl_wna16_linear_kernel(registry: dict) -> bool:
     """Prepend the FL kernel when a W4A16 or W8A16 backend is available."""
-    if not (kernels.is_wna16_gemm_available() or kernels.is_w8a16_gemm_available()):
+    from vllm.platforms import PlatformEnum, current_platform
+
+    has_fl_kernel = (
+        kernels.is_wna16_gemm_available()
+        or kernels.is_w8a16_gemm_available()
+    )
+    is_hygon = getattr(current_platform, "vendor_name", None) == "hygon"
+
+    if not (has_fl_kernel or is_hygon):
         return False
-    from vllm.platforms import PlatformEnum
 
     candidates = registry.setdefault(PlatformEnum.OOT, [])
-    if FLWNA16LinearKernel not in candidates:
+
+    # Hygon is represented as an OOT platform, but its
+    # HIP Triton runtime can execute the upstream Triton W4A16 kernel.
+    if is_hygon and HygonTritonWNA16LinearKernel not in candidates:
+        candidates.insert(0, HygonTritonWNA16LinearKernel)
+
+    # Prefer the plugin-local fixed operator when it is available.
+    if has_fl_kernel and FLWNA16LinearKernel not in candidates:
         candidates.insert(0, FLWNA16LinearKernel)
+
     return True
 
 
-__all__ = ["FLWNA16LinearKernel", "register_fl_wna16_linear_kernel"]
+__all__ = [
+    "FLWNA16LinearKernel",
+    "HygonTritonWNA16LinearKernel",
+    "register_fl_wna16_linear_kernel",
+]

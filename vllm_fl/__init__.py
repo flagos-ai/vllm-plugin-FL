@@ -139,6 +139,22 @@ def register_router():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+
+    # Apply Hygon-specific GLM-5.2 compatibility patches only on Hygon.
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", None) == "hygon":
+        from vllm_fl.patches.hygon_glm_kv_cache import apply_hygon_glm_kv_cache_patch
+        from vllm_fl.patches.glm_index_share import apply_glm_index_share_patches
+
+        try:
+            apply_hygon_glm_kv_cache_patch()
+            apply_glm_index_share_patches()
+        except Exception as e:
+            logger.exception(f"Apply GLM IndexShare patches failed: {str(e)}")
+            raise
+
+
     from vllm import ModelRegistry
 
     _register_flagcx_connector()
