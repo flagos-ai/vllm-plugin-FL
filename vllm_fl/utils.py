@@ -97,6 +97,15 @@ def use_flaggems(default: bool = True) -> bool:
     return value.lower() in ("true", "1")
 
 
+def use_flaggems_vllm() -> bool:
+    """Check if flaggems_vllm should be used for non-aten ops.
+
+    Returns:
+        True if VLLM_FL_USE_FLAGGEMS_VLLM is "1" or "true" (default: True).
+    """
+    return os.environ.get("VLLM_FL_USE_FLAGGEMS_VLLM", "1").lower() in ("1", "true")
+
+
 def get_flag_gems_whitelist_blacklist() -> Tuple[
     Optional[list[str]], Optional[list[str]]
 ]:

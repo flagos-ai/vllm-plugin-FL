@@ -40,9 +40,13 @@ from vllm.v1.attention.backends.utils import (
 )
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.platforms.interface import DeviceCapability
-from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
-# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash,
-# from flag_gems import reshape_and_cache_flash
+from vllm_fl.utils import use_flaggems_vllm
+
+if use_flaggems_vllm():
+    from flaggems_vllm.ops.flash_attn_varlen_func import flash_attn_varlen_func
+    from flaggems_vllm.ops.reshape_and_cache_flash import reshape_and_cache_flash
+else:
+    from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
 
 logger = init_logger(__name__)
 

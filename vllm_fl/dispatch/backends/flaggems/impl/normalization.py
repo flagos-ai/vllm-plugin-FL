@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 import torch
+from vllm_fl.utils import use_flaggems_vllm
 
 
 def rms_norm_flaggems(
@@ -27,7 +28,10 @@ def rms_norm_flaggems(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    from flag_gems.modules.normalization import gems_rms_forward
+    if use_flaggems_vllm():
+        from flaggems_vllm.ops.rms_norm import gems_rms_forward
+    else:
+        from flag_gems import rms_norm_forward as gems_rms_forward
 
     # Get weight and epsilon from obj
     weight = obj.weight

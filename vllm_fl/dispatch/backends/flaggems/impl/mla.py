@@ -23,7 +23,13 @@ from vllm.model_executor.layers.attention.mla_attention import (
     MLACommonMetadata,
 )
 
-from flag_gems import flash_attn_varlen_func, flash_mla
+from vllm_fl.utils import use_flaggems_vllm
+
+if use_flaggems_vllm():
+    from flaggems_vllm.ops.flash_attn_varlen_func import flash_attn_varlen_func
+    from flaggems_vllm.ops.flash_mla import flash_mla
+else:
+    from flag_gems import flash_attn_varlen_func, flash_mla
 
 logger = init_logger(__name__)
 

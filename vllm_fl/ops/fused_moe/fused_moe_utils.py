@@ -328,10 +328,17 @@ class TritonExpertsFL(TritonExperts):
         # Fast path (no LoRA, NVIDIA only): let FlagGems own both expert GEMMs
         # for unquantized and W8A16 inputs.
         if self._lora_context is None and current_platform.is_cuda():
-            import flag_gems
+            from vllm_fl.utils import use_flaggems_vllm
+
+            if use_flaggems_vllm():
+                import flaggems_vllm
+                fused_experts_impl = flaggems_vllm.fused_experts_impl
+            else:
+                import flag_gems
+                fused_experts_impl = flag_gems.fused_experts_impl
 
             output.copy_(
-                flag_gems.fused_experts_impl(
+                fused_experts_impl(
                     hidden_states,
                     w1,
                     w2,

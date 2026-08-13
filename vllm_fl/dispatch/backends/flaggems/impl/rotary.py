@@ -7,6 +7,7 @@ FlagGems rotary embedding operator implementations.
 from __future__ import annotations
 
 import torch
+from vllm_fl.utils import use_flaggems_vllm
 
 
 def rotary_embedding_flaggems(
@@ -35,7 +36,10 @@ def rotary_embedding_flaggems(
     Returns:
         Tuple of (embedded_query, embedded_key)
     """
-    from flag_gems.modules.rotary_embedding import gems_rope_forward
+    if use_flaggems_vllm():
+        from flaggems_vllm.ops.rope import gems_rope_forward
+    else:
+        from flag_gems import apply_rotary_pos_emb as gems_rope_forward
 
     return gems_rope_forward(
         query,

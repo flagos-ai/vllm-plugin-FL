@@ -5,6 +5,7 @@ FlagGems implementations for mHC (Multi-Head Convolution) operators.
 """
 
 import torch
+from vllm_fl.utils import use_flaggems_vllm
 
 
 def mhc_pre_flaggems(
@@ -21,14 +22,19 @@ def mhc_pre_flaggems(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """FlagGems native implementation of mhc_pre."""
     import importlib
-    from flag_gems import mhc_pre
 
-    # Workaround: flag_gems uses a WeakKeyDictionary with tensor keys.
+    if use_flaggems_vllm():
+        from flaggems_vllm.ops.mhc.mhc_pre import mhc_pre
+        _mhc_pre_mod = importlib.import_module('flaggems_vllm.ops.mhc.mhc_pre')
+    else:
+        from flag_gems import mhc_pre
+        _mhc_pre_mod = importlib.import_module('flag_gems.fused.mhc.mhc_pre')
+
+    # Workaround: uses a WeakKeyDictionary with tensor keys.
     # WeakKeyDictionary.get() creates a new weakref and dict lookup calls
     # ref.__eq__ which delegates to tensor.__eq__, returning a multi-element
     # tensor instead of a scalar bool — causing RuntimeError.
     # Patch the module's _FN_BF16_CACHE with an id-based cache.
-    _mhc_pre_mod = importlib.import_module('flag_gems.fused.mhc.mhc_pre')
     _patch_fn_bf16_cache(_mhc_pre_mod)
 
     return mhc_pre(
@@ -79,7 +85,10 @@ def mhc_post_flaggems(
     comb: torch.Tensor,
 ) -> torch.Tensor:
     """FlagGems native implementation of mhc_post."""
-    from flag_gems import mhc_post
+    if use_flaggems_vllm():
+        from flaggems_vllm.ops.mhc_post import mhc_post
+    else:
+        from flag_gems import mhc_post
 
     return mhc_post(x, residual, post, comb)
 
@@ -96,7 +105,10 @@ def hc_head_fused_kernel_flaggems(
     hc_mult: int,
 ) -> None:
     """FlagGems native implementation of hc_head_fused_kernel. Mutates `out` in-place."""
-    from flag_gems import hc_head_fused_kernel
+    if use_flaggems_vllm():
+        from flaggems_vllm.ops.hc_head_fused_kernel import hc_head_fused_kernel
+    else:
+        from flag_gems import hc_head_fused_kernel
 
     hc_head_fused_kernel(
         hs_flat, fn, hc_scale, hc_base, out,
