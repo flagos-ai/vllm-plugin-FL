@@ -12,6 +12,17 @@ def is_glm_moe_dsa_metax_active() -> bool:
     return _glm_moe_dsa_metax_active
 
 
+def is_glm_w8a8_int8_moe(quant_method) -> bool:
+    if not is_glm_moe_dsa_metax_active():
+        return False
+
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 import (  # noqa: E501
+        CompressedTensorsW8A8Int8MoEMethod,
+    )
+
+    return isinstance(quant_method, CompressedTensorsW8A8Int8MoEMethod)
+
+
 def _quantize_indexer_query_fp8(
     x: torch.Tensor,
     group_size: int,
@@ -99,7 +110,14 @@ def _load_int8_indexer_wk(
 def _patch_model_loader() -> None:
     from vllm.model_executor.models import deepseek_v2
 
-    deepseek_v2._try_load_fp8_indexer_wk = _load_int8_indexer_wk
+    original_indexer_loader = deepseek_v2._try_load_fp8_indexer_wk
+
+    def load_indexer_wk(*args):
+        if _load_int8_indexer_wk(*args):
+            return True
+        return original_indexer_loader(*args)
+
+    deepseek_v2._try_load_fp8_indexer_wk = load_indexer_wk
     deepseek_v2.per_token_group_quant_fp8 = _quantize_indexer_query_fp8
 
 
@@ -189,6 +207,10 @@ def _make_int8_moe_quant_config(
     from vllm.model_executor.layers.fused_moe.config import (
         int8_w8a8_moe_quant_config,
         int8_w8a16_moe_quant_config,
+    )
+
+    assert (a1_scale is None) == (a2_scale is None), (
+        "a1_scale and a2_scale must both be provided or both be None"
     )
 
     if a1_scale is None and not per_act_token_quant:

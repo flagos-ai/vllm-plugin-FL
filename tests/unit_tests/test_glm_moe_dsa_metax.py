@@ -4,12 +4,14 @@ import importlib
 import sys
 from types import ModuleType, SimpleNamespace
 
+import pytest
 import torch
-import vllm_fl
+
 from vllm import platforms
 from vllm.model_executor.models import ModelRegistry
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
+import vllm_fl
 from vllm_fl import dispatch
 from vllm_fl.dispatch.backends.flaggems.impl import (
     flashmla_sparse as gems_sparse_mla,
@@ -23,11 +25,11 @@ from vllm_fl.dispatch.backends.vendor.metax.impl.attention.ops import (
 from vllm_fl.ops.fused_moe import layer, router
 from vllm_fl.ops.fused_moe.router import _glm_grouped_topk
 from vllm_fl.patches import glm_moe_dsa_metax
-from vllm_fl.platform import PlatformFL
 from vllm_fl.patches.glm_moe_dsa_metax import (
     _load_int8_indexer_wk,
     _make_int8_moe_quant_config,
 )
+from vllm_fl.platform import PlatformFL
 
 
 class _FusedWeight:
@@ -71,6 +73,35 @@ def test_load_int8_indexer_weight_into_bf16_fused_projection():
     assert loaded == {"model.layers.0.self_attn.indexer.wk_weights_proj.weight"}
 
 
+def test_model_loader_delegates_non_int8_indexer_weights(monkeypatch):
+    delegated = []
+
+    from vllm.model_executor.models import deepseek_v2
+
+    monkeypatch.setattr(
+        deepseek_v2,
+        "_try_load_fp8_indexer_wk",
+        lambda *args: delegated.append(args) or True,
+    )
+    monkeypatch.setattr(
+        deepseek_v2,
+        "per_token_group_quant_fp8",
+        deepseek_v2.per_token_group_quant_fp8,
+    )
+    glm_moe_dsa_metax._patch_model_loader()
+
+    args = (
+        "model.layers.0.self_attn.indexer.wk.weight",
+        torch.zeros(2, 2, dtype=torch.bfloat16),
+        {},
+        {},
+        set(),
+        set(),
+    )
+    assert deepseek_v2._try_load_fp8_indexer_wk(*args)
+    assert delegated == [args]
+
+
 def test_dynamic_activation_int8_moe_keeps_w8a8_without_static_scales():
     scale = torch.ones(2)
     config = _make_int8_moe_quant_config(
@@ -81,6 +112,13 @@ def test_dynamic_activation_int8_moe_keeps_w8a8_without_static_scales():
 
     assert config.use_int8_w8a8
     assert not config.use_int8_w8a16
+
+
+def test_int8_moe_activation_scales_must_be_paired():
+    scale = torch.ones(2)
+
+    with pytest.raises(AssertionError, match="a1_scale and a2_scale"):
+        _make_int8_moe_quant_config(scale, scale, a1_scale=scale)
 
 
 def test_glm_grouped_topk_uses_bias_only_for_expert_selection():
@@ -181,9 +219,7 @@ def test_non_metax_model_entry_does_not_apply_metax_patches(monkeypatch):
     monkeypatch.setattr(
         platforms, "current_platform", SimpleNamespace(vendor_name="cuda")
     )
-    monkeypatch.setattr(
-        glm_moe_dsa_metax, "apply_model_patches", apply_model_patches
-    )
+    monkeypatch.setattr(glm_moe_dsa_metax, "apply_model_patches", apply_model_patches)
     sys.modules.pop(module_name, None)
     importlib.import_module(module_name)
     sys.modules.pop(module_name, None)
@@ -240,9 +276,7 @@ def test_metax_registration_uses_glm_plugin_entry(monkeypatch):
 
 
 def test_non_metax_attention_backend_keeps_dispatch_path(monkeypatch):
-    selected_backend = SimpleNamespace(
-        get_path=lambda: "unexpected-selected-backend"
-    )
+    selected_backend = SimpleNamespace(get_path=lambda: "unexpected-selected-backend")
     selector = SimpleNamespace(use_mla=True, use_sparse=True)
     monkeypatch.setattr(PlatformFL, "vendor_name", "cuda")
     monkeypatch.setattr(
@@ -375,7 +409,7 @@ def test_non_glm_quantized_moe_keeps_existing_fl_replacement(monkeypatch):
 
     runner = Runner()
     replacement = object()
-    monkeypatch.setattr(layer, "is_glm_moe_dsa_metax_active", lambda: False)
+    monkeypatch.setattr(layer, "is_glm_w8a8_int8_moe", lambda method: False)
     monkeypatch.setattr(layer, "UnquantizedFusedMoEMethod", UnquantizedMethod)
     monkeypatch.setattr(
         layer, "UnquantizedFusedMoEMethodFL", lambda config: replacement
@@ -395,7 +429,7 @@ def test_glm_quantized_moe_keeps_oracle_quant_method(monkeypatch):
     runner = SimpleNamespace(
         routed_experts=SimpleNamespace(quant_method=quant_method),
     )
-    monkeypatch.setattr(layer, "is_glm_moe_dsa_metax_active", lambda: True)
+    monkeypatch.setattr(layer, "is_glm_w8a8_int8_moe", lambda method: True)
     monkeypatch.setattr(layer, "UnquantizedFusedMoEMethod", UnquantizedMethod)
     monkeypatch.setattr(layer, "_OrigFusedMoE", lambda *args, **kwargs: runner)
     monkeypatch.setattr(layer, "replace_router_with_fl", lambda: None)

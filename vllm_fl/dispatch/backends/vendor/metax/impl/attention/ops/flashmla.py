@@ -267,6 +267,7 @@ def flash_mla_sparse_fwd_maca(
     """Run the MetaX Sparse MLA kernel with its 64-head layout."""
     num_heads = q.shape[1]
     if num_heads % 64 != 0:
+        assert 64 % num_heads == 0
         padded_q = q.new_empty((q.shape[0], 64, q.shape[2]))
         padded_q[:, :num_heads] = q
         q = padded_q

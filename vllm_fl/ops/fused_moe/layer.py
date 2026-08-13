@@ -15,7 +15,7 @@ from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
 )
 
 from vllm_fl.ops.fused_moe.router import replace_router_with_fl
-from vllm_fl.patches.glm_moe_dsa_metax import is_glm_moe_dsa_metax_active
+from vllm_fl.patches.glm_moe_dsa_metax import is_glm_w8a8_int8_moe
 from .fused_moe_utils import select_unquantized_moe_backend_oot
 
 
@@ -58,11 +58,8 @@ def FusedMoEFL(*args, **kwargs) -> MoERunner:
 
     # GLM W8A8 selects TritonExpertsFL through its quantization oracle.
     # Other models retain the existing FL quant-method replacement.
-    keep_glm_quant_method = (
-        is_glm_moe_dsa_metax_active()
-        and not isinstance(
-            runner.routed_experts.quant_method, UnquantizedFusedMoEMethod
-        )
+    keep_glm_quant_method = is_glm_w8a8_int8_moe(
+        runner.routed_experts.quant_method
     )
     if not keep_glm_quant_method:
         fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
