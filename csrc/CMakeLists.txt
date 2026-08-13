@@ -89,21 +89,11 @@ if(VLLM_VENDOR STREQUAL "ascend")
         ascend/aclnn_torch_adapter/NPUStorageImpl.h
         # Framework operator torch adapters (op_host/op_kernel/ are built by the
         # CANN toolchain and are present here for reference / vendor packaging).
+        ascend/attention/chunk_gated_delta_rule/chunk_gated_delta_rule_torch_adpt.h
         ascend/attention/fused_gdn_gating/fused_gdn_gating_torch_adpt.h
-        ascend/attention/kv_quant_sparse_flash_attention/kv_quant_sparse_flash_attention_torch_adpt.h
-        ascend/attention/lightning_indexer/lightning_indexer_torch_adpt.h
-        ascend/attention/lightning_indexer_quant/lightning_indexer_quant_torch_adpt.h
-        ascend/attention/lightning_indexer_vllm/lightning_indexer_vllm_torch_adpt.h
-        ascend/attention/ngram_spec_decode/ngram_spec_decode_torch_adpt.h
         ascend/attention/recurrent_gated_delta_rule/recurrent_gated_delta_rule_torch_adpt.h
-        ascend/attention/sparse_flash_attention/sparse_flash_attention_torch_adpt.h
-        ascend/attention/store_kv_block/store_kv_block_torch_adpt.h
-        ascend/gmm/grouped_matmul_swiglu_quant_v2/grouped_matmul_swiglu_quant_v2_torch_adpt.h
-        ascend/gmm/grouped_matmul_swiglu_quant_weight_nz_tensor_list/grouped_matmul_swiglu_quant_torch_adpt.h
-        ascend/mc2/dispatch_ffn_combine/dispatch_ffn_combine_torch_adpt.h
         ascend/mc2/matmul_allreduce_add_rmsnorm/matmul_allreduce_add_rmsnorm_torch_adpt.h
         ascend/moe/add_rms_norm_bias/add_rms_norm_bias_torch_adpt.h
-        ascend/moe/apply_top_k_top_p_custom/apply_top_k_top_p_custom_torch_adpt.h
         ascend/moe/moe_gating_top_k/moe_gating_top_k_torch_adpt.h
         ascend/moe/moe_init_routing_custom/moe_init_routing_custom_torch_adpt.h
     )

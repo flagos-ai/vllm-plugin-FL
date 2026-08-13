@@ -131,24 +131,9 @@ if(ASCEND950_AVAILABLE)
 else()
     message(STATUS "ASCEND950 is NOT available in CANN headers; skipping ASCEND950-only operators.")
     set(ASCEND950_SKIP_OPS
-        compressor
-        inplace_partial_rotary_mul
-        kv_quant_sparse_flash_attention
-        lightning_indexer
         recurrent_gated_delta_rule
-        sparse_flash_attention
-        vllm_quant_lightning_indexer
         add_rms_norm_bias
         causal_conv1d
-        dequant_swiglu_quant
-        hc_post
-        hc_pre
-        hc_pre_inv_rms
-        hc_pre_sinkhorn
-        moe_gating_top_k
-        moe_gating_top_k_hash
-        scatter_nd_update_v2
-        grouped_matmul_swiglu_quant_v2
     )
 endif()
 

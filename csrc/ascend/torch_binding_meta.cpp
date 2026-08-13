@@ -1713,9 +1713,7 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
     // npu_recurrent_gated_delta_rule_310
     ops.impl("npu_recurrent_gated_delta_rule_310", &vllm_fl::meta::npu_recurrent_gated_delta_rule_310_meta);
     // chunk_gated_delta_rule_fwd_h
-    ops.impl("chunk_gated_delta_rule_fwd_h", &vllm_fl::meta::chunk_gated_delta_rule_fwd_h_meta);
     // chunk_fwd_o
-    ops.impl("chunk_fwd_o", &vllm_fl::meta::chunk_fwd_o_meta);
 }
 }
 #else
@@ -1744,21 +1742,11 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
     ops.impl("batch_matmul_transpose", &vllm_fl::meta::batch_matmul_transpose);
 #endif
     // grouped_matmul_swiglu_quant_weight_nz meta implementation
-    ops.impl("grouped_matmul_swiglu_quant_weight_nz", &vllm_fl::meta::grouped_matmul_swiglu_quant);
     // grouped_matmul_swiglu_quant meta implementation
-    ops.impl("grouped_matmul_swiglu_quant", &vllm_fl::meta::grouped_matmul_swiglu_quant);
     // Grouped matmul swiglu quant weight nz tensor list
-    ops.impl("grouped_matmul_swiglu_quant_weight_nz_tensor_list", &vllm_fl::meta::grouped_matmul_swiglu_quant_weight_nz_tensor_list_meta);
     // Grouped matmul swiglu quant v2
-    ops.impl("grouped_matmul_swiglu_quant_v2", &vllm_fl::meta::grouped_matmul_swiglu_quant_v2_meta);
     // Lightning indexer
-    ops.impl("npu_lightning_indexer", &vllm_fl::meta::npu_lightning_indexer_meta);
-    // Sparse flash attention
-    ops.impl("npu_sparse_flash_attention", &vllm_fl::meta::npu_sparse_flash_attention_meta);
-    ops.impl("npu_kv_quant_sparse_flash_attention",
-             &vllm_fl::meta::npu_kv_quant_sparse_flash_attention_meta);
     // MoE dispatch-ffn-combine
-    ops.impl("dispatch_ffn_combine", &vllm_fl::meta::dispatch_ffn_combine_meta);
     // matmul allreduce add rmsnorm
     ops.impl("matmul_allreduce_add_rmsnorm", &vllm_fl::meta::matmul_allreduce_add_rmsnorm_meta);
     // moe_init_routing_custom
@@ -1768,32 +1756,14 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
     // Add_Rms_Norm_Bias
     ops.impl("npu_add_rms_norm_bias", &vllm_fl::meta::npu_add_rms_norm_bias_meta);
     // transpose_kv_cache_by_block
-    ops.impl("transpose_kv_cache_by_block", &vllm_fl::meta::transpose_kv_cache_by_block_meta);
     // hamming_dist_top_k
-    ops.impl("npu_hamming_dist_top_k", &vllm_fl::meta::npu_hamming_dist_top_k_meta);
     // reshape_and_cache_bnsd
-    ops.impl("npu_reshape_and_cache_bnsd", &vllm_fl::meta::npu_reshape_and_cache_bnsd_meta);
     // npu_sign_bits_pack
     ops.impl("npu_sign_bits_pack", &vllm_fl::meta::npu_sign_bits_pack_meta);
     // CopyAndExpandEagleInputs
-    ops.impl("npu_copy_and_expand_eagle_inputs", &vllm_fl::meta::npu_copy_and_expand_eagle_inputs_meta);
     // causal_conv1d_fn
     ops.impl("npu_causal_conv1d_custom", &vllm_fl::meta::npu_causal_conv1d_custom_meta);
     // moe_grouped_matmul
-    ops.impl("moe_grouped_matmul", &vllm_fl::meta::moe_grouped_matmul_meta);
-    ops.impl("moe_gating_top_k_hash", &vllm_fl::meta::moe_gating_top_k_hash_meta);
-    ops.impl("compressor", &vllm_fl::meta::compressor_meta);
-    ops.impl("compressor_metadata", &vllm_fl::meta::compressor_metadata_meta);
-    ops.impl("npu_vllm_quant_lightning_indexer", &vllm_fl::meta::npu_vllm_quant_lightning_indexer_meta);
-    ops.impl("npu_vllm_quant_lightning_indexer_metadata", &vllm_fl::meta::npu_vllm_quant_lightning_indexer_metadata_meta);
-    ops.impl("npu_sparse_attn_sharedkv", &vllm_fl::meta::npu_sparse_attn_sharedkv_meta);
-    ops.impl("npu_sparse_attn_sharedkv_metadata", &vllm_fl::meta::npu_sparse_attn_sharedkv_metadata_meta);
-    ops.impl("npu_hc_post", &vllm_fl::meta::npu_hc_post_meta);
-    ops.impl("npu_hc_pre", &vllm_fl::meta::npu_hc_pre_meta);
-    ops.impl("npu_hc_pre_v2", &vllm_fl::meta::npu_hc_pre_meta);
-    ops.impl("npu_hc_pre_inv_rms", &vllm_fl::meta::npu_hc_pre_inv_rms_meta);
-    ops.impl("npu_hc_pre_sinkhorn", &vllm_fl::meta::npu_hc_pre_sinkhorn_meta);
-    ops.impl("inplace_partial_rotary_mul", &vllm_fl::meta::inplace_partial_rotary_mul_meta);
     ops.impl("npu_rms_norm_dynamic_quant", &vllm_fl::meta::npu_rms_norm_dynamic_quant_meta);
     ops.impl("indexer_compress_epilog", &vllm_fl::meta::indexer_compress_epilog_meta);
     ops.impl("kv_compress_epilog", &vllm_fl::meta::kv_compress_epilog_meta);
@@ -1803,19 +1773,10 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
     ops.impl("npu_swiglu_group_quant", &vllm_fl::meta::npu_swiglu_group_quant_meta);
     ops.impl("npu_load_index_kv_cache", &vllm_fl::meta::npu_load_index_kv_cache_meta);
     ops.impl("indexer_compress_epilog_v2", &vllm_fl::meta::indexer_compress_epilog_v2_meta);
-    ops.impl("npu_dequant_swiglu_quant", &vllm_fl::meta::npu_dequant_swiglu_quant_meta);
-    ops.impl("npu_scatter_nd_update_v2", &vllm_fl::meta::npu_scatter_nd_update_v2_meta);
     // Lightning indexer quant
-    ops.impl("npu_lightning_indexer_quant", &vllm_fl::meta::npu_lightning_indexer_quant_meta);
     // N-gram spec decode
-    ops.impl("npu_ngram_spec_decode", &vllm_fl::meta::npu_ngram_spec_decode_meta);
     // chunk_gated_delta_rule_fwd_h
-    ops.impl("chunk_gated_delta_rule_fwd_h", &vllm_fl::meta::chunk_gated_delta_rule_fwd_h_meta);
     // chunk_fwd_o
-    ops.impl("chunk_fwd_o", &vllm_fl::meta::chunk_fwd_o_meta);
-     // store_kv_block
-    ops.impl("store_kv_block_pre", &vllm_fl::meta::store_kv_block_metadata);
-    ops.impl("store_kv_block", &vllm_fl::meta::store_kv_block);
     // npu_fused_gdn_gating
     ops.impl("npu_fused_gdn_gating", &vllm_fl::meta::npu_fused_gdn_gating_meta);
 }
