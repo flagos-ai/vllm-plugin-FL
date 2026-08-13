@@ -2,12 +2,22 @@
 
 import importlib
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import torch
 from vllm import platforms
+from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 from vllm_fl import dispatch
+from vllm_fl.dispatch.backends.flaggems.impl import (
+    flashmla_sparse as gems_sparse_mla,
+)
+from vllm_fl.dispatch.backends.vendor.metax.impl.attention.mla import (
+    flashmla_sparse as metax_sparse_mla,
+)
+from vllm_fl.dispatch.backends.vendor.metax.impl.attention.ops import (
+    flashmla as metax_flashmla,
+)
 from vllm_fl.ops.fused_moe import layer, router
 from vllm_fl.ops.fused_moe.router import _metax_grouped_topk
 from vllm_fl.patches import glm_moe_dsa_metax
@@ -168,6 +178,113 @@ def test_non_metax_attention_backend_keeps_dispatch_path(monkeypatch):
     backend = PlatformFL.get_attn_backend_cls(selected_backend, selector)
 
     assert backend == "existing-dispatch-backend"
+
+
+def test_metax_explicit_sparse_mla_uses_plugin_backend():
+    selector = SimpleNamespace(use_mla=True, use_sparse=True)
+    original_vendor = PlatformFL.vendor_name
+    PlatformFL.vendor_name = "metax"
+    try:
+        backend = PlatformFL.get_attn_backend_cls(
+            AttentionBackendEnum.FLASHMLA_SPARSE,
+            selector,
+        )
+    finally:
+        PlatformFL.vendor_name = original_vendor
+
+    assert backend.endswith("flashmla_sparse.MacaFlashMLASparseBackend")
+
+
+def test_metax_non_mla_selection_keeps_dispatch_path(monkeypatch):
+    selector = SimpleNamespace(use_mla=False, use_sparse=False)
+    monkeypatch.setattr(PlatformFL, "vendor_name", "metax")
+    monkeypatch.setattr(
+        dispatch, "call_op", lambda *args, **kwargs: "existing-dispatch-backend"
+    )
+
+    backend = PlatformFL.get_attn_backend_cls(
+        AttentionBackendEnum.TORCH_SDPA,
+        selector,
+    )
+
+    assert backend == "existing-dispatch-backend"
+
+
+def test_sparse_mla_kernel_adapters_return_attention_output(monkeypatch):
+    q = torch.zeros(2, 4, 576, dtype=torch.bfloat16)
+    kv = torch.zeros(8, 1, 576, dtype=torch.bfloat16)
+    indices = torch.zeros(2, 1, 128, dtype=torch.int32)
+    expected = torch.zeros(2, 4, 512, dtype=torch.bfloat16)
+
+    def metax_kernel(q, kv, indices, scale, d_v=512, **kwargs):
+        return (
+            torch.zeros(q.shape[0], q.shape[1], d_v, dtype=q.dtype),
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(metax_flashmla, "flash_mla_sparse_fwd", metax_kernel)
+    metax_output = metax_flashmla.flash_mla_sparse_fwd_maca(
+        q,
+        kv,
+        indices,
+        1.0,
+    )
+
+    assert metax_output.shape == expected.shape
+
+    def flaggems_kernel(q, kv, indices, scale, topk_length=None):
+        return expected, None, None
+
+    module = ModuleType("flag_gems.fused.flashmla_sparse")
+    module.flash_mla_sparse_fwd = flaggems_kernel
+    monkeypatch.setitem(sys.modules, "flag_gems.fused.flashmla_sparse", module)
+    gems_output = gems_sparse_mla.flash_mla_sparse_fwd_flaggems(
+        q,
+        kv,
+        indices,
+        1.0,
+    )
+
+    assert gems_output is expected
+
+
+def test_metax_sparse_mla_backend_dispatches_kernel(monkeypatch):
+    q = torch.zeros(2, 4, 576, dtype=torch.bfloat16)
+    kv_cache = torch.zeros(2, 64, 576, dtype=torch.bfloat16)
+    indices = torch.zeros(2, 128, dtype=torch.int32)
+    lengths = torch.full((2,), 128, dtype=torch.int32)
+    expected = torch.zeros(2, 4, 512, dtype=torch.bfloat16)
+    captured = {}
+
+    def dispatch_kernel(q, kv, indices, scale, topk_length=None):
+        captured["shapes"] = q.shape, kv.shape, indices.shape
+        captured["scale"] = scale
+        captured["lengths"] = topk_length
+        return expected
+
+    monkeypatch.setattr(
+        metax_sparse_mla,
+        "_flash_mla_sparse_fwd",
+        dispatch_kernel,
+    )
+    impl = SimpleNamespace(softmax_scale=0.125)
+    output = metax_sparse_mla.MacaFlashMLASparseImpl._bf16_flash_mla_kernel(
+        impl,
+        q,
+        kv_cache,
+        indices,
+        lengths,
+    )
+
+    assert output is expected
+    assert captured["shapes"] == (
+        torch.Size([2, 4, 576]),
+        torch.Size([128, 1, 576]),
+        torch.Size([2, 1, 128]),
+    )
+    assert captured["scale"] == 0.125
+    assert captured["lengths"] is lengths
 
 
 def test_non_metax_quantized_moe_keeps_existing_fl_replacement(monkeypatch):

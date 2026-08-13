@@ -13,7 +13,10 @@ from vllm.v1.attention.backends.mla.flashmla_sparse import (
     FlashMLASparseImpl,
 )
 
-from ..ops.flashmla import flash_mla_sparse_fwd
+from vllm_fl.dispatch import CachedOp
+
+
+_flash_mla_sparse_fwd = CachedOp("flash_mla_sparse_fwd")
 
 
 class MacaFlashMLASparseBackend(FlashMLASparseBackend):
@@ -40,19 +43,10 @@ class MacaFlashMLASparseImpl(FlashMLASparseImpl):
         topk_length: torch.Tensor | None = None,
     ) -> torch.Tensor:
         num_tokens = q.shape[0]
-        if self.num_heads % self.prefill_padding != 0:
-            assert self.prefill_padding % self.num_heads == 0
-            padded_q = q.new_empty(
-                (num_tokens, self.prefill_padding, q.shape[2])
-            )
-            padded_q[:, : self.num_heads] = q
-            q = padded_q
-
-        output = flash_mla_sparse_fwd(
+        return _flash_mla_sparse_fwd(
             q,
             kv_cache.view(-1, 1, kv_cache.shape[-1]),
             topk_indices.view(num_tokens, 1, -1),
             self.softmax_scale,
             topk_length=topk_length,
-        )[0]
-        return output[:, : self.num_heads]
+        )

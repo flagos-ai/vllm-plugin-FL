@@ -162,6 +162,24 @@ class FlagGemsBackend(Backend):
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
 
+    def flash_mla_sparse_fwd(
+        self,
+        q,
+        kv,
+        indices,
+        sm_scale,
+        topk_length=None,
+    ):
+        from .impl.flashmla_sparse import flash_mla_sparse_fwd_flaggems
+
+        return flash_mla_sparse_fwd_flaggems(
+            q,
+            kv,
+            indices,
+            sm_scale,
+            topk_length=topk_length,
+        )
+
     def moe_align_block_size(
         self,
         topk_ids: torch.Tensor,

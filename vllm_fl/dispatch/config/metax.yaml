@@ -29,6 +29,9 @@ op_backends:
   # attention_backend: prioritize vendor (MACA attention)
   attention_backend:
     - vendor:metax
+  # Sparse MLA uses the MetaX kernel by default; a custom policy may select FlagGems.
+  flash_mla_sparse_fwd:
+    - vendor:metax
   # All other ops: prefer FlagGems (Triton), fallback to reference (PyTorch native)
   silu_and_mul:
     - flagos

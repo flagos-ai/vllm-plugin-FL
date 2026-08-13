@@ -83,6 +83,14 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        OpImpl(
+            op_name="flash_mla_sparse_fwd",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.flash_mla_sparse_fwd, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # MoE align
         OpImpl(
             op_name="moe_align_block_size",

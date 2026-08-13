@@ -170,6 +170,24 @@ class MacaBackend(Backend):
         # Default to FLASH_ATTN
         return AttentionBackendEnum.FLASH_ATTN.get_path()
 
+    def flash_mla_sparse_fwd(
+        self,
+        q,
+        kv,
+        indices,
+        sm_scale,
+        topk_length=None,
+    ):
+        from .impl.attention.ops.flashmla import flash_mla_sparse_fwd_maca
+
+        return flash_mla_sparse_fwd_maca(
+            q,
+            kv,
+            indices,
+            sm_scale,
+            topk_length=topk_length,
+        )
+
     def topk_softmax(
         self,
         topk_weights,
