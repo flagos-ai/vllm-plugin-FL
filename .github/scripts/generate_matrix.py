@@ -145,7 +145,9 @@ def check_model_paths(
 
     selected_cases = json.loads(cases)
     if not isinstance(selected_cases, list):
-        print("::error title=Invalid cases::--cases must be a JSON array", file=sys.stderr)
+        print(
+            "::error title=Invalid cases::--cases must be a JSON array", file=sys.stderr
+        )
         return 1
 
     missing = 0
@@ -324,8 +326,7 @@ def main(argv: list[str] | None = None) -> int:
         "--cases",
         default=None,
         help=(
-            "JSON array of {model, case} entries to check when "
-            "--check-models is set."
+            "JSON array of {model, case} entries to check when --check-models is set."
         ),
     )
     args = parser.parse_args(argv)
