@@ -7,8 +7,14 @@ import os
 from typing import Optional, Tuple
 
 import flag_gems
-from flag_gems.runtime.backend.device import DeviceDetector
 from flag_gems.runtime import backend
+
+try:
+    # Newer FlagGems (e.g. Ascend build) exposes DeviceDetector here.
+    from flag_gems.runtime.backend.device_finder import DeviceDetector
+except ImportError:
+    # Older FlagGems / other vendor builds still use the legacy path.
+    from flag_gems.runtime.backend.device import DeviceDetector
 
 _OP_CONFIG: Optional[dict[str, str]] = None
 

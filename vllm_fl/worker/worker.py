@@ -50,7 +50,6 @@ from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
 from vllm.platforms import current_platform
-from vllm.profiler.wrapper import TorchProfilerWrapper
 
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
@@ -221,11 +220,13 @@ class WorkerFL(WorkerBase):
         profiler_config = vllm_config.profiler_config
         if profiler_config.profiler == "torch":
             worker_name = f"{vllm_config.instance_id}-rank-{self.rank}"
-            self.profiler = TorchProfilerWrapper(
+            # FL wrapper branches Ascend NPU vs CUDA internally, keeping the
+            # hardware probe out of the worker path.
+            from vllm_fl.profiler import FLTorchProfilerWrapper
+            self.profiler = FLTorchProfilerWrapper(
                 profiler_config,
                 worker_name=worker_name,
                 local_rank=self.local_rank,
-                activities=["CPU", "CUDA"],
             )
         else:
             self.profiler = None
