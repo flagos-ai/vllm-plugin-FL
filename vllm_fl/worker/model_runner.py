@@ -99,7 +99,7 @@ from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import is_pin_memory_available
 
 from vllm.platforms import current_platform
-if current_platform.dist_backend == "flagcx":
+if current_platform.dist_backend in ("flagcx", "hccl"):
     @contextmanager
     def graph_capture(device: torch.device):
         """
@@ -2078,6 +2078,7 @@ class ModelRunnerFL(
             draft_token_ids=draft_token_ids,
             num_draft_tokens=num_draft_tokens.tolist(),
             cu_num_draft_tokens=cu_num_draft_tokens,
+            cu_num_sampled_tokens=cu_num_sampled_tokens,
             target_logits_indices=target_logits_indices,
             bonus_logits_indices=bonus_logits_indices,
             logits_indices=logits_indices,
