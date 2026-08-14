@@ -30,7 +30,7 @@ container_options: >-
   --ipc=host
   --privileged
   --env VLLM_PLUGINS=fl
-  --env TOPS_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  --env TOPS_VISIBLE_DEVICES=2,3
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=99999
   --env TORCH_GCU_ENABLE_INT64_AND_UINT64=1
   --env ENABLE_I64_CHECK=0

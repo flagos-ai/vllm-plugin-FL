@@ -35,14 +35,14 @@ device_overrides:
       - qwen3_6/27b_tp2_eager
       - qwen3_6/35b_a3b_tp2_eager
     llm:
-      gpu_memory_utilization: 0.80
+      gpu_memory_utilization: 0.90
       disable_custom_all_reduce: false
     serve:
       startup_retries: 120
 
 env_defaults:
   VLLM_PLUGINS: "fl"
-  TOPS_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+  TOPS_VISIBLE_DEVICES: "2,3"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "99999"
   TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
   ENABLE_I64_CHECK: "0"
