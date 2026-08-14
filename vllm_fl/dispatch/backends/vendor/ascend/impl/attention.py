@@ -548,6 +548,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
     ):
         """Get parameters for fused_infer_attention."""
 
+        block_size = 128
+
         if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
             block_size = 128
             block_table = None
