@@ -35,7 +35,7 @@ device_overrides:
       - qwen3_6/27b_tp2_eager
       - qwen3_6/35b_a3b_tp2_eager
     llm:
-      gpu_memory_utilization: 0.75
+      gpu_memory_utilization: 0.8
     serve:
       extra_engine:
         enforce_eager: true
