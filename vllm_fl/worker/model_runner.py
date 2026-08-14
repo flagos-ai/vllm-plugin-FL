@@ -53,6 +53,7 @@ from vllm.distributed.parallel_state import (
 )
 from vllm.forward_context import (
     BatchDescriptor,
+    get_forward_context,
     set_forward_context,
 )
 from vllm.logger import init_logger
@@ -99,7 +100,8 @@ from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import is_pin_memory_available
 
 from vllm.platforms import current_platform
-if current_platform.dist_backend == "flagcx":
+
+if current_platform.dist_backend in ("flagcx", "hccl"):
     @contextmanager
     def graph_capture(device: torch.device):
         """
@@ -602,6 +604,7 @@ class ModelRunnerFL(
 
         # Cudagraph dispatcher for runtime cudagraph dispatching.
         self.cudagraph_dispatcher = CudagraphDispatcher(self.vllm_config)
+        self.aclgraph_update_stream = None
 
         self.mm_budget = (
             MultiModalBudget(
@@ -1621,7 +1624,16 @@ class ModelRunnerFL(
             # Fill unused with -1. Needed for reshape_and_cache in full cuda
             # graph mode. `blk_table_tensor` -1 to match mamba PAD_SLOT_ID
             slot_mapping[num_tokens:num_tokens_padded].fill_(-1)
-            blk_table_tensor[num_reqs:num_reqs_padded].fill_(-1)
+            # Pad block-table rows with block id 0 rather than -1: when a
+            # decode batch shrinks below the captured size (e.g. the first
+            # request finishes at max concurrency), the full-attention FIA
+            # kernel receives the padded rows and dereferences the block ids
+            # even for seq_len==0 rows, and block id -1 makes it fault
+            # (fftsplus aicore error / CCU instruction address check error,
+            # surfacing as aclrtSynchronizeEvent 507011). The mamba/GDN pad
+            # slots keep their PAD_SLOT_ID=-1 convention via the metadata
+            # builder's own fills, so this only affects the attention path.
+            blk_table_tensor[num_reqs:num_reqs_padded].fill_(0)
 
             return blk_table_tensor, slot_mapping
 
@@ -2078,6 +2090,7 @@ class ModelRunnerFL(
             draft_token_ids=draft_token_ids,
             num_draft_tokens=num_draft_tokens.tolist(),
             cu_num_draft_tokens=cu_num_draft_tokens,
+            cu_num_sampled_tokens=cu_num_sampled_tokens,
             target_logits_indices=target_logits_indices,
             bonus_logits_indices=bonus_logits_indices,
             logits_indices=logits_indices,
@@ -3129,6 +3142,23 @@ class ModelRunnerFL(
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
+            if (
+                current_platform.device_type == "npu"
+                and cudagraph_mode == CUDAGraphMode.FULL
+                and self.aclgraph_update_stream is not None
+            ):
+                from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_graph import (
+                    update_full_graph_params,
+                )
+
+                update_full_graph_params(
+                    [group.backend for group in self._attn_group_iterator()],
+                    self.aclgraph_update_stream,
+                    get_forward_context(),
+                    num_tokens_padded,
+                    self.vllm_config,
+                    self.speculative_config,
+                )
 
         with record_function_or_nullcontext("gpu_model_runner: postprocess"):
             if self.use_aux_hidden_state_outputs:
@@ -3768,6 +3798,8 @@ class ModelRunnerFL(
         cudagraph_mode = self.compilation_config.cudagraph_mode
         assert cudagraph_mode is not None
         if cudagraph_mode.has_full_cudagraphs() and not self.parallel_config.enable_dbo:
+            if current_platform.device_type == "npu":
+                self.aclgraph_update_stream = torch.npu.Stream()
             self.model = GraphWrapper(
                 self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
             )
@@ -4165,6 +4197,24 @@ class ModelRunnerFL(
                 # shorter sequence lengths to run faster.
                 # TODO(luka) better system for describing dummy batches
                 seq_lens = [1] * num_decode_tokens + [num_prefill_tokens + 1]
+            elif (
+                current_platform.device_type == "npu"
+                and is_graph_capturing
+                and cudagraph_runtime_mode == CUDAGraphMode.FULL
+            ):
+                # _npu_paged_attention only returns its maximum workspace at a
+                # sufficiently large context length. Capturing with decode
+                # query length 1 works until the runtime context crosses an
+                # internal tiling boundary, where graph-task update then fails
+                # with CANN 507000. This matches vllm-ascend's FULL graph
+                # capture strategy; inference still updates the task with the
+                # real per-request sequence lengths.
+                seq_lens = min(6144, self.max_model_len)
+                logger.info_once(
+                    "Using seq_len=%d to capture the maximum Ascend "
+                    "paged-attention workspace",
+                    seq_lens,
+                )
             else:
                 seq_lens = max_query_len  # type: ignore[assignment]
             self.seq_lens.np[:num_reqs] = seq_lens
@@ -4969,6 +5019,15 @@ class ModelRunnerFL(
         # Trigger cudagraph dispatching keys initialization after
         # resolved cudagraph mode.
         self.compilation_config.cudagraph_mode = cudagraph_mode
+        if (
+            current_platform.device_type == "npu"
+            and cudagraph_mode.has_full_cudagraphs()
+        ):
+            from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_graph import (
+                ensure_graph_params,
+            )
+
+            ensure_graph_params(list(self.cudagraph_batch_sizes))
         self.cudagraph_dispatcher.initialize_cudagraph_keys(
             cudagraph_mode, self.uniform_decode_query_len
         )
@@ -5298,28 +5357,21 @@ class ModelRunnerFL(
         self, kv_caches: dict[str, torch.Tensor]
     ) -> None:
         """
-        Update the layout of attention layers from (2, num_blocks, ...) to
-        (num_blocks, 2, ...).
+        Keep the attention KV cache in the contiguous (2, num_blocks, ...)
+        layout.
 
-        Args:
-            kv_caches: The KV cache buffer of each layer.
+        Upstream vLLM re-strides the cache into an interleaved
+        (num_blocks, 2, ...) layout here, which makes ``kv_cache[0]`` /
+        ``kv_cache[1]`` non-contiguous views. The Ascend attention impl
+        (``vllm_fl/dispatch/backends/vendor/ascend/impl/attention.py``)
+        requires contiguous k/v caches and was paying one full-cache
+        ``.contiguous()`` copy per attention layer per step (~1ms per copy
+        at typical cache sizes, seen as the ``aclnnInplaceCopy_SliceAiCore``
+        hotspot in profiles). Skipping the re-stride keeps the views
+        contiguous; all accesses go through the same views, so this is
+        semantically transparent.
         """
-
-        for group in self._kv_cache_spec_attn_group_iterator():
-            kv_cache_spec = group.kv_cache_spec
-            for layer_name in group.layer_names:
-                kv_cache = kv_caches[layer_name]
-                if isinstance(kv_cache_spec, AttentionSpec) and kv_cache.shape[0] == 2:
-                    assert kv_cache.shape[1] != 2, (
-                        "Fail to determine whether the layout is "
-                        "(2, num_blocks, ...) or (num_blocks, 2, ...) for "
-                        f"a tensor of shape {kv_cache.shape}"
-                    )
-                    hidden_size = kv_cache.shape[2:].numel()
-                    kv_cache.as_strided_(
-                        size=kv_cache.shape,
-                        stride=(hidden_size, 2 * hidden_size, *kv_cache.stride()[2:]),
-                    )
+        return
 
     def initialize_kv_cache_tensors(
         self, kv_cache_config: KVCacheConfig, kernel_block_sizes: list[int]
