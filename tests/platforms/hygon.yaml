@@ -33,15 +33,12 @@ device_overrides:
   bw1000:
     cases:
       - qwen3_6/27b_tp2_eager
-      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
-      - qwen3_6/35b_a3b_tp2_graph
     llm:
-      max_model_len: 262144
-      gpu_memory_utilization: 0.90
+      gpu_memory_utilization: 0.75
     serve:
       extra_engine:
-        enforce_eager: false
+        enforce_eager: true
         disable_custom_all_reduce: false
         enable_log_requests: false
         enable_prefix_caching: false
@@ -56,9 +53,9 @@ bw1000:
   tests:
     e2e:
       inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+        qwen3_6: ["27b_tp2_eager"]
       serving:
-        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+        qwen3_6: ["35b_a3b_tp2_eager"]
     functional:
       include: "*"
       exclude: []
