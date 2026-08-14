@@ -1,0 +1,871 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import asyncio
+import os
+import sys
+import threading
+import time
+import uuid
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Optional
+
+import msgspec
+import numpy as np
+import torch
+import zmq
+import zmq.asyncio
+
+from vllm.attention.backends.abstract import AttentionMetadata
+from vllm.attention.selector import get_attn_backend
+from vllm.config import VllmConfig
+from vllm.distributed.kv_transfer.kv_connector.utils import TpKVTopology
+from vllm.distributed.kv_transfer.kv_connector.v1.base import (
+    KVConnectorBase_V1,
+    KVConnectorMetadata,
+    KVConnectorRole,
+)
+from vllm.distributed.parallel_state import (
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+    get_tp_group,
+)
+from vllm.forward_context import ForwardContext
+from vllm.logger import init_logger
+from vllm.utils.network_utils import get_ip, make_zmq_path, make_zmq_socket
+from vllm.v1.attention.backends.utils import get_kv_cache_layout
+from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.request import RequestStatus
+
+if TYPE_CHECKING:
+    from vllm.v1.core.kv_cache_manager import KVCacheBlocks
+    from vllm.v1.kv_cache_interface import KVCacheConfig
+    from vllm.v1.request import Request
+
+_flagcx_path = os.getenv("FLAGCX_PATH")
+if _flagcx_path and os.path.isdir(_flagcx_path):
+    if _flagcx_path not in sys.path:
+        sys.path.append(_flagcx_path)
+
+try:
+    from plugin.interservice.flagcx_wrapper import (
+        FLAGCXLibrary,
+    )
+except ImportError as e:
+    raise ImportError(
+        "Cannot import FlagCX wrapper. Set FLAGCX_PATH to the FlagCX repo "
+        "root (containing plugin/interservice/flagcx_wrapper.py)."
+    ) from e
+
+EngineId = str
+ReqId = str
+
+TRANS_DONE = b"trans_done"
+TRANS_ERROR = b"trans_error"
+
+logger = init_logger(__name__)
+
+
+class FlagCXAgentMetadata(
+    msgspec.Struct,
+    omit_defaults=True,  # type: ignore[call-arg]
+    dict=True,
+):
+    """Sent from Decode → Prefill over ZMQ to request a KV transfer."""
+
+    remote_hostname: str
+    remote_port: int
+    request_ids: list[ReqId]
+    kv_caches_base_addr: list[int]
+    block_ids: list[list[int]]
+
+
+@dataclass
+class RecvReqMeta:
+    local_block_ids: list[int]
+    remote_host: str
+    remote_port: int
+
+
+@dataclass
+class SendBlockMeta:
+    local_block_ids: list[int]
+    ready: threading.Event
+    expire_time: float = float("inf")
+
+
+@dataclass
+class SendReqMeta:
+    reqs: dict[ReqId, SendBlockMeta]
+    lock: threading.Lock
+
+
+@dataclass
+class FinishedSendReqSet:
+    set: set[ReqId]
+    lock: threading.Lock
+
+
+@dataclass
+class FinishedReceiveReqSet:
+    set: set[ReqId]
+    lock: asyncio.Lock
+
+
+class FlagCXConnectorMetadata(KVConnectorMetadata):
+    def __init__(self):
+        self.reqs_to_recv: dict[ReqId, RecvReqMeta] = {}
+        self.reqs_to_send: dict[ReqId, list[int]] = {}
+
+    def add_new_req(
+        self,
+        request_id: ReqId,
+        local_block_ids: list[int],
+        kv_transfer_params: dict[str, Any],
+        load_remote_cache: bool = True,
+    ):
+        if load_remote_cache:
+            self.reqs_to_recv[request_id] = RecvReqMeta(
+                local_block_ids=local_block_ids,
+                remote_host=kv_transfer_params["remote_host"],
+                remote_port=kv_transfer_params["remote_port"],
+            )
+        else:
+            self.reqs_to_send[request_id] = local_block_ids
+
+
+class FlagCXConnector(KVConnectorBase_V1):
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        role: KVConnectorRole,
+        kv_cache_config: Optional["KVCacheConfig"] = None,
+    ):
+        super().__init__(vllm_config, role, kv_cache_config)
+
+        assert vllm_config.kv_transfer_config is not None
+        assert vllm_config.kv_transfer_config.engine_id is not None
+        self.engine_id: EngineId = vllm_config.kv_transfer_config.engine_id
+
+        if role == KVConnectorRole.SCHEDULER:
+            self.connector_scheduler: FlagCXConnectorScheduler | None = (
+                FlagCXConnectorScheduler(vllm_config, self.engine_id)
+            )
+            self.connector_worker: FlagCXConnectorWorker | None = None
+        elif role == KVConnectorRole.WORKER:
+            self.connector_scheduler = None
+            self.connector_worker = FlagCXConnectorWorker(vllm_config, self.engine_id)
+
+    # ---- Scheduler-side ----
+    def get_num_new_matched_tokens(
+        self, request: "Request", num_computed_tokens: int
+    ) -> tuple[int, bool]:
+        assert self.connector_scheduler is not None
+        return self.connector_scheduler.get_num_new_matched_tokens(
+            request, num_computed_tokens
+        )
+
+    def update_state_after_alloc(
+        self,
+        request: "Request",
+        blocks: "KVCacheBlocks",
+        num_external_tokens: int,
+    ):
+        assert self.connector_scheduler is not None
+        return self.connector_scheduler.update_state_after_alloc(
+            request, blocks, num_external_tokens
+        )
+
+    def build_connector_meta(
+        self, scheduler_output: SchedulerOutput
+    ) -> KVConnectorMetadata:
+        assert self.connector_scheduler is not None
+        return self.connector_scheduler.build_connector_meta(scheduler_output)
+
+    def request_finished(
+        self, request: "Request", block_ids: list[int]
+    ) -> tuple[bool, dict[str, Any] | None]:
+        assert self.connector_scheduler is not None
+        return self.connector_scheduler.request_finished(request, block_ids)
+
+    # ---- Worker-side ----
+    def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
+        assert self.connector_worker is not None
+        self.connector_worker.register_kv_caches(kv_caches)
+
+    def get_finished(
+        self, finished_req_ids: set[str]
+    ) -> tuple[set[str] | None, set[str] | None]:
+        assert self.connector_worker is not None
+        return self.connector_worker.get_finished()
+
+    def start_load_kv(self, forward_context: "ForwardContext", **kwargs) -> None:
+        assert self.connector_worker is not None
+        assert isinstance(self._connector_metadata, FlagCXConnectorMetadata)
+        self.connector_worker.start_load_kv(self._connector_metadata)
+
+    def wait_for_layer_load(self, layer_name: str) -> None:
+        if self.connector_worker is not None:
+            self.connector_worker.wait_for_layer_load()
+
+    def save_kv_layer(
+        self,
+        layer_name: str,
+        kv_layer: torch.Tensor,
+        attn_metadata: AttentionMetadata,
+        **kwargs,
+    ) -> None:
+        pass
+
+    def wait_for_save(self):
+        pass
+
+
+class FlagCXConnectorScheduler:
+    def __init__(self, vllm_config: VllmConfig, engine_id: str):
+        self.vllm_config = vllm_config
+        self.engine_id: EngineId = engine_id
+        self.side_channel_host = get_ip()
+        self.side_channel_port = _get_side_channel_port(vllm_config)
+
+        assert vllm_config.kv_transfer_config
+        self.kv_role = vllm_config.kv_transfer_config.kv_role
+        logger.info("FlagCX Connector Scheduler init: %s", engine_id)
+
+        self._reqs_need_recv: dict[ReqId, tuple["Request", list[int]]] = {}
+        self._reqs_need_send: dict[ReqId, list[int]] = {}
+
+    def get_num_new_matched_tokens(
+        self, request: "Request", num_computed_tokens: int
+    ) -> tuple[int, bool]:
+        params = request.kv_transfer_params
+        if params is not None and params.get("do_remote_prefill"):
+            token_ids = request.prompt_token_ids or []
+            count = len(token_ids) - num_computed_tokens
+            if count > 0:
+                return count, True
+        return 0, False
+
+    def update_state_after_alloc(
+        self,
+        request: "Request",
+        blocks: "KVCacheBlocks",
+        num_external_tokens: int,
+    ):
+        params = request.kv_transfer_params
+        if not params:
+            return
+
+        if params.get("do_remote_prefill"):
+            assert self.kv_role != "kv_producer"
+            if all(p in params for p in ("remote_host", "remote_port")):
+                local_block_ids = (
+                    blocks.get_unhashed_block_ids() if num_external_tokens > 0 else []
+                )
+                self._reqs_need_recv[request.request_id] = (
+                    request,
+                    local_block_ids,
+                )
+            else:
+                logger.warning("Invalid KVTransferParams: %s", params)
+            params["do_remote_prefill"] = False
+
+        elif params.get("do_remote_decode"):
+            self._reqs_need_send[request.request_id] = []
+
+    def build_connector_meta(
+        self, scheduler_output: SchedulerOutput
+    ) -> KVConnectorMetadata:
+        meta = FlagCXConnectorMetadata()
+
+        if self.kv_role != "kv_producer":
+            for req_id, (req, block_ids) in self._reqs_need_recv.items():
+                assert req.kv_transfer_params is not None
+                meta.add_new_req(
+                    request_id=req_id,
+                    local_block_ids=block_ids,
+                    kv_transfer_params=req.kv_transfer_params,
+                )
+            self._reqs_need_recv.clear()
+
+        if self.kv_role != "kv_consumer":
+            for req_id, block_ids in self._reqs_need_send.items():
+                meta.add_new_req(
+                    request_id=req_id,
+                    local_block_ids=block_ids,
+                    kv_transfer_params={},
+                    load_remote_cache=False,
+                )
+            self._reqs_need_send.clear()
+
+        return meta
+
+    def request_finished(
+        self, request: "Request", block_ids: list[int]
+    ) -> tuple[bool, dict[str, Any] | None]:
+        params = request.kv_transfer_params
+        if not params:
+            return False, None
+
+        if params.get("do_remote_prefill"):
+            assert self.kv_role != "kv_producer"
+            self._reqs_need_recv[request.request_id] = (request, [])
+            params["do_remote_prefill"] = False
+            return False, None
+
+        if (
+            not params.get("do_remote_decode")
+            or request.status != RequestStatus.FINISHED_LENGTH_CAPPED
+        ):
+            return False, None
+
+        assert self.kv_role != "kv_consumer"
+        delay_free_blocks = len(block_ids) > 0
+
+        if delay_free_blocks:
+            self._reqs_need_send[request.request_id] = block_ids
+
+        return delay_free_blocks, dict(
+            do_remote_prefill=True,
+            do_remote_decode=False,
+            remote_host=self.side_channel_host,
+            remote_port=self.side_channel_port,
+        )
+
+
+class FlagCXConnectorWorker:
+    """Worker-side logic for FlagCX PD disaggregation.
+
+    This avoids the previous Decode-initiated async comm init that could
+    deadlock and leave requests stuck in WAITING_FOR_REMOTE_KVS.
+    """
+
+    def __init__(self, vllm_config: VllmConfig, engine_id: str):
+        logger.info("FlagCX Connector Worker init: %s", engine_id)
+
+        self.vllm_config = vllm_config
+        self.engine_id: EngineId = engine_id
+        self.hostname = get_ip()
+
+        # ---- FlagCX library ----
+        library_path = os.getenv("FLAGCX_LIB_PATH")
+        if library_path is None:
+            flagcx_path = os.getenv("FLAGCX_PATH", "")
+            library_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
+        self.flagcx = FLAGCXLibrary(library_path)
+        self.kv_cache_device: torch.device | None = None
+
+        # ---- P2P engine (one-sided RDMA + RPC control plane) ----
+        # Replaces the old per-pair comm model. The engine owns the
+        # handshake/RPC port; transfers are addressed by absolute VA.
+        self.engine = self.flagcx.flagcxP2pEngineCreate()
+        self.rpc_port: int = 0
+        self.kv_tensors_meta: list[tuple[int, int]] = []
+
+        # ---- Cached connections, keyed by "host:rpc_port" ----
+        # The engine caches connections internally; this memoizes the
+        # opaque handle so we call get_conn once per remote session.
+        self.session_conns: dict[str, Any] = {}
+        self.conn_lock = threading.Lock()
+
+        # ---- Side-channel ZMQ port ----
+        self.side_channel_port: int = _get_side_channel_port(vllm_config)
+
+        self.tp_rank = get_tensor_model_parallel_rank()
+        self.world_size = get_tensor_model_parallel_world_size()
+        self.tp_group = get_tp_group()
+        self.num_blocks = 0
+
+        assert vllm_config.kv_transfer_config
+        self.kv_role = vllm_config.kv_transfer_config.kv_role
+        self.num_workers = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
+            "num_workers", 10
+        )
+
+        self.kv_caches_base_addr: list[int] = []
+        self.device_kv_caches: dict[str, torch.Tensor] = {}
+        self.reqs_need_send: SendReqMeta = SendReqMeta(reqs={}, lock=threading.Lock())
+
+        # ---- Prefill (sender) background threads ----
+        if self.kv_role != "kv_consumer":
+            self._sender_t: threading.Thread | None = None
+            self._sender_executor = ThreadPoolExecutor(
+                max_workers=self.num_workers,
+                thread_name_prefix="vllm-flagcx-sender",
+            )
+
+        # ---- Decode (receiver) background threads ----
+        if self.kv_role != "kv_producer":
+            # Async event loop for _receive_kv coroutines (sends request-level
+            # metadata to Prefill over the ZMQ side channel and awaits the
+            # transfer-done reply). No comm-init listener is needed anymore;
+            # the engine's RPC server (started in register_kv_caches) handles
+            # the data-plane handshake.
+            self.receiver_loop = asyncio.new_event_loop()
+            self._receiver_t = threading.Thread(
+                target=self._receiver_loop_fn,
+                args=(self.receiver_loop,),
+                daemon=True,
+            )
+            self._receiver_t.start()
+
+        self.finished_sending_reqs = FinishedSendReqSet(set(), threading.Lock())
+        self.finished_recving_reqs = FinishedReceiveReqSet(set(), asyncio.Lock())
+
+        self._abort_request_timeout = int(
+            os.getenv("FLAGCX_CONNECTOR_ABORT_REQUEST_TIMEOUT", "480")
+        )
+
+        # ---- Attention backend detection ----
+        self.block_size = vllm_config.cache_config.block_size
+        self.model_config = vllm_config.model_config
+        self.cache_config = vllm_config.cache_config
+        self.use_mla = self.model_config.use_mla
+
+        backend = get_attn_backend(
+            self.model_config.get_head_size(),
+            self.model_config.dtype,
+            self.cache_config.cache_dtype,
+            self.block_size,
+            use_mla=self.use_mla,
+        )
+        self.backend_name = backend.get_name()
+        self.kv_cache_layout = get_kv_cache_layout()
+
+        self._tp_size: dict[EngineId, int] = {self.engine_id: self.world_size}
+        self._block_size: dict[EngineId, int] = {self.engine_id: self.block_size}
+        self.kv_topo = TpKVTopology(
+            tp_rank=self.tp_rank,
+            engine_id=self.engine_id,
+            remote_tp_size=self._tp_size,
+            remote_block_size=self._block_size,
+            is_mla=self.use_mla,
+            total_num_kv_heads=self.model_config.get_total_num_kv_heads(),
+            attn_backend=backend,
+        )
+
+        self.zmq_ctx = zmq.Context()
+        self.async_zmq_ctx = zmq.asyncio.Context()
+        self._encoder = msgspec.msgpack.Encoder()
+        self._decoder = msgspec.msgpack.Decoder(FlagCXAgentMetadata)
+
+    def _get_conn(self, session: str) -> Any:
+        """Get (or lazily open) the engine connection to a remote session
+        string "host:rpc_port". The first call performs the QP + desc-table
+        handshake; subsequent calls return the cached handle."""
+        with self.conn_lock:
+            conn = self.session_conns.get(session)
+            if conn is None:
+                conn = self.flagcx.flagcxP2pGetConn(self.engine, session)
+                self.session_conns[session] = conn
+                logger.info("Opened P2P connection to %s", session)
+            return conn
+
+    def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
+        logger.info("Registering KV caches. use_mla: %s", self.use_mla)
+
+        seen_base_addresses: list[int] = []
+        split_k_and_v = self.kv_topo.split_k_and_v
+        self.num_attn_layers = len(kv_caches)
+        self.per_layer_mrs = 2 if split_k_and_v else 1
+        tensor_size_bytes = None
+
+        for layer_name, cache_or_caches in kv_caches.items():
+            cache_list = cache_or_caches if split_k_and_v else [cache_or_caches]
+            for cache in cache_list:
+                if self.kv_cache_device is None:
+                    self.kv_cache_device = cache.device
+                else:
+                    assert self.kv_cache_device == cache.device
+                base_addr = cache.data_ptr()
+                if base_addr in seen_base_addresses:
+                    continue
+                seen_base_addresses.append(base_addr)
+                curr_size = cache.nbytes
+
+                if tensor_size_bytes is None:
+                    tensor_size_bytes = curr_size
+                    self.num_blocks = cache.shape[0]
+
+                assert tensor_size_bytes == curr_size
+                kernel_block_size = cache.shape[-2 if self.use_mla else -3]
+                assert self.block_size == kernel_block_size
+                self.kv_tensors_meta.append((base_addr, curr_size))
+
+        self.kv_caches_base_addr = seen_base_addresses
+
+        assert tensor_size_bytes is not None
+        assert self.num_blocks != 0
+        assert tensor_size_bytes % self.num_blocks == 0
+        self.block_len = tensor_size_bytes // self.num_blocks
+        self.device_kv_caches = kv_caches
+
+        # Register every KV tensor with the engine as an RDMA MR. The engine
+        # tracks them in its global region table; writes later resolve the
+        # local lkey by source VA, so the MR handles need not be kept.
+        for base_addr, size in self.kv_tensors_meta:
+            self.flagcx.flagcxP2pRegister(self.engine, base_addr, size)
+
+        # The engine's handshake port becomes our session identity; peers
+        # connect to "{hostname}:{rpc_port}" for the data-plane transfer.
+        self.rpc_port = self.flagcx.flagcxP2pGetRpcPort(self.engine)
+
+        logger.info(
+            "KV cache metadata collected: %d tensors, num_blocks=%d, "
+            "block_len=%d, rpc_port=%d.",
+            len(seen_base_addresses),
+            self.num_blocks,
+            self.block_len,
+            self.rpc_port,
+        )
+
+        # Decode (write target) starts the RPC accept daemon so Prefill can
+        # connect and RDMA-write into our registered KV regions.
+        if self.kv_role != "kv_producer":
+            self.flagcx.flagcxP2pStartRpcServer(self.engine)
+            logger.info("FlagCX P2P RPC server started on port %d", self.rpc_port)
+
+        # Launch Prefill sender thread (ROUTER socket for Decode requests)
+        if self.kv_role != "kv_consumer":
+            ready_event = threading.Event()
+            self._sender_t = threading.Thread(
+                target=self._sender_thread,
+                args=(ready_event, self.side_channel_port, self.tp_rank),
+                daemon=True,
+                name="flagcx_sender",
+            )
+            self._sender_t.start()
+            ready_event.wait()
+
+    def _sender_thread(
+        self, ready_event: threading.Event, base_port: int, tp_rank: int
+    ):
+        """Prefill sender: ROUTER socket receives requests from Decode,
+        dispatches to thread pool, and relays transfer status."""
+        frontend_path = make_zmq_path("tcp", self.hostname, base_port + tp_rank)
+        frontend = make_zmq_socket(self.zmq_ctx, frontend_path, zmq.ROUTER)
+
+        backend_path = make_zmq_path("inproc", str(uuid.uuid4()))
+        backend = make_zmq_socket(self.zmq_ctx, backend_path, zmq.PULL)
+
+        poller = zmq.Poller()
+        poller.register(frontend, zmq.POLLIN)
+        poller.register(backend, zmq.POLLIN)
+
+        ready_event.set()
+
+        try:
+            while True:
+                sockets = dict(poller.poll())
+
+                if frontend in sockets:
+                    identity, _, metadata_bytes = frontend.recv_multipart()
+                    self._sender_executor.submit(
+                        self._sender_worker,
+                        identity,
+                        metadata_bytes,
+                        backend_path,
+                    )
+
+                if backend in sockets:
+                    identity, status = backend.recv_multipart()
+                    frontend.send_multipart((identity, b"", status))
+
+        except zmq.ContextTerminated:
+            pass
+        except Exception as e:
+            logger.error("FlagCX sender thread error: %s", e)
+        finally:
+            frontend.close()
+            backend.close()
+
+    def _sender_worker(
+        self,
+        identity: bytes,
+        metadata_bytes: bytes,
+        worker_channel_path: str,
+    ):
+        status = TRANS_ERROR
+
+        try:
+            metadata = self._decoder.decode(metadata_bytes)
+            self._send_kv_to_decode(metadata)
+            status = TRANS_DONE
+        except Exception as e:
+            logger.error("FlagCX sender worker error: %s", e)
+        finally:
+            pusher = make_zmq_socket(self.zmq_ctx, worker_channel_path, zmq.PUSH)
+            try:
+                pusher.send_multipart((identity, status))
+            except zmq.ZMQError as e:
+                logger.warning(
+                    "Internal error, maybe the server is shutting down. Error: %s",
+                    e,
+                )
+            finally:
+                pusher.close()
+
+    def _send_kv_to_decode(
+        self,
+        meta: FlagCXAgentMetadata,
+    ) -> None:
+        send_reqs: list[tuple[ReqId, SendBlockMeta, list[int]]] = []
+        with self.reqs_need_send.lock:
+            for req_id, remote_block_ids in zip(meta.request_ids, meta.block_ids):
+                send_meta = self.reqs_need_send.reqs.get(req_id)
+                if send_meta is None:
+                    logger.warning("Request %s not found in reqs_need_send", req_id)
+                    return
+                # Mark it as not expired. We will send it now.
+                send_meta.expire_time = float("inf")
+                send_reqs.append((req_id, send_meta, remote_block_ids))
+
+        if send_reqs:
+            self._send_blocks(send_reqs, meta)
+
+            ok_reqs = [req_id for req_id, _, _ in send_reqs]
+            with self.reqs_need_send.lock:
+                for req_id in ok_reqs:
+                    self.reqs_need_send.reqs.pop(req_id, None)
+
+            with self.finished_sending_reqs.lock:
+                self.finished_sending_reqs.set.update(ok_reqs)
+
+    def _send_blocks(
+        self,
+        send_reqs: list[tuple[ReqId, SendBlockMeta, list[int]]],
+        agent_meta: FlagCXAgentMetadata,
+    ) -> int:
+        local_base_addr = self.kv_caches_base_addr
+        remote_base_addr = agent_meta.kv_caches_base_addr
+        block_len = self.block_len
+        # Data-plane session: the peer's engine handshake port.
+        remote_session = f"{agent_meta.remote_hostname}:{agent_meta.remote_port}"
+        conn = self._get_conn(remote_session)
+
+        start_time = time.perf_counter()
+
+        # Absolute-VA addressed write lists: each entry pairs a local source
+        # VA with the absolute remote destination VA. The engine resolves
+        # both the local lkey and remote rkey from the addresses internally.
+        src_vas: list[int] = []
+        dst_vas: list[int] = []
+        sizes: list[int] = []
+
+        for req_id, send_meta, remote_block_ids in send_reqs:
+            send_meta.ready.wait()
+
+            num_remote_blocks = len(remote_block_ids)
+            if num_remote_blocks == 0:
+                continue
+
+            local_block_ids = send_meta.local_block_ids
+            # Partial prefix cache hit: just send uncomputed blocks.
+            num_local_blocks = len(local_block_ids)
+            assert num_local_blocks >= num_remote_blocks
+            if num_local_blocks > num_remote_blocks:
+                local_block_ids = local_block_ids[-num_remote_blocks:]
+
+            group_local_block_ids, group_remote_block_ids = _group_contiguous(
+                local_block_ids, remote_block_ids
+            )
+
+            for local_layer_addr, remote_layer_addr in zip(
+                local_base_addr, remote_base_addr
+            ):
+                for group_local_block_id, group_remote_block_id in zip(
+                    group_local_block_ids, group_remote_block_ids
+                ):
+                    src_vas.append(
+                        local_layer_addr + group_local_block_id[0] * block_len
+                    )
+                    dst_vas.append(
+                        remote_layer_addr + group_remote_block_id[0] * block_len
+                    )
+                    sizes.append(block_len * len(group_local_block_id))
+
+            logger.debug(
+                "Sending kv_caches for request %s (%d blocks) to %s",
+                req_id,
+                num_remote_blocks,
+                remote_session,
+            )
+
+        total_xfers = len(sizes)
+        if total_xfers > 0:
+            self.flagcx.flagcxP2pBatchWriteSync(
+                conn, src_vas, dst_vas, sizes
+            )
+
+        logger.debug(
+            "Sending to %s done, took %s",
+            remote_session,
+            time.perf_counter() - start_time,
+        )
+        return total_xfers
+
+    def _receiver_loop_fn(self, loop: asyncio.AbstractEventLoop):
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+
+    async def _receive_kv(
+        self,
+        path: str,
+        req_blocks: list[tuple[str, list[int]]],
+    ):
+        req_ids, block_ids = map(list, zip(*req_blocks))
+
+        metadata = FlagCXAgentMetadata(
+            remote_hostname=self.hostname,
+            remote_port=self.rpc_port,
+            request_ids=req_ids,
+            kv_caches_base_addr=self.kv_caches_base_addr,
+            block_ids=block_ids,
+        )
+
+        encoded_data = self._encoder.encode(metadata)
+
+        sock: zmq.asyncio.Socket = make_zmq_socket(
+            self.async_zmq_ctx, path, zmq.REQ, bind=False, linger=0
+        )
+        sock.setsockopt(zmq.RCVTIMEO, 60000)
+
+        try:
+            await sock.send(encoded_data)
+            ret_msg = await sock.recv()
+            if ret_msg != TRANS_DONE:
+                logger.error(
+                    "Error happens during transferring kvcache for %s, "
+                    "see logs in prefiller.",
+                    req_ids,
+                )
+                return
+
+        except zmq.ContextTerminated:
+            logger.debug("ZMQ context terminated, exiting FlagCX receiver thread.")
+        except Exception as e:
+            logger.error("FlagCXAgentMetadata transfer failed for %s: %s", req_ids, e)
+            return
+        finally:
+            sock.close()
+
+        async with self.finished_recving_reqs.lock:
+            self.finished_recving_reqs.set.update(req_ids)
+
+        logger.debug("pulling kv_caches for %s finished", req_ids)
+
+    def start_load_kv(self, metadata: FlagCXConnectorMetadata):
+        if self.kv_role != "kv_producer":
+            kv_pulls = self._group_kv_pull(metadata)
+            for path, req_blocks in kv_pulls.items():
+                asyncio.run_coroutine_threadsafe(
+                    self._receive_kv(path, req_blocks),
+                    self.receiver_loop,
+                )
+
+        if self.kv_role != "kv_consumer":
+            with self.reqs_need_send.lock:
+                for req_id, block_ids in metadata.reqs_to_send.items():
+                    if block_ids:
+                        send_meta = self.reqs_need_send.reqs[req_id]
+                        send_meta.local_block_ids = block_ids
+                        send_meta.ready.set()
+                        send_meta.expire_time = time.perf_counter() + 480
+                    else:
+                        self.reqs_need_send.reqs[req_id] = SendBlockMeta(
+                            local_block_ids=[], ready=threading.Event()
+                        )
+
+    def wait_for_layer_load(self) -> None:
+        return
+
+    def _group_kv_pull(self, metadata: FlagCXConnectorMetadata):
+        kv_pulls: dict[str, list[tuple[str, list[int]]]] = defaultdict(list)
+        for req_id, meta in metadata.reqs_to_recv.items():
+            path = make_zmq_path(
+                "tcp", meta.remote_host, meta.remote_port + self.tp_rank
+            )
+            kv_pulls[path].append((req_id, meta.local_block_ids))
+        return kv_pulls
+
+    async def _fetch_finished_recving(self) -> set[ReqId]:
+        async with self.finished_recving_reqs.lock:
+            result = self.finished_recving_reqs.set
+            self.finished_recving_reqs.set = set()
+        return result
+
+    def get_finished(self) -> tuple[set[str] | None, set[str] | None]:
+        fut = None
+        if self.kv_role != "kv_producer":
+            fut = asyncio.run_coroutine_threadsafe(
+                self._fetch_finished_recving(), self.receiver_loop
+            )
+
+        if self.kv_role != "kv_consumer":
+            with self.finished_sending_reqs.lock:
+                finished_sending = self.finished_sending_reqs.set
+                self.finished_sending_reqs.set = set()
+        else:
+            finished_sending = set()
+
+        finished_recving = fut.result() if fut else set()
+
+        now = time.perf_counter()
+        with self.reqs_need_send.lock:
+            expired = [
+                rid
+                for rid, sm in self.reqs_need_send.reqs.items()
+                if sm.expire_time < now
+            ]
+            for rid in expired:
+                logger.warning("Request %s send timed out, freeing blocks", rid)
+                del self.reqs_need_send.reqs[rid]
+            if expired:
+                finished_sending.update(expired)
+
+        return finished_sending or None, finished_recving or None
+
+    def __del__(self):
+        self.shutdown()
+
+    def shutdown(self):
+        self.zmq_ctx.term()
+        self.async_zmq_ctx.term()
+        if self.kv_role != "kv_consumer":
+            self._sender_executor.shutdown(wait=False)
+            if self._sender_t:
+                self._sender_t.join(timeout=2)
+        if self.kv_role != "kv_producer":
+            if hasattr(self, "receiver_loop") and self.receiver_loop.is_running():
+                self.receiver_loop.call_soon_threadsafe(self.receiver_loop.stop)
+                self._receiver_t.join(timeout=2)
+        # Tear down the engine (stops the RPC server, closes connections and
+        # deregisters MRs).
+        engine = getattr(self, "engine", None)
+        if engine is not None:
+            try:
+                self.flagcx.flagcxP2pEngineDestroy(engine)
+            except Exception as e:
+                logger.warning("flagcxP2pEngineDestroy failed: %s", e)
+            self.engine = None
+
+
+def _group_contiguous(
+    src_indices: list[int], dst_indices: list[int]
+) -> tuple[list[list[int]], list[list[int]]]:
+    if len(src_indices) == 0:
+        return [], []
+    brk = np.where((np.diff(src_indices) != 1) | (np.diff(dst_indices) != 1))[0] + 1
+    src_groups = [g.tolist() for g in np.split(src_indices, brk)]
+    dst_groups = [g.tolist() for g in np.split(dst_indices, brk)]
+    return src_groups, dst_groups
+
+
+def _get_side_channel_port(vllm_config: VllmConfig) -> int:
+    base_port = int(os.getenv("FLAGCX_BOOTSTRAP_PORT", "8998"))
+    return (
+        base_port
+        + vllm_config.parallel_config.data_parallel_rank
+        * vllm_config.parallel_config.tensor_parallel_size
+    )
