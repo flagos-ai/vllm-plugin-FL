@@ -27,7 +27,7 @@ ARG IMAGE_STAGE=dev
 ARG SOURCE_URL=https://github.com/flagos-ai/vllm-plugin-FL
 
 LABEL org.opencontainers.image.title="vllm-plugin-fl" \
-      org.opencontainers.image.description="Enflame ZIXIAOC200 image for vllm-plugin-FL" \
+      org.opencontainers.image.description="Enflame S60 image for vllm-plugin-FL" \
       org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \

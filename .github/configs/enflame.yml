@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Enflame ZIXIAOC200 hardware configuration.
+# Enflame S60 hardware configuration.
 platform: enflame
 
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-enflame-ci
 
-# Replace this with the exact label configured on the ZIXIAOC200 runner.
+# Replace this with the exact label configured on the Enflame S60 runner.
 runner_labels:
-  - enflame-zixiaoc200
+  - enflame-s60
 
 # Model files are persistent host data and use the same path in the container.
 container_volumes:

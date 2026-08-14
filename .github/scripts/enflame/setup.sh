@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Setup script for Enflame ZIXIAOC200 CI.
+# Setup script for Enflame S60 CI.
 set -euo pipefail
 
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"

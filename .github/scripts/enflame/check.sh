@@ -1,10 +1,10 @@
 #!/bin/bash
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Check Enflame ZIXIAOC200 availability.
+# Check Enflame S60 availability.
 set -euo pipefail
 
 echo "Current time: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "=== Checking Enflame ZIXIAOC200 availability ==="
+echo "=== Checking Enflame S60 availability ==="
 
 if ! command -v efsmi >/dev/null 2>&1; then
   echo "::error::efsmi is not available in the CI container."

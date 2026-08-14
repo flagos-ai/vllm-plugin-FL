@@ -16,7 +16,7 @@ platform: enflame
 vendor: gcu
 
 device_types:
-  zixiaoc200:
+  s60:
     memory_gb: 42
     tags: [enflame, gcu, bf16, fp16, fp32]
 
@@ -30,7 +30,7 @@ tolerance:
       atol: 1e-2
 
 device_overrides:
-  zixiaoc200:
+  s60:
     cases:
       - qwen3_6/27b_tp2_eager
       - qwen3_6/35b_a3b_tp2_eager
@@ -48,8 +48,8 @@ env_defaults:
   ENABLE_I64_CHECK: "0"
   TORCHGCU_INDUCTOR_ENABLE: "1"
 
-zixiaoc200:
-  name: "zixiaoc200"
+s60:
+  name: "s60"
   tests:
     e2e:
       inference:
