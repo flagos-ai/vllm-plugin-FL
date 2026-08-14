@@ -38,7 +38,7 @@ device_overrides:
       gpu_memory_utilization: 0.90
       disable_custom_all_reduce: false
     serve:
-      startup_retries: 120
+      startup_retries: 240
 
 env_defaults:
   VLLM_PLUGINS: "fl"
