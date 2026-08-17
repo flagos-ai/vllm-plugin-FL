@@ -92,17 +92,15 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
-### Qwen3.5 text-only causal model support
+### Runtime compatibility hooks
 
-The plugin supports Qwen3.5 text-only causal models. It installs the required
-config, model, and checkpoint compatibility at process startup without
-modifying the vLLM installation.
+The plugin installs runtime compatibility hooks through vLLM's plugin entry
+points without modifying the installed vLLM package. Model-specific config and
+model registrations are loaded only for their corresponding architectures.
 
-For MoE variants, it also routes `vllm._custom_ops.moe_sum` to FlagGems when
-`USE_FLAGGEMS=1` and `moe_sum` is not excluded by the FlagOS
-whitelist/blacklist. This supports arbitrary MoE top-k with FP32 accumulation
-and handles empty-token batches without rebuilding or replacing vLLM's
-`_moe_C` extension.
+Operator adapters use the plugin dispatch manager, so backend selection,
+fallback, per-op policy, operator-list recording, and I/O diagnostics continue
+to follow the common FlagOS controls.
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 

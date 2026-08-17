@@ -1,17 +1,15 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install Qwen3.5 text-only causal model support at vLLM runtime.
+"""Install canonical Qwen3.5 text-only model support at vLLM runtime.
 
-The compatibility layer mirrors the text-only config, model, and checkpoint
-handling missing from upstream vLLM without modifying the vLLM installation.
+The target vLLM release already provides Qwen3.5 config and model classes. This
+module only fills in the missing text-config, causal-model, and verifier
+registrations without modifying the vLLM installation.
 """
 
 import logging
 
 from vllm.model_executor.models.config import (
     Qwen3_5ForConditionalGenerationConfig,
-)
-from vllm.transformers_utils.model_arch_config_convertor import (
-    ModelArchConfigConvertorBase,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,53 +18,10 @@ _ARCHITECTURES = {
     "Qwen3_5ForCausalLM": "Qwen3_5ForCausalLM",
     "Qwen3_5MoeForCausalLM": "Qwen3_5MoeForCausalLM",
 }
-_CONDITIONAL_TO_CAUSAL = {
-    "Qwen3_5ForConditionalGeneration": "Qwen3_5ForCausalLM",
-    "Qwen3_5MoeForConditionalGeneration": "Qwen3_5MoeForCausalLM",
-}
-_DEFAULT_ARCHITECTURES = {
-    "qwen3_5_text": "Qwen3_5ForCausalLM",
-    "qwen3_5_moe_text": "Qwen3_5MoeForCausalLM",
-}
-
-
-class Qwen3_5TextModelArchConfigConvertor(ModelArchConfigConvertorBase):
-    """Normalize multimodal architecture names in text-only Qwen configs."""
-
-    def get_architectures(self) -> list[str]:
-        architectures = super().get_architectures()
-        if not architectures:
-            default = _DEFAULT_ARCHITECTURES.get(self.hf_config.model_type)
-            normalized = [default] if default is not None else architectures
-        else:
-            normalized = [
-                _CONDITIONAL_TO_CAUSAL.get(arch, arch) for arch in architectures
-            ]
-
-        # The runtime model loader consults hf_config.architectures again after
-        # ModelArchitectureConfig has been built. Keep both views synchronized
-        # so it cannot fall back to a stale VL architecture.
-        if normalized != architectures:
-            self.hf_config.architectures = normalized.copy()
-        return normalized
-
-
-class Qwen3_5ForCausalLMConfig(Qwen3_5ForConditionalGenerationConfig):
-    """Use the upstream cache config checks and remove multimodal RoPE keys."""
-
-    @staticmethod
-    def verify_and_update_config(vllm_config) -> None:
-        Qwen3_5ForConditionalGenerationConfig.verify_and_update_config(vllm_config)
-
-        hf_text_config = vllm_config.model_config.hf_text_config
-        rope_parameters = getattr(hf_text_config, "rope_parameters", None)
-        if rope_parameters is not None:
-            rope_parameters.pop("mrope_section", None)
-            rope_parameters.pop("mrope_interleaved", None)
 
 
 def apply_qwen3_5_text_patches() -> bool:
-    """Register Qwen3.5 text-only causal model support.
+    """Register canonical Qwen3.5 text-only causal models.
 
     Repeated calls are safe. Returns ``True`` after installing the runtime
     registrations.
@@ -75,21 +30,20 @@ def apply_qwen3_5_text_patches() -> bool:
         config as model_config,
         registry as model_registry,
     )
-    from vllm.transformers_utils import (
-        config as transformers_config,
-        model_arch_config_convertor,
-    )
+    from vllm.transformers_utils import config as transformers_config
 
     config_registry = transformers_config._CONFIG_REGISTRY
     config_registry.setdefault("qwen3_5_text", "Qwen3_5TextConfig")
     config_registry.setdefault("qwen3_5_moe_text", "Qwen3_5MoeTextConfig")
 
-    convertors = model_arch_config_convertor.MODEL_ARCH_CONFIG_CONVERTORS
-    convertors["qwen3_5_text"] = Qwen3_5TextModelArchConfigConvertor
-    convertors["qwen3_5_moe_text"] = Qwen3_5TextModelArchConfigConvertor
-
     for architecture in _ARCHITECTURES:
-        model_config.MODELS_CONFIG_MAP[architecture] = Qwen3_5ForCausalLMConfig
+        # The causal and conditional variants share the same hybrid-cache
+        # verification. Canonical text-only configs already carry causal
+        # architecture names and valid RoPE parameters, so no config mutation
+        # or architecture conversion is needed here.
+        model_config.MODELS_CONFIG_MAP[architecture] = (
+            Qwen3_5ForConditionalGenerationConfig
+        )
 
     # Keep the source registries coherent for introspection, then overwrite the
     # already-materialized ModelRegistry with a lazy plugin path.  Importing
@@ -107,8 +61,4 @@ def apply_qwen3_5_text_patches() -> bool:
     return True
 
 
-__all__ = [
-    "Qwen3_5ForCausalLMConfig",
-    "Qwen3_5TextModelArchConfigConvertor",
-    "apply_qwen3_5_text_patches",
-]
+__all__ = ["apply_qwen3_5_text_patches"]

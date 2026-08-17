@@ -3,61 +3,12 @@ from types import SimpleNamespace
 from vllm_fl.patches import qwen3_5_text as compat
 
 
-def test_text_config_convertor_remaps_conditional_architecture():
-    hf_config = SimpleNamespace(
-        model_type="qwen3_5_moe_text",
-        architectures=["Qwen3_5MoeForConditionalGeneration"],
-    )
-    convertor = compat.Qwen3_5TextModelArchConfigConvertor(hf_config, hf_config)
-
-    assert convertor.get_architectures() == ["Qwen3_5MoeForCausalLM"]
-    assert hf_config.architectures == ["Qwen3_5MoeForCausalLM"]
-
-
-def test_text_config_convertor_supplies_default_architecture():
-    hf_config = SimpleNamespace(
-        model_type="qwen3_5_text",
-        architectures=None,
-    )
-    convertor = compat.Qwen3_5TextModelArchConfigConvertor(hf_config, hf_config)
-
-    assert convertor.get_architectures() == ["Qwen3_5ForCausalLM"]
-    assert hf_config.architectures == ["Qwen3_5ForCausalLM"]
-
-
-def test_causal_config_removes_multimodal_rope_keys(monkeypatch):
-    parent_calls = []
-    monkeypatch.setattr(
-        compat.Qwen3_5ForConditionalGenerationConfig,
-        "verify_and_update_config",
-        lambda config: parent_calls.append(config),
-    )
-    rope_parameters = {
-        "rope_type": "default",
-        "mrope_section": [16, 24, 24],
-        "mrope_interleaved": True,
-    }
-    vllm_config = SimpleNamespace(
-        model_config=SimpleNamespace(
-            hf_text_config=SimpleNamespace(rope_parameters=rope_parameters)
-        )
-    )
-
-    compat.Qwen3_5ForCausalLMConfig.verify_and_update_config(vllm_config)
-
-    assert parent_calls == [vllm_config]
-    assert rope_parameters == {"rope_type": "default"}
-
-
 def test_apply_registers_only_plugin_owned_lazy_models(monkeypatch):
     from vllm.model_executor.models import (
         config as model_config,
         registry as model_registry,
     )
-    from vllm.transformers_utils import (
-        config as transformers_config,
-        model_arch_config_convertor,
-    )
+    from vllm.transformers_utils import config as transformers_config
 
     registered = {}
     fake_registry = SimpleNamespace(
@@ -67,7 +18,6 @@ def test_apply_registers_only_plugin_owned_lazy_models(monkeypatch):
     )
     monkeypatch.setattr(transformers_config, "_CONFIG_REGISTRY", {})
     monkeypatch.setattr(model_config, "MODELS_CONFIG_MAP", {})
-    monkeypatch.setattr(model_arch_config_convertor, "MODEL_ARCH_CONFIG_CONVERTORS", {})
     monkeypatch.setattr(model_registry, "_TEXT_GENERATION_MODELS", {})
     monkeypatch.setattr(model_registry, "_VLLM_MODELS", {})
     monkeypatch.setattr(model_registry, "ModelRegistry", fake_registry)
@@ -83,8 +33,8 @@ def test_apply_registers_only_plugin_owned_lazy_models(monkeypatch):
         "qwen3_5_moe_text": "Qwen3_5MoeTextConfig",
     }
     assert {
-        "Qwen3_5ForCausalLM": compat.Qwen3_5ForCausalLMConfig,
-        "Qwen3_5MoeForCausalLM": compat.Qwen3_5ForCausalLMConfig,
+        "Qwen3_5ForCausalLM": compat.Qwen3_5ForConditionalGenerationConfig,
+        "Qwen3_5MoeForCausalLM": compat.Qwen3_5ForConditionalGenerationConfig,
     } == model_config.MODELS_CONFIG_MAP
 
 

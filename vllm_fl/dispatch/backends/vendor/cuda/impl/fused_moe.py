@@ -5,6 +5,7 @@ CUDA rotary embedding operator implementations.
 """
 
 import torch
+
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
