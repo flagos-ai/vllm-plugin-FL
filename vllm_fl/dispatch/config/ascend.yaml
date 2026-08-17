@@ -103,6 +103,15 @@ flagos_blacklist:
   - _index_put_impl_
   # --- Reduction (argmax only - Invalid Runtime Function on NPU) ---
   - argmax
+  # --- Constant materialization (coreDim=0 kernel launch on scalar tensors) ---
+  # register_buffer("_k_scale", torch.tensor(1.0)) during model construction
+  # routes torch.tensor(scalar) through aten::lift_fresh; the FlagGems copy
+  # kernel computes a zero grid for a scalar/tiny tensor and the NPU aborts
+  # engine startup with "coreDim is invalid (value 0)". These are trivial
+  # copies, so falling back to torch_npu is lossless.
+  - lift_fresh
+  - lift_fresh_copy
+  - _to_copy
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
