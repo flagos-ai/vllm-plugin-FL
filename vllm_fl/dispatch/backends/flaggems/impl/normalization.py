@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Optional, Union
 
 import torch
-from vllm_fl.utils import use_flaggems_vllm
+
+import vllm_fl.envs as fl_envs
 
 
 def rms_norm_flaggems(
@@ -28,7 +29,7 @@ def rms_norm_flaggems(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    if use_flaggems_vllm():
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
         from flaggems_vllm.ops.rms_norm import gems_rms_forward
     else:
         from flag_gems import rms_norm_forward as gems_rms_forward

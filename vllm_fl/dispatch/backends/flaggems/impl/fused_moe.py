@@ -9,7 +9,8 @@ from typing import Optional
 import torch
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
-from vllm_fl.utils import use_flaggems_vllm
+
+import vllm_fl.envs as fl_envs
 
 
 def moe_align_block_size_flaggems(
@@ -20,7 +21,7 @@ def moe_align_block_size_flaggems(
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if use_flaggems_vllm():
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
         from flaggems_vllm.ops.moe_align_block_size import moe_align_block_size_triton
     else:
         from flag_gems import moe_align_block_size_triton
@@ -60,7 +61,7 @@ def moe_align_block_size_flaggems(
 def topk_softmax_flaggems(
     topk_weights, topk_indices, token_expert_indices, gating_output, renormalize=False
 ):
-    if use_flaggems_vllm():
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
         from flaggems_vllm.ops.topk_softmax import topk_softmax
         topk_softmax(
             topk_weights,
@@ -141,7 +142,7 @@ def fused_topk_bias_flaggems(
         return topk_weights, topk_ids
 
     elif scoring_func == "sqrtsoftplus":
-        if use_flaggems_vllm():
+        if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
             from flaggems_vllm.ops.topk_softplus_sqrt import topk_softplus_sqrt
         else:
             from flag_gems import topk_softplus_sqrt
@@ -205,7 +206,7 @@ def invoke_fused_moe_triton_kernel_flaggems(
     block_shape=None,
     B_bias=None,
 ):
-    if use_flaggems_vllm():
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
         from flaggems_vllm.ops.invoke_fused_moe_kernel import invoke_fused_moe_triton_kernel
     else:
         from flag_gems import invoke_fused_moe_triton_kernel
@@ -244,7 +245,7 @@ def grouped_topk_flaggems(
     bias,
     scoring_func=0,
 ):
-    if use_flaggems_vllm():
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
         from flaggems_vllm.ops.grouped_topk import grouped_topk
     else:
         from flag_gems import grouped_topk
@@ -262,7 +263,7 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    if use_flaggems_vllm():
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
         from flaggems_vllm.ops.moe_sum import moe_sum
     else:
         from flag_gems import moe_sum

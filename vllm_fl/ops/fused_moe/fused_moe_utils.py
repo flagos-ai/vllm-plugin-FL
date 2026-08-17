@@ -44,6 +44,7 @@ from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl
 
+import vllm_fl.envs as fl_envs
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import use_flaggems
@@ -328,9 +329,7 @@ class TritonExpertsFL(TritonExperts):
         # Fast path (no LoRA, NVIDIA only): let FlagGems own both expert GEMMs
         # for unquantized and W8A16 inputs.
         if self._lora_context is None and current_platform.is_cuda():
-            from vllm_fl.utils import use_flaggems_vllm
-
-            if use_flaggems_vllm():
+            if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
                 import flaggems_vllm
                 fused_experts_impl = flaggems_vllm.fused_experts_impl
             else:

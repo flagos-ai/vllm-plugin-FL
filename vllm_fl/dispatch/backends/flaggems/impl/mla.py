@@ -23,9 +23,9 @@ from vllm.model_executor.layers.attention.mla_attention import (
     MLACommonMetadata,
 )
 
-from vllm_fl.utils import use_flaggems_vllm
+import vllm_fl.envs as fl_envs
 
-if use_flaggems_vllm():
+if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
     from flaggems_vllm.ops.flash_attn_varlen_func import flash_attn_varlen_func
     from flaggems_vllm.ops.flash_mla import flash_mla
 else:
