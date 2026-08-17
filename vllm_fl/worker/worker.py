@@ -673,13 +673,13 @@ class WorkerFL(WorkerBase):
         # cuda graph capture.
         try:
             kernel_warmup(self)
-        except ImportError:
+        except ImportError as e:
             # vllm 0.24.0's kernel_warmup unconditionally imports
             # minimax_m3_msa_warmup, whose chain reaches torchvision.
             # torchvision is not installed on OOT runtimes (installing it
             # would overwrite the vendor-matched torch matrix); the warmup
             # is a no-op for any model other than MiniMaxM3, so skip it.
-            logger.warning("kernel_warmup skipped: torchvision unavailable")
+            logger.warning("kernel_warmup skipped: %s", e)
 
         cuda_graph_memory_bytes = 0
         if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
