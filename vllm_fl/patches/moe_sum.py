@@ -54,7 +54,7 @@ def patch_vllm_moe_sum(ops_module: ModuleType | None = None) -> bool:
     moe_sum_flagos._vllm_fl_moe_sum_patch = True
     moe_sum_flagos._vllm_fl_original = original
     ops_module.moe_sum = moe_sum_flagos
-    logger.info("Monkey-patched vLLM moe_sum -> FlagGems runtime operator")
+    logger.info("Bridged vLLM moe_sum -> vllm-plugin-FL dispatch manager")
     return True
 
 
