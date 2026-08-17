@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from vllm_fl.patches import qwen3_5_v024 as compat
+from vllm_fl.patches import qwen3_5_text as compat
 
 
 def test_text_config_convertor_remaps_conditional_architecture():
@@ -65,7 +65,6 @@ def test_apply_registers_only_plugin_owned_lazy_models(monkeypatch):
             architecture, model
         )
     )
-    monkeypatch.setattr(compat, "is_vllm_024", lambda: True)
     monkeypatch.setattr(transformers_config, "_CONFIG_REGISTRY", {})
     monkeypatch.setattr(model_config, "MODELS_CONFIG_MAP", {})
     monkeypatch.setattr(model_arch_config_convertor, "MODEL_ARCH_CONFIG_CONVERTORS", {})
@@ -73,7 +72,7 @@ def test_apply_registers_only_plugin_owned_lazy_models(monkeypatch):
     monkeypatch.setattr(model_registry, "_VLLM_MODELS", {})
     monkeypatch.setattr(model_registry, "ModelRegistry", fake_registry)
 
-    assert compat.apply_qwen3_5_v024_patches() is True
+    assert compat.apply_qwen3_5_text_patches() is True
 
     assert registered == {
         "Qwen3_5ForCausalLM": ("vllm_fl.models.qwen3_5:Qwen3_5ForCausalLM"),

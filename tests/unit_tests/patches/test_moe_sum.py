@@ -1,6 +1,6 @@
 from types import ModuleType
 
-from vllm_fl.patches import moe_sum_v024
+from vllm_fl.patches import moe_sum
 
 
 class _FakeTensor:
@@ -21,18 +21,17 @@ def test_moe_sum_patch_routes_nonempty_and_guards_empty(monkeypatch):
     ops = ModuleType("fake_vllm_custom_ops")
     ops.moe_sum = lambda input, output: calls.append(("original", input, output))
 
-    monkeypatch.setattr(moe_sum_v024, "is_vllm_024", lambda: True)
     monkeypatch.setattr(
-        moe_sum_v024, "use_flaggems_op", lambda op_name: op_name == "moe_sum"
+        moe_sum, "use_flaggems_op", lambda op_name: op_name == "moe_sum"
     )
     monkeypatch.setattr(
-        moe_sum_v024,
+        moe_sum,
         "_flag_gems_moe_sum",
         lambda input, output: calls.append(("flag_gems", input, output)),
     )
 
-    assert moe_sum_v024.patch_vllm_moe_sum(ops) is True
-    assert moe_sum_v024.patch_vllm_moe_sum(ops) is False
+    assert moe_sum.patch_vllm_moe_sum(ops) is True
+    assert moe_sum.patch_vllm_moe_sum(ops) is False
 
     nonempty_input = _FakeTensor(24)
     nonempty_output = _FakeTensor(8)
@@ -48,15 +47,14 @@ def test_moe_sum_patch_uses_stride_safe_fallback(monkeypatch):
     ops = ModuleType("fake_vllm_custom_ops")
     ops.moe_sum = lambda input, output: None
 
-    monkeypatch.setattr(moe_sum_v024, "is_vllm_024", lambda: True)
-    monkeypatch.setattr(moe_sum_v024, "use_flaggems_op", lambda op_name: True)
+    monkeypatch.setattr(moe_sum, "use_flaggems_op", lambda op_name: True)
     monkeypatch.setattr(
-        moe_sum_v024,
+        moe_sum,
         "_torch_moe_sum",
         lambda input, output: calls.append((input, output)),
     )
 
-    assert moe_sum_v024.patch_vllm_moe_sum(ops) is True
+    assert moe_sum.patch_vllm_moe_sum(ops) is True
     noncontiguous_input = _FakeTensor(24, hidden_stride=2)
     output = _FakeTensor(8)
     ops.moe_sum(noncontiguous_input, output)
@@ -69,8 +67,7 @@ def test_moe_sum_patch_respects_flaggems_disable(monkeypatch):
     original = lambda input, output: None
     ops.moe_sum = original
 
-    monkeypatch.setattr(moe_sum_v024, "is_vllm_024", lambda: True)
-    monkeypatch.setattr(moe_sum_v024, "use_flaggems_op", lambda op_name: False)
+    monkeypatch.setattr(moe_sum, "use_flaggems_op", lambda op_name: False)
 
-    assert moe_sum_v024.patch_vllm_moe_sum(ops) is False
+    assert moe_sum.patch_vllm_moe_sum(ops) is False
     assert ops.moe_sum is original

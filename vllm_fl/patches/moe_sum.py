@@ -1,11 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Route vLLM 0.24 MoE reduction through FlagGems at runtime."""
+"""Route vLLM MoE reduction through FlagGems at runtime."""
 
-from functools import wraps
 import logging
+from functools import wraps
 from types import ModuleType
 
-from vllm_fl.patches._version import is_vllm_024
 from vllm_fl.utils import use_flaggems_op
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,7 @@ def patch_vllm_moe_sum(ops_module: ModuleType | None = None) -> bool:
     every call.  The replacement therefore covers Triton/FP8 experts while
     leaving the vLLM wheel and its compiled extensions untouched.
     """
-    if not is_vllm_024() or not use_flaggems_op("moe_sum"):
+    if not use_flaggems_op("moe_sum"):
         return False
 
     if ops_module is None:
@@ -56,7 +55,7 @@ def patch_vllm_moe_sum(ops_module: ModuleType | None = None) -> bool:
     moe_sum_flagos._vllm_fl_moe_sum_patch = True
     moe_sum_flagos._vllm_fl_original = original
     ops_module.moe_sum = moe_sum_flagos
-    logger.info("Monkey-patched vLLM 0.24 moe_sum -> FlagGems runtime operator")
+    logger.info("Monkey-patched vLLM moe_sum -> FlagGems runtime operator")
     return True
 
 

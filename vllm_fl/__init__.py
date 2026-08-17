@@ -138,17 +138,13 @@ def register_router():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
-    # Keep all vLLM 0.24 compatibility changes plugin-owned.  These hooks are
-    # idempotent because general plugins are loaded independently in spawned
-    # model-inspection and worker processes.
-    from vllm_fl.patches._version import is_vllm_024
+    # General plugins are loaded independently in spawned model-inspection and
+    # worker processes, so all runtime compatibility hooks must be idempotent.
+    from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
+    from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
 
-    if is_vllm_024():
-        from vllm_fl.patches.qwen3_5_v024 import apply_qwen3_5_v024_patches
-        from vllm_fl.patches.moe_sum_v024 import patch_vllm_moe_sum
-
-        apply_qwen3_5_v024_patches()
-        patch_vllm_moe_sum()
+    apply_qwen3_5_text_patches()
+    patch_vllm_moe_sum()
 
     _register_flagcx_connector()
 

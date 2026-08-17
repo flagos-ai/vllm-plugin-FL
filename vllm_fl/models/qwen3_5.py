@@ -1,10 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Runtime compatibility shim for Qwen3.5 text-only models on vLLM 0.24.
+"""Runtime compatibility shim for Qwen3.5 text-only causal models.
 
 The model implementation remains the one shipped by vLLM. Importing this
 module adds the hybrid-model metadata, cache helpers, and VL checkpoint prefix
-mapping that the v0.24 text-only classes are missing, then re-exports those
-upstream classes for lazy registration by the FL plugin.
+mapping that the upstream text-only classes are missing, then re-exports those
+classes for lazy registration by the FL plugin.
 """
 
 from vllm.model_executor.layers.mamba.mamba_utils import (
