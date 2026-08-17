@@ -1,19 +1,17 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Route vLLM MoE reduction through FlagGems at runtime."""
+"""Route vLLM MoE reduction through the plugin dispatch manager."""
 
 import logging
 from functools import wraps
 from types import ModuleType
 
+from vllm_fl.dispatch import CachedOp
 from vllm_fl.utils import use_flaggems_op
 
 logger = logging.getLogger(__name__)
 
 
-def _flag_gems_moe_sum(input, output):
-    from flag_gems import moe_sum
-
-    return moe_sum(input, output)
+_dispatch_moe_sum = CachedOp("moe_sum")
 
 
 def _torch_moe_sum(input, output):
@@ -23,11 +21,12 @@ def _torch_moe_sum(input, output):
 
 
 def patch_vllm_moe_sum(ops_module: ModuleType | None = None) -> bool:
-    """Replace ``vllm._custom_ops.moe_sum`` without replacing ``_moe_C``.
+    """Bridge ``vllm._custom_ops.moe_sum`` into the plugin OpManager.
 
     vLLM's MoE implementations resolve this function through the module on
-    every call.  The replacement therefore covers Triton/FP8 experts while
-    leaving the vLLM wheel and its compiled extensions untouched.
+    every call. The adapter therefore covers Triton/FP8 experts while leaving
+    the vLLM wheel and its compiled extensions untouched. Backend selection,
+    fallback, diagnostics, and per-op policy remain owned by OpManager.
     """
     if not use_flaggems_op("moe_sum"):
         return False
@@ -50,7 +49,7 @@ def patch_vllm_moe_sum(ops_module: ModuleType | None = None) -> bool:
         # Preserve non-contiguous correctness via a rare fallback.
         if input.stride(-1) != 1 or output.stride(-1) != 1:
             return _torch_moe_sum(input, output)
-        return _flag_gems_moe_sum(input, output)
+        return _dispatch_moe_sum(input, output)
 
     moe_sum_flagos._vllm_fl_moe_sum_patch = True
     moe_sum_flagos._vllm_fl_original = original

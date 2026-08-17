@@ -26,8 +26,8 @@ def test_moe_sum_patch_routes_nonempty_and_guards_empty(monkeypatch):
     )
     monkeypatch.setattr(
         moe_sum,
-        "_flag_gems_moe_sum",
-        lambda input, output: calls.append(("flag_gems", input, output)),
+        "_dispatch_moe_sum",
+        lambda input, output: calls.append(("dispatch", input, output)),
     )
 
     assert moe_sum.patch_vllm_moe_sum(ops) is True
@@ -38,7 +38,7 @@ def test_moe_sum_patch_routes_nonempty_and_guards_empty(monkeypatch):
     ops.moe_sum(nonempty_input, nonempty_output)
     ops.moe_sum(_FakeTensor(0), nonempty_output)
 
-    assert calls == [("flag_gems", nonempty_input, nonempty_output)]
+    assert calls == [("dispatch", nonempty_input, nonempty_output)]
     assert ops.moe_sum._vllm_fl_original is not ops.moe_sum
 
 
