@@ -499,6 +499,11 @@ class WorkerFL(WorkerBase):
         current_platform.empty_cache()
         current_platform.torch_device_fn.reset_peak_memory_stats()
 
+        # cudagraph_memory_estimate is only computed in the profiling branch
+        # below; keep a default so the CUDA-graph warning block at the end of
+        # this function stays safe when the NPU branch skips profiling.
+        cudagraph_memory_estimate = 0
+
         # On Ascend NPU, the profile_run forward pass crashes the worker
         # process (SIGKILL from the NPU driver due to incompatible Triton
         # kernels in the GDN/FLA layers). Skip profile_run and estimate
@@ -561,41 +566,41 @@ class WorkerFL(WorkerBase):
             ):
                 cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
 
-        profile_result.torch_peak_increase = (
-            profile_torch_peak - profile_result.before_profile.torch_peak
-        )
-        profile_result.non_kv_cache_memory = (
-            profile_result.non_torch_increase
-            + profile_result.torch_peak_increase
-            + profile_result.weights_memory
-        )
-        cudagraph_memory_estimate_applied = (
-            cudagraph_memory_estimate
-            if envs.VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
-            else 0
-        )
+            profile_result.torch_peak_increase = (
+                profile_torch_peak - profile_result.before_profile.torch_peak
+            )
+            profile_result.non_kv_cache_memory = (
+                profile_result.non_torch_increase
+                + profile_result.torch_peak_increase
+                + profile_result.weights_memory
+            )
+            cudagraph_memory_estimate_applied = (
+                cudagraph_memory_estimate
+                if envs.VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS
+                else 0
+            )
 
-        self.non_torch_memory = profile_result.non_torch_increase
-        self.peak_activation_memory = profile_result.torch_peak_increase
-        self.cudagraph_memory_estimate = cudagraph_memory_estimate
+            self.non_torch_memory = profile_result.non_torch_increase
+            self.peak_activation_memory = profile_result.torch_peak_increase
+            self.cudagraph_memory_estimate = cudagraph_memory_estimate
 
-        free_gpu_memory = profile_result.after_profile.free_memory
-        # NOTE(woosuk): Here we assume that the other processes using the same
-        # GPU did not change their memory usage during the profiling.
-        assert self.init_snapshot.free_memory > free_gpu_memory, (
-            "Error in memory profiling. "
-            f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
-            f"current free memory {GiB(free_gpu_memory)} GiB. "
-            "This happens when other processes sharing the same container "
-            "release GPU memory while vLLM is profiling during initialization. "
-            "To fix this, ensure consistent GPU memory allocation or "
-            "isolate vLLM in its own container."
-        )
-        self.available_kv_cache_memory_bytes = (
-            self.requested_memory
-            - profile_result.non_kv_cache_memory
-            - cudagraph_memory_estimate_applied
-        )
+            free_gpu_memory = profile_result.after_profile.free_memory
+            # NOTE(woosuk): Here we assume that the other processes using the
+            # same GPU did not change their memory usage during the profiling.
+            assert self.init_snapshot.free_memory > free_gpu_memory, (
+                "Error in memory profiling. "
+                f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
+                f"current free memory {GiB(free_gpu_memory)} GiB. "
+                "This happens when other processes sharing the same container "
+                "release GPU memory while vLLM is profiling during initialization. "
+                "To fix this, ensure consistent GPU memory allocation or "
+                "isolate vLLM in its own container."
+            )
+            self.available_kv_cache_memory_bytes = (
+                self.requested_memory
+                - profile_result.non_kv_cache_memory
+                - cudagraph_memory_estimate_applied
+            )
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
         if current_platform.device_type != "npu":
