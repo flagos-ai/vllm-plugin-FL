@@ -92,13 +92,19 @@ def _patch_xpu_get_device():
 
     Prevents torch.xpu.get_device_name crash in vllm.model_executor.layers.fla.ops.utils,
     which calls get_device_name at module level when Triton reports backend as 'xpu'.
+
+    NOTE: Must NOT call get_platform_name() here — it accesses current_platform which
+    is not yet initialized during platform resolve, causing infinite recursion and log
+    flooding. Use PlatformFL.vendor_name (class attribute, resolved at class definition
+    time) as a safe static check at this stage.
     """
+    from vllm_fl.platform import PlatformFL
+    if PlatformFL.vendor_name != "kunlunxin":
+        return
     try:
-        from vllm_fl.dispatch.config.utils import get_platform_name
-        if get_platform_name() != "kunlunxin":
-            return
         ensure_fla_compat()
     except Exception as e:
         import logging
-        logger = logging.getLogger(__name__)
-        logger.warning("Failed to apply XPU get_device_name patch: %s", e)
+        logging.getLogger(__name__).warning(
+            "Failed to apply XPU get_device_name patch: %s", e
+        )
