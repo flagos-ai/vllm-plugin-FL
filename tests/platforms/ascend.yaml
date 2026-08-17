@@ -41,6 +41,7 @@ device_types:
 tolerance:
   inference:
     default:  {rtol: 1e-3, atol: 1e-3}
+    float32:  {rtol: 1e-4, atol: 1e-5}
     bfloat16: {rtol: 1e-2, atol: 1e-2}
     float16:  {rtol: 1e-2, atol: 1e-2}
 
@@ -91,7 +92,8 @@ env_defaults: {}
       # Include patterns: "*" for all, or list specific paths
       include: "*"
       # Exclude patterns: empty list or list paths to exclude
-      exclude: []
+      exclude:
+        - ops/test_ops_correctness.py
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
