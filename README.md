@@ -92,6 +92,11 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
+### vLLM 0.24 runtime compatibility
+
+For vLLM 0.24.x, the plugin registers Qwen3.5 text-only causal model
+support at process startup without modifying the vLLM installation.
+
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
     4.1 Clone the repository:

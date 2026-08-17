@@ -138,6 +138,16 @@ def register_router():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+    # Keep all vLLM 0.24 compatibility changes plugin-owned.  These hooks are
+    # idempotent because general plugins are loaded independently in spawned
+    # model-inspection and worker processes.
+    from vllm_fl.patches._version import is_vllm_024
+
+    if is_vllm_024():
+        from vllm_fl.patches.qwen3_5_v024 import apply_qwen3_5_v024_patches
+
+        apply_qwen3_5_v024_patches()
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
