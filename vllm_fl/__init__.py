@@ -145,8 +145,10 @@ def register_model():
 
     if is_vllm_024():
         from vllm_fl.patches.qwen3_5_v024 import apply_qwen3_5_v024_patches
+        from vllm_fl.patches.moe_sum_v024 import patch_vllm_moe_sum
 
         apply_qwen3_5_v024_patches()
+        patch_vllm_moe_sum()
 
     _register_flagcx_connector()
 
