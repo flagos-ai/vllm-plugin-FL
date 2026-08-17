@@ -70,10 +70,10 @@ def silu_and_mul_with_clamp_flaggems(x: torch.Tensor, swiglu_limit: torch.Tensor
         Output tensor of shape [..., d]
     """
     if use_flaggems_vllm():
-        from flaggems_vllm.ops.silu_and_mul_with_clamp import silu_and_mul_with_clamp
+        from flaggems_vllm.ops.silu_and_mul_with_clamp import silu_and_mul_with_clamp_kernel
     else:
-        from flag_gems import silu_and_mul_with_clamp
+        from flag_gems.fused.silu_and_mul_with_clamp import silu_and_mul_with_clamp_kernel
 
     d = x.shape[-1] // 2
     gate, up = x[..., :d], x[..., d:]
-    return silu_and_mul_with_clamp(gate, up, swiglu_limit)
+    return silu_and_mul_with_clamp_kernel(gate, up, swiglu_limit)
