@@ -5,8 +5,6 @@ Test cases for flaggems_vllm import substitution.
 
 Verifies that all 'from flaggems_vllm.ops.xxx import yyy' used in the codebase
 are importable and return callable objects.
-
-Run: python3 tests/unit_tests/flaggems/test_flaggems_vllm_imports.py
 """
 
 
@@ -124,18 +122,3 @@ def test_fused_experts_impl():
     import flaggems_vllm
 
     assert callable(flaggems_vllm.fused_experts_impl)
-
-
-if __name__ == "__main__":
-    tests = [v for k, v in globals().items() if k.startswith("test_")]
-    passed = 0
-    failed = 0
-    for t in tests:
-        try:
-            t()
-            print(f"✅ {t.__name__}")
-            passed += 1
-        except Exception as e:
-            print(f"❌ {t.__name__}: {e}")
-            failed += 1
-    print(f"\n{passed} passed, {failed} failed")
