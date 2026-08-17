@@ -207,7 +207,7 @@ def invoke_fused_moe_triton_kernel_flaggems(
     B_bias=None,
 ):
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
-        from flaggems_vllm.ops.invoke_fused_moe_kernel import invoke_fused_moe_triton_kernel
+        from flaggems_vllm.ops.fused_moe import invoke_fused_moe_triton_kernel
     else:
         from flag_gems import invoke_fused_moe_triton_kernel
 

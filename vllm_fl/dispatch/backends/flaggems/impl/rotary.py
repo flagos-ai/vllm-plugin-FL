@@ -38,7 +38,7 @@ def rotary_embedding_flaggems(
         Tuple of (embedded_query, embedded_key)
     """
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
-        from flaggems_vllm.ops.rope import gems_rope_forward
+        from flaggems_vllm.ops.rotary_embedding import apply_rotary_pos_emb as gems_rope_forward
     else:
         from flag_gems import apply_rotary_pos_emb as gems_rope_forward
 

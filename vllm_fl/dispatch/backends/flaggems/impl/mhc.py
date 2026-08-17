@@ -87,7 +87,7 @@ def mhc_post_flaggems(
 ) -> torch.Tensor:
     """FlagGems native implementation of mhc_post."""
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
-        from flaggems_vllm.ops.mhc_post import mhc_post
+        from flaggems_vllm.ops.mhc.mhc_post import mhc_post
     else:
         from flag_gems import mhc_post
 
@@ -107,7 +107,7 @@ def hc_head_fused_kernel_flaggems(
 ) -> None:
     """FlagGems native implementation of hc_head_fused_kernel. Mutates `out` in-place."""
     if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
-        from flaggems_vllm.ops.hc_head_fused_kernel import hc_head_fused_kernel
+        from flaggems_vllm.ops.mhc.hc_head_fused_kernel import hc_head_fused_kernel
     else:
         from flag_gems import hc_head_fused_kernel
 

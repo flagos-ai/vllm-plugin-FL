@@ -1,9 +1,14 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+import logging
 import os
 from typing import Any, Callable
 
 from vllm_fl.utils import use_flaggems
+
+logger = logging.getLogger(__name__)
+
+_FLAGGEMS_VLLM_STATUS_LOGGED = False
 
 fl_vllm_environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_FL_PREFER_ENABLED": lambda: (
@@ -22,7 +27,18 @@ fl_vllm_environment_variables: dict[str, Callable[[], Any]] = {
 def __getattr__(name: str):
     # lazy evaluation of environment variables
     if name in fl_vllm_environment_variables:
-        return fl_vllm_environment_variables[name]()
+        value = fl_vllm_environment_variables[name]()
+        if name == "VLLM_FL_USE_FLAGGEMS_VLLM":
+            global _FLAGGEMS_VLLM_STATUS_LOGGED
+            if not _FLAGGEMS_VLLM_STATUS_LOGGED:
+                _FLAGGEMS_VLLM_STATUS_LOGGED = True
+                backend = "flaggems_vllm" if value else "flag_gems"
+                logger.info(
+                    "VLLM_FL_USE_FLAGGEMS_VLLM=%s, using %s for non-aten ops",
+                    os.environ.get("VLLM_FL_USE_FLAGGEMS_VLLM", "1"),
+                    backend,
+                )
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
