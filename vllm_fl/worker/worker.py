@@ -671,7 +671,15 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        kernel_warmup(self)
+        try:
+            kernel_warmup(self)
+        except ImportError:
+            # vllm 0.24.0's kernel_warmup unconditionally imports
+            # minimax_m3_msa_warmup, whose chain reaches torchvision.
+            # torchvision is not installed on OOT runtimes (installing it
+            # would overwrite the vendor-matched torch matrix); the warmup
+            # is a no-op for any model other than MiniMaxM3, so skip it.
+            logger.warning("kernel_warmup skipped: torchvision unavailable")
 
         cuda_graph_memory_bytes = 0
         if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
