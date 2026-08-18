@@ -3,9 +3,11 @@
 # Setup script for Moore Threads MUSA CI environment.
 set -euo pipefail
 
+# Install FlagGems-vllm for test purpose
 FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
 git clone https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
 git -C "${FLAGGEMS_VLLM_DIR}" checkout main
+pip install --no-build-isolation -e "${FLAGGEMS_VLLM_DIR}"
 
 git config --global --add safe.directory "$(pwd)"
 
@@ -13,10 +15,12 @@ git config --global --add safe.directory "$(pwd)"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${MTHREADS_VISIBLE_DEVICES:?MTHREADS_VISIBLE_DEVICES is not set}"
 
+# Install vLLM-Plugin-FL
 python -m pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import flag_gems
+import flaggems_vllm
 import torch
 import torch_musa
 import vllm
@@ -30,6 +34,7 @@ assert current_platform.device_type == "musa", current_platform.device_type
 print(f"vLLM import ok: {vllm.__version__}")
 print(f"vLLM-FL import ok: {vllm_fl.__file__}")
 print(f"FlagGems import ok: {getattr(flag_gems, '__version__', 'unknown')}")
+print(f"FlagGems-vllm grouped_topk: {callable(flaggems_vllm.grouped_topk)}")
 print(f"Torch import ok: {torch.__version__}")
 print(f"MUSA available: {torch.musa.is_available()}")
 print(f"MUSA devices: {torch.musa.device_count()}")

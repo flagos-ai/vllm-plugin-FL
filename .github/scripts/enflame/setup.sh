@@ -3,9 +3,11 @@
 # Setup script for Enflame S60 CI.
 set -euo pipefail
 
+# Install FlagGems-vllm for test purpose
 FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
 git clone https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
 git -C "${FLAGGEMS_VLLM_DIR}" checkout main
+pip install --no-build-isolation -e "${FLAGGEMS_VLLM_DIR}"
 
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${TOPS_VISIBLE_DEVICES:?TOPS_VISIBLE_DEVICES is not set}"
@@ -24,11 +26,13 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-# The vendor runtime, vLLM, and FlagGems come from the pinned base image.
+# Install vLLM-Plugin-FL
+# The vendor runtime and vLLM come from the pinned base image.
 python -m pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import flag_gems
+import flaggems_vllm
 import torch
 import torch_gcu  # noqa: F401
 import vllm
@@ -37,6 +41,7 @@ import vllm_fl
 print(f"vLLM import ok: {vllm.__version__}")
 print(f"vLLM-FL import ok: {vllm_fl.__file__}")
 print(f"FlagGems import ok: {getattr(flag_gems, '__version__', 'unknown')}")
+print(f"FlagGems-vllm grouped_topk: {callable(flaggems_vllm.grouped_topk)}")
 print(f"FlagGems vendor: {getattr(flag_gems, 'vendor_name', 'auto-detected')}")
 print(f"Torch import ok: {torch.__version__}")
 print(f"Accelerator available: {torch.gcu.is_available()}")
