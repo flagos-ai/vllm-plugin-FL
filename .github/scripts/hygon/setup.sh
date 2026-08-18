@@ -7,7 +7,7 @@ set -euo pipefail
 FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
 git clone https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
 git -C "${FLAGGEMS_VLLM_DIR}" checkout main
-pip install --no-build-isolation -e "${FLAGGEMS_VLLM_DIR}"
+python -m pip install --no-build-isolation -e "${FLAGGEMS_VLLM_DIR}"
 
 git config --global --add safe.directory "$(pwd)"
 
