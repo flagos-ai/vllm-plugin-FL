@@ -5,6 +5,7 @@ set -euo pipefail
 
 # Install FlagGems-vllm for test purpose
 FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
+rm -rf "${FLAGGEMS_VLLM_DIR}"
 git clone https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
 git -C "${FLAGGEMS_VLLM_DIR}" checkout main
 uv pip install --system --no-build-isolation -e "${FLAGGEMS_VLLM_DIR}"
