@@ -128,6 +128,23 @@ flagos_blacklist:
   - pow_tensor_scalar_
   - pow_scalar
 
+  # --- Crash: cumsum get_num_sms returns None (large-row scan) ---
+  # flag_gems cumsum kernels call get_num_sms(device_idx) ->
+  # torch_device_fn.get_device_properties(idx).multi_processor_count when
+  # N > 16384. On torch_npu 2.9.0 / triton_ascend 3.2.0 (cann8.5.0) the
+  # properties object lacks multi_processor_count -> None * 4 -> TypeError
+  # ("unsupported operand type(s) for *: 'NoneType' and 'int'"), killing
+  # EngineCore on the first decode step (vllm topk_topp_sampler
+  # torch.cumsum(probs_sort, dim=-1, out=probs_sort), batch < 8 -> pytorch
+  # path). hw25 (cann9.0.0, torch_npu 2.10.0) has a working
+  # multi_processor_count, so this is cann8.5.0-specific. Falling back to
+  # torch_npu.cumsum is exact. Both the plain and out= overloads are listed
+  # because config_filter() matches on the impl function name
+  # (item[1].__name__): "cumsum" (aten::cumsum) and "cumsum_out"
+  # (aten::cumsum.out).
+  - cumsum
+  - cumsum_out
+
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
 # oot_blacklist:
