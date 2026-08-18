@@ -3,6 +3,10 @@
 # Setup script for Enflame S60 CI.
 set -euo pipefail
 
+FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
+git clone https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
+git -C "${FLAGGEMS_VLLM_DIR}" checkout main
+
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${TOPS_VISIBLE_DEVICES:?TOPS_VISIBLE_DEVICES is not set}"
 

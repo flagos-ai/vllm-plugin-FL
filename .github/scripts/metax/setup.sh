@@ -3,6 +3,10 @@
 # Setup script for MetaX C550 CI environment.
 set -euo pipefail
 
+FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
+git clone https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
+git -C "${FLAGGEMS_VLLM_DIR}" checkout main
+
 export PATH="/opt/conda/bin:${PATH}"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
