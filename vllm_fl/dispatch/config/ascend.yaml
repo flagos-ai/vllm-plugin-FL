@@ -113,6 +113,21 @@ flagos_blacklist:
   - lift_fresh_copy
   - _to_copy
 
+  # --- Compile: triton_ascend fork rejects chained boolean (or) ---
+  # flag_gems ascend pow kernels use `if (A or B or C)` which the
+  # triton_ascend 3.2.0 fork frontend refuses (UnsupportedLanguageConstruct:
+  # chained boolean operators), so the Triton path crashes compiling the
+  # RoPE _compute_inv_freq `10000.0 ** t` (pow.Scalar -> pow_scalar).
+  # config_filter() matches on the impl function name (item[1].__name__),
+  # so the blacklist must list the wrapper names below — the op short name
+  # "pow" does NOT match and is ineffective. Falling back to torch_npu.pow
+  # is exact.
+  - pow_tensor_tensor
+  - pow_tensor_tensor_
+  - pow_tensor_scalar
+  - pow_tensor_scalar_
+  - pow_scalar
+
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
 # oot_blacklist:
