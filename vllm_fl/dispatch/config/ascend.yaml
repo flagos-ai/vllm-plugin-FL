@@ -80,6 +80,12 @@ flagos_blacklist:
   # --- Arithmetic (Triton compilation hang on MoE 256-expert shapes) ---
   - mm
   - addmm
+  - linear  # flag_gems linear (aten::linear) kernel spins forever on device
+            # under triton_ascend 3.2.0 for decode (M=1) shapes; AICore pinned
+            # at ~111% while EngineCore stalls in get_current_stream; flagtree
+            # 0.6.0+ascend3.2 compiles the same kernel fine. mm/addmm already
+            # blacklisted; linear is the remaining GEMM path in the hot decode
+            # loop. Falling back to torch_npu.linear is exact.
   - add
   - sub
   - mul
