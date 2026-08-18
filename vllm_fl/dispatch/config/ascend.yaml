@@ -145,6 +145,25 @@ flagos_blacklist:
   - cumsum
   - cumsum_out
 
+  # --- Crash: repeat_interleave (triton_ascend 3.2.0 MLIR stride assertion) ---
+  # The ATB rotary path (torch_npu._npu_rotary_embedding -> torch.ops.atb.*)
+  # uses repeat_interleave to expand the cos/sin cache for GQA. With flag_gems
+  # patching it, the pointwise copy kernel (rank-3, t2048) fails to compile on
+  # triton_ascend 3.2.0 / cann8.5.0: ConvertTritonIRToLinalgIR "strides must
+  # not be zero" -> MLIRCompilationError. That exception is raised inside the
+  # vendor rotary impl on its first decode call, which silently poisons the
+  # vendor.ascend impl (CachedOp fast path marks it failed without a warning
+  # log) and forces a fallback to the flag_gems rope kernel -> hangs/garbage
+  # on first request under the triton compiler. Falling back to
+  # torch_npu.repeat_interleave is exact. All three overload wrappers are
+  # listed because config_filter() matches on the impl function name
+  # (item[1].__name__): "repeat_interleave_self_int" (ATB internal),
+  # "repeat_interleave_self_tensor" and "repeat_interleave_tensor" (plugin's
+  # own patch.py / gdn_torch_ops.py / mm_encoder_attention.py calls).
+  - repeat_interleave_self_int
+  - repeat_interleave_self_tensor
+  - repeat_interleave_tensor
+
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
 # oot_blacklist:
