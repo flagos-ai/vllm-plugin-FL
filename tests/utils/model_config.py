@@ -6,6 +6,8 @@ Shared model configuration loader.
 Reads model YAML configs from ``tests/models/<model>/<case>.yaml``
 (or legacy ``tests/models/<name>.yaml``) and provides typed interfaces
 for engine parameters, test generation, and multimodal asset loading.
+When platform/device information is provided, device-specific case overrides
+from ``tests/platforms/<platform>.yaml`` are merged into the base model config.
 
 Usage::
 
@@ -27,11 +29,21 @@ Usage::
     # Access generate config for smoke tests
     gen = cfg.generate
     print(gen.modality, gen.prompts, gen.assets)
+
+    # Apply device-specific case overrides from platform YAML.
+    # This first loads tests/models/qwen3_6/27b_tp2_eager.yaml, then looks up
+    # tests/platforms/cuda.yaml -> device_overrides.h20. If the device's
+    # cases list contains qwen3_6/27b_tp2_eager, its llm/serve overrides are
+    # merged into the base model config.
+    cfg = ModelConfig.load("qwen3_6", "27b_tp2_eager", platform="cuda", device="h20")
+
 """
 
 from __future__ import annotations
 
+import copy
 import itertools
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,6 +51,46 @@ from typing import Any
 import yaml
 
 _MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Return base deeply merged with override.
+
+    A ``null`` value in an override removes the inherited key.
+    """
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if value is None:
+            result.pop(key, None)
+        elif isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+def _apply_device_case_overrides(
+    raw: dict[str, Any],
+    model: str,
+    case: str | None,
+    platform: str | None,
+    device: str | None,
+) -> dict[str, Any]:
+    """Apply ``device_overrides.<device>.cases`` from platform YAML."""
+    config = copy.deepcopy(raw)
+    active_platform = platform or os.environ.get("FL_TEST_PLATFORM", "")
+    if not active_platform or not case:
+        return config
+
+    active_device = device or os.environ.get("FL_TEST_DEVICE", "")
+
+    from tests.utils.platform_config import PlatformConfig
+
+    platform_config = PlatformConfig.load(
+        active_platform,
+        active_device or None,
+    )
+    return _deep_merge(config, platform_config.get_device_case_overrides(model, case))
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +156,7 @@ class ServeConfig:
     Fields:
         api_key: Optional API key for authenticated endpoints.
         extra_engine: Engine param overrides for serving (e.g. dtype).
+        extra_args: Raw command-line arguments appended to ``vllm serve``.
         endpoints: List of endpoints to test (``"completion"``, ``"chat"``,
                    ``"embedding"``).
         completion_prompt: Prompt string for ``/v1/completions`` endpoint.
@@ -125,6 +178,7 @@ class ServeConfig:
 
     api_key: str = ""
     extra_engine: dict[str, Any] = field(default_factory=dict)
+    extra_args: list[str] = field(default_factory=list)
     endpoints: list[str] = field(default_factory=list)
     completion_prompt: str = "Hello"
     chat_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -146,6 +200,7 @@ class ServeConfig:
         return cls(
             api_key=raw.get("api_key", ""),
             extra_engine=raw.get("extra_engine", {}),
+            extra_args=raw.get("extra_args", []),
             endpoints=raw.get("endpoints", []),
             completion_prompt=raw.get("completion_prompt", "Hello"),
             chat_messages=raw.get("chat_messages", []),
@@ -180,6 +235,8 @@ class ModelConfig:
         generate:
           prompts: [...]
           sampling: {max_tokens: 5}
+        # Device differences live in tests/platforms/<platform>.yaml under
+        # device_overrides.<device>.cases.
 
     **Legacy layout** (``tests/models/<name>.yaml``)::
 
@@ -202,6 +259,8 @@ class ModelConfig:
         model: str,
         case: str | None = None,
         models_dir: Path | None = None,
+        platform: str | None = None,
+        device: str | None = None,
     ) -> ModelConfig:
         """Load model config from YAML.
 
@@ -210,6 +269,11 @@ class ModelConfig:
             case: Case name within the model directory (e.g. ``"06b_tp2"``).
                   If ``None``, falls back to legacy flat file ``<model>.yaml``.
             models_dir: Override directory for model configs.
+            platform: Optional platform name used to apply
+                ``device_overrides.<device>.cases``. Defaults to
+                ``FL_TEST_PLATFORM`` when unset.
+            device: Optional device name used to apply device-level overrides.
+                Defaults to ``FL_TEST_DEVICE`` when unset.
 
         Raises:
             FileNotFoundError: If the config file does not exist.
@@ -231,6 +295,14 @@ class ModelConfig:
 
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
+
+        raw = _apply_device_case_overrides(
+            raw,
+            model,
+            case,
+            platform,
+            device,
+        )
 
         return cls._from_dict(raw)
 
