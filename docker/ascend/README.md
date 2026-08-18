@@ -27,9 +27,10 @@ The common convention is:
     └── Qwen3-0.6B/
 ```
 
-The E2E workflow runs `.github/scripts/ascend/download_models.sh`
-idempotently. It downloads `Qwen/Qwen3-0.6B` through
-`https://hf-mirror.com` only when the model is absent.
+E2E jobs expect these model directories to be provisioned before CI starts.
+The workflow validates the selected model paths with the shared
+`.github/scripts/generate_matrix.py --check-models` check before running
+`tests/run.py`.
 
 To avoid occupying a scarce NPU runner during development, validate changes
 on the host with the same image, setup script, and `tests/run.py` command

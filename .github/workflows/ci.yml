@@ -155,3 +155,14 @@ jobs:
     with:
       platform: musa
     secrets: inherit
+
+  # ============================================================
+  # Job 4f: Enflame platform testing
+  # ============================================================
+  test-enflame:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: enflame
+    secrets: inherit

@@ -170,6 +170,16 @@ pytest -m multi_gpu         # Only multi-GPU tests
 
 E2E tests are driven by YAML configs under `tests/models/<model>/<case>.yaml`. Each config defines the base LLM engine parameters and test behavior. For shared model families, keep these files as CUDA baseline configs and put platform/device differences in `tests/platforms/<platform>.yaml`.
 
+### Model storage
+
+CI hosts and job containers use the same persistent model hierarchy. Store all
+models under `/data/models/`, mount `/data:/data` into the job container, and
+reference the absolute host path from every model case. Qwen models must use
+`/data/models/Qwen/<model-name>`. Hosts in mainland China may set
+`HF_ENDPOINT=https://hf-mirror.com` when downloading with the Hugging Face CLI.
+Set `HF_HUB_DISABLE_XET=1` as well so large files continue through the mirror
+instead of contacting the Hugging Face Xet CAS service directly.
+
 ### Text model example
 
 ```yaml

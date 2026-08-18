@@ -30,6 +30,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLATFORMS_DIR = REPO_ROOT / "tests" / "platforms"
+sys.path.insert(0, str(REPO_ROOT))
 
 # YAML task key → test directory name
 TASK_DIR_MAP: dict[str, str] = {
@@ -128,6 +129,70 @@ def build_e2e_matrix(
             }
         )
     return entries
+
+
+def check_model_paths(
+    platform: str,
+    device: str | None = None,
+    cases: str | None = None,
+) -> int:
+    """Validate that the selected CI matrix model directories exist."""
+    from tests.utils.model_config import ModelConfig
+
+    if not cases:
+        print("[check-models] No E2E model cases selected.")
+        return 0
+
+    selected_cases = json.loads(cases)
+    if not isinstance(selected_cases, list):
+        print(
+            "::error title=Invalid cases::--cases must be a JSON array", file=sys.stderr
+        )
+        return 1
+
+    missing = 0
+    print(f"[check-models] Platform: {platform}")
+    print(f"[check-models] Device:   {device or ''}")
+    print(f"[check-models] Cases:    {len(selected_cases)}")
+
+    for case_entry in selected_cases:
+        model = str(case_entry["model"])
+        case = str(case_entry["case"])
+        try:
+            model_cfg = ModelConfig.load(
+                model,
+                case,
+                platform=platform,
+                device=device or None,
+            )
+        except Exception as exc:
+            message = f"{model}/{case}: {exc}"
+            print(
+                f"::error title=Invalid model config::{message}",
+                file=sys.stderr,
+            )
+            missing += 1
+            continue
+
+        model_path = model_cfg.model
+        exists = bool(model_path) and Path(model_path).exists()
+        status = "OK" if exists else "MISSING"
+        print(f"[check-models] {status}: {model}/{case} -> {model_path}")
+        if not exists:
+            message = f"{model}/{case} requires model path: {model_path}"
+            print(
+                f"::error file=tests/models/{model}/{case}.yaml,"
+                f"title=Missing test model::{message}",
+                file=sys.stderr,
+            )
+            missing += 1
+
+    if missing:
+        print(f"[check-models] Missing or invalid model cases: {missing}")
+        return 1
+
+    print("[check-models] All selected model paths exist.")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +309,34 @@ def main(argv: list[str] | None = None) -> int:
         "When provided and non-empty, the e2e matrix is filtered to only "
         "include tests affected by those changes (PR smart-skip).",
     )
+    parser.add_argument(
+        "--check-models",
+        action="store_true",
+        help=(
+            "Validate that selected E2E model paths exist instead of "
+            "generating matrices."
+        ),
+    )
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="Device name to check when --check-models is set.",
+    )
+    parser.add_argument(
+        "--cases",
+        default=None,
+        help=(
+            "JSON array of {model, case} entries to check when --check-models is set."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.check_models:
+        return check_model_paths(
+            args.platform,
+            device=args.device,
+            cases=args.cases,
+        )
 
     config = load_platform(args.platform)
     devices = get_device_sections(config)

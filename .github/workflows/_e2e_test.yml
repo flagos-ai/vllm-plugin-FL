@@ -93,15 +93,16 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
-      - name: Prepare host models
-        run: |
-          model_script=".github/scripts/${{ inputs.platform }}/download_models.sh"
-          if [ -f "${model_script}" ]; then
-            bash "${model_script}"
-          fi
-
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
+
+      - name: Check test models
+        run: |
+          python .github/scripts/generate_matrix.py \
+            --platform ${{ inputs.platform }} \
+            --device "${{ inputs.device }}" \
+            --cases '${{ inputs.cases }}' \
+            --check-models
 
       - name: Run E2E test
         run: |

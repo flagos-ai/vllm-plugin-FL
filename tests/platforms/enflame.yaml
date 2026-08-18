@@ -12,52 +12,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-platform: hygon
-vendor: hygon
+platform: enflame
+vendor: gcu
 
 device_types:
-  bw1000:
-    memory_gb: 64
-    tags: [bf16, fp16, fp32]
+  s60:
+    memory_gb: 42
+    tags: [enflame, gcu, bf16, fp16, fp32]
 
 tolerance:
   inference:
     default:
-      rtol: 1e-5
-      atol: 1e-8
-    bfloat16:
       rtol: 1e-3
       atol: 1e-3
+    bfloat16:
+      rtol: 1e-2
+      atol: 1e-2
 
 device_overrides:
-  bw1000:
+  s60:
     cases:
       - qwen3_6/27b_tp2_eager
-      - qwen3_6/27b_tp4_graph
       - qwen3_6/35b_a3b_tp2_eager
-      - qwen3_6/35b_a3b_tp4_graph
     llm:
-      gpu_memory_utilization: 0.8
+      gpu_memory_utilization: 0.90
+      disable_custom_all_reduce: false
     serve:
-      extra_engine:
-        enforce_eager: true
-        disable_custom_all_reduce: false
-        enable_log_requests: false
-        enable_prefix_caching: false
+      startup_retries: 240
 
 env_defaults:
-  GEMS_VENDOR: "hygon"
-  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-  VLLM_FL_FLAGOS_BLACKLIST: "pow_scalar,pow_tensor_scalar,pow_tensor_tensor,pow_tensor_scalar_,pow_tensor_tensor_,cat"
+  VLLM_PLUGINS: "fl"
+  TOPS_VISIBLE_DEVICES: "2,3"
+  VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "99999"
+  TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
+  ENABLE_I64_CHECK: "0"
+  TORCHGCU_INDUCTOR_ENABLE: "1"
 
-bw1000:
-  name: "bw1000"
+s60:
+  name: "s60"
   tests:
     e2e:
       inference:
-        qwen3_6: ["35b_a3b_tp4_graph", "27b_tp2_eager"]
+        qwen3_6: ["27b_tp2_eager"]
       serving:
-        qwen3_6: ["27b_tp4_graph", "35b_a3b_tp2_eager"]
+        qwen3_6: ["35b_a3b_tp2_eager"]
     functional:
       include: "*"
       exclude: []

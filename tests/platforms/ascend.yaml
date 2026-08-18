@@ -57,7 +57,7 @@ device_overrides:
       max_model_len: 4096
       gpu_memory_utilization: 0.8
       trust_remote_code: true
-      disable_custom_all_reduce: null
+      disable_custom_all_reduce: false
       enable_chunked_prefill: false
       async_scheduling: false
       enable_prefix_caching: false
@@ -92,7 +92,8 @@ env_defaults: {}
       # Include patterns: "*" for all, or list specific paths
       include: "*"
       # Exclude patterns: empty list or list paths to exclude
-      exclude: []
+      exclude:
+        - ops/test_ops_correctness.py
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

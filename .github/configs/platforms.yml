@@ -23,10 +23,12 @@ platforms:
   cuda:
     enabled: true
   ascend:
-    enabled: false
+    enabled: true
   hygon:
     enabled: true
   metax:
     enabled: true
   musa:
+    enabled: true
+  enflame:
     enabled: true
