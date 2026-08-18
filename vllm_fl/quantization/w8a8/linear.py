@@ -34,17 +34,14 @@ from vllm_fl.utils import (
 
 FLAGGEMS_W8A8_LINEAR_OP = "w8a8_dynamic_per_token_linear"
 
-_dynamic_per_token_quant_int8 = CachedOp("dynamic_per_token_quant_int8")
+_dynamic_per_token_quant_int8_op = CachedOp("dynamic_per_token_quant_int8")
+
+def _flaggems_available() -> bool:
+    return find_spec("flag_gems") is not None
 
 
 def _resolve_flaggems_scaled_mm():
-    """Resolve the returning ``scaled_mm`` API, not the output-buffer API.
-
-    FlagGems 5.3 exposes only ``cutlass_scaled_mm(output, ...)``.  Besides
-    having a different call contract, its SM80 branch is not implemented on
-    PPU.  The generic returning API was added later and provides the Triton
-    INT8 fallback required by CUDA-alike OOT devices.
-    """
+    """Resolve the returning ``scaled_mm`` API."""
     import flag_gems
 
     scaled_mm = getattr(flag_gems, "scaled_mm", None)
@@ -60,14 +57,84 @@ def _resolve_flaggems_scaled_mm():
     return scaled_mm
 
 
-def _flaggems_available() -> bool:
-    if find_spec("flag_gems") is None:
-        return False
-    try:
-        _resolve_flaggems_scaled_mm()
-    except (ImportError, RuntimeError):
-        return False
-    return True
+# --- torch.library custom ops for graph mode compatibility ---
+_resolved_quant_fn = None
+_cached_scaled_mm = None
+
+
+@torch.library.custom_op("vllm_fl::dynamic_per_token_quant_int8", mutates_args=())
+def _dynamic_per_token_quant_int8(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    global _resolved_quant_fn
+    if _resolved_quant_fn is None:
+        from vllm_fl.dispatch import get_default_manager
+        mgr = get_default_manager()
+        impl = mgr._resolve_impl("dynamic_per_token_quant_int8")
+        _resolved_quant_fn = impl.fn
+    return _resolved_quant_fn(x)
+
+
+@_dynamic_per_token_quant_int8.register_fake
+def _dynamic_per_token_quant_int8_fake(x):
+    M, K = x.shape
+    x_q = torch.empty_like(x, dtype=torch.int8)
+    x_scale = torch.empty((M, 1), dtype=torch.float32, device=x.device)
+    return x_q, x_scale
+
+
+@torch.library.custom_op("vllm_fl::scaled_mm", mutates_args=())
+def _scaled_mm_wrapper(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    a_scale: torch.Tensor,
+    b_scale: torch.Tensor,
+    out_dtype: int,
+) -> torch.Tensor:
+    global _cached_scaled_mm
+    if _cached_scaled_mm is None:
+        _cached_scaled_mm = _resolve_flaggems_scaled_mm()
+    dtype = _DTYPE_MAP[out_dtype]
+    return _cached_scaled_mm(a, b, a_scale, b_scale, bias=None, out_dtype=dtype)
+
+
+@_scaled_mm_wrapper.register_fake
+def _scaled_mm_wrapper_fake(a, b, a_scale, b_scale, out_dtype):
+    M = a.shape[0]
+    N = b.shape[1]
+    dtype = _DTYPE_MAP[out_dtype]
+    return torch.empty((M, N), dtype=dtype, device=a.device)
+
+
+# Encode dtype as int for custom_op (custom_op doesn't support torch.dtype args)
+_DTYPE_MAP = {
+    0: torch.float32,
+    1: torch.float16,
+    2: torch.bfloat16,
+}
+_DTYPE_TO_INT = {v: k for k, v in _DTYPE_MAP.items()}
+
+
+@torch.library.custom_op("vllm_fl::scaled_mm_bias", mutates_args=())
+def _scaled_mm_bias_wrapper(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    a_scale: torch.Tensor,
+    b_scale: torch.Tensor,
+    bias: torch.Tensor,
+    out_dtype: int,
+) -> torch.Tensor:
+    global _cached_scaled_mm
+    if _cached_scaled_mm is None:
+        _cached_scaled_mm = _resolve_flaggems_scaled_mm()
+    dtype = _DTYPE_MAP[out_dtype]
+    return _cached_scaled_mm(a, b, a_scale, b_scale, bias=bias, out_dtype=dtype)
+
+
+@_scaled_mm_bias_wrapper.register_fake
+def _scaled_mm_bias_wrapper_fake(a, b, a_scale, b_scale, bias, out_dtype):
+    M = a.shape[0]
+    N = b.shape[1]
+    dtype = _DTYPE_MAP[out_dtype]
+    return torch.empty((M, N), dtype=dtype, device=a.device)
 
 
 class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
@@ -139,20 +206,17 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        scaled_mm = _resolve_flaggems_scaled_mm()
-
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape
         x_2d = x.reshape(-1, original_shape[-1]).contiguous()
         x_q, x_scale = _dynamic_per_token_quant_int8(x_2d)
-        output = scaled_mm(
-            x_q,
-            weight,
-            x_scale,
-            weight_scale,
-            bias=bias,
-            out_dtype=x.dtype,
-        )
+        dtype_int = _DTYPE_TO_INT[x.dtype]
+        if bias is not None:
+            output = _scaled_mm_bias_wrapper(
+                x_q, weight, x_scale, weight_scale, bias, dtype_int)
+        else:
+            output = _scaled_mm_wrapper(
+                x_q, weight, x_scale, weight_scale, dtype_int)
         return output.reshape(*original_shape[:-1], weight.shape[1])
 
 

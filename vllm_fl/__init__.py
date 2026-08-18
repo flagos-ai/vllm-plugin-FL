@@ -154,3 +154,10 @@ def register_model():
         #glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+# Qwen3.5-MoE flat/text-only checkpoint support (model_type=qwen3_5_moe_text)
+    try:
+        from vllm_fl.patches.qwen3_5_moe_text import apply_model_patches as _qwen35_text
+        _qwen35_text()
+    except Exception as e:
+        logger.error(f"Register Qwen3_5MoeText patch error: {str(e)}")
+    _fl_qwen35_text_patch = True

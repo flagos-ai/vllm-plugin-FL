@@ -77,6 +77,7 @@ Configuration File (YAML):
 """
 
 import os
+import torch
 
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
@@ -168,6 +169,7 @@ class CachedOp:
     __slots__ = (
         "_op_name",
         "_impl",
+        "_impl_fn",
         "_use_manager_call",
         "_manager_id",
         "_manager_epoch",
@@ -177,12 +179,26 @@ class CachedOp:
     def __init__(self, op_name: str) -> None:
         self._op_name = op_name
         self._impl = None
+        self._impl_fn = None
         self._use_manager_call = False
         self._manager_id = -1
         self._manager_epoch = -1
         self._policy_epoch = -1
 
+    def _ensure_impl_resolved(self):
+        mgr = get_default_manager()
+        if self._impl is None:
+            impl = mgr._resolve_impl(self._op_name)
+            mgr._record_first_use(self._op_name, impl)
+            torch.compiler.allow_in_graph(impl.fn)
+            self._impl = impl
+            self._impl_fn = impl.fn
+            self._manager_id = id(mgr)
+            self._manager_epoch = mgr.policy_epoch
+            self._policy_epoch = get_policy_epoch()
+
     def __call__(self, *args, **kwargs):
+
         mgr = get_default_manager()
 
         if not _OP_FAST_PATH_ENABLED:
@@ -200,6 +216,7 @@ class CachedOp:
             or self._policy_epoch != policy_epoch
         ):
             self._impl = None
+            self._impl_fn = None
             self._use_manager_call = False
 
         if self._use_manager_call:
@@ -214,8 +231,9 @@ class CachedOp:
         ):
             impl = mgr._resolve_impl(self._op_name)
             mgr._record_first_use(self._op_name, impl)
+            torch.compiler.allow_in_graph(impl.fn)
             self._impl = impl
-            # resolve() can initialize the manager and bump its epoch.
+            self._impl_fn = impl.fn
             self._manager_id = manager_id
             self._manager_epoch = mgr.policy_epoch
             self._policy_epoch = get_policy_epoch()
@@ -230,6 +248,8 @@ class CachedOp:
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)
 
+
+torch._dynamo.allow_in_graph(CachedOp)
 
 __all__ = [
     # Types
