@@ -50,6 +50,11 @@ logger = init_logger(__name__)
 
 class AttentionFLBackend(AttentionBackend):
     accept_output_buffer: bool = True
+    # KV cache update is performed by vLLM via do_kv_cache_update() before
+    # forward(). Without this, vLLM assumes the backend updates the KV cache
+    # inside forward() and never calls do_kv_cache_update, leaving the cache
+    # unwritten (all zeros) and producing garbage output.
+    forward_includes_kv_cache_update: bool = False
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
     @staticmethod
