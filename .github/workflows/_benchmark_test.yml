@@ -99,7 +99,7 @@ jobs:
             --output "${FL_BENCHMARK_RESULT_DIR}/serve_benchmark_metrics.json"
 
       - name: Upload serve benchmark data to backend
-        continue-on-error: false
+        continue-on-error: true
         if: steps.benchmark_test.outcome == 'success'
         uses: flagos-ai/FlagOps/actions/post-benchmark-report@main
         env:
@@ -114,7 +114,7 @@ jobs:
           repository_name: '${{ github.repository }}'
           commit_id: ${{ github.event.pull_request.head.sha || github.sha }}
           workflow_id: ${{ github.run_id }}
-          fail_on_error: 'false'
+          fail_on_error: 'true'
 
       - name: Upload test results
         if: always()
