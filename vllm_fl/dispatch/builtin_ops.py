@@ -164,12 +164,4 @@ def register_builtins(registry: OpRegistry) -> None:
     except Exception as e:
         logger.debug(f"Plugin discovery failed: {e}")
 
-    # Wrap attention ops with eager_break_during_capture so that OOT vendor
-    # attention backends participate correctly in breakable CUDA graph capture
-    # (vLLM >= 0.24.0 feature).  This is a no-op when
-    # VLLM_USE_BREAKABLE_CUDAGRAPH is not set.
-    try:
-        from vllm_fl.compilation.break_graph import wrap_attention_ops_for_break_graph
-        wrap_attention_ops_for_break_graph(registry)
-    except Exception as e:
-        logger.debug(f"Break-graph wrapping skipped: {e}")
+

@@ -31,17 +31,6 @@ from vllm.compilation.breakable_cudagraph import (
 from vllm.compilation.counter import compilation_counter
 from vllm.compilation.cuda_graph import CUDAGraphStat
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
-try:
-    from vllm.compilation.breakable_cudagraph import (
-        BreakableCUDAGraphWrapper,
-        is_breakable_cudagraph_enabled,
-    )
-    _BREAKABLE_CUDAGRAPH_AVAILABLE = True
-except ImportError:
-    _BREAKABLE_CUDAGRAPH_AVAILABLE = False
-
-    def is_breakable_cudagraph_enabled() -> bool:  # type: ignore[misc]
-        return False
 from vllm.config import (
     CompilationMode,
     CUDAGraphMode,
@@ -5390,14 +5379,13 @@ class ModelRunnerFL(
         assert cudagraph_mode is not None
         if (
             is_breakable_cudagraph_enabled()
-            and cudagraph_mode.has_full_cudagraphs()
+            and cudagraph_mode != CUDAGraphMode.NONE
             and not self.parallel_config.use_ubatching
         ):
             # vLLM 0.24.0+ breakable CUDA graph: splits the graph at
             # @eager_break_during_capture decorated ops (e.g. attention).
-            # OOT vendor attention ops are wrapped by
-            # vllm_fl.compilation.break_graph.wrap_attention_ops_for_break_graph
-            # which is called from register_builtins().
+            # OOT vendor attention backends participate automatically because
+            # upstream unified_attention_with_output is already decorated.
             self.model = BreakableCUDAGraphWrapper(self.model, self.vllm_config)
             drafter = getattr(self, "drafter", None)
             if drafter is not None and hasattr(drafter, "model"):
