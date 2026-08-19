@@ -4,11 +4,16 @@
 
 import torch
 
+import vllm_fl.envs as fl_envs
+
 
 def router_gemm_bf16_fp32_flaggems(
     x: torch.Tensor, weight: torch.Tensor
 ) -> torch.Tensor:
-    from flag_gems import router_gemm
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm.ops.router_gemm import router_gemm
+    else:
+        from flag_gems import router_gemm
 
     # Keep vLLM's descriptive dispatch name at the plugin boundary.  The
     # current FlagGems public API calls the same bf16 x bf16 -> fp32 primitive

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import torch
 
+import vllm_fl.envs as fl_envs
+
 
 def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     """
@@ -20,11 +22,14 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
-    from flag_gems.modules.activation import gems_silu_and_mul
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm.ops.silu_and_mul import silu_and_mul
+    else:
+        from flag_gems import silu_and_mul
 
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
-    return gems_silu_and_mul(x1, x2)
+    return silu_and_mul(x1, x2)
 
 
 def gelu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
@@ -38,7 +43,10 @@ def gelu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     Returns:
         Output tensor of shape [..., d]
     """
-    from flag_gems.fused import gelu_and_mul
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm.ops.gelu_and_mul import gelu_and_mul
+    else:
+        from flag_gems import gelu_and_mul
 
     approximate = getattr(obj, "approximate", "none") if obj is not None else "none"
     d = x.shape[-1] // 2
@@ -62,7 +70,10 @@ def silu_and_mul_with_clamp_flaggems(x: torch.Tensor, swiglu_limit: torch.Tensor
     Returns:
         Output tensor of shape [..., d]
     """
-    from flag_gems.fused.silu_and_mul_with_clamp import silu_and_mul_with_clamp_kernel
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm.ops.silu_and_mul_with_clamp import silu_and_mul_with_clamp_kernel
+    else:
+        from flag_gems.fused.silu_and_mul_with_clamp import silu_and_mul_with_clamp_kernel
 
     d = x.shape[-1] // 2
     gate, up = x[..., :d], x[..., d:]

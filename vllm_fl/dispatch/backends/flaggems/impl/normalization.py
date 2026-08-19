@@ -6,9 +6,14 @@ FlagGems normalization operator implementations.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional, Union
 
 import torch
+
+import vllm_fl.envs as fl_envs
+
+logger = logging.getLogger(__name__)
 
 
 def rms_norm_flaggems(
@@ -27,7 +32,13 @@ def rms_norm_flaggems(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    from flag_gems.modules.normalization import gems_rms_forward
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        logger.warning_once(
+            "rms_norm_forward is not available in flaggems_vllm, "
+            "falling back to flag_gems.rms_norm_forward"
+        )
+
+    from flag_gems import rms_norm_forward as gems_rms_forward
 
     # Get weight and epsilon from obj
     weight = obj.weight
