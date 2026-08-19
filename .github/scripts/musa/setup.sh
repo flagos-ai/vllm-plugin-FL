@@ -3,11 +3,18 @@
 # Setup script for Moore Threads MUSA CI environment.
 set -euo pipefail
 
+# Install FlagGems for test purpose
+FLAGGEMS_VERSION="v5.4.0.dev0"
+FLAGGEMS_DIR="$(cd .. && pwd -P)/FlagGems"
+rm -rf "${FLAGGEMS_DIR}"
+git clone --branch "${FLAGGEMS_VERSION}" --depth 1 https://github.com/flagos-ai/FlagGems.git "${FLAGGEMS_DIR}"
+python -m pip install --no-build-isolation -e "${FLAGGEMS_DIR}"
+
 # Install FlagGems-vllm for test purpose
+FLAGGEMS_VLLM_VERSION="v0.1.1-rc0"
 FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
 rm -rf "${FLAGGEMS_VLLM_DIR}"
-git clone https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
-git -C "${FLAGGEMS_VLLM_DIR}" checkout main
+git clone --branch "${FLAGGEMS_VLLM_VERSION}" --depth 1 https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
 python -m pip install --no-build-isolation -e "${FLAGGEMS_VLLM_DIR}"
 
 git config --global --add safe.directory "$(pwd)"
