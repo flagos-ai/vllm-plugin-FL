@@ -26,11 +26,11 @@ def vllm_topk_softmax(
 ) -> tuple[torch.Tensor, ...]:
     if renormalize:
         xtorch_ops.moe_softmax_topk_norm(
-            gating_output, topk_weights, topk_indices, None,
+            gating_output, topk_weights, topk_indices, token_expert_indices,
         )
     else:
         xtorch_ops.moe_softmax_topk(
-            gating_output, topk_weights, topk_indices, None,
+            gating_output, topk_weights, topk_indices, token_expert_indices,
         )
     return topk_weights, topk_indices
 
@@ -78,44 +78,60 @@ def fused_topk_bias(
 
 
 def grouped_topk(
-    hidden_states: torch.Tensor,
-    gating_output: torch.Tensor,
+    scores: torch.Tensor,
+    n_group: int,
+    topk_group: int,
     topk: int,
     renormalize: bool,
-    num_expert_group: int = 0,
-    topk_group: int = 0,
-    scoring_func: str = "softmax",
-    routed_scaling_factor: float = 1.0,
-    e_score_correction_bias: Optional[torch.Tensor] = None,
+    routed_scaling_factor: float,
+    bias: torch.Tensor,
+    scoring_func: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Grouped top-k selection."""
-    seq_num = gating_output.shape[0]
+    """Grouped top-k selection with unified dispatch ABI.
 
-    if scoring_func == "softmax":
-        scores = gating_output.softmax(dim=-1)
-    elif scoring_func == "sigmoid":
-        scores = gating_output.sigmoid()
-    else:
-        raise ValueError(f"Unsupported scoring_func: {scoring_func}")
+    Args:
+        scores: Already computed scores tensor (after softmax/sigmoid if needed)
+        n_group: Number of expert groups
+        topk_group: Number of groups to select
+        topk: Total number of experts to select
+        renormalize: Whether to renormalize weights
+        routed_scaling_factor: Scaling factor for routing weights
+        bias: Score correction bias tensor
+        scoring_func: 0=none (scores already processed), 1=sigmoid
 
-    if e_score_correction_bias is not None:
-        assert e_score_correction_bias.dtype == torch.float32
-        scores_for_choice = scores + e_score_correction_bias.unsqueeze(0)
+    Returns:
+        topk_weights: Selected expert weights
+        topk_ids: Selected expert indices
+    """
+    seq_num = scores.shape[0]
+
+    # Apply sigmoid if scoring_func=1 (dispatcher may pass raw logits in this case)
+    if scoring_func == 1:
+        scores = scores.sigmoid()
+
+    # Apply bias for expert selection
+    if bias is not None and bias.numel() > 0:
+        assert bias.dtype == torch.float32
+        scores_for_choice = scores + bias.unsqueeze(0)
     else:
         scores_for_choice = scores
 
-    topk_weights = torch.empty((seq_num, topk), dtype=torch.float, device=gating_output.device)
-    topk_ids = torch.empty((seq_num, topk), dtype=torch.int32, device=gating_output.device)
+    topk_weights = torch.empty((seq_num, topk), dtype=torch.float, device=scores.device)
+    topk_ids = torch.empty((seq_num, topk), dtype=torch.int32, device=scores.device)
 
     xtorch_ops.moe_group_topk(
-        scores_for_choice, num_expert_group, topk_group,
+        scores_for_choice, n_group, topk_group,
         topk_weights, topk_ids, None,
     )
 
-    if e_score_correction_bias is not None:
+    # If bias was used for selection, gather original scores for weights
+    if bias is not None and bias.numel() > 0:
         topk_weights = scores.gather(1, topk_ids)
 
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+
+    if routed_scaling_factor != 1.0:
+        topk_weights = topk_weights * routed_scaling_factor
 
     return topk_weights, topk_ids

@@ -16,8 +16,9 @@ Kunlunxin implementation of chunk_gated_delta_rule.
 Contains both the low-level kernel wrapper (chunk_gated_delta_rule_fwd) and
 the top-level entry (chunk_gated_delta_rule).
 
-The top-level ChunkGatedDeltaRuleFunction.forward **skips l2norm** because the
-Kunlunxin kernel handles it internally (use_qk_l2norm_in_kernel=True).
+The Kunlunxin native kernel supports use_qk_l2norm_in_kernel natively,
+so normalization is delegated to the kernel when enabled, rather than
+being done in Python like other backends.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ def chunk_gated_delta_rule_fwd(
     initial_state: torch.Tensor,
     output_final_state: bool,
     cu_seqlens: Optional[torch.LongTensor] = None,
+    use_qk_l2norm_in_kernel: bool = True,
 ) -> tuple:
     """
     Kunlunxin chunked gated delta rule forward pass.
@@ -74,6 +76,9 @@ def chunk_gated_delta_rule_fwd(
 
     cu_seqlens_cpu = cu_seqlens.cpu() if cu_seqlens is not None else None
 
+    # Use -1 for automatic scale (1/sqrt(K)) only when caller does not provide one
+    kernel_scale = scale if scale is not None else -1
+
     final_state = torch.empty_like(state_input)
     o = torch.empty_like(v)
     xtorch_ops.chunk_gated_delta_rule(
@@ -82,13 +87,13 @@ def chunk_gated_delta_rule_fwd(
         v,
         g_input,
         beta_input,
-        -1,  # uses -1 for automatic scale
+        kernel_scale,
         state_input,
         o,
         final_state,
         cu_seqlens_cpu,
         head_first=False,
-        use_qk_l2norm_in_kernel=True,  # always True in Kunlunxin
+        use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
     )
 
     # Transpose final_state back to [N, H, K, V]
@@ -115,8 +120,8 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         cu_seqlens: Optional[torch.LongTensor] = None,
         use_qk_l2norm_in_kernel: bool = False,
     ):
-        # klx diff: skip l2norm — kernel handles it internally
-        # (upstream would do l2norm_fwd(q), l2norm_fwd(k) here)
+        # When use_qk_l2norm_in_kernel=True, the native kernel handles L2-norm
+        # internally. When False, the caller has already normalized q/k externally.
 
         # [N, H, K, V] -> [N, H, V, K] for kunlunxin kernel
         if initial_state is not None:
@@ -132,6 +137,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
             initial_state=initial_state,
             output_final_state=output_final_state,
             cu_seqlens=cu_seqlens,
+            use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
         )
         ctx.scale = scale
         ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel

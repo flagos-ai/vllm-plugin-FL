@@ -33,19 +33,19 @@ op_backends:
     - vendor
     - reference
 
-  # rms_norm: prioritize vendor (Kunlunxin) implementation
+  # rms_norm: prioritize flagos (FlagGems) implementation, fallback to vendor
   rms_norm:
     - flagos
     - vendor
     - reference
 
-  # silu_and_mul: prioritize vendor (Kunlunxin) implementation
+  # silu_and_mul: prioritize flagos (FlagGems) implementation, fallback to vendor
   silu_and_mul:
     - flagos
     - vendor
     - reference
 
-  # rotary_embedding: prioritize vendor (Kunlunxin) implementation
+  # rotary_embedding: prioritize flagos (FlagGems) implementation, fallback to vendor
   rotary_embedding:
     - flagos
     - vendor

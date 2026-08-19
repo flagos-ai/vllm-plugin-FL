@@ -43,6 +43,7 @@ def apply_kunlunxin_patches():
     patch_fused_gdn_gating()
     patch_ssm_cache_update()
     patch_sampler_rng()
+    patch_decode_attention()
     logger.info("Applied all Kunlunxin patches")
 
 

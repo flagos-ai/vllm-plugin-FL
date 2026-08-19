@@ -135,7 +135,9 @@ class KunlunxinBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        # TODO: Implement MLA (Multi-head Latent Attention) support for Kunlunxin
         if use_mla:
+            # TODO: Implement MLA with sparse attention support for Kunlunxin
             if use_sparse:
                 raise NotImplementedError("MLA with sparse attention is not implemented for Kunlunxin yet.")
             raise NotImplementedError("MLA attention is not implemented for Kunlunxin yet.")
@@ -193,22 +195,23 @@ class KunlunxinBackend(Backend):
 
     def grouped_topk(
         self,
-        hidden_states: 'torch.Tensor',
-        gating_output: 'torch.Tensor',
+        scores: 'torch.Tensor',
+        n_group: int,
+        topk_group: int,
         topk: int,
         renormalize: bool,
-        num_expert_group: int = 0,
-        topk_group: int = 0,
-        scoring_func: str = 'softmax',
-        routed_scaling_factor: float = 1.0,
-        e_score_correction_bias: 'torch.Tensor | None' = None,
+        routed_scaling_factor: float,
+        bias: 'torch.Tensor',
+        scoring_func: int = 0,
     ) -> tuple:
         from .impl.fused_moe.experts_selector import grouped_topk
         return grouped_topk(
-            hidden_states, gating_output, topk, renormalize,
-            num_expert_group=num_expert_group,
-            topk_group=topk_group,
-            scoring_func=scoring_func,
-            routed_scaling_factor=routed_scaling_factor,
-            e_score_correction_bias=e_score_correction_bias,
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
         )

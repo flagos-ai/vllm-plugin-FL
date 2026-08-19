@@ -30,15 +30,23 @@ def _klx_fused_experts(
     w2: torch.Tensor,
     topk_weights: torch.Tensor,
     topk_ids: torch.Tensor,
+    activation: str = "silu",
     use_int8_w8a8: bool = False,
     use_int8_w4a8: bool = False,
     w1_scale: Optional[torch.Tensor] = None,
     w2_scale: Optional[torch.Tensor] = None,
+    w1_bias: Optional[torch.Tensor] = None,
+    w2_bias: Optional[torch.Tensor] = None,
 ) -> None:
     """
     Fused MoE expert computation using xtorch_ops (sorted path).
 
-    Pipeline: gen_block_statistic -> moe_pre_sorted -> moe_fc(w1) -> swiglu -> moe_fc(w2) -> post (weight+sum)
+    Pipeline: gen_block_statistic -> moe_pre_sorted -> moe_fc(w1) -> activation -> moe_fc(w2) -> post (weight+sum)
+
+    Args:
+        activation: Activation function type. Supported: "silu", "gelu", "relu"
+        w1_bias: Optional bias for gate+up projection [E, 2*ffn_hd]
+        w2_bias: Optional bias for down projection [E, hidden_dim]
     """
     if use_int8_w8a8 or use_int8_w4a8:
         raise NotImplementedError("_klx_fused_experts is not supported for int8 w8a8 and w4a8.")
@@ -73,18 +81,43 @@ def _klx_fused_experts(
     inner_fc_out = torch.empty(seq_num, moe_topk, double_ffn_hd, dtype=dtype, device=device)
     xtorch_ops.moe_fc(
         moe_expand, w1, sorted_tokens_num_lod, moe_index, moe_topk, inner_fc_out,
+        bias=w1_bias,
     )
     inner_fc_out = inner_fc_out.view(moe_input_num, double_ffn_hd)
 
-    # Step 4: SwiGLU activation (in-place on first half)
+    # Step 4: Activation
     ffn_hd = double_ffn_hd // 2
-    swiglu_out = torch.empty(moe_input_num, ffn_hd, dtype=dtype, device=device)
-    xtorch_ops.swiglu(inner_fc_out, swiglu_out)
+    if activation == "silu":
+        # SwiGLU: silu(gate) * up
+        swiglu_out = torch.empty(moe_input_num, ffn_hd, dtype=dtype, device=device)
+        xtorch_ops.swiglu(inner_fc_out, swiglu_out)
+    elif activation == "gelu":
+        # GeGLU: gelu(gate) * up
+        gate = inner_fc_out[:, :ffn_hd]
+        up = inner_fc_out[:, ffn_hd:]
+        swiglu_out = xtorch_ops.gelu(gate) * up
+    elif activation == "relu":
+        # ReLU: relu(gate) * up
+        gate = inner_fc_out[:, :ffn_hd]
+        up = inner_fc_out[:, ffn_hd:]
+        swiglu_out = xtorch_ops.relu(gate) * up
+    elif activation in ["gelu_no_mul", "silu_no_mul"]:
+        # No mul variant: only apply activation, no gating
+        if activation == "gelu_no_mul":
+            swiglu_out = xtorch_ops.gelu(inner_fc_out)
+        else:  # silu_no_mul
+            swiglu_out = xtorch_ops.silu(inner_fc_out)
+    else:
+        raise ValueError(
+            f"Unsupported activation '{activation}'. "
+            f"Supported: ['silu', 'gelu', 'relu', 'gelu_no_mul', 'silu_no_mul']"
+        )
 
     # Step 5: Outer FC (down projection)
     outer_fc_out = torch.empty(seq_num, moe_topk, hidden_dim, dtype=dtype, device=device)
     xtorch_ops.moe_fc(
         swiglu_out, w2, sorted_tokens_num_lod, moe_index, moe_topk, outer_fc_out,
+        bias=w2_bias,
     )
     outer_fc_out = outer_fc_out.view(moe_input_num, hidden_dim)
 
@@ -127,13 +160,37 @@ def fused_experts_impl(
 ) -> torch.Tensor:
     """
     Kunlunxin fused experts implementation.
-    
+
     This function matches the signature of vllm_fl.ops.fused_moe.fused_moe.fused_experts_impl
     and is patched in by the Kunlunxin patch system.
+
+    Args:
+        activation: Activation function. Supported: "silu", "gelu", "relu", "gelu_no_mul", "silu_no_mul"
+        apply_router_weight_on_input: If True, apply router weights on input (NOT SUPPORTED)
+        w1_bias: Optional bias for gate+up projection
+        w2_bias: Optional bias for down projection
     """
+    # Stage 1: Explicit rejections for unsupported features
+
+    # 1.1: Reject unsupported quantization schemes
     if use_fp8_w8a8 or use_int8_w8a16 or use_int4_w4a16:
         raise NotImplementedError(
-            "Kunlunxin fused_experts does not support fp8/int8_w8a16/int4 quantization yet."
+            "Kunlunxin fused_experts does not support fp8_w8a8/int8_w8a16/int4_w4a16 quantization yet."
+        )
+
+    # 1.2: Reject apply_router_weight_on_input=True
+    if apply_router_weight_on_input:
+        raise NotImplementedError(
+            "Kunlunxin fused_experts does not support apply_router_weight_on_input=True. "
+            "Router weights are always applied in the moe_post stage (after down projection)."
+        )
+
+    # 1.3: Validate activation function
+    SUPPORTED_ACTIVATIONS = ["silu", "gelu", "relu", "gelu_no_mul", "silu_no_mul"]
+    if activation not in SUPPORTED_ACTIVATIONS:
+        raise NotImplementedError(
+            f"Kunlunxin fused_experts does not support activation '{activation}'. "
+            f"Supported activations: {SUPPORTED_ACTIVATIONS}"
         )
 
     num_tokens = hidden_states.size(0)
@@ -157,9 +214,12 @@ def fused_experts_impl(
         w2=w2,
         topk_weights=topk_weights,
         topk_ids=topk_ids,
+        activation=activation,
         use_int8_w8a8=use_int8_w8a8,
         w1_scale=w1_scale,
         w2_scale=w2_scale,
+        w1_bias=w1_bias,
+        w2_bias=w2_bias,
     )
 
     return output

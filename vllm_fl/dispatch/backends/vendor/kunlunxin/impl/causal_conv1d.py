@@ -118,6 +118,22 @@ def causal_conv1d_update_kunlunxin(
     Returns:
         output tensor (same shape as input x)
     """
+    # Reject speculative decoding: not supported by native kernel
+    if num_accepted_tokens is not None:
+        raise NotImplementedError(
+            "Kunlunxin causal_conv1d_update does not support speculative decoding. "
+            "The native xtorch_ops.causal_conv1d_update kernel does not accept "
+            "num_accepted_tokens parameter."
+        )
+
+    # Reject varlen mode with query_start_loc: not supported by native kernel
+    if query_start_loc is not None and max_query_len > 0:
+        raise NotImplementedError(
+            "Kunlunxin causal_conv1d_update does not support varlen with query_start_loc. "
+            "The native xtorch_ops.causal_conv1d_update kernel does not accept "
+            "query_start_loc and max_query_len parameters."
+        )
+
     if activation not in [None, "silu", "swish"]:
         raise NotImplementedError(
             f"activation must be None, silu, or swish, actual: {activation}"
