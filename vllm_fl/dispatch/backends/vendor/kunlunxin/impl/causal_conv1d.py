@@ -126,8 +126,8 @@ def causal_conv1d_update_kunlunxin(
             "num_accepted_tokens parameter."
         )
 
-    # Reject varlen mode with query_start_loc: not supported by native kernel
-    if query_start_loc is not None and max_query_len > 0:
+    # Reject varlen mode: not supported by native kernel
+    if query_start_loc is not None or max_query_len > 0:
         raise NotImplementedError(
             "Kunlunxin causal_conv1d_update does not support varlen with query_start_loc. "
             "The native xtorch_ops.causal_conv1d_update kernel does not accept "
