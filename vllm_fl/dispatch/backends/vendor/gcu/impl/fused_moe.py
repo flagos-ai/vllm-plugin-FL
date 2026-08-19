@@ -55,12 +55,25 @@ def _write_zeros_to_output(
     BLOCK_SIZE_M,
     BLOCK_SIZE_N,
     compute_type,
+    naive_block_assignment: tl.constexpr,
+    pid_m,
 ):
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=compute_type)
-    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    c_ptrs = c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
-    c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, accumulator, mask=c_mask)
+    if naive_block_assignment:
+        # Naive layout: only row 0 (token slot pid_m) is valid.  Store a full
+        # (BLOCK_SIZE_M, BLOCK_SIZE_N) zero tile whose M extent is clamped to
+        # pid_m+1 so boundary_check keeps only block-row 0 (-> C row pid_m).
+        c_block_ptr = tl.make_block_ptr(
+            base=c_ptr, shape=(pid_m + 1, N), strides=(stride_cm, stride_cn),
+            offsets=(pid_m, pid_n * BLOCK_SIZE_N),
+            block_shape=(BLOCK_SIZE_M, BLOCK_SIZE_N), order=(1, 0),
+        )
+        tl.store(c_block_ptr, accumulator, boundary_check=(0, 1))
+    else:
+        offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        c_ptrs = c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
+        c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
+        tl.store(c_ptrs, accumulator, mask=c_mask)
 
 
 @triton.jit
@@ -179,22 +192,47 @@ def fused_moe_kernel_gcu(
                     BLOCK_SIZE_M,
                     BLOCK_SIZE_N,
                     compute_type,
+                    naive_block_assignment,
+                    pid_m,
                 )
             else:
                 offs_bn = (
                     pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
                 ) % N
                 offs_k = tl.arange(0, BLOCK_SIZE_K)
-                a_ptrs = a_ptr + (
-                    offs_token[:, None] // top_k * stride_am
-                    + offs_k[None, :] * stride_ak
+
+                # A tile via block pointer (naive layout): only row 0 of the
+                # tile is a valid token (token slot pid_m -> A row
+                # pid_m // top_k); the remaining rows are masked out at store
+                # time, so loading extra rows is harmless.
+                # Row bound = every row the gather could reach:
+                # cdiv(num_valid_tokens, top_k).
+                # The sorted-token-id layout keeps the masked row gather.
+                if naive_block_assignment:
+                    num_token_rows = (num_valid_tokens + top_k - 1) // top_k
+                    a_block_ptr = tl.make_block_ptr(
+                        base=a_ptr, shape=(num_token_rows, K),
+                        strides=(stride_am, stride_ak),
+                        offsets=(pid_m // top_k, 0),
+                        block_shape=(BLOCK_SIZE_M, BLOCK_SIZE_K), order=(1, 0),
+                    )
+                else:
+                    a_ptrs = a_ptr + (
+                        offs_token[:, None] // top_k * stride_am
+                        + offs_k[None, :] * stride_ak
+                    )
+
+                # B tile via block pointer: a regular block inside expert
+                # ``off_experts``.  B is stored [E, N, K] (K contiguous);
+                # view the expert slice as (K, N), same as the reference
+                # block-scaled MM.
+                b_block_ptr = tl.make_block_ptr(
+                    base=b_ptr + off_experts * stride_be,
+                    shape=(K, N), strides=(stride_bk, stride_bn),
+                    offsets=(0, pid_n * BLOCK_SIZE_N),
+                    block_shape=(BLOCK_SIZE_K, BLOCK_SIZE_N), order=(0, 1),
                 )
 
-                b_ptrs = (
-                    b_ptr
-                    + off_experts * stride_be
-                    + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-                )
                 if use_int8_w8a16:
                     b_scale_ptrs = (
                         b_scale_ptr
@@ -246,16 +284,26 @@ def fused_moe_kernel_gcu(
                     (BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32
                 )
                 for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-                    a = tl.load(
-                        a_ptrs,
-                        mask=token_mask[:, None]
-                        & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-                        other=0.0,
-                    )
+                    # Load the next block of A and B.  Block pointers handle
+                    # the K/N bounds via boundary_check (zero padding); the
+                    # sorted layout keeps the explicit K mask on its gather.
+                    if naive_block_assignment:
+                        a = tl.load(
+                            a_block_ptr,
+                            boundary_check=(0, 1),
+                            padding_option="zero",
+                        )
+                    else:
+                        a = tl.load(
+                            a_ptrs,
+                            mask=token_mask[:, None]
+                            & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                            other=0.0,
+                        )
                     b = tl.load(
-                        b_ptrs,
-                        mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
-                        other=0.0,
+                        b_block_ptr,
+                        boundary_check=(0, 1),
+                        padding_option="zero",
                     )
                     if use_int8_w8a16:
                         accumulator = tl.dot(a, b.to(compute_type), acc=accumulator)
@@ -281,8 +329,12 @@ def fused_moe_kernel_gcu(
                                 accumulator += tl.dot(a, b)
                     else:
                         accumulator += tl.dot(a, b)
-                    a_ptrs += BLOCK_SIZE_K * stride_ak
-                    b_ptrs += BLOCK_SIZE_K * stride_bk
+                    # Advance the ptrs to the next K block.
+                    if naive_block_assignment:
+                        a_block_ptr = tl.advance(a_block_ptr, (0, BLOCK_SIZE_K))
+                    else:
+                        a_ptrs += BLOCK_SIZE_K * stride_ak
+                    b_block_ptr = tl.advance(b_block_ptr, (BLOCK_SIZE_K, 0))
 
                 # Dequantization for supported quantization schemes.
                 if use_int8_w8a16:
@@ -309,15 +361,31 @@ def fused_moe_kernel_gcu(
                 accumulator = accumulator.to(compute_type)
 
                 # -----------------------------------------------------------
-                # Write back the block of the output.
-                offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-                c_ptrs = (
-                    c_ptr
-                    + stride_cm * offs_token[:, None]
-                    + stride_cn * offs_cn[None, :]
-                )
-                c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
-                tl.store(c_ptrs, accumulator, mask=c_mask)
+                # Write back the block of the output.  Naive layout: only
+                # row 0 of the tile holds a valid token result (slot pid_m).
+                # Store the full tile through a block pointer whose M extent
+                # is clamped to pid_m+1, so boundary_check keeps only
+                # block-row 0 (-> C row pid_m) and masks the padding rows.
+                # This avoids a tl.sum/tl.reshape row extraction that the
+                # GCU compiler cannot lower.  Sorted layout: keep the masked
+                # scatter store.
+                if naive_block_assignment:
+                    c_block_ptr = tl.make_block_ptr(
+                        base=c_ptr, shape=(pid_m + 1, N),
+                        strides=(stride_cm, stride_cn),
+                        offsets=(pid_m, pid_n * BLOCK_SIZE_N),
+                        block_shape=(BLOCK_SIZE_M, BLOCK_SIZE_N), order=(1, 0),
+                    )
+                    tl.store(c_block_ptr, accumulator, boundary_check=(0, 1))
+                else:
+                    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+                    c_ptrs = (
+                        c_ptr
+                        + stride_cm * offs_token[:, None]
+                        + stride_cn * offs_cn[None, :]
+                    )
+                    c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
+                    tl.store(c_ptrs, accumulator, mask=c_mask)
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +554,9 @@ def apply_fused_moe_triton_kernel_gcu_patch() -> None:
     ]
 
     try:
+        import sys
+
+        all_patched = True
         for module_name in _IMPORTERS:
             try:
                 mod = __import__(
@@ -497,17 +568,29 @@ def apply_fused_moe_triton_kernel_gcu_patch() -> None:
                 mod.invoke_fused_moe_triton_kernel = (
                     invoke_fused_moe_triton_kernel_gcu
                 )
+            elif module_name in sys.modules:
+                # Module exists but is only partially initialized (circular
+                # import): the target name is not defined yet.  Do NOT mark
+                # as patched so a later apply_gcu_patches() retry can rebind.
+                all_patched = False
 
-        _patched = True
-        logger.info(
-            "Patched invoke_fused_moe_triton_kernel for GCU "
-            "(grid <= %d, 1-D only, NUM_SPC=%d, num_warps <= %d)",
-            GCU_NUM_GRID,
-            GCU_NUM_GRID,
-            GCU_MAX_WARPS,
-        )
+        _patched = all_patched
+        if all_patched:
+            logger.info(
+                "Patched invoke_fused_moe_triton_kernel for GCU "
+                "(grid <= %d, 1-D only, NUM_SPC=%d, num_warps <= %d)",
+                GCU_NUM_GRID,
+                GCU_NUM_GRID,
+                GCU_MAX_WARPS,
+            )
+        else:
+            logger.debug(
+                "invoke_fused_moe_triton_kernel patch deferred (will retry)"
+            )
     except Exception as exc:
-        logger.warning(
-            "Failed to patch invoke_fused_moe_triton_kernel for GCU: %s",
+        # Circular import — will be retried by subsequent
+        # apply_gcu_patches() calls from other lifecycle hooks.
+        logger.debug(
+            "invoke_fused_moe_triton_kernel patch deferred (will retry): %s",
             exc,
         )
