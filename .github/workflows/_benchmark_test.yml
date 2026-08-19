@@ -60,6 +60,8 @@ jobs:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
       options: ${{ inputs.container_options }}
+    env:
+      FL_BENCHMARK_RESULT_DIR: benchmark-results
 
     steps:
       - name: Checkout (attempt 1)
@@ -82,10 +84,37 @@ jobs:
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run benchmark smoke tests
+        id: benchmark_test
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
             --scope benchmark
+
+      - name: Generate serve benchmark report
+        if: steps.benchmark_test.outcome == 'success'
+        run: |
+          python tests/benchmarks/format_benchmark_report.py \
+            --benchmark-type serve \
+            --input "${FL_BENCHMARK_RESULT_DIR}/serve_result.json" \
+            --output "${FL_BENCHMARK_RESULT_DIR}/serve_benchmark_metrics.json"
+
+      - name: Upload serve benchmark data to backend
+        continue-on-error: true
+        if: steps.benchmark_test.outcome == 'success'
+        uses: flagos-ai/FlagOps/actions/post-benchmark-report@main
+        env:
+          NO_PROXY: "flagcicd-inner.flagos.net"
+        with:
+          backend_url: 'http://flagcicd-inner.flagos.net:8000'
+          user_id: '000000000000000000'
+          report_path: benchmark-results/serve_benchmark_metrics.json
+          list_code: 'benchmark_${{ inputs.platform }}_vllm_serve_smoke'
+          list_name: 'Benchmark-vLLM-Serve-Smoke-${{ inputs.platform }}'
+          header_config: '[{"field":"metric","name":"Benchmark Metric","required":true,"sortable":true,"type":"string"},{"field":"values","name":"Per Step Details","required":false,"sortable":false,"type":"array"},{"field":"avg","name":"Avg","required":true,"sortable":true,"type":"number"},{"field":"p50","name":"P50","required":true,"sortable":true,"type":"number"},{"field":"p99","name":"P99","required":true,"sortable":true,"type":"number"}]'
+          repository_name: '${{ github.repository }}'
+          commit_id: ${{ github.event.pull_request.head.sha || github.sha }}
+          workflow_id: ${{ github.run_id }}
+          fail_on_error: 'false'
 
       - name: Upload test results
         if: always()
