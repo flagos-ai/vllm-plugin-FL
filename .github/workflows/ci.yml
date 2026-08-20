@@ -166,3 +166,14 @@ jobs:
     with:
       platform: enflame
     secrets: inherit
+
+  # ============================================================
+  # Job 4g: Kunlunxin platform testing
+  # ============================================================
+  test-kunlunxin:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: kunlunxin
+    secrets: inherit
