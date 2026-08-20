@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # Install FlagGems for test purpose
-FLAGGEMS_VERSION="v5.4.0.dev0"
+FLAGGEMS_VERSION="v5.3.4"
 FLAGGEMS_DIR="$(cd .. && pwd -P)/FlagGems"
 rm -rf "${FLAGGEMS_DIR}"
 git clone --branch "${FLAGGEMS_VERSION}" --depth 1 https://github.com/flagos-ai/FlagGems.git "${FLAGGEMS_DIR}"
