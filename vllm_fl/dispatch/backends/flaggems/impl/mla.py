@@ -56,6 +56,13 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
         # MLA Specific Arguments
         **mla_args,
     ) -> None:
+        # Ensure flash_attn_varlen_func is not None so parent __init__ doesn't
+        # reject us. We override prefill with _flash_attn_varlen_diff_headdims.
+        import vllm.model_executor.layers.attention.mla_attention as _mla_mod
+        _orig_fa = _mla_mod.flash_attn_varlen_func
+        if _orig_fa is None:
+            _mla_mod.flash_attn_varlen_func = flash_attn_varlen_func
+
         super().__init__(
             num_heads,
             head_size,
@@ -69,6 +76,9 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
             kv_sharing_target_layer_name,
             **mla_args,
         )
+
+        # Restore original value
+        _mla_mod.flash_attn_varlen_func = _orig_fa
 
         unsupported_features = [alibi_slopes, sliding_window, logits_soft_cap]
         if any(unsupported_features):
@@ -90,9 +100,106 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
                 "TritonMLA V1 with FP8 KV cache not yet supported"
             )
 
+    def do_kv_cache_update(
+        self,
+        kv_c_normed: torch.Tensor,
+        k_pe: torch.Tensor,
+        kv_cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        kv_cache_dtype: str,
+        k_scale: torch.Tensor,
+    ) -> None:
+        if kv_cache.numel() == 0:
+            return
+        import flag_gems
+        if flag_gems.vendor_name == "kunlunxin":
+            import xtorch_ops
+            xtorch_ops.concat_and_cache_mla(
+                kv_c_normed, k_pe.squeeze(1), slot_mapping.flatten(), kv_cache
+            )
+        else:
+            from vllm import _custom_ops as ops
+            ops.concat_and_cache_mla(
+                kv_c_normed, k_pe.squeeze(1), kv_cache,
+                slot_mapping.flatten(), kv_cache_dtype, k_scale,
+            )
+
     def _flash_attn_varlen_diff_headdims(
         self, q, k, v, return_softmax_lse=False, softmax_scale=None, **kwargs
     ):
+        """
+        Modified to support Kunlunxin backend using xtorch_ops.prefill_attention.
+
+        Kunlunxin backend uses native API which supports head_dim=576 for MLA.
+        Other backends continue to use FlagGems flash_attn_varlen_func.
+        """
+        import flag_gems
+
+        # DEBUG: Print to confirm this method is being called
+        print(f"[MLA DEBUG] _flash_attn_varlen_diff_headdims called! vendor={flag_gems.vendor_name}, q.shape={q.shape}, k.shape={k.shape}, v.shape={v.shape}", flush=True)
+
+        # Kunlunxin-specific path: use xtorch_ops.prefill_attention
+        if flag_gems.vendor_name == "kunlunxin":
+            print(f"[MLA DEBUG] Using Kunlunxin xtorch_ops.prefill_attention path", flush=True)
+            import xtorch_ops
+
+            # Extract varlen parameters from kwargs
+            cu_seqlens_q = kwargs.get("cu_seqlens_q")
+            cu_seqlens_k = kwargs.get("cu_seqlens_k")
+            causal = kwargs.get("causal", True)
+
+            if cu_seqlens_q is None or cu_seqlens_k is None:
+                raise ValueError(
+                    "Kunlunxin prefill_attention requires cu_seqlens_q and cu_seqlens_k"
+                )
+
+            # Construct LOD tensors (cumulative sequence lengths)
+            context_qlen_lod_cpu = cu_seqlens_q.cpu() if cu_seqlens_q.device.type != "cpu" else cu_seqlens_q
+            context_qlen_lod_xpu = cu_seqlens_q.to(q.device)
+            context_kvlen_lod_cpu = cu_seqlens_k.cpu() if cu_seqlens_k.device.type != "cpu" else cu_seqlens_k
+            context_kvlen_lod_xpu = cu_seqlens_k.to(q.device)
+
+            # Pad v to match q/k head_dim (same as FlagGems approach)
+            v_head_dim = v.shape[-1]
+            if v.shape[-1] != q.shape[-1]:
+                v = torch.nn.functional.pad(
+                    v, [0, q.shape[-1] - v.shape[-1]], value=0
+                )
+
+            # Prepare output tensor
+            output = torch.empty_like(q)
+
+            # Call xtorch_ops.prefill_attention (modifies output in-place)
+            print(f"[MLA DEBUG] Calling xtorch_ops.prefill_attention...", flush=True)
+            ret_code = xtorch_ops.prefill_attention(
+                q=q,
+                k=k,
+                v=v,
+                out=output,
+                is_causal=causal,
+                is_prefix_cache=False,
+                alpha=softmax_scale if softmax_scale is not None else 1.0,
+                context_qlen_lod_cpu=context_qlen_lod_cpu,
+                context_qlen_lod_xpu=context_qlen_lod_xpu,
+                context_kvlen_lod_cpu=context_kvlen_lod_cpu,
+                context_kvlen_lod_xpu=context_kvlen_lod_xpu,
+            )
+
+            print(f"[MLA DEBUG] xtorch_ops.prefill_attention returned code={ret_code}", flush=True)
+            if ret_code != 0:
+                raise RuntimeError(f"xtorch_ops.prefill_attention failed with code {ret_code}")
+
+            # Slice output back to original v_head_dim
+            if output.shape[-1] != v_head_dim:
+                output = output[..., :v_head_dim]
+
+            # xtorch_ops.prefill_attention doesn't return LSE
+            if return_softmax_lse:
+                return output.clone(), None
+            return output.clone()
+
+        # Original FlagGems path for other backends
+        print(f"[MLA DEBUG] Using original FlagGems flash_attn_varlen_func path", flush=True)
         maybe_padded_v = v
         if self._pad_v:
             maybe_padded_v = torch.nn.functional.pad(
@@ -119,7 +226,7 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
             return attn_out, lse
         return attn_out
 
-    def _forward_decode(
+    def forward_mqa(
         self,
         q: Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
         kv_c_and_k_pe_cache: torch.Tensor,
@@ -135,13 +242,13 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
         head_dim_v = 0
         if type(q) is tuple:
             ### q_nope & q_pe
-            head_dim_v = q[0][-1]
+            head_dim_v = q[0].shape[-1]
             q = torch.cat(q, dim=-1)
 
         assert isinstance(q, torch.Tensor)
         B = q.shape[0]
         q_num_heads = q.shape[1]
-        head_dim = q[-1]
+        head_dim = q.shape[-1]
         # o = torch.zeros(B,
         #                 q_num_heads,
         #                 self.kv_lora_rank,
@@ -175,8 +282,18 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
         #                      attn_metadata.decode.seq_lens, attn_logits,
         #                      num_kv_splits, self.scale, PAGE_SIZE)
         ### NOTE(lms): check correctness
+        # flash_mla uses sm_scale = 1/sqrt(head_dim) internally, but MLA needs
+        # self.scale = 1/sqrt(qk_nope_head_dim + qk_rope_head_dim).
+        # Pre-scale q to correct: q * self.scale * sqrt(head_dim) makes
+        # the effective scale = self.scale after the kernel applies 1/sqrt(head_dim).
+        import math
+        scale_correction = self.scale * math.sqrt(head_dim)
+        q_scaled = q * scale_correction
+
+        # flash_mla expects q shape [B, s_q, num_heads, d]
+        q_4d = q_scaled.unsqueeze(1)
         o = flash_mla(
-            q,
+            q_4d,
             attn_metadata.decode.block_table,
             kv_c_and_k_pe_cache,
             None,
@@ -190,4 +307,6 @@ class MLAFLImpl(MLACommonImpl[MLACommonMetadata]):
             head_dim_v,
             True,
         )
+        # flash_mla returns [B, s_q=1, num_heads, dv], squeeze s_q dim
+        o = o.squeeze(1)
         return o, lse
