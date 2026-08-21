@@ -27,11 +27,11 @@ from . import kernels
 
 
 class FLWNA16LinearKernel(MPLinearKernel):
-    """Consume standard uint4b8 weights through the fixed local operator.
+    """Consume standard uint4b8/uint8b128 compressed-tensors weights.
 
-    vLLM's MPLinear registry selects this adapter only when
-    ``vllm_fl::wna16_gemm`` is registered. The execution path does not fall
-    through to CUDA, FlagGems, or the test-only reference implementation.
+    W4A16 uses the fixed plugin operator when it is built. W8A16 uses its
+    dedicated operator when available and otherwise uses the portable Triton
+    implementation.
     """
 
     @classmethod
@@ -43,24 +43,34 @@ class FLWNA16LinearKernel(MPLinearKernel):
         cls,
         config: MPLinearLayerConfig,
     ) -> tuple[bool, str | None]:
-        if config.weight_type != scalar_types.uint4b8:
-            return False, "FL WNA16 currently requires symmetric uint4b8"
+        if config.weight_type not in {
+            scalar_types.uint4b8,
+            scalar_types.uint8b128,
+        }:
+            return False, "FL WNA16 requires symmetric uint4b8 or uint8b128"
         if config.zero_points:
             return False, "FL WNA16 does not use explicit zero points"
         if config.has_g_idx:
             return False, "FL WNA16 does not support activation ordering"
         if config.act_type not in {torch.bfloat16, torch.float16}:
             return False, "FL WNA16 requires BF16 or FP16 activations"
-        if config.group_size <= 0:
-            return False, "FL WNA16 requires group-wise quantization"
+        is_w8a16 = config.weight_type == scalar_types.uint8b128
+        if config.group_size <= 0 and not (is_w8a16 and config.group_size == -1):
+            return False, "FL WNA16 requires group or channel quantization"
         input_size, output_size = config.partition_weight_shape
-        if input_size % config.group_size:
+        if config.group_size > 0 and input_size % config.group_size:
             return False, "input size must be divisible by group_size"
-        if input_size % 8:
-            return False, "input size must be divisible by the INT4 pack factor"
+        pack_factor = 4 if is_w8a16 else 8
+        if input_size % pack_factor:
+            return False, "input size must be divisible by the pack factor"
         if output_size <= 0:
             return False, "output size must be positive"
-        if not kernels.is_wna16_gemm_available():
+        available = (
+            kernels.is_w8a16_gemm_available()
+            if is_w8a16
+            else kernels.is_wna16_gemm_available()
+        )
+        if not available:
             return False, "the plugin-local wna16_gemm kernel is not built"
         return True, None
 
@@ -81,20 +91,21 @@ class FLWNA16LinearKernel(MPLinearKernel):
     ) -> torch.Tensor:
         weight, scale, _, _ = self._get_weight_params(layer)
         original_shape = x.shape
-        x_2d = x.reshape(-1, original_shape[-1])
+        x_2d = x.reshape(-1, original_shape[-1]).contiguous()
         output = kernels.wna16_gemm(
             x_2d,
             weight,
             scale,
             self.config.group_size,
             bias,
+            num_bits=self.config.weight_type.size_bits,
         )
         return output.reshape(*original_shape[:-1], output.shape[-1])
 
 
 def register_fl_wna16_linear_kernel(registry: dict) -> bool:
-    """Prepend the FL kernel only when its fixed local operator is built."""
-    if not kernels.is_wna16_gemm_available():
+    """Prepend the FL kernel when a W4A16 or W8A16 backend is available."""
+    if not (kernels.is_wna16_gemm_available() or kernels.is_w8a16_gemm_available()):
         return False
     from vllm.platforms import PlatformEnum
 

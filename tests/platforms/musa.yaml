@@ -1,0 +1,52 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+platform: musa
+vendor: mthreads
+
+device_types:
+  s5000:
+    memory_gb: 80
+    tags: [musa, mthreads, bf16, fp16, fp32]
+
+tolerance:
+  inference:
+    default:
+      rtol: 1e-3
+      atol: 1e-3
+    bfloat16:
+      rtol: 1e-2
+      atol: 1e-2
+
+device_overrides:
+  s5000:
+    cases:
+      - qwen3_6/27b_tp4_eager
+      - qwen3_6/35b_a3b_tp4_eager
+    llm:
+      gpu_memory_utilization: 0.90
+      trust_remote_code: true
+
+env_defaults:
+  GEMS_VENDOR: "mthreads"
+  VLLM_PLUGINS: "fl"
+  MTHREADS_VISIBLE_DEVICES: "all"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+
+s5000:
+  name: "s5000"
+  tests:
+    e2e:
+      inference:
+        qwen3_6: ["27b_tp4_eager"]
+      serving:
+        qwen3_6: ["35b_a3b_tp4_eager"]
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []
+    benchmark:
+      enabled: true
+      smoke: ["serve"]

@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 import torch
+import os
 
 from vllm_fl.dispatch.backends.base import Backend
 
@@ -206,7 +207,14 @@ class FlagGemsBackend(Backend):
 
         if use_sparse:
             raise ValueError("use_sparse=True requires use_mla=True.")
-        # TODO: return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+
+        use_flaggems_attn = os.environ.get(
+            "VLLM_FL_USE_FLAGGEMS_ATTN", "0"
+        ).lower() in ("1", "true", "yes")
+
+        if use_flaggems_attn:
+            print("Using FlagGems attention backend.")
+            return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
 

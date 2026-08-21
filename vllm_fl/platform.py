@@ -56,7 +56,7 @@ def _resolve_flagcx_backend() -> bool:
     try:
         if flagcx_path not in sys.path:
             sys.path.insert(0, flagcx_path)
-        import plugin.torch.flagcx  # triggers _C.so load and backend registration
+        import flagcx  # triggers _C.so load and backend registration
         return torch.distributed.is_backend_available("flagcx")
     except Exception:
         logger.warning(
@@ -206,6 +206,9 @@ class PlatformFL(Platform):
             if cls.device_type == "npu":
                 cache_config.block_size = 128
                 logger.info("Setting kv cache block size to 128 for Ascend NPU.")
+            elif cls.vendor_name == "kunlunxin":
+                cache_config.block_size = 128
+                logger.info("Setting kv cache block size to 128 for Kunlunxin.")
             elif cls.device_type == "musa":
                 cache_config.block_size = 64
                 logger.info("Setting kv cache block size to 64 for MUSA.")
@@ -396,7 +399,21 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead", "gcu"]:
+        # Current detection reports vendor_name="enflame" and
+        # device_type="gcu". Keep the legacy "gcu" vendor alias for images
+        # built with the earlier detector.
+        if cls.vendor_name in {
+            "nvidia",
+            "ascend",
+            "metax",
+            "hygon",
+            "mthreads",
+            "iluvatar",
+            "thead",
+            "gcu",
+            "enflame",
+            "kunlunxin",
+        }:
             return True
         return False
 

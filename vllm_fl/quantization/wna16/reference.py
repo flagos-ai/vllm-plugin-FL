@@ -49,6 +49,52 @@ def unpack_uint4b8(
     return (codes.to(torch.int16) - 8).to(torch.int8)
 
 
+def unpack_uint8b128(
+    weight_packed: torch.Tensor,
+    *,
+    in_features: int | None = None,
+) -> torch.Tensor:
+    """Unpack compressed-tensors uint8b128 int32 words to signed int8."""
+    if weight_packed.ndim != 2 or weight_packed.dtype != torch.int32:
+        raise ValueError("weight_packed must be a 2D int32 tensor")
+    codes = weight_packed.contiguous().view(torch.uint8)
+    if in_features is not None:
+        if in_features < 0 or in_features > codes.shape[1]:
+            raise ValueError("in_features is incompatible with weight_packed")
+        codes = codes[:, :in_features]
+    return (codes.to(torch.int16) - 128).to(torch.int8)
+
+
+def _apply_group_scales(
+    x: torch.Tensor,
+    values: torch.Tensor,
+    weight_scale: torch.Tensor,
+    group_size: int,
+    bias: torch.Tensor | None,
+) -> torch.Tensor:
+    effective_group_size = x.shape[-1] if group_size == -1 else group_size
+    if effective_group_size <= 0 or x.shape[-1] % effective_group_size:
+        raise ValueError("group_size must divide the input feature dimension")
+    expected_scale_shape = (
+        values.shape[0],
+        x.shape[-1] // effective_group_size,
+    )
+    if tuple(weight_scale.shape) != expected_scale_shape:
+        raise ValueError(
+            f"weight_scale must have shape {expected_scale_shape}, "
+            f"got {tuple(weight_scale.shape)}"
+        )
+    scales = weight_scale.repeat_interleave(
+        effective_group_size,
+        dim=1,
+    )
+    weight = values.to(scales.dtype) * scales
+    output = torch.matmul(x, weight.transpose(0, 1))
+    if bias is not None:
+        output = output + bias
+    return output
+
+
 def wna16_gemm_reference(
     x: torch.Tensor,
     weight_packed: torch.Tensor,
@@ -59,28 +105,45 @@ def wna16_gemm_reference(
     """Materialize dequantized weights for small numerical tests only."""
     if x.ndim < 2:
         raise ValueError("x must have at least two dimensions")
-    if group_size <= 0 or x.shape[-1] % group_size:
-        raise ValueError("group_size must divide the input feature dimension")
-    expected_scale_shape = (
-        weight_packed.shape[0],
-        x.shape[-1] // group_size,
-    )
-    if tuple(weight_scale.shape) != expected_scale_shape:
-        raise ValueError(
-            f"weight_scale must have shape {expected_scale_shape}, "
-            f"got {tuple(weight_scale.shape)}"
-        )
-
     values = unpack_uint4b8(
         weight_packed,
         in_features=x.shape[-1],
     )
-    scales = weight_scale.repeat_interleave(group_size, dim=1)
-    weight = values.to(scales.dtype) * scales
-    output = torch.matmul(x, weight.transpose(0, 1))
-    if bias is not None:
-        output = output + bias
-    return output
+    return _apply_group_scales(
+        x,
+        values,
+        weight_scale,
+        group_size,
+        bias,
+    )
 
 
-__all__ = ["unpack_uint4b8", "wna16_gemm_reference"]
+def w8a16_gemm_reference(
+    x: torch.Tensor,
+    weight_packed: torch.Tensor,
+    weight_scale: torch.Tensor,
+    group_size: int,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Materialize uint8b128 weights for small numerical tests only."""
+    if x.ndim < 2:
+        raise ValueError("x must have at least two dimensions")
+    values = unpack_uint8b128(
+        weight_packed,
+        in_features=x.shape[-1],
+    )
+    return _apply_group_scales(
+        x,
+        values,
+        weight_scale,
+        group_size,
+        bias,
+    )
+
+
+__all__ = [
+    "unpack_uint4b8",
+    "unpack_uint8b128",
+    "w8a16_gemm_reference",
+    "wna16_gemm_reference",
+]
