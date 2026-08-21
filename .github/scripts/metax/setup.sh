@@ -11,7 +11,7 @@ git clone --branch "${FLAGGEMS_VERSION}" --depth 1 https://github.com/flagos-ai/
 python -m pip install --no-build-isolation -e "${FLAGGEMS_DIR}"
 
 # Install FlagGems-vllm for test purpose
-FLAGGEMS_VLLM_VERSION="v0.1.1-rc0"
+FLAGGEMS_VLLM_VERSION="main"
 FLAGGEMS_VLLM_DIR="$(cd .. && pwd -P)/FlagGems-vllm"
 rm -rf "${FLAGGEMS_VLLM_DIR}"
 git clone --branch "${FLAGGEMS_VLLM_VERSION}" --depth 1 https://github.com/flagos-ai/FlagGems-vllm.git "${FLAGGEMS_VLLM_DIR}"
