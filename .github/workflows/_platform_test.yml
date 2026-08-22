@@ -164,6 +164,7 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
+    secrets: inherit
 
   # ============================================================
   # Feishu notification — per-platform status

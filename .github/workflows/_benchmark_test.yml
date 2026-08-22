@@ -107,6 +107,7 @@ jobs:
         with:
           backend_url: 'http://flagcicd-inner.flagos.net:8000'
           user_id: '000000000000000000'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
           report_path: benchmark-results/serve_benchmark_metrics.json
           list_code: 'benchmark_${{ inputs.platform }}_vllm_serve_smoke'
           list_name: 'Benchmark-vLLM-Serve-Smoke-${{ inputs.platform }}'
