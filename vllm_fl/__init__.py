@@ -163,6 +163,14 @@ def _patch_torch_accelerator():
         accel.reset_peak_memory_stats = _safe_reset_peak_memory_stats
 
 
+def _init_vendor_device():
+    """Vendor-specific device initialization patches."""
+    from vllm_fl.utils import DeviceInfo
+    if DeviceInfo().vendor_name == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import _patch_xpu_get_device
+        _patch_xpu_get_device()
+
+
 def register():
     """Register the FL platform."""
     # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
@@ -173,6 +181,7 @@ def register():
         return arm_cpu_platform
 
     _patch_torch_accelerator()
+    _init_vendor_device()
     _patch_custom_ops()
     _patch_flash_attn_import()
     _patch_transformers_compat()
