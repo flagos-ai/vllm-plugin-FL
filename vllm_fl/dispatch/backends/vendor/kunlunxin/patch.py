@@ -195,8 +195,8 @@ def patch_sampler_rng():
 
         _orig_random_sample = _sampler_mod.random_sample
 
-        def _broadcast_random_sample(probs, generators):
-            sampled_tokens = _orig_random_sample(probs, generators)
+        def _broadcast_random_sample(probs, generators, use_fp64_gumbel=False):
+            sampled_tokens = _orig_random_sample(probs, generators, use_fp64_gumbel)
             try:
                 from vllm.distributed import get_tp_group
                 tp_group = get_tp_group()
