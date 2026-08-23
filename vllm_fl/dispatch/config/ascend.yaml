@@ -117,6 +117,8 @@ flagos_blacklist:
   - _index_put_impl_
   # --- Reduction (argmax only - Invalid Runtime Function on NPU) ---
   - argmax
+  # --- Crash: pow_scalar (chained-boolean a < b < c tl.constexpr branch) ---
+  - pow_scalar
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
