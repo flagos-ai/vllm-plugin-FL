@@ -41,6 +41,30 @@ from vllm_fl.utils import VENDOR_DEVICE_MAP
 _CONFIG_DIR = Path(__file__).parent
 
 
+def _get_arch_config_name(platform: str) -> Optional[str]:
+    """Return an architecture-specific config name when one is available."""
+    if platform != "nvidia":
+        return None
+    if os.environ.get("VLLM_FL_HOPPER_LONG_CONTEXT_OPT", "0").lower() not in (
+        "1",
+        "true",
+    ):
+        return None
+
+    try:
+        from vllm.platforms import current_platform
+
+        capability = current_platform.get_device_capability()
+    except Exception:
+        # Device discovery is not guaranteed to be available in API-only or
+        # model-inspection processes. Fall back to the vendor-wide defaults.
+        return None
+
+    if capability is not None and capability.major == 9:
+        return "nvidia_hopper"
+    return None
+
+
 def get_platform_name() -> str:
     """
     Detect the current hardware platform.
@@ -74,6 +98,12 @@ def get_config_path(platform: Optional[str] = None) -> Optional[Path]:
     """
     if platform is None:
         platform = get_platform_name()
+
+    arch_config = _get_arch_config_name(platform)
+    if arch_config is not None:
+        config_file = _CONFIG_DIR / f"{arch_config}.yaml"
+        if config_file.exists():
+            return config_file
 
     # Try platform-specific config
     config_file = _CONFIG_DIR / f"{platform}.yaml"

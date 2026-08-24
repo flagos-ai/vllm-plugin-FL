@@ -386,6 +386,14 @@ class PlatformFL(Platform):
     def pre_register_and_update(cls, parser=None) -> None:
         if cls.device_name == "npu":
             import vllm_fl.dispatch.backends.vendor.ascend
+        if cls.vendor_name == "iluvatar":
+            # Patches are applied at module import time in iluvatar.py.
+            # Also call chained-or patch here explicitly from the main process,
+            # so the vllm source file is rewritten before Worker subprocesses start.
+            from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
+                patch_triton_chained_or_for_iluvatar,
+            )
+            patch_triton_chained_or_for_iluvatar()
 
     def supports_fp8(cls) -> bool:
         if cls.vendor_name == "nvidia":
@@ -394,6 +402,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_uuid(cls, device_id: int = 0) -> str:
+        if cls.device_type == "cuda" and cls.vendor_name == "iluvatar":
+            # Iluvatar is CUDA-compatible but has no NVML library.
+            # Return a synthetic UUID based on device index.
+            return f"ILUVATAR-{device_id}"
         if cls.device_type == "cuda":
             import pynvml
             pynvml.nvmlInit()

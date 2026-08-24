@@ -323,6 +323,7 @@ Environment variables can override specific items from platform config. If not s
 | `VLLM_FL_PREFER` | `flagos` | Preferred backend: `flagos`, `vendor`, `reference` |
 | `VLLM_FL_STRICT` | `0` | Strict mode: `1` = fail on error, `0` = try fallback |
 | `VLLM_FL_PER_OP` | (none) | Per-operator order: `op1=a\|b\|c;op2=x\|y` |
+| `VLLM_FL_HOPPER_LONG_CONTEXT_OPT` | `0` | On NVIDIA Hopper, route attention to FA3 and `mm`/`mm_out` to native CUDA |
 | `VLLM_FL_ALLOW_VENDORS` | (none) | Vendor whitelist, comma-separated |
 | `VLLM_FL_DENY_VENDORS` | (none) | Vendor blacklist, comma-separated |
 
@@ -384,6 +385,9 @@ export VLLM_FL_FLAGOS_WHITELIST="silu_and_mul,rms_norm"
 
 # Specify per-operator order
 export VLLM_FL_PER_OP="rms_norm=vendor|flagos|reference"
+
+# Opt in to the NVIDIA Hopper long-context routing for an A/B run
+export VLLM_FL_HOPPER_LONG_CONTEXT_OPT=1
 
 # Use completely custom config file
 export VLLM_FL_CONFIG=/path/to/my_config.yaml

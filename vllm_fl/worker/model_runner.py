@@ -24,6 +24,10 @@ import torch.nn as nn
 from tqdm import tqdm
 
 import vllm.envs as envs
+from vllm.compilation.breakable_cudagraph import (
+    BreakableCUDAGraphWrapper,
+    is_breakable_cudagraph_enabled,
+)
 from vllm.compilation.counter import compilation_counter
 from vllm.compilation.cuda_graph import CUDAGraphStat
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
@@ -3277,6 +3281,10 @@ class ModelRunnerFL(
         if isinstance(self.model, (GraphWrapper, UBatchWrapper)):
             # get raw model out of the cudagraph wrapper.
             return self.model.unwrap()
+        # BreakableCUDAGraphWrapper (vLLM 0.24.0+) wraps the model but is not
+        # an nn.Module. Unwrap it so callers always get the raw model.
+        if isinstance(self.model, BreakableCUDAGraphWrapper):
+            return self.model.unwrap()
         return self.model
 
     def apply_sparse_weight_patches(self, patches: Iterable[SparseWeightPatch]) -> None:
@@ -5371,6 +5379,21 @@ class ModelRunnerFL(
         cudagraph_mode = self.compilation_config.cudagraph_mode
         assert cudagraph_mode is not None
         if (
+            is_breakable_cudagraph_enabled()
+            and cudagraph_mode != CUDAGraphMode.NONE
+            and not self.parallel_config.use_ubatching
+        ):
+            # vLLM 0.24.0+ breakable CUDA graph: splits the graph at
+            # @eager_break_during_capture decorated ops (e.g. attention).
+            # OOT vendor attention backends participate automatically because
+            # upstream unified_attention_with_output is already decorated.
+            self.model = BreakableCUDAGraphWrapper(self.model, self.vllm_config)
+            drafter = getattr(self, "drafter", None)
+            if drafter is not None and hasattr(drafter, "model"):
+                drafter.model = BreakableCUDAGraphWrapper(
+                    drafter.model, self.vllm_config
+                )
+        elif (
             cudagraph_mode.has_full_cudagraphs()
             and not self.parallel_config.use_ubatching
         ):

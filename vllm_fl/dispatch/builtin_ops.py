@@ -163,3 +163,5 @@ def register_builtins(registry: OpRegistry) -> None:
             logger.debug(f"Registered {plugin_count} external plugins")
     except Exception as e:
         logger.debug(f"Plugin discovery failed: {e}")
+
+
