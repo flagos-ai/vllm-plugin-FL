@@ -117,7 +117,12 @@ flagos_blacklist:
   - _index_put_impl_
   # --- Reduction (argmax only - Invalid Runtime Function on NPU) ---
   - argmax
-  # --- Crash: pow_scalar (chained-boolean a < b < c tl.constexpr branch) ---
+  # --- Crash: pow_scalar (OR'd tl.constexpr() dtype guard in pow.py) ---
+  # flag_gems _ascend/ops/pow.py guards the exponent dtype with three OR'd
+  # tl.constexpr() calls; vendor triton rejects the chained constexpr boolean
+  # (T-path on both backends), and flagtree 0.6.0+ascend3.2 (cann8.5.0) also
+  # rejects it (F-path). flagtree 0.6.1+ascend3.5 (cann9.0.0) accepts it, so
+  # there the blacklist only matters for the T-path. Fall back to torch_npu.
   - pow_scalar
 
 # OOT (Out-of-Tree) operator blacklist
