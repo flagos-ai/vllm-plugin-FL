@@ -18,10 +18,8 @@
 name: CI
 
 on:
-  schedule:
-    - cron: '0 18 * * *'  # daily at 2:00 AM CST (UTC+8)
   pull_request:
-    branches: [main, devops]
+    branches: [v0.2.1]
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - "**.md"
