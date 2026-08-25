@@ -44,15 +44,6 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _patch_transformers_compat():
-    """Patch transformers compatibility for ALLOWED_LAYER_TYPES and tokenizer."""
-    import transformers.configuration_utils as cfg
-    if not hasattr(cfg, "ALLOWED_LAYER_TYPES"):
-        cfg.ALLOWED_LAYER_TYPES = getattr(
-            cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ()
-        )
-
-
 def _register_flagcx_connector():
     from vllm.distributed.kv_transfer.kv_connector.factory import (
         KVConnectorFactory,
@@ -113,13 +104,13 @@ def register():
         logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
         return arm_cpu_platform
 
+    # vLLM v0.28.0 enables the V2 model runner by default for most dense
+    # models. FL currently adapts the V1 runner, so choose V1 unless the user
+    # explicitly set the upstream switch. PlatformFL.check_and_update_config
+    # rejects an explicit V2 request with a clear error.
+    os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     _patch_custom_ops()
     _patch_flash_attn_import()
-    _patch_transformers_compat()
-
-    # Model-specific platform patches
-    from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
-    glm5_platform()
 
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
@@ -172,13 +163,7 @@ def _register_gdn_packed_decode_patch() -> bool:
 
 
 def register_model():
-    """Register FL-specific models not yet upstream."""
-    # General plugins are loaded independently in spawned model-inspection and
-    # worker processes, so all runtime compatibility hooks must be idempotent.
-    from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
-    from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
-
-    apply_qwen3_5_text_patches()
+    """Register FL runtime extensions after vLLM model discovery."""
 
     from vllm.platforms import current_platform
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
@@ -215,8 +200,6 @@ def register_model():
         install_arm_cpu_packed_w4a8()
         return
 
-    patch_vllm_moe_sum()
-
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
@@ -224,15 +207,3 @@ def register_model():
     register_router()
 
     _register_gdn_packed_decode_patch()
-
-    # Register GLM-5 (GlmMoeDsa) — config not yet upstream
-    try:
-        from vllm.transformers_utils.config import _CONFIG_REGISTRY
-
-        from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
-        _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
-
-        #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
-        #glm5_model()
-    except Exception as e:
-        logger.error(f"Register GlmMoeDsa model error: {str(e)}")

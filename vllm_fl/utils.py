@@ -126,7 +126,7 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     Priority (highest to lowest):
     1. VLLM_FL_FLAGOS_WHITELIST env var: Only these ops use FlagGems
     2. VLLM_FL_FLAGOS_BLACKLIST env var: These ops don't use FlagGems
-    3. Platform config flagos_blacklist: Default blacklist from config file
+    3. Platform config flagos_whitelist/flagos_blacklist
     4. VLLM_FL_FLAGOS_BLACKLIST_APPEND: Ops appended to the selected blacklist
 
     Note: VLLM_FL_FLAGOS_WHITELIST and VLLM_FL_FLAGOS_BLACKLIST cannot be set
@@ -164,13 +164,26 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     if blacklist_str:
         blacklist = [op.strip() for op in blacklist_str.split(",") if op.strip()]
     else:
-        # Priority 3: Blacklist from platform config
+        # Priority 3: Whitelist/blacklist from platform config
         try:
-            from vllm_fl.dispatch.config import get_flagos_blacklist
+            from vllm_fl.dispatch.config import (
+                get_flagos_blacklist,
+                get_flagos_whitelist,
+            )
 
+            whitelist = get_flagos_whitelist()
             config_blacklist = get_flagos_blacklist()
+            if whitelist and config_blacklist:
+                raise ValueError(
+                    "Platform config cannot define both flagos_whitelist and "
+                    "flagos_blacklist."
+                )
+            if whitelist:
+                return list(whitelist), None
             if config_blacklist:
                 blacklist = list(config_blacklist)
+        except ValueError:
+            raise
         except Exception:
             pass
 
@@ -196,7 +209,7 @@ def use_flaggems_op(op_name: str, default: bool = True) -> bool:
     Priority (highest to lowest):
     1. VLLM_FL_FLAGOS_WHITELIST env var: Only these ops use FlagGems
     2. VLLM_FL_FLAGOS_BLACKLIST env var: These ops don't use FlagGems
-    3. Platform config flagos_blacklist: Default blacklist from config file
+    3. Platform config flagos_whitelist/flagos_blacklist
     4. Default: Use FlagGems for all ops
 
     Note: Whitelist and blacklist (env vars) cannot be set simultaneously.

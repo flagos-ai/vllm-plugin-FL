@@ -5,14 +5,16 @@ import os
 import torch
 
 from vllm.model_executor.custom_op import CustomOp
-from vllm.model_executor.layers.fla.ops.l2norm import l2norm_fwd
+from vllm.third_party.flash_linear_attention.ops.l2norm import l2norm_fwd
 from .utils import input_guard
 from vllm_fl.utils import use_flaggems_op
 
 if use_flaggems_op("chunk_gated_delta_rule_fwd"):
     from flag_gems.fused.FLA import chunk_gated_delta_rule_fwd
 else:
-    from vllm.model_executor.layers.fla.ops.chunk import chunk_gated_delta_rule_fwd
+    from vllm.third_party.flash_linear_attention.ops.chunk import (
+        chunk_gated_delta_rule_fwd,
+    )
 
 
 class ChunkGatedDeltaRuleFunction(torch.autograd.Function):

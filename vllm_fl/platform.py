@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.20.2/vllm/platforms/cuda.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/platforms/cuda.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -11,10 +11,15 @@ from typing_extensions import ParamSpec
 import torch
 
 # Import custom ops and trigger registration on both legacy and stable-ABI
-# vLLM wheels. Keep the attempts independent: official vLLM 0.24 wheels have
+# vLLM wheels. Keep the attempts independent: official vLLM 0.28 wheels have
 # only the stable-ABI module, so failure of the legacy import must not skip it.
 import importlib
-for _extension in ("vllm._C", "vllm._C_stable_libtorch"):
+for _extension in (
+    "vllm._C",
+    "vllm._C_stable_libtorch",
+    "vllm._moe_C_stable_libtorch",
+    "vllm._qutlass_C",
+):
     try:
         importlib.import_module(_extension)
     except (ImportError, OSError):
@@ -68,6 +73,16 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
+    device_control_env_var: str = (
+        "ASCEND_RT_VISIBLE_DEVICES"
+        if device_type == "npu"
+        else "MUSA_VISIBLE_DEVICES"
+        if device_type == "musa"
+        else "CUDA_VISIBLE_DEVICES"
+    )
+    ray_noset_device_env_vars: list[str] = [
+        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
+    ]
     dist_backend: str = (
         "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
     )
@@ -92,6 +107,9 @@ class PlatformFL(Platform):
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
+    def is_sleep_mode_available(self) -> bool:
+        return self.vendor_name == "nvidia"
+
     def is_musa(self) -> bool:
         if hasattr(torch, 'musa') and torch.musa.is_available():
             return True
@@ -105,7 +123,22 @@ class PlatformFL(Platform):
         """
         Check if the dtype is supported by the current platform.
         """
-        pass
+        if (
+            cls.vendor_name == "nvidia"
+            and torch_dtype == torch.bfloat16
+            and not cls.has_device_capability(80)
+        ):
+            capability = cls.get_device_capability()
+            gpu_name = cls.get_device_name()
+            compute_str = (
+                "does not have a compute capability"
+                if capability is None
+                else f"has compute capability {capability.as_version_str()}"
+            )
+            raise ValueError(
+                "Bfloat16 is only supported on GPUs with compute capability "
+                f"of at least 8.0. Your {gpu_name} GPU {compute_str}."
+            )
 
     @classmethod
     def get_current_memory_usage(
@@ -121,6 +154,9 @@ class PlatformFL(Platform):
         Set the device for the current platform.
         """
         cls.torch_device_fn.set_device(device)
+        if cls.vendor_name == "nvidia":
+            # Force CUDA context initialization, matching vLLM v0.28.0.
+            _ = torch.zeros(1, device=device)
 
     @classmethod
     def empty_cache(cls) -> None:
@@ -178,6 +214,28 @@ class PlatformFL(Platform):
         model_config = vllm_config.model_config
 
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+
+        # The FL overrides currently adapt the V1 runner. register() defaults
+        # the upstream environment switch to V1 before config construction.
+        # If the user explicitly requested V2, fail instead of bypassing FL.
+        if vllm_config.use_v2_model_runner:
+            raise NotImplementedError(
+                "vllm-plugin-FL does not yet support the vLLM V2 model "
+                "runner; unset VLLM_USE_V2_MODEL_RUNNER or set it to 0."
+            )
+
+        scheduler_config = vllm_config.scheduler_config
+        if (
+            model_config is not None
+            and model_config.is_mm_prefix_lm
+            and scheduler_config.is_multimodal_model
+            and not scheduler_config.disable_chunked_mm_input
+        ):
+            logger.warning_once(
+                "Forcing --disable_chunked_mm_input for models with "
+                "multimodal-bidirectional attention."
+            )
+            scheduler_config.disable_chunked_mm_input = True
 
         cache_config = vllm_config.cache_config
         if cache_config and cache_config.block_size is None:
@@ -404,9 +462,10 @@ class PlatformFL(Platform):
             )
             patch_triton_chained_or_for_iluvatar()
 
+    @classmethod
     def supports_fp8(cls) -> bool:
         if cls.vendor_name == "nvidia":
-            return True
+            return cls.has_device_capability(89)
         return False
 
     @classmethod
@@ -418,7 +477,7 @@ class PlatformFL(Platform):
         if cls.device_type == "cuda":
             import pynvml
             pynvml.nvmlInit()
-            physical_device_id = cls.device_id_to_physical_device_id(device_id)
+            physical_device_id = cls.visible_device_id_to_physical_device_id(device_id)
             handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
             uuid = pynvml.nvmlDeviceGetUUID(handle)
             pynvml.nvmlShutdown()
@@ -460,15 +519,50 @@ class PlatformFL(Platform):
         # Non-CUDA devices (e.g. txda/tsingmicro) have no CUDA-style capability
         if cls.device_type == "txda":
             return None
-        major, minor = torch.cuda.get_device_capability(device_id)
+        major, minor = cls.torch_device_fn.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
+
+    @classmethod
+    def check_runner_kv_caches_multi_layer(cls) -> None:
+        """The FL V1 runner follows the target CUDA runner's KV-cache layout."""
+        return None
 
     @classmethod
     def support_deep_gemm(cls) -> bool:
         """Currently, only Hopper and Blackwell GPUs are supported."""
         if cls.device_type == "cuda" and cls.vendor_name == "nvidia":
-            return cls.is_device_capability(90) or cls.is_device_capability_family(100)
+            return (
+                cls.is_device_capability(90)
+                or cls.is_device_capability_family(100)
+                or cls.is_device_capability_family(120)
+            )
         return False
+
+    @classmethod
+    def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
+        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        from vllm.config.compilation import CompilationMode
+        from vllm.config.kernel import IrOpPriorityConfig
+
+        cc = vllm_config.compilation_config
+        using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
+        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        return IrOpPriorityConfig.with_default(
+            default,
+            rms_norm=default,
+            fused_add_rms_norm=default,
+        )
+
+    @classmethod
+    def is_arch_support_pdl(cls) -> bool:
+        if cls.vendor_name != "nvidia":
+            return False
+        try:
+            device = cls.torch_device_fn.current_device()
+            major, _ = cls.torch_device_fn.get_device_capability(device)
+        except Exception:
+            return False
+        return major >= 9
 
     @classmethod
     def is_fully_connected(cls, physical_device_ids: list[int]) -> bool:
