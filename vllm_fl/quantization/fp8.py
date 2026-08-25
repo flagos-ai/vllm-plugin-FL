@@ -33,21 +33,68 @@ from vllm.model_executor.kernels.linear.scaled_mm.ScaledMMLinearKernel import (
     FP8ScaledMMLinearLayerConfig,
 )
 from vllm.model_executor.kernels.linear.scaled_mm.deep_gemm import DeepGemmFp8BlockScaledMMKernel
+from vllm.model_executor.layers.quantization.utils.fp8_utils import (
+    per_token_group_quant_fp8,
+)
 from vllm.model_executor.utils import replace_parameter
+from vllm.utils.flashinfer import flashinfer_fp8_blockscale_gemm
 
 from flag_gems import w8a8_block_fp8_matmul
 
+
 def _flaggems_fp8_block_gemm_impl(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: list[int],
+    output_dtype: torch.dtype,
+) -> torch.Tensor:
+    """Use FlashInfer for decode and FlagGems W8A8 for prefill."""
+
+    def run_flashinfer(
         input: torch.Tensor,
         weight: torch.Tensor,
-        input_scale: torch.Tensor,
         weight_scale: torch.Tensor,
-        block_size: list[int],
-        output_dtype: torch.dtype,
-) -> torch.Tensor:
-    return w8a8_block_fp8_matmul(input, weight, input_scale, weight_scale, block_size, output_dtype=output_dtype)
+    ) -> torch.Tensor:
+        return flashinfer_fp8_blockscale_gemm(
+            input=input,
+            weight=weight,
+            weight_scale=weight_scale,
+            out_dtype=output_dtype,
+        )
+
+    def run_flaggems(
+        input: torch.Tensor,
+        weight: torch.Tensor,
+        weight_scale: torch.Tensor,
+    ) -> torch.Tensor:
+        q_input, input_scale = per_token_group_quant_fp8(
+            input,
+            group_size=block_size[1],
+            column_major_scales=False,
+            tma_aligned_scales=False,
+            use_ue8m0=False,
+        )
+        return w8a8_block_fp8_matmul(
+            q_input,
+            weight,
+            input_scale,
+            weight_scale,
+            block_size,
+            output_dtype=output_dtype,
+        )
+
+    return torch.cond(
+        input.shape[0] < 32,
+        run_flashinfer,
+        run_flaggems,
+        (input, weight, weight_scale),
+    )
+
 
 class FlagGemsFp8BlockScaledMMLinearKernel(Fp8BlockScaledDynamicMMLinearKernel):
+    apply_input_quant: ClassVar[bool] = False
+
     base_type: ClassVar[type[FlashInferFp8DeepGEMMDynamicBlockScaledKernel]] = (
         FlashInferFp8DeepGEMMDynamicBlockScaledKernel
     )
@@ -88,8 +135,7 @@ class FlagGemsFp8BlockScaledMMLinearKernel(Fp8BlockScaledDynamicMMLinearKernel):
             new_weight_scale = exp_bits.view(torch.float32)
         else:
             new_weight_scale = weight_scale
-        replace_parameter(layer, scale_attr_name, new_weight_scale.data) 
-
+        replace_parameter(layer, scale_attr_name, new_weight_scale.data)
 
     def apply_block_scaled_mm(
         self,
@@ -100,22 +146,25 @@ class FlagGemsFp8BlockScaledMMLinearKernel(Fp8BlockScaledDynamicMMLinearKernel):
     ) -> torch.Tensor:
         weight_group_shape = self.config.weight_quant_key.scale.group_shape
         group_shape = [weight_group_shape.row, weight_group_shape.col]
-        return torch.ops.vllm.flaggems_fp8_block_gemm(A, B, As, Bs, group_shape, output_dtype=self.config.out_dtype)
+        return torch.ops.vllm.flaggems_fp8_block_gemm(
+            A, B, Bs, group_shape, output_dtype=self.config.out_dtype
+        )
+
 
 def _flaggems_fp8_block_gemm_fake(
     input: torch.Tensor,
     weight: torch.Tensor,
-    input_scale: torch.Tensor,
     weight_scale: torch.Tensor,
     block_size: list[int],
-    output_dtype: torch.dtype
+    output_dtype: torch.dtype,
 ) -> torch.Tensor:
     """
     Required fake/meta implementation for torch.compile graph tracing.
     """
     return torch.empty(
-            input.shape[0], weight.shape[0], dtype=output_dtype, device=input.device
+        input.shape[0], weight.shape[0], dtype=output_dtype, device=input.device
     )
+
 
 direct_register_custom_op(
     "flaggems_fp8_block_gemm",
