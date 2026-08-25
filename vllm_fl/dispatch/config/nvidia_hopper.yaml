@@ -29,15 +29,8 @@ op_backends:
     - vendor
     - reference
 
-flagos_blacklist:
-  - index_put_
-  - index_put
-  - _index_put_impl_
-  - nonzero
-  - copy_
-  - to_copy
-  - index
-  # FlagGems' Hopper host-TMA mm.out path is slower than the native dense
-  # GEMM for the long-context projection shapes used by vLLM.
-  - mm
-  - mm_out
+# See nvidia.yaml. The whitelist also keeps Hopper dense GEMM and unsupported
+# pointwise ATen paths on the native CUDA implementations.
+flagos_whitelist:
+  - rms_norm
+  - rotary_embedding

@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/compilation/cuda_graph.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/compilation/cuda_graph.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -26,6 +26,7 @@ from vllm.forward_context import (
 )
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
+from vllm.utils.torch_utils import current_stream
 
 logger = init_logger(__name__)
 
@@ -183,39 +184,49 @@ class GraphWrapper:
 
             with ExitStack() as stack:
                 if self.cudagraph_options.gc_disable:
-                    stack.enter_context(patch("gc.collect", lambda: None))
-                    # FL-specific: patch our platform's empty_cache
                     stack.enter_context(
-                        patch("vllm_fl.platform.PlatformFL.empty_cache",
-                              lambda: None)
+                        patch("gc.collect", lambda *args, **kwargs: None)
+                    )
+                    stack.enter_context(
+                        patch(
+                            "torch.accelerator.empty_cache",
+                            lambda *args, **kwargs: None,
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "vllm_fl.platform.PlatformFL.empty_cache",
+                            lambda *args, **kwargs: None,
+                        )
                     )
 
-            if self.graph_pool is not None:
-                set_graph_pool_id(self.graph_pool)
-            else:
-                set_graph_pool_id(current_platform.graph_pool_handle())
+                if self.graph_pool is not None:
+                    set_graph_pool_id(self.graph_pool)
+                else:
+                    set_graph_pool_id(current_platform.graph_pool_handle())
 
-            # Sync offloader's copy stream before capture if available.
-            try:
-                from vllm.model_executor.offloader.base import get_offloader
-                get_offloader().sync_prev_onload()
-            except (ImportError, RuntimeError):
-                pass
-
-            # FL-specific: use platform-agnostic graph capture
-            with current_platform.torch_device_fn.graph(
-                graph, pool=self.graph_pool
-            ):
-                # `output` is managed by pytorch's cudagraph pool
-                output = self.runnable(*args, **kwargs)
-                # Join offloader's copy stream after forward if available
+                # Sync offloader's copy stream before capture if available.
                 try:
                     from vllm.model_executor.offloader.base import get_offloader
-                    get_offloader().join_after_forward()
+
+                    get_offloader().sync_prev_onload()
                 except (ImportError, RuntimeError):
                     pass
-                if self.cudagraph_options.weak_ref_output:
-                    output = weak_ref_tensors(output)
+
+                # FL-specific: use platform-agnostic graph capture while
+                # preserving the explicit stream used by vLLM v0.28.0.
+                with current_platform.torch_device_fn.graph(
+                    graph,
+                    pool=self.graph_pool,
+                    stream=current_stream(),
+                ):
+                    output = self.runnable(*args, **kwargs)
+                    try:
+                        get_offloader().join_after_forward()
+                    except (ImportError, RuntimeError, UnboundLocalError):
+                        pass
+                    if self.cudagraph_options.weak_ref_output:
+                        output = weak_ref_tensors(output)
 
             entry.output = weak_ref_tensors(output)
             entry.graph = graph

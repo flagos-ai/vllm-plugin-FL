@@ -335,7 +335,8 @@ Environment variables can override specific items from platform config. If not s
 | `VLLM_FL_FLAGOS_WHITELIST` | (none) | FlagGems ops whitelist (mutually exclusive with blacklist) |
 | `VLLM_FL_FLAGOS_BLACKLIST` | (none) | FlagGems ops blacklist (mutually exclusive with whitelist) |
 
-**Priority**: `WHITELIST` > `BLACKLIST` (env) > `flagos_blacklist` (config file)
+**Priority**: environment `WHITELIST`/`BLACKLIST` > platform
+`flagos_whitelist`/`flagos_blacklist` (the two config keys are mutually exclusive)
 
 #### OOT Operator Control
 

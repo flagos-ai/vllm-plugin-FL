@@ -7,12 +7,12 @@
 # into alternating graph-segments and eager-segments, avoiding the need for
 # torch.compile FX-graph splitting.
 #
-# Since v0.3.0-dev targets vLLM 0.24.x exclusively, this module is a thin
-# re-export of the upstream symbols.  No FL-specific fallback is maintained.
+# The vLLM 0.28.0 target retains this interface, so this module is a thin
+# re-export of the upstream symbols. No FL-specific fallback is maintained.
 #
 # Key upstream design:
 #   - ``unified_attention_with_output`` is already decorated with
-#     ``@eager_break_during_capture`` in vLLM 0.24.  OOT attention backends
+#     ``@eager_break_during_capture`` in vLLM 0.28.0. OOT attention backends
 #     (e.g. AttentionFLBackend) implement ``AttentionImpl.forward`` which is
 #     called from within ``unified_attention_with_output``.  This means OOT
 #     backends automatically participate in breakable capture without any

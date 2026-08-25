@@ -1,8 +1,8 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import importlib
-import os
 import logging
+import os
 import sys
 
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
@@ -18,10 +18,8 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
-from vllm_fl.utils import get_op_config as _get_op_config
-
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
-
+from vllm_fl.utils import get_op_config as _get_op_config
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +31,6 @@ def __getattr__(name):
         globals()[name] = module
         return module
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def _patch_transformers_compat():
-    """Patch transformers compatibility for ALLOWED_LAYER_TYPES and tokenizer."""
-    import transformers.configuration_utils as cfg
-    if not hasattr(cfg, "ALLOWED_LAYER_TYPES"):
-        cfg.ALLOWED_LAYER_TYPES = getattr(
-            cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ()
-        )
 
 
 def _register_flagcx_connector():
@@ -97,13 +86,13 @@ def _patch_custom_ops():
 
 def register():
     """Register the FL platform."""
+    # vLLM v0.28.0 enables the V2 model runner by default for most dense
+    # models. FL currently adapts the V1 runner, so choose V1 unless the user
+    # explicitly set the upstream switch. PlatformFL.check_and_update_config
+    # rejects an explicit V2 request with a clear error.
+    os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     _patch_custom_ops()
     _patch_flash_attn_import()
-    _patch_transformers_compat()
-
-    # Model-specific platform patches
-    from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
-    glm5_platform()
 
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
@@ -136,21 +125,11 @@ def register_router():
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 
+
 def register_model():
-    """Register FL-specific models not yet upstream."""
+    """Register FL runtime extensions after vLLM model discovery."""
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
     register_router()
-
-    # Register GLM-5 (GlmMoeDsa) — config not yet upstream
-    try:
-        from vllm.transformers_utils.config import _CONFIG_REGISTRY
-        from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
-        _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
-
-        #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
-        #glm5_model()
-    except Exception as e:
-        logger.error(f"Register GlmMoeDsa model error: {str(e)}")

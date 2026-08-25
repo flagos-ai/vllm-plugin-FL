@@ -3,7 +3,7 @@
 """
 Unit tests for vllm_fl.compilation.break_graph
 
-Since v0.3.0-dev targets vLLM 0.24.x exclusively, break_graph.py is now a thin
+For the vLLM 0.28.0 target, break_graph.py remains a thin
 re-export of upstream symbols.  These tests verify:
 
   1. All expected symbols are re-exported correctly from upstream.
