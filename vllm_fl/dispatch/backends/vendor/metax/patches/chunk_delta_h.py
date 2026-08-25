@@ -16,8 +16,8 @@
 # ------------------------------------------------------------
 
 from vllm.triton_utils import tl, triton
-from vllm.model_executor.layers.fla.ops.op import exp
-from vllm.model_executor.layers.fla.ops.utils import use_cuda_graph
+from vllm.third_party.flash_linear_attention.ops.op import exp
+from vllm.third_party.flash_linear_attention.ops.utils import use_cuda_graph
 
 
 @triton.heuristics(
@@ -302,6 +302,6 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
             tl.store(p_ht, b_h4.to(p_ht.dtype.element_ty), boundary_check=(0, 1))
 
 
-import vllm.model_executor.layers.fla.ops.chunk_delta_h
+import vllm.third_party.flash_linear_attention.ops.chunk_delta_h
 
-vllm.model_executor.layers.fla.ops.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64 = chunk_gated_delta_rule_fwd_kernel_h_blockdim64
+vllm.third_party.flash_linear_attention.ops.chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64 = chunk_gated_delta_rule_fwd_kernel_h_blockdim64

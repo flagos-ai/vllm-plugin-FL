@@ -11,11 +11,12 @@ from vllm_fl.dispatch.config.utils import (
     get_config_path,
     get_effective_config,
     get_flagos_blacklist,
+    get_flagos_whitelist,
     get_oot_blacklist,
     get_per_op_order,
     get_platform_name,
-    load_platform_config,
     get_vendor_device_map,
+    load_platform_config,
 )
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     'load_platform_config',
     'get_per_op_order',
     'get_flagos_blacklist',
+    'get_flagos_whitelist',
     'get_oot_blacklist',
     'get_effective_config',
     'get_vendor_device_map',

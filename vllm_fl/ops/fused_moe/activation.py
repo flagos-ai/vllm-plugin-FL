@@ -1,6 +1,10 @@
 import torch
-import torch.nn.functional as F
-from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+from vllm.model_executor.layers.fused_moe.activation import (
+    ApplyMoEActivationConfig,
+    MoEActivation,
+    apply_moe_activation as upstream_apply_moe_activation,
+)
+
 from vllm_fl.dispatch import CachedOp
 
 _silu_and_mul = CachedOp("silu_and_mul")
@@ -11,8 +15,12 @@ def apply_moe_activation(
     activation: MoEActivation,
     output: torch.Tensor,
     input: torch.Tensor,
+    *,
+    activation_config: ApplyMoEActivationConfig | None = None,
+    topk_ids: torch.Tensor | None = None,
+    expert_map: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Apply MoE activation function."""
+    """Apply MoE activation while preserving vLLM v0.28 configuration."""
     assert input.dim() == 2, "Input must be 2D"
     assert output.dim() == 2, "Output must be 2D"
     if activation.is_gated:
@@ -27,26 +35,22 @@ def apply_moe_activation(
         )
 
     # Activations with gated multiplication (gate × activation(up))
-    if activation == MoEActivation.SILU:
+    if activation == MoEActivation.SILU and (
+        activation_config is None or activation_config.clamp_limit is None
+    ):
         output.copy_(_silu_and_mul(None, input))
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
-    elif activation == MoEActivation.SWIGLUOAI:
-        torch.ops._C.swigluoai_and_mul(output, input)
-    elif activation == MoEActivation.SWIGLUSTEP:
-        from vllm.model_executor.layers.activation import swiglustep_and_mul_triton
-
-        swiglustep_and_mul_triton(output, input)
-
-    # Activations without gated multiplication
-    elif activation == MoEActivation.SILU_NO_MUL:
-        output.copy_(F.silu(input))
-    elif activation == MoEActivation.GELU_NO_MUL:
-        output.copy_(F.gelu(input))
-    elif activation == MoEActivation.RELU2_NO_MUL:
-        F.relu(input, inplace=True)
-        torch.square(input, out=output)
     else:
-        raise ValueError(f"Unsupported FusedMoe activation: {activation}")
+        # v0.28 adds configured clamp/SITU/SwiGLU-OAI behavior and additional
+        # activation variants. Delegate these paths to the target implementation.
+        upstream_apply_moe_activation(
+            activation,
+            output,
+            input,
+            activation_config=activation_config,
+            topk_ids=topk_ids,
+            expert_map=expert_map,
+        )
 
     return output

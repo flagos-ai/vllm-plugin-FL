@@ -1,22 +1,25 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 # FL router subclasses that route ops through call_op dispatch.
 
-import torch
 from functools import partial
+
+import torch
 
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
     rocm_aiter_grouped_topk,
 )
+from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
+    FusedTopKBiasRouter,
+    fused_topk_bias,
+)
 from vllm.model_executor.layers.fused_moe.router.fused_topk_router import (
     FusedTopKRouter,
+    _get_padding_mask,
+    fused_topk as upstream_fused_topk,
 )
 from vllm.model_executor.layers.fused_moe.router.grouped_topk_router import (
     GroupedTopKRouter,
-)
-from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
-    FusedTopKBiasRouter,
-    fused_topk_bias
 )
 from vllm_fl.dispatch import CachedOp
 
@@ -29,8 +32,21 @@ def fused_topk(
     topk: int,
     renormalize: bool,
     indices_type: torch.dtype | None = None,
+    scoring_func: str = "softmax",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
+
+    # The FL kernel currently implements the unpadded softmax path. Preserve
+    # v0.28.0 padding and sigmoid semantics by delegating those cases upstream.
+    if scoring_func != "softmax" or _get_padding_mask(hidden_states.shape[0]) is not None:
+        return upstream_fused_topk(
+            hidden_states=hidden_states,
+            gating_output=gating_output,
+            topk=topk,
+            renormalize=renormalize,
+            indices_type=indices_type,
+            scoring_func=scoring_func,
+        )
 
     M, _ = hidden_states.size()
 
@@ -75,6 +91,7 @@ class FusedTopKRouterFL(FusedTopKRouter):
             topk=self.top_k,
             renormalize=self.renormalize,
             indices_type=indices_type,
+            scoring_func=self.scoring_func,
         )
         return topk_weights, topk_ids
 
@@ -248,10 +265,29 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
             renormalize=self.renormalize,
             scoring_func=self.scoring_func,
             indices_type=indices_type,
+            input_tokens=input_ids,
+            hash_indices_table=self._hash_indices_table,
+            routed_scaling_factor=self.routed_scaling_factor,
         )
 
-        if self.routed_scaling_factor != 1.0:
-            topk_weights *= self.routed_scaling_factor
+        if self.num_fused_shared_experts > 0:
+            m = topk_ids.shape[0]
+            n = self.num_fused_shared_experts
+            base = self.global_num_experts
+            shared_ids = torch.arange(
+                base,
+                base + n,
+                dtype=topk_ids.dtype,
+                device=topk_ids.device,
+            ).expand(m, n)
+            shared_weights = torch.full(
+                (m, n),
+                self.shared_expert_weight,
+                dtype=topk_weights.dtype,
+                device=topk_weights.device,
+            )
+            topk_ids = torch.cat([topk_ids, shared_ids], dim=-1)
+            topk_weights = torch.cat([topk_weights, shared_weights], dim=-1)
 
         return topk_weights, topk_ids
 
