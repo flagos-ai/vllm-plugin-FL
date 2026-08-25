@@ -68,3 +68,11 @@ def add_oot_quant_kernel() -> None:
     register_fl_w8a8_linear_kernel(_POSSIBLE_INT8_KERNELS)
     install_packed_w8a8_scheme()
     install_fl_w8a8_moe_selector()
+
+    from vllm_fl.quantization.wna16.linear import (
+        register_fl_triton_wna16_linear_kernel,
+    )
+
+    register_fl_triton_wna16_linear_kernel(
+        _POSSIBLE_KERNELS,
+    )

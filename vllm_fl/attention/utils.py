@@ -29,11 +29,15 @@ def patch_mm_encoder_attention():
             try:
                 from vllm.vllm_flash_attn import flash_attn_varlen_func
 
+                if flash_attn_varlen_func is None:
+                    raise ImportError("vLLM's bundled FlashAttention is unavailable")
+
                 logger.info_once("Using vllm.vllm_flash_attn for vit attention")
             except (ImportError, ModuleNotFoundError):
                 from flash_attn import flash_attn_varlen_func
 
                 logger.info_once("Using flash_attn for vit attention")
+
             return flash_attn_varlen_func
         elif attn_backend == AttentionBackendEnum.ROCM_AITER_FA:
             from aiter import flash_attn_varlen_func
