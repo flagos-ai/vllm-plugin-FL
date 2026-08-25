@@ -47,14 +47,15 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 1. Install vLLM
 
-    For **NVIDIA** GPUs, install vLLM from the official [v0.24.0](https://github.com/vllm-project/vllm/tree/v0.24.0) release (optional if the correct version is already installed):
+    For **NVIDIA** GPUs, install vLLM from the official [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) release (optional if the correct version is already installed):
     ```sh
-    pip install vllm==0.24.0
+    pip install vllm==0.28.0 \
+      --extra-index-url https://wheels.vllm.ai/2cf0a6915ce544dc493a0990f2ea38d81601128a/cu130
     ```
 
     For **non-NVIDIA** chips, install vLLM from source with the `empty` device target:
     ```sh
-    git clone -b v0.24.0 https://github.com/vllm-project/vllm.git
+    git clone -b v0.28.0 https://github.com/vllm-project/vllm.git
     cd vllm
     VLLM_TARGET_DEVICE=empty pip install -v --no-build-isolation --no-deps .
     ```
@@ -70,9 +71,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     2.2 Install
     ```sh
     cd vllm-plugin-FL
-    pip install --no-build-isolation .
+    pip install --no-build-isolation --no-deps .
     # or editable install
-    pip install --no-build-isolation -e .
+    pip install --no-build-isolation --no-deps -e .
     ```
 
     For CUDA-like devices, including CUDA and HIP/ROCm environments that use
@@ -80,9 +81,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     `VLLM_VENDOR=cuda` during installation:
     ```sh
     cd vllm-plugin-FL
-    VLLM_VENDOR=cuda pip install --no-build-isolation .
+    VLLM_VENDOR=cuda pip install --no-build-isolation --no-deps .
     # or editable install
-    VLLM_VENDOR=cuda pip install --no-build-isolation -e .
+    VLLM_VENDOR=cuda pip install --no-build-isolation --no-deps -e .
     ```
 
     This builds and installs `vllm_fl._C`, which provides native C++ support

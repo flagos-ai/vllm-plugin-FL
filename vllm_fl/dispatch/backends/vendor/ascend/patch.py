@@ -59,10 +59,10 @@ def patch_fused_moe():
 def patch_fla_ops():
     """Patch FLA ops and fused_gdn_gating with Ascend implementations."""
     try:
-        import vllm.model_executor.layers.fla.ops as _fla_ops_lib
-        import vllm.model_executor.layers.fla.ops.chunk as _fla_chunk_lib
-        import vllm.model_executor.layers.fla.ops.fused_recurrent as _fla_recurrent_lib
-        import vllm.model_executor.layers.fla.ops.layernorm_guard as _fla_layernorm_lib
+        import vllm.third_party.flash_linear_attention.ops as _fla_ops_lib
+        import vllm.third_party.flash_linear_attention.ops.chunk as _fla_chunk_lib
+        import vllm.third_party.flash_linear_attention.ops.fused_recurrent as _fla_recurrent_lib
+        import vllm.third_party.flash_linear_attention.ops.layernorm_guard as _fla_layernorm_lib
         import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
         from flag_gems.runtime.backend._ascend.fla import (
             chunk_gated_delta_rule_fwd,

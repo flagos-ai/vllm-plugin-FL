@@ -13,6 +13,7 @@ Configuration Priority (highest to lowest):
    - VLLM_FL_PREFER: Backend preference (flagos, vendor, reference)
    - VLLM_FL_STRICT: Strict mode: 1 = fail immediately on error (no fallback), 0 = try fallback (default)
    - VLLM_FL_PER_OP: Per-operator backend order
+   - VLLM_FL_FLAGOS_WHITELIST: FlagOS operator whitelist
    - VLLM_FL_FLAGOS_BLACKLIST: FlagOS operator blacklist
    - VLLM_FL_OOT_BLACKLIST: OOT operator blacklist
 3. Platform-specific config file: Default values (auto-detected)
@@ -35,6 +36,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
+
 from vllm_fl.utils import VENDOR_DEVICE_MAP
 
 # Directory containing config files (config/)
@@ -182,6 +184,19 @@ def get_flagos_blacklist(config: Optional[dict] = None) -> Optional[list[str]]:
     blacklist = config.get('flagos_blacklist', [])
     if isinstance(blacklist, list):
         return [str(op) for op in blacklist]
+    return None
+
+
+def get_flagos_whitelist(config: Optional[dict] = None) -> Optional[list[str]]:
+    """Extract the FlagOS operator whitelist from config."""
+    if config is None:
+        config = load_platform_config()
+    if config is None:
+        return None
+
+    whitelist = config.get('flagos_whitelist', [])
+    if isinstance(whitelist, list):
+        return [str(op) for op in whitelist]
     return None
 
 
