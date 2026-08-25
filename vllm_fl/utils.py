@@ -51,6 +51,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "enflame": {"device_type": "gcu", "device_name": "gcu"},
     # Registered backend: vendor/txda
     "tsingmicro": {"device_type": "txda", "device_name": "txda"},
+    # Registered backend: vendor/kunlunxin
+    "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
 }
 
 
@@ -219,7 +221,7 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead", "gcu"]
+        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead", "gcu", "kunlunxin"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property

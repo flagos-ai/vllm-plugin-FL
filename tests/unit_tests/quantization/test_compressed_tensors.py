@@ -4,16 +4,20 @@ from types import SimpleNamespace
 
 import pytest
 
+from vllm_fl import utils as fl_utils
 from vllm_fl.quantization import compressed_tensors
 from vllm_fl.quantization.compressed_tensors import (
     CompatibilityReport,
+    W8A8DynamicTokenScheme,
     WNA16Scheme,
     inspect_vllm_compressed_tensors_api,
     register_compressed_tensors_oot,
+    validate_compressed_tensors_w8a8_config,
     validate_compressed_tensors_wna16_config,
 )
 from vllm_fl.quantization.marlin import is_marlin_moe_platform
-from vllm_fl.quantization.wna16 import moe as moe_adapter
+from vllm_fl.quantization.w8a8 import moe as w8a8_moe_adapter, packed as packed_w8a8
+from vllm_fl.quantization.wna16 import kernels as wna16_kernels, moe as moe_adapter
 
 
 def _config():
@@ -36,6 +40,110 @@ def _config():
         },
         "ignore": [],
     }
+
+
+def _w8a8_config():
+    return {
+        "quant_method": "compressed-tensors",
+        "format": "int-quantized",
+        "quantization_status": "compressed",
+        "config_groups": {
+            "w8a8": {
+                "targets": ["Linear"],
+                "weights": {
+                    "num_bits": 8,
+                    "type": "int",
+                    "strategy": "channel",
+                    "symmetric": True,
+                    "dynamic": False,
+                },
+                "input_activations": {
+                    "num_bits": 8,
+                    "type": "int",
+                    "strategy": "token",
+                    "symmetric": True,
+                    "dynamic": True,
+                },
+            }
+        },
+        "ignore": [],
+    }
+
+
+def test_accepts_standard_dynamic_token_w8a8_config():
+    schemes = validate_compressed_tensors_w8a8_config(_w8a8_config())
+    assert schemes == [
+        W8A8DynamicTokenScheme(
+            weight_num_bits=8,
+            weight_type="int",
+            weight_strategy="channel",
+            weight_symmetric=True,
+            weight_dynamic=False,
+            weight_group_size=None,
+            input_num_bits=8,
+            input_type="int",
+            input_strategy="token",
+            input_symmetric=True,
+            input_dynamic=True,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value", "message"),
+    [
+        ("weights", "strategy", "group", "per-channel"),
+        ("weights", "group_size", 128, "must not set group_size"),
+        ("input_activations", "strategy", "tensor", "per-token"),
+        ("input_activations", "dynamic", False, "must be dynamic"),
+        ("input_activations", "symmetric", False, "symmetric"),
+    ],
+)
+def test_rejects_noncanonical_w8a8_config(section, field, value, message):
+    config = _w8a8_config()
+    config["config_groups"]["w8a8"][section][field] = value
+    with pytest.raises(ValueError, match=message):
+        validate_compressed_tensors_w8a8_config(config)
+
+
+def test_rejects_packed_format_for_canonical_w8a8():
+    config = _w8a8_config()
+    config["format"] = "pack-quantized"
+    with pytest.raises(ValueError, match="int-quantized"):
+        validate_compressed_tensors_w8a8_config(config)
+
+
+def test_w8a8_registration_does_not_depend_on_wna16_kernel(monkeypatch):
+    calls = []
+    report = CompatibilityReport(
+        vllm_version="0.20.2",
+        linear_wna16=True,
+        moe_wna16=True,
+    )
+    monkeypatch.setattr(
+        compressed_tensors,
+        "inspect_vllm_compressed_tensors_api",
+        lambda: report,
+    )
+    monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
+    monkeypatch.setattr(
+        w8a8_moe_adapter,
+        "install_fl_w8a8_moe_selector",
+        lambda: calls.append("w8a8"),
+    )
+    monkeypatch.setattr(
+        packed_w8a8,
+        "install_packed_w8a8_scheme",
+        lambda: calls.append("packed-w8a8"),
+    )
+    monkeypatch.setattr(
+        wna16_kernels,
+        "is_wna16_moe_available",
+        lambda: False,
+    )
+
+    assert compressed_tensors.register_compressed_tensors_oot() is report
+    assert calls == ["packed-w8a8", "w8a8"]
 
 
 def test_accepts_standard_w4a16_group_config():
@@ -81,6 +189,11 @@ def test_local_moe_adapter_is_not_installed_without_kernel(monkeypatch):
     monkeypatch.setattr(
         moe_adapter.kernels,
         "is_wna16_moe_available",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        moe_adapter,
+        "is_flaggems_wna16_moe_available",
         lambda: False,
     )
     assert moe_adapter.install_fl_wna16_moe_method() is False

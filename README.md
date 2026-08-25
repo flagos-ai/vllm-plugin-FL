@@ -99,7 +99,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     ```sh
     git clone https://github.com/flagos-ai/FlagCX.git
     cd FlagCX
-    git checkout -b v0.9.0
+    git checkout -b v0.13.0
     git submodule update --init --recursive
     ```
 

@@ -47,8 +47,16 @@ tolerance:
     default: {rtol: 1e-5, atol: 1e-8}
     bfloat16: {rtol: 1e-3, atol: 1e-3}
 
-# Device-level overrides for specific test cases (optional)
-device_overrides: {}
+# Device-level overrides for specific test cases (optional).
+# Use this for parameters that differ from the base model YAML.
+device_overrides:
+  my_device:
+    cases:
+      - model_name/e2e_test_case_name
+    llm:
+      gpu_memory_utilization: 0.9
+    serve:
+      startup_retries: 120
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.
