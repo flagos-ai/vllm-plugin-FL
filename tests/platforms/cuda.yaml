@@ -63,6 +63,7 @@ a100:
       inference:
         qwen3: ["4b_tp2", "next_tp8"]
         qwen3_5: ["35b_tp4"]
+        qwen3_8: ["27b_tp2"]
         minicpm: ["o45_tp4"]
       serving:
         qwen3: ["next_tp8"]
@@ -83,3 +84,10 @@ a100:
     benchmark:
       enabled: true
       smoke: ["throughput", "latency", "serve"]
+
+a800:
+  name: "a800"
+  tests:
+    e2e:
+      inference:
+        qwen3_8: ["27b_tp2"]
