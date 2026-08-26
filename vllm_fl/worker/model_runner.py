@@ -114,39 +114,41 @@ def _accelerator_synchronize() -> None:
         torch.accelerator.synchronize()
 
 
-if current_platform.dist_backend == "flagcx" or current_platform.device_type == "musa":
+if (
+    current_platform.dist_backend == "flagcx"
+    or current_platform.device_type == "musa"
+):
     @contextmanager
     def graph_capture(device: torch.device):
-        """
-        `graph_capture` is a context manager which should surround the code that
-        is capturing the NPU graph. Its main purpose is to ensure that the
-        some operations will be run after the graph is captured, before the graph
-        is replayed. It returns a `GraphCaptureContext` object which contains the
-        necessary data for the graph capture. Currently, it only contains the
-        stream that the graph capture is running on. This stream is set to the
-        current NPU stream when the context manager is entered and reset to the
-        default stream when the context manager is exited. This is to ensure that
-        the graph capture is running on a separate stream from the default stream,
-        in order to explicitly distinguish the kernels to capture
-        from other kernels possibly launched on background in the default stream.
+        """Provide an isolated stream for accelerator graph capture.
+
+        The capture stream waits for work already queued on the current stream
+        before capture starts. Entering this context makes the capture stream
+        current, while leaving it restores the previously active stream. The
+        returned ``GraphCaptureContext`` exposes the capture stream to callers.
         """
         graph_capture_context = GraphCaptureContext(
-            current_platform.torch_device_fn.Stream(device=device))
+            current_platform.torch_device_fn.Stream(device=device)
+        )
         stream = graph_capture_context.stream
 
-        # we use nullcontext now
-        maybe_ca_context = nullcontext()
-
-        # ensure all initialization operations complete before attempting to
-        # capture the graph on another stream
         curr_stream = current_platform.torch_device_fn.current_stream()
         if curr_stream != stream:
             stream.wait_stream(curr_stream)
 
-        with current_platform.torch_device_fn.stream(stream), maybe_ca_context:
+        with current_platform.torch_device_fn.stream(stream), nullcontext():
             yield graph_capture_context
 else:
     from vllm.distributed.parallel_state import graph_capture
+
+from vllm_fl.compilation.graph_runtime import (
+    get_graph_capture,
+    get_graph_runtime_backend,
+)
+
+graph_capture = get_graph_capture(graph_capture)
+
+
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
@@ -461,6 +463,7 @@ class ModelRunnerFL(
         self.cache_config = vllm_config.cache_config
         self.offload_config = vllm_config.offload_config
         self.compilation_config = vllm_config.compilation_config
+        self.graph_runtime = get_graph_runtime_backend()
         self.lora_config = vllm_config.lora_config
         self.load_config = vllm_config.load_config
         self.parallel_config = vllm_config.parallel_config
@@ -3580,13 +3583,15 @@ class ModelRunnerFL(
         Returns:
             Model output tensor
         """
-        return self.model(
+        model_output = self.model(
             input_ids=input_ids,
             positions=positions,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
             **model_kwargs,
         )
+        self.graph_runtime.after_model_forward(self.vllm_config)
+        return model_output
 
     @staticmethod
     def _is_uniform_decode(
@@ -4966,6 +4971,16 @@ class ModelRunnerFL(
         ):
             self.eplb_state.start_async_loop()
 
+        if self.vllm_config.compilation_config.mode in (
+            CompilationMode.STOCK_TORCH_COMPILE,
+            CompilationMode.VLLM_COMPILE,
+        ):
+            from vllm_fl.compilation.graph_runtime import (
+                get_graph_runtime_backend,
+            )
+
+            get_graph_runtime_backend().prepare_model_compile()
+
         if (
             self.vllm_config.compilation_config.mode
             == CompilationMode.STOCK_TORCH_COMPILE
@@ -4987,6 +5002,7 @@ class ModelRunnerFL(
             cudagraph_mode.has_full_cudagraphs()
             and not self.parallel_config.use_ubatching
         ):
+            self.graph_runtime.prepare_graph_wrapper()
             self.model = GraphWrapper(
                 self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
             )
@@ -6019,6 +6035,7 @@ class ModelRunnerFL(
         saved_num_cudagraph_captured = compilation_counter.num_cudagraph_captured
 
         capture_descs = self.cudagraph_dispatcher.get_capture_descs()
+        self.graph_runtime.prepare_capture(capture_descs)
 
         total_graphs = sum(len(descs) for _, descs in capture_descs)
         if total_graphs == 0:
@@ -6152,6 +6169,9 @@ class ModelRunnerFL(
 
         start_time = time.perf_counter()
 
+        capture_descs = self.cudagraph_dispatcher.get_capture_descs()
+        self.graph_runtime.prepare_capture(capture_descs)
+
         # Trigger CUDA graph capture for specific shapes.
         # Capture the large shapes first so that the smaller shapes
         # can reuse the memory pool allocated for the large shapes.
@@ -6161,10 +6181,7 @@ class ModelRunnerFL(
             torch.accelerator.empty_cache()
             start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
-            for (
-                runtime_mode,
-                batch_descs,
-            ) in self.cudagraph_dispatcher.get_capture_descs():
+            for runtime_mode, batch_descs in capture_descs:
                 self._capture_cudagraphs(
                     batch_descriptors=batch_descs,
                     cudagraph_runtime_mode=runtime_mode,
