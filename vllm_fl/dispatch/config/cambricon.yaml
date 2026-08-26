@@ -1,0 +1,28 @@
+# vLLM-FL Dispatch Configuration for Cambricon MLU (torch_mlu)
+# Auto-loaded when running on Cambricon MLU hardware (vendor_name == "cambricon").
+#
+# There is no dedicated vendor/cambricon dispatch backend; ops route through
+# FlagOS (flag_gems, Triton). Only per-op exceptions are listed below.
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# FlagOS operator blacklist
+flagos_blacklist:
+  # flag_gems `index` (cambricon backend, ops/index.py) crashes E2E inside the
+  # vLLM inductor wrap: Triton's AutoTileForTritonPass fails with
+  # "'tensor.expand_shape' op expected dimension 0 of collapsed type to be
+  # static value of 4" during the flagtune bench of (15, 4096) shapes
+  # (BLOCK_SIZE0=4 / BLOCK_SIZE1=4096). The RuntimeError escapes the autotuner
+  # (not in its catch list), killing the EngineCore. Fall back to torch_mlu.
+  - index
+
+  # NOTE: `empty` used to be blacklisted here (flag_gems grid 607744 > 65535
+  # MLU Triton grid limit for the Qwen3 vocab embedding). The fix landed in
+  # flag_gems 5.3.4 (_cambricon/ops/empty.py: grid capped at TOTAL_CORE_NUM +
+  # grid-stride loop, PR #4435), so `empty` no longer needs a blacklist entry.
