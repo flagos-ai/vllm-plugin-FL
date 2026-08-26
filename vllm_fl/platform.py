@@ -215,15 +215,6 @@ class PlatformFL(Platform):
 
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
-        # The FL overrides currently adapt the V1 runner. register() defaults
-        # the upstream environment switch to V1 before config construction.
-        # If the user explicitly requested V2, fail instead of bypassing FL.
-        if vllm_config.use_v2_model_runner:
-            raise NotImplementedError(
-                "vllm-plugin-FL does not yet support the vLLM V2 model "
-                "runner; unset VLLM_USE_V2_MODEL_RUNNER or set it to 0."
-            )
-
         scheduler_config = vllm_config.scheduler_config
         if (
             model_config is not None
