@@ -13,10 +13,13 @@ from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
     UnquantizedFusedMoEMethod,
 )
+from vllm.logger import init_logger
 
 from vllm_fl.ops.fused_moe.router import replace_router_with_fl
-from vllm_fl.patches.glm_moe_dsa_metax import is_glm_w8a8_int8_moe
 from .fused_moe_utils import select_unquantized_moe_backend_oot
+
+
+logger = init_logger(__name__)
 
 
 class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
@@ -56,14 +59,18 @@ def FusedMoEFL(*args, **kwargs) -> MoERunner:
     #    _fused_moe_pkg.FusedMoE with FusedMoEFL.
     runner: MoERunner = _OrigFusedMoE(*args, **kwargs)
 
-    # GLM W8A8 selects TritonExpertsFL through its quantization oracle.
-    # Other models retain the existing FL quant-method replacement.
-    keep_glm_quant_method = is_glm_w8a8_int8_moe(
-        runner.routed_experts.quant_method
-    )
-    if not keep_glm_quant_method:
+    # 2. Replace only an upstream unquantized method with the FL version.
+    # Quantized methods own their weight/activation scaling metadata and must
+    # remain attached to the runner. This also preserves GLM W8A8's
+    # CompressedTensorsW8A8Int8MoEMethod selected by its quantization oracle.
+    if isinstance(runner._quant_method, UnquantizedFusedMoEMethod):
         fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
         runner._replace_quant_method(fl_quant_method)
+    else:
+        logger.info_once(
+            "Preserving upstream quantized MoE method %s in FusedMoEFL.",
+            type(runner._quant_method).__name__,
+        )
 
     # 3. Replace router _compute_routing with FL version via monkey-patch.
     #    replace_router_with_fl() patches the class method so the router

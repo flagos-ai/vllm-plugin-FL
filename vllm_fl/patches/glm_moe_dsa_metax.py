@@ -12,17 +12,6 @@ def is_glm_moe_dsa_metax_active() -> bool:
     return _glm_moe_dsa_metax_active
 
 
-def is_glm_w8a8_int8_moe(quant_method) -> bool:
-    if not is_glm_moe_dsa_metax_active():
-        return False
-
-    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_int8 import (  # noqa: E501
-        CompressedTensorsW8A8Int8MoEMethod,
-    )
-
-    return isinstance(quant_method, CompressedTensorsW8A8Int8MoEMethod)
-
-
 def _patch_mla_prefill() -> None:
     from flash_attn import flash_attn_varlen_func
     from vllm import _custom_ops as ops
