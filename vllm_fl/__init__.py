@@ -17,6 +17,64 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
+# --- torch 2.7.1+cpu (cambricon 4.4.3) compat shims ---------------------
+
+import torch
+
+# torch-mlu registers `_C::get_mlu_view_from_cpu_tensor` as a
+# CompositeImplicitAutograd op that has no Python handle via torch.ops._C.
+# torch._export.utils._materialize_cpp_cia_ops() getattr()s every CIA op and
+# raises AttributeError on it, aborting torch._inductor init (first triggered
+# by vllm.utils.deep_gemm's module-level @torch.compile). Skip CIA ops the
+# dispatcher has no Python handle for.
+try:
+    import torch._export.utils as _export_utils
+
+    def _tolerant_materialize_cpp_cia_ops():
+        for op in torch._C._dispatch_get_registrations_for_dispatch_key(
+            "CompositeImplicitAutograd"
+        ):
+            namespace, full = tuple(op.split("::"))
+            parts = full.split(".")
+            name = parts[0]
+            overload = "default" if len(parts) == 1 else parts[1]
+            try:
+                _ = getattr(getattr(getattr(torch.ops, namespace), name), overload)
+            except AttributeError:
+                continue
+
+    _export_utils._materialize_cpp_cia_ops = _tolerant_materialize_cpp_cia_ops
+except Exception:
+    pass
+
+# flag_gems 5.3.5 populates current_work_registrar.torch_ops_map via
+# torch.library.get_kernel(), which only exists in torch 2.8+. torch 2.7.1+cpu
+# (cambricon 4.4.3) lacks it, so the map stays empty and the generated copy_
+# pre/post hooks raise KeyError: 'aten::copy_'. Provide a torch 2.7.1-compatible
+# get_kernel that redispatches to the native (CompositeExplicitAutograd) kernel.
+if not hasattr(torch.library, "get_kernel"):
+    _FALLBACK_KEYSET = torch._C.DispatchKeySet(
+        torch._C.DispatchKey.CompositeExplicitAutograd
+    )
+
+    class _RedispatchKernel:
+        def __init__(self, qualified_name):
+            self._qualified_name = qualified_name
+
+        def call_boxed(self, keyset, *args, **kwargs):
+            namespace, name = self._qualified_name.split("::")
+            op = getattr(getattr(torch.ops, namespace), name)
+            return op.default.redispatch(_FALLBACK_KEYSET, *args, **kwargs)
+
+    def _get_kernel(name_or_op, dispatch_key):
+        if isinstance(name_or_op, str):
+            qualified_name = name_or_op
+        else:
+            qualified_name = name_or_op._qualified_op_name
+        return _RedispatchKernel(qualified_name)
+
+    torch.library.get_kernel = _get_kernel
+
 from vllm_fl.utils import get_op_config as _get_op_config
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
@@ -184,3 +242,25 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register DeepseekV4 model error: {str(e)}")
+
+
+# flag_gems 5.3.5 cambricon backend emits a task_type='block' triton launch
+# kwarg unsupported by triton 3.2.0+mlu1.7.2 (cambricon 4.4.3). Strip it from
+# JITFunction.run. torch_mlu must be imported first — its _inductor module
+# imports triton.Config during triton init, so patching triton earlier raises a
+# circular-import error. Guarded on torch_mlu importability (cambricon only).
+try:
+    import torch_mlu  # noqa: F401
+    import triton.runtime.jit as _tr_jit
+
+    _orig_run = _tr_jit.JITFunction.run
+    if not getattr(_orig_run, "_flagos_task_type_patched", False):
+
+        def _run_no_task_type(self, *args, **kwargs):
+            kwargs.pop("task_type", None)
+            return _orig_run(self, *args, **kwargs)
+
+        _run_no_task_type._flagos_task_type_patched = True
+        _tr_jit.JITFunction.run = _run_no_task_type
+except ImportError:
+    pass
