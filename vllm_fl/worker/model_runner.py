@@ -114,39 +114,32 @@ def _accelerator_synchronize() -> None:
         torch.accelerator.synchronize()
 
 
-if current_platform.dist_backend == "flagcx" or current_platform.device_type == "musa":
+if (
+    current_platform.dist_backend == "flagcx"
+    or current_platform.device_type == "musa"
+):
     @contextmanager
     def graph_capture(device: torch.device):
-        """
-        `graph_capture` is a context manager which should surround the code that
-        is capturing the NPU graph. Its main purpose is to ensure that the
-        some operations will be run after the graph is captured, before the graph
-        is replayed. It returns a `GraphCaptureContext` object which contains the
-        necessary data for the graph capture. Currently, it only contains the
-        stream that the graph capture is running on. This stream is set to the
-        current NPU stream when the context manager is entered and reset to the
-        default stream when the context manager is exited. This is to ensure that
-        the graph capture is running on a separate stream from the default stream,
-        in order to explicitly distinguish the kernels to capture
-        from other kernels possibly launched on background in the default stream.
-        """
+        """Capture a graph on a stream isolated from the default stream."""
         graph_capture_context = GraphCaptureContext(
-            current_platform.torch_device_fn.Stream(device=device))
+            current_platform.torch_device_fn.Stream(device=device)
+        )
         stream = graph_capture_context.stream
 
-        # we use nullcontext now
-        maybe_ca_context = nullcontext()
-
-        # ensure all initialization operations complete before attempting to
-        # capture the graph on another stream
         curr_stream = current_platform.torch_device_fn.current_stream()
         if curr_stream != stream:
             stream.wait_stream(curr_stream)
 
-        with current_platform.torch_device_fn.stream(stream), maybe_ca_context:
+        with current_platform.torch_device_fn.stream(stream), nullcontext():
             yield graph_capture_context
 else:
     from vllm.distributed.parallel_state import graph_capture
+
+from vllm_fl.compilation.graph_runtime import get_graph_capture
+
+graph_capture = get_graph_capture(graph_capture)
+
+
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
