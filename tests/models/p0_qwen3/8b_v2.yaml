@@ -1,0 +1,20 @@
+# P0-1: dense/GQA baseline, expected to auto-select Model Runner V2.
+
+llm:
+  model: "/data/models/Qwen3-8B"
+  tensor_parallel_size: 1
+  max_num_seqs: 2
+  max_model_len: 4096
+  gpu_memory_utilization: 0.75
+  trust_remote_code: true
+
+generate:
+  prompts:
+    - "Hello, my name is"
+    - text: "The capital of France is"
+      expected: "Paris"
+  sampling:
+    max_tokens: 32
+    temperature: 0.0
+  parametrize:
+    enforce_eager: [true, false]

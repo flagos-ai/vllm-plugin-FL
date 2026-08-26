@@ -40,11 +40,41 @@ def test_worker_keeps_target_lifecycle_contract():
     assert not missing, f"WorkerFL is missing v0.28.0 methods: {missing}"
 
 
-def test_worker_uses_fl_model_runner():
+def test_worker_selects_v1_or_v2_model_runner():
     import inspect
 
     from vllm_fl.worker.worker import WorkerFL
 
     source = inspect.getsource(WorkerFL.init_device)
+    assert "GPUModelRunnerV2" in source
     assert "vllm_fl.worker.model_runner" in source
     assert "ModelRunnerFL" in source
+
+
+def test_platform_accepts_v2_model_runner():
+    from types import SimpleNamespace
+
+    from vllm.config import CUDAGraphMode
+    from vllm_fl.platform import PlatformFL
+
+    parallel_config = SimpleNamespace(
+        worker_cls=None,
+        all2all_backend=None,
+        data_parallel_size=1,
+    )
+    vllm_config = SimpleNamespace(
+        parallel_config=parallel_config,
+        model_config=None,
+        scheduler_config=SimpleNamespace(),
+        cache_config=None,
+        compilation_config=SimpleNamespace(
+            compile_sizes=[],
+            cudagraph_mode=CUDAGraphMode.NONE,
+        ),
+        attention_config=None,
+        use_v2_model_runner=True,
+    )
+
+    PlatformFL.check_and_update_config(vllm_config)
+
+    assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"

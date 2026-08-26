@@ -272,6 +272,16 @@ def test_inference(combo: dict) -> None:
 
     llm = LLM(**llm_kwargs)
     try:
+        expected_runner = os.environ.get("FL_EXPECTED_MODEL_RUNNER")
+        actual_runner = (
+            "v2" if llm.llm_engine.vllm_config.use_v2_model_runner else "v1"
+        )
+        print(f"[{_MODEL}/{_CASE}] model runner: {actual_runner}")
+        if expected_runner:
+            assert actual_runner == expected_runner.lower(), (
+                f"Expected {expected_runner} model runner, got {actual_runner}"
+            )
+
         sampling_params = SamplingParams(**gen.sampling)
 
         if gen.modality == "text":

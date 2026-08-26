@@ -104,11 +104,6 @@ def register():
         logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
         return arm_cpu_platform
 
-    # vLLM v0.28.0 enables the V2 model runner by default for most dense
-    # models. FL currently adapts the V1 runner, so choose V1 unless the user
-    # explicitly set the upstream switch. PlatformFL.check_and_update_config
-    # rejects an explicit V2 request with a clear error.
-    os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     _patch_custom_ops()
     _patch_flash_attn_import()
 
