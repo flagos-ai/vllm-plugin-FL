@@ -168,9 +168,17 @@ def patch_triton_perf_model_for_iluvatar() -> None:
     callable to the module attribute is sufficient — callers import the name
     directly, so we also patch the reference in the testing helper.
 
-    TODO: Remove once iluvatar triton natively handles missing nvsmi/nvml.
+    Applies only when triton < 3.3 — later versions handle missing nvsmi/nvml
+    natively or remove triton.ops.matmul_perf_model entirely.
+
+    TODO: Remove once minimum supported Iluvatar triton version is >= 3.3.
     """
     try:
+        import triton as _triton
+        _tv = tuple(int(x) for x in _triton.__version__.split(".")[:2])
+        if _tv >= (3, 3):
+            return
+
         import triton.ops.matmul_perf_model as _mpm
 
         if getattr(_mpm, '_iluvatar_clock_patched', False):
@@ -194,58 +202,9 @@ def patch_triton_perf_model_for_iluvatar() -> None:
             "Failed to patch triton perf model for iluvatar: %s", e
         )
 
-def patch_triton_testing_tflops_for_iluvatar() -> None:
-    """Patch triton.ops.matmul_perf_model.get_max_tensorcore_tflops for iluvatar.
-
-    On BI-V150, torch.cuda.get_device_capability() returns a value < 8,
-    which triggers `assert dtype == torch.float16` in the original flagtree
-    triton implementation. BF16 models fail this assert.
-
-    NOTE: patching triton.testing.get_max_tensorcore_tflops is insufficient
-    because matmul_perf_model.py binds the function directly via
-    `from ..testing import get_max_tensorcore_tflops`, so the module-level
-    name in matmul_perf_model must be patched directly.
-
-    TODO: Remove once flagtree triton handles non-NVIDIA capability correctly.
-    """
-    try:
-        import triton.testing as _tt
-        import triton.ops.matmul_perf_model as _mpm_ops
-        import torch as _torch
-        if getattr(_mpm_ops, "_iluvatar_tflops_patched", False):
-            return
-        from triton.runtime import driver as _driver
-
-        def _get_max_tensorcore_tflops(dtype, clock_rate, device=None):
-            if not device:
-                device = _torch.cuda.current_device()
-            num_subcores = (
-                _driver.active.utils.get_device_properties(device)
-                ["multiprocessor_count"] * 4)
-            if dtype in [_torch.float32, _torch.int32]:
-                ops_per_sub_core = 256
-            elif dtype in [_torch.float16, _torch.bfloat16, _torch.int16]:
-                ops_per_sub_core = 512
-            else:
-                ops_per_sub_core = 512  # safe fallback for unknown dtypes
-            return num_subcores * clock_rate * ops_per_sub_core * 1e-9
-
-        # Patch both the testing module and the matmul_perf_model module
-        # (the latter binds the function directly at import time).
-        _tt.get_max_tensorcore_tflops = _get_max_tensorcore_tflops
-        _mpm_ops.get_max_tensorcore_tflops = _get_max_tensorcore_tflops
-        _mpm_ops._iluvatar_tflops_patched = True
-        logger.info(
-            "Patched triton.ops.matmul_perf_model.get_max_tensorcore_tflops "
-            "for iluvatar (bfloat16 support, no capability assert)."
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to patch triton.testing.get_max_tensorcore_tflops "
-            "for iluvatar: %s", e
-        )
-
 patch_triton_chained_or_for_iluvatar()
+patch_triton_language_for_iluvatar()
+patch_triton_perf_model_for_iluvatar()
 
 
 def patch_sampler_compile_for_iluvatar() -> None:
@@ -507,10 +466,9 @@ class IluvatarBackend(Backend):
             return AttentionBackendEnum.FLASHMLA.get_path()
 
         # flash_attn is not available on iluvatar. Use TRITON_ATTN (the vllm
-        # default), but patch tl.make_tensor_descriptor so that triton JIT's
+        # default). The tl.make_tensor_descriptor stub and perf model patches
+        # are already applied at module level (above), so triton JIT's
         # DependencyFinder can hash the kernel without AttributeError on
         # triton < 3.3.  The kernel itself uses USE_TD=False at runtime, so
         # the stub is never called.
-        patch_triton_language_for_iluvatar()
-        patch_triton_perf_model_for_iluvatar()
         return AttentionBackendEnum.TRITON_ATTN.get_path()
