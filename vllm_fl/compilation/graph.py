@@ -27,6 +27,11 @@ from vllm.forward_context import (
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 
+from vllm_fl.compilation.graph_runtime import (
+    get_graph_class,
+    get_graph_runtime_backend,
+)
+
 logger = init_logger(__name__)
 
 
@@ -41,20 +46,11 @@ def weak_ref_tensors(tensor: Any) -> Any:
 
 # FL-specific: platform-agnostic graph class selection
 class Graph:
-    if current_platform.device_type == "cuda":
-        graph = torch.cuda.CUDAGraph
-    elif current_platform.device_type == "npu":
-        graph = torch.npu.NPUGraph
-    elif current_platform.device_type == "musa":
-        graph = torch.musa.MUSAGraph
-    elif current_platform.device_type == "ptpu":
-        graph = torch.ptpu.PTPUGraph
-    elif current_platform.device_type == "gcu":
-        graph = torch.gcu.GCUGraph
-    elif current_platform.device_type == "txda":
-        graph = None
-    else:
-        raise NotImplementedError("not support graph")
+    @staticmethod
+    def graph() -> Any:
+        # Resolve lazily so importing worker modules does not require an
+        # initialized accelerator runtime (for example in CPU-only unit tests).
+        return get_graph_class()()
 
 
 # Re-export CUDAGraphStat for compatibility
@@ -100,6 +96,7 @@ class GraphWrapper:
         self.vllm_config = vllm_config
         self.runtime_mode = runtime_mode
         self.compilation_config = vllm_config.compilation_config
+        self.graph_runtime = get_graph_runtime_backend()
 
         self.first_run_finished = False
         self.is_debugging_mode = envs.VLLM_LOGGING_LEVEL == "DEBUG"
@@ -151,6 +148,7 @@ class GraphWrapper:
             return self.runnable(*args, **kwargs)
 
         forward_context = get_forward_context()
+        self.graph_runtime.prepare_forward_context(forward_context)
         batch_descriptor = forward_context.batch_descriptor
         graph_runtime_mode = forward_context.cudagraph_runtime_mode
 
@@ -207,19 +205,25 @@ class GraphWrapper:
                 pass
 
             # FL-specific: use platform-agnostic graph capture
-            with current_platform.torch_device_fn.graph(
-                graph, pool=self.graph_pool
-            ):
-                # `output` is managed by pytorch's cudagraph pool
-                output = self.runnable(*args, **kwargs)
-                # Join offloader's copy stream after forward if available
-                try:
-                    from vllm.model_executor.offloader.base import get_offloader
-                    get_offloader().join_after_forward()
-                except (ImportError, RuntimeError):
-                    pass
-                if self.cudagraph_options.weak_ref_output:
-                    output = weak_ref_tensors(output)
+            self.graph_runtime.begin_capture(forward_context)
+            try:
+                with current_platform.torch_device_fn.graph(
+                    graph, pool=self.graph_pool
+                ):
+                    # `output` is managed by pytorch's cudagraph pool
+                    output = self.runnable(*args, **kwargs)
+                    # Join offloader's copy stream after forward if available
+                    try:
+                        from vllm.model_executor.offloader.base import get_offloader
+                        get_offloader().join_after_forward()
+                    except (ImportError, RuntimeError):
+                        pass
+                    if self.cudagraph_options.weak_ref_output:
+                        output = weak_ref_tensors(output)
+            finally:
+                self.graph_runtime.end_capture()
+
+            self.graph_runtime.after_capture()
 
             entry.output = weak_ref_tensors(output)
             entry.graph = graph
@@ -249,7 +253,6 @@ class GraphWrapper:
         except (ImportError, RuntimeError):
             pass
 
-        if current_platform.device_type == "npu":
-            current_platform.torch_device_fn.synchronize()
+        self.graph_runtime.before_replay()
         entry.graph.replay()
         return entry.output
