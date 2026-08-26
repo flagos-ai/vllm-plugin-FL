@@ -254,18 +254,20 @@ def patch_torch_inductor_for_iluvatar() -> None:
     try:
         import triton.backends as _tb
         _registered = list(getattr(_tb, 'backends', {}).keys())
-        # If 'cuda' is already registered (standard triton), no patch needed
+        # If 'cuda' is already registered as a backend name, no patch needed
         if 'cuda' in _registered or not _registered:
             logger.debug('patch_torch_inductor_for_iluvatar: triton has cuda backend or no backends, skipping')
             return
         # Probe the actual target string expected by supports_target().
-        # In flagtree triton 3.6.x, the registered backend name is 'iluvatar'
-        # but its supports_target() checks backend == 'corex', so we must
-        # discover the correct probe string at runtime.
+        # Different flagtree triton versions use different conventions:
+        #   - 3.2.x: backend name 'iluvatar', supports_target checks == 'cuda'
+        #   - 3.6.x: backend name 'iluvatar', supports_target checks == 'corex'
+        # We must discover the correct target string at runtime.
         _target = None
         try:
             from triton.backends.compiler import GPUTarget as _GPUTarget
-            for _probe in ('corex', 'iluvatar') + tuple(_registered):
+            # Include 'cuda' in probes — some backends accept 'cuda' as target
+            for _probe in ('cuda', 'corex', 'iluvatar') + tuple(_registered):
                 try:
                     _t = object.__new__(_GPUTarget)
                     _GPUTarget.__init__(_t, _probe, 90, False)
@@ -281,6 +283,16 @@ def patch_torch_inductor_for_iluvatar() -> None:
             pass
         if not _target:
             _target = 'corex'  # safe default for all known flagtree versions
+
+        # If the discovered target is already 'cuda', no remapping needed —
+        # inductor naturally passes 'cuda' to GPUTarget.
+        if _target == 'cuda':
+            logger.info(
+                "patch_torch_inductor_for_iluvatar: backend '%s' already "
+                "supports target='cuda', no GPUTarget remap needed.",
+                _registered,
+            )
+            return
     except Exception:
         logger.debug('patch_torch_inductor_for_iluvatar: cannot inspect triton backends, skipping')
         return
