@@ -11,7 +11,9 @@ AllGather path in vLLM-Ascend v0.20.2rc1.  The surrounding vLLM modular MoE
 runner is intentionally retained: it already owns shared-expert execution and
 the final tensor-parallel reduction.  Keeping those responsibilities there
 lets FL reuse the current Ascend routing/GMM implementation without importing
-``vllm_ascend`` at runtime.
+``vllm_ascend`` at runtime.  With expert parallelism enabled, vLLM supplies
+the local expert map and performs the final cross-rank reduction; this method
+routes and computes only the experts owned by the current EP rank.
 """
 
 from __future__ import annotations

@@ -45,6 +45,7 @@ ops=(
   chunk_gated_delta_rule_fwd_h
   moe_gating_top_k
   moe_init_routing_custom
+  apply_top_k_top_p_custom
 )
 ops_csv=$(IFS=,; echo "${ops[*]}")
 

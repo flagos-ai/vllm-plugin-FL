@@ -12,14 +12,23 @@ if(NOT FL_BUILD_CANN_OPP)
   if(NOT DEFINED TORCH_NPU_PATH)
     execute_process(
       COMMAND ${Python_EXECUTABLE} -c
-              "import pathlib, torch_npu; print(pathlib.Path(torch_npu.__file__).resolve().parent)"
-      OUTPUT_VARIABLE TORCH_NPU_PATH
+              "import importlib.util, pathlib; spec = importlib.util.find_spec('torch_npu'); print(pathlib.Path(next(iter(spec.submodule_search_locations))).resolve())"
+      OUTPUT_VARIABLE TORCH_NPU_PATH_OUTPUT
       OUTPUT_STRIP_TRAILING_WHITESPACE
       RESULT_VARIABLE TORCH_NPU_QUERY_RESULT
     )
     if(NOT TORCH_NPU_QUERY_RESULT EQUAL 0)
       message(FATAL_ERROR "torch_npu is required for VLLM_VENDOR=ascend")
     endif()
+    # Query the package location without importing torch_npu. Importing it can
+    # initialize the Ascend runtime, whose driver diagnostics may be written to
+    # stdout and corrupt the path consumed by CMake.
+    string(REGEX MATCH "^[^\r\n]+" TORCH_NPU_PATH "${TORCH_NPU_PATH_OUTPUT}")
+  endif()
+  if(NOT EXISTS "${TORCH_NPU_PATH}/include/torch_npu")
+    message(FATAL_ERROR
+      "Invalid torch_npu package path '${TORCH_NPU_PATH}'; expected "
+      "include/torch_npu")
   endif()
 
   add_library(_C_ascend SHARED

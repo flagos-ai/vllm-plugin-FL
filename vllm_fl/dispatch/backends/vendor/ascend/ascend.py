@@ -15,6 +15,45 @@ import torch
 from vllm_fl.dispatch.backends.base import Backend
 
 
+def _get_moe_gating_top_k():
+    """Return the locally packaged Ascend gating op when it is registered."""
+    try:
+        return torch.ops._C_ascend.moe_gating_top_k
+    except (AttributeError, RuntimeError):
+        return None
+
+
+def _can_return_native_topk_outputs(
+    gating_output: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_indices: torch.Tensor,
+    token_expert_indices: torch.Tensor,
+    renormalize: bool,
+) -> bool:
+    """Whether the simple FusedTopK request matches the custom-op contract.
+
+    Grouped routing, correction bias, alternate scoring functions and custom
+    routing functions use different dispatch operations and never enter this
+    method.  Keep this fast path deliberately limited to the ordinary softmax
+    router implemented by ``FusedTopKRouterFL``.
+    """
+    return (
+        gating_output.ndim == 2
+        and gating_output.dtype
+        in (torch.float16, torch.float32, torch.bfloat16)
+        and topk_weights.ndim == 2
+        and topk_indices.ndim == 2
+        and token_expert_indices.ndim == 2
+        and topk_indices.dtype == torch.int32
+        and token_expert_indices.dtype == torch.int32
+        and isinstance(renormalize, bool)
+        and topk_weights.shape == topk_indices.shape
+        and topk_weights.shape == token_expert_indices.shape
+        and topk_weights.shape[0] == gating_output.shape[0]
+        and 0 < topk_weights.shape[1] <= gating_output.shape[1]
+    )
+
+
 class AscendBackend(Backend):
     """
     Ascend backend for operator implementations.
@@ -216,9 +255,23 @@ class AscendBackend(Backend):
         self, topk_weights, topk_indices, token_expert_indices, gating_output,
         renormalize=False,
     ):
-        """Use the current vLLM-Ascend A3 expert-selection operator."""
-        custom_topk = getattr(torch.ops._C_ascend, "moe_gating_top_k", None)
-        if custom_topk is not None:
+        """Use the current vLLM-Ascend A3 expert-selection operator.
+
+        The custom op already returns routing weights in ``gating_output``'s
+        dtype and expert IDs as int32.  Returning those tensors directly is
+        important for BF16 MoE models: copying them through vLLM's generic
+        FP32 output buffer would add a BF16 -> FP32 -> BF16 conversion in every
+        MoE layer.  Unsupported input contracts retain the existing pure-Torch
+        fallback and its caller-requested output dtypes.
+        """
+        custom_topk = _get_moe_gating_top_k()
+        if custom_topk is not None and _can_return_native_topk_outputs(
+            gating_output,
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
+            renormalize,
+        ):
             selected_weights, selected_indices, _ = custom_topk(
                 gating_output,
                 k=topk_weights.shape[1],
@@ -232,6 +285,16 @@ class AscendBackend(Backend):
                 eps=1e-20,
                 bias_opt=None,
             )
+            # The custom-op schema guarantees these dtypes.  Keep a defensive
+            # fallback for locally built extensions with an older contract.
+            if (
+                selected_weights.dtype == gating_output.dtype
+                and selected_indices.dtype == torch.int32
+                and selected_weights.shape == topk_weights.shape
+                and selected_indices.shape == topk_indices.shape
+            ):
+                return selected_weights, selected_indices
+
             topk_weights.copy_(selected_weights.to(topk_weights.dtype))
             topk_indices.copy_(selected_indices.to(topk_indices.dtype))
             return topk_weights, topk_indices

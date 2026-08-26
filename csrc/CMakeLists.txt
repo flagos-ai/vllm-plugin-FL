@@ -40,9 +40,25 @@ message(STATUS "Python: ${Python_EXECUTABLE} (${Python_VERSION})")
 
 execute_process(
     COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.utils.cmake_prefix_path)"
-    OUTPUT_VARIABLE TORCH_CMAKE_PREFIX
+    OUTPUT_VARIABLE TORCH_CMAKE_PREFIX_OUTPUT
+    RESULT_VARIABLE TORCH_CMAKE_PREFIX_RESULT
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+if(NOT TORCH_CMAKE_PREFIX_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "Failed to query torch.utils.cmake_prefix_path with ${Python_EXECUTABLE}")
+endif()
+
+# Some Ascend runtime builds print driver diagnostics to stdout while Python
+# imports torch. Keep only the first non-empty line, which is the value emitted
+# by torch.utils.cmake_prefix_path, instead of treating the diagnostic as part
+# of a filesystem path.
+string(REGEX MATCH "^[^\r\n]+" TORCH_CMAKE_PREFIX "${TORCH_CMAKE_PREFIX_OUTPUT}")
+if(NOT EXISTS "${TORCH_CMAKE_PREFIX}/Torch/TorchConfig.cmake")
+    message(FATAL_ERROR
+        "Invalid PyTorch CMake prefix '${TORCH_CMAKE_PREFIX}' returned by "
+        "${Python_EXECUTABLE}; expected Torch/TorchConfig.cmake")
+endif()
 list(APPEND CMAKE_PREFIX_PATH ${TORCH_CMAKE_PREFIX})
 
 find_package(Torch REQUIRED)

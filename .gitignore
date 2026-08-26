@@ -8,6 +8,7 @@ csrc/ascend/build/
 csrc/ascend/build_out/
 csrc/ascend/output/
 csrc/ascend/third_party/
+csrc/build_sampler_ext/
 vllm_fl/dispatch/backends/vendor/ascend/prebuilt/ascend910b1/
 vllm_fl/dispatch/backends/vendor/ascend/prebuilt/ascend910_93/
 

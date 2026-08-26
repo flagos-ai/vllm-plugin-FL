@@ -202,6 +202,39 @@ def memory_profiling_fl(
     )
 
 
+def _npu_memory_profiling_enabled(vllm_config: VllmConfig) -> bool:
+    """Return whether FL should profile NPU activation memory.
+
+    The migrated GDN/FLA profiling path is the native-aligned default. Keep an
+    explicit opt-out for diagnosis or older SoCs that cannot finish the dummy
+    profile, instead of silently halving the KV budget for normal deployments.
+    """
+    additional_config = getattr(vllm_config, "additional_config", None) or {}
+    if not isinstance(additional_config, dict):
+        return True
+    return bool(additional_config.get("enable_npu_memory_profiling", True))
+
+
+def _maybe_bind_ascend_cpus(vllm_config: VllmConfig, local_rank: int) -> None:
+    """Apply optional Ascend-native CPU placement after worker warmup."""
+
+    additional_config = vllm_config.additional_config or {}
+    enable_cpu_binding = additional_config.get("enable_cpu_binding", True)
+    if current_platform.device_type != "npu" or not enable_cpu_binding:
+        return
+
+    try:
+        from vllm_fl.cpu_binding import bind_cpus
+
+        bind_cpus(local_rank)
+    except Exception as exc:
+        logger.warning(
+            "Bind cpus failed in local rank %s: %s. Skipping CPU binding.",
+            local_rank,
+            exc,
+        )
+
+
 class WorkerFL(WorkerBase):
     def __init__(
         self,
@@ -454,9 +487,9 @@ class WorkerFL(WorkerBase):
         """Profiles the peak memory usage of the model to determine how much
         memory can be used for KV cache without OOMs.
 
-        On Ascend NPU, the full profile_run forward pass can crash the worker
-        due to incompatible Triton kernels. In that case, we fall back to a
-        conservative memory estimate based on model weight size.
+        On Ascend NPU, full memory profiling is an explicit FL-only opt-in.
+        The default keeps the conservative fallback used while the migrated
+        GDN/FLA profiling path is being validated.
 
         The engine will first conduct a profiling of the existing memory usage.
         Then, it calculates the free memory that can be used for KV cache in
@@ -498,11 +531,62 @@ class WorkerFL(WorkerBase):
         current_platform.empty_cache()
         current_platform.torch_device_fn.reset_peak_memory_stats()
 
-        # On Ascend NPU, the profile_run forward pass crashes the worker
-        # process (SIGKILL from the NPU driver due to incompatible Triton
-        # kernels in the GDN/FLA layers). Skip profile_run and estimate
-        # KV cache memory from the current free memory after model loading.
-        if current_platform.device_type == "npu":
+        enable_npu_memory_profiling = (
+            current_platform.device_type == "npu"
+            and _npu_memory_profiling_enabled(self.vllm_config)
+        )
+
+        if enable_npu_memory_profiling:
+            logger.info(
+                "Ascend NPU memory profiling is enabled by FL additional "
+                "config; running profile_run to measure activation memory."
+            )
+            with memory_profiling_fl(
+                self.init_snapshot,
+                weights_memory=int(self.model_runner.model_memory_usage),
+            ) as profile_result:
+                self.model_runner.profile_run()
+                # Match vLLM-Ascend v0.20.2rc1: read the allocated peak before
+                # leaving the profiling context, so later cleanup or graph-pool
+                # accounting cannot inflate the activation classification.
+                profile_torch_peak = current_platform.torch_device_fn.memory_stats(
+                    self.device
+                ).get("allocated_bytes.all.peak", 0)
+
+            profile_result.torch_peak_increase = (
+                profile_torch_peak - profile_result.before_profile.torch_peak
+            )
+            profile_result.non_kv_cache_memory = (
+                profile_result.weights_memory
+                + profile_result.torch_peak_increase
+                + profile_result.non_torch_increase
+            )
+            self.non_torch_memory = profile_result.non_torch_increase
+            self.peak_activation_memory = profile_result.torch_peak_increase
+
+            free_gpu_memory = profile_result.after_profile.free_memory
+            assert self.init_snapshot.free_memory > free_gpu_memory, (
+                "Error in NPU memory profiling. "
+                f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
+                f"current free memory {GiB(free_gpu_memory)} GiB. "
+                "This happens when another process releases NPU memory while "
+                "vLLM is profiling. Isolate this service on its NPUs and retry."
+            )
+            self.available_kv_cache_memory_bytes = (
+                self.requested_memory - profile_result.non_kv_cache_memory
+            )
+            logger.info(
+                "Ascend NPU memory profile: weights %.2f GiB, peak activation "
+                "%.2f GiB, non-torch %.2f GiB, available KV cache %.2f GiB",
+                GiB(profile_result.weights_memory),
+                GiB(self.peak_activation_memory),
+                GiB(self.non_torch_memory),
+                GiB(self.available_kv_cache_memory_bytes),
+            )
+        # Explicit compatibility fallback for older SoCs where the migrated
+        # GDN/FLA profiling path cannot finish. Estimate KV-cache memory from
+        # post-load free memory and reserve half of the remaining budget.
+        elif current_platform.device_type == "npu":
             current_platform.empty_cache()
             free_mem = current_platform.torch_device_fn.mem_get_info(
                 self.device
@@ -528,9 +612,12 @@ class WorkerFL(WorkerBase):
             self.non_torch_memory = 0
             self.peak_activation_memory = activation_reserve
             logger.info(
-                "Ascend NPU: Skipped profile_run. Free memory: %.2f GiB, "
-                "KV cache budget: %.2f GiB",
+                "Ascend NPU memory profiling was explicitly disabled "
+                "(enable_npu_memory_profiling=False); skipped profile_run. "
+                "Free memory: %.2f GiB, 50%% activation reserve: %.2f GiB, "
+                "available KV cache: %.2f GiB",
                 GiB(free_bytes),
+                GiB(activation_reserve),
                 GiB(self.available_kv_cache_memory_bytes),
             )
         else:
@@ -770,6 +857,14 @@ class WorkerFL(WorkerBase):
                 self.model_runner._dummy_pooler_run(hidden_states)
             else:
                 self.model_runner._dummy_sampler_run(hidden_states=last_hidden_states)
+
+        # Match vLLM-Ascend's host-side placement policy. Bind only after all
+        # model warmup and graph capture work has materialized the worker's hot
+        # allocations, so taskset/migratepages operate on the final process.
+        # This is an optional performance optimization and must never prevent
+        # the inference service from starting when host topology or privileges
+        # are unavailable.
+        _maybe_bind_ascend_cpus(self.vllm_config, self.local_rank)
 
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.

@@ -71,9 +71,12 @@ def set_ascend_forward_context(
         skip_compiled=skip_compiled,
     ):
         context = get_forward_context()
-        # Qwen3.6 BF16 TP execution uses the all-gather/no-EP path.  The local
-        # FL MoE implementation does not require vLLM-Ascend's communication
-        # object, but copied operators still inspect these attributes.
+        # Qwen3.6 BF16 uses the correctness-first AllGather family for both TP
+        # and EP.  In EP mode upstream vLLM owns expert placement/weight
+        # filtering and reduces the per-rank local-expert outputs.  The local
+        # FL implementation therefore does not need vLLM-Ascend's global
+        # communication-method registry, while copied operators still inspect
+        # the communication type stored in this context.
         ascend_values = {
             "input_ids": input_ids,
             "num_tokens": num_tokens,

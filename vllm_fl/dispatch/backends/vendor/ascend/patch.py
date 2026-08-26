@@ -25,6 +25,7 @@ def apply_ascend_patches() -> None:
     _patches_applied = True
 
     patch_mamba_config()
+    patch_mamba_utils()
     patch_gdn_ascend_ops()
     patch_op_cls()
 
@@ -65,6 +66,14 @@ def patch_mamba_config() -> None:
         verify_and_update_config
     )
     logger.info("Patched HybridAttentionMambaModelConfig for Ascend")
+
+
+def patch_mamba_utils() -> None:
+    """Install the FL-local copy of vLLM-Ascend's Mamba copy kernel."""
+    from .patches.patch_mamba_utils import apply_mamba_utils_patch
+
+    apply_mamba_utils_patch()
+    logger.info("Patched Mamba batch memcpy for Ascend")
 
 
 def patch_op_cls() -> None:

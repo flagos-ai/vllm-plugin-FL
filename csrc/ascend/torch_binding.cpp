@@ -21,6 +21,7 @@
 #include "moe/add_rms_norm_bias/add_rms_norm_bias_torch_adpt.h"
 #include "moe/moe_gating_top_k/moe_gating_top_k_torch_adpt.h"
 #include "moe/moe_init_routing_custom/moe_init_routing_custom_torch_adpt.h"
+#include "moe/apply_top_k_top_p_custom/apply_top_k_top_p_custom_torch_adpt.h"
 
 namespace vllm_ascend {
 
@@ -484,6 +485,8 @@ TORCH_LIBRARY(_C_ascend, ops) {
         "int quant_mode=0, int[2] active_expert_range=[], "
         "int row_idx_type=0) -> (Tensor, Tensor, Tensor, Tensor)");
     ops.def(
+        "npu_apply_top_k_top_p(Tensor logits, Tensor? p=None, Tensor? k=None) -> Tensor");
+    ops.def(
         "moe_gating_top_k(Tensor x, int k, int k_group, int group_count, "
         "int group_select_mode, int renorm, int norm_type, bool out_flag, "
         "float routed_scaling_factor, float eps, Tensor? bias_opt=None) "
@@ -526,6 +529,7 @@ TORCH_LIBRARY_IMPL(_C_ascend, PrivateUse1, ops) {
     ops.impl(
         "npu_moe_init_routing_custom",
         &vllm_ascend::npu_moe_init_routing_custom);
+    ops.impl("npu_apply_top_k_top_p", &vllm_ascend::npu_apply_top_k_top_p);
     ops.impl("moe_gating_top_k", &vllm_ascend::moe_gating_top_k);
     ops.impl("npu_gemma_rms_norm", &vllm_ascend::npu_gemma_rms_norm);
     ops.impl("npu_add_rms_norm_bias", &vllm_ascend::npu_add_rms_norm_bias);

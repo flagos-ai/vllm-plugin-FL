@@ -9,7 +9,9 @@
 # -----------------------------------------------------------------------------------------------------------
 
 # Ascend mode
-if(DEFINED ENV{ASCEND_HOME_PATH})
+if(DEFINED CUSTOM_ASCEND_CANN_PACKAGE_PATH)
+  set(ASCEND_DIR ${CUSTOM_ASCEND_CANN_PACKAGE_PATH})
+elseif(DEFINED ENV{ASCEND_HOME_PATH})
   set(ASCEND_DIR $ENV{ASCEND_HOME_PATH})
 else()
   if ("$ENV{USER}" STREQUAL "root")

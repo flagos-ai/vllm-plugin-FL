@@ -3,6 +3,7 @@
 import os
 import logging
 import sys
+from pathlib import Path
 
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
@@ -21,6 +22,35 @@ from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 
 logger = logging.getLogger(__name__)
+
+_ASCEND_TRITON_CACHE_EPOCH = "vllm-fl-ascend-v1"
+
+
+def _configure_ascend_hccl() -> None:
+    """Use HCCL's AIV communication expansion mode by default on Ascend.
+
+    AIV is implemented by HCCL rather than by a vLLM-Ascend Python or C++
+    operator.  Selecting it before worker processes are spawned is therefore
+    sufficient for FL's HCCL process groups.  Keep an explicitly supplied
+    value untouched so deployments can opt out for compatibility/debugging.
+    """
+    os.environ.setdefault("HCCL_OP_EXPANSION_MODE", "AIV")
+
+
+def _configure_ascend_triton_cache() -> None:
+    """Keep FL Ascend kernels out of incompatible shared Triton caches.
+
+    torch_npu's Triton cache key can collide for kernels copied from another
+    plugin even when their source locations and launchers differ.  Reusing
+    such an entry corrupted Qwen3.6 aligned-Mamba prefix-cache inference while
+    a clean cache produced correct output.  A versioned FL-owned default keeps
+    normal launches deterministic; an explicit user setting is preserved.
+    """
+    if os.environ.get("TRITON_CACHE_DIR", "").strip():
+        return
+    os.environ["TRITON_CACHE_DIR"] = str(
+        Path.home() / ".triton" / _ASCEND_TRITON_CACHE_EPOCH
+    )
 
 
 def __getattr__(name):
@@ -118,6 +148,8 @@ def register():
         # current vLLM-Ascend implementations. Do not let a parent process or
         # an old launch script reactivate FlagGems globally on NPU.
         os.environ["USE_FLAGGEMS"] = "0"
+        _configure_ascend_hccl()
+        _configure_ascend_triton_cache()
 
     _init_vendor_device()
 

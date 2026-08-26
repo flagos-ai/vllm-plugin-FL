@@ -15,8 +15,6 @@
 # limitations under the License.
 #
 
-from types import SimpleNamespace
-
 import torch
 import torch_npu
 from einops import rearrange
@@ -32,6 +30,7 @@ from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 from vllm_fl.compilation.graph import (
     get_ascend_graph_params,
     is_ascend_graph_capturing,
+    record_ascend_graph_task,
     weak_ref_tensors,
 )
 from vllm_fl.dispatch.backends.vendor.ascend.impl.triton.fla.chunk import chunk_gated_delta_rule
@@ -64,8 +63,15 @@ def _runtime_num_actual_tokens(
     attn_metadata: GDNAttentionMetadata,
     mixed_qkv: torch.Tensor,
 ) -> int:
-    """Return the authoritative runtime token count for GDN core output."""
-    if attn_metadata.num_prefills > 0:
+    """Return the authoritative runtime token count for GDN core output.
+
+    During FX tracing the metadata object can still contain the one-token
+    decode value used to capture FULL_DECODE_ONLY, so the tensor dimension is
+    authoritative there.  Outside tracing, including eager chunked-prefill
+    and prefix-cache resume, ``num_actual_tokens`` must be used to discard the
+    runner's padding exactly as the native vLLM-Ascend implementation does.
+    """
+    if attn_metadata.num_prefills > 0 and torch.compiler.is_compiling():
         return mixed_qkv.shape[0]
     return attn_metadata.num_actual_tokens
 
@@ -170,83 +176,131 @@ def update_conv1d_graph_params(
         attn_metadata = draft_attn_metadatas
 
     with torch.npu.stream(update_stream):
-        for param, handle, event in zip(
-            graph_params.conv1d_params[num_tokens],
-            graph_params.conv1d_handles[num_tokens],
-            graph_params.conv1d_events[num_tokens],
-        ):
-            # Unpack parameters captured during graph capture
-            (
-                output,
-                mixed_qkv,
-                conv_weights_T,
-                conv_state,
-                bias,
-                activation_num,
-                pad_slot_id,
-                run_mode,
-                branch,
-                layer_prefix,
-                _,
-                _,
-                _,
-                q_per_seq,
-            ) = param
-
-            new_query_start_loc: tuple[int, ...] = ()
-            new_cache_indices: tuple[int, ...] = ()
-            new_num_accepted: tuple[int, ...] = ()
-
-            if run_mode == 1 and attn_metadata is not None:
-                # get gdn metadata by captured layer_prefix
-                meta = attn_metadata
-                if isinstance(meta, dict):
-                    meta = meta.get(layer_prefix, None)
-                    assert isinstance(meta, GDNAttentionMetadata)
-
-                if meta is None:
-                    continue
-
-                cap_x_dim0 = int(mixed_qkv.size(0))
-                if branch == "spec" and meta.spec_sequence_masks is not None:
-                    qsl_host, cidx_host, num_accepted_host = get_spec_causal_conv1d_update_host_args(meta)
-                    new_query_start_loc, new_cache_indices, new_num_accepted = _pad_conv1d_host_args_to_capture(
-                        qsl_host,
-                        cidx_host,
-                        num_accepted_host,
-                        cap_x_dim0=cap_x_dim0,
-                        q_per_seq=q_per_seq,
-                        with_num_accepted=True,
-                    )
-                elif branch == "non_spec_decode":
-                    non_sdq_host, non_sd_cidx_host = get_causal_conv1d_update_host_args(meta)
-                    new_query_start_loc, new_cache_indices, _ = _pad_conv1d_host_args_to_capture(
-                        non_sdq_host,
-                        non_sd_cidx_host,
-                        (),
-                        cap_x_dim0=cap_x_dim0,
-                        q_per_seq=q_per_seq,
-                        with_num_accepted=False,
-                    )
-                    new_num_accepted = ()
-
-            torch.npu.graph_task_update_begin(update_stream, handle)
-            torch.ops._C_ascend.npu_causal_conv1d_custom(
-                output,
-                mixed_qkv,
-                conv_weights_T,
-                conv_state=conv_state,
-                bias_opt=bias,
-                query_start_loc_opt=new_query_start_loc,
-                cache_indices_opt=new_cache_indices,
-                initial_state_mode_opt=(),
-                num_accepted_tokens_opt=new_num_accepted,
-                activation_mode=activation_num,
-                pad_slot_id=pad_slot_id,
-                run_mode=run_mode,
+        task_count = min(
+            len(graph_params.conv1d_params[num_tokens]),
+            len(graph_params.conv1d_handles[num_tokens]),
+            len(graph_params.conv1d_events[num_tokens]),
+        )
+        for task_index in range(task_count):
+            _update_conv1d_graph_task(
+                update_stream,
+                forward_context,
+                num_tokens,
+                vllm_config,
+                task_index,
+                attn_metadata=attn_metadata,
             )
-            torch.npu.graph_task_update_end(update_stream)
-            event.record(update_stream)
+
+
+def _update_conv1d_graph_task(
+    update_stream,
+    forward_context,
+    num_tokens,
+    vllm_config,
+    task_index,
+    *,
+    attn_metadata=None,
+):
+    """Update one captured conv1d task; caller owns stream context."""
+    del vllm_config
+    graph_params = get_graph_params()
+    if (
+        graph_params is None
+        or num_tokens not in graph_params.conv1d_params
+        or num_tokens not in graph_params.conv1d_handles
+        or num_tokens not in graph_params.conv1d_events
+    ):
+        return False
+    if task_index >= min(
+        len(graph_params.conv1d_params[num_tokens]),
+        len(graph_params.conv1d_handles[num_tokens]),
+        len(graph_params.conv1d_events[num_tokens]),
+    ):
+        return False
+    if attn_metadata is None:
+        attn_metadata = forward_context.attn_metadata
+
+    param = graph_params.conv1d_params[num_tokens][task_index]
+    handle = graph_params.conv1d_handles[num_tokens][task_index]
+    event = graph_params.conv1d_events[num_tokens][task_index]
+    (
+        output,
+        mixed_qkv,
+        conv_weights_T,
+        conv_state,
+        bias,
+        activation_num,
+        pad_slot_id,
+        run_mode,
+        branch,
+        layer_prefix,
+        _,
+        _,
+        _,
+        q_per_seq,
+    ) = param
+
+    new_query_start_loc: tuple[int, ...] = ()
+    new_cache_indices: tuple[int, ...] = ()
+    new_num_accepted: tuple[int, ...] = ()
+    if run_mode == 1 and attn_metadata is not None:
+        meta = attn_metadata
+        if isinstance(meta, dict):
+            meta = meta.get(layer_prefix, None)
+        if not isinstance(meta, GDNAttentionMetadata):
+            return False
+
+        cap_x_dim0 = int(mixed_qkv.size(0))
+        if branch == "spec" and meta.spec_sequence_masks is not None:
+            qsl_host, cidx_host, num_accepted_host = (
+                get_spec_causal_conv1d_update_host_args(meta)
+            )
+            (
+                new_query_start_loc,
+                new_cache_indices,
+                new_num_accepted,
+            ) = _pad_conv1d_host_args_to_capture(
+                qsl_host,
+                cidx_host,
+                num_accepted_host,
+                cap_x_dim0=cap_x_dim0,
+                q_per_seq=q_per_seq,
+                with_num_accepted=True,
+            )
+        elif branch == "non_spec_decode":
+            non_sdq_host, non_sd_cidx_host = (
+                get_causal_conv1d_update_host_args(meta)
+            )
+            new_query_start_loc, new_cache_indices, _ = (
+                _pad_conv1d_host_args_to_capture(
+                    non_sdq_host,
+                    non_sd_cidx_host,
+                    (),
+                    cap_x_dim0=cap_x_dim0,
+                    q_per_seq=q_per_seq,
+                    with_num_accepted=False,
+                )
+            )
+            new_num_accepted = ()
+
+    torch.npu.graph_task_update_begin(update_stream, handle)
+    torch.ops._C_ascend.npu_causal_conv1d_custom(
+        output,
+        mixed_qkv,
+        conv_weights_T,
+        conv_state=conv_state,
+        bias_opt=bias,
+        query_start_loc_opt=new_query_start_loc,
+        cache_indices_opt=new_cache_indices,
+        initial_state_mode_opt=(),
+        num_accepted_tokens_opt=new_num_accepted,
+        activation_mode=activation_num,
+        pad_slot_id=pad_slot_id,
+        run_mode=run_mode,
+    )
+    torch.npu.graph_task_update_end(update_stream)
+    event.record(update_stream)
+    return True
 
 
 def get_non_spec_chunked_prefill_meta(attn_metadata):
@@ -254,62 +308,30 @@ def get_non_spec_chunked_prefill_meta(attn_metadata):
     return fallback_meta.chunk
 
 
-def _use_split_multi_prefill(attn_metadata) -> bool:
-    """Run every multi-sequence chunk batch as safe B=1 custom-op calls.
-
-    A scheduler step may contain one prefill plus one or more decodes. The
-    legacy chunk custom op is unsafe for that mixed variable-length batch too,
-    so the condition must use the total non-spec sequence count rather than
-    ``num_prefills`` alone.
-    """
-    return (
-        attn_metadata.num_prefills > 0
-        and attn_metadata.num_prefills + attn_metadata.num_decodes > 1
-    )
-
-
-def _make_single_sequence_chunk_meta(
+def _run_batched_chunk_prefill(
     *,
-    seq_len: int,
-    num_value_heads: int,
-    device: torch.device,
-) -> SimpleNamespace:
-    """Build the metadata required by one variable-length B=1 chunk call."""
-
-    def _ceil_div(value: int, divisor: int) -> int:
-        return (value + divisor - 1) // divisor
-
-    def _chunk_indices(chunk_size: int) -> torch.Tensor:
-        count = _ceil_div(seq_len, chunk_size)
-        indices = torch.empty((count, 2), dtype=torch.int32, device=device)
-        indices[:, 0].zero_()
-        indices[:, 1].copy_(
-            torch.arange(count, dtype=torch.int32, device=device)
-        )
-        return indices
-
-    chunk_size = 64
-    large_block_size = 608 * 2
-    cumsum_block_size = max(
-        1,
-        1 << (
-            max(1, (2**18) // (num_value_heads * chunk_size)) - 1
-        ).bit_length(),
-    )
-    chunk_count = _ceil_div(seq_len, chunk_size)
-    return SimpleNamespace(
-        block_indices_cumsum=_chunk_indices(cumsum_block_size),
-        chunk_indices_chunk64=_chunk_indices(chunk_size),
-        chunk_offsets_chunk64=torch.tensor(
-            [0, chunk_count], dtype=torch.int32, device=device
-        ),
-        update_chunk_offsets_chunk64=torch.tensor(
-            [0, chunk_count + 1], dtype=torch.int32, device=device
-        ),
-        final_chunk_indices_chunk64=torch.tensor(
-            [chunk_count], dtype=torch.int32, device=device
-        ),
-        chunk_indices_large_block=_chunk_indices(large_block_size),
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    g: torch.Tensor,
+    beta: torch.Tensor,
+    initial_state: torch.Tensor,
+    query_start_loc: torch.Tensor,
+    attn_metadata: GDNAttentionMetadata,
+):
+    """Run one target-version variable-length GDN call for the whole batch."""
+    return chunk_gated_delta_rule(
+        q=query,
+        k=key,
+        v=value,
+        g=g,
+        beta=beta,
+        initial_state=initial_state,
+        output_final_state=True,
+        cu_seqlens=query_start_loc,
+        prebuilt_meta=get_non_spec_chunked_prefill_meta(attn_metadata),
+        head_first=False,
+        use_qk_l2norm_in_kernel=True,
     )
 
 
@@ -523,6 +545,12 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
                 )
                 handle = torch.npu.graph_task_group_end(stream)
                 graph_params.conv1d_handles[num_actual_tokens].append(handle)
+                record_ascend_graph_task(
+                    num_actual_tokens,
+                    "conv1d",
+                    len(graph_params.conv1d_handles[num_actual_tokens]) - 1,
+                    self.prefix,
+                )
                 mixed_qkv_spec = output_spec
             else:
                 # for enforce eager
@@ -640,6 +668,12 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
                 )
                 handle = torch.npu.graph_task_group_end(stream)
                 graph_params.conv1d_handles[num_actual_tokens].append(handle)
+                record_ascend_graph_task(
+                    num_actual_tokens,
+                    "conv1d",
+                    len(graph_params.conv1d_handles[num_actual_tokens]) - 1,
+                    self.prefix,
+                )
                 mixed_qkv_non_spec = output_non_spec
             else:
                 output_non_spec = torch.empty_like(mixed_qkv_non_spec)
@@ -710,77 +744,21 @@ class AscendGatedDeltaNetAttention(GatedDeltaNetAttention):
 
         # 2.2: Process the remaining part
         if attn_metadata.num_prefills > 0:
-            if _use_split_multi_prefill(attn_metadata):
-                initial_state = (
-                    ssm_state[non_spec_state_indices_tensor]
-                    .transpose(-1, -2)
-                    .contiguous()
-                )
-                clear_ssm_states(initial_state, has_initial_state)
-                fallback_meta = _check_and_get_host_args(
-                    attn_metadata,
-                    "non_spec_prefill_fallback_meta",
-                    "causal_conv1d",
-                )
-                query_start_loc_host = tuple(
-                    int(value)
-                    for value in fallback_meta.causal_conv1d.query_start_loc_cpu.tolist()
-                )
-                core_attn_out_non_spec = torch.empty_like(value_non_spec)
-                final_states = []
-                for seq_idx, (seq_start, seq_end) in enumerate(
-                    zip(query_start_loc_host, query_start_loc_host[1:])
-                ):
-                    seq_len = seq_end - seq_start
-                    seq_cu_seqlens = non_spec_query_start_loc.new_tensor(
-                        [0, seq_len]
-                    )
-                    seq_meta = _make_single_sequence_chunk_meta(
-                        seq_len=seq_len,
-                        num_value_heads=value_non_spec.shape[2],
-                        device=value_non_spec.device,
-                    )
-                    seq_output, seq_final_state = chunk_gated_delta_rule(
-                        q=query_non_spec[:, seq_start:seq_end],
-                        k=key_non_spec[:, seq_start:seq_end],
-                        v=value_non_spec[:, seq_start:seq_end],
-                        g=g_non_spec[:, seq_start:seq_end],
-                        beta=beta_non_spec[:, seq_start:seq_end],
-                        initial_state=initial_state[seq_idx : seq_idx + 1],
-                        output_final_state=True,
-                        cu_seqlens=seq_cu_seqlens,
-                        prebuilt_meta=seq_meta,
-                        head_first=False,
-                        use_qk_l2norm_in_kernel=True,
-                    )
-                    core_attn_out_non_spec[:, seq_start:seq_end].copy_(seq_output)
-                    final_states.append(seq_final_state)
-                last_recurrent_state = torch.cat(final_states, dim=0)
-                ssm_state[non_spec_state_indices_tensor] = (
-                    last_recurrent_state.transpose(-1, -2)
-                    .contiguous()
-                    .to(ssm_state.dtype)
-                )
-            else:
-                initial_state = ssm_state[non_spec_state_indices_tensor].transpose(-1, -2).contiguous()
-                clear_ssm_states(initial_state, has_initial_state)
-                prebuilt_meta = get_non_spec_chunked_prefill_meta(attn_metadata)
-                (core_attn_out_non_spec, last_recurrent_state) = chunk_gated_delta_rule(
-                    q=query_non_spec,
-                    k=key_non_spec,
-                    v=value_non_spec,
-                    g=g_non_spec,
-                    beta=beta_non_spec,
-                    initial_state=initial_state,
-                    output_final_state=True,
-                    cu_seqlens=non_spec_query_start_loc,
-                    prebuilt_meta=prebuilt_meta,
-                    head_first=False,
-                    use_qk_l2norm_in_kernel=True,
-                )
-                ssm_state[non_spec_state_indices_tensor] = (
-                    last_recurrent_state.transpose(-1, -2).contiguous().to(ssm_state.dtype)
-                )
+            initial_state = ssm_state[non_spec_state_indices_tensor].transpose(-1, -2).contiguous()
+            clear_ssm_states(initial_state, has_initial_state)
+            (core_attn_out_non_spec, last_recurrent_state) = _run_batched_chunk_prefill(
+                query=query_non_spec,
+                key=key_non_spec,
+                value=value_non_spec,
+                g=g_non_spec,
+                beta=beta_non_spec,
+                initial_state=initial_state,
+                query_start_loc=non_spec_query_start_loc,
+                attn_metadata=attn_metadata,
+            )
+            ssm_state[non_spec_state_indices_tensor] = (
+                last_recurrent_state.transpose(-1, -2).contiguous().to(ssm_state.dtype)
+            )
         elif attn_metadata.num_decodes > 0:
             cu_seqlens = non_spec_query_start_loc[: attn_metadata.num_decodes + 1]
             query_non_spec = l2norm_fwd(query_non_spec)

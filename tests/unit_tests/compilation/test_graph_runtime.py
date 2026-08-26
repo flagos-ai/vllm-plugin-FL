@@ -83,7 +83,13 @@ def test_ascend_capture_lifecycle_delegates_graph_state(monkeypatch):
     from vllm_fl.compilation.graph_runtime import AscendGraphRuntimeBackend
 
     set_capturing = MagicMock()
+    weak_ref_workspaces = MagicMock()
     monkeypatch.setattr(graph, "set_ascend_graph_capturing", set_capturing)
+    monkeypatch.setattr(
+        graph,
+        "weak_ref_ascend_graph_workspaces",
+        weak_ref_workspaces,
+    )
     forward_context = SimpleNamespace()
     backend = AscendGraphRuntimeBackend()
 
@@ -92,11 +98,13 @@ def test_ascend_capture_lifecycle_delegates_graph_state(monkeypatch):
     backend.begin_capture(forward_context)
     assert forward_context.capturing is True
     backend.end_capture()
+    backend.after_capture()
 
     assert set_capturing.call_args_list == [
         call(True),
         call(False),
     ]
+    weak_ref_workspaces.assert_called_once_with()
 
 
 def test_ascend_prepare_capture_uses_all_token_sizes(monkeypatch):

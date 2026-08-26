@@ -48,6 +48,26 @@ dist_backend_dict = {
     "musa": "mccl",
 }
 
+
+def _ascend_npugraph_ex_enabled(vllm_config: "VllmConfig") -> bool:
+    """Return whether the opt-in Ascend npugraph_ex compiler is enabled.
+
+    Keep this behind the same nested additional-config shape used by
+    vLLM-Ascend.  The default remains the existing eager-FX path so a runtime
+    without npugraph_ex is unaffected.
+    """
+    additional_config = getattr(vllm_config, "additional_config", None) or {}
+    ascend_compilation_config = additional_config.get(
+        "ascend_compilation_config", {}
+    )
+    if not isinstance(ascend_compilation_config, dict):
+        logger.warning(
+            "Ignoring non-dict ascend_compilation_config: %r",
+            ascend_compilation_config,
+        )
+        return False
+    return bool(ascend_compilation_config.get("enable_npugraph_ex", False))
+
 def _resolve_flagcx_backend() -> bool:
     """Check whether the flagcx torch distributed backend is available."""
     flagcx_path = os.environ.get("FLAGCX_PATH")
@@ -93,6 +113,52 @@ class PlatformFL(Platform):
     )
     ### TODO(lms): dispatch device_control_env_var
     # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
+
+    @classmethod
+    def get_compile_backend(cls) -> str:
+        # vLLM asks the platform for the import path only when
+        # CompilationConfig.backend is neither "eager" nor "inductor".  The
+        # default Ascend path remains EagerAdaptor; the custom path is selected
+        # only by the explicit npugraph_ex opt-in in check_and_update_config().
+        if cls.device_type == "npu":
+            return "vllm_fl.compilation.compiler_interface.AscendCompiler"
+        return super().get_compile_backend()
+
+    @classmethod
+    def _get_default_max_cudagraph_capture_size(
+        cls, vllm_config: "VllmConfig"
+    ) -> int | None:
+        """Return vLLM-Ascend's workload-bound default capture maximum."""
+        compilation_config = vllm_config.compilation_config
+        if compilation_config.max_cudagraph_capture_size is not None:
+            return None
+        if compilation_config.cudagraph_capture_sizes is not None:
+            return None
+
+        scheduler_config = getattr(vllm_config, "scheduler_config", None)
+        max_num_seqs = getattr(scheduler_config, "max_num_seqs", None)
+        if max_num_seqs is None:
+            return None
+
+        decode_query_len = 1
+        speculative_config = getattr(vllm_config, "speculative_config", None)
+        if speculative_config and speculative_config.num_speculative_tokens:
+            decode_query_len += speculative_config.num_speculative_tokens
+
+        return min(max_num_seqs * decode_query_len, 512)
+
+    @classmethod
+    def apply_config_platform_defaults(cls, vllm_config: "VllmConfig") -> None:
+        if cls.device_type != "npu":
+            return
+
+        default_max_capture_size = cls._get_default_max_cudagraph_capture_size(
+            vllm_config
+        )
+        if default_max_capture_size is not None:
+            vllm_config.compilation_config.max_cudagraph_capture_size = (
+                default_max_capture_size
+            )
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
@@ -291,12 +357,16 @@ class PlatformFL(Platform):
                 compilation_config.cudagraph_mode = CUDAGraphMode.NONE
             elif compilation_config.cudagraph_mode == CUDAGraphMode.FULL_DECODE_ONLY:
                 compilation_config.mode = CompilationMode.VLLM_COMPILE
-                # Keep the FX graph eager and let the FL-owned outer NPUGraph
-                # wrapper perform decode capture/replay.  The current
-                # vLLM-Ascend npugraph_ex compiler was evaluated here, but it
-                # did not improve latency and regressed mixed-batch GDN state
-                # reuse, so it is intentionally not selected.
-                compilation_config.backend = "eager"
+                enable_npugraph_ex = _ascend_npugraph_ex_enabled(vllm_config)
+                if enable_npugraph_ex:
+                    # Keep the compiler implementation local to FL: the
+                    # standalone wheel must not import vllm-ascend at runtime.
+                    compilation_config.backend = (
+                        "vllm_fl.compilation.compiler_interface.AscendCompiler"
+                    )
+                else:
+                    # Preserve the validated compatibility path by default.
+                    compilation_config.backend = "eager"
                 compilation_config.use_inductor = False
                 compilation_config.splitting_ops = []
                 # These post-grad quantization fusions are CUDA-only in
@@ -307,9 +377,16 @@ class PlatformFL(Platform):
                 compilation_config.pass_config.fuse_act_quant = False
                 compilation_config.pass_config.fuse_attn_quant = False
                 compilation_config.cudagraph_num_of_warmups = 1
-                logger.info(
-                    "Enabling Ascend FULL_DECODE_ONLY with eager FX and NPUGraph."
-                )
+                if enable_npugraph_ex:
+                    logger.info(
+                        "Enabling Ascend FULL_DECODE_ONLY with FL-local "
+                        "AscendCompiler/npugraph_ex and NPUGraph."
+                    )
+                else:
+                    logger.info(
+                        "Enabling Ascend FULL_DECODE_ONLY with eager FX and "
+                        "NPUGraph."
+                    )
             else:
                 logger.warning(
                     "Ascend FL currently supports only NONE or "
@@ -333,7 +410,8 @@ class PlatformFL(Platform):
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
-            parallel_config.data_parallel_size > 1
+            parallel_config.all2all_backend == "deepep_high_throughput"
+            and parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
             # TODO: Piecewise Cuda graph might be enabled

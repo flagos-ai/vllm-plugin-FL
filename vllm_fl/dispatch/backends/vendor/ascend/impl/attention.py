@@ -46,7 +46,12 @@ from vllm_fl.dispatch.backends.vendor.ascend.impl.attention_mask import (
 from vllm_fl.compilation.graph import (
     get_ascend_graph_params,
     is_ascend_graph_capturing,
+    record_ascend_graph_task,
+    update_ascend_graph_params_workspace,
     weak_ref_tensors,
+)
+from vllm_fl.dispatch.backends.vendor.ascend.impl.attention_utils import (
+    using_paged_attention,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +83,7 @@ def is_torch_npu_available() -> bool:
 
 # Ascend platform specific configurations
 ASCEND_SAMPLED_TOKEN_IDS_DTYPE = torch.int32  # NPU uses int32, CUDA uses int64
+SWA_INT_MAX = 2147483647
 
 
 class AscendAttentionState(Enum):
@@ -295,12 +301,8 @@ class AscendAttentionMetadataBuilder:
             attn_state: Current attention state.
 
         Returns:
-            Attention mask tensor, or None for decode-only.
+            Attention mask tensor selected for the model runner.
         """
-        # Decode-only doesn't need mask (uses paged attention)
-        if attn_state == AscendAttentionState.DecodeOnly:
-            return None
-
         mask_builder = self._get_mask_builder()
 
         # Pooling model uses general attention mask
@@ -334,7 +336,17 @@ class AscendAttentionMetadataBuilder:
             self._split_decodes_and_prefills(common_attn_metadata)
 
         block_table = common_attn_metadata.block_table_tensor
-        seq_lens = common_attn_metadata.seq_lens_cpu[:num_reqs]
+        # ``seq_lens_cpu`` is intentionally None under async scheduling. The
+        # target Ascend path keeps the optimistic pinned buffer available via
+        # ``_seq_lens_cpu`` so attention never performs a device-to-host sync.
+        seq_lens_cpu = common_attn_metadata.seq_lens_cpu
+        if seq_lens_cpu is None:
+            seq_lens_cpu = common_attn_metadata._seq_lens_cpu
+        if seq_lens_cpu is None:
+            raise RuntimeError(
+                "Ascend attention requires seq_lens_cpu or _seq_lens_cpu"
+            )
+        seq_lens = seq_lens_cpu[:num_reqs]
         slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens]
 
         # Determine attention state
@@ -588,6 +600,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         update_stream: Any,
         forward_context: Any,
         num_tokens: int,
+        vllm_config: VllmConfig,
     ) -> None:
         graph_params = get_ascend_graph_params()
         if (
@@ -601,53 +614,143 @@ class AscendAttentionBackendImpl(AttentionImpl):
         if not isinstance(attn_metadata, dict):
             return
 
+        params = graph_params.attention_params[num_tokens]
+        handles = graph_params.handles[num_tokens]
+        events = graph_params.events[num_tokens]
+        use_pa = using_paged_attention(num_tokens, vllm_config)
+
         with torch.npu.stream(update_stream):
-            for param, handle, event in zip(
-                graph_params.attention_params[num_tokens],
-                graph_params.handles[num_tokens],
-                graph_params.events[num_tokens],
-            ):
-                (
-                    layer_name,
-                    query,
-                    key_cache,
-                    value_cache,
-                    num_kv_heads,
-                    num_heads,
-                    scale,
-                    block_table,
-                    output,
-                ) = param
-                metadata = attn_metadata.get(layer_name)
-                if not isinstance(metadata, AscendMetadata):
-                    continue
-                seq_lens = metadata.seq_lens
-                workspace = torch_npu._npu_paged_attention_get_workspace(
-                    query=query,
-                    key_cache=key_cache,
-                    value_cache=value_cache,
-                    num_kv_heads=num_kv_heads,
-                    num_heads=num_heads,
-                    scale_value=scale,
-                    block_table=block_table,
-                    context_lens=seq_lens,
-                    out=output,
+            for task_index, _ in enumerate(zip(params, handles, events)):
+                AscendAttentionBackendImpl._update_graph_task(
+                    update_stream,
+                    forward_context,
+                    num_tokens,
+                    vllm_config,
+                    task_index,
+                    use_pa=use_pa,
                 )
-                torch.npu.graph_task_update_begin(update_stream, handle)
-                torch_npu._npu_paged_attention(
-                    query=query,
-                    key_cache=key_cache,
-                    value_cache=value_cache,
-                    num_kv_heads=num_kv_heads,
-                    num_heads=num_heads,
-                    scale_value=scale,
-                    block_table=block_table,
-                    context_lens=seq_lens,
-                    out=output,
-                    workspace=workspace,
-                )
-                torch.npu.graph_task_update_end(update_stream)
-                event.record(update_stream)
+
+    @staticmethod
+    def _update_graph_task(
+        update_stream: Any,
+        forward_context: Any,
+        num_tokens: int,
+        vllm_config: VllmConfig,
+        task_index: int,
+        *,
+        use_pa: bool | None = None,
+    ) -> bool:
+        """Update one captured attention task; caller owns stream context."""
+        graph_params = get_ascend_graph_params()
+        if (
+            graph_params is None
+            or num_tokens not in graph_params.attention_params
+            or num_tokens not in graph_params.handles
+            or num_tokens not in graph_params.events
+        ):
+            return False
+        params = graph_params.attention_params[num_tokens]
+        handles = graph_params.handles[num_tokens]
+        events = graph_params.events[num_tokens]
+        if task_index >= min(len(params), len(handles), len(events)):
+            return False
+
+        attn_metadata = forward_context.attn_metadata
+        if not isinstance(attn_metadata, dict):
+            return False
+        param = params[task_index]
+        handle = handles[task_index]
+        event = events[task_index]
+        layer_name = param[0]
+        metadata = attn_metadata.get(layer_name)
+        if not isinstance(metadata, AscendMetadata):
+            return False
+
+        if use_pa is None:
+            use_pa = using_paged_attention(num_tokens, vllm_config)
+        if use_pa:
+            (
+                _,
+                query,
+                key_cache,
+                value_cache,
+                num_kv_heads,
+                num_heads,
+                scale,
+                block_table,
+                output,
+            ) = param
+            seq_lens = metadata.seq_lens
+            workspace = torch_npu._npu_paged_attention_get_workspace(
+                query=query,
+                key_cache=key_cache,
+                value_cache=value_cache,
+                num_kv_heads=num_kv_heads,
+                num_heads=num_heads,
+                scale_value=scale,
+                block_table=block_table,
+                context_lens=seq_lens,
+                out=output,
+            )
+            torch.npu.graph_task_update_begin(update_stream, handle)
+            torch_npu._npu_paged_attention(
+                query=query,
+                key_cache=key_cache,
+                value_cache=value_cache,
+                num_kv_heads=num_kv_heads,
+                num_heads=num_heads,
+                scale_value=scale,
+                block_table=block_table,
+                context_lens=seq_lens,
+                out=output,
+                workspace=workspace,
+            )
+        else:
+            (
+                _,
+                query,
+                key_cache,
+                value_cache,
+                captured_block_table,
+                attn_mask,
+                block_size,
+                num_kv_heads,
+                num_heads,
+                scale,
+                output,
+                softmax_lse,
+                sparse_mode,
+                pre_tokens,
+                next_tokens,
+            ) = param
+            torch.npu.graph_task_update_begin(update_stream, handle)
+            block_table = (
+                captured_block_table
+                if sparse_mode == 4
+                else metadata.block_tables
+            )
+            torch_npu.npu_fused_infer_attention_score.out(
+                query=query,
+                key=key_cache,
+                value=value_cache,
+                block_table=block_table,
+                atten_mask=attn_mask,
+                input_layout="TND",
+                block_size=block_size,
+                actual_seq_lengths=metadata.actual_seq_lengths_q,
+                actual_seq_lengths_kv=metadata.seq_lens_list,
+                num_key_value_heads=num_kv_heads,
+                num_heads=num_heads,
+                scale=scale,
+                sparse_mode=sparse_mode,
+                pre_tokens=pre_tokens,
+                next_tokens=next_tokens,
+                workspace=graph_params.workspaces.get(num_tokens),
+                out=[output, softmax_lse],
+            )
+        torch.npu.graph_task_update_end(update_stream)
+        event.record(update_stream)
+        return True
 
     def _get_fia_params(
         self,
@@ -717,8 +820,19 @@ class AscendAttentionBackendImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AscendMetadata,
         output: torch.Tensor,
+        layer_name: str,
     ) -> torch.Tensor:
         """Forward pass using fused_infer_attention_score."""
+        if is_ascend_graph_capturing():
+            return self.full_graph_fused_infer_attention(
+                query,
+                key,
+                value,
+                attn_metadata,
+                output,
+                layer_name,
+            )
+
         key, value, block_size, block_table, actual_seq_lengths_kv = \
             self._get_fia_params(key, value, attn_metadata)
 
@@ -750,6 +864,117 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         attn_output = attn_output.view(num_tokens, self.num_heads, self.head_size)
         output[:num_tokens] = attn_output[:num_tokens]
+        return output
+
+    def full_graph_fused_infer_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: torch.Tensor,
+        layer_name: str,
+    ) -> torch.Tensor:
+        """Capture FIA and retain the task handle for host parameter update."""
+        key, value, block_size, block_table, actual_seq_lengths_kv = (
+            self._get_fia_params(key, value, attn_metadata)
+        )
+        num_tokens = attn_metadata.actual_seq_lengths_q[-1]
+        graph_params = get_ascend_graph_params()
+        assert graph_params is not None
+
+        actual_seq_lengths_q = attn_metadata.actual_seq_lengths_q
+        workspace = graph_params.workspaces.get(num_tokens)
+        softmax_lse = torch.empty(
+            1,
+            dtype=query.dtype,
+            device=query.device,
+        )
+        sparse_mode = (
+            4
+            if self.sliding_window is not None
+            else 3 if attn_metadata.causal else 0
+        )
+        pre_tokens = self.sliding_window or SWA_INT_MAX
+        next_tokens = 0 if self.sliding_window is not None else SWA_INT_MAX
+
+        if workspace is None:
+            workspace = (
+                torch_npu._npu_fused_infer_attention_score_get_max_workspace(
+                    query=query,
+                    key=key,
+                    value=value,
+                    atten_mask=attn_metadata.attn_mask,
+                    block_table=block_table,
+                    input_layout="TND",
+                    block_size=block_size,
+                    actual_seq_lengths=actual_seq_lengths_q,
+                    actual_seq_lengths_kv=actual_seq_lengths_kv,
+                    num_key_value_heads=self.num_kv_heads,
+                    num_heads=self.num_heads,
+                    sparse_mode=sparse_mode,
+                    pre_tokens=pre_tokens,
+                    next_tokens=next_tokens,
+                    scale=self.scale,
+                )
+            )
+            update_ascend_graph_params_workspace(num_tokens, workspace)
+
+        stream = torch.npu.current_stream()
+        event = torch.npu.ExternalEvent()
+        event.wait(stream)
+        event.reset(stream)
+        graph_params.events[num_tokens].append(event)
+        graph_params.attention_params[num_tokens].append(
+            (
+                layer_name,
+                weak_ref_tensors(query),
+                weak_ref_tensors(key),
+                weak_ref_tensors(value),
+                weak_ref_tensors(block_table),
+                weak_ref_tensors(attn_metadata.attn_mask)
+                if attn_metadata.attn_mask is not None
+                else None,
+                block_size,
+                self.num_kv_heads,
+                self.num_heads,
+                self.scale,
+                weak_ref_tensors(output),
+                weak_ref_tensors(softmax_lse),
+                sparse_mode,
+                pre_tokens,
+                next_tokens,
+            )
+        )
+
+        torch.npu.graph_task_group_begin(stream)
+        torch_npu.npu_fused_infer_attention_score.out(
+            query=query,
+            key=key,
+            value=value,
+            atten_mask=attn_metadata.attn_mask,
+            block_table=block_table,
+            input_layout="TND",
+            block_size=block_size,
+            actual_seq_lengths=actual_seq_lengths_q,
+            actual_seq_lengths_kv=actual_seq_lengths_kv,
+            num_key_value_heads=self.num_kv_heads,
+            num_heads=self.num_heads,
+            scale=self.scale,
+            sparse_mode=sparse_mode,
+            pre_tokens=pre_tokens,
+            next_tokens=next_tokens,
+            workspace=workspace,
+            out=[output, softmax_lse],
+        )
+        handle = torch.npu.graph_task_group_end(stream)
+        graph_params.handles[num_tokens].append(handle)
+        record_ascend_graph_task(
+            num_tokens,
+            "attention",
+            len(graph_params.handles[num_tokens]) - 1,
+            layer_name,
+        )
         return output
 
     def forward_paged_attention(
@@ -812,6 +1037,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
             )
             handle = torch.npu.graph_task_group_end(stream)
             graph_params.handles[num_tokens].append(handle)
+            record_ascend_graph_task(
+                num_tokens,
+                "attention",
+                len(graph_params.handles[num_tokens]) - 1,
+                layer_name,
+            )
             return output
 
         torch_npu._npu_paged_attention(
@@ -879,14 +1110,23 @@ class AscendAttentionBackendImpl(AttentionImpl):
         num_tokens = query.shape[0]
 
         # Use paged attention for decode-only state
-        if (attn_metadata.attn_state == AscendAttentionState.DecodeOnly
-                and self.sliding_window is None):
+        if (
+            attn_metadata.attn_state == AscendAttentionState.DecodeOnly
+            and using_paged_attention(num_tokens, self.vllm_config)
+            and self.sliding_window is None
+        ):
             output = self.forward_paged_attention(
                 query, attn_metadata, output, layer_name
             )
         else:
             output = self.forward_fused_infer_attention(
-                query, key, value, attn_metadata, output)
+                query,
+                key,
+                value,
+                attn_metadata,
+                output,
+                layer_name,
+            )
 
         return output
 

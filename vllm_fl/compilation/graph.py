@@ -5,9 +5,10 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
+import re
 import weakref
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from typing import Any, ClassVar
 from unittest.mock import patch
@@ -67,7 +68,6 @@ class GraphEntry:
     # during capture, and check if they are the same during replay
     input_addresses: list[int] | None = None
 
-
 @dataclasses.dataclass
 class GraphOptions:
     debug_log_enable: bool = True
@@ -86,6 +86,16 @@ class AscendGraphParams:
     conv1d_events: dict[int, list[Any]]
     conv1d_handles: dict[int, list[Any]]
     conv1d_params: dict[int, list[tuple[Any, ...]]]
+    task_order: dict[int, list["AscendGraphTaskDescriptor"]]
+
+
+@dataclasses.dataclass(frozen=True)
+class AscendGraphTaskDescriptor:
+    """One captured dynamic task in model execution order."""
+
+    kind: str
+    index: int
+    layer_name: str
 
 
 _ascend_graph_params: AscendGraphParams | None = None
@@ -104,11 +114,32 @@ def set_ascend_graph_params(capture_sizes: list[int]) -> None:
         conv1d_events={size: [] for size in sizes},
         conv1d_handles={size: [] for size in sizes},
         conv1d_params={size: [] for size in sizes},
+        task_order={size: [] for size in sizes},
     )
 
 
 def get_ascend_graph_params() -> AscendGraphParams | None:
     return _ascend_graph_params
+
+
+def update_ascend_graph_params_workspace(
+    num_tokens: int,
+    workspace: torch.Tensor,
+) -> None:
+    """Keep the per-shape attention workspace used by graph task updates."""
+    if _ascend_graph_params is not None:
+        _ascend_graph_params.workspaces[num_tokens] = workspace
+
+
+def weak_ref_ascend_graph_workspaces() -> None:
+    """Release strong Python references after NPUGraph owns workspaces."""
+    if _ascend_graph_params is None:
+        return
+    for num_tokens, workspace in _ascend_graph_params.workspaces.items():
+        if workspace is not None:
+            _ascend_graph_params.workspaces[num_tokens] = weak_ref_tensors(
+                workspace
+            )
 
 
 def set_ascend_graph_capturing(capturing: bool) -> None:
@@ -120,6 +151,129 @@ def is_ascend_graph_capturing() -> bool:
     return _ascend_graph_capturing
 
 
+def record_ascend_graph_task(
+    num_tokens: int,
+    kind: str,
+    index: int,
+    layer_name: str,
+) -> None:
+    """Record a task at its actual capture-time model position."""
+    if _ascend_graph_params is None:
+        return
+    if num_tokens not in _ascend_graph_params.task_order:
+        return
+    _ascend_graph_params.task_order[num_tokens].append(
+        AscendGraphTaskDescriptor(kind, index, layer_name)
+    )
+
+
+def _interleaved_graph_task_update_enabled(vllm_config: VllmConfig) -> bool:
+    """Return whether the experimental hybrid decode-only path is eligible."""
+    additional_config = getattr(vllm_config, "additional_config", None) or {}
+    if not isinstance(additional_config, Mapping):
+        return False
+    compilation_config = getattr(vllm_config, "compilation_config", None)
+    return (
+        current_platform.device_type == "npu"
+        and bool(
+            additional_config.get(
+                "enable_interleaved_graph_task_update", True
+            )
+        )
+        and bool(
+            getattr(getattr(vllm_config, "model_config", None),
+                    "is_hybrid", False)
+        )
+        and getattr(vllm_config, "speculative_config", None) is None
+        and getattr(compilation_config, "cudagraph_mode", None)
+        == CUDAGraphMode.FULL_DECODE_ONLY
+    )
+
+
+_LAYER_INDEX_PATTERN = re.compile(r"(?:^|\.)layers\.(\d+)(?:\.|$)")
+
+
+def _validated_interleaved_task_order(
+    graph_params: AscendGraphParams,
+    num_tokens: int,
+) -> list[AscendGraphTaskDescriptor] | None:
+    """Validate exact coverage and monotonically increasing model layers.
+
+    Returning ``None`` deliberately selects the established attention-then-GDN
+    update path.  The strict one-task-per-layer contract matches the non-spec
+    Qwen3.5/Qwen3.6 hybrid decode graph and prevents an experimental ordering
+    from being used for unfamiliar graph layouts.
+    """
+    if num_tokens not in graph_params.task_order:
+        return None
+    order = graph_params.task_order[num_tokens]
+    num_attention = len(graph_params.attention_params.get(num_tokens, ()))
+    num_conv1d = len(graph_params.conv1d_params.get(num_tokens, ()))
+    if not (
+        num_attention == len(graph_params.handles.get(num_tokens, ()))
+        == len(graph_params.events.get(num_tokens, ()))
+        and num_conv1d
+        == len(graph_params.conv1d_handles.get(num_tokens, ()))
+        == len(graph_params.conv1d_events.get(num_tokens, ()))
+    ):
+        return None
+    if len(order) != num_attention + num_conv1d:
+        return None
+
+    expected = {
+        ("attention", index) for index in range(num_attention)
+    } | {("conv1d", index) for index in range(num_conv1d)}
+    actual = {(task.kind, task.index) for task in order}
+    if len(actual) != len(order) or actual != expected:
+        return None
+
+    layer_indices: list[int] = []
+    for task in order:
+        if task.kind == "attention":
+            params = graph_params.attention_params[num_tokens]
+        elif task.kind == "conv1d":
+            params = graph_params.conv1d_params[num_tokens]
+        else:
+            return None
+        if task.index >= len(params):
+            return None
+        captured_layer_name = params[task.index][0 if task.kind == "attention" else 9]
+        if task.layer_name != captured_layer_name:
+            return None
+        match = _LAYER_INDEX_PATTERN.search(task.layer_name)
+        if match is None:
+            return None
+        layer_indices.append(int(match.group(1)))
+
+    if (
+        layer_indices != sorted(layer_indices)
+        or len(set(layer_indices)) != len(layer_indices)
+    ):
+        return None
+    return order
+
+
+def _interleaved_forward_metadata_complete(
+    task_order: list[AscendGraphTaskDescriptor],
+    forward_context: Any,
+    attention_metadata_type: type,
+    conv1d_metadata_type: type,
+) -> bool:
+    """Reject the candidate before submitting any task on partial metadata."""
+    metadata = getattr(forward_context, "attn_metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    for task in task_order:
+        expected_type = (
+            attention_metadata_type
+            if task.kind == "attention"
+            else conv1d_metadata_type
+        )
+        if not isinstance(metadata.get(task.layer_name), expected_type):
+            return False
+    return True
+
+
 def update_ascend_full_graph_params(
     update_stream: Any,
     forward_context: Any,
@@ -129,13 +283,59 @@ def update_ascend_full_graph_params(
     """Refresh host parameters consumed by task groups on the next replay."""
     from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
         AscendAttentionBackendImpl,
+        AscendMetadata,
+        using_paged_attention,
     )
     from vllm_fl.dispatch.backends.vendor.ascend.impl.gdn import (
+        GDNAttentionMetadata,
+        _update_conv1d_graph_task,
         update_conv1d_graph_params,
     )
 
+    graph_params = get_ascend_graph_params()
+    if (
+        graph_params is not None
+        and _interleaved_graph_task_update_enabled(vllm_config)
+        and (
+            task_order := _validated_interleaved_task_order(
+                graph_params, num_tokens
+            )
+        )
+        is not None
+        and _interleaved_forward_metadata_complete(
+            task_order,
+            forward_context,
+            AscendMetadata,
+            GDNAttentionMetadata,
+        )
+    ):
+        attention_uses_paged = using_paged_attention(num_tokens, vllm_config)
+        with torch.npu.stream(update_stream):
+            for task in task_order:
+                if task.kind == "attention":
+                    AscendAttentionBackendImpl._update_graph_task(
+                        update_stream,
+                        forward_context,
+                        num_tokens,
+                        vllm_config,
+                        task.index,
+                        use_pa=attention_uses_paged,
+                    )
+                else:
+                    _update_conv1d_graph_task(
+                        update_stream,
+                        forward_context,
+                        num_tokens,
+                        vllm_config,
+                        task.index,
+                    )
+        return
+
     AscendAttentionBackendImpl.update_graph_params(
-        update_stream, forward_context, num_tokens
+        update_stream,
+        forward_context,
+        num_tokens,
+        vllm_config,
     )
     update_conv1d_graph_params(
         update_stream, forward_context, num_tokens, vllm_config
@@ -271,13 +471,13 @@ class GraphWrapper:
             except (ImportError, RuntimeError):
                 pass
 
-            # FL-specific: use platform-agnostic graph capture
             self.graph_runtime.begin_capture(forward_context)
             try:
+                # FL-specific: use platform-agnostic graph capture
                 with current_platform.torch_device_fn.graph(
                     graph, pool=self.graph_pool
                 ):
-                    # `output` is managed by pytorch's cudagraph pool
+                    # `output` is managed by pytorch's graph pool
                     output = self.runnable(*args, **kwargs)
                     # Join offloader's copy stream after forward if available
                     try:

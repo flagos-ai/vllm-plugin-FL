@@ -182,5 +182,31 @@ class FusedMoEFL(FusedMoE):
             else 1.0,
         )
 
+        # Upstream vLLM already owns the shared-expert scheduling and output
+        # reduction contract, but its auxiliary stream implementation is CUDA
+        # only. Replace that small runner component on Ascend so the public
+        # additional_config switch is functional without importing or copying
+        # vLLM-Ascend's complete FusedMoE stack.
+        from vllm.platforms import current_platform
+
+        if current_platform.device_type == "npu" and shared_experts is not None:
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.shared_experts import (
+                AscendSharedExperts,
+            )
+
+            additional_config = self.vllm_config.additional_config or {}
+            multistream_enabled = bool(
+                additional_config.get(
+                    "multistream_overlap_shared_expert", False
+                )
+            )
+            self.runner._shared_experts = AscendSharedExperts(
+                shared_experts,
+                moe_config=self.moe_config,
+                quant_method=self.quant_method,
+                enable_dbo=self.vllm_config.parallel_config.enable_dbo,
+                multistream_enabled=multistream_enabled,
+            )
+
 
 __all__ = ["FusedMoEFL", "UnquantizedFusedMoEMethodFL"]

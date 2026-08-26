@@ -1,7 +1,12 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Device-specific lifecycle hooks for static graph execution."""
+"""Device-specific lifecycle hooks for static graph execution.
+
+The model runner owns *when* a graph is prepared, captured, and replayed.
+This module owns the small device-specific actions performed at those
+lifecycle points so worker code does not need hardware checks.
+"""
 
 from contextlib import contextmanager, nullcontext
 from typing import Any
@@ -126,6 +131,11 @@ class AscendGraphRuntimeBackend(GraphRuntimeBackend):
         from vllm_fl.compilation.graph import set_ascend_graph_capturing
 
         set_ascend_graph_capturing(False)
+
+    def after_capture(self) -> None:
+        from vllm_fl.compilation.graph import weak_ref_ascend_graph_workspaces
+
+        weak_ref_ascend_graph_workspaces()
 
     def before_replay(self) -> None:
         current_platform.torch_device_fn.synchronize()
