@@ -111,6 +111,18 @@ include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
 "vllm_fl.dispatch.config" = ["*.yaml"]
+"vllm_fl.dispatch.backends.vendor.ascend" = [
+    "prebuilt/**/*",
+    "prebuilt/*/lib/*.so",
+    "prebuilt/*/opp/**/*.so",
+    "prebuilt/*/opp/**/*.o",
+    "prebuilt/*/opp/**/*.json",
+    "prebuilt/*/opp/**/*.h",
+    "prebuilt/*/opp/**/*.py",
+    "prebuilt/*/opp/**/*.bash",
+    "prebuilt/*/opp/**/*.sh",
+    "prebuilt/*/opp/**/version.info",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

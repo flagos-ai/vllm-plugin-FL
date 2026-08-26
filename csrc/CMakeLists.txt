@@ -17,11 +17,11 @@ endif()
 if(NOT VLLM_VENDOR)
     message(FATAL_ERROR
         "VLLM_VENDOR is required but not specified.\n"
-        "Set VLLM_VENDOR=cuda."
+        "Set VLLM_VENDOR=cuda or VLLM_VENDOR=ascend."
     )
 endif()
 
-set(SUPPORTED_VENDORS cuda)
+set(SUPPORTED_VENDORS cuda ascend)
 if(NOT VLLM_VENDOR IN_LIST SUPPORTED_VENDORS)
     message(FATAL_ERROR
         "Unsupported vendor: ${VLLM_VENDOR}\n"

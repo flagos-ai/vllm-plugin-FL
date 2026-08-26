@@ -134,14 +134,23 @@ def register_builtins(registry: OpRegistry) -> None:
     Args:
         registry: Registry to register into
     """
-    # Register FlagGems (DEFAULT) implementations
-    try:
-        from .backends.flaggems.register_ops import register_builtins as register_flaggems
+    # Do not even import the FlagGems backend when it is disabled. This is
+    # important on Ascend because importing FlagGems mutates process-global
+    # device/backend state even if none of its operators is later selected.
+    from vllm_fl.utils import use_flaggems
 
-        register_flaggems(registry)
-        logger.debug("Registered FlagGems operators")
-    except Exception as e:
-        logger.warning(f"Failed to register FlagGems operators: {e}")
+    if use_flaggems():
+        try:
+            from .backends.flaggems.register_ops import (
+                register_builtins as register_flaggems,
+            )
+
+            register_flaggems(registry)
+            logger.debug("Registered FlagGems operators")
+        except Exception as e:
+            logger.warning(f"Failed to register FlagGems operators: {e}")
+    else:
+        logger.debug("FlagGems is disabled; skipping its backend registration")
 
     # Register PyTorch (REFERENCE) implementations
     try:

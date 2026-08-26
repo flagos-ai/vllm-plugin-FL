@@ -216,7 +216,28 @@ class AscendBackend(Backend):
         self, topk_weights, topk_indices, token_expert_indices, gating_output,
         renormalize=False,
     ):
-        """Pure-torch topk_softmax for Ascend NPU."""
+        """Use the current vLLM-Ascend A3 expert-selection operator."""
+        custom_topk = getattr(torch.ops._C_ascend, "moe_gating_top_k", None)
+        if custom_topk is not None:
+            selected_weights, selected_indices, _ = custom_topk(
+                gating_output,
+                k=topk_weights.shape[1],
+                k_group=1,
+                group_count=1,
+                group_select_mode=1,
+                renorm=int(renormalize),
+                norm_type=0,
+                out_flag=False,
+                routed_scaling_factor=1.0,
+                eps=1e-20,
+                bias_opt=None,
+            )
+            topk_weights.copy_(selected_weights.to(topk_weights.dtype))
+            topk_indices.copy_(selected_indices.to(topk_indices.dtype))
+            return topk_weights, topk_indices
+
+        # Keep the fallback for development builds that do not package the
+        # A3 custom OPP yet. Production Qwen3.6 wheels take the branch above.
         scores = torch.softmax(gating_output.float(), dim=-1)
         topk = topk_weights.shape[1]
         tk_weights, tk_indices = torch.topk(scores, k=topk, dim=-1)

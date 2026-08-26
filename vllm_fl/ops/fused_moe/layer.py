@@ -78,7 +78,16 @@ class FusedMoEFL(FusedMoE):
         self._apply_routed_scale_to_output = apply_routed_scale_to_output
         # Replace quant_method with FL version that properly handles OOT backend
         if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(self.quant_method, UnquantizedFusedMoEMethodFL):
-            self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
+            from vllm.platforms import current_platform
+
+            if current_platform.device_type == "npu":
+                from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe_layer import (
+                    AscendUnquantizedFusedMoEMethod,
+                )
+
+                self.quant_method = AscendUnquantizedFusedMoEMethod(self.moe_config)
+            else:
+                self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
             self.base_quant_method = self.quant_method
         else:
             from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod

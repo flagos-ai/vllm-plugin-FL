@@ -75,6 +75,73 @@ class GraphOptions:
     weak_ref_output: bool = True
 
 
+@dataclasses.dataclass
+class AscendGraphParams:
+    """Host-side task update state for a captured Ascend full graph."""
+
+    events: dict[int, list[Any]]
+    workspaces: dict[int, torch.Tensor | None]
+    handles: dict[int, list[Any]]
+    attention_params: dict[int, list[tuple[Any, ...]]]
+    conv1d_events: dict[int, list[Any]]
+    conv1d_handles: dict[int, list[Any]]
+    conv1d_params: dict[int, list[tuple[Any, ...]]]
+
+
+_ascend_graph_params: AscendGraphParams | None = None
+_ascend_graph_capturing = False
+
+
+def set_ascend_graph_params(capture_sizes: list[int]) -> None:
+    """Initialize per-shape task update storage before graph capture."""
+    global _ascend_graph_params
+    sizes = sorted(set(capture_sizes))
+    _ascend_graph_params = AscendGraphParams(
+        events={size: [] for size in sizes},
+        workspaces={size: None for size in sizes},
+        handles={size: [] for size in sizes},
+        attention_params={size: [] for size in sizes},
+        conv1d_events={size: [] for size in sizes},
+        conv1d_handles={size: [] for size in sizes},
+        conv1d_params={size: [] for size in sizes},
+    )
+
+
+def get_ascend_graph_params() -> AscendGraphParams | None:
+    return _ascend_graph_params
+
+
+def set_ascend_graph_capturing(capturing: bool) -> None:
+    global _ascend_graph_capturing
+    _ascend_graph_capturing = capturing
+
+
+def is_ascend_graph_capturing() -> bool:
+    return _ascend_graph_capturing
+
+
+def update_ascend_full_graph_params(
+    update_stream: Any,
+    forward_context: Any,
+    num_tokens: int,
+    vllm_config: VllmConfig,
+) -> None:
+    """Refresh host parameters consumed by task groups on the next replay."""
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+        AscendAttentionBackendImpl,
+    )
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.gdn import (
+        update_conv1d_graph_params,
+    )
+
+    AscendAttentionBackendImpl.update_graph_params(
+        update_stream, forward_context, num_tokens
+    )
+    update_conv1d_graph_params(
+        update_stream, forward_context, num_tokens, vllm_config
+    )
+
+
 class GraphWrapper:
     """FL-specific graph wrapper that supports multiple device types (CUDA, NPU).
     Adapted from upstream CUDAGraphWrapper with platform-agnostic graph capture."""

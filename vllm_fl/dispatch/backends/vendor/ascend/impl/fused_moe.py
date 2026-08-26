@@ -9,7 +9,6 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 import torch_npu
-from flag_gems.runtime.backend._ascend import fused
 
 import logging
 logger = logging.getLogger(__name__)
@@ -265,6 +264,10 @@ def fused_experts_impl(
             expert_map=expert_map,
         )
     except Exception as e:
+        from vllm_fl.compilation.graph import is_ascend_graph_capturing
+
+        if is_ascend_graph_capturing():
+            raise
         # Fall back to Python loop on first failure, then log warning
         if not hasattr(fused_experts_impl, '_grouped_matmul_warned'):
             logger.warning(

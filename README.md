@@ -71,6 +71,17 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     required by some graph/custom-op paths, especially when vLLM is installed
     with `VLLM_TARGET_DEVICE=empty`.
 
+    For Ascend, set `VLLM_VENDOR=ascend`. A3 (`ascend910_93`) is the default
+    target; for A2, also set `SOC_VERSION=ascend910b`:
+    ```sh
+    cd vllm-plugin-FL
+    # A3
+    VLLM_VENDOR=ascend pip install --no-build-isolation .
+
+    # A2
+    VLLM_VENDOR=ascend SOC_VERSION=ascend910b pip install --no-build-isolation .
+    ```
+
     If `VLLM_VENDOR` is not set, vllm-plugin-FL is installed as a Python-only
     plugin and the native extension is skipped.
 

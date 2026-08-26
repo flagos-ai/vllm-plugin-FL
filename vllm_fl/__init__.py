@@ -17,8 +17,6 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
-from vllm_fl.utils import get_op_config as _get_op_config
-
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 
@@ -104,6 +102,23 @@ def _init_vendor_device():
 
 def register():
     """Register the FL platform."""
+    # Device runtimes cannot be safely re-initialized after fork.  This is
+    # required by both FL workers and the delegated vLLM-Ascend worker.
+    multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
+    if multiproc_method is None:
+        os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+    # torch_npu registers ``torch.npu`` as an import side effect.  Detect via
+    # DeviceInfo so platform activation does not depend on whether another
+    # module happened to import torch_npu first.
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().device_type == "npu":
+        # The standalone Ascend path is intentionally built from FL-local
+        # current vLLM-Ascend implementations. Do not let a parent process or
+        # an old launch script reactivate FlagGems globally on NPU.
+        os.environ["USE_FLAGGEMS"] = "0"
+
     _init_vendor_device()
 
     _patch_custom_ops()
@@ -118,10 +133,9 @@ def register():
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
     # subprocesses.
 
-    multiproc_method = os.environ.get("VLLM_WORKER_MULTIPROC_METHOD")
-    if multiproc_method is None:
-        os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-    _get_op_config()
+    from vllm_fl.utils import get_op_config
+
+    get_op_config()
 
     return "vllm_fl.platform.PlatformFL"
 

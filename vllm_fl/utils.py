@@ -2,18 +2,24 @@
 
 import json
 import os
+from types import SimpleNamespace
 from typing import Optional, Tuple
 
-import flag_gems
-try:
-    # FlagGems<=5.0.2: DeviceDetector lives in device.
-    from flag_gems.runtime.backend.device import DeviceDetector
-except (ImportError, FileNotFoundError):
-    # FlagGems>5.0.2: DeviceDetector lives in device_finder.
-    from flag_gems.runtime.backend.device_finder import DeviceDetector
-from flag_gems.runtime import backend
-
 _OP_CONFIG: Optional[dict[str, str]] = None
+
+
+def _load_flaggems_device_runtime():
+    import flag_gems
+
+    try:
+        # FlagGems<=5.0.2
+        from flag_gems.runtime.backend.device import DeviceDetector
+    except (ImportError, FileNotFoundError):
+        # FlagGems>5.0.2
+        from flag_gems.runtime.backend.device_finder import DeviceDetector
+    from flag_gems.runtime import backend
+
+    return flag_gems, DeviceDetector, backend
 
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
@@ -220,9 +226,38 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
-        self.device = DeviceDetector()
         self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead", "gcu", "kunlunxin"]
+        import torch
+
+        npu = getattr(torch, "npu", None)
+        if npu is None:
+            # torch-npu registers the PrivateUse1 ``torch.npu`` facade as an
+            # import side effect. Platform plugin discovery can run before any
+            # other Ascend module imports torch_npu, so bootstrap it locally
+            # instead of making device detection depend on import order.
+            try:
+                import torch_npu  # noqa: F401
+            except (ImportError, OSError, RuntimeError):
+                pass
+            npu = getattr(torch, "npu", None)
+        if npu is not None and npu.is_available():
+            # Avoid importing FlagGems on Ascend. Its device detector mutates
+            # process-global backend state during import, which changes model
+            # numerics even when USE_FLAGGEMS=0.
+            self.device = SimpleNamespace(
+                dispatch_key="PrivateUse1",
+                vendor_name="ascend",
+                name="npu",
+            )
+            self._backend = None
+            self._torch_device_fn = npu
+            return
+
+        _, DeviceDetector, backend = _load_flaggems_device_runtime()
+        self.device = DeviceDetector()
+        self._backend = backend
         backend.set_torch_backend_device_fn(self.device.vendor_name)
+        self._torch_device_fn = backend.gen_torch_device_object()
 
     @property
     def dispatch_key(self):
@@ -239,12 +274,14 @@ class DeviceInfo:
     @property
     def torch_device_fn(self):
         # torch_device_fn is like 'torch.cuda' object
-        return backend.gen_torch_device_object()
+        return self._torch_device_fn
 
     @property
     def torch_backend_device(self):
         # torch_backend_device is like 'torch.backend.cuda' object
-        return backend.get_torch_backend_device_fn()
+        if self._backend is None:
+            return self._torch_device_fn
+        return self._backend.get_torch_backend_device_fn()
 
     def get_supported_device(self):
         if self.vendor_name not in self.supported_device:
@@ -257,6 +294,7 @@ def get_flaggems_all_ops() -> list[str]:
     Get all FlagGems operator names from flag_gems._FULL_CONFIG.
     """
     try:
+        flag_gems, _, _ = _load_flaggems_device_runtime()
         # _FULL_CONFIG is a tuple of (op_name, function, ...) tuples
         # Some entries have 2 elements, some have 3
         ops = [entry[0] for entry in flag_gems._FULL_CONFIG]

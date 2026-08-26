@@ -11,7 +11,8 @@ This module follows a layered testing strategy:
 Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -146,6 +147,7 @@ class TestGetCumsumAndArange:
         expected_arange = np.array([0, 1, 0, 1, 2, 3, 4, 0, 1, 2])
         np.testing.assert_array_equal(arange_out, expected_arange)
 
+
     def test_single_sequence(self, mock_model_runner):
         """Test with single sequence (common in generation phase)."""
         num_tokens = np.array([5])
@@ -189,6 +191,174 @@ class TestGetCumsumAndArange:
         )
 
         assert cu_num_tokens.dtype == np.int64
+
+
+class TestAscendSlotMappingBuffers:
+    def test_int32_conversion_buffer_has_stable_address_across_steps(self):
+        from vllm_fl.worker import model_runner as model_runner_module
+
+        source = torch.arange(16, dtype=torch.int64)
+        runner = SimpleNamespace(
+            kv_cache_config=SimpleNamespace(
+                kv_cache_groups=[
+                    SimpleNamespace(
+                        kv_cache_spec=object(),
+                        layer_names=["model.layers.0.self_attn"],
+                    )
+                ]
+            ),
+            input_batch=SimpleNamespace(
+                block_table=[
+                    SimpleNamespace(
+                        slot_mapping=SimpleNamespace(gpu=source)
+                    )
+                ]
+            ),
+            device=torch.device("cpu"),
+        )
+
+        with patch.object(
+            model_runner_module,
+            "current_platform",
+            SimpleNamespace(device_type="npu"),
+        ):
+            first_by_group, _ = model_runner_module.ModelRunnerFL._get_slot_mappings(
+                runner,
+                num_tokens_padded=8,
+                num_reqs_padded=1,
+                num_tokens_unpadded=6,
+            )
+            first = first_by_group[0]
+            first_address = first.data_ptr()
+
+            source[:8].add_(100)
+            second_by_group, _ = model_runner_module.ModelRunnerFL._get_slot_mappings(
+                runner,
+                num_tokens_padded=8,
+                num_reqs_padded=1,
+                num_tokens_unpadded=7,
+            )
+            second = second_by_group[0]
+
+        assert first.dtype == torch.int32
+        assert second.data_ptr() == first_address
+        torch.testing.assert_close(
+            second,
+            torch.tensor(
+                [100, 101, 102, 103, 104, 105, 106, -1],
+                dtype=torch.int32,
+            ),
+        )
+
+
+class TestDenseMambaStateViews:
+    def test_dense_mamba_views_are_non_overlapping(self):
+        from vllm_fl.worker.model_runner import _make_dense_mamba_state_views
+
+        num_blocks = 4
+        shapes = [(3, 8), (2, 8, 8)]
+        dtypes = [torch.bfloat16, torch.float32]
+        required_bytes = sum(
+            num_blocks
+            * int(np.prod(shape))
+            * torch.empty((), dtype=dtype).element_size()
+            for shape, dtype in zip(shapes, dtypes)
+        )
+        raw = torch.empty(required_bytes + 64, dtype=torch.uint8)
+
+        conv_state, ssm_state = _make_dense_mamba_state_views(
+            raw, num_blocks, shapes, dtypes
+        )
+
+        assert conv_state.shape == (num_blocks, *shapes[0])
+        assert ssm_state.shape == (num_blocks, *shapes[1])
+        assert conv_state.stride(0) == int(np.prod(shapes[0]))
+        assert ssm_state.stride(0) == int(np.prod(shapes[1]))
+
+        conv_start = conv_state.storage_offset() * conv_state.element_size()
+        conv_end = conv_start + conv_state.numel() * conv_state.element_size()
+        ssm_start = ssm_state.storage_offset() * ssm_state.element_size()
+        ssm_end = ssm_start + ssm_state.numel() * ssm_state.element_size()
+        assert conv_start == 0
+        assert conv_end == ssm_start
+        assert ssm_end == required_bytes
+
+
+class TestReserveModularMoeWorkspace:
+    def test_reserves_maximum_modular_kernel_requirement(self):
+        from vllm_fl.worker.model_runner import _reserve_modular_moe_workspace
+
+        class FakeExperts:
+            @staticmethod
+            def workspace_shapes(
+                tokens,
+                intermediate_dim,
+                hidden_dim,
+                top_k,
+                global_num_experts,
+                local_num_experts,
+                expert_tokens_meta,
+                activation,
+            ):
+                assert (global_num_experts, local_num_experts) == (256, 128)
+                assert expert_tokens_meta is None
+                assert activation == "silu"
+                return (
+                    (tokens, top_k, intermediate_dim // 2),
+                    (tokens, top_k, max(intermediate_dim, hidden_dim)),
+                    (tokens, hidden_dim),
+                )
+
+            @staticmethod
+            def workspace_dtype(in_dtype):
+                assert in_dtype == torch.bfloat16
+                return torch.bfloat16
+
+        moe_layer = torch.nn.Module()
+        moe_layer.quant_method = MagicMock()
+        moe_layer.quant_method.moe_kernel.is_monolithic = False
+        moe_layer.quant_method.moe_kernel.impl.fused_experts = FakeExperts()
+        moe_layer.moe_config = MagicMock(
+            hidden_dim=1024,
+            experts_per_token=8,
+            num_experts=256,
+            in_dtype=torch.bfloat16,
+        )
+        moe_layer.global_num_experts = 256
+        moe_layer.w13_weight = torch.empty(128, 512, 1024, device="meta")
+        moe_layer.activation = "silu"
+
+        model = torch.nn.Module()
+        model.add_module("moe", moe_layer)
+        workspace_manager = MagicMock()
+
+        num_kernels, reserved_bytes = _reserve_modular_moe_workspace(
+            model, max_num_tokens=64, workspace_manager=workspace_manager
+        )
+
+        assert num_kernels == 1
+        assert reserved_bytes == (64 * 8 * 256 + 64 * 8 * 1024) * 2
+        workspace_manager.get_simultaneous.assert_called_once_with(
+            ((64 * 8 * 256,), torch.bfloat16),
+            ((64, 8, 1024), torch.bfloat16),
+        )
+
+    def test_skips_monolithic_moe_kernel(self):
+        from vllm_fl.worker.model_runner import _reserve_modular_moe_workspace
+
+        moe_layer = torch.nn.Module()
+        moe_layer.quant_method = MagicMock()
+        moe_layer.quant_method.moe_kernel.is_monolithic = True
+        model = torch.nn.Module()
+        model.add_module("moe", moe_layer)
+        workspace_manager = MagicMock()
+
+        result = _reserve_modular_moe_workspace(
+            model, max_num_tokens=64, workspace_manager=workspace_manager
+        )
+
+        assert result == (0, 0)
+        workspace_manager.get_simultaneous.assert_not_called()
 
 
 # =============================================================================
@@ -318,3 +488,31 @@ class TestGetPositions:
         expected = mock_model_runner.xdrope_positions.gpu[:, :10]
         assert result.shape == (2, 10)
         torch.testing.assert_close(result, expected)
+
+
+class TestGraphRuntimeDelegation:
+    def test_model_forward_delegates_graph_lifecycle(self):
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+
+        model_output = object()
+        runner = MagicMock(spec=ModelRunnerFL)
+        runner.model = MagicMock(return_value=model_output)
+        runner.graph_runtime = MagicMock()
+        runner.vllm_config = MagicMock()
+        runner._model_forward = ModelRunnerFL._model_forward.__get__(
+            runner, ModelRunnerFL
+        )
+        positions = torch.zeros((1,), dtype=torch.int64)
+
+        result = runner._model_forward(positions=positions)
+
+        assert result is model_output
+        runner.model.assert_called_once_with(
+            input_ids=None,
+            positions=positions,
+            intermediate_tensors=None,
+            inputs_embeds=None,
+        )
+        runner.graph_runtime.after_model_forward.assert_called_once_with(
+            runner.vllm_config
+        )

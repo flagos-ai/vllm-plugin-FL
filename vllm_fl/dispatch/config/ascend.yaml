@@ -15,8 +15,9 @@
 # vLLM-FL Dispatch Configuration for Ascend NPU
 # Auto-loaded when running on Ascend hardware
 
-# Preferred default backend type: flagos, vendor, reference
-prefer: flagos
+# The standalone Ascend path uses FL-local implementations copied/adapted from
+# the matching vLLM-Ascend version. FlagGems is not part of the NPU runtime.
+prefer: vendor
 
 # Strict Mode:
 #   true  = Raise an error immediately on failure; do not attempt other backends.
@@ -51,8 +52,8 @@ op_backends:
     - flagos
     - reference
   silu_and_mul:
-    - flagos
     - vendor
+    - flagos
     - reference
   rotary_embedding:
     - vendor
@@ -80,6 +81,9 @@ op_backends:
 # Operators are blacklisted because their FlagGems Triton kernels are either
 # incorrect, imprecise, or crash on Ascend NPU during inference.
 flagos_blacklist:
+  # PR #301 uses the native NPU SwiGLU path for stable graph decode; PR #349
+  # also excludes the FlagGems implementation on Ascend.
+  - silu_and_mul
   # --- Crash: GDN recurrent path precision ---
   - exp
   - exp_

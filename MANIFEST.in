@@ -1,0 +1,5 @@
+recursive-include csrc *
+prune csrc/ascend/build
+prune csrc/ascend/build_out
+prune csrc/ascend/output
+prune csrc/ascend/third_party

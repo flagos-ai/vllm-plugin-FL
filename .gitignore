@@ -3,6 +3,13 @@ __pycache__/
 build/
 dist/
 vllm_fl/_version.py
+.deps/
+csrc/ascend/build/
+csrc/ascend/build_out/
+csrc/ascend/output/
+csrc/ascend/third_party/
+vllm_fl/dispatch/backends/vendor/ascend/prebuilt/ascend910b1/
+vllm_fl/dispatch/backends/vendor/ascend/prebuilt/ascend910_93/
 
 # Coverage
 .coverage

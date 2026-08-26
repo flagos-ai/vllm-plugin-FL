@@ -119,7 +119,16 @@ def select_unquantized_moe_backend_oot(
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
 
-    if current_platform.is_out_of_tree() and use_flaggems():
+    # ``TritonExpertsFL`` is the FL modular-experts adapter.  Despite its
+    # historical name, its kernels are selected through ``CachedOp`` and can
+    # therefore be provided by a vendor backend without globally enabling
+    # FlagGems.  Ascend does exactly that for routing, expert GEMMs, and the
+    # final reduction.  Falling through to the upstream Triton oracle when
+    # USE_FLAGGEMS=0 rejects the otherwise supported OOT/NPU configuration
+    # before model weights are loaded.
+    if current_platform.is_out_of_tree() and (
+        use_flaggems() or get_platform_name() == "ascend"
+    ):
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     if moe_config.is_lora_enabled:
@@ -330,7 +339,32 @@ class TritonExpertsFL(TritonExperts):
 
         # Fast path (no LoRA): platform-specific implementations
         if self._lora_context is None:
-            if get_platform_name() == "kunlunxin":
+            if get_platform_name() == "ascend":
+                # Use the vLLM-Ascend-style NPU routing/GMM path in both eager
+                # and graph modes. Keeping a separate CPU-routing eager path
+                # changes accumulation order and leaves eager slower than the
+                # implementation used by the Ascend reference and FL graph.
+                from vllm_fl.dispatch.backends.vendor.ascend.impl.fused_moe import (
+                    fused_experts_impl,
+                )
+
+                output.copy_(
+                    fused_experts_impl(
+                        hidden_states,
+                        w1,
+                        w2,
+                        topk_weights,
+                        topk_ids,
+                        inplace=False,
+                        activation=activation.value,
+                        apply_router_weight_on_input=apply_router_weight_on_input,
+                        global_num_experts=global_num_experts,
+                        expert_map=expert_map,
+                    )
+                )
+                return
+
+            elif get_platform_name() == "kunlunxin":
                 # Kunlunxin: use patched fused_experts_impl
                 from vllm_fl.ops.fused_moe.fused_moe import fused_experts_impl
 
