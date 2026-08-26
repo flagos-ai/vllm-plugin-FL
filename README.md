@@ -2,6 +2,13 @@
 
 vllm-plugin-FL is a plugin for the [vLLM](https://github.com/vllm-project/vllm) inference/serving framework, built on FlagOS's unified multi-chip backend — including the unified operator library [FlagGems](https://github.com/flagos-ai/FlagGems) and the unified communication library [FlagCX](https://github.com/flagos-ai/FlagCX). It extends vLLM's capabilities and performance across diverse hardware environments. Without changing vLLM's original interfaces or usage patterns, the same command can run model inference/serving on different chips.
 
+## Version Compatibility
+
+| vllm-plugin-FL Branch | Community vLLM Version |
+|-----------------------|------------------------|
+| `release/0.2` | [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) |
+| `main` | [v0.24.0](https://github.com/vllm-project/vllm/tree/v0.24.0) |
+
 ## Supported Models and Chips
 
 In theory, vllm-plugin-FL can support all models available in vLLM, as long as no unsupported operators are involved. The tables below summarize the current support status of end-to-end verified models and chips, including both fully supported and in-progress ("Merging") entries.
@@ -37,8 +44,19 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 ### Setup
 
-1. Install vllm from the official [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) (optional if the correct version is installed)
+1. Install vLLM
 
+    For **NVIDIA** GPUs, install vLLM from the official [v0.24.0](https://github.com/vllm-project/vllm/tree/v0.24.0) release (optional if the correct version is already installed):
+    ```sh
+    pip install vllm==0.24.0
+    ```
+
+    For **non-NVIDIA** chips, install vLLM from source with the `empty` device target:
+    ```sh
+    git clone -b v0.24.0 https://github.com/vllm-project/vllm.git
+    cd vllm
+    VLLM_TARGET_DEVICE=empty pip install -v --no-build-isolation --no-deps .
+    ```
 
 2. Install vllm-plugin-FL
 
@@ -48,11 +66,11 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     git clone https://github.com/flagos-ai/vllm-plugin-FL
     ```
 
-    2.2 install
+    2.2 Install
     ```sh
     cd vllm-plugin-FL
     pip install --no-build-isolation .
-    # or editble install
+    # or editable install
     pip install --no-build-isolation -e .
     ```
 
@@ -81,24 +99,32 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install -U scikit-build-core==0.11 pybind11 ninja cmake
     ```
 
-    3.2 Installation FlagGems
+    3.2 Install FlagGems
 
     ```sh
-    git clone https://github.com/flagos-ai/FlagGems
+    git clone -b v5.3.4 https://github.com/flagos-ai/FlagGems
     cd FlagGems
-    git checkout 3b2b55c8eda5de44ba3476d26566ecf134db0662
     pip install --no-build-isolation .
-    # or editble install
+    # or editable install
     pip install --no-build-isolation -e .
     ```
+
+### Runtime compatibility hooks
+
+The plugin installs runtime compatibility hooks through vLLM's plugin entry
+points without modifying the installed vLLM package. Model-specific config and
+model registrations are loaded only for their corresponding architectures.
+
+Operator adapters use the plugin dispatch manager, so backend selection,
+fallback, per-op policy, operator-list recording, and I/O diagnostics continue
+to follow the common FlagOS controls.
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
     4.1 Clone the repository:
     ```sh
-    git clone https://github.com/flagos-ai/FlagCX.git
+    git clone -b v0.13.0 https://github.com/flagos-ai/FlagCX.git
     cd FlagCX
-    git checkout -b v0.9.0
     git submodule update --init --recursive
     ```
 
@@ -126,12 +152,14 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
-1. Install [FlagTree](https://resource.flagos.net)
+1. Install [FlagTree](https://github.com/flagos-ai/flagtree/)
 
     ```sh
     RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple --trusted-host=https://resource.flagos.net"
-    python3 -m pip install flagtree==0.4.0+ascend3.2 $RES
+    python3 -m pip install flagtree==0.6.1rc1+ascend3.5 $RES
     ```
+
+    For other chips, please refer to [FlagTree](https://github.com/flagos-ai/flagtree/) for the corresponding version (e.g., `flagtree==0.6.1+iluvatar3.6`, `flagtree==0.6.1+metax3.6`, etc.).
 
 2. Set required environment variable
 
@@ -150,8 +178,6 @@ If there are multiple plugins in the current environment, you can specify use vl
 With vLLM and vLLM-fl installed, you can start generating texts for list of input prompts (i.e. offline batch inferencing). See the example script: [offline_inference](./examples/offline_inference.py). Or use blow python script directly.
 ```python
 from vllm import LLM, SamplingParams
-import torch
-from vllm.config.compilation import CompilationConfig
 
 
 if __name__ == '__main__':

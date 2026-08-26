@@ -1,0 +1,43 @@
+# vLLM-FL Dispatch Configuration for NVIDIA Hopper GPUs
+
+# Keep FlagOS as the default implementation and override only the operators
+# whose Hopper paths have a measured regression against the CUDA vendor stack.
+# This config is opt-in via VLLM_FL_HOPPER_LONG_CONTEXT_OPT=1.
+prefer: flagos
+strict: false
+
+allow_vendors:
+  - cuda
+
+op_backends:
+  # FlashAttention-3 is substantially faster than Triton unified attention
+  # for long-context full-attention prefill on Hopper.
+  attention_backend:
+    - vendor
+    - flagos
+    - reference
+  rms_norm:
+    - flagos
+    - vendor
+    - reference
+  silu_and_mul:
+    - flagos
+    - vendor
+    - reference
+  rotary_embedding:
+    - flagos
+    - vendor
+    - reference
+
+flagos_blacklist:
+  - index_put_
+  - index_put
+  - _index_put_impl_
+  - nonzero
+  - copy_
+  - to_copy
+  - index
+  # FlagGems' Hopper host-TMA mm.out path is slower than the native dense
+  # GEMM for the long-context projection shapes used by vLLM.
+  - mm
+  - mm_out
