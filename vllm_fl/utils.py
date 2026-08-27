@@ -32,64 +32,29 @@ _OP_CONFIG: Optional[dict[str, str]] = None
 # Values are normalized to lowercase and matched against available backend
 # subdirectories (for example, cuda/ascend/metax/iluvatar/mthreads).
 #
-# - device_control_env_var: the environment variable the runtime honours to
-#   restrict visible devices (the vLLM ``Platform.device_control_env_var``
-#   contract). Needed to translate a logical device ID into the ordinal that
-#   is actually visible to the process, which matters whenever a launcher
-#   isolates devices per worker (for example Ray in multi-node deployments).
-#   Do not infer this value from ``device_type``: several runtimes expose
-#   CUDA-shaped torch APIs while using a vendor-specific visibility variable.
-#   These names follow FlagGems' vendor environment mapping.
 VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/cuda
-    "nvidia": {
-        "device_type": "cuda",
-        "device_name": "nvidia",
-        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
-    },
+    "nvidia": {"device_type": "cuda", "device_name": "nvidia"},
     # Registered backend: vendor/ascend
-    "ascend": {
-        "device_type": "npu",
-        "device_name": "npu",
-        "device_control_env_var": "ASCEND_RT_VISIBLE_DEVICES",
-    },
+    "ascend": {"device_type": "npu", "device_name": "npu"},
     # Registered backend: vendor/iluvatar
-    "iluvatar": {
-        "device_type": "cuda",
-        "device_name": "cuda",
-        "device_control_env_var": "ILUVATAR_VISIBLE_DEVICES",
-    },
+    "iluvatar": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/metax
-    "metax": {
-        "device_type": "cuda",
-        "device_name": "metax",
-        "device_control_env_var": "MACA_VISIBLE_DEVICES",
-    },
+    "metax": {"device_type": "cuda", "device_name": "metax"},
     # Registered backend: vendor/musa
-    "mthreads": {
-        "device_type": "musa",
-        "device_name": "musa",
-        "device_control_env_var": "MUSA_VISIBLE_DEVICES",
-    },
+    "mthreads": {"device_type": "musa", "device_name": "musa"},
     # Registered backend: vendor/sunrise
-    "sunrise": {
-        "device_type": "ptpu",
-        "device_name": "ptpu",
-        "device_control_env_var": "TANG_VISIBLE_DEVICES",
-    },
+    "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
     # Registered backend: vendor/hygon
-    "hygon": {
-        "device_type": "cuda",
-        "device_name": "cuda",
-        "device_control_env_var": "HIP_VISIBLE_DEVICES",
-    },
+    "hygon": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
-    "thead": {
-        "device_type": "cuda",
-        "device_name": "thead",
-        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
-    },
+    "thead": {"device_type": "cuda", "device_name": "thead"},
 }
+
+# Keep the vLLM base-class no-op for platforms not validated by this change.
+# Operators can opt a platform in without a code change via the override below.
+_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER = "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER"
+_VALIDATED_DEVICE_CONTROL_ENV_VARS = {"nvidia": "CUDA_VISIBLE_DEVICES"}
 
 
 def _get_vendor_device_field(vendor_name: str, field: str) -> str:
@@ -124,22 +89,18 @@ def get_device_name(vendor_name: str) -> str:
 
 
 def get_device_control_env_var(vendor_name: str) -> str:
-    """Return the visible-devices environment variable for the given vendor.
+    """Return the validated vLLM device-control variable for a vendor.
 
-    ``FLAGOS_DEVICE_CONTROL_ENV_VAR`` overrides the table, so a vendor whose
-    runtime is not covered here can be enabled without a code change.
-    Unknown vendors retain the historical CUDA_VISIBLE_DEVICES fallback.
-    Use the override for a runtime that has a different visibility variable.
+    Only NVIDIA is enabled by default because this mapping path was validated
+    on NVIDIA H20. Other vendors retain the vLLM base-class no-op unless an
+    operator explicitly sets ``FLAGOS_DEVICE_CONTROL_ENV_VAR``.
     """
     override = os.environ.get("FLAGOS_DEVICE_CONTROL_ENV_VAR", "").strip()
     if override:
         return override
-    device_info = VENDOR_DEVICE_MAP.get(vendor_name)
-    if isinstance(device_info, dict):
-        value = device_info.get("device_control_env_var")
-        if isinstance(value, str) and value.strip():
-            return value
-    return "CUDA_VISIBLE_DEVICES"
+    return _VALIDATED_DEVICE_CONTROL_ENV_VARS.get(
+        vendor_name, _DEVICE_CONTROL_ENV_VAR_PLACEHOLDER
+    )
 
 
 def use_flaggems(default: bool = True) -> bool:
