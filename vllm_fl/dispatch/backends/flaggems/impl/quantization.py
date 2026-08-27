@@ -10,16 +10,14 @@ import torch
 def dynamic_per_token_quant_int8_flaggems(
     x: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run vLLM-compatible activation quantization under FlagGems dispatch.
+    """Run the FlagGems-vLLM fused dynamic per-token INT8 kernel.
 
-    FlagGems does not expose a standalone public INT8 per-token operator.
-    Keeping the vLLM dynamic-scaled-INT8 decomposition here preserves the
-    Dense linear numerical contract without importing FlagGems' private MoE
-    helper. The worker enables FlagGems ATen replacements globally.
+    FlagGems core does not expose this standalone operator, so resolve the
+    vLLM integration entry point lazily. Import and runtime failures propagate
+    to ``CachedOp``/``OpManager``, which marks this implementation unavailable
+    and falls through to the registered ``reference.torch`` implementation.
     """
-    import flag_gems  # noqa: F401
-
-    from vllm_fl.quantization.w8a8.reference import (
+    from flaggems_vllm.ops.scaled_int8_quant import (
         dynamic_per_token_quant_int8,
     )
 
