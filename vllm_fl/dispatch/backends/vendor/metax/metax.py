@@ -184,9 +184,9 @@ class MacaBackend(Backend):
         index_weights_head_scale: float,
         use_fp4: bool = False,
     ):
-        from .impl.deepseek_v4_attn import fused_indexer_q_rope_quant_maca
+        from vllm.v1.attention.ops.deepseek_v4_ops import fused_indexer_q_rope_quant
 
-        return fused_indexer_q_rope_quant_maca(
+        return fused_indexer_q_rope_quant(
             positions,
             index_q,
             index_q_cos_sin_cache,

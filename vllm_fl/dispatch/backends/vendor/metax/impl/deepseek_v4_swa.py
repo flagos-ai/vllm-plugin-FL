@@ -60,6 +60,7 @@ def _compute_swa_indices_and_lens_kernel(
 
 def apply_metax_swa_patch() -> None:
     from flag_gems.fused.flash_mla_with_kvcache import get_mla_metadata
+
     from vllm.v1.attention.backends.mla import sparse_swa
 
     sparse_swa._compute_swa_indices_and_lens_kernel = (

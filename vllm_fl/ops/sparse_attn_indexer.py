@@ -43,10 +43,6 @@ RADIX_TOPK_WORKSPACE_SIZE = 1024 * 1024
 MXFP4_BLOCK_SIZE = 32
 
 
-def _dequantize_fp8(values: torch.Tensor, scales: torch.Tensor) -> torch.Tensor:
-    return values.to(torch.bfloat16) * scales.to(torch.bfloat16).unsqueeze(-1)
-
-
 def _gather_workspace_shapes(
     total_seq_lens: int,
     head_dim: int,
@@ -227,16 +223,17 @@ def sparse_attn_indexer_fl(
                 q_slice_cast = q_slice
                 k_quant_cast = k_quant
                 k_scale_cast = k_scale.view(torch.float32).squeeze(-1)
-                
-            if current_platform.vendor_name == "metax" and not use_fp4_cache:
-                from vllm_metax.utils.deep_gemm import bf16_mqa_logits
 
-                logits = bf16_mqa_logits(
-                    q_slice_cast.to(torch.bfloat16),
-                    _dequantize_fp8(k_quant_cast, k_scale_cast),
+            if current_platform.vendor_name == "metax" and not use_fp4_cache:
+                from flag_gems.ops.fp8_mqa_logits import fp8_mqa_logits
+
+                logits = fp8_mqa_logits(
+                    q_slice_cast,
+                    (k_quant_cast, k_scale_cast),
                     weights[chunk.token_start : chunk.token_end],
                     chunk.cu_seqlen_ks,
                     chunk.cu_seqlen_ke,
+                    clean_logits=False,
                 )
             else:
                 logits = fp8_fp4_mqa_logits(
@@ -316,65 +313,16 @@ def sparse_attn_indexer_fl(
         )
 
         if current_platform.vendor_name == "metax" and not use_fp4_cache:
-            from vllm_metax.utils.deep_gemm import bf16_mqa_logits
+            from flag_gems.ops.fp8_paged_mqa_logits import fp8_paged_mqa_logits
 
-            context_lens_per_batch = seq_lens.amax(dim=1)
-            cu_seq_lens = torch.zeros(
-                batch_size + 1,
-                dtype=torch.int32,
-                device=seq_lens.device,
-            )
-            torch.cumsum(context_lens_per_batch, dim=0, out=cu_seq_lens[1:])
-            seq_offsets = cu_seq_lens.tolist()
-
-            workspace_manager = current_workspace_manager()
-            values_spec, scales_spec = _gather_workspace_shapes(
-                total_seq_lens, head_dim, fp8_dtype, False
-            )
-            k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
-                values_spec,
-                scales_spec,
-            )
-            total_context_len = seq_offsets[-1]
-            k_quant = k_quant_full[:total_context_len]
-            k_scale = k_scale_full[:total_context_len]
-            _cp_gather_indexer_k_quant_cache(
+            logits = fp8_paged_mqa_logits(
+                padded_q_quant_cast,
                 kv_cache,
-                k_quant,
-                k_scale,
+                weights[:num_padded_tokens],
+                seq_lens,
                 decode_metadata.block_table,
-                cu_seq_lens,
+                max_model_len,
             )
-
-            max_context_len = max(
-                seq_offsets[i + 1] - seq_offsets[i] for i in range(batch_size)
-            )
-            logits = torch.full(
-                (num_padded_tokens, max_context_len),
-                -float("inf"),
-                dtype=torch.float32,
-                device=kv_cache.device,
-            )
-            for batch_idx in range(batch_size):
-                context_lens = seq_lens[batch_idx].reshape(-1)
-                seq_start = seq_offsets[batch_idx]
-                seq_end = seq_offsets[batch_idx + 1]
-                k_bf16 = _dequantize_fp8(
-                    k_quant[seq_start:seq_end],
-                    k_scale[seq_start:seq_end].view(torch.float32).squeeze(-1),
-                )
-                q_bf16 = padded_q_quant_cast[batch_idx].to(torch.bfloat16)
-                starts = torch.zeros_like(context_lens)
-                row_start = batch_idx * next_n
-                logits[row_start : row_start + next_n, : seq_end - seq_start] = (
-                    bf16_mqa_logits(
-                        q_bf16,
-                        k_bf16,
-                        weights[row_start : row_start + next_n],
-                        starts,
-                        context_lens,
-                    )
-                )
         else:
             logits = fp8_fp4_paged_mqa_logits(
                 (padded_q_quant_cast, padded_q_scale),
@@ -389,15 +337,15 @@ def sparse_attn_indexer_fl(
         num_rows = logits.shape[0]
         topk_indices = topk_indices_buffer[:num_padded_tokens, :topk_tokens]
         _top_k_per_row_decode(
-                logits,
-                next_n,
-                seq_lens,
-                topk_indices,
-                num_rows,
-                logits.stride(0),
-                logits.stride(1),
-                topk_tokens,
-            )
+            logits,
+            next_n,
+            seq_lens,
+            topk_indices,
+            num_rows,
+            logits.stride(0),
+            logits.stride(1),
+            topk_tokens,
+        )
 
         # if current_platform.is_cuda() and topk_tokens in (512, 1024, 2048):
         #     workspace_manager = current_workspace_manager()

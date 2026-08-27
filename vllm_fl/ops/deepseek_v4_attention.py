@@ -98,6 +98,14 @@ from vllm.model_executor.layers.deepseek_v4_attention import (
 logger = init_logger(__name__)
 
 
+def _use_metax_int8(vllm_config: VllmConfig) -> bool:
+    config = vllm_config.model_config.hf_config
+    return (
+        current_platform.vendor_name == "metax"
+        and getattr(config, "expert_dtype", "fp4") == "int8"
+    )
+
+
 # --8<-- [start:multi_head_latent_attention]
 class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAttentionWrapper):
     """Pluggable MLA layer which allows OOT backends to add
@@ -179,7 +187,10 @@ class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAtten
             raise ValueError(f"Duplicate layer name: {self.layer_name}")
         compilation_config.static_forward_context[self.layer_name] = self
 
-        if current_platform.vendor_name == "metax" and self.compressor is not None:
+        if (
+            _use_metax_int8(mla_modules.vllm_config)
+            and self.compressor is not None
+        ):
             compilation_config.static_forward_context.pop(
                 self.compressor.state_cache.prefix
             )
@@ -1024,7 +1035,7 @@ class DeepseekV4Indexer(nn.Module):
         )
         compressor_cls = (
             FLDeepseekCompressor
-            if current_platform.vendor_name == "metax"
+            if _use_metax_int8(vllm_config)
             else VllmDeepseekCompressor
         )
         self.compressor = compressor_cls(
@@ -1040,7 +1051,7 @@ class DeepseekV4Indexer(nn.Module):
 
         indexer_cls = (
             SparseAttnIndexerFL
-            if current_platform.vendor_name == "metax"
+            if _use_metax_int8(vllm_config)
             else SparseAttnIndexer
         )
         self.indexer_op = indexer_cls(

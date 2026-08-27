@@ -44,9 +44,7 @@ class MetaXTritonW8A8Experts(TritonW8A8Experts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ) -> None:
-        from vllm_metax.model_executor.layers.fused_moe.fused_moe import (
-            fused_experts_impl,
-        )
+        from vllm_fl.ops.fused_moe.fused_moe import fused_experts_impl
 
         result = fused_experts_impl(
             hidden_states=hidden_states,
@@ -54,7 +52,6 @@ class MetaXTritonW8A8Experts(TritonW8A8Experts):
             w2=w2,
             topk_weights=topk_weights,
             topk_ids=topk_ids,
-            inplace=False,
             activation=activation.value,
             apply_router_weight_on_input=apply_router_weight_on_input,
             use_int8_w8a8=True,
@@ -97,9 +94,10 @@ class DeepseekV4W8A8Int8(CompressedTensorsW8A8Int8):
 class DeepseekV4W8A8Config(CompressedTensorsConfig):
     def get_quant_method(self, layer, prefix):
         method = super().get_quant_method(layer, prefix)
-        if isinstance(method, CompressedTensorsLinearMethod) and type(
-            layer.scheme
-        ) is CompressedTensorsW8A8Int8:
+        if (
+            isinstance(method, CompressedTensorsLinearMethod)
+            and type(layer.scheme) is CompressedTensorsW8A8Int8
+        ):
             scheme = layer.scheme
             layer.scheme = DeepseekV4W8A8Int8(
                 scheme.strategy,

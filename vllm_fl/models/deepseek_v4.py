@@ -1270,10 +1270,11 @@ class DeepseekV4DecoderLayer(nn.Module):
     ):
         super().__init__()
 
-        if current_platform.vendor_name != "metax":
+        config = vllm_config.model_config.hf_config
+        expert_dtype = getattr(config, "expert_dtype", "fp4")
+        if current_platform.vendor_name != "metax" or expert_dtype != "int8":
             import vllm.model_executor.layers.mhc  # noqa: F401
 
-        config = vllm_config.model_config.hf_config
         self.hidden_size = config.hidden_size
 
         self.rms_norm_eps = config.rms_norm_eps
@@ -1723,7 +1724,9 @@ class DeepseekV4ForCausalLM(nn.Module):
             from vllm_fl.quantization.w8a8.deepseek_v4 import DeepseekV4W8A8Config
 
             apply_metax_swa_patch()
-            vllm_config.quant_config.__class__ = DeepseekV4W8A8Config
+            vllm_config.quant_config = DeepseekV4W8A8Config.from_config(
+                vllm_config.quant_config.config
+            )
         if expert_dtype != "fp4":
             self.hf_to_vllm_mapper = _make_deepseek_v4_weights_mapper(expert_dtype)
 
