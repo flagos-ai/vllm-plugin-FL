@@ -171,8 +171,11 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
                 get_flagos_whitelist,
             )
 
-            whitelist = get_flagos_whitelist()
-            config_blacklist = get_flagos_blacklist()
+            # Config helpers return an empty list when the YAML key is absent.
+            # Normalize that to ``None`` so an omitted whitelist does not become
+            # an active whitelist which rejects every FlagGems operator.
+            whitelist = get_flagos_whitelist() or None
+            config_blacklist = get_flagos_blacklist() or None
             if whitelist and config_blacklist:
                 raise ValueError(
                     "Platform config cannot define both flagos_whitelist and "

@@ -231,3 +231,24 @@ def test_get_flag_gems_whitelist_blacklist_empty_strings(monkeypatch):
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
     assert whitelist is None
     assert blacklist is None
+
+
+def test_empty_platform_whitelist_preserves_platform_blacklist(monkeypatch):
+    """An omitted YAML whitelist must not disable every FlagGems op."""
+    _env_for_flaggems_enabled(monkeypatch)
+    monkeypatch.delenv("VLLM_FL_FLAGOS_WHITELIST", raising=False)
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
+
+    with (
+        patch(
+            "vllm_fl.dispatch.config.get_flagos_whitelist",
+            return_value=[],
+        ),
+        patch(
+            "vllm_fl.dispatch.config.get_flagos_blacklist",
+            return_value=["sub"],
+        ),
+    ):
+        assert get_flag_gems_whitelist_blacklist() == (None, ["sub"])
+        assert use_flaggems_op("sub") is False
+        assert use_flaggems_op("rms_norm") is True

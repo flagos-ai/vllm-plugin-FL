@@ -40,5 +40,11 @@ flagos_blacklist:
   - copy_
   - to_copy
   - index
+  - fill_scalar_
+  - fill_tensor_
+  - sub
+  - rsub_scalar
+  - masked_fill_
+  - le
   - mm
   - mm_out
