@@ -18,7 +18,11 @@ import pytest
 MODEL_IMPORTS = [
     (
         "vllm.model_executor.models.deepseek_v2",
-        ["DeepseekV2ForCausalLM", "DeepseekV3ForCausalLM"],
+        [
+            "DeepseekV2ForCausalLM",
+            "DeepseekV3ForCausalLM",
+            "GlmMoeDsaForCausalLM",
+        ],
     ),
     (
         "vllm.model_executor.models.mixtral",
@@ -39,6 +43,10 @@ MODEL_IMPORTS = [
     (
         "vllm.model_executor.models.qwen3_next",
         ["Qwen3NextForCausalLM"],
+    ),
+    (
+        "vllm.model_executor.models.qwen3_5",
+        ["Qwen3_5ForCausalLM"],
     ),
     (
         "vllm.model_executor.models.kimi_vl",
@@ -77,3 +85,19 @@ class TestMoeModelImports:
         assert isinstance(cls, type), (
             f"{module_path}.{class_name} is {type(cls).__name__}, expected a class"
         )
+
+
+@pytest.mark.parametrize(
+    "model_type, expected_class",
+    [
+        ("glm_moe_dsa", "GlmMoeDsaConfig"),
+        ("qwen3_5", "Qwen3_5Config"),
+    ],
+)
+def test_removed_config_bridges_are_native(model_type, expected_class):
+    """Target Transformers must own configs deleted from the plugin."""
+    from transformers import AutoConfig
+
+    config = AutoConfig.for_model(model_type)
+    assert type(config).__name__ == expected_class
+    assert config.model_type == model_type
