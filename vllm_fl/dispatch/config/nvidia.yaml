@@ -43,12 +43,16 @@ op_backends:
     - vendor
     - reference
 
-# vLLM 0.28 requires PyTorch 2.13, while FlagGems 5.4 declares NVIDIA
-# support through PyTorch 2.11. Limit global ATen registration to the
-# kernels validated on PyTorch 2.13; FL dispatch falls back to CUDA for all
-# other operators.
-flagos_whitelist:
-  - rms_norm
-  - rotary_embedding
+# FlagOS operators known to be incompatible with the NVIDIA runtime.
+# Keep this list evidence-based: add an operator only after a real inference
+# failure has been reproduced and attributed to its FlagGems implementation.
+flagos_blacklist:
+  - index_put_
+  - index_put
+  - _index_put_impl_
+  - nonzero
+  - copy_
+  - to_copy
+  - index
 # OOT (Out-of-Tree) operator blacklist
 # oot_blacklist: []
