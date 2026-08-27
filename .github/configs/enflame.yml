@@ -1,0 +1,37 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Enflame S60 hardware configuration.
+platform: enflame
+
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-enflame-ci
+
+# Replace this with the exact label configured on the Enflame S60 runner.
+runner_labels:
+  - enflame-s60
+
+# Model files are persistent host data and use the same path in the container.
+container_volumes:
+  - /data:/data
+
+container_options: >-
+  --hostname vllm-plugin-fl
+  --ipc=host
+  --privileged
+  --env VLLM_PLUGINS=fl
+  --env TOPS_VISIBLE_DEVICES=2,3
+  --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=99999
+  --env TORCH_GCU_ENABLE_INT64_AND_UINT64=1
+  --env ENABLE_I64_CHECK=0
+  --env TORCHGCU_INDUCTOR_ENABLE=1

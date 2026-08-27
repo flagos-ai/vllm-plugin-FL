@@ -768,7 +768,7 @@ def main() -> None:
             "No throughput arguments provided. "
             "Pass them after the script args, e.g.: "
             'python benchmark_gems_autotune.py --ops "silu_and_mul" -- '
-            "--model /models/Qwen3-Next-80B-A3B-Instruct --tensor-parallel-size 4 ..."
+            "--model /data/models/Qwen/Qwen3-Next-80B-A3B-Instruct --tensor-parallel-size 4 ..."
         )
 
     if args.background and not os.environ.get("FLAGGEMS_AUTOTUNE_BACKGROUND"):
