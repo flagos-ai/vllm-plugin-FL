@@ -22,6 +22,15 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
     assert path is not None
     assert path.name == "nvidia.yaml"
     assert config["op_backends"]["attention_backend"][0] == "flagos"
+    assert {
+        "fill_scalar_",
+        "fill_tensor_",
+        "sub",
+        "rsub_scalar",
+        "masked_fill_",
+        "le",
+    }.issubset(config["flagos_blacklist"])
+    assert "silu_and_mul" not in config["flagos_blacklist"]
     assert "lt" not in config["flagos_blacklist"]
 
 
@@ -35,7 +44,16 @@ def test_hopper_uses_architecture_specific_config_when_enabled(monkeypatch):
     assert path is not None
     assert path.name == "nvidia_hopper.yaml"
     assert config["op_backends"]["attention_backend"][0] == "vendor"
-    assert {"mm", "mm_out"}.issubset(config["flagos_blacklist"])
+    assert {
+        "fill_scalar_",
+        "fill_tensor_",
+        "sub",
+        "rsub_scalar",
+        "masked_fill_",
+        "le",
+        "mm",
+        "mm_out",
+    }.issubset(config["flagos_blacklist"])
 
 
 def test_non_hopper_nvidia_keeps_vendor_wide_config(monkeypatch):

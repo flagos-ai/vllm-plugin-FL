@@ -54,5 +54,13 @@ flagos_blacklist:
   - copy_
   - to_copy
   - index
+  # FlagGems 5.4 pointwise kernels are incompatible with the PyTorch 2.13
+  # runtime required by vLLM 0.28 (reproduced by Qwen3-8B V2 inference).
+  - fill_scalar_
+  - fill_tensor_
+  - sub
+  - rsub_scalar
+  - masked_fill_
+  - le
 # OOT (Out-of-Tree) operator blacklist
 # oot_blacklist: []

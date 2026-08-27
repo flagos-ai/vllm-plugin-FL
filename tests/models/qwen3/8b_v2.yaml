@@ -15,6 +15,9 @@ generate:
       expected: "Paris"
   sampling:
     max_tokens: 32
-    temperature: 0.0
+    # Exercise the V2 temperature/top-p sampler instead of greedy-only paths.
+    temperature: 0.8
+    top_p: 0.9
+    seed: 0
   parametrize:
     enforce_eager: [true, false]
