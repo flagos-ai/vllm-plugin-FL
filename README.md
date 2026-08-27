@@ -180,7 +180,7 @@ With vLLM and vLLM-fl installed, you can start generating texts for list of inpu
 from vllm import LLM, SamplingParams
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]
