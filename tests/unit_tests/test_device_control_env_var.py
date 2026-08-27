@@ -41,9 +41,7 @@ def test_blank_env_override_is_ignored(monkeypatch):
 
 
 def test_platform_picks_up_the_dispatched_value():
-    from vllm.platforms import current_platform
-
     from vllm_fl.platform import PlatformFL
 
-    expected = get_device_control_env_var(current_platform.vendor_name)
+    expected = get_device_control_env_var(PlatformFL.vendor_name)
     assert PlatformFL.device_control_env_var == expected
