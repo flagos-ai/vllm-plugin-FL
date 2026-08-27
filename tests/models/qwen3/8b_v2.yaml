@@ -1,12 +1,11 @@
-# P0-2: MoE + MLA whitelist path, expected to auto-select Model Runner V2.
+# Qwen3-8B dense/GQA V2 runner smoke test.
 
 llm:
-  model: "/data/models/DeepSeek-V2-Lite-Chat"
+  model: "/data/models/Qwen3-8B"
   tensor_parallel_size: 1
   max_num_seqs: 2
   max_model_len: 4096
-  gpu_memory_utilization: 0.8
-  enforce_eager: true
+  gpu_memory_utilization: 0.75
   trust_remote_code: true
 
 generate:
@@ -17,3 +16,5 @@ generate:
   sampling:
     max_tokens: 32
     temperature: 0.0
+  parametrize:
+    enforce_eager: [true, false]
