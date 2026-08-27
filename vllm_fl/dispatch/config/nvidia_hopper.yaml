@@ -29,8 +29,16 @@ op_backends:
     - vendor
     - reference
 
-# See nvidia.yaml. The whitelist also keeps Hopper dense GEMM and unsupported
-# pointwise ATen paths on the native CUDA implementations.
-flagos_whitelist:
-  - rms_norm
-  - rotary_embedding
+# See nvidia.yaml. Hopper additionally keeps dense GEMM on the native CUDA
+# implementation because the FlagGems host-TMA path regresses long-context
+# projection shapes.
+flagos_blacklist:
+  - index_put_
+  - index_put
+  - _index_put_impl_
+  - nonzero
+  - copy_
+  - to_copy
+  - index
+  - mm
+  - mm_out
