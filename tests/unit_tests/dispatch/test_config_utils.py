@@ -22,7 +22,7 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
     assert path is not None
     assert path.name == "nvidia.yaml"
     assert config["op_backends"]["attention_backend"][0] == "flagos"
-    assert config["flagos_whitelist"] == ["rms_norm", "rotary_embedding"]
+    assert "lt" not in config["flagos_blacklist"]
 
 
 def test_hopper_uses_architecture_specific_config_when_enabled(monkeypatch):
@@ -35,7 +35,7 @@ def test_hopper_uses_architecture_specific_config_when_enabled(monkeypatch):
     assert path is not None
     assert path.name == "nvidia_hopper.yaml"
     assert config["op_backends"]["attention_backend"][0] == "vendor"
-    assert config["flagos_whitelist"] == ["rms_norm", "rotary_embedding"]
+    assert {"mm", "mm_out"}.issubset(config["flagos_blacklist"])
 
 
 def test_non_hopper_nvidia_keeps_vendor_wide_config(monkeypatch):
@@ -48,7 +48,7 @@ def test_non_hopper_nvidia_keeps_vendor_wide_config(monkeypatch):
     assert path is not None
     assert path.name == "nvidia.yaml"
     assert config["op_backends"]["attention_backend"][0] == "flagos"
-    assert config["flagos_whitelist"] == ["rms_norm", "rotary_embedding"]
+    assert "mm" not in config["flagos_blacklist"]
 
 
 def test_capability_probe_failure_falls_back_to_vendor_config(monkeypatch):
