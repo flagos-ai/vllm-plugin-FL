@@ -63,12 +63,7 @@ def test_w8a8_linear_accepts_only_canonical_dynamic_token_scheme(
         assert message in reason
 
 
-def test_w8a8_linear_registration_is_non_cuda_and_idempotent(monkeypatch):
-    monkeypatch.setattr(
-        type(linear.current_platform),
-        "is_cuda",
-        lambda self: False,
-    )
+def test_w8a8_linear_registration_is_idempotent():
     registry = {PlatformEnum.OOT: []}
 
     assert linear.register_fl_w8a8_linear_kernel(registry) is True
@@ -76,34 +71,43 @@ def test_w8a8_linear_registration_is_non_cuda_and_idempotent(monkeypatch):
     assert registry[PlatformEnum.OOT] == [linear.FLW8A8DynamicLinearKernel]
 
 
-def test_w8a8_linear_is_not_registered_on_cuda(monkeypatch):
-    monkeypatch.setattr(
-        type(linear.current_platform),
-        "is_cuda",
-        lambda self: True,
-    )
-    registry = {PlatformEnum.OOT: []}
+def test_w8a8_linear_registration_keeps_native_fallback():
+    native_kernel = object()
+    registry = {PlatformEnum.OOT: [native_kernel]}
 
-    assert linear.register_fl_w8a8_linear_kernel(registry) is False
-    assert registry[PlatformEnum.OOT] == []
+    assert linear.register_fl_w8a8_linear_kernel(registry) is True
+    assert linear.register_fl_w8a8_linear_kernel(registry) is True
+    assert registry[PlatformEnum.OOT] == [
+        linear.FLW8A8DynamicLinearKernel,
+        native_kernel,
+    ]
 
 
-def test_w8a8_linear_cuda_guard_precedes_flaggems_policy(monkeypatch):
-    monkeypatch.setattr(
-        type(linear.current_platform),
-        "is_cuda",
-        lambda self: True,
-    )
-    monkeypatch.setattr(
-        linear,
-        "use_flaggems_op",
-        lambda op_name: pytest.fail(f"policy must not be queried for {op_name}"),
-    )
+def test_w8a8_linear_uses_common_flaggems_policy(monkeypatch):
+    monkeypatch.setattr(linear, "is_oot_enabled", lambda: True)
+    policy_calls = []
+
+    def allow_flaggems(op_name):
+        policy_calls.append(op_name)
+        return True
+
+    monkeypatch.setattr(linear, "use_flaggems_op", allow_flaggems)
+
+    supported, reason = linear.FLW8A8DynamicLinearKernel.is_supported()
+
+    assert supported is True
+    assert reason is None
+    assert policy_calls == [linear.FLAGGEMS_W8A8_LINEAR_OP]
+
+
+def test_w8a8_linear_policy_disable_falls_back_to_native_candidate(monkeypatch):
+    monkeypatch.setattr(linear, "is_oot_enabled", lambda: True)
+    monkeypatch.setattr(linear, "use_flaggems_op", lambda op_name: False)
 
     supported, reason = linear.FLW8A8DynamicLinearKernel.is_supported()
 
     assert supported is False
-    assert "NVIDIA" in reason
+    assert "disabled by policy" in reason
 
 
 def test_w8a8_linear_quantizes_then_calls_flaggems_scaled_mm(monkeypatch):

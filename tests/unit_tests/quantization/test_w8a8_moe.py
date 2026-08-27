@@ -135,7 +135,7 @@ def test_w8a8_moe_selector_uses_fl_experts_on_non_nvidia_oot(monkeypatch):
     assert upstream_calls == []
 
 
-def test_w8a8_moe_selector_uses_vllm_functional_experts_on_nvidia(monkeypatch):
+def test_w8a8_moe_selector_uses_flaggems_on_nvidia(monkeypatch):
     upstream_calls = []
 
     def upstream_selector(*args, **kwargs):
@@ -150,7 +150,7 @@ def test_w8a8_moe_selector_uses_vllm_functional_experts_on_nvidia(monkeypatch):
     monkeypatch.setattr(
         type(platforms.current_platform),
         "is_out_of_tree",
-        lambda self: True,
+        lambda self: False,
     )
 
     import vllm_fl.utils as fl_utils
@@ -164,10 +164,51 @@ def test_w8a8_moe_selector_uses_vllm_functional_experts_on_nvidia(monkeypatch):
     monkeypatch.setattr(
         fl_utils,
         "use_flaggems_op",
-        lambda op_name: (_ for _ in ()).throw(
-            AssertionError("NVIDIA must not consult the FlagGems W8A8 gate")
+        lambda op_name: True,
+    )
+    moe_adapter.install_fl_w8a8_moe_selector()
+    config = SimpleNamespace(
+        is_lora_enabled=False,
+        moe_parallel_config=SimpleNamespace(
+            use_batched_activation_format=False,
         ),
     )
+
+    backend, experts_cls = oracle.select_int8_moe_backend(
+        config,
+        weight_key=None,
+        activation_key=None,
+    )
+
+    from vllm_fl.quantization.w8a8.moe_experts import FlagGemsW8A8Experts
+
+    assert backend == "triton"
+    assert experts_cls is FlagGemsW8A8Experts
+    assert upstream_calls == []
+
+
+def test_w8a8_moe_selector_nvidia_policy_disable_uses_native_fallback(monkeypatch):
+    upstream_calls = []
+
+    def upstream_selector(*args, **kwargs):
+        upstream_calls.append((args, kwargs))
+        return "nvidia-native"
+
+    oracle, _ = _install_with_fake_modules(
+        monkeypatch,
+        upstream_selector,
+        lambda **kwargs: kwargs,
+    )
+
+    import vllm_fl.utils as fl_utils
+
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
+    monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
+    monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op_name: False)
     moe_adapter.install_fl_w8a8_moe_selector()
     config = SimpleNamespace(
         is_lora_enabled=False,
@@ -217,7 +258,7 @@ def test_w8a8_moe_selector_nvidia_noncanonical_falls_back_without_flaggems(
         fl_utils,
         "use_flaggems_op",
         lambda op_name: (_ for _ in ()).throw(
-            AssertionError("NVIDIA must not consult the FlagGems W8A8 gate")
+            AssertionError("noncanonical W8A8 must not consult the FlagGems gate")
         ),
     )
     moe_adapter.install_fl_w8a8_moe_selector()

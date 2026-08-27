@@ -22,7 +22,6 @@ from vllm.model_executor.kernels.linear import (
     Int8ScaledMMLinearLayerConfig,
 )
 from vllm.model_executor.layers.quantization.utils import replace_parameter
-from vllm.platforms import current_platform
 
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.utils import (
@@ -48,10 +47,8 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         compute_capability: int | None = None,
     ) -> tuple[bool, str | None]:
         del compute_capability
-        if current_platform.is_cuda():
-            return False, "NVIDIA keeps vLLM's native W8A8 kernels"
         if not is_oot_enabled():
-            return False, "FL OOT kernels are disabled"
+            return False, "FL W8A8 kernels are disabled"
         if not use_flaggems_op(FLAGGEMS_W8A8_LINEAR_OP):
             return False, "FlagGems W8A8 linear is disabled by policy"
         return True, None
@@ -120,12 +117,12 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
 
 
 def register_fl_w8a8_linear_kernel(registry: dict) -> bool:
-    """Prepend the FL kernel on non-NVIDIA OOT platforms."""
-    if current_platform.is_cuda():
-        return False
-
+    """Prepend FlagGems while retaining native INT8 kernels as fallback."""
     from vllm.platforms import PlatformEnum
 
+    # PlatformFL always selects through the OOT registry. On NVIDIA that list
+    # has already inherited CUDA's native Cutlass/Triton candidates, so
+    # prepending here keeps them available as ordered fallbacks.
     candidates = registry.setdefault(PlatformEnum.OOT, [])
     if FLW8A8DynamicLinearKernel not in candidates:
         candidates.insert(0, FLW8A8DynamicLinearKernel)
