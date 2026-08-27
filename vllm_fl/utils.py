@@ -37,7 +37,9 @@ _OP_CONFIG: Optional[dict[str, str]] = None
 #   contract). Needed to translate a logical device ID into the ordinal that
 #   is actually visible to the process, which matters whenever a launcher
 #   isolates devices per worker (for example Ray in multi-node deployments).
-#   CUDA-alike vendors reuse CUDA_VISIBLE_DEVICES; others declare their own.
+#   Do not infer this value from ``device_type``: several runtimes expose
+#   CUDA-shaped torch APIs while using a vendor-specific visibility variable.
+#   These names follow FlagGems' vendor environment mapping.
 VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/cuda
     "nvidia": {
@@ -55,13 +57,13 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "iluvatar": {
         "device_type": "cuda",
         "device_name": "cuda",
-        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+        "device_control_env_var": "ILUVATAR_VISIBLE_DEVICES",
     },
     # Registered backend: vendor/metax
     "metax": {
         "device_type": "cuda",
         "device_name": "metax",
-        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+        "device_control_env_var": "MACA_VISIBLE_DEVICES",
     },
     # Registered backend: vendor/musa
     "mthreads": {
@@ -73,13 +75,13 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "sunrise": {
         "device_type": "ptpu",
         "device_name": "ptpu",
-        "device_control_env_var": "PTPU_VISIBLE_DEVICES",
+        "device_control_env_var": "TANG_VISIBLE_DEVICES",
     },
     # Registered backend: vendor/hygon
     "hygon": {
         "device_type": "cuda",
         "device_name": "cuda",
-        "device_control_env_var": "CUDA_VISIBLE_DEVICES",
+        "device_control_env_var": "HIP_VISIBLE_DEVICES",
     },
     # Registered backend: vendor/thead (PPU)
     "thead": {
@@ -126,8 +128,8 @@ def get_device_control_env_var(vendor_name: str) -> str:
 
     ``FLAGOS_DEVICE_CONTROL_ENV_VAR`` overrides the table, so a vendor whose
     runtime is not covered here can be enabled without a code change.
-    Unknown vendors fall back to CUDA_VISIBLE_DEVICES because every
-    CUDA-alike backend honours it.
+    Unknown vendors retain the historical CUDA_VISIBLE_DEVICES fallback.
+    Use the override for a runtime that has a different visibility variable.
     """
     override = os.environ.get("FLAGOS_DEVICE_CONTROL_ENV_VAR", "").strip()
     if override:

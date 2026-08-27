@@ -17,13 +17,13 @@ def test_every_vendor_declares_a_device_control_env_var():
     ("vendor", "expected"),
     [
         ("nvidia", "CUDA_VISIBLE_DEVICES"),
-        ("iluvatar", "CUDA_VISIBLE_DEVICES"),
-        ("metax", "CUDA_VISIBLE_DEVICES"),
-        ("hygon", "CUDA_VISIBLE_DEVICES"),
+        ("iluvatar", "ILUVATAR_VISIBLE_DEVICES"),
+        ("metax", "MACA_VISIBLE_DEVICES"),
+        ("hygon", "HIP_VISIBLE_DEVICES"),
         ("thead", "CUDA_VISIBLE_DEVICES"),
         ("ascend", "ASCEND_RT_VISIBLE_DEVICES"),
         ("mthreads", "MUSA_VISIBLE_DEVICES"),
-        ("sunrise", "PTPU_VISIBLE_DEVICES"),
+        ("sunrise", "TANG_VISIBLE_DEVICES"),
     ],
 )
 def test_known_vendors_resolve(monkeypatch, vendor, expected):
@@ -31,11 +31,14 @@ def test_known_vendors_resolve(monkeypatch, vendor, expected):
     assert get_device_control_env_var(vendor) == expected
 
 
-def test_cuda_alike_vendors_share_the_cuda_variable(monkeypatch):
+def test_cuda_device_type_does_not_imply_cuda_control_variable(monkeypatch):
     monkeypatch.delenv(_OVERRIDE, raising=False)
-    for vendor, device_info in VENDOR_DEVICE_MAP.items():
-        if device_info["device_type"] == "cuda":
-            assert get_device_control_env_var(vendor) == "CUDA_VISIBLE_DEVICES"
+    assert VENDOR_DEVICE_MAP["iluvatar"]["device_type"] == "cuda"
+    assert get_device_control_env_var("iluvatar") == "ILUVATAR_VISIBLE_DEVICES"
+    assert VENDOR_DEVICE_MAP["metax"]["device_type"] == "cuda"
+    assert get_device_control_env_var("metax") == "MACA_VISIBLE_DEVICES"
+    assert VENDOR_DEVICE_MAP["hygon"]["device_type"] == "cuda"
+    assert get_device_control_env_var("hygon") == "HIP_VISIBLE_DEVICES"
 
 
 def test_unknown_vendor_falls_back_to_cuda(monkeypatch):
