@@ -39,6 +39,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Moore Threads | Supported | - |
 | Hygon | Supported | - |
 | Sunrise | Supported | - |
+| ARM64 CPU (Apple M5 Pro, CIX P1) | Supported | - |
 
 ## Quick Start
 

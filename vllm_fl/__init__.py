@@ -26,6 +26,22 @@ from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 logger = logging.getLogger(__name__)
 
 
+def _is_arm_cpu_target() -> bool:
+    """Return whether FlagGems and vLLM both selected an ARM CPU target."""
+    import platform
+
+    if platform.machine().lower() not in {"aarch64", "arm64"}:
+        return False
+
+    import flag_gems
+
+    if flag_gems.vendor_name != "arm":
+        return False
+    from vllm.platforms import cpu_platform_plugin
+
+    return cpu_platform_plugin() is not None
+
+
 def __getattr__(name):
     if name == "distributed":
         import importlib
@@ -97,6 +113,12 @@ def _patch_custom_ops():
 
 def register():
     """Register the FL platform."""
+    # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
+    # preserve vLLM's stock CPU platform and install kernels in register_model().
+    if _is_arm_cpu_target():
+        logger.info("[vllm_fl] FlagGems ARM target -> vLLM CPU platform")
+        return "vllm.platforms.cpu.CpuPlatform"
+
     _patch_custom_ops()
     _patch_flash_attn_import()
     _patch_transformers_compat()
@@ -144,6 +166,16 @@ def register_model():
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
 
     apply_qwen3_5_text_patches()
+
+    from vllm.platforms import current_platform
+    if current_platform.device_type == "cpu" and _is_arm_cpu_target():
+        # FlagGems owns the ARM CPU runtime and its compiler/runtime details.
+        # vLLM's quantization config still selects the checkpoint kernel.
+        from flag_gems.integrations.vllm import install_arm_cpu_runtime
+
+        install_arm_cpu_runtime()
+        return
+
     patch_vllm_moe_sum()
 
     _register_flagcx_connector()
