@@ -107,9 +107,13 @@ def test_w8a8_moe_selector_uses_fl_experts_on_non_nvidia_oot(monkeypatch):
 
     import vllm_fl.utils as fl_utils
 
-    monkeypatch.setattr(fl_utils, "is_nvidia_platform", lambda: False)
     monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
     monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op_name: True)
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: False,
+    )
     moe_adapter.install_fl_w8a8_moe_selector()
     config = SimpleNamespace(
         is_lora_enabled=False,
@@ -151,8 +155,12 @@ def test_w8a8_moe_selector_uses_vllm_functional_experts_on_nvidia(monkeypatch):
 
     import vllm_fl.utils as fl_utils
 
-    monkeypatch.setattr(fl_utils, "is_nvidia_platform", lambda: True)
     monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
     monkeypatch.setattr(
         fl_utils,
         "use_flaggems_op",
@@ -200,7 +208,11 @@ def test_w8a8_moe_selector_nvidia_noncanonical_falls_back_without_flaggems(
 
     import vllm_fl.utils as fl_utils
 
-    monkeypatch.setattr(fl_utils, "is_nvidia_platform", lambda: True)
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
     monkeypatch.setattr(
         fl_utils,
         "use_flaggems_op",

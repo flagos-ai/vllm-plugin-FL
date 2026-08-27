@@ -66,6 +66,16 @@ def test_functional_experts_defer_activation_quantization(experts_cls):
     assert experts_cls.expects_unquantized_inputs.fget(instance) is True
 
 
+def test_vllm_functional_experts_changes_the_triton_input_contract():
+    instance = SimpleNamespace(_lora_context=None)
+
+    assert moe_experts.TritonExperts.expects_unquantized_inputs.fget(instance) is False
+    assert (
+        moe_experts.VllmFunctionalW8A8Experts.expects_unquantized_inputs.fget(instance)
+        is True
+    )
+
+
 def test_vllm_functional_experts_call_only_native_vllm(monkeypatch):
     calls = []
 

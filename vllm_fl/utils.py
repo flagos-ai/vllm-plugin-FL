@@ -140,20 +140,6 @@ def get_device_control_env_var(vendor_name: str) -> str:
     return "CUDA_VISIBLE_DEVICES"
 
 
-def is_nvidia_platform() -> bool:
-    """Return whether the active vLLM platform represents NVIDIA hardware.
-
-    Do not use ``torch.cuda.is_available()`` for this check: several OOT
-    platforms are CUDA-alike but must not select vLLM's NVIDIA-only kernels.
-    """
-    from vllm.platforms import current_platform
-
-    return (
-        getattr(current_platform, "vendor_name", None) == "nvidia"
-        or getattr(current_platform, "device_name", None) == "nvidia"
-    )
-
-
 def use_flaggems(default: bool = True) -> bool:
     if os.environ.get("VLLM_FL_PREFER_ENABLED", "True").lower() not in ("true", "1"):
         return False

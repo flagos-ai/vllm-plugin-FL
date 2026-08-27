@@ -98,7 +98,6 @@ def install_fl_w8a8_moe_selector() -> bool:
         from vllm.platforms import current_platform
 
         from vllm_fl.utils import (
-            is_nvidia_platform,
             is_oot_enabled,
             use_flaggems_op,
         )
@@ -108,12 +107,14 @@ def install_fl_w8a8_moe_selector() -> bool:
             kInt8StaticChannelSym,
         ) and activation_key in (None, kInt8DynamicTokenSym)
 
-        # NVIDIA must never consult the FL/FlagGems operator policy. For the
-        # canonical W8A8 case, vLLM's stock TritonExperts asks the modular
-        # prepare stage to quantize the first activation, while its functional
-        # implementation expects floating-point input and owns both dynamic
-        # quantization steps. Use a thin bridge to correct that input contract.
-        if is_nvidia_platform():
+        # CUDA keeps W8A8 execution in vLLM, which already provides native
+        # NVIDIA INT8 kernels; FlagGems supplies the corresponding OOT path.
+        # For the canonical W8A8 case, vLLM's stock TritonExperts asks the
+        # modular prepare stage to quantize the first activation, while its
+        # functional implementation expects floating-point input and owns both
+        # dynamic quantization steps. Use a thin bridge to correct that input
+        # contract.
+        if current_platform.is_cuda():
             if not canonical_w8a8:
                 return current_selector(
                     config,

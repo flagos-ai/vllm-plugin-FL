@@ -63,9 +63,12 @@ def test_w8a8_linear_accepts_only_canonical_dynamic_token_scheme(
         assert message in reason
 
 
-def test_w8a8_linear_registration_is_non_nvidia_and_idempotent(monkeypatch):
-    monkeypatch.setattr(linear, "is_nvidia_platform", lambda: False)
-    monkeypatch.setattr(linear, "_flaggems_available", lambda: True)
+def test_w8a8_linear_registration_is_non_cuda_and_idempotent(monkeypatch):
+    monkeypatch.setattr(
+        type(linear.current_platform),
+        "is_cuda",
+        lambda self: False,
+    )
     registry = {PlatformEnum.OOT: []}
 
     assert linear.register_fl_w8a8_linear_kernel(registry) is True
@@ -73,17 +76,24 @@ def test_w8a8_linear_registration_is_non_nvidia_and_idempotent(monkeypatch):
     assert registry[PlatformEnum.OOT] == [linear.FLW8A8DynamicLinearKernel]
 
 
-def test_w8a8_linear_is_not_registered_on_nvidia(monkeypatch):
-    monkeypatch.setattr(linear, "is_nvidia_platform", lambda: True)
-    monkeypatch.setattr(linear, "_flaggems_available", lambda: True)
+def test_w8a8_linear_is_not_registered_on_cuda(monkeypatch):
+    monkeypatch.setattr(
+        type(linear.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
     registry = {PlatformEnum.OOT: []}
 
     assert linear.register_fl_w8a8_linear_kernel(registry) is False
     assert registry[PlatformEnum.OOT] == []
 
 
-def test_w8a8_linear_nvidia_guard_precedes_flaggems_policy(monkeypatch):
-    monkeypatch.setattr(linear, "is_nvidia_platform", lambda: True)
+def test_w8a8_linear_cuda_guard_precedes_flaggems_policy(monkeypatch):
+    monkeypatch.setattr(
+        type(linear.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
     monkeypatch.setattr(
         linear,
         "use_flaggems_op",
@@ -94,18 +104,6 @@ def test_w8a8_linear_nvidia_guard_precedes_flaggems_policy(monkeypatch):
 
     assert supported is False
     assert "NVIDIA" in reason
-
-
-def test_w8a8_linear_rejects_flaggems_without_returning_scaled_mm(
-    monkeypatch,
-):
-    flag_gems = ModuleType("flag_gems")
-    monkeypatch.delitem(sys.modules, "flag_gems.ops.scaled_mm", raising=False)
-    monkeypatch.delitem(sys.modules, "flag_gems.ops", raising=False)
-    monkeypatch.setitem(sys.modules, "flag_gems", flag_gems)
-    monkeypatch.setattr(linear, "find_spec", lambda name: object())
-
-    assert linear._flaggems_available() is False
 
 
 def test_w8a8_linear_quantizes_then_calls_flaggems_scaled_mm(monkeypatch):

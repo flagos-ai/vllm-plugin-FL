@@ -15,8 +15,6 @@
 
 from __future__ import annotations
 
-from importlib.util import find_spec
-
 import torch
 
 from vllm.model_executor.kernels.linear import (
@@ -24,10 +22,10 @@ from vllm.model_executor.kernels.linear import (
     Int8ScaledMMLinearLayerConfig,
 )
 from vllm.model_executor.layers.quantization.utils import replace_parameter
+from vllm.platforms import current_platform
 
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.utils import (
-    is_nvidia_platform,
     is_oot_enabled,
     use_flaggems_op,
 )
@@ -35,39 +33,6 @@ from vllm_fl.utils import (
 FLAGGEMS_W8A8_LINEAR_OP = "w8a8_dynamic_per_token_linear"
 
 _dynamic_per_token_quant_int8 = CachedOp("dynamic_per_token_quant_int8")
-
-
-def _resolve_flaggems_scaled_mm():
-    """Resolve the returning ``scaled_mm`` API, not the output-buffer API.
-
-    FlagGems 5.3 exposes only ``cutlass_scaled_mm(output, ...)``.  Besides
-    having a different call contract, its SM80 branch is not implemented on
-    PPU.  The generic returning API was added later and provides the Triton
-    INT8 fallback required by CUDA-alike OOT devices.
-    """
-    import flag_gems
-
-    scaled_mm = getattr(flag_gems, "scaled_mm", None)
-    if scaled_mm is None:
-        try:
-            from flag_gems.ops.scaled_mm import scaled_mm
-        except (ImportError, AttributeError) as exc:
-            raise RuntimeError(
-                "FlagGems W8A8 linear requires the returning scaled_mm API"
-            ) from exc
-    if not callable(scaled_mm):
-        raise RuntimeError("FlagGems scaled_mm is not callable")
-    return scaled_mm
-
-
-def _flaggems_available() -> bool:
-    if find_spec("flag_gems") is None:
-        return False
-    try:
-        _resolve_flaggems_scaled_mm()
-    except (ImportError, RuntimeError):
-        return False
-    return True
 
 
 class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
@@ -83,14 +48,12 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         compute_capability: int | None = None,
     ) -> tuple[bool, str | None]:
         del compute_capability
-        if is_nvidia_platform():
+        if current_platform.is_cuda():
             return False, "NVIDIA keeps vLLM's native W8A8 kernels"
         if not is_oot_enabled():
             return False, "FL OOT kernels are disabled"
         if not use_flaggems_op(FLAGGEMS_W8A8_LINEAR_OP):
             return False, "FlagGems W8A8 linear is disabled by policy"
-        if not _flaggems_available():
-            return False, "FlagGems is not installed"
         return True, None
 
     @classmethod
@@ -139,7 +102,7 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        scaled_mm = _resolve_flaggems_scaled_mm()
+        from flag_gems import scaled_mm
 
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape
@@ -158,7 +121,7 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
 
 def register_fl_w8a8_linear_kernel(registry: dict) -> bool:
     """Prepend the FL kernel on non-NVIDIA OOT platforms."""
-    if is_nvidia_platform() or not _flaggems_available():
+    if current_platform.is_cuda():
         return False
 
     from vllm.platforms import PlatformEnum
