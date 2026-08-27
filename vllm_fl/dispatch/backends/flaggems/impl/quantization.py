@@ -7,17 +7,31 @@ from __future__ import annotations
 import torch
 
 
-def dynamic_per_token_quant_int8_flaggems(
+def dynamic_per_token_quant_int8_flaggems_vllm(
     x: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run the FlagGems-vLLM fused dynamic per-token INT8 kernel.
+    """Run FlagGems-vLLM dynamic symmetric per-token INT8 quantization.
 
-    FlagGems core does not expose this standalone operator, so resolve the
-    vLLM integration entry point lazily. Import and runtime failures propagate
-    to ``CachedOp``/``OpManager``, which marks this implementation unavailable
-    and falls through to the registered ``reference.torch`` implementation.
+    ``scaled_int8_quant`` selects its dynamic path when ``scale`` is ``None``.
+    Import and runtime failures propagate to dispatch, which then tries the
+    local FlagGems/Triton implementation before the PyTorch reference.
     """
-    from flaggems_vllm.ops.scaled_int8_quant import (
+    from flaggems_vllm.ops.scaled_int8_quant import scaled_int8_quant
+
+    output, scale, _ = scaled_int8_quant(
+        x,
+        scale=None,
+        azp=None,
+        symmetric=True,
+    )
+    return output, scale
+
+
+def dynamic_per_token_quant_int8_flaggems_triton(
+    x: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run the in-tree backend-neutral FlagGems/Triton fallback kernel."""
+    from vllm_fl.quantization.w8a8.flaggems_kernels import (
         dynamic_per_token_quant_int8,
     )
 

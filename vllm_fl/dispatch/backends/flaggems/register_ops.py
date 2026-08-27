@@ -49,6 +49,17 @@ def register_builtins(registry) -> None:
                 is_avail,
             ),
             vendor=None,
+            priority=BackendPriority.DEFAULT + 10,
+        ),
+        OpImpl(
+            op_name="dynamic_per_token_quant_int8",
+            impl_id="default.flagos_triton",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                backend.dynamic_per_token_quant_int8_triton,
+                is_avail,
+            ),
+            vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
         # Activation
