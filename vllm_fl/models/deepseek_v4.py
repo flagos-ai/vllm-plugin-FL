@@ -68,7 +68,9 @@ from vllm.model_executor.models.utils import (
 )
 from vllm_fl.ops.deepseek_v4_attention import (
     DeepseekV4Indexer as DeepseekV4IndexerFP8,
+    is_metax_w8a8,
 )
+
 _DEEPSEEK_V4_EXPERT_DTYPES = ("bf16", "fp4", "fp8")
 
 
@@ -1271,8 +1273,8 @@ class DeepseekV4DecoderLayer(nn.Module):
         super().__init__()
 
         config = vllm_config.model_config.hf_config
-        expert_dtype = getattr(config, "expert_dtype", "fp4")
-        if current_platform.vendor_name != "metax" or expert_dtype != "int8":
+        use_metax_int8 = is_metax_w8a8(vllm_config)
+        if not use_metax_int8:
             import vllm.model_executor.layers.mhc  # noqa: F401
 
         self.hidden_size = config.hidden_size
@@ -1717,18 +1719,21 @@ class DeepseekV4ForCausalLM(nn.Module):
         config = vllm_config.model_config.hf_config
         self.config = config
         expert_dtype = getattr(config, "expert_dtype", "fp4")
-        if current_platform.vendor_name == "metax" and expert_dtype == "int8":
+        use_metax_int8 = is_metax_w8a8(vllm_config)
+        if use_metax_int8:
             from vllm_fl.dispatch.backends.vendor.metax.impl.deepseek_v4_swa import (
                 apply_metax_swa_patch,
             )
             from vllm_fl.quantization.w8a8.deepseek_v4 import DeepseekV4W8A8Config
 
+            config.sliding_window = config.sliding_window_size
             apply_metax_swa_patch()
             vllm_config.quant_config = DeepseekV4W8A8Config.from_config(
                 vllm_config.quant_config.config
             )
-        if expert_dtype != "fp4":
-            self.hf_to_vllm_mapper = _make_deepseek_v4_weights_mapper(expert_dtype)
+        if use_metax_int8 or expert_dtype != "fp4":
+            mapper_dtype = "int8" if use_metax_int8 else expert_dtype
+            self.hf_to_vllm_mapper = _make_deepseek_v4_weights_mapper(mapper_dtype)
 
         self.model = self.model_cls(
             vllm_config=vllm_config, prefix=maybe_prefix(prefix, "model")

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 from vllm.model_executor.kernels.linear.scaled_mm.cutlass import (

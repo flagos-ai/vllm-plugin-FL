@@ -98,11 +98,23 @@ from vllm.model_executor.layers.deepseek_v4_attention import (
 logger = init_logger(__name__)
 
 
-def _use_metax_int8(vllm_config: VllmConfig) -> bool:
+def is_metax_w8a8(vllm_config: VllmConfig) -> bool:
     config = vllm_config.model_config.hf_config
+    quant_config = getattr(config, "quantization_config", None) or {}
+    groups = quant_config.get("config_groups") or {}
     return (
         current_platform.vendor_name == "metax"
-        and getattr(config, "expert_dtype", "fp4") == "int8"
+        and quant_config.get("quant_method") == "compressed-tensors"
+        and quant_config.get("format") == "int-quantized"
+        and bool(groups)
+        and all(
+            group["weights"]["num_bits"] == 8
+            and group["weights"]["strategy"] == "channel"
+            and group["input_activations"]["num_bits"] == 8
+            and group["input_activations"]["strategy"] == "token"
+            and group["input_activations"]["dynamic"] is True
+            for group in groups.values()
+        )
     )
 
 
@@ -149,6 +161,7 @@ class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAtten
                          qk_rope_head_dim, v_head_dim, q_lora_rank, kv_lora_rank, o_lora_rank,
                          mla_modules, window_size, compress_ratio, cache_config, quant_config,
                          prefix)
+        self.use_metax_int8 = is_metax_w8a8(mla_modules.vllm_config)
         # TODO(yifan): currently hardcoded for FP8 sparse, make it more generic
         head_bytes = (
             self.nope_head_dim  # 448 fp8 NoPE
@@ -187,10 +200,7 @@ class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAtten
             raise ValueError(f"Duplicate layer name: {self.layer_name}")
         compilation_config.static_forward_context[self.layer_name] = self
 
-        if (
-            _use_metax_int8(mla_modules.vllm_config)
-            and self.compressor is not None
-        ):
+        if self.use_metax_int8 and self.compressor is not None:
             compilation_config.static_forward_context.pop(
                 self.compressor.state_cache.prefix
             )
@@ -228,7 +238,7 @@ class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAtten
         )
         o = o_padded[:, : self.n_local_heads, :]
 
-        if self.wo_a.weight.dtype == torch.int8:
+        if self.use_metax_int8:
             cos_sin = self.rotary_emb.cos_sin_cache.index_select(0, positions)
             half_rope = self.rope_head_dim // 2
             cos = cos_sin[:, :half_rope].to(o.dtype).unsqueeze(1)
@@ -1035,7 +1045,7 @@ class DeepseekV4Indexer(nn.Module):
         )
         compressor_cls = (
             FLDeepseekCompressor
-            if _use_metax_int8(vllm_config)
+            if is_metax_w8a8(vllm_config)
             else VllmDeepseekCompressor
         )
         self.compressor = compressor_cls(
@@ -1051,7 +1061,7 @@ class DeepseekV4Indexer(nn.Module):
 
         indexer_cls = (
             SparseAttnIndexerFL
-            if _use_metax_int8(vllm_config)
+            if is_metax_w8a8(vllm_config)
             else SparseAttnIndexer
         )
         self.indexer_op = indexer_cls(
