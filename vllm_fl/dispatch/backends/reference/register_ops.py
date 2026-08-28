@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -37,6 +37,18 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
+        # Quantization
+        OpImpl(
+            op_name="dynamic_per_token_quant_int8",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(
+                backend.dynamic_per_token_quant_int8,
+                is_avail,
+            ),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
         # Activation
         OpImpl(
             op_name="silu_and_mul",

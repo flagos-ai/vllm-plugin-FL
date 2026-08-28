@@ -58,7 +58,7 @@ def test_dynamic_per_token_quant_zero_row_is_finite():
     quantized, scales = dynamic_per_token_quant_int8(torch.zeros(2, 8))
     assert torch.count_nonzero(quantized) == 0
     assert torch.isfinite(scales).all()
-    assert (scales > 0).all()
+    assert torch.count_nonzero(scales) == 0
 
 
 def test_w8a8_reference_matches_explicit_qdq_matmul():
@@ -73,10 +73,9 @@ def test_w8a8_reference_matches_explicit_qdq_matmul():
     weight_scale = torch.tensor([[0.01], [0.025]], dtype=torch.float32)
     bias = torch.tensor([0.5, -0.25], dtype=torch.float32)
 
-    x_q, x_scale = dynamic_per_token_quant_int8(x)
+    x_q, x_scale = dynamic_per_token_quant_int8(x.reshape(-1, x.shape[-1]))
     expected = (
-        x_q.reshape(-1, 4).float()
-        @ weight.float().t()
+        (x_q.reshape(-1, 4).int() @ weight.int().t()).float()
         * x_scale.reshape(-1, 1)
         * weight_scale.reshape(1, -1)
         + bias

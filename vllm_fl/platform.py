@@ -33,7 +33,12 @@ else:
     VllmConfig = None
     CacheDType = None
 
-from vllm_fl.utils import DeviceInfo, get_device_name, get_device_type
+from vllm_fl.utils import (
+    DeviceInfo,
+    get_device_control_env_var,
+    get_device_name,
+    get_device_type,
+)
 
 logger = init_logger(__name__)
 
@@ -66,8 +71,12 @@ class PlatformFL(Platform):
     dist_backend: str = (
         "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
     )
-    ### TODO(lms): dispatch device_control_env_var
-    # device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
+    # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
+    # translated into the ordinal visible to this process. Leaving the
+    # base-class placeholder makes that translation a silent no-op, which picks
+    # the wrong GPU whenever a launcher isolates devices per worker (Ray
+    # multi-node in particular).
+    device_control_env_var: str = get_device_control_env_var(device_info.vendor_name)
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""

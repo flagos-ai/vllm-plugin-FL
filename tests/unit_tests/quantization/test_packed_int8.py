@@ -88,7 +88,7 @@ def test_static_tensor_activation_config_does_not_select_dynamic_w8a8():
     )
 
 
-def test_packed_scheme_reuses_native_w8a8_execution(monkeypatch):
+def test_packed_scheme_reuses_vllm_024_w8a8_kernel_interface(monkeypatch):
     processed_layers = []
 
     class FakeKernel:

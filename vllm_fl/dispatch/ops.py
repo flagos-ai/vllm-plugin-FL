@@ -57,6 +57,23 @@ class VLLMFLBackendBase(ABC):
         """
         return None
 
+    # ==================== Quantization Operators ====================
+
+    @abstractmethod
+    def dynamic_per_token_quant_int8(
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Dynamically quantize each token to symmetric INT8.
+
+        Args:
+            x: Floating-point input shaped ``[tokens, hidden_size]``.
+
+        Returns:
+            Tuple of the INT8 output and FP32 per-token scales.
+        """
+        pass
+
     # ==================== Activation Operators ====================
 
     @abstractmethod

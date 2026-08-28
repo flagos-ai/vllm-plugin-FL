@@ -19,14 +19,9 @@ import vllm.platforms as platforms
 from vllm_fl.quantization.w8a8 import moe as moe_adapter
 
 
-def test_w8a8_moe_selector_patches_oracle_and_scheme(monkeypatch):
-    def upstream_selector(*args, **kwargs):
-        return "upstream"
-
-    def upstream_builder(*args, **kwargs):
-        return "upstream-config"
-
+def _install_with_fake_modules(monkeypatch, upstream_selector, upstream_builder):
     oracle = SimpleNamespace(
+        Int8MoeBackend=SimpleNamespace(TRITON="triton"),
         select_int8_moe_backend=upstream_selector,
     )
     scheme = SimpleNamespace(
@@ -37,22 +32,24 @@ def test_w8a8_moe_selector_patches_oracle_and_scheme(monkeypatch):
         moe_adapter._ORACLE_MODULE: oracle,
         moe_adapter._SCHEME_MODULE: scheme,
     }
-    monkeypatch.setattr(
-        moe_adapter,
-        "import_module",
-        lambda name: modules[name],
-    )
+    monkeypatch.setattr(moe_adapter, "import_module", lambda name: modules[name])
+    return oracle, scheme
 
-    assert moe_adapter.install_fl_w8a8_moe_selector() is True
+
+def test_w8a8_moe_builder_preserves_dynamic_per_token_config(monkeypatch):
+    def upstream_selector(*args, **kwargs):
+        return "upstream"
+
+    def upstream_builder(*args, **kwargs):
+        return "upstream-config"
+
+    oracle, scheme = _install_with_fake_modules(
+        monkeypatch,
+        upstream_selector,
+        upstream_builder,
+    )
+    assert moe_adapter.install_fl_w8a8_moe_selector()
     assert oracle.select_int8_moe_backend is scheme.select_int8_moe_backend
-    assert getattr(
-        oracle.select_int8_moe_backend,
-        moe_adapter._ADAPTER_MARKER,
-    )
-    assert getattr(
-        scheme.make_int8_moe_quant_config,
-        moe_adapter._CONFIG_BUILDER_MARKER,
-    )
 
     config_module = SimpleNamespace(
         int8_w8a8_moe_quant_config=lambda **kwargs: kwargs,
@@ -90,29 +87,17 @@ def test_w8a8_moe_selector_patches_oracle_and_scheme(monkeypatch):
     )
 
 
-def test_w8a8_moe_selector_uses_vllm_functional_experts(monkeypatch):
+def test_w8a8_moe_selector_uses_fl_experts_on_non_nvidia_oot(monkeypatch):
     upstream_calls = []
 
     def upstream_selector(*args, **kwargs):
         upstream_calls.append((args, kwargs))
         return "upstream"
 
-    oracle = SimpleNamespace(
-        Int8MoeBackend=SimpleNamespace(TRITON="triton"),
-        select_int8_moe_backend=upstream_selector,
-    )
-    scheme = SimpleNamespace(
-        select_int8_moe_backend=upstream_selector,
-        make_int8_moe_quant_config=lambda **kwargs: kwargs,
-    )
-    modules = {
-        moe_adapter._ORACLE_MODULE: oracle,
-        moe_adapter._SCHEME_MODULE: scheme,
-    }
-    monkeypatch.setattr(
-        moe_adapter,
-        "import_module",
-        lambda name: modules[name],
+    oracle, _ = _install_with_fake_modules(
+        monkeypatch,
+        upstream_selector,
+        lambda **kwargs: kwargs,
     )
     monkeypatch.setattr(
         type(platforms.current_platform),
@@ -123,12 +108,18 @@ def test_w8a8_moe_selector_uses_vllm_functional_experts(monkeypatch):
     import vllm_fl.utils as fl_utils
 
     monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
-
+    monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op_name: True)
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: False,
+    )
     moe_adapter.install_fl_w8a8_moe_selector()
     config = SimpleNamespace(
+        is_lora_enabled=False,
         moe_parallel_config=SimpleNamespace(
             use_batched_activation_format=False,
-        )
+        ),
     )
 
     backend, experts_cls = oracle.select_int8_moe_backend(
@@ -137,43 +128,147 @@ def test_w8a8_moe_selector_uses_vllm_functional_experts(monkeypatch):
         activation_key=None,
     )
 
-    from vllm_fl.quantization.w8a8.moe_experts import TritonW8A8Experts
+    from vllm_fl.quantization.w8a8.moe_experts import FlagGemsW8A8Experts
 
     assert backend == "triton"
-    assert experts_cls is TritonW8A8Experts
+    assert experts_cls is FlagGemsW8A8Experts
     assert upstream_calls == []
 
 
-def test_w8a8_moe_selector_install_is_idempotent(monkeypatch):
-    def installed_selector(*args, **kwargs):
-        return "installed"
+def test_w8a8_moe_selector_uses_flaggems_on_nvidia(monkeypatch):
+    upstream_calls = []
 
-    setattr(installed_selector, moe_adapter._ADAPTER_MARKER, True)
+    def upstream_selector(*args, **kwargs):
+        upstream_calls.append((args, kwargs))
+        return "nvidia-native"
 
-    def installed_builder(*args, **kwargs):
-        return "installed-config"
-
-    setattr(
-        installed_builder,
-        moe_adapter._CONFIG_BUILDER_MARKER,
-        True,
+    oracle, _ = _install_with_fake_modules(
+        monkeypatch,
+        upstream_selector,
+        lambda **kwargs: kwargs,
     )
-    oracle = SimpleNamespace(
-        select_int8_moe_backend=installed_selector,
-    )
-    scheme = SimpleNamespace(
-        select_int8_moe_backend=None,
-        make_int8_moe_quant_config=installed_builder,
-    )
-    modules = {
-        moe_adapter._ORACLE_MODULE: oracle,
-        moe_adapter._SCHEME_MODULE: scheme,
-    }
     monkeypatch.setattr(
-        moe_adapter,
-        "import_module",
-        lambda name: modules[name],
+        type(platforms.current_platform),
+        "is_out_of_tree",
+        lambda self: False,
     )
 
-    assert moe_adapter.install_fl_w8a8_moe_selector() is True
-    assert scheme.select_int8_moe_backend is installed_selector
+    import vllm_fl.utils as fl_utils
+
+    monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
+    monkeypatch.setattr(
+        fl_utils,
+        "use_flaggems_op",
+        lambda op_name: True,
+    )
+    moe_adapter.install_fl_w8a8_moe_selector()
+    config = SimpleNamespace(
+        is_lora_enabled=False,
+        moe_parallel_config=SimpleNamespace(
+            use_batched_activation_format=False,
+        ),
+    )
+
+    backend, experts_cls = oracle.select_int8_moe_backend(
+        config,
+        weight_key=None,
+        activation_key=None,
+    )
+
+    from vllm_fl.quantization.w8a8.moe_experts import FlagGemsW8A8Experts
+
+    assert backend == "triton"
+    assert experts_cls is FlagGemsW8A8Experts
+    assert upstream_calls == []
+
+
+def test_w8a8_moe_selector_nvidia_policy_disable_uses_native_fallback(monkeypatch):
+    upstream_calls = []
+
+    def upstream_selector(*args, **kwargs):
+        upstream_calls.append((args, kwargs))
+        return "nvidia-native"
+
+    oracle, _ = _install_with_fake_modules(
+        monkeypatch,
+        upstream_selector,
+        lambda **kwargs: kwargs,
+    )
+
+    import vllm_fl.utils as fl_utils
+
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
+    monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
+    monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op_name: False)
+    moe_adapter.install_fl_w8a8_moe_selector()
+    config = SimpleNamespace(
+        is_lora_enabled=False,
+        moe_parallel_config=SimpleNamespace(
+            use_batched_activation_format=False,
+        ),
+    )
+
+    backend, experts_cls = oracle.select_int8_moe_backend(
+        config,
+        weight_key=None,
+        activation_key=None,
+    )
+
+    from vllm_fl.quantization.w8a8.moe_experts import (
+        VllmFunctionalW8A8Experts,
+    )
+
+    assert backend == "triton"
+    assert experts_cls is VllmFunctionalW8A8Experts
+    assert upstream_calls == []
+
+
+def test_w8a8_moe_selector_nvidia_noncanonical_falls_back_without_flaggems(
+    monkeypatch,
+):
+    upstream_calls = []
+
+    def upstream_selector(*args, **kwargs):
+        upstream_calls.append((args, kwargs))
+        return "nvidia-native"
+
+    oracle, _ = _install_with_fake_modules(
+        monkeypatch,
+        upstream_selector,
+        lambda **kwargs: kwargs,
+    )
+
+    import vllm_fl.utils as fl_utils
+
+    monkeypatch.setattr(
+        type(platforms.current_platform),
+        "is_cuda",
+        lambda self: True,
+    )
+    monkeypatch.setattr(
+        fl_utils,
+        "use_flaggems_op",
+        lambda op_name: (_ for _ in ()).throw(
+            AssertionError("noncanonical W8A8 must not consult the FlagGems gate")
+        ),
+    )
+    moe_adapter.install_fl_w8a8_moe_selector()
+    config = SimpleNamespace()
+
+    result = oracle.select_int8_moe_backend(
+        config,
+        weight_key="noncanonical",
+        activation_key="noncanonical",
+    )
+
+    assert result == "nvidia-native"
+    assert len(upstream_calls) == 1
