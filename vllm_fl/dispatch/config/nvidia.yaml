@@ -54,13 +54,68 @@ flagos_blacklist:
   - copy_
   - to_copy
   - index
-  # FlagGems 5.4 pointwise kernels are incompatible with the PyTorch 2.13
-  # runtime required by vLLM 0.28 (reproduced by Qwen3-8B V2 inference).
+  # The FlagGems 5.4 kernels below are incompatible with the PyTorch 2.13
+  # runtime required by vLLM 0.28 (reproduced by Qwen3-8B and DeepSeek-V2).
   - fill_scalar_
   - fill_tensor_
   - sub
   - rsub_scalar
   - masked_fill_
   - le
-# OOT (Out-of-Tree) operator blacklist
-# oot_blacklist: []
+  # MOSS-Transcribe-Diarize audio encoder/profile failures.
+  - le_scalar
+  - gelu
+  - clamp
+  # LLaVA-OneVision-2 visual encoder failures.
+  # FlagGems filters by implementation function name, so scalar overloads
+  # must be listed explicitly.
+  - pow_scalar
+  - pow_tensor_scalar
+  - cos
+  - sin
+  - floor_divide
+  # Qwen3.5 hybrid-attention and multimodal generation failures.
+  - lt
+  - lt_scalar
+  - gt_scalar
+  - rsqrt
+  - sigmoid
+  - where_self
+  - where_self_out
+  - true_divide_
+  - bitwise_not
+  - clamp_
+  # Unlimited-OCR visual encoder/generation failures.
+  - sqrt
+  - sum
+  - bitwise_or_tensor
+  # LongCat-Flash-Lite scales loaded n-gram weights in place.
+  - mul_
+  # LongCat zero-expert routing and n-gram input preparation compare ids with scalars.
+  - ge_scalar
+  - eq_scalar
+  # LongCat expands per-request n-gram state from tensor repeat counts.
+  - repeat_interleave_self_tensor
+  # LongCat V2 input preparation combines tensor masks during decode.
+  - bitwise_and_tensor
+  # DeepSeek-V2-Lite MLA/MoE and sampling failures.
+  - reciprocal
+  - mul
+  - true_divide
+  - repeat_interleave_self_int
+  - neg
+  - add
+  - silu_and_mul
+  - constant_pad_nd
+  - pad
+  - bmm_out
+  - topk
+  - full
+  - gather
+  - argmax
+# FlagGems 5.4 fused MoE enters its internal pointwise activation kernel
+# directly, bypassing the ATen-level flagos_blacklist, and fails on A800 with
+# the PyTorch 2.13 runtime used by vLLM 0.28. Keep the rest of the FL OOT
+# implementations enabled and delegate only fused MoE to native vLLM CUDA.
+oot_blacklist:
+  - fused_moe

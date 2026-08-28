@@ -55,6 +55,7 @@ def test_platform_accepts_v2_model_runner():
     from types import SimpleNamespace
 
     from vllm.config import CUDAGraphMode
+
     from vllm_fl.platform import PlatformFL
 
     parallel_config = SimpleNamespace(
@@ -78,3 +79,42 @@ def test_platform_accepts_v2_model_runner():
     PlatformFL.check_and_update_config(vllm_config)
 
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+
+def test_nvidia_platform_keeps_native_cuda_semantics():
+    from vllm.platforms import PlatformEnum
+    from vllm.platforms.cuda import CudaPlatform
+
+    from vllm_fl.nvidia_platform import NvidiaPlatformFL
+
+    assert issubclass(NvidiaPlatformFL, CudaPlatform)
+    assert NvidiaPlatformFL._enum == PlatformEnum.CUDA
+    platform = NvidiaPlatformFL()
+    assert platform.is_cuda()
+    assert not platform.is_out_of_tree()
+
+
+def test_nvidia_platform_selects_target_version_worker_wrapper():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from vllm.platforms.cuda import CudaPlatform
+
+    from vllm_fl.nvidia_platform import NvidiaPlatformFL
+
+    parallel_config = SimpleNamespace(worker_cls=None)
+    vllm_config = SimpleNamespace(parallel_config=parallel_config)
+
+    with patch.object(CudaPlatform, "check_and_update_config") as native_update:
+        NvidiaPlatformFL.check_and_update_config(vllm_config)
+
+    assert parallel_config.worker_cls == "vllm_fl.worker.worker.NvidiaWorkerFL"
+    native_update.assert_called_once_with(vllm_config)
+
+
+def test_nvidia_worker_delegates_to_target_version_gpu_worker():
+    from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
+
+    from vllm_fl.worker.worker import NvidiaWorkerFL
+
+    assert issubclass(NvidiaWorkerFL, NativeGPUWorker)

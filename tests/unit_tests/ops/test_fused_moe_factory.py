@@ -2,6 +2,29 @@
 
 """Contract tests for the vLLM v0.28.0 MoE factory adaptation."""
 
+from types import SimpleNamespace
+
+
+def test_fl_triton_experts_respects_fused_moe_blacklist(monkeypatch):
+    import vllm_fl.ops.fused_moe.fused_moe_utils as moe_utils
+
+    platform = SimpleNamespace(
+        is_out_of_tree=lambda: True,
+        is_cpu=lambda: False,
+    )
+    monkeypatch.setattr(moe_utils, "current_platform", platform)
+    monkeypatch.setattr(moe_utils, "use_flaggems", lambda: True)
+
+    monkeypatch.setattr(moe_utils, "get_oot_blacklist", lambda: [])
+    assert moe_utils._should_use_fl_triton_experts()
+
+    monkeypatch.setattr(
+        moe_utils,
+        "get_oot_blacklist",
+        lambda: ["fused_moe"],
+    )
+    assert not moe_utils._should_use_fl_triton_experts()
+
 
 def test_factory_reads_quant_method_from_routed_experts(monkeypatch):
     import vllm_fl.ops.fused_moe.layer as layer

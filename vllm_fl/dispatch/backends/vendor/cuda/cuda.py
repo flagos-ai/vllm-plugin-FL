@@ -50,10 +50,7 @@ class CudaBackend(Backend):
 
                 from vllm.platforms import current_platform
 
-                if (
-                    hasattr(current_platform, "device_name")
-                    and current_platform.device_name == "nvidia"
-                ):
+                if getattr(current_platform, "vendor_name", None) == "nvidia":
                     CudaBackend._available = True
                 else:
                     CudaBackend._available = False
