@@ -1726,7 +1726,6 @@ class DeepseekV4ForCausalLM(nn.Module):
             )
             from vllm_fl.quantization.w8a8.deepseek_v4 import DeepseekV4W8A8Config
 
-            config.sliding_window = config.sliding_window_size
             apply_metax_swa_patch()
             vllm_config.quant_config = DeepseekV4W8A8Config.from_config(
                 vllm_config.quant_config.config
