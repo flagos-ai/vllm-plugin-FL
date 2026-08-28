@@ -199,3 +199,62 @@ def test_non_ascend_graph_capture_context_is_preserved():
     assert uses_local_capture("cuda", "nccl") is False
     assert uses_local_capture("musa", "mccl") is True
     assert uses_local_capture("cuda", "flagcx") is True
+
+
+def test_npu_pre_register_adds_ascend_quantization_choice(monkeypatch):
+    module = ast.parse(PLATFORM_PATH.read_text())
+    platform_class = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef) and node.name == "PlatformFL"
+    )
+    method = next(
+        node
+        for node in platform_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "pre_register_and_update"
+    )
+    method.decorator_list = []
+
+    for name in (
+        "vllm_fl",
+        "vllm_fl.dispatch",
+        "vllm_fl.dispatch.backends",
+        "vllm_fl.dispatch.backends.vendor",
+        "vllm_fl.dispatch.backends.vendor.ascend",
+        "vllm_fl.quantization",
+    ):
+        package = ModuleType(name)
+        package.__path__ = []
+        monkeypatch.setitem(sys.modules, name, package)
+    modelslim = ModuleType("vllm_fl.quantization.modelslim")
+    modelslim.ASCEND_QUANTIZATION_METHOD = "ascend"
+    modelslim.AscendModelSlimConfig = type("AscendModelSlimConfig", (), {})
+    monkeypatch.setitem(sys.modules, modelslim.__name__, modelslim)
+
+    namespace = {}
+    exec(
+        compile(
+            ast.Module([method], type_ignores=[]),
+            str(PLATFORM_PATH),
+            "exec",
+        ),
+        namespace,
+    )
+    choices = ["compressed-tensors"]
+    parser = SimpleNamespace(
+        _option_string_actions={
+            "--quantization": SimpleNamespace(choices=choices),
+        }
+    )
+
+    namespace["pre_register_and_update"](
+        SimpleNamespace(device_name="npu"),
+        parser,
+    )
+    namespace["pre_register_and_update"](
+        SimpleNamespace(device_name="npu"),
+        parser,
+    )
+
+    assert choices == ["compressed-tensors", "ascend"]
