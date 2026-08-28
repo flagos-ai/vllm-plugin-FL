@@ -116,6 +116,11 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().vendor_name == "nvidia":
+        return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+
     return "vllm_fl.platform.PlatformFL"
 
 def register_quant_linear():
