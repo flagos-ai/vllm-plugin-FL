@@ -1,0 +1,14 @@
+# MOSS-Transcribe-Diarize 0.9B V2 audio transcription smoke test.
+
+llm:
+  model: "/data/models/MOSS-Transcribe-Diarize"
+  tensor_parallel_size: 1
+  max_num_seqs: 1
+  max_model_len: 8192
+  gpu_memory_utilization: 0.6
+  trust_remote_code: true
+
+serve:
+  endpoints: ["transcription"]
+  transcription_asset: "mary_had_lamb"
+  transcription_expected: ["mary", "lamb"]

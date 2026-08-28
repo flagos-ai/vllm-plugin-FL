@@ -20,7 +20,6 @@ import torch
 import torch.nn as nn
 
 import vllm.envs as envs
-import vllm_fl.envs as fl_envs
 from vllm.config import CUDAGraphMode, VllmConfig, set_current_vllm_config
 from vllm.config.compilation import CompilationMode
 from vllm.device_allocator import get_mem_allocator_instance
@@ -56,6 +55,7 @@ from vllm.distributed.weight_transfer import (
 )
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
+from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 from vllm.multimodal.gpu_ipc_memory import reserve_mm_ipc_gpu_memory
 from vllm.platforms import current_platform
@@ -80,19 +80,18 @@ from vllm.v1.outputs import (
     ModelRunnerOutput,
 )
 from vllm.v1.utils import compute_iteration_details, report_usage_stats
+from vllm.v1.worker.gpu.warmup import warmup_kernels
+from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
 from vllm.v1.worker.sentinel.gpu_worker_sentinel import WorkerSentinel
 from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp
+from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
-from vllm.model_executor.model_loader import TensorizerLoader
-from vllm.v1.worker.gpu.warmup import warmup_kernels
-from vllm.v1.worker.utils import request_memory
-
+import vllm_fl.envs as fl_envs
 from vllm_fl.attention.utils import patch_mm_encoder_attention
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.ops.custom_ops import register_oot_ops
@@ -149,6 +148,20 @@ def _initialize_fl_runtime(rank: int) -> None:
     else:
         logger.info("[FlagGems] Enable all ops")
         flag_gems.enable(**common)
+
+
+class NvidiaWorkerFL(NativeGPUWorker):
+    """Thin FL wrapper around vLLM's target-version NVIDIA worker.
+
+    NVIDIA uses the upstream v0.28 GPU worker and V2 model runner unchanged;
+    the plugin only installs its dispatch hooks before model construction.
+    Keeping this as a delegating wrapper prevents the copied multi-vendor
+    worker below from drifting from CUDA behavior in future vLLM releases.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _initialize_fl_runtime(self.rank)
 
 
 def _apply_worker_vendor_patches() -> None:

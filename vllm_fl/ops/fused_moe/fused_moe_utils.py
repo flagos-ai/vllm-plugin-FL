@@ -27,13 +27,23 @@ from vllm.triton_utils import tl
 
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
-from vllm_fl.utils import use_flaggems
+from vllm_fl.utils import get_oot_blacklist, use_flaggems
 
 _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
 _moe_sum = CachedOp("moe_sum")
 
 logger = init_logger(__name__)
+
+
+def _should_use_fl_triton_experts() -> bool:
+    """Return whether the FL FlagGems MoE backend is enabled by policy."""
+    return (
+        current_platform.is_out_of_tree()
+        and not current_platform.is_cpu()
+        and use_flaggems()
+        and "fused_moe" not in (get_oot_blacklist() or [])
+    )
 
 
 def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBackend]:
@@ -100,11 +110,7 @@ def select_unquantized_moe_backend_oot(
 
     # Accelerator OOT platforms use the FL Triton experts when FlagGems is
     # enabled. CPU must continue into the v0.28 architecture-aware oracle.
-    if (
-        current_platform.is_out_of_tree()
-        and not current_platform.is_cpu()
-        and use_flaggems()
-    ):
+    if _should_use_fl_triton_experts():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     if moe_config.is_lora_enabled:

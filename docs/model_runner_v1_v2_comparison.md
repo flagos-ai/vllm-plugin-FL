@@ -8,12 +8,14 @@
 
 vLLM 0.28 将 V2 Model Runner 作为大多数纯 Attention 稠密生成模型的默认路径。V2 不是在 V1 上增加少量分支，而是对请求状态、GPU 输入准备、采样、异步流水和 CUDA Graph 管理进行模块化重构。
 
-`vllm-plugin-FL` 的 0.28 基础设施已经从上游同步了 `WorkerFL` 的双 runner 分支：
+`vllm-plugin-FL` 的通用跨硬件 `WorkerFL` 已同步 0.28 的双 runner 分支：
 
 - V1：实例化插件维护的 `vllm_fl.worker.model_runner.ModelRunnerFL`。
 - V2：实例化上游 `vllm.v1.worker.gpu.model_runner.GPUModelRunner`。
 
 迁移前仍有两道人工限制：插件注册时默认写入 `VLLM_USE_V2_MODEL_RUNNER=0`，平台配置又拒绝 `use_v2_model_runner=True`。本次迁移移除这两道限制，恢复上游 0.28 的自动选择逻辑，同时保留显式 `VLLM_USE_V2_MODEL_RUNNER=0` 的 V1 回退能力。
+
+NVIDIA 最终不再注册为通用 OOT 平台。`NvidiaPlatformFL` 继承上游 `CudaPlatform` 并保持 `PlatformEnum.CUDA`，只把 worker 指向继承上游 GPU Worker 的薄封装 `NvidiaWorkerFL`；该封装仅安装 FL runtime/dispatch hooks，runner 生命周期和 V1/V2 自动选择完全交给 vLLM 0.28。实测表明，把 NVIDIA 标成 `PlatformEnum.OOT` 会让 MLA 与 MoE 进入通用加速器分支，并造成 DeepSeek-V2 decode 结果损坏。
 
 ## 2. 运行时如何选择 V1/V2
 
@@ -36,7 +38,7 @@ vLLM 0.28 将 V2 Model Runner 作为大多数纯 Attention 稠密生成模型的
 - Diffusion、DFlash、DSpark 等部分专用路径会强制使用 V2。
 - V2 依赖 Triton；环境缺少可用 Triton 时不能启用。
 
-0.28 的架构白名单包括：
+0.28 的 V2 runner 架构允许列表（与 FlagGems 算子黑名单无关）包括：
 
 - `DeepseekV2ForCausalLM`
 - `DeepseekV4ForCausalLM`
@@ -66,16 +68,16 @@ vLLM 0.28 将 V2 Model Runner 作为大多数纯 Attention 稠密生成模型的
 
 ## 4. 对 vllm-plugin-FL 的直接影响
 
-### 4.1 V2 仍然经过的 FL 层
+### 4.1 NVIDIA V1/V2 都经过的 FL 层
 
-- `PlatformFL`：设备类型、通信后端、attention backend、静态图 wrapper、KV cache block size 等平台决策。
-- `WorkerFL`：设备初始化、分布式初始化、FL runtime 初始化、OOT op 注册、内存探测、执行与采样入口。
-- dispatch/custom ops：只要上游 V2 调用的是已被 FL 注册或替换的 op，仍可按 vendor 策略路由。
-- `managed_inference_mode`：Worker 级别的内存探测、执行和采样封装仍保留。
+- `NvidiaPlatformFL`：保留上游 CUDA 的平台枚举、attention/MoE 分支和配置检查，只追加 FL worker 选择。
+- `NvidiaWorkerFL`：继承上游 `vllm.v1.worker.gpu_worker.Worker`，在构造阶段安装 FlagGems、FL OOT op 和 dispatch runtime；其余设备初始化、内存探测、执行、采样和 V1/V2 runner 构造继续使用上游实现。
+- dispatch/custom ops：上游 V1 或 V2 调用已被 FL 注册或替换的 op 时，仍按 NVIDIA blacklist 与 backend policy 路由；未替换的算子保持原生 CUDA 实现。
+- 非 NVIDIA 后端仍使用通用 `PlatformFL` / `WorkerFL` 路径，本轮不改变其平台语义。
 
-### 4.2 V2 不再经过的 V1 专属层
+### 4.2 NVIDIA 不再经过的插件 runner 副本
 
-V2 不实例化 `ModelRunnerFL`，因此所有只写在该类内部、又没有提升到 Platform/Worker/dispatch 的定制都不会自动生效，重点包括：
+NVIDIA 的原生 worker 薄封装无论自动选择 V1 还是 V2，都不实例化插件维护的 `ModelRunnerFL`。因此所有只写在该类内部、又没有提升到 Platform/Worker/dispatch 的定制都不会自动生效，重点包括：
 
 - runner 内部的 IO dumper hook；
 - 直接写在 V1 prepare/forward/sample 路径中的诊断逻辑；
@@ -86,7 +88,7 @@ V2 不实例化 `ModelRunnerFL`，因此所有只写在该类内部、又没有�
 
 ### 4.3 建议的后续代码方向
 
-1. 保留 V1 `ModelRunnerFL`，作为 0.28 自动回退和跨硬件后端的兼容路径。
+1. 保留 V1 `ModelRunnerFL`，作为非 NVIDIA 跨硬件后端的兼容路径；NVIDIA 优先复用上游 runner。
 2. 新增 FL 能力时优先放在 Platform、Worker、dispatch 或上游提供的模块化接口中。
 3. 将必须覆盖 V2 内部状态的功能做成小型 adapter/hook，不复制整个 V2 目录。
 4. 为 runner 选择保留契约测试：默认不改写环境变量，显式 `0/1` 必须被尊重。
@@ -114,18 +116,33 @@ V2 在 0.28 支持的 speculative method 主要是 `eagle`、`eagle3`、`mtp`、
 
 | 顺序 | 模型 | 自动 runner 预期 | 核心覆盖 | GPU 建议 | 状态 |
 |---:|---|---|---|---:|---|
-| P0-1 | `Qwen/Qwen3-8B` | V2 | 稠密文本、GQA；依次验证 eager 与 CUDA Graph | 1×A800 | 待测试 |
-| P0-2 | `deepseek-ai/DeepSeek-V2-Lite-Chat` | V2（白名单） | MoE、MLA；单卡后可补 TP2 | 1×A800 | 待测试 |
-| P0-3 | `OpenMOSS-Team/MOSS-Transcribe-Diarize` | V2 | 0.28 新增音频、转写/说话人区分 | 1×A800 | 待测试 |
-| P0-4 | `lmms-lab-encoder/LLaVA-OneVision-2-8B-Instruct` | V2 | 0.28 新增图像、多图/视频输入 | 1×A800 | 待测试 |
-| P0-5a | `Qwen/Qwen3.5-0.8B` | V1 | 混合 GDN + full attention 的自动回退 | 1×A800 | 待测试 |
-| P0-5b | `Qwen/Qwen3.5-0.8B` | 强制 V2 | 混合 Attention、视觉、MTP 的实验兼容性 | 1×A800 | 待测试 |
-| P0-6a | `baidu/Unlimited-OCR` | V1 | 0.28 新增 MoE/R-SWA、OCR、多图、长输出 | 1×A800 | 待测试 |
-| P0-6b | `baidu/Unlimited-OCR` | 强制 V2 | OCR 模型 V2 实验兼容性 | 1×A800 | 待测试 |
-| P0-7 | `Qwen/Qwen3.8-27B` | 强制 V2 | 已有 V1 基线上的 V2 文本+视觉、TP2 | 2×A800 | 待测试 |
-| P0-8 | `meituan-longcat/LongCat-Flash-Lite` | V2（白名单） | 约 69B 大模型、MoE/长上下文、TP4 | 4×A800 | 待测试 |
+| P0-1 | `Qwen/Qwen3-8B` | V2 | 稠密文本、GQA；依次验证 eager 与 CUDA Graph | 1×A800 | 最终回归已通过 eager + CUDA Graph（2/2） |
+| P0-2 | `deepseek-ai/DeepSeek-V2-Lite-Chat` | V2（架构允许列表） | MoE、MLA；单卡后可补 TP2 | 1×A800 | 已通过 eager + CUDA Graph（2/2） |
+| P0-3 | `openmoss/MOSS-Transcribe-Diarize` | V2 | 0.28 新增音频、转写/说话人区分 | 1×A800 | 已通过真实音频转写（2/2） |
+| P0-4 | `lmms-lab-encoder/LLaVA-OneVision-2-8B-Instruct` | V2 | 0.28 新增图像、多图/视频输入 | 1×A800 | 已通过 eager + CUDA Graph，图像输出 `stop` |
+| P0-5a | `Qwen/Qwen3.5-0.8B` | V1 | 混合 GDN + full attention 的自动回退 | 1×A800 | 已通过自动 V1 文本推理，输出以 `Paris` 开头 |
+| P0-5b | `Qwen/Qwen3.5-0.8B` | 强制 V2 | 混合 Attention、视觉、MTP 的实验兼容性 | 1×A800 | 已通过 V2 + 1-token MTP 图像推理，输出 `STOP` |
+| P0-6a | `PaddlePaddle/Unlimited-OCR`（ModelScope） | V1 | 0.28 新增 MoE/R-SWA、OCR、本地图片资产 | 1×A800 | 已通过，官方百度图片识别出 `Bai du 百度` |
+| P0-6b | `PaddlePaddle/Unlimited-OCR`（ModelScope） | 强制 V2 | OCR 模型 V2 实验兼容性 | 1×A800 | 已通过，日志确认 V2，识别结果与 V1 一致 |
+| P0-7a | `Qwen/Qwen3.8-27B` | 强制 V2 | 混合 GDN/full attention、文本、TP2 | 2×A800 | 已通过，语义断言命中 `Paris` |
+| P0-7b | `Qwen/Qwen3.8-27B` | 强制 V2 | 原生视觉塔、图片输入、TP2 | 2×A800 | 已通过，stop-sign 图片输出包含 `STOP` |
+| P0-8 | `meituan-longcat/LongCat-Flash-Lite` | V2（架构允许列表） | 约 69B 大模型、MoE/长上下文、TP4 | 4×A800 | 已通过，129GB BF16 权重、原生 TritonExperts、CUDA Graph、2 条生成均成功 |
 
 测试必须按表中顺序执行。每个模型失败时先保存完整日志并定位失败阶段，再继续下一个；不能用后续模型的成功掩盖前一项失败。
+
+### 6.1 测试路径与新增能力对应关系
+
+本轮没有为每个模型新增独立 Python 客户端，而是扩展现有 YAML 驱动的 inference/serving smoke harness。新增字段或分支都由真实 P0 用例执行：
+
+| Harness 能力 | 实际覆盖用例 |
+|---|---|
+| `runner_override` / `expected_runner`，并断言 engine 的实际 runner | Qwen3.5 V1/V2、Unlimited-OCR V1/V2、Qwen3.8 V2、LongCat V2 |
+| 文本 `expected` / `expected_regex` 语义断言 | Qwen3、DeepSeek-V2、Qwen3.5、Qwen3.8、LongCat |
+| 可配置多模态 placeholder | LLaVA-OneVision-2、Qwen3.5、Qwen3.8、Unlimited-OCR |
+| vLLM 内置图片与显式本地图片路径 | stop-sign 视觉测试、Unlimited-OCR 官方百度图片 |
+| `/v1/audio/transcriptions` multipart 请求与转写语义断言 | MOSS-Transcribe-Diarize 真实音频服务测试 |
+
+模型目录只保存模型参数、输入与断言；共用的加载、推理、runner 检查和清理逻辑仍集中在两个 smoke harness 中。
 
 ## 7. 建议记录项
 
@@ -151,7 +168,35 @@ V2 在 0.28 支持的 speculative method 主要是 `eagle`、`eagle3`、`mtp`、
 - 机器：`bm-baai-dx-zone1-lc-a800-80g-15-171`，8×NVIDIA A800-SXM4-80GB。
 - 镜像：`vllm-fl-test-env:0.28.0`（本地镜像 ID `878fccdd...`）。
 - vLLM：`0.28.0`。
-- 基线：解除 V2 锁定后，插件单测 `375 passed`。
-- 详细推理日志：`/nfs/wlx/adapt/nvidia-vllm-0.28.0/logs/p0-*`。
+- 完整单测：`372 passed, 19 skipped`；NVIDIA 平台/blacklist 聚焦测试：`18 passed`。
+- 静态验证：改动 Python 文件通过 Ruff（忽略仓库既有的 `UP007`/`UP045` 注解风格），`git diff --check` 通过；CUDA 11 个 e2e 配置 dry-run 全部成功解析。
+- 详细 P0 推理日志：`/nfs/wlx/adapt/nvidia-vllm-0.28.0/logs/p0-*`；最终 Qwen3/DeepSeek-V2/LLaVA 回归：`nvidia-final-regressions.log`；最终单测：`nvidia-final-validation.log`。
 
-P0 的逐项结果将在每个模型完成后回填到第 6 节状态列；未完成项不得标记为通过。
+已完成结果：
+
+- Qwen3-8B：最终代码状态的 V2 eager 与 CUDA Graph 回归均完成有效文本生成（2/2）。
+- DeepSeek-V2-Lite-Chat：V2 eager 与 CUDA Graph 均通过，`The capital of France is` 输出以 `Paris.` 开头；这项严格断言可捕获此前 OOT 平台语义导致的重复词损坏。
+- MOSS-Transcribe-Diarize：V2 CUDA Graph 服务启动和真实 `/v1/audio/transcriptions` 请求通过，输出包含 `Mary had a little lamb`；实测新增 `gelu`、`clamp`、`le_scalar` 三个 NVIDIA FlagGems blacklist 项。
+- LLaVA-OneVision-2-8B-Instruct：V2 eager 与 CUDA Graph 均完成真实 stop-sign 图像推理，输出包含 `stop`；首次 graph 失败由共享机器外部任务抢占显存引起，换至显存充足设备后通过。
+- Qwen3.5-0.8B 自动模式：实际选择 V1，混合 GDN/full-attention 模型完成文本生成，输出以 `Paris` 开头；按真实错误补充了精确的 FlagGems 重载黑名单。
+- Qwen3.5-0.8B 强制模式：日志确认 `Using V2 Model Runner`，1-token MTP 草稿层加载成功，真实 stop-sign 图像推理输出 `STOP`。
+- Unlimited-OCR 自动模式：实际选择 V1；官方百度图片完成 OCR，输出 `title [0, 0, 999, 999]Bai du 百度`。
+- Unlimited-OCR 强制模式：日志确认 `Using V2 Model Runner`；同一图片得到与 V1 一致的语义结果。
+- Qwen3.8-27B 文本：TP2、强制 V2，日志确认 GDN prefill/decode 路径，`The capital of France is` 输出包含 `Paris`。
+- Qwen3.8-27B 视觉：TP2、强制 V2，真实 stop-sign 图片输出包含 `STOP`。
+- LongCat-Flash-Lite：TP4、V2，加载 128.69GiB BF16 权重并使用上游 `TritonExperts`；CUDA Graph 和 2 条真实生成通过，法国首都输出包含 `Paris`。
+
+NVIDIA 默认配置继续采用黑名单策略。新增项均来自 A800 真实推理失败，按首次触发模型归类如下；未在表内且未复现失败的 FlagGems 算子仍保持启用：
+
+| 触发模型 | 失败算子/路径 |
+|---|---|
+| Qwen3-8B、DeepSeek-V2-Lite | 基础 pointwise、索引、padding、采样，以及 FL fused-MoE 内部激活路径 |
+| MOSS-Transcribe-Diarize | `gelu`、`clamp`、`le_scalar` |
+| LLaVA-OneVision-2 | `cos`、`sin`、`floor_divide`、标量幂路径 |
+| Qwen3.5-0.8B | `rsqrt`、`sigmoid`、比较/where/除法重载、`bitwise_not`、`clamp_` |
+| Unlimited-OCR | `sqrt`、`bitwise_or_tensor`、`sum` |
+| LongCat-Flash-Lite | `mul_`、`ge_scalar`、`eq_scalar`、`repeat_interleave_self_tensor`、`bitwise_and_tensor`；FL `fused_moe` 回退上游 CUDA 实现 |
+
+Hopper 专用配置是显式 opt-in 路径，本轮没有 H100 实测，因此没有把 A800 新增项复制到该文件；默认 NVIDIA 配置仍适用于未启用 Hopper 专用优化的 H100。
+
+P0-1 至 P0-8 均已按顺序完成；最终代码状态的关键模型回归与完整单测结果也记录在本节。
