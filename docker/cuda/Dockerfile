@@ -19,7 +19,7 @@ ARG UBUNTU_VERSION=24.04
 FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
 
 ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.7.12
+ARG UV_VERSION=0.12.6
 ARG VLLM_VERSION=0.24.0
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -59,7 +59,7 @@ ENV PATH="/root/.local/bin:${PATH}"
 RUN gcc --version
 
 # Install pip via uv
-RUN uv pip install --system pip setuptools wheel
+RUN uv pip install --system --break-system-packages pip setuptools wheel
 
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
@@ -74,13 +74,13 @@ ARG EXTRA_INDEX_URL
 ARG VLLM_VERSION=0.24.0
 
 # Install vLLM
-RUN uv pip install --system \
+RUN uv pip install --system --break-system-packages \
         ${INDEX_URL:+--index-url ${INDEX_URL}} \
         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
         "vllm==${VLLM_VERSION}"
 
 # Install dev tools
-RUN uv pip install --system \
+RUN uv pip install --system --break-system-packages \
         pytest \
         pytest-cov \
         pytest-json-report \
@@ -97,13 +97,13 @@ ARG EXTRA_INDEX_URL
 ARG VLLM_VERSION=0.24.0
 
 # Install vLLM
-RUN uv pip install --system \
+RUN uv pip install --system --break-system-packages \
         ${INDEX_URL:+--index-url ${INDEX_URL}} \
         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
         "vllm[audio]==${VLLM_VERSION}"
 
 # Install dev/test tools
-RUN uv pip install --system \
+RUN uv pip install --system --break-system-packages \
         pytest \
         pytest-cov \
         pytest-timeout \
@@ -119,16 +119,16 @@ RUN uv pip install --system \
 ARG FLAGGEMS_VERSION=v5.3.5
 
 # Install FlagGems
-RUN uv pip install --system scikit-build-core==0.11 pybind11 \
+RUN uv pip install --system --break-system-packages scikit-build-core==0.11 pybind11 \
     && git clone --branch ${FLAGGEMS_VERSION} --depth 1 https://github.com/flagos-ai/FlagGems /workspace/FlagGems \
-    && uv pip install --system --no-build-isolation /workspace/FlagGems
+    && uv pip install --system --break-system-packages --no-build-isolation /workspace/FlagGems
 
 # Install DeepGEMM
 RUN git clone https://github.com/deepseek-ai/DeepGEMM.git /workspace/DeepGEMM \
     && cd /workspace/DeepGEMM \
     && git checkout 891d57b \
     && git submodule update --init --recursive \
-    && TORCH_DEVICE_BACKEND_AUTOLOAD=0 uv pip install --system --no-build-isolation .
+    && TORCH_DEVICE_BACKEND_AUTOLOAD=0 uv pip install --system --break-system-packages --no-build-isolation .
 
 WORKDIR /workspace
 
@@ -137,10 +137,10 @@ FROM base AS release
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_VERSION=0.20.2
+ARG VLLM_VERSION=0.24.0
 
 # Install vLLM
-RUN uv pip install --system \
+RUN uv pip install --system --break-system-packages \
         ${INDEX_URL:+--index-url ${INDEX_URL}} \
         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
         "vllm==${VLLM_VERSION}"
