@@ -52,6 +52,22 @@ MODEL_IMPORTS = [
         "vllm.model_executor.models.kimi_vl",
         ["KimiVLForConditionalGeneration"],
     ),
+    # --- vLLM 0.28 new architectures ---
+    (
+        "vllm.model_executor.models.mimo",
+        ["MiMoForCausalLM"],
+    ),
+    (
+        "vllm.model_executor.models.gemma3n_mm",
+        ["Gemma3nForConditionalGeneration"],
+    ),
+    (
+        "vllm.model_executor.models.qwen3_5",
+        [
+            "Qwen3_5ForConditionalGeneration",
+            "Qwen3_5MoeForConditionalGeneration",
+        ],
+    ),
 ]
 
 
