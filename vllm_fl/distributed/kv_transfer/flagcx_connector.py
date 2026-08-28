@@ -28,6 +28,12 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorRole,
     SupportsHMA,
 )
+from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
+    KVConnectorPromMetrics,
+    KVConnectorStats,
+    PromMetric,
+    PromMetricT,
+)
 from vllm.distributed.parallel_state import (
     get_pp_group,
     get_tensor_model_parallel_rank,
@@ -52,6 +58,11 @@ from vllm.v1.kv_cache_interface import (
 from vllm.v1.request import RequestStatus
 from vllm.v1.worker.block_table import BlockTable
 from vllm.v1.worker.utils import select_common_block_size
+
+from vllm_fl.distributed.kv_transfer.flagcx_stats import (
+    FlagCXKVConnectorStats,
+    FlagCXPromMetrics,
+)
 
 if TYPE_CHECKING:
     from vllm.v1.core.kv_cache_manager import KVCacheBlocks
@@ -300,6 +311,43 @@ class FlagCXConnector(KVConnectorBase_V1, SupportsHMA):
 
     def wait_for_save(self):
         pass
+
+    def get_kv_connector_stats(self) -> "KVConnectorStats | None":
+        """Return worker-local transfer stats since the last call.
+
+        Note the P/D asymmetry: FlagCX is P-push (P issues the one-sided
+        flagcxP2pBatchWriteSync), so P records successful transfer latency,
+        bytes and descriptor counts, while D only records failures (ZMQ /
+        side-channel errors). NIXL-style dashboards will therefore find
+        successful-transfer metrics on the P worker, not D.
+        """
+        if self.connector_worker is None:
+            return None
+        return self.connector_worker.get_kv_connector_stats()
+
+    @classmethod
+    def build_kv_connector_stats(
+        cls, data: dict[str, Any] | None = None
+    ) -> "KVConnectorStats | None":
+        return FlagCXKVConnectorStats(data=data or {})
+
+    @classmethod
+    def build_prom_metrics(
+        cls,
+        vllm_config: VllmConfig,
+        metric_types: dict[type[PromMetric], type[PromMetricT]],
+        labelnames: list[str],
+        per_engine_labelvalues: dict[int, list[object]],
+    ) -> KVConnectorPromMetrics:
+        """Register the FlagCX Prometheus metrics.
+
+        Without this the base class returns None and the stats above only
+        reach the periodic CLI log line; the counters registered here are
+        what make rate()/increase() queries possible.
+        """
+        return FlagCXPromMetrics(
+            vllm_config, metric_types, labelnames, per_engine_labelvalues
+        )
 
 
 class FlagCXConnectorScheduler:
@@ -595,6 +643,8 @@ class FlagCXConnectorWorker:
                 daemon=True,
             )
             self._receiver_t.start()
+
+        self.xfer_stats = FlagCXKVConnectorStats()
 
         self.finished_sending_reqs = FinishedSendReqSet(set(), threading.Lock())
         self.finished_recving_reqs = FinishedReceiveReqSet(set(), asyncio.Lock())
@@ -1004,7 +1054,19 @@ class FlagCXConnectorWorker:
         )
 
         if sizes:
-            self.flagcx.flagcxP2pBatchWriteSync(conn, src_vas, dst_vas, sizes)
+            write_start = time.perf_counter()
+            try:
+                self.flagcx.flagcxP2pBatchWriteSync(conn, src_vas, dst_vas, sizes)
+            except Exception:
+                # Only the one-sided write itself counts as a failed transfer;
+                # earlier setup errors are reported by the sender worker.
+                self.xfer_stats.record_failed_transfer()
+                raise
+            self.xfer_stats.record_transfer(
+                duration_s=time.perf_counter() - write_start,
+                total_bytes=sum(sizes),
+                num_descs=len(sizes),
+            )
 
         finished: list[ReqId] = []
         with self.reqs_need_send.lock:
@@ -1197,12 +1259,14 @@ class FlagCXConnectorWorker:
                     "see logs in prefiller.",
                     req_ids,
                 )
+                self.xfer_stats.record_failed_recv()
                 return
 
         except zmq.ContextTerminated:
             logger.debug("ZMQ context terminated, exiting FlagCX receiver thread.")
         except Exception as e:
             logger.error("FlagCXAgentMetadata transfer failed for %s: %s", req_ids, e)
+            self.xfer_stats.record_failed_recv()
             return
         finally:
             sock.close()
@@ -1315,12 +1379,22 @@ class FlagCXConnectorWorker:
             for transfer_id in expired:
                 send_meta = self.reqs_need_send.reqs.pop(transfer_id)
                 logger.warning(
-                    "Transfer %s send timed out, freeing blocks", transfer_id
+                    "Transfer %s send timed out after %d seconds, freeing blocks",
+                    transfer_id,
+                    self._abort_request_timeout,
                 )
+                self.xfer_stats.record_kv_expired_req()
                 if send_meta.p_req_id:
                     finished_sending.add(send_meta.p_req_id)
 
         return finished_sending or None, finished_recving or None
+
+    def get_kv_connector_stats(self) -> "KVConnectorStats | None":
+        """Return transfer stats collected since the last call, or None
+        if nothing has been recorded in this interval."""
+        if self.xfer_stats.is_empty():
+            return None
+        return self.xfer_stats.clone_and_reset()
 
     def __del__(self):
         self.shutdown()
