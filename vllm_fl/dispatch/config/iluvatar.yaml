@@ -45,19 +45,19 @@ op_backends:
   # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
   attention_backend:
     - flagos
-    - vendor:iluvatar
+    #- vendor:iluvatar
     - reference
   rms_norm:
     - flagos
-    - vendor:iluvatar
+    #- vendor:iluvatar
     - reference
   silu_and_mul:
     - flagos
-    - vendor:iluvatar
+    #- vendor:iluvatar
     - reference
   rotary_embedding:
     - flagos
-    - vendor:iluvatar
+    #- vendor:iluvatar
     - reference
 
 # FlagOS operator blacklist
