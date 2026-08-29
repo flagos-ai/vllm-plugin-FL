@@ -51,18 +51,12 @@ dist_backend_dict = {
 def _resolve_flagcx_backend() -> bool:
     """Check whether the flagcx torch distributed backend is available."""
     flagcx_path = os.environ.get("FLAGCX_PATH")
-    if not flagcx_path:
-        return False
     try:
-        if flagcx_path not in sys.path:
+        if flagcx_path and flagcx_path not in sys.path:
             sys.path.insert(0, flagcx_path)
         import flagcx  # triggers _C.so load and backend registration
         return torch.distributed.is_backend_available("flagcx")
     except Exception:
-        logger.warning(
-            "FLAGCX_PATH=%s is set but flagcx torch backend could not be loaded.",
-            flagcx_path,
-        )
         return False
 
 

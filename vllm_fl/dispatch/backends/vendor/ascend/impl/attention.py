@@ -28,6 +28,7 @@ from typing import Any, ClassVar, List, Optional, Tuple, Type
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionImpl,
@@ -719,6 +720,86 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 actual_seq_kvlen=attn_metadata.actual_seq_lengths_q,
             )[0]
 
+
+    def forward_sdpa(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: "AscendMetadata",
+        output: torch.Tensor,
+    ) -> torch.Tensor:
+        """NPU fusion attention fallback for unsupported head_dim.
+
+        The npu_fused_infer_attention_score and _npu_paged_attention kernels
+        only support head_dim in {64, 128, 192}. For head_dim=256 (e.g.
+        Qwen3.5 full attention), use npu_fusion_attention which supports
+        arbitrary head_dim.
+
+        query/key/value are TND layout: [num_tokens, num_heads, head_size].
+        output is also [num_tokens, num_heads, head_size].
+        """
+        num_tokens = query.shape[0]
+
+        if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
+            # Single-sequence prefill: npu_fusion_attention with causal mask
+            q = query[:num_tokens].contiguous()  # [T, H, D]
+            k = key[:num_tokens].contiguous()    # [T, Hkv, D]
+            v = value[:num_tokens].contiguous()
+            attn_out = torch_npu.npu_fusion_attention(
+                query=q, key=k, value=v,
+                head_num=self.num_heads,
+                input_layout="TND",
+                scale=self.scale,
+                actual_seq_qlen=[num_tokens],
+                actual_seq_kvlen=[num_tokens],
+                sparse_mode=3,  # causal
+            )[0]
+            output[:num_tokens] = attn_out[:num_tokens]
+            return output
+
+        # Decode / chunked-prefill: gather KV from paged cache, per-sequence
+        k_cache = self.key_cache   # [num_blocks, block_size, Hkv, D]
+        v_cache = self.value_cache
+        _, block_size, _, _ = k_cache.shape
+        block_table = attn_metadata.block_tables
+        seq_lens = attn_metadata.seq_lens_list
+        actual_seq_q = attn_metadata.actual_seq_lengths_q
+
+        if actual_seq_q is None:
+            actual_seq_q = [1] * len(seq_lens)
+
+        idx = 0
+        for i, (seq_len, q_len) in enumerate(zip(seq_lens, actual_seq_q)):
+            if seq_len <= 0 or q_len <= 0:
+                idx += q_len
+                continue
+            blocks = block_table[i]
+            n_blocks = (seq_len + block_size - 1) // block_size
+            # Gather KV for this sequence: [seq_len, Hkv, D]
+            k_seq = k_cache[blocks[:n_blocks]].reshape(
+                -1, self.num_kv_heads, self.head_size)[:seq_len].contiguous()
+            v_seq = v_cache[blocks[:n_blocks]].reshape(
+                -1, self.num_kv_heads, self.head_size)[:seq_len].contiguous()
+
+            q_seq = query[idx:idx + q_len].contiguous()  # [q_len, H, D]
+
+            # sparse_mode: 3=causal (for prefill q_len>1), 0=no mask (decode q_len=1)
+            sparse_mode = 3 if q_len > 1 else 0
+            out_i = torch_npu.npu_fusion_attention(
+                query=q_seq, key=k_seq, value=v_seq,
+                head_num=self.num_heads,
+                input_layout="TND",
+                scale=self.scale,
+                actual_seq_qlen=[q_len],
+                actual_seq_kvlen=[seq_len],
+                sparse_mode=sparse_mode,
+            )[0]
+            output[idx:idx + q_len] = out_i[:q_len]
+            idx += q_len
+
+        return output
+
     def forward_impl(
         self,
         query: torch.Tensor,
@@ -731,8 +812,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
         """Forward implementation dispatching to appropriate attention method."""
         num_tokens = query.shape[0]
 
-        # Use paged attention for decode-only state
-        if (attn_metadata.attn_state == AscendAttentionState.DecodeOnly
+        # head_dim > 192 is not supported by NPU fused attention kernels
+        # (only {64, 128, 192} are supported). Fall back to npu_fusion_attention.
+        if self.head_size > 192:
+            output = self.forward_sdpa(
+                query, key, value, attn_metadata, output)
+        elif (attn_metadata.attn_state == AscendAttentionState.DecodeOnly
                 and self.sliding_window is None):
             output = self.forward_paged_attention(query, attn_metadata, output)
         else:
