@@ -49,6 +49,7 @@ dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
     "musa": "mccl",
+    "txda": "gloo",
 }
 
 

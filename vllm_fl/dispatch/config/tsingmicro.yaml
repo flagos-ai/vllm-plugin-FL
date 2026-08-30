@@ -1,0 +1,42 @@
+# vLLM-FL Dispatch Configuration for TSINGMICRO (TX8110 / TSM Runtime)
+# Auto-loaded when running on TSINGMICRO txda hardware
+
+# Preferred default backend type: flagos, vendor, reference
+prefer: flagos
+
+# Strict Mode:
+#   true  = Raise an error immediately on failure; do not attempt other backends.
+#   false = Attempt the next available backend in sequence upon failure (Default).
+strict: false
+
+# Per-operator backend execution order (Optional)
+# Only the backends listed here will be attempted, in the order specified.
+op_backends:
+  # attention_backend: prioritize flagos (Triton attention)
+  attention_backend:
+    - flagos
+    - reference
+  rms_norm:
+    - flagos
+    - reference
+  silu_and_mul:
+    - flagos
+    - reference
+  rotary_embedding:
+    - flagos
+    - reference
+
+# FlagOS operator blacklist
+# to_copy/copy_/copy hang the TX8110 triton copy kernel on dtype-changing
+# casts (e.g. int32 -> int64) in topk_topp sampling; mask these off.
+flagos_blacklist:
+  - masked_fill
+  - masked_fill_
+  - to_copy
+  - copy_
+  - copy
+
+# OOT (Out-of-Tree) operator blacklist
+oot_blacklist:
+  - masked_fill
+  - masked_fill_
