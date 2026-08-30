@@ -133,7 +133,7 @@ class PlatformFL(Platform):
     ### TODO(lms): change pin_memory depend device
     @classmethod
     def is_pin_memory_available(cls):
-        if cls.device_type in ["cuda", "xpu", "npu", "musa"]:
+        if cls.device_type in ["cuda", "xpu", "npu", "musa", "txda"]:
             return True
         return False
 
@@ -457,6 +457,9 @@ class PlatformFL(Platform):
         # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
             return None
+        if cls.device_type == "txda":
+            major, minor = torch.txda.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 
