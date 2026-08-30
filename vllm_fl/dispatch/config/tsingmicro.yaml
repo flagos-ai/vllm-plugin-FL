@@ -12,10 +12,13 @@ strict: false
 # Per-operator backend execution order (Optional)
 # Only the backends listed here will be attempted, in the order specified.
 op_backends:
-  # attention_backend: prioritize flagos (Triton attention)
+  # attention_backend: flagos (Triton attention) is CUDA-gated and raises on
+  # txda, so fall back to vendor.txda -> AttentionFLBackend (flag_gems).
+  # reference is not listed: its registration is broken upstream (missing
+  # ReferenceBackend methods) and its impl returns CUDA-only FLASH_ATTN.
   attention_backend:
     - flagos
-    - reference
+    - vendor
   rms_norm:
     - flagos
     - reference
