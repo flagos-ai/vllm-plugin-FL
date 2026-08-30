@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import fcntl
 import gc
 import importlib
 import os
@@ -32,8 +33,28 @@ from vllm.distributed.kv_transfer import (
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
+
+_serialized_deep_gemm_warmup = None
 try:
-    from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
+    import vllm.model_executor.warmup.kernel_warmup as kernel_warmup_module
+
+    _deep_gemm_warmup = kernel_warmup_module.deep_gemm_warmup
+
+    def _serialized_deep_gemm_warmup(*args, **kwargs):
+        lock_path = os.environ.get(
+            "VLLM_FL_DEEP_GEMM_WARMUP_LOCK_FILE",
+            "/tmp/vllm-fl-deep-gemm-warmup.lock",
+        )
+        with open(lock_path, "a+") as lock_file:
+            logger.info("Waiting for the DeepGEMM warmup lock")
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                logger.info("Running DeepGEMM warmup with the lock held")
+                return _deep_gemm_warmup(*args, **kwargs)
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+    kernel_warmup = kernel_warmup_module.kernel_warmup
 except ImportError:
     # deep_gemm may be broken in some environments; provide a fallback
     import logging as _logging
@@ -726,21 +747,13 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if os.environ.get("VLLM_FL_SKIP_KERNEL_WARMUP", "").lower() in (
-            "true",
-            "1",
-        ):
-            logger.warning("kernel_warmup skipped by VLLM_FL_SKIP_KERNEL_WARMUP")
-        else:
-            try:
-                kernel_warmup(self)
-            except ImportError as e:
-                # vllm 0.24.0's kernel_warmup unconditionally imports
-                # minimax_m3_msa_warmup, whose chain reaches torchvision.
-                # torchvision is not installed on OOT runtimes (installing it
-                # would overwrite the vendor-matched torch matrix); the warmup
-                # is a no-op for any model other than MiniMaxM3, so skip it.
-                logger.warning("kernel_warmup skipped: %s", e)
+        if _serialized_deep_gemm_warmup is not None:
+            kernel_warmup.__globals__["deep_gemm_warmup"] = (
+                _serialized_deep_gemm_warmup
+            )
+        kernel_warmup(self)
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
 
         cuda_graph_memory_bytes = 0
         if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
