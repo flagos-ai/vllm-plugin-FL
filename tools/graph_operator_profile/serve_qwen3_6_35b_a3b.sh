@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUN_ROOT=${PROFILE_RUN_ROOT:-/vllm-workspace/graph_operator_profile_runs}
+RUN_DIR="$RUN_ROOT/qwen3_6_35b_a3b"
+PROFILE_DIR="$RUN_DIR/profile"
+CAPTURE_DIR="$PROFILE_DIR/capture_traces"
+if [[ -d "$RUN_DIR" ]]; then
+  archive="$RUN_ROOT/archive/qwen3_6_35b_a3b_$(date +%Y%m%d_%H%M%S)_$$"
+  mkdir -p "$(dirname "$archive")"
+  mv "$RUN_DIR" "$archive"
+fi
+mkdir -p "$PROFILE_DIR" "$CAPTURE_DIR"
+
+export VLLM_PLUGINS=fl
+export VLLM_FL_SKIP_KERNEL_WARMUP=1
+export VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR="$CAPTURE_DIR"
+export VLLM_USE_BREAKABLE_CUDAGRAPH=0
+
+exec vllm serve /models/Qwen3.6-35B-A3B \
+  --served-model-name qwen \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --tensor-parallel-size 2 \
+  --max-model-len 32768 \
+  --max-num-seqs 1 \
+  --no-enable-prefix-caching \
+  --trust-remote-code \
+  --compilation-config '{"cudagraph_capture_sizes":[1],"cudagraph_num_of_warmups":0}' \
+  --profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILE_DIR\",\"torch_profiler_record_shapes\":true,\"torch_profiler_with_stack\":false,\"torch_profiler_dump_cuda_time_total\":false,\"torch_profiler_with_memory\":false,\"ignore_frontend\":true}" \
+  > "$RUN_DIR/serve.log" 2>&1

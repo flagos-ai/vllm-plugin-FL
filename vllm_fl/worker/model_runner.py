@@ -7,6 +7,7 @@
 import functools
 import gc
 import itertools
+import os
 import threading
 import time
 from collections import defaultdict
@@ -289,6 +290,56 @@ if TYPE_CHECKING:
     from vllm.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
 
 logger = init_logger(__name__)
+
+
+@contextmanager
+def _profile_graph_capture(
+    num_tokens: int,
+    cudagraph_runtime_mode: CUDAGraphMode,
+):
+    """Record real CUDA Graph capture on the current rank.
+
+    Runtime profiling remains owned by upstream vLLM's /start_profile and is
+    intentionally unchanged. This hook captures graph-construction operators
+    with shape/dtype metadata without a sitecustomize monkey patch.
+    """
+    trace_root = os.environ.get("VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR", "")
+    if not trace_root:
+        yield
+        return
+
+    os.makedirs(trace_root, exist_ok=True)
+    rank = (
+        torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    )
+    mode_name = cudagraph_runtime_mode.name
+    label = f"capture_{num_tokens}_{mode_name}"
+    handler = torch.profiler.tensorboard_trace_handler(
+        trace_root,
+        worker_name=f"graph_capture_rank_{rank}_{label}",
+        use_gzip=True,
+    )
+    logger.info(
+        "Profiling real CUDA Graph capture on rank %d: tokens=%d mode=%s",
+        rank,
+        num_tokens,
+        mode_name,
+    )
+    with (
+        torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            profile_memory=False,
+            with_stack=False,
+            on_trace_ready=handler,
+        ),
+        torch.profiler.record_function(label),
+    ):
+        yield
+
 
 AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
 # list when ubatching is enabled
@@ -5524,7 +5575,7 @@ class ModelRunnerFL(
             logger.warning_once(
                 "Reloading with `is_checkpoint_format=True` requires that "
                 "weights be in kernel format and already sharded",
-                
+
             )
             loaded_weights = set()
             for name, loaded_weight in weights_iterator:
@@ -5538,7 +5589,7 @@ class ModelRunnerFL(
         logger.info_once(
             "Reloading and processing weights took %.2f seconds",
             diff_seconds,
-            
+
         )
         if self.model_config.quantization is None and loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
@@ -6735,7 +6786,7 @@ class ModelRunnerFL(
             "Graph capturing finished in %.0f secs, took %.2f GiB",
             elapsed_time,
             cuda_graph_size / (1 << 30),
-            
+
         )
         return cuda_graph_size
 
@@ -6762,17 +6813,34 @@ class ModelRunnerFL(
                 num_active_loras=desc.num_active_loras,
                 profile_seq_lens=profile_seq_lens,
             )
-        self._dummy_run(
-            desc.num_tokens,
-            cudagraph_runtime_mode=cudagraph_runtime_mode,
-            uniform_decode=desc.uniform,
-            allow_microbatching=allow_microbatching,
-            skip_eplb=True,
-            remove_lora=False,
-            num_active_loras=desc.num_active_loras,
-            is_graph_capturing=True,
-            profile_seq_lens=profile_seq_lens,
-        )
+        if os.environ.get("VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR", ""):
+            with _profile_graph_capture(
+                desc.num_tokens,
+                cudagraph_runtime_mode,
+            ):
+                self._dummy_run(
+                    desc.num_tokens,
+                    cudagraph_runtime_mode=cudagraph_runtime_mode,
+                    uniform_decode=desc.uniform,
+                    allow_microbatching=allow_microbatching,
+                    skip_eplb=True,
+                    remove_lora=False,
+                    num_active_loras=desc.num_active_loras,
+                    is_graph_capturing=True,
+                    profile_seq_lens=profile_seq_lens,
+                )
+        else:
+            self._dummy_run(
+                desc.num_tokens,
+                cudagraph_runtime_mode=cudagraph_runtime_mode,
+                uniform_decode=desc.uniform,
+                allow_microbatching=allow_microbatching,
+                skip_eplb=True,
+                remove_lora=False,
+                num_active_loras=desc.num_active_loras,
+                is_graph_capturing=True,
+                profile_seq_lens=profile_seq_lens,
+            )
 
     def _capture_cudagraphs(
         self,
@@ -7390,7 +7458,7 @@ class ModelRunnerFL(
         self,
         kv_cache_config: KVCacheConfig,
         is_profiling: bool = False,
-    ) -> None:        
+    ) -> None:
         """
         Initialize KV cache based on `kv_cache_config`.
         Args:

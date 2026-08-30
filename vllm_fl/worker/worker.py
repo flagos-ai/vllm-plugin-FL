@@ -5,6 +5,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import gc
+import importlib
 import os
 from contextlib import nullcontext, contextmanager
 from types import NoneType
@@ -72,6 +73,39 @@ from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
+
+
+def _patch_deepseek_v4_launch_pdl() -> None:
+    """Supply missing Triton launch_pdl launch metadata.
+
+    vLLM 0.24.0 declares launch_pdl as a required constexpr argument for
+    fused_inv_rope_fp8_quant. PlatformFL inherits the generic platform PDL
+    capability result, so the caller omits the argument even on an H100 that
+    supports PDL in hardware. Preserve an explicit caller value and default
+    only the missing case to False for compatibility.
+    """
+    try:
+        fused_inv_rope_fp8_quant = importlib.import_module(
+            "vllm.models.deepseek_v4.common.ops.fused_inv_rope_fp8_quant"
+        )
+    except ImportError:
+        return
+
+    kernel = fused_inv_rope_fp8_quant._fused_inv_rope_fp8_quant_per_head
+    original_run = kernel.run
+    if getattr(original_run, "_vllm_fl_launch_pdl_compat", False):
+        return
+
+    def run_with_launch_pdl(*args, **kwargs):
+        kwargs.setdefault("launch_pdl", False)
+        return original_run(*args, **kwargs)
+
+    run_with_launch_pdl._vllm_fl_launch_pdl_compat = True
+    kernel.run = run_with_launch_pdl
+    logger.info(
+        "Patched DeepSeek-V4 fused_inv_rope_fp8_quant launch_pdl default"
+    )
+
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
@@ -233,6 +267,7 @@ class WorkerFL(WorkerBase):
         patch_mm_encoder_attention()
 
         register_oot_ops()
+        _patch_deepseek_v4_launch_pdl()
 
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
@@ -691,15 +726,21 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        try:
-            kernel_warmup(self)
-        except ImportError as e:
-            # vllm 0.24.0's kernel_warmup unconditionally imports
-            # minimax_m3_msa_warmup, whose chain reaches torchvision.
-            # torchvision is not installed on OOT runtimes (installing it
-            # would overwrite the vendor-matched torch matrix); the warmup
-            # is a no-op for any model other than MiniMaxM3, so skip it.
-            logger.warning("kernel_warmup skipped: %s", e)
+        if os.environ.get("VLLM_FL_SKIP_KERNEL_WARMUP", "").lower() in (
+            "true",
+            "1",
+        ):
+            logger.warning("kernel_warmup skipped by VLLM_FL_SKIP_KERNEL_WARMUP")
+        else:
+            try:
+                kernel_warmup(self)
+            except ImportError as e:
+                # vllm 0.24.0's kernel_warmup unconditionally imports
+                # minimax_m3_msa_warmup, whose chain reaches torchvision.
+                # torchvision is not installed on OOT runtimes (installing it
+                # would overwrite the vendor-matched torch matrix); the warmup
+                # is a no-op for any model other than MiniMaxM3, so skip it.
+                logger.warning("kernel_warmup skipped: %s", e)
 
         cuda_graph_memory_bytes = 0
         if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:

@@ -45,6 +45,9 @@ op_backends:
 
 # FlagOS operator blacklist
 flagos_blacklist:
+  # FlagGems 5.3.4 cannot lower torch.float8_e8m0fnu allocations used by
+  # DeepSeek-V4 FP8 UE8M0 scale parameters. Fall back to native PyTorch.
+  - empty
   - index_put_
   - index_put
   - _index_put_impl_

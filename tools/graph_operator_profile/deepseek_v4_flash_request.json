@@ -1,0 +1,6 @@
+{
+  "model": "deepseek-v4-flash",
+  "prompt": "Hello",
+  "max_tokens": 4,
+  "temperature": 0
+}
