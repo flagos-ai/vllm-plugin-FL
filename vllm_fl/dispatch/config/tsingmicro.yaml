@@ -19,15 +19,20 @@ op_backends:
   attention_backend:
     - flagos
     - vendor
+  # rms_norm/rotary_embedding: flag_gems (flagtree-compiled) kernels compute
+  # WRONG values on TX8110 without raising (probe: rms_norm maxrel ~7200,
+  # rope maxabs ~1.7-2.9 vs float32 ref), so reference-first: strict:false only
+  # falls back on exception, and wrong output never triggers it. Reference.torch
+  # impls are numerically fine on txda (maxrel < 1%, bf16 precision).
   rms_norm:
-    - flagos
     - reference
+    - flagos
   silu_and_mul:
     - flagos
     - reference
   rotary_embedding:
-    - flagos
     - reference
+    - flagos
 
 # FlagOS operator blacklist
 # to_copy/copy_/copy hang the TX8110 triton copy kernel on dtype-changing
