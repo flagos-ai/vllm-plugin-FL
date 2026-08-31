@@ -70,6 +70,7 @@ def test_all_backends_register_deepseek_v4_op(monkeypatch):
     from vllm_fl.dispatch.backends.flaggems import register_ops as flaggems_ops
     from vllm_fl.dispatch.backends.reference import register_ops as reference_ops
     from vllm_fl.dispatch.backends.vendor.cuda import register_ops as cuda_ops
+
     registered = []
 
     class Registry:

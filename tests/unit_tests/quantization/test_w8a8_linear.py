@@ -257,12 +257,8 @@ def test_w8a8_linear_weight_layout_and_numerics_match_flaggems_contract(
 
 
 def test_w8a8_grouped_linear_prepares_group_major_weights():
-    checkpoint_weight = torch.arange(
-        32, dtype=torch.int8
-    ).reshape(8, 4)
-    checkpoint_scale = torch.arange(
-        1, 9, dtype=torch.float32
-    ).reshape(8, 1)
+    checkpoint_weight = torch.arange(32, dtype=torch.int8).reshape(8, 4)
+    checkpoint_scale = torch.arange(1, 9, dtype=torch.float32).reshape(8, 1)
     layer = torch.nn.Module()
     layer.is_bmm = True
     layer.bmm_batch_size = 2
