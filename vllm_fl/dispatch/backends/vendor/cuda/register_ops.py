@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -49,6 +49,27 @@ def register_builtins(registry) -> None:
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
+        *[
+            OpImpl(
+                op_name=f"deepseek_v4_{op_name}",
+                impl_id="vendor.cuda",
+                kind=BackendImplKind.VENDOR,
+                fn=_bind_is_available(
+                    getattr(backend, f"deepseek_v4_{op_name}"),
+                    is_avail,
+                ),
+                vendor="cuda",
+                priority=BackendPriority.VENDOR,
+            )
+            for op_name in (
+                "inv_rope_quant_fp8",
+                "int8_scaled_mm",
+                "mhc_pre",
+                "mhc_fused_post_pre",
+                "mhc_post",
+                "hc_head",
+            )
+        ],
         # Activation
         OpImpl(
             op_name="silu_and_mul",

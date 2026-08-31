@@ -51,6 +51,27 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        *[
+            OpImpl(
+                op_name=f"deepseek_v4_{op_name}",
+                impl_id="default.flagos",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(
+                    getattr(backend, f"deepseek_v4_{op_name}"),
+                    is_avail,
+                ),
+                vendor=None,
+                priority=BackendPriority.DEFAULT,
+            )
+            for op_name in (
+                "inv_rope_quant_fp8",
+                "int8_scaled_mm",
+                "mhc_pre",
+                "mhc_fused_post_pre",
+                "mhc_post",
+                "hc_head",
+            )
+        ],
         # Quantization
         OpImpl(
             op_name="dynamic_per_token_quant_int8",

@@ -7,10 +7,23 @@ from unittest.mock import Mock
 import torch
 
 from vllm_fl.dispatch.backends.reference.impl.deepseek_v4 import (
+    deepseek_v4_hc_head_torch,
+    deepseek_v4_int8_scaled_mm_torch,
     deepseek_v4_inv_rope_quant_int8_torch,
+    deepseek_v4_mhc_post_torch,
 )
 from vllm_fl.dispatch.types import BackendImplKind
 from vllm_fl.ops import deepseek_v4_int8_woa
+
+DSV4_OPS = {
+    "deepseek_v4_inv_rope_quant_int8",
+    "deepseek_v4_inv_rope_quant_fp8",
+    "deepseek_v4_int8_scaled_mm",
+    "deepseek_v4_mhc_pre",
+    "deepseek_v4_mhc_fused_post_pre",
+    "deepseek_v4_mhc_post",
+    "deepseek_v4_hc_head",
+}
 
 
 def test_reference_inv_rope_quant_int8():
@@ -102,3 +115,66 @@ def test_all_backends_register_deepseek_v4_op(monkeypatch):
         BackendImplKind.VENDOR,
         BackendImplKind.REFERENCE,
     }
+
+
+def test_reference_scaled_mm_and_mhc_ops():
+    x_q = torch.tensor([[1, -2]], dtype=torch.int8)
+    weight = torch.tensor([[3, 4], [5, 6]], dtype=torch.int8)
+    actual = deepseek_v4_int8_scaled_mm_torch(
+        x_q,
+        weight,
+        torch.tensor([[0.5]]),
+        torch.tensor([0.25, 0.5]),
+        torch.float32,
+    )
+    torch.testing.assert_close(actual, torch.tensor([[-0.875, -2.0]]))
+
+    residual = torch.tensor([[[1, 2], [3, 4]]], dtype=torch.bfloat16)
+    layer = torch.tensor([[2, -1]], dtype=torch.bfloat16)
+    post = torch.tensor([[[0.5], [1.0]]], dtype=torch.float32)
+    comb = torch.eye(2, dtype=torch.float32).unsqueeze(0)
+    torch.testing.assert_close(
+        deepseek_v4_mhc_post_torch(layer, residual, post, comb),
+        torch.tensor([[[2, 1.5], [5, 3]]], dtype=torch.bfloat16),
+    )
+
+    fn = torch.zeros((2, 4), dtype=torch.float32)
+    head = deepseek_v4_hc_head_torch(
+        residual,
+        fn,
+        torch.ones(1),
+        torch.zeros(2),
+        1e-6,
+        0.0,
+    )
+    torch.testing.assert_close(head, residual.float().mean(dim=1).to(torch.bfloat16))
+
+
+def test_all_backends_register_all_deepseek_v4_ops(monkeypatch):
+    from vllm_fl.dispatch.backends.flaggems import register_ops as flaggems_ops
+    from vllm_fl.dispatch.backends.reference import register_ops as reference_ops
+    from vllm_fl.dispatch.backends.vendor.cuda import register_ops as cuda_ops
+
+    registered = []
+
+    class Registry:
+        def register_many(self, impls):
+            registered.extend(impls)
+
+    monkeypatch.setattr(
+        flaggems_ops,
+        "use_flaggems_op",
+        lambda op_name: op_name in DSV4_OPS,
+    )
+    registry = Registry()
+    flaggems_ops.register_builtins(registry)
+    cuda_ops.register_builtins(registry)
+    reference_ops.register_builtins(registry)
+
+    for op_name in DSV4_OPS:
+        implementations = [impl for impl in registered if impl.op_name == op_name]
+        assert {impl.impl_id for impl in implementations} == {
+            "default.flagos",
+            "vendor.cuda",
+            "reference.torch",
+        }

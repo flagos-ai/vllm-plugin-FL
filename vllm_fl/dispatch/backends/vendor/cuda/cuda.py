@@ -8,8 +8,6 @@ This backend provides operator implementations for NVIDIA CUDA GPUs.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -23,14 +21,14 @@ class CudaBackend(Backend):
     operator implementations for NVIDIA GPUs.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "cuda"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "nvidia"
 
     def is_available(self) -> bool:
@@ -84,6 +82,30 @@ class CudaBackend(Backend):
             rope_dim,
         )
 
+    def _deepseek_v4_call(self, op_name, *args, **kwargs):
+        from .impl import deepseek_v4
+
+        fn = getattr(deepseek_v4, f"deepseek_v4_{op_name}_cuda")
+        return fn(*args, **kwargs)
+
+    def deepseek_v4_inv_rope_quant_fp8(self, *args, **kwargs):
+        return self._deepseek_v4_call("inv_rope_quant_fp8", *args, **kwargs)
+
+    def deepseek_v4_int8_scaled_mm(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_scaled_mm", *args, **kwargs)
+
+    def deepseek_v4_mhc_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_fused_post_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_fused_post_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_post(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_post", *args, **kwargs)
+
+    def deepseek_v4_hc_head(self, *args, **kwargs):
+        return self._deepseek_v4_call("hc_head", *args, **kwargs)
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
@@ -122,8 +144,8 @@ class CudaBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization using vLLM's CUDA implementation.
 
@@ -210,7 +232,7 @@ class CudaBackend(Backend):
         topk_ids: torch.Tensor,
         block_size: int,
         num_experts: int,
-        expert_map: Optional[torch.Tensor] = None,
+        expert_map: torch.Tensor | None = None,
         pad_sorted_ids: bool = False,
         ignore_invalid_experts: bool = False,
     ):
@@ -306,6 +328,12 @@ class CudaBackend(Backend):
         from .impl.fused_moe import grouped_topk_cuda
 
         return grouped_topk_cuda(
-            scores, n_group, topk_group, topk,
-            renormalize, routed_scaling_factor, bias, scoring_func,
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
         )

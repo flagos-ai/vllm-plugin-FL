@@ -8,10 +8,9 @@ This backend provides operator implementations using the FlagGems library.
 
 from __future__ import annotations
 
-from typing import Optional, Union
+import os
 
 import torch
-import os
 
 from vllm_fl.dispatch.backends.base import Backend
 
@@ -24,7 +23,7 @@ class FlagGemsBackend(Backend):
     operator implementations.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
@@ -65,6 +64,30 @@ class FlagGemsBackend(Backend):
             nope_dim,
             rope_dim,
         )
+
+    def _deepseek_v4_call(self, op_name, *args, **kwargs):
+        from .impl import deepseek_v4
+
+        fn = getattr(deepseek_v4, f"deepseek_v4_{op_name}_flaggems")
+        return fn(*args, **kwargs)
+
+    def deepseek_v4_inv_rope_quant_fp8(self, *args, **kwargs):
+        return self._deepseek_v4_call("inv_rope_quant_fp8", *args, **kwargs)
+
+    def deepseek_v4_int8_scaled_mm(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_scaled_mm", *args, **kwargs)
+
+    def deepseek_v4_mhc_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_fused_post_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_fused_post_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_post(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_post", *args, **kwargs)
+
+    def deepseek_v4_hc_head(self, *args, **kwargs):
+        return self._deepseek_v4_call("hc_head", *args, **kwargs)
 
     def dynamic_per_token_quant_int8(
         self,
@@ -116,8 +139,8 @@ class FlagGemsBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 
@@ -205,7 +228,9 @@ class FlagGemsBackend(Backend):
 
         if use_flaggems_attn:
             print("Using FlagGems attention backend.")
-            return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+            return (
+                "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+            )
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()
 
@@ -214,7 +239,7 @@ class FlagGemsBackend(Backend):
         topk_ids: torch.Tensor,
         block_size: int,
         num_experts: int,
-        expert_map: Optional[torch.Tensor] = None,
+        expert_map: torch.Tensor | None = None,
         pad_sorted_ids: bool = False,
         ignore_invalid_experts: bool = False,
     ):
@@ -310,6 +335,12 @@ class FlagGemsBackend(Backend):
         from .impl.fused_moe import grouped_topk_flaggems
 
         return grouped_topk_flaggems(
-            scores, n_group, topk_group, topk,
-            renormalize, routed_scaling_factor, bias, scoring_func,
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
         )

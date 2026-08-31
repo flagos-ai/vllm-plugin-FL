@@ -10,8 +10,6 @@ and serve as fallback implementations.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -25,7 +23,7 @@ class ReferenceBackend(Backend):
     implementations that are always available as fallbacks.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
@@ -35,7 +33,7 @@ class ReferenceBackend(Backend):
         """Check if PyTorch is available."""
         if ReferenceBackend._available is None:
             try:
-                import torch
+                import torch  # noqa: F401
 
                 ReferenceBackend._available = True
             except ImportError:
@@ -64,6 +62,30 @@ class ReferenceBackend(Backend):
             nope_dim,
             rope_dim,
         )
+
+    def _deepseek_v4_call(self, op_name, *args, **kwargs):
+        from .impl import deepseek_v4
+
+        fn = getattr(deepseek_v4, f"deepseek_v4_{op_name}_torch")
+        return fn(*args, **kwargs)
+
+    def deepseek_v4_inv_rope_quant_fp8(self, *args, **kwargs):
+        return self._deepseek_v4_call("inv_rope_quant_fp8", *args, **kwargs)
+
+    def deepseek_v4_int8_scaled_mm(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_scaled_mm", *args, **kwargs)
+
+    def deepseek_v4_mhc_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_fused_post_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_fused_post_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_post(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_post", *args, **kwargs)
+
+    def deepseek_v4_hc_head(self, *args, **kwargs):
+        return self._deepseek_v4_call("hc_head", *args, **kwargs)
 
     def dynamic_per_token_quant_int8(
         self,
@@ -107,8 +129,8 @@ class ReferenceBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 
