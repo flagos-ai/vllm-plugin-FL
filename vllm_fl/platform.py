@@ -76,12 +76,17 @@ class PlatformFL(Platform):
         if self.device_type == "musa":
             return True
         if self.vendor_name == "hygon":
-            return False
+            return True
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
+        
+    def is_rocm(self) -> bool:
+        if self.vendor_name == "hygon":
+            return True
+        return False
 
     def is_musa(self) -> bool:
         if hasattr(torch, 'musa') and torch.musa.is_available():

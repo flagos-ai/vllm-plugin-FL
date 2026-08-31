@@ -501,6 +501,9 @@ class ModelRunnerFL(
         parallel_config = self.parallel_config
         self.device = device
         self.pin_memory = is_pin_memory_available()
+        self._use_hygon_rope_h2d_staging = (
+            str(getattr(current_platform, "vendor_name", "")).lower() == "hygon"
+        )
         self.dtype = self.model_config.dtype
 
         self.kv_cache_dtype = kv_cache_dtype_str_to_dtype(
@@ -824,6 +827,10 @@ class ModelRunnerFL(
             self.max_num_reqs, dtype=torch.int32
         )
 
+        # Hygon uses flat contiguous staging buffers because the active columns
+        # of the compile-stable RoPE buffers are intentionally non-contiguous.
+        self.mrope_positions_h2d_cpu: torch.Tensor | None = None
+        self.mrope_positions_h2d_gpu: torch.Tensor | None = None
         # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
         if self.uses_mrope:
             # NOTE: `mrope_positions` is implemented with one additional dummy
@@ -839,13 +846,39 @@ class ModelRunnerFL(
             self.mrope_positions = self._make_buffer(
                 (3, self.max_num_tokens + 1), dtype=torch.int64
             )
+            if self._use_hygon_rope_h2d_staging:
+                self.mrope_positions_h2d_cpu = torch.empty(
+                    3 * self.max_num_tokens,
+                    dtype=torch.int64,
+                    device="cpu",
+                    pin_memory=self.pin_memory,
+                )
+                self.mrope_positions_h2d_gpu = torch.empty(
+                    3 * self.max_num_tokens,
+                    dtype=torch.int64,
+                    device=self.device,
+                )
 
         # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
+        self.xdrope_positions_h2d_cpu: torch.Tensor | None = None
+        self.xdrope_positions_h2d_gpu: torch.Tensor | None = None
         if self.uses_xdrope_dim > 0:
             # Similar to mrope but use assigned dimension number for RoPE, 4 as default.
             self.xdrope_positions = self._make_buffer(
                 (self.uses_xdrope_dim, self.max_num_tokens + 1), dtype=torch.int64
             )
+            if self._use_hygon_rope_h2d_staging:
+                self.xdrope_positions_h2d_cpu = torch.empty(
+                    self.uses_xdrope_dim * self.max_num_tokens,
+                    dtype=torch.int64,
+                    device="cpu",
+                    pin_memory=self.pin_memory,
+                )
+                self.xdrope_positions_h2d_gpu = torch.empty(
+                    self.uses_xdrope_dim * self.max_num_tokens,
+                    dtype=torch.int64,
+                    device=self.device,
+                )
 
         # None in the first PP rank. The rest are set after load_model.
         self.intermediate_tensors: IntermediateTensors | None = None
@@ -1990,11 +2023,19 @@ class ModelRunnerFL(
         # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
         if self.uses_mrope:
             self._calc_mrope_positions(scheduler_output)
+            if self._use_hygon_rope_h2d_staging:
+                self._pack_mrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
 
         # Calculate XD-RoPE positions.
         # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
         if self.uses_xdrope_dim > 0:
             self._calc_xdrope_positions(scheduler_output)
+            if self._use_hygon_rope_h2d_staging:
+                self._pack_xdrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
 
         # Get token indices.
         # E.g., [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
@@ -2202,16 +2243,26 @@ class ModelRunnerFL(
 
         if self.uses_mrope:
             # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-            self.mrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
-                self.mrope_positions.cpu[:, :total_num_scheduled_tokens],
-                non_blocking=True,
-            )
+            if self._use_hygon_rope_h2d_staging:
+                self._copy_mrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
+            else:
+                self.mrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
+                    self.mrope_positions.cpu[:, :total_num_scheduled_tokens],
+                    non_blocking=True,
+                )
         elif self.uses_xdrope_dim > 0:
             # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
-            self.xdrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
-                self.xdrope_positions.cpu[:, :total_num_scheduled_tokens],
-                non_blocking=True,
-            )
+            if self._use_hygon_rope_h2d_staging:
+                self._copy_xdrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
+            else:
+                self.xdrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
+                    self.xdrope_positions.cpu[:, :total_num_scheduled_tokens],
+                    non_blocking=True,
+                )
         if self.use_async_spec_decode and (self.uses_mrope or self.uses_xdrope_dim > 0):
             drift = self.num_computed_tokens[req_indices_gpu].to(
                 torch.int64
@@ -2710,6 +2761,52 @@ class ModelRunnerFL(
             dcp_world_size=self.dcp_world_size,
         )
         return common_prefix_len if use_cascade else 0
+
+    def _pack_mrope_positions_for_hygon_h2d(self, num_tokens: int) -> None:
+        assert self.mrope_positions_h2d_cpu is not None
+        packed = self.mrope_positions_h2d_cpu[: 3 * num_tokens].view(
+            3, num_tokens
+        )
+        packed.copy_(self.mrope_positions.cpu[:, :num_tokens])
+
+    def _copy_mrope_positions_for_hygon_h2d(self, num_tokens: int) -> None:
+        assert self._use_hygon_rope_h2d_staging
+        assert self.mrope_positions_h2d_cpu is not None
+        assert self.mrope_positions_h2d_gpu is not None
+        num_elements = 3 * num_tokens
+        packed_gpu = self.mrope_positions_h2d_gpu[:num_elements]
+        packed_gpu.copy_(
+            self.mrope_positions_h2d_cpu[:num_elements],
+            non_blocking=True,
+        )
+        self.mrope_positions.gpu[:, :num_tokens].copy_(
+            packed_gpu.view(3, num_tokens),
+            non_blocking=True,
+        )
+
+    def _pack_xdrope_positions_for_hygon_h2d(self, num_tokens: int) -> None:
+        assert self.xdrope_positions_h2d_cpu is not None
+        dim = self.uses_xdrope_dim
+        packed = self.xdrope_positions_h2d_cpu[: dim * num_tokens].view(
+            dim, num_tokens
+        )
+        packed.copy_(self.xdrope_positions.cpu[:, :num_tokens])
+
+    def _copy_xdrope_positions_for_hygon_h2d(self, num_tokens: int) -> None:
+        assert self._use_hygon_rope_h2d_staging
+        assert self.xdrope_positions_h2d_cpu is not None
+        assert self.xdrope_positions_h2d_gpu is not None
+        dim = self.uses_xdrope_dim
+        num_elements = dim * num_tokens
+        packed_gpu = self.xdrope_positions_h2d_gpu[:num_elements]
+        packed_gpu.copy_(
+            self.xdrope_positions_h2d_cpu[:num_elements],
+            non_blocking=True,
+        )
+        self.xdrope_positions.gpu[:, :num_tokens].copy_(
+            packed_gpu.view(dim, num_tokens),
+            non_blocking=True,
+        )
 
     def _calc_mrope_positions(self, scheduler_output: "SchedulerOutput"):
         mrope_pos_ptr = 0
@@ -3267,11 +3364,27 @@ class ModelRunnerFL(
 
         if should_sync_mrope_positions:
             self._calc_mrope_positions(scheduler_output)
-            self.mrope_positions.copy_to_gpu(total_num_scheduled_tokens)
+            if self._use_hygon_rope_h2d_staging:
+                self._pack_mrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
+                self._copy_mrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
+            else:
+                self.mrope_positions.copy_to_gpu(total_num_scheduled_tokens)
 
         if should_sync_xdrope_positions:
             self._calc_xdrope_positions(scheduler_output)
-            self.xdrope_positions.copy_to_gpu(total_num_scheduled_tokens)
+            if self._use_hygon_rope_h2d_staging:
+                self._pack_xdrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
+                self._copy_xdrope_positions_for_hygon_h2d(
+                    total_num_scheduled_tokens
+                )
+            else:
+                self.xdrope_positions.copy_to_gpu(total_num_scheduled_tokens)
 
         return mm_embeds, is_mm_embed
 

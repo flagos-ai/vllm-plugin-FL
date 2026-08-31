@@ -55,8 +55,16 @@ class FlagGemsBackend(Backend):
             Output tensor of shape [..., d]
         """
         from .impl.activation import silu_and_mul_flaggems
-
         return silu_and_mul_flaggems(obj, x)
+
+    def silu_and_mul_native(
+        self,
+        output: torch.Tensor,
+        input: torch.Tensor,
+    ) -> None:
+        from .impl.native_ops import silu_and_mul_out_flaggems
+
+        silu_and_mul_out_flaggems(output, input)
 
     def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
@@ -188,6 +196,28 @@ class FlagGemsBackend(Backend):
             expert_map,
             pad_sorted_ids,
             ignore_invalid_experts,
+        )
+
+    def moe_align_block_size_native(
+        self,
+        topk_ids: torch.Tensor,
+        num_experts: int,
+        block_size: int,
+        sorted_token_ids: torch.Tensor,
+        expert_ids: torch.Tensor,
+        num_tokens_post_pad: torch.Tensor,
+        expert_map: torch.Tensor | None = None,
+    ) -> None:
+        from .impl.native_ops import moe_align_block_size_out_flaggems
+
+        moe_align_block_size_out_flaggems(
+            topk_ids,
+            num_experts,
+            block_size,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_pad,
+            expert_map,
         )
 
     def moe_sum(self, inp, out):

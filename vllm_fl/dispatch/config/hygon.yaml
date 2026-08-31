@@ -1,5 +1,5 @@
 # vLLM-FL Dispatch Configuration for hygon GPU
-# Auto-loaded when running on hygon hardware
+# Auto-loaded when running on hygons hardware
 
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
@@ -26,8 +26,8 @@ strict: false
 #   - reference   : PyTorch reference implementation
 #   - vendor      : Any available vendor backend (auto-detected)
 #   - vendor:hygon : hygon-specific vendor backend
+
 op_backends:
-  # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
   attention_backend:
     - flagos
     - vendor:hygon
@@ -35,24 +35,133 @@ op_backends:
 
   rms_norm:
     - flagos
+    #- flagos
     - vendor:hygon
+    #- flagos
     - reference
 
   silu_and_mul:
     - flagos
+    #- flagos
     - vendor:hygon
+    #- flagos
+    - reference
+
+  gelu_and_mul:
+    - flagos
+    #- flagos
+    - vendor:hygon
+    #- flagos
     - reference
 
   rotary_embedding:
     - flagos
+    #- flagos
+    - vendor:hygon
+    #- flagos
+    - reference
+
+  moe_align_block_size:
+    - flagos
     - vendor:hygon
     - reference
 
-# FlagOS operator blacklist
-# Blacklist only ops that are known to have issues
+  moe_sum:
+    - flagos
+    - vendor:hygon
+    - reference
+
+  dynamic_scaled_int8_quant:
+    - vendor:hygon
+    - flagos
+    - reference
+
+  topk_softmax:
+    - flagos
+    - vendor:hygon
+    - reference
+
+  # FlagGems' similarly named kernel was unstable in DeepSeek-V4 inference.
+  # Keep the validated Hygon PyTorch implementation as the explicit route.
+  topk_softplus_sqrt:
+    - vendor:hygon
+    - flagos
+    - reference
+
+  invoke_fused_moe_triton_kernel:
+    - vendor:hygon
+    - flagos
+  #  - vendor:hygon
+    - reference
+
+  grouped_topk:
+    - flagos
+    - vendor:hygon
+    - reference
+
+
 flagos_blacklist:
   - cat
+  - cat_out
 
+  - mm
+  - mm_out
+  - bmm
+  - bmm_out
+  - addmm
+  - addmm_out
+  - addmm_dtype
+  - addmm_dtype_out
+  - group_mm
+
+  - sum
+  - sum_out
+  - sum_dim
+  - sum_dim_out
+
+  - to_copy
+  - copy_
+
+  - zeros
+  - zeros_like
+  - zero
+  - zero_
+  - zero_out
+
+  - fill_scalar
+  - fill_tensor
+  - fill_scalar_
+  - fill_tensor_
+
+  - index
+  - index_select
+  - index_put
+  - index_put_
+  - _index_put_impl_
+
+  - gather
+  - scatter
+  - scatter_
+  - scatter_add_
+  - scatter_reduce
+  - scatter_reduce_
+  - scatter_reduce_out
+  - slice_scatter
+
+  # Graph-out prepare_inputs dynamic-shape small ops confirmed by hipprof:
+  # hipModuleGetFunction -> hipModuleLaunchKernel resolves to
+  # _index_jit_function, _to_copy_func_kernel_rank_1,
+  # _copy_kernel_kernel_rank_{1,2}, add_func_kernel_rank_1,
+  # and sub_func_tensor_scalar_kernel_rank_1. The add/sub kernels are
+  # shared by both functional and inplace FlagGems wrappers.
+  # Existing entries above already cover index/to_copy/copy_.
+  - add
+  - add_
+  - sub
+  - sub_
+  - exponential_
+  #- mul
+  #- mul_
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
 # oot_blacklist:

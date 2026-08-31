@@ -11,6 +11,7 @@ This module follows a layered testing strategy:
 Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -36,6 +37,46 @@ def has_vllm_model_runner():
 pytestmark = pytest.mark.skipif(
     not has_vllm_model_runner(), reason="vllm_fl.worker.model_runner not available"
 )
+
+
+class TestHygonRopeH2DStaging:
+    def test_mrope_staging_preserves_active_columns(self):
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+
+        num_tokens = 5
+        source = torch.arange(18, dtype=torch.int64).view(3, 6)
+        target = torch.zeros_like(source)
+        runner = SimpleNamespace(
+            _use_hygon_rope_h2d_staging=True,
+            mrope_positions=SimpleNamespace(cpu=source, gpu=target),
+            mrope_positions_h2d_cpu=torch.empty(15, dtype=torch.int64),
+            mrope_positions_h2d_gpu=torch.empty(15, dtype=torch.int64),
+        )
+
+        ModelRunnerFL._pack_mrope_positions_for_hygon_h2d(runner, num_tokens)
+        ModelRunnerFL._copy_mrope_positions_for_hygon_h2d(runner, num_tokens)
+
+        torch.testing.assert_close(target[:, :num_tokens], source[:, :num_tokens])
+
+    def test_xdrope_staging_preserves_active_columns(self):
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+
+        num_tokens = 5
+        dim = 4
+        source = torch.arange(24, dtype=torch.int64).view(dim, 6)
+        target = torch.zeros_like(source)
+        runner = SimpleNamespace(
+            _use_hygon_rope_h2d_staging=True,
+            uses_xdrope_dim=dim,
+            xdrope_positions=SimpleNamespace(cpu=source, gpu=target),
+            xdrope_positions_h2d_cpu=torch.empty(dim * num_tokens, dtype=torch.int64),
+            xdrope_positions_h2d_gpu=torch.empty(dim * num_tokens, dtype=torch.int64),
+        )
+
+        ModelRunnerFL._pack_xdrope_positions_for_hygon_h2d(runner, num_tokens)
+        ModelRunnerFL._copy_xdrope_positions_for_hygon_h2d(runner, num_tokens)
+
+        torch.testing.assert_close(target[:, :num_tokens], source[:, :num_tokens])
 
 
 # =============================================================================

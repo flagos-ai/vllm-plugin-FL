@@ -24,7 +24,7 @@ SCHEMAS: list[str] = [
     'rms_norm(Tensor! result, Tensor input, Tensor weight, float epsilon) -> ()',
     'fused_add_rms_norm(Tensor! input, Tensor! residual, Tensor weight, float epsilon) -> ()',
     'fused_qk_norm_rope(Tensor! qkv, int num_heads_q, int num_heads_k, int num_heads_v, int head_dim, float eps, Tensor q_weight, Tensor k_weight, Tensor cos_sin_cache, bool is_neox, Tensor position_ids, int forced_token_heads_per_warp=-1) -> ()',
-    'fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(Tensor! q, Tensor kv, Tensor! k_cache, Tensor slot_mapping, Tensor position_ids, Tensor cos_sin_cache, float eps, int cache_block_size) -> ()',
+    'fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(Tensor q_in, Tensor kv, Tensor! k_cache, Tensor slot_mapping, Tensor position_ids, Tensor cos_sin_cache, int q_head_padded, float eps, int cache_block_size) -> Tensor',
     'apply_repetition_penalties_(Tensor! logits, Tensor prompt_mask, Tensor output_mask, Tensor repetition_penalties) -> ()',
     'top_k_per_row_prefill(Tensor logits, Tensor rowStarts, Tensor rowEnds, Tensor! indices, int numRows, int stride0, int stride1, int topK) -> ()',
     'top_k_per_row_decode(Tensor logits, int next_n, Tensor seq_lens, Tensor! indices, int numRows, int stride0, int stride1, int topK) -> ()',

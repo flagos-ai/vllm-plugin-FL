@@ -98,6 +98,30 @@ class TestSelectionPolicy:
         assert policy.get_per_op_order("rms_norm") == ["reference"]
         assert policy.get_per_op_order("nonexistent") is None
 
+    def test_native_op_inherits_base_op_order(self):
+        policy = SelectionPolicy.from_dict(
+            per_op_order={
+                "silu_and_mul": ["flagos", "vendor:hygon", "reference"]
+            },
+        )
+        assert policy.get_per_op_order("silu_and_mul_native") == [
+            "flagos",
+            "vendor:hygon",
+            "reference",
+        ]
+
+    def test_native_op_order_can_override_base_op_order(self):
+        policy = SelectionPolicy.from_dict(
+            per_op_order={
+                "silu_and_mul": ["flagos", "vendor:hygon", "reference"],
+                "silu_and_mul_native": ["vendor:hygon", "flagos"],
+            },
+        )
+        assert policy.get_per_op_order("silu_and_mul_native") == [
+            "vendor:hygon",
+            "flagos",
+        ]
+
     def test_fingerprint_uniqueness(self):
         policy1 = SelectionPolicy(prefer=PREFER_DEFAULT)
         policy2 = SelectionPolicy(prefer=PREFER_VENDOR)

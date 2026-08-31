@@ -49,6 +49,14 @@ def register_builtins(registry) -> None:
             priority=BackendPriority.DEFAULT,
         ),
         OpImpl(
+            op_name="silu_and_mul_native",
+            impl_id="default.flagos.native",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.silu_and_mul_native, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
             op_name="gelu_and_mul",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
@@ -92,6 +100,14 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        OpImpl(
+            op_name="moe_align_block_size_native",
+            impl_id="default.flagos.native",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.moe_align_block_size_native, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # MoE sum
         OpImpl(
             op_name="moe_sum",
@@ -130,5 +146,9 @@ def register_builtins(registry) -> None:
         ),
     ]
 
-    filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
+    filtered = [
+        impl
+        for impl in impls
+        if use_flaggems_op(impl.op_name.removesuffix("_native"))
+    ]
     registry.register_many(filtered)

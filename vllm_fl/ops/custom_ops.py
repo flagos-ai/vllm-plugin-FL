@@ -133,6 +133,9 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     if "fused_moe" not in (blacklist or []):
         _patch_fused_moe_factory()
 
+    if str(getattr(current_platform, "vendor_name", "")).lower() == "hygon":
+        from vllm_fl.dispatch.backends.vendor.hygon.patch import apply_hygon_patches
+        apply_hygon_patches()
 
 def _patch_fused_moe_factory() -> None:
     """Replace the FusedMoE factory function with FusedMoEFL in all relevant

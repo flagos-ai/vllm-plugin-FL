@@ -56,8 +56,16 @@ class ReferenceBackend(Backend):
             Output tensor of shape [..., d]
         """
         from .impl.activation import silu_and_mul_torch
-
         return silu_and_mul_torch(obj, x)
+
+    def silu_and_mul_native(
+        self,
+        output: torch.Tensor,
+        input: torch.Tensor,
+    ) -> None:
+        from .impl.native_ops import silu_and_mul_out_torch
+
+        silu_and_mul_out_torch(output, input)
 
     def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """

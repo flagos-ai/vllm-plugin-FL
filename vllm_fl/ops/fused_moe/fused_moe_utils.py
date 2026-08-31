@@ -89,6 +89,13 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
 
+    if str(getattr(current_platform, "vendor_name", "")).lower() == "hygon":
+        from vllm_fl.dispatch.backends.vendor.hygon.impl.moe.triton_experts import (
+            HygonTritonExpertsFL,
+        )
+
+        return UnquantizedMoeBackend.TRITON, HygonTritonExpertsFL
+
     if current_platform.is_out_of_tree() and use_flaggems():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 

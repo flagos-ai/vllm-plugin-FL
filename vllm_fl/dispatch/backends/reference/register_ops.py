@@ -47,6 +47,14 @@ def register_builtins(registry) -> None:
             priority=BackendPriority.REFERENCE,
         ),
         OpImpl(
+            op_name="silu_and_mul_native",
+            impl_id="reference.torch.native",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.silu_and_mul_native, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
+        OpImpl(
             op_name="gelu_and_mul",
             impl_id="reference.torch",
             kind=BackendImplKind.REFERENCE,
