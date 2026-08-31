@@ -1,0 +1,1362 @@
+[
+  {
+    "M": 1,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 4, 'best_smem_config': (10240, 128, 0)}",
+    "time_ms": 15.414033927184628,
+    "baseline_time_ms": 15.681428502180745,
+    "acc": 0.017051671979943173
+  },
+  {
+    "M": 1,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 4, 'best_smem_config': (40960, 128, 0)}",
+    "time_ms": 7.006346435168164,
+    "baseline_time_ms": 7.095172391112508,
+    "acc": 0.01251921039376136
+  },
+  {
+    "M": 1,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 13.516257602744307,
+    "baseline_time_ms": 40.72380926282633,
+    "acc": 0.6680993785352425
+  },
+  {
+    "M": 1,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 13.505810290711736,
+    "baseline_time_ms": 17.235200107097626,
+    "acc": 0.21638215937220773
+  },
+  {
+    "M": 1,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 54.007477294349414,
+    "baseline_time_ms": 55.26883089793967,
+    "acc": 0.022822150986321676
+  },
+  {
+    "M": 1,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 128, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (40960, 128, 0)}",
+    "time_ms": 136.52322930283844,
+    "baseline_time_ms": 140.46800000702635,
+    "acc": 0.02808305595573779
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 12.184200726659693,
+    "baseline_time_ms": 50.642856928919045,
+    "acc": 0.7594092935206813
+  },
+  {
+    "M": 17,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 5, 'best_smem_config': (61440, 128, 0)}",
+    "time_ms": 7.937000009405892,
+    "baseline_time_ms": 14.5714286315654,
+    "acc": 0.455303923171106
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.590015111212109,
+    "baseline_time_ms": 48.64999971219471,
+    "acc": 0.8028773860648502
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.591701479434077,
+    "baseline_time_ms": 48.551428796989576,
+    "acc": 0.8024424467601083
+  },
+  {
+    "M": 17,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 13.946787901504925,
+    "baseline_time_ms": 28.322857338935137,
+    "acc": 0.5075783585460348
+  },
+  {
+    "M": 17,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 13.654539896790528,
+    "baseline_time_ms": 28.265714246247494,
+    "acc": 0.5169221701658121
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 60.94574106343468,
+    "baseline_time_ms": 141.92827056019993,
+    "acc": 0.5705877284146565
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 128, 'best_block_n': 64, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 5, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 15.704712707378054,
+    "baseline_time_ms": 50.72840907131181,
+    "acc": 0.6904158242908615
+  },
+  {
+    "M": 33,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (110592, 128, 0)}",
+    "time_ms": 8.548888877137667,
+    "baseline_time_ms": 14.321219577828831,
+    "acc": 0.4030613921755314
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (49152, 128, 0)}",
+    "time_ms": 9.724404848557674,
+    "baseline_time_ms": 49.08454350891282,
+    "acc": 0.8018845821232522
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (49152, 128, 0)}",
+    "time_ms": 9.941277959083731,
+    "baseline_time_ms": 49.78919908876082,
+    "acc": 0.8003326395879337
+  },
+  {
+    "M": 33,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (110592, 128, 0)}",
+    "time_ms": 14.3791199414475,
+    "baseline_time_ms": 28.823946471821305,
+    "acc": 0.5011397916831156
+  },
+  {
+    "M": 33,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 14.221345383523559,
+    "baseline_time_ms": 28.952817099638395,
+    "acc": 0.5088096148094281
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 62.356672814865874,
+    "baseline_time_ms": 64.46445977466333,
+    "acc": 0.032696883944506094
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 14, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 70.68252472364927,
+    "baseline_time_ms": 239.3930644517945,
+    "acc": 0.7047428049533896
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 128, 'best_block_n': 64, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 5, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 16.067837585216843,
+    "baseline_time_ms": 51.68259532709841,
+    "acc": 0.6891054428763934
+  },
+  {
+    "M": 49,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (110592, 128, 0)}",
+    "time_ms": 8.590610904493325,
+    "baseline_time_ms": 14.903067474030644,
+    "acc": 0.4235676031486201
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.898480352908827,
+    "baseline_time_ms": 50.121420635798266,
+    "acc": 0.7626068814096908
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.803095665659999,
+    "baseline_time_ms": 49.60200729257112,
+    "acc": 0.7620439915658868
+  },
+  {
+    "M": 49,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 14.285975651213581,
+    "baseline_time_ms": 29.468207883725015,
+    "acc": 0.5152071782721617
+  },
+  {
+    "M": 49,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (110592, 128, 0)}",
+    "time_ms": 14.24547119666242,
+    "baseline_time_ms": 29.430851629485872,
+    "acc": 0.5159680944335869
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 62.104528186456214,
+    "baseline_time_ms": 64.88324311637395,
+    "acc": 0.042826387776792485
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 14, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 71.03819271260488,
+    "baseline_time_ms": 238.58008177912964,
+    "acc": 0.7022459201838571
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 3, 'best_smem_config': (208896, 128, 0)}",
+    "time_ms": 14.060127459893561,
+    "baseline_time_ms": 52.474351144815216,
+    "acc": 0.732057145002301
+  },
+  {
+    "M": 65,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 10.403780527867196,
+    "baseline_time_ms": 15.290212709920928,
+    "acc": 0.3195790846574168
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (147456, 128, 0)}",
+    "time_ms": 10.03441446133562,
+    "baseline_time_ms": 50.08037322993154,
+    "acc": 0.7996337923588327
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (147456, 128, 0)}",
+    "time_ms": 10.055306465023925,
+    "baseline_time_ms": 50.3084645205446,
+    "acc": 0.8001269456173202
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.197730024328077,
+    "baseline_time_ms": 29.799732956444483,
+    "acc": 0.45644714172429657
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.206717993977993,
+    "baseline_time_ms": 29.595592695106447,
+    "acc": 0.45239420744367353
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 235.25073488845544,
+    "baseline_time_ms": 247.29163368859614,
+    "acc": 0.0486910884146744
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 74.19744001328945,
+    "baseline_time_ms": 99.43812522105873,
+    "acc": 0.25383307611298245
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 250.54992455288883,
+    "baseline_time_ms": 253.1332319793592,
+    "acc": 0.010205327077248527
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 17, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 97.82982163596898,
+    "baseline_time_ms": 198.48437736619192,
+    "acc": 0.5071157592646258
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 64, 'best_block_n': 128, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 5, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 16.090847520252407,
+    "baseline_time_ms": 51.47530325462647,
+    "acc": 0.6874064550788984
+  },
+  {
+    "M": 81,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 10.045222665849266,
+    "baseline_time_ms": 15.785069166240604,
+    "acc": 0.3636250459178918
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 32, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 8, 'best_smem_config': (131072, 128, 0)}",
+    "time_ms": 10.05383018382038,
+    "baseline_time_ms": 50.467364350769,
+    "acc": 0.8007855113268425
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 32, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 8, 'best_smem_config': (131072, 128, 0)}",
+    "time_ms": 9.996071522999998,
+    "baseline_time_ms": 50.525618005502096,
+    "acc": 0.8021583521865788
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.329491479417026,
+    "baseline_time_ms": 29.841135472109002,
+    "acc": 0.4527858534512075
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.353744386058107,
+    "baseline_time_ms": 29.996369851648613,
+    "acc": 0.45480921635058125
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 236.01395685038122,
+    "baseline_time_ms": 247.59266961855715,
+    "acc": 0.046765167910722716
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 74.68734528430683,
+    "baseline_time_ms": 99.33962262932609,
+    "acc": 0.2481615763430699
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 250.92240574216484,
+    "baseline_time_ms": 253.67620959877968,
+    "acc": 0.010855585791707978
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 17, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 98.21817380083696,
+    "baseline_time_ms": 198.10135855450986,
+    "acc": 0.5042024218435074
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 128, 'best_block_n': 64, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 5, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 16.093926324274825,
+    "baseline_time_ms": 51.50603780628375,
+    "acc": 0.6875332095082771
+  },
+  {
+    "M": 97,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 10.109526703145201,
+    "baseline_time_ms": 15.631226888440688,
+    "acc": 0.35324803514807857
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 13, 'best_block_m': 128, 'best_block_n': 32, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 6, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 15.699782135025895,
+    "baseline_time_ms": 50.001276024454754,
+    "acc": 0.6860123704173589
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 13, 'best_block_m': 128, 'best_block_n': 32, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 6, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 15.515472861223442,
+    "baseline_time_ms": 50.40996260801504,
+    "acc": 0.6922141565176141
+  },
+  {
+    "M": 97,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.227668669771838,
+    "baseline_time_ms": 29.691525425572518,
+    "acc": 0.45345789961349103
+  },
+  {
+    "M": 97,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.101042910027633,
+    "baseline_time_ms": 29.794591107407275,
+    "acc": 0.45959846027137685
+  },
+  {
+    "M": 97,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 235.45237341158682,
+    "baseline_time_ms": 247.45323428655647,
+    "acc": 0.048497490483686234
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 73.96611658260376,
+    "baseline_time_ms": 98.76789227796243,
+    "acc": 0.2511117238946342
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 17, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 98.10512252400872,
+    "baseline_time_ms": 198.40325686947142,
+    "acc": 0.5055266527779247
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 896,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 128, 'best_block_n': 64, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 5, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 16.093990864527797,
+    "baseline_time_ms": 52.44122622570316,
+    "acc": 0.6931042230923348
+  },
+  {
+    "M": 113,
+    "K": 640,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 10.42442485431874,
+    "baseline_time_ms": 15.578259590245384,
+    "acc": 0.33083507859593075
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 13, 'best_block_m': 128, 'best_block_n': 32, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 6, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 15.613950497217845,
+    "baseline_time_ms": 50.00022282913937,
+    "acc": 0.6877223817467015
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 13, 'best_block_m': 128, 'best_block_n': 32, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 6, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 15.758637707945732,
+    "baseline_time_ms": 49.45728110645514,
+    "acc": 0.6813687013237587
+  },
+  {
+    "M": 113,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.45913304063281,
+    "baseline_time_ms": 29.641404573534643,
+    "acc": 0.4447249286112318
+  },
+  {
+    "M": 113,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.314584569862255,
+    "baseline_time_ms": 29.807892955067167,
+    "acc": 0.4526756857837927
+  },
+  {
+    "M": 113,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 235.49870492743074,
+    "baseline_time_ms": 247.0478808791221,
+    "acc": 0.04674873514637534
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 20,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 74.3122860996671,
+    "baseline_time_ms": 98.34534827243075,
+    "acc": 0.2443741630380789
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 416,
+    "num_groups": 21,
+    "config": "{'num_min_sms': 17, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 98.2762414637028,
+    "baseline_time_ms": 199.41901598797472,
+    "acc": 0.507187210924614
+  },
+  {
+    "M": 1,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 64, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (10240, 128, 0)}",
+    "time_ms": 6.074693885498813,
+    "baseline_time_ms": 6.197142897040716,
+    "acc": 0.019758945949168827
+  },
+  {
+    "M": 1,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 12.145570906012388,
+    "baseline_time_ms": 12.302069057678354,
+    "acc": 0.012721287039783591
+  },
+  {
+    "M": 1,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 4, 'best_smem_config': (20480, 128, 0)}",
+    "time_ms": 12.150273668242896,
+    "baseline_time_ms": 12.467142926262957,
+    "acc": 0.02541634919036284
+  },
+  {
+    "M": 1,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 128, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 4, 'best_smem_config': (10240, 128, 0)}",
+    "time_ms": 12.792863547969526,
+    "baseline_time_ms": 12.991724182562582,
+    "acc": 0.015306716167817425
+  },
+  {
+    "M": 1,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 17.3063032724189,
+    "baseline_time_ms": 24.19018163938414,
+    "acc": 0.2845732400685064
+  },
+  {
+    "M": 1,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 128, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (40960, 128, 0)}",
+    "time_ms": 92.81370686046009,
+    "baseline_time_ms": 94.15863071793741,
+    "acc": 0.01428359617405861
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 256,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 8, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.0252536779909,
+    "baseline_time_ms": 48.41285664588213,
+    "acc": 0.8135773366152199
+  },
+  {
+    "M": 17,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (24576, 128, 0)}",
+    "time_ms": 5.682155672561176,
+    "baseline_time_ms": 10.04857154163931,
+    "acc": 0.4345310028380216
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (49152, 128, 0)}",
+    "time_ms": 9.12244772093732,
+    "baseline_time_ms": 48.33241385118715,
+    "acc": 0.8112561117053901
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 14, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (49152, 128, 0)}",
+    "time_ms": 9.118390411149637,
+    "baseline_time_ms": 46.78000030773027,
+    "acc": 0.8050792998895546
+  },
+  {
+    "M": 17,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 13.868361206905897,
+    "baseline_time_ms": 28.482758857566733,
+    "acc": 0.5130962812887199
+  },
+  {
+    "M": 17,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 13.862893877736626,
+    "baseline_time_ms": 28.449999833745615,
+    "acc": 0.5127278046134354
+  },
+  {
+    "M": 17,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 19.469079322048596,
+    "baseline_time_ms": 27.31432317228924,
+    "acc": 0.2872208767815909
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 256,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 12, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.259223804545048,
+    "baseline_time_ms": 48.1209737363826,
+    "acc": 0.8075844463316737
+  },
+  {
+    "M": 33,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (24576, 128, 0)}",
+    "time_ms": 6.058323354610872,
+    "baseline_time_ms": 10.138079757902611,
+    "acc": 0.40241904785879967
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 12, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.458746227310664,
+    "baseline_time_ms": 49.36792599382224,
+    "acc": 0.8084030058606411
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 12, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.325345299925443,
+    "baseline_time_ms": 49.3352058298244,
+    "acc": 0.8109799048555295
+  },
+  {
+    "M": 33,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (110592, 128, 0)}",
+    "time_ms": 14.630395500778647,
+    "baseline_time_ms": 28.771819898202544,
+    "acc": 0.49150260384840483
+  },
+  {
+    "M": 33,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 14.471952051103296,
+    "baseline_time_ms": 29.233475978282176,
+    "acc": 0.5049527445229351
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 64, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (131072, 128, 0)}",
+    "time_ms": 22.160249589339436,
+    "baseline_time_ms": 44.243558551917296,
+    "acc": 0.4991304878124655
+  },
+  {
+    "M": 33,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 11, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 26.34245174966993,
+    "baseline_time_ms": 89.14076428065138,
+    "acc": 0.7044847891730749
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 256,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.219791944986998,
+    "baseline_time_ms": 48.160074848339214,
+    "acc": 0.8085594348841645
+  },
+  {
+    "M": 49,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 128, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (24576, 128, 0)}",
+    "time_ms": 6.277897830263977,
+    "baseline_time_ms": 10.41915915436573,
+    "acc": 0.39746598192297733
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.267142711905763,
+    "baseline_time_ms": 49.4169084983054,
+    "acc": 0.8124702051682664
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.32166659289838,
+    "baseline_time_ms": 49.140905469374836,
+    "acc": 0.8103073904751765
+  },
+  {
+    "M": 49,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (110592, 128, 0)}",
+    "time_ms": 14.467132070041028,
+    "baseline_time_ms": 29.486266660193603,
+    "acc": 0.5093603324977174
+  },
+  {
+    "M": 49,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 128, 'block_k': 64, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 14.474137487131674,
+    "baseline_time_ms": 29.370234139188874,
+    "acc": 0.5071834491159624
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 64, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (131072, 128, 0)}",
+    "time_ms": 22.01177597602951,
+    "baseline_time_ms": 44.16781342771959,
+    "acc": 0.5016331063784338
+  },
+  {
+    "M": 49,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 11, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 26.14309414151753,
+    "baseline_time_ms": 88.60595559080441,
+    "acc": 0.7049510502177725
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 256,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.236423236258249,
+    "baseline_time_ms": 49.16355389193235,
+    "acc": 0.8121286500857716
+  },
+  {
+    "M": 65,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 128, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (40960, 128, 0)}",
+    "time_ms": 6.547917851555514,
+    "baseline_time_ms": 11.023952041523989,
+    "acc": 0.4060280898455081
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.33964279968114,
+    "baseline_time_ms": 49.70770958443372,
+    "acc": 0.8121087678800251
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 16, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 16, 'best_num_stages': 4, 'best_smem_config': (81920, 128, 0)}",
+    "time_ms": 9.127299644008765,
+    "baseline_time_ms": 48.3650185851457,
+    "acc": 0.8112830324268288
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.187545953409895,
+    "baseline_time_ms": 29.902742319058216,
+    "acc": 0.45866015294881757
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.217723028877604,
+    "baseline_time_ms": 29.584146992468515,
+    "acc": 0.4518103552890578
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 125.26453165291565,
+    "baseline_time_ms": 130.5501014370509,
+    "acc": 0.04048690675804545
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 26.311565535708358,
+    "baseline_time_ms": 49.55583155645531,
+    "acc": 0.46905208308867685
+  },
+  {
+    "M": 65,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 138.66214135141348,
+    "baseline_time_ms": 146.0999996678249,
+    "acc": 0.05090936573115845
+  },
+  {
+    "M": 65,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 17, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (221184, 128, 0)}",
+    "time_ms": 35.42808798187477,
+    "baseline_time_ms": 80.5488054611984,
+    "acc": 0.560166190187128
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 256,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 12, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.56060692143368,
+    "baseline_time_ms": 49.59417779583111,
+    "acc": 0.7668958850567845
+  },
+  {
+    "M": 81,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 32, 'best_block_n': 128, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (40960, 128, 0)}",
+    "time_ms": 6.725680789368917,
+    "baseline_time_ms": 10.847179512711042,
+    "acc": 0.37996040523828645
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 12, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.76490171131947,
+    "baseline_time_ms": 49.77323402231732,
+    "acc": 0.7636299520733508
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 12, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.643058487746133,
+    "baseline_time_ms": 48.563588584694905,
+    "acc": 0.76025127411166
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.38110445103854,
+    "baseline_time_ms": 30.17075116651285,
+    "acc": 0.4570534767056026
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.56587012168499,
+    "baseline_time_ms": 30.10013171782096,
+    "acc": 0.44964127476302473
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 125.4303480002714,
+    "baseline_time_ms": 131.66936092516957,
+    "acc": 0.04738393868596302
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 26.18863494505012,
+    "baseline_time_ms": 49.731846074735444,
+    "acc": 0.47340312069464163
+  },
+  {
+    "M": 81,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 138.8565264250103,
+    "baseline_time_ms": 146.0710992841874,
+    "acc": 0.04939083018154644
+  },
+  {
+    "M": 81,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 17, 'best_block_m': 32, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (221184, 128, 0)}",
+    "time_ms": 35.45243701263636,
+    "baseline_time_ms": 79.9270638918623,
+    "acc": 0.5564401432210508
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 256,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.617359623301644,
+    "baseline_time_ms": 49.82777957078176,
+    "acc": 0.7668497427865744
+  },
+  {
+    "M": 97,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 64, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (32768, 128, 0)}",
+    "time_ms": 7.186099714831697,
+    "baseline_time_ms": 10.922235581641202,
+    "acc": 0.342066954963821
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.88326782283462,
+    "baseline_time_ms": 48.92825256326828,
+    "acc": 0.7571287098907002
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.787349519499365,
+    "baseline_time_ms": 48.99834563493505,
+    "acc": 0.759433724409357
+  },
+  {
+    "M": 97,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.179325116192636,
+    "baseline_time_ms": 29.84113739585398,
+    "acc": 0.4578180817450834
+  },
+  {
+    "M": 97,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.325061672286672,
+    "baseline_time_ms": 29.890635290672147,
+    "acc": 0.45384025754109114
+  },
+  {
+    "M": 97,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 125.83589993417263,
+    "baseline_time_ms": 130.20870840247673,
+    "acc": 0.03358307229949398
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 26.062187049449342,
+    "baseline_time_ms": 49.81096886384422,
+    "acc": 0.476778154613113
+  },
+  {
+    "M": 97,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 138.7030972739843,
+    "baseline_time_ms": 146.3678917369327,
+    "acc": 0.05236663842042866
+  },
+  {
+    "M": 97,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 11, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 38.3414283052695,
+    "baseline_time_ms": 80.27381374169204,
+    "acc": 0.5223669274186233
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 256,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.589438520224936,
+    "baseline_time_ms": 50.73022746452779,
+    "acc": 0.7715476728676479
+  },
+  {
+    "M": 113,
+    "K": 256,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 128, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 2, 'best_smem_config': (49152, 128, 0)}",
+    "time_ms": 7.3066862085642965,
+    "baseline_time_ms": 11.230328334356422,
+    "acc": 0.34937911065242044
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.796458066931663,
+    "baseline_time_ms": 48.79791806815504,
+    "acc": 0.7582589886221007
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 16, 'best_block_m': 32, 'best_block_n': 64, 'block_k': 256, 'warp_m': 16, 'warp_n': 32, 'best_num_stages': 8, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 11.798431433815942,
+    "baseline_time_ms": 49.97505584543341,
+    "acc": 0.7639135918065402
+  },
+  {
+    "M": 113,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.386070812497007,
+    "baseline_time_ms": 30.005999958763518,
+    "acc": 0.4539068574613089
+  },
+  {
+    "M": 113,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 1,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 16.64197519076643,
+    "baseline_time_ms": 29.706912702762043,
+    "acc": 0.4397945233393735
+  },
+  {
+    "M": 113,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 64, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (98304, 128, 0)}",
+    "time_ms": 125.8071639866971,
+    "baseline_time_ms": 129.66111676795833,
+    "acc": 0.029723273077759016
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 10,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 256, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (245760, 128, 0)}",
+    "time_ms": 26.176433150128574,
+    "baseline_time_ms": 49.809558536199965,
+    "acc": 0.47446968173579784
+  },
+  {
+    "M": 113,
+    "K": 1664,
+    "N": 5120,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 20, 'best_block_m': 64, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 32, 'best_num_stages': 3, 'best_smem_config': (122880, 128, 0)}",
+    "time_ms": 138.90360330788337,
+    "baseline_time_ms": 145.90881728837567,
+    "acc": 0.048010902361350305
+  },
+  {
+    "M": 113,
+    "K": 5120,
+    "N": 208,
+    "num_groups": 11,
+    "config": "{'num_min_sms': 11, 'best_block_m': 128, 'best_block_n': 256, 'block_k': 128, 'warp_m': 32, 'warp_n': 128, 'best_num_stages': 4, 'best_smem_config': (196608, 128, 0)}",
+    "time_ms": 38.19850111916483,
+    "baseline_time_ms": 80.30338322133528,
+    "acc": 0.5243226426229061
+  }
+]
