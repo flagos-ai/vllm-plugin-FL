@@ -42,6 +42,29 @@ class FlagGemsBackend(Backend):
         return FlagGemsBackend._available
 
     # ==================== Operator Implementations ====================
+    def deepseek_v4_inv_rope_quant_int8(
+        self,
+        o: torch.Tensor,
+        positions: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        n_groups: int,
+        heads_per_group: int,
+        nope_dim: int,
+        rope_dim: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.deepseek_v4 import (
+            deepseek_v4_inv_rope_quant_int8_flaggems,
+        )
+
+        return deepseek_v4_inv_rope_quant_int8_flaggems(
+            o,
+            positions,
+            cos_sin_cache,
+            n_groups,
+            heads_per_group,
+            nope_dim,
+            rope_dim,
+        )
 
     def dynamic_per_token_quant_int8(
         self,

@@ -7,6 +7,11 @@ import torch
 
 from vllm.triton_utils import tl, triton
 
+from vllm_fl.dispatch import CachedOp
+
+DSV4_INV_ROPE_QUANT_INT8_OP = "deepseek_v4_inv_rope_quant_int8"
+_dispatch_inv_rope_quant_int8 = CachedOp(DSV4_INV_ROPE_QUANT_INT8_OP)
+
 
 @triton.jit
 def _inv_rope_quant_int8_kernel(
@@ -76,7 +81,7 @@ def _inv_rope_quant_int8_kernel(
     )
 
 
-def fused_inv_rope_quant_int8(
+def fused_inv_rope_quant_int8_triton(
     o: torch.Tensor,
     positions: torch.Tensor,
     cos_sin_cache: torch.Tensor,
@@ -125,3 +130,24 @@ def fused_inv_rope_quant_int8(
         num_stages=3,
     )
     return o_q, o_scale
+
+
+def fused_inv_rope_quant_int8(
+    o: torch.Tensor,
+    positions: torch.Tensor,
+    cos_sin_cache: torch.Tensor,
+    n_groups: int,
+    heads_per_group: int,
+    nope_dim: int,
+    rope_dim: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Dispatch DSV4 inverse-RoPE INT8 quantization through OpManager."""
+    return _dispatch_inv_rope_quant_int8(
+        o,
+        positions,
+        cos_sin_cache,
+        n_groups,
+        heads_per_group,
+        nope_dim,
+        rope_dim,
+    )

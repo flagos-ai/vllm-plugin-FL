@@ -37,6 +37,18 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
+        # DeepSeek-V4
+        OpImpl(
+            op_name="deepseek_v4_inv_rope_quant_int8",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.deepseek_v4_inv_rope_quant_int8,
+                is_avail,
+            ),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
         # Activation
         OpImpl(
             op_name="silu_and_mul",
