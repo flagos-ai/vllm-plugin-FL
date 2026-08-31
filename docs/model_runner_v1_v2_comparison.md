@@ -160,9 +160,9 @@ P0 验证期间曾临时扩展 YAML 驱动的 inference/serving smoke harness，
 - 机器：`bm-baai-dx-zone1-lc-a800-80g-15-171`，8×NVIDIA A800-SXM4-80GB。
 - 镜像：`vllm-fl-test-env:0.28.0`（本地镜像 ID `878fccdd...`）。
 - vLLM：`0.28.0`。
-- 完整单测：`372 passed, 19 skipped`；NVIDIA 平台/blacklist 聚焦测试：`18 passed`。
+- 最新 upstream rebase 后完整单测：`436 passed, 19 skipped`；NVIDIA 平台/blacklist 聚焦测试：`18 passed`。
 - 静态验证：改动 Python 文件通过 Ruff（忽略仓库既有的 `UP007`/`UP045` 注解风格），`git diff --check` 通过；验证期间使用的 CUDA e2e 配置均成功解析，但未纳入本 PR。
-- 详细 P0 推理日志：`/nfs/wlx/adapt/nvidia-vllm-0.28.0/logs/p0-*`；最终 Qwen3/DeepSeek-V2/LLaVA 回归：`nvidia-final-regressions.log`；最终单测：`nvidia-final-validation.log`。
+- 详细 P0 推理日志：`/nfs/wlx/adapt/nvidia-vllm-0.28.0/logs/p0-*`；Qwen3/DeepSeek-V2/LLaVA 最终矩阵回归：`nvidia-final-regressions.log`。最新 upstream rebase 后的完整单测与 Qwen3-8B V2 eager 回归分别记录在 `961fd71-unit-tests.log` 和 `961fd71-qwen3-8b-eager.log`。
 
 已完成结果：
 
@@ -191,4 +191,4 @@ NVIDIA 默认配置继续采用黑名单策略。新增项均来自 A800 真实�
 
 Hopper 专用配置是显式 opt-in 路径，本轮没有 H100 实测，因此没有把 A800 新增项复制到该文件；默认 NVIDIA 配置仍适用于未启用 Hopper 专用优化的 H100。
 
-P0-1 至 P0-8 均已按顺序完成；最终代码状态的关键模型回归与完整单测结果也记录在本节。
+P0-1 至 P0-8 均已按顺序完成；rebase 到最新 `upstream/main` 后又完成了 `436 passed, 19 skipped` 的完整单测，以及 Qwen3-8B V2 eager 推理回归（`1 passed`，法国首都输出以 `Paris` 开头）。
