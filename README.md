@@ -14,7 +14,7 @@ matrix, scenarios, and usage.
 | vllm-plugin-FL Branch | Community vLLM Version |
 |-----------------------|------------------------|
 | `release/0.2` | [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) |
-| `main` | [v0.24.0](https://github.com/vllm-project/vllm/tree/v0.24.0) |
+| `main` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
 
 ## Supported Models and Chips
 
@@ -111,7 +111,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     3.2 Install FlagGems
 
     ```sh
-    git clone -b v5.3.4 https://github.com/flagos-ai/FlagGems
+    git clone -b v5.4.0.dev0 https://github.com/flagos-ai/FlagGems
     cd FlagGems
     pip install --no-build-isolation .
     # or editable install
