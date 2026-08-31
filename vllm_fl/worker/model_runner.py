@@ -6576,7 +6576,14 @@ class ModelRunnerFL(
         profiling_pool = current_platform.graph_pool_handle()
         encoder_profiling_pool = current_platform.graph_pool_handle()
         original_pools: dict[int, Any] = {}
-        for instance in list(GraphWrapper._all_instances):
+        # Match upstream: BreakableCUDAGraphWrapper instances (DeepseekV4 et
+        # al.) must also profile into the temporary pool, otherwise their
+        # graph memory is neither measured nor reclaimed and the real capture
+        # OOMs after the KV cache is sized.
+        _profiling_wrappers = list(GraphWrapper._all_instances) + list(
+            BreakableCUDAGraphWrapper._all_instances
+        )
+        for instance in _profiling_wrappers:
             original_pools[id(instance)] = instance.graph_pool
             instance.graph_pool = profiling_pool
 
@@ -6596,6 +6603,13 @@ class ModelRunnerFL(
                     mem_samples: list[int] = []
 
                     for i, desc in enumerate(profile_descs):
+                        # Drop reclaimable allocator cache before both
+                        # readings: eager warmup activations stay cached in
+                        # the torch allocator and otherwise inflate the graph
+                        # delta (~90 GiB observed on PPU). Graph-pool memory
+                        # is not reclaimable, so post-empty_cache deltas
+                        # isolate it.
+                        torch.accelerator.empty_cache()
                         mem_before = current_platform.torch_device_fn.mem_get_info()[0]
                         self._warmup_and_capture(
                             desc,
@@ -6610,6 +6624,7 @@ class ModelRunnerFL(
                             ),
                         )
                         _accelerator_synchronize()
+                        torch.accelerator.empty_cache()
                         free_after = current_platform.torch_device_fn.mem_get_info()[0]
                         mem_samples.append(mem_before - free_after)
 
@@ -6620,7 +6635,7 @@ class ModelRunnerFL(
                     shared_memory_estimate[mode] = first_capture
                     per_graph_estimate[mode] = per_graph * (len(descs) - 1)
 
-                    logger.debug(
+                    logger.warning(
                         "Estimated %s CUDA graph memory: "
                         "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
                         mode.name,
@@ -6644,7 +6659,8 @@ class ModelRunnerFL(
         finally:
             set_cudagraph_capturing_enabled(False)
             GraphWrapper.clear_all_graphs()
-            for instance in list(GraphWrapper._all_instances):
+            BreakableCUDAGraphWrapper.clear_all_graphs()
+            for instance in _profiling_wrappers:
                 if id(instance) in original_pools:
                     instance.graph_pool = original_pools[id(instance)]
             for key_set in self.cudagraph_dispatcher.cudagraph_keys.values():
