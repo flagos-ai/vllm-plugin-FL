@@ -9,8 +9,11 @@ This module registers all REFERENCE (PyTorch) implementations.
 from __future__ import annotations
 
 import functools
+import logging
 
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
+
+logger = logging.getLogger(__name__)
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -22,6 +25,25 @@ def _bind_is_available(fn, is_available_fn):
 
     wrapper._is_available = is_available_fn
     return wrapper
+
+
+# (op_name, backend method name) pairs. getattr is resolved lazily below so a
+# single missing method logs a warning and skips that op instead of aborting
+# the whole reference registration (which would leave every `reference` token
+# in a platform yaml matching nothing).
+_REFERENCE_OPS = [
+    ("dynamic_per_token_quant_int8", "dynamic_per_token_quant_int8"),
+    ("silu_and_mul", "silu_and_mul"),
+    ("gelu_and_mul", "gelu_and_mul"),
+    ("rms_norm", "rms_norm"),
+    ("rotary_embedding", "rotary_embedding"),
+    ("attention_backend", "attention_backend"),
+    ("moe_align_block_size", "moe_align_block_size"),
+    ("moe_sum", "moe_sum"),
+    ("topk_softmax", "topk_softmax"),
+    ("invoke_fused_moe_triton_kernel", "invoke_fused_moe_triton_kernel"),
+    ("grouped_topk", "grouped_topk"),
+]
 
 
 def register_builtins(registry) -> None:
@@ -36,108 +58,26 @@ def register_builtins(registry) -> None:
     backend = ReferenceBackend()
     is_avail = backend.is_available
 
-    impls = [
-        # Quantization
-        OpImpl(
-            op_name="dynamic_per_token_quant_int8",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(
-                backend.dynamic_per_token_quant_int8,
-                is_avail,
-            ),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Activation
-        OpImpl(
-            op_name="silu_and_mul",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        OpImpl(
-            op_name="gelu_and_mul",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.gelu_and_mul, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Normalization
-        OpImpl(
-            op_name="rms_norm",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Rotary Embedding
-        OpImpl(
-            op_name="rotary_embedding",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Attention Backend
-        OpImpl(
-            op_name="attention_backend",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.attention_backend, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # MoE align
-        OpImpl(
-            op_name="moe_align_block_size",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # MoE sum
-        OpImpl(
-            op_name="moe_sum",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.moe_sum, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # topk softmax
-        OpImpl(
-            op_name="topk_softmax",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.topk_softmax, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # invoke fused moe triton kernel
-        OpImpl(
-            op_name="invoke_fused_moe_triton_kernel",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # grouped topk
-        OpImpl(
-            op_name="grouped_topk",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.grouped_topk, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-    ]
+    impls = []
+    for op_name, method_name in _REFERENCE_OPS:
+        try:
+            method = getattr(backend, method_name)
+        except AttributeError:
+            logger.warning(
+                "Reference backend missing %s; skipping op %s",
+                method_name,
+                op_name,
+            )
+            continue
+        impls.append(
+            OpImpl(
+                op_name=op_name,
+                impl_id="reference.torch",
+                kind=BackendImplKind.REFERENCE,
+                fn=_bind_is_available(method, is_avail),
+                vendor=None,
+                priority=BackendPriority.REFERENCE,
+            )
+        )
 
     registry.register_many(impls)

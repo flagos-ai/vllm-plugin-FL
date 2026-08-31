@@ -167,6 +167,73 @@ class ReferenceBackend(Backend):
             return AttentionBackendEnum.FLASHMLA.get_path()
         return AttentionBackendEnum.FLASH_ATTN.get_path()
 
+    def moe_align_block_size(
+        self,
+        topk_ids: torch.Tensor,
+        block_size: int,
+        num_experts: int,
+        expert_map: Optional[torch.Tensor] = None,
+        pad_sorted_ids: bool = False,
+        ignore_invalid_experts: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        from .impl.fused_moe import moe_align_block_size_torch
+
+        return moe_align_block_size_torch(
+            topk_ids,
+            block_size,
+            num_experts,
+            expert_map=expert_map,
+            pad_sorted_ids=pad_sorted_ids,
+            ignore_invalid_experts=ignore_invalid_experts,
+        )
+
+    def moe_sum(self, inp: torch.Tensor, out: torch.Tensor) -> None:
+        from .impl.fused_moe import moe_sum_torch
+
+        moe_sum_torch(inp, out)
+
+    def topk_softmax(
+        self,
+        topk_weights: torch.Tensor,
+        topk_indices: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
+        renormalize: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.fused_moe import topk_softmax_torch
+
+        return topk_softmax_torch(
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+        )
+
+    def grouped_topk(
+        self,
+        scores: torch.Tensor,
+        n_group: int,
+        topk_group: int,
+        topk: int,
+        renormalize: bool,
+        routed_scaling_factor: float,
+        bias: Optional[torch.Tensor] = None,
+        scoring_func: int = 0,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.fused_moe import grouped_topk_torch
+
+        return grouped_topk_torch(
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
+        )
+
     def invoke_fused_moe_triton_kernel(
         self,
         A,
