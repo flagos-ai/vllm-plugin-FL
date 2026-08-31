@@ -118,3 +118,66 @@ def test_nvidia_worker_delegates_to_target_version_gpu_worker():
     from vllm_fl.worker.worker import NvidiaWorkerFL
 
     assert issubclass(NvidiaWorkerFL, NativeGPUWorker)
+
+
+def test_native_runner_io_bridge_replaces_only_inference_mode():
+    import torch
+
+    from vllm_fl.dispatch.io_common import set_io_active
+    from vllm_fl.worker.worker import _install_native_runner_io_methods
+
+    class NativeRunner:
+        @torch.inference_mode()
+        def execute_model(self):
+            return torch.is_inference_mode_enabled(), torch.is_grad_enabled()
+
+        @torch.inference_mode()
+        def sample_tokens(self):
+            return torch.is_inference_mode_enabled(), torch.is_grad_enabled()
+
+    runner = NativeRunner()
+    _install_native_runner_io_methods(runner)
+
+    try:
+        set_io_active(True)
+        assert runner.execute_model() == (False, False)
+        assert runner.sample_tokens() == (False, False)
+
+        set_io_active(False)
+        assert runner.execute_model() == (True, False)
+    finally:
+        set_io_active(False)
+
+
+def test_nvidia_worker_initializes_io_dump_once_after_model_load():
+    from types import SimpleNamespace
+    from unittest.mock import Mock, patch
+
+    from vllm_fl.worker.worker import NvidiaWorkerFL
+
+    worker = object.__new__(NvidiaWorkerFL)
+    worker._fl_io_dump_initialized = False
+    worker.model_config = SimpleNamespace(enforce_eager=True)
+    model = object()
+    worker.model_runner = SimpleNamespace(get_model=Mock(return_value=model))
+
+    with (
+        patch(
+            "vllm_fl.dispatch.io_dumper.init_io_dump_from_env"
+        ) as init_io_dump,
+        patch(
+            "vllm_fl.dispatch.io_dumper.is_dump_enabled", return_value=True
+        ),
+        patch(
+            "vllm_fl.dispatch.io_dumper.register_io_module_hooks"
+        ) as register_hooks,
+        patch(
+            "vllm_fl.worker.worker._install_native_runner_io_methods"
+        ) as install_methods,
+    ):
+        worker._ensure_io_dump_initialized()
+        worker._ensure_io_dump_initialized()
+
+    init_io_dump.assert_called_once_with(True)
+    install_methods.assert_called_once_with(worker.model_runner)
+    register_hooks.assert_called_once_with(model)
