@@ -106,6 +106,38 @@ class CudaBackend(Backend):
     def deepseek_v4_hc_head(self, *args, **kwargs):
         return self._deepseek_v4_call("hc_head", *args, **kwargs)
 
+    def deepseek_v4_fused_q_kv_rmsnorm(self, *args, **kwargs):
+        return self._deepseek_v4_call("fused_q_kv_rmsnorm", *args, **kwargs)
+
+    def deepseek_v4_qnorm_rope_kv_quant_insert(self, *args, **kwargs):
+        return self._deepseek_v4_call("qnorm_rope_kv_quant_insert", *args, **kwargs)
+
+    def deepseek_v4_qnorm_rope_kv_bf16_insert(self, *args, **kwargs):
+        return self._deepseek_v4_call("qnorm_rope_kv_bf16_insert", *args, **kwargs)
+
+    def deepseek_v4_qnorm_rope_kv_fp8_insert(self, *args, **kwargs):
+        return self._deepseek_v4_call("qnorm_rope_kv_fp8_insert", *args, **kwargs)
+
+    def deepseek_v4_compute_global_topk_indices_and_lens(self, *args, **kwargs):
+        return self._deepseek_v4_call(
+            "compute_global_topk_indices_and_lens", *args, **kwargs
+        )
+
+    def deepseek_v4_flash_mla_with_kvcache(self, *args, **kwargs):
+        return self._deepseek_v4_call("flash_mla_with_kvcache", *args, **kwargs)
+
+    def deepseek_v4_dequantize_and_gather_k_cache(self, *args, **kwargs):
+        return self._deepseek_v4_call("dequantize_and_gather_k_cache", *args, **kwargs)
+
+    def deepseek_v4_combine_topk_swa_indices(self, *args, **kwargs):
+        return self._deepseek_v4_call("combine_topk_swa_indices", *args, **kwargs)
+
+    def deepseek_v4_flash_mla_sparse_fwd(self, *args, **kwargs):
+        return self._deepseek_v4_call("flash_mla_sparse_fwd", *args, **kwargs)
+
+    def deepseek_v4_fused_indexer_q_rope_quant(self, *args, **kwargs):
+        return self._deepseek_v4_call("fused_indexer_q_rope_quant", *args, **kwargs)
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.

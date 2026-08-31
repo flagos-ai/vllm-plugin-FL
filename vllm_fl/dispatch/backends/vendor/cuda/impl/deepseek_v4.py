@@ -15,6 +15,54 @@ from vllm_fl.ops.deepseek_v4_int8_woa import (
 )
 
 
+def _vllm_dsv4_op(op_name, *args, **kwargs):
+    """Call the vLLM CUDA implementation behind an OpManager vendor entry."""
+    from vllm_fl.dispatch.backends.reference.impl import deepseek_v4
+
+    fn = getattr(deepseek_v4, f"deepseek_v4_{op_name}_torch")
+    return fn(*args, **kwargs)
+
+
+def deepseek_v4_fused_q_kv_rmsnorm_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("fused_q_kv_rmsnorm", *args, **kwargs)
+
+
+def deepseek_v4_qnorm_rope_kv_quant_insert_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("qnorm_rope_kv_quant_insert", *args, **kwargs)
+
+
+def deepseek_v4_qnorm_rope_kv_bf16_insert_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("qnorm_rope_kv_bf16_insert", *args, **kwargs)
+
+
+def deepseek_v4_qnorm_rope_kv_fp8_insert_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("qnorm_rope_kv_fp8_insert", *args, **kwargs)
+
+
+def deepseek_v4_compute_global_topk_indices_and_lens_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("compute_global_topk_indices_and_lens", *args, **kwargs)
+
+
+def deepseek_v4_flash_mla_with_kvcache_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("flash_mla_with_kvcache", *args, **kwargs)
+
+
+def deepseek_v4_dequantize_and_gather_k_cache_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("dequantize_and_gather_k_cache", *args, **kwargs)
+
+
+def deepseek_v4_combine_topk_swa_indices_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("combine_topk_swa_indices", *args, **kwargs)
+
+
+def deepseek_v4_flash_mla_sparse_fwd_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("flash_mla_sparse_fwd", *args, **kwargs)
+
+
+def deepseek_v4_fused_indexer_q_rope_quant_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("fused_indexer_q_rope_quant", *args, **kwargs)
+
+
 def deepseek_v4_inv_rope_quant_int8_cuda(
     o: torch.Tensor,
     positions: torch.Tensor,

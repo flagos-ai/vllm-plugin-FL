@@ -7,6 +7,68 @@ from __future__ import annotations
 import torch
 
 
+def deepseek_v4_fused_q_kv_rmsnorm_torch(*args, **kwargs):
+    from vllm.models.deepseek_v4.common.ops import fused_q_kv_rmsnorm
+
+    return fused_q_kv_rmsnorm(*args, **kwargs)
+
+
+def deepseek_v4_qnorm_rope_kv_quant_insert_torch(*args, **kwargs):
+    return torch.ops._C.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
+        *args, **kwargs
+    )
+
+
+def deepseek_v4_qnorm_rope_kv_bf16_insert_torch(*args, **kwargs):
+    return torch.ops._C.fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_bf16_insert(
+        *args, **kwargs
+    )
+
+
+def deepseek_v4_qnorm_rope_kv_fp8_insert_torch(*args, **kwargs):
+    return torch.ops._C.fused_deepseek_v4_qnorm_rope_kv_rope_full_cache_fp8_insert(
+        *args, **kwargs
+    )
+
+
+def deepseek_v4_compute_global_topk_indices_and_lens_torch(*args, **kwargs):
+    from vllm.models.deepseek_v4.common.ops import (
+        compute_global_topk_indices_and_lens,
+    )
+
+    return compute_global_topk_indices_and_lens(*args, **kwargs)
+
+
+def deepseek_v4_flash_mla_with_kvcache_torch(*args, **kwargs):
+    from vllm.v1.attention.ops.flashmla import flash_mla_with_kvcache
+
+    return flash_mla_with_kvcache(*args, **kwargs)
+
+
+def deepseek_v4_dequantize_and_gather_k_cache_torch(*args, **kwargs):
+    from vllm.models.deepseek_v4.common.ops import dequantize_and_gather_k_cache
+
+    return dequantize_and_gather_k_cache(*args, **kwargs)
+
+
+def deepseek_v4_combine_topk_swa_indices_torch(*args, **kwargs):
+    from vllm.models.deepseek_v4.common.ops import combine_topk_swa_indices
+
+    return combine_topk_swa_indices(*args, **kwargs)
+
+
+def deepseek_v4_flash_mla_sparse_fwd_torch(*args, **kwargs):
+    from vllm.v1.attention.ops.flashmla import flash_mla_sparse_fwd
+
+    return flash_mla_sparse_fwd(*args, **kwargs)
+
+
+def deepseek_v4_fused_indexer_q_rope_quant_torch(*args, **kwargs):
+    from vllm.models.deepseek_v4.common.ops import fused_indexer_q_rope_quant
+
+    return fused_indexer_q_rope_quant(*args, **kwargs)
+
+
 def deepseek_v4_inv_rope_quant_int8_torch(
     o: torch.Tensor,
     positions: torch.Tensor,

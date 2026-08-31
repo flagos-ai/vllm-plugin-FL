@@ -7,6 +7,7 @@ from itertools import islice
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import VllmConfig
@@ -17,7 +18,6 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from vllm.model_executor.models.utils import PPMissingLayer, make_layers
-from vllm.models.deepseek_v4.common.ops import fused_q_kv_rmsnorm
 from vllm.models.deepseek_v4.nvidia.flashmla import (
     DeepseekV4FlashMLAAttention,
 )
@@ -30,15 +30,27 @@ from vllm.models.deepseek_v4.nvidia.model import (
 )
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
+from vllm.utils.multi_stream_utils import execute_in_parallel, maybe_execute_in_parallel
 from vllm.utils.torch_utils import direct_register_custom_op, vllm_lib
+from vllm.v1.worker.workspace import current_workspace_manager
 
 from vllm_fl.ops.deepseek_v4 import (
+    combine_topk_swa_indices,
+    compute_global_topk_indices_and_lens,
+    dequantize_and_gather_k_cache,
+    flash_mla_sparse_fwd,
+    flash_mla_with_kvcache,
+    fused_indexer_q_rope_quant,
+    fused_q_kv_rmsnorm,
     hc_head,
     int8_scaled_mm,
     inv_rope_quant_fp8,
     mhc_fused_post_pre,
     mhc_post,
     mhc_pre,
+    qnorm_rope_kv_bf16_insert,
+    qnorm_rope_kv_fp8_insert,
+    qnorm_rope_kv_quant_insert,
 )
 from vllm_fl.ops.deepseek_v4_int8_woa import fused_inv_rope_quant_int8
 
@@ -117,6 +129,337 @@ direct_register_custom_op(
 
 class DeepseekV4FLFlashMLAAttention(DeepseekV4FlashMLAAttention):
     """FlashMLA attention with a W8A8-only wo_a branch."""
+
+    def _indexer_forward(
+        self,
+        indexer,
+        hidden_states: torch.Tensor,
+        qr: torch.Tensor,
+        compressed_kv_score: torch.Tensor,
+        indexer_weights: torch.Tensor,
+        positions: torch.Tensor,
+    ) -> torch.Tensor:
+        compressor = indexer.compressor
+
+        def wq_b_and_q_quant():
+            q, _ = indexer.wq_b(qr)
+            q = q.view(-1, indexer.n_head, indexer.head_dim)
+            return fused_indexer_q_rope_quant(
+                positions,
+                q,
+                self.indexer_rotary_emb.cos_sin_cache,
+                indexer_weights,
+                indexer.softmax_scale,
+                indexer.n_head**-0.5,
+                use_fp4=indexer.use_fp4_kv,
+            )
+
+        (q_quant, weights), k = maybe_execute_in_parallel(
+            wq_b_and_q_quant,
+            lambda: compressor(compressed_kv_score, positions, self.indexer_rotary_emb),
+            indexer.ln_events[0],
+            indexer.ln_events[1],
+            indexer.aux_stream,
+        )
+        return indexer.indexer_op(hidden_states, q_quant, k, weights)
+
+    def attention_impl(
+        self,
+        hidden_states: torch.Tensor,
+        qr: torch.Tensor,
+        kv: torch.Tensor,
+        kv_score: torch.Tensor,
+        indexer_kv_score: torch.Tensor,
+        indexer_weights: torch.Tensor,
+        positions: torch.Tensor,
+        out: torch.Tensor,
+    ) -> None:
+        """Upstream orchestration with every direct CUDA helper dispatched."""
+        attn_metadata = get_forward_context().attn_metadata
+        if self.indexer is not None:
+            aux_streams = self.aux_stream_list
+            indexer = self.indexer
+            assert self.compressor is not None
+            compressor = self.compressor
+
+            def wq_b_kv_insert() -> torch.Tensor:
+                q = self.wq_b(qr).view(-1, self.n_local_heads, self.head_dim)
+                return self._fused_qnorm_rope_kv_insert(q, kv, positions, attn_metadata)
+
+            q, _ = execute_in_parallel(
+                wq_b_kv_insert,
+                [
+                    lambda: self._indexer_forward(
+                        indexer,
+                        hidden_states,
+                        qr,
+                        indexer_kv_score,
+                        indexer_weights,
+                        positions,
+                    ),
+                    lambda: compressor(kv_score, positions, self.rotary_emb),
+                ],
+                self.ln_events[0],
+                [self.ln_events[1], self.ln_events[2]],
+                [aux_streams[0], aux_streams[1]] if aux_streams is not None else None,
+                enable=aux_streams is not None,
+            )
+        elif self.compressor is not None:
+            aux_stream = (
+                self.aux_stream_list[0] if self.aux_stream_list is not None else None
+            )
+            compressor = self.compressor
+
+            def wq_b_kv_insert() -> torch.Tensor:
+                q = self.wq_b(qr).view(-1, self.n_local_heads, self.head_dim)
+                return self._fused_qnorm_rope_kv_insert(q, kv, positions, attn_metadata)
+
+            q, _ = maybe_execute_in_parallel(
+                wq_b_kv_insert,
+                lambda: compressor(kv_score, positions, self.rotary_emb),
+                self.ln_events[0],
+                self.ln_events[1],
+                aux_stream,
+            )
+        else:
+            q = self.wq_b(qr).view(-1, self.n_local_heads, self.head_dim)
+            q = self._fused_qnorm_rope_kv_insert(q, kv, positions, attn_metadata)
+        self.forward_mqa(q, kv, positions, out)
+
+    def _fused_qnorm_rope_kv_insert(
+        self,
+        q: torch.Tensor,
+        kv: torch.Tensor,
+        positions: torch.Tensor,
+        attn_metadata,
+    ) -> torch.Tensor:
+        """Route each cache-layout-specific fused insert through OpManager."""
+        if not isinstance(attn_metadata, dict):
+            if self.n_local_heads < self.padded_heads:
+                return F.pad(
+                    q,
+                    (0, 0, 0, self.padded_heads - self.n_local_heads),
+                    value=0.0,
+                )
+            return q
+
+        swa_metadata = attn_metadata.get(self.swa_cache_layer.prefix)
+        assert swa_metadata is not None
+        swa_kv_cache = self.swa_cache_layer.kv_cache
+        assert positions.dtype == torch.int64
+        cos_sin_cache = self.rotary_emb.cos_sin_cache
+
+        if swa_kv_cache.dtype == torch.uint8:
+            return qnorm_rope_kv_quant_insert(
+                q,
+                kv,
+                swa_kv_cache.view(swa_kv_cache.shape[0], -1),
+                swa_metadata.slot_mapping,
+                positions,
+                cos_sin_cache,
+                self.padded_heads,
+                self.eps,
+                swa_metadata.block_size,
+            )
+
+        block_size = swa_metadata.block_size
+        swa_kv_cache_3d = swa_kv_cache.view(-1, block_size, self.head_dim)
+        if swa_kv_cache.dtype == torch.bfloat16:
+            qnorm_rope_kv_bf16_insert(
+                q,
+                kv,
+                swa_kv_cache_3d,
+                swa_metadata.slot_mapping,
+                positions,
+                cos_sin_cache,
+                self.eps,
+                block_size,
+            )
+            return q
+
+        q_fp8 = torch.empty_like(q, dtype=torch.float8_e4m3fn)
+        qnorm_rope_kv_fp8_insert(
+            q,
+            kv,
+            q_fp8,
+            swa_kv_cache_3d,
+            swa_metadata.slot_mapping,
+            positions,
+            cos_sin_cache,
+            self._flashinfer_fp8_kv_scale,
+            self._flashinfer_fp8_q_scale_inv,
+            self.eps,
+            block_size,
+        )
+        return q_fp8
+
+    def _forward_decode(
+        self,
+        q: torch.Tensor,
+        kv_cache: torch.Tensor | None,
+        swa_metadata,
+        attn_metadata,
+        swa_only: bool,
+        output: torch.Tensor,
+    ) -> None:
+        """Decode path with all DSV4 CUDA helpers behind OpManager."""
+        num_decodes = swa_metadata.num_decodes
+        num_decode_tokens = swa_metadata.num_decode_tokens
+        topk_indices = None
+        topk_lens = None
+        if not swa_only:
+            assert attn_metadata is not None
+            assert swa_metadata.is_valid_token is not None
+            block_size = attn_metadata.block_size // self.compress_ratio
+            is_valid = swa_metadata.is_valid_token[:num_decode_tokens]
+            if self.compress_ratio == 4:
+                assert self.topk_indices_buffer is not None
+                global_indices, topk_lens = compute_global_topk_indices_and_lens(
+                    self.topk_indices_buffer[:num_decode_tokens],
+                    swa_metadata.token_to_req_indices,
+                    attn_metadata.block_table[:num_decodes],
+                    block_size,
+                    is_valid,
+                )
+                topk_indices = global_indices.view(num_decode_tokens, 1, -1)
+            else:
+                topk_indices = attn_metadata.c128a_global_decode_topk_indices
+                topk_lens = attn_metadata.c128a_decode_topk_lens
+
+        q = q.unsqueeze(1)
+        swa_cache = self.swa_cache_layer.kv_cache.unsqueeze(-2)
+        if kv_cache is not None:
+            kv_cache = kv_cache.unsqueeze(-2)
+        if self.compress_ratio <= 1:
+            tile_metadata = swa_metadata.tile_sched_swaonly
+        elif self.compress_ratio == 4:
+            tile_metadata = swa_metadata.tile_sched_c4a
+        elif self.compress_ratio == 128:
+            tile_metadata = swa_metadata.tile_sched_c128a
+        else:
+            raise ValueError(
+                f"Unsupported compress_ratio={self.compress_ratio}; "
+                "expected 1, 4, or 128."
+            )
+        assert tile_metadata is not None
+        flash_mla_with_kvcache(
+            q=q,
+            k_cache=swa_cache,
+            block_table=None,
+            head_dim_v=512,
+            tile_scheduler_metadata=tile_metadata,
+            cache_seqlens=None,
+            is_fp8_kvcache=True,
+            indices=swa_metadata.decode_swa_indices,
+            topk_length=swa_metadata.decode_swa_lens,
+            softmax_scale=self.scale,
+            attn_sink=self.attn_sink,
+            extra_k_cache=kv_cache if not swa_only else None,
+            extra_indices_in_kvcache=topk_indices,
+            extra_topk_length=topk_lens,
+            out=output.unsqueeze(1),
+        )
+
+    def _forward_prefill(
+        self,
+        q: torch.Tensor,
+        positions: torch.Tensor,
+        compressed_k_cache: torch.Tensor | None,
+        swa_k_cache: torch.Tensor,
+        output: torch.Tensor,
+        attn_metadata,
+        swa_metadata,
+    ) -> None:
+        """Prefill path with gather/index construction/attention dispatched."""
+        del positions
+        swa_only = attn_metadata is None
+        num_prefill_tokens = swa_metadata.num_prefill_tokens
+        num_decodes = swa_metadata.num_decodes
+        num_decode_tokens = swa_metadata.num_decode_tokens
+        seq_lens = swa_metadata.prefill_seq_lens
+        gather_lens = swa_metadata.prefill_gather_lens
+        query_start_loc_cpu = swa_metadata.query_start_loc_cpu
+        query_start_loc = swa_metadata.query_start_loc
+        assert seq_lens is not None and gather_lens is not None
+        assert query_start_loc_cpu is not None and query_start_loc is not None
+        prefill_token_base = query_start_loc_cpu[num_decodes]
+
+        if not swa_only:
+            if self.compress_ratio == 4:
+                assert self.topk_indices_buffer is not None
+                topk_indices = self.topk_indices_buffer[num_decode_tokens:]
+                topk_indices = topk_indices[:num_prefill_tokens]
+            else:
+                assert attn_metadata is not None
+                topk_indices = attn_metadata.c128a_prefill_topk_indices
+            top_k = topk_indices.shape[-1]
+        else:
+            assert self.topk_indices_buffer is not None
+            topk_indices = self.topk_indices_buffer[num_decode_tokens:]
+            top_k = 0
+
+        chunk_plan = swa_metadata.get_prefill_chunk_plan(
+            compress_ratio=self.compress_ratio,
+            prefill_chunk_size=self.PREFILL_CHUNK_SIZE,
+        )
+        assert chunk_plan
+        workspace_manager = current_workspace_manager()
+        for chunk_start, chunk_end, chunk_n, chunk_m in chunk_plan:
+            chunk_size = chunk_end - chunk_start
+            kv = workspace_manager.get_simultaneous(
+                ((chunk_size, chunk_m, q.shape[-1]), torch.bfloat16),
+            )[0]
+            if not swa_only:
+                assert attn_metadata is not None
+                block_table = attn_metadata.block_table[num_decodes:]
+                dequantize_and_gather_k_cache(
+                    kv[:chunk_size],
+                    compressed_k_cache,
+                    seq_lens=seq_lens[chunk_start:chunk_end] // self.compress_ratio,
+                    gather_lens=None,
+                    block_table=block_table[chunk_start:chunk_end],
+                    block_size=attn_metadata.block_size // self.compress_ratio,
+                    offset=0,
+                )
+
+            swa_block_table = swa_metadata.block_table[num_decodes:]
+            dequantize_and_gather_k_cache(
+                kv[:chunk_size],
+                swa_k_cache,
+                seq_lens=seq_lens[chunk_start:chunk_end],
+                gather_lens=gather_lens[chunk_start:chunk_end],
+                block_table=swa_block_table[chunk_start:chunk_end],
+                block_size=swa_metadata.block_size,
+                offset=chunk_n,
+            )
+            query_start = (
+                query_start_loc_cpu[num_decodes + chunk_start] - prefill_token_base
+            )
+            query_end = (
+                query_start_loc_cpu[num_decodes + chunk_end] - prefill_token_base
+            )
+            combined_indices, combined_lens = combine_topk_swa_indices(
+                topk_indices[query_start:query_end],
+                query_start_loc[
+                    num_decodes + chunk_start : num_decodes + chunk_end + 1
+                ],
+                seq_lens[chunk_start:chunk_end],
+                gather_lens[chunk_start:chunk_end],
+                self.window_size,
+                self.compress_ratio,
+                top_k,
+                chunk_m,
+                chunk_n,
+            )
+            flash_mla_sparse_fwd(
+                q=q[query_start:query_end],
+                kv=kv.view(-1, 1, q.shape[-1]),
+                indices=combined_indices.unsqueeze(1),
+                sm_scale=self.scale,
+                attn_sink=self.attn_sink,
+                topk_length=combined_lens,
+                out=output[query_start:query_end],
+            )
 
     def forward(
         self,

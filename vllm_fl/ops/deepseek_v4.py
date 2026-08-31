@@ -14,6 +14,16 @@ _OPS = {
         "mhc_fused_post_pre",
         "mhc_post",
         "hc_head",
+        "fused_q_kv_rmsnorm",
+        "qnorm_rope_kv_quant_insert",
+        "qnorm_rope_kv_bf16_insert",
+        "qnorm_rope_kv_fp8_insert",
+        "compute_global_topk_indices_and_lens",
+        "flash_mla_with_kvcache",
+        "dequantize_and_gather_k_cache",
+        "combine_topk_swa_indices",
+        "flash_mla_sparse_fwd",
+        "fused_indexer_q_rope_quant",
     )
 }
 
@@ -40,3 +50,43 @@ def mhc_post(*args, **kwargs):
 
 def hc_head(*args, **kwargs):
     return _OPS["hc_head"](*args, **kwargs)
+
+
+def fused_q_kv_rmsnorm(*args, **kwargs):
+    return _OPS["fused_q_kv_rmsnorm"](*args, **kwargs)
+
+
+def qnorm_rope_kv_quant_insert(*args, **kwargs):
+    return _OPS["qnorm_rope_kv_quant_insert"](*args, **kwargs)
+
+
+def qnorm_rope_kv_bf16_insert(*args, **kwargs):
+    return _OPS["qnorm_rope_kv_bf16_insert"](*args, **kwargs)
+
+
+def qnorm_rope_kv_fp8_insert(*args, **kwargs):
+    return _OPS["qnorm_rope_kv_fp8_insert"](*args, **kwargs)
+
+
+def compute_global_topk_indices_and_lens(*args, **kwargs):
+    return _OPS["compute_global_topk_indices_and_lens"](*args, **kwargs)
+
+
+def flash_mla_with_kvcache(*args, **kwargs):
+    return _OPS["flash_mla_with_kvcache"](*args, **kwargs)
+
+
+def dequantize_and_gather_k_cache(*args, **kwargs):
+    return _OPS["dequantize_and_gather_k_cache"](*args, **kwargs)
+
+
+def combine_topk_swa_indices(*args, **kwargs):
+    return _OPS["combine_topk_swa_indices"](*args, **kwargs)
+
+
+def flash_mla_sparse_fwd(*args, **kwargs):
+    return _OPS["flash_mla_sparse_fwd"](*args, **kwargs)
+
+
+def fused_indexer_q_rope_quant(*args, **kwargs):
+    return _OPS["fused_indexer_q_rope_quant"](*args, **kwargs)

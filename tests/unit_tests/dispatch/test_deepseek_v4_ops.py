@@ -23,6 +23,16 @@ DSV4_OPS = {
     "deepseek_v4_mhc_fused_post_pre",
     "deepseek_v4_mhc_post",
     "deepseek_v4_hc_head",
+    "deepseek_v4_fused_q_kv_rmsnorm",
+    "deepseek_v4_qnorm_rope_kv_quant_insert",
+    "deepseek_v4_qnorm_rope_kv_bf16_insert",
+    "deepseek_v4_qnorm_rope_kv_fp8_insert",
+    "deepseek_v4_compute_global_topk_indices_and_lens",
+    "deepseek_v4_flash_mla_with_kvcache",
+    "deepseek_v4_dequantize_and_gather_k_cache",
+    "deepseek_v4_combine_topk_swa_indices",
+    "deepseek_v4_flash_mla_sparse_fwd",
+    "deepseek_v4_fused_indexer_q_rope_quant",
 }
 
 

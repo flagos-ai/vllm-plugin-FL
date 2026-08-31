@@ -68,6 +68,16 @@ def register_builtins(registry) -> None:
                 "mhc_fused_post_pre",
                 "mhc_post",
                 "hc_head",
+                "fused_q_kv_rmsnorm",
+                "qnorm_rope_kv_quant_insert",
+                "qnorm_rope_kv_bf16_insert",
+                "qnorm_rope_kv_fp8_insert",
+                "compute_global_topk_indices_and_lens",
+                "flash_mla_with_kvcache",
+                "dequantize_and_gather_k_cache",
+                "combine_topk_swa_indices",
+                "flash_mla_sparse_fwd",
+                "fused_indexer_q_rope_quant",
             )
         ],
         # Activation
