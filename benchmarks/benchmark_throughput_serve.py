@@ -23,10 +23,15 @@
 #
 # [Optional] Run all 10 test cases:
 # python benchmarks/benchmark_throughput_serve.py --enable-all
+#
+# [Optional] Run custom test cases:
+# python benchmarks/benchmark_throughput_serve.py \
+#   --test-cases '[[1024,1024,32,128],[4096,1024,64,256]]'
 
 
 import argparse
 import csv
+import json
 import os
 import re
 import subprocess
@@ -82,16 +87,53 @@ ALL_TEST_CASES = [
 ]
 
 
-def parse_args():
+def parse_test_cases(value):
+    try:
+        raw_cases = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid JSON: {exc.msg}") from exc
+
+    if not isinstance(raw_cases, list) or not raw_cases:
+        raise argparse.ArgumentTypeError("test cases must be a non-empty JSON list")
+
+    for index, raw_case in enumerate(raw_cases):
+        case_label = f"test case at index {index}"
+
+        if not isinstance(raw_case, list) or len(raw_case) != 4:
+            raise argparse.ArgumentTypeError(
+                f"{case_label} must be a list of exactly 4 values: "
+                "input_len, output_len, concurrency, num_prompts"
+            )
+
+        if any(type(item) is not int or item <= 0 for item in raw_case):
+            raise argparse.ArgumentTypeError(
+                f"{case_label} values must be positive integers"
+            )
+
+    return [tuple(case) for case in raw_cases]
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
+    test_case_group = parser.add_mutually_exclusive_group()
+
+    test_case_group.add_argument(
         "--enable-all",
         action="store_true",
         help="Enable all 10 test cases. If not set, run default 4 cases.",
     )
+    test_case_group.add_argument(
+        "--test-cases",
+        type=parse_test_cases,
+        metavar="JSON",
+        help=(
+            "Run custom test cases from a JSON list. Each case is "
+            "[input_len, output_len, concurrency, num_prompts]."
+        ),
+    )
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 PATTERNS = {
@@ -342,7 +384,12 @@ def print_summary(results):
 def main():
     args = parse_args()
 
-    test_cases = ALL_TEST_CASES if args.enable_all else DEFAULT_TEST_CASES
+    if args.test_cases:
+        test_cases = args.test_cases
+    elif args.enable_all:
+        test_cases = ALL_TEST_CASES
+    else:
+        test_cases = DEFAULT_TEST_CASES
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
