@@ -19,17 +19,17 @@
 # vllm serve /models/Qwen3.6-35B-A3B --tensor-parallel-size 2 --max-model-len 262144 --no-enable-log-requests --no-enable-prefix-caching
 
 #  2. Run this benchmark script (default: 4 test cases):
-# python benchmarks/benchmark_throughput_serve.py \
-#   --model /models/Qwen3.6-35B-A3B --port 8000
+# python benchmarks/benchmark_throughput_serve.py --model /models/Qwen3.6-35B-A3B
 #
 # [Optional] Run all 10 test cases:
 # python benchmarks/benchmark_throughput_serve.py \
-#   --model /models/Qwen3.6-35B-A3B --port 8000 --enable-all
+#   --model /models/Qwen3.6-35B-A3B --served-model-name qwen \
+#   --port 8000 --enable-all
 #
-# [Optional] Run custom test cases:
+# [Optional] Run custom test cases or port or served model name:
 # Each test case: [input_len, output_len, concurrency, num_prompts]
 # python benchmarks/benchmark_throughput_serve.py \
-#   --model /models/Qwen3.6-35B-A3B --port 8000 \
+#   --model /models/Qwen3.6-35B-A3B --served-model-name qwen --port 8000 \
 #   --test-cases '[[1024,1024,64,256],[4096,1024,64,256]]'
 
 
@@ -129,6 +129,10 @@ def parse_args(argv=None):
         default=8000,
         help="Server port (default: 8000).",
     )
+    parser.add_argument(
+        "--served-model-name",
+        help="Model name exposed by the server. If omitted, use the model path.",
+    )
 
     test_case_group = parser.add_mutually_exclusive_group()
 
@@ -150,7 +154,7 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def build_common_args(model, port):
+def build_common_args(model, port, served_model_name=None):
     return [
         "vllm",
         "bench",
@@ -158,7 +162,7 @@ def build_common_args(model, port):
         "--backend",
         "vllm",
         "--model",
-        model,
+        served_model_name or model,
         "--tokenizer",
         model,
         "--endpoint",
@@ -421,7 +425,7 @@ def print_summary(results):
 
 def main():
     args = parse_args()
-    common_args = build_common_args(args.model, args.port)
+    common_args = build_common_args(args.model, args.port, args.served_model_name)
 
     if args.test_cases:
         test_cases = args.test_cases
@@ -443,6 +447,7 @@ def main():
     print(f"RUNS={RUNS}")
     print(f"SKIP_FIRST={SKIP_FIRST}")
     print(f"MODEL={args.model}")
+    print(f"SERVED_MODEL_NAME={args.served_model_name or args.model}")
     print(f"PORT={args.port}")
     print(f"ENABLE_ALL={args.enable_all}")
     print(f"TOTAL_CASES={len(test_cases)}")
