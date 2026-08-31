@@ -22,55 +22,23 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
     assert path is not None
     assert path.name == "nvidia.yaml"
     assert config["op_backends"]["attention_backend"][0] == "flagos"
-    assert {
+    assert config["flagos_blacklist"] == [
         "fill_scalar_",
         "fill_tensor_",
         "sub",
-        "rsub_scalar",
-        "masked_fill_",
-        "le",
-        "le_scalar",
-        "lt",
-        "lt_scalar",
-        "gt_scalar",
-        "pow_scalar",
-        "pow_tensor_scalar",
-        "cos",
-        "sin",
-        "floor_divide",
+        "to_copy",
+        "copy_",
         "reciprocal",
-        "sqrt",
-        "rsqrt",
-        "sigmoid",
-        "sum",
-        "mul_",
         "mul",
-        "ge_scalar",
-        "eq_scalar",
-        "where_self",
-        "where_self_out",
         "true_divide",
-        "true_divide_",
-        "repeat_interleave_self_int",
-        "repeat_interleave_self_tensor",
-        "bitwise_and_tensor",
-        "neg",
-        "bitwise_not",
-        "bitwise_or_tensor",
+        "rsub_scalar",
         "add",
-        "silu_and_mul",
-        "constant_pad_nd",
         "pad",
-        "bmm_out",
-        "topk",
+        "constant_pad_nd",
         "full",
-        "gather",
-        "argmax",
-        "gelu",
-        "clamp",
-        "clamp_",
-    }.issubset(config["flagos_blacklist"])
-    assert config["oot_blacklist"] == ["fused_moe"]
+        "topk",
+    ]
+    assert config["oot_blacklist"] == []
 
 
 def test_hopper_uses_architecture_specific_config_when_enabled(monkeypatch):
