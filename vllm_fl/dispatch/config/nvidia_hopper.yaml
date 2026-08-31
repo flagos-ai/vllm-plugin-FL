@@ -29,9 +29,6 @@ op_backends:
     - vendor
     - reference
 
-# See nvidia.yaml. Hopper additionally keeps dense GEMM on the native CUDA
-# implementation because the FlagGems host-TMA path regresses long-context
-# projection shapes.
 flagos_blacklist:
   - index_put_
   - index_put
@@ -40,11 +37,7 @@ flagos_blacklist:
   - copy_
   - to_copy
   - index
-  - fill_scalar_
-  - fill_tensor_
-  - sub
-  - rsub_scalar
-  - masked_fill_
-  - le
+  # FlagGems' Hopper host-TMA mm.out path is slower than the native dense
+  # GEMM for the long-context projection shapes used by vLLM.
   - mm
   - mm_out
