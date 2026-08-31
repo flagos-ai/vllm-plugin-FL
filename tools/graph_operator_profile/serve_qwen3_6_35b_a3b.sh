@@ -24,7 +24,7 @@ exec vllm serve /models/Qwen3.6-35B-A3B \
   --port 8000 \
   --tensor-parallel-size 2 \
   --max-model-len 32768 \
-  --max-num-seqs 1 \
+  --max-num-seqs 64 \
   --no-enable-prefix-caching \
   --trust-remote-code \
   --compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,32,64],"cudagraph_num_of_warmups":0}' \

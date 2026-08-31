@@ -55,5 +55,9 @@ flagos_blacklist:
   - copy_
   - to_copy
   - index
+  # FlagGems linear/mm autotuning can access invalid memory for the dynamic
+  # DeepSeek-V4 logits-projection shapes in a concurrent prefill/decode batch.
+  - linear
+  - mm
 # OOT (Out-of-Tree) operator blacklist
 # oot_blacklist: []

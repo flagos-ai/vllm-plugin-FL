@@ -1,6 +1,7 @@
 {
   "model": "deepseek-v4-flash",
-  "prompt": "Hello",
-  "max_tokens": 4,
-  "temperature": 0
+  "concurrency": 64,
+  "input_tokens": 4096,
+  "output_tokens": 1024,
+  "seed": 0
 }
