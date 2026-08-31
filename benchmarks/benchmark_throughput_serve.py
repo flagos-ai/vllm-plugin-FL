@@ -16,17 +16,20 @@
 
 # Usage:
 #  1. Start the server as follows (adjust model path and args as needed):
-# vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 2 --max-model-len 262144 --no-enable-log-requests --no-enable-prefix-caching
+# vllm serve /models/Qwen3.6-35B-A3B --port 8002 --tensor-parallel-size 2 --max-model-len 32768 --trust-remote-code
 
 #  2. Run this benchmark script (default: 4 test cases):
-# python benchmarks/benchmark_throughput_serve.py
+# python benchmarks/benchmark_throughput_serve.py \
+#   --model /models/Qwen3.6-35B-A3B --port 8002
 #
 # [Optional] Run all 10 test cases:
-# python benchmarks/benchmark_throughput_serve.py --enable-all
+# python benchmarks/benchmark_throughput_serve.py \
+#   --model /models/Qwen3.6-35B-A3B --port 8002 --enable-all
 #
 # [Optional] Run custom test cases:
 # Each test case: [input_len, output_len, concurrency, num_prompts]
 # python benchmarks/benchmark_throughput_serve.py \
+#   --model /models/Qwen3.6-35B-A3B --port 8002 \
 #   --test-cases '[[1024,1024,32,128],[4096,1024,64,256]]'
 
 
@@ -40,32 +43,11 @@ import time
 from datetime import datetime
 from statistics import mean
 
-MODEL = "/data/models/Qwen/Qwen3.6-27B"
-
 # total runs for each case
 RUNS = 4
 
 # skip first N runs
 SKIP_FIRST = 1
-
-COMMON_ARGS = [
-    "vllm",
-    "bench",
-    "serve",
-    "--backend",
-    "vllm",
-    "--model",
-    MODEL,
-    "--endpoint",
-    "/v1/completions",
-    "--host",
-    "localhost",
-    "--port",
-    "8000",
-    "--dataset-name",
-    "random",
-    "--ignore-eos",
-]
 
 # Baseline cases used when --enable-all is not set.
 # Each case is a tuple:
@@ -114,8 +96,39 @@ def parse_test_cases(value):
     return [tuple(case) for case in raw_cases]
 
 
+def existing_path(value):
+    path = os.path.abspath(os.path.expanduser(value))
+    if not os.path.exists(path):
+        raise argparse.ArgumentTypeError(f"model path does not exist: {path}")
+    return path
+
+
+def valid_port(value):
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid port: {value}") from exc
+
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--model",
+        type=existing_path,
+        required=True,
+        help="Local model path used to load the tokenizer.",
+    )
+    parser.add_argument(
+        "--port",
+        type=valid_port,
+        default=8000,
+        help="Server port (default: 8000).",
+    )
 
     test_case_group = parser.add_mutually_exclusive_group()
 
@@ -135,6 +148,30 @@ def parse_args(argv=None):
     )
 
     return parser.parse_args(argv)
+
+
+def build_common_args(model, port):
+    return [
+        "vllm",
+        "bench",
+        "serve",
+        "--backend",
+        "vllm",
+        "--model",
+        model,
+        "--tokenizer",
+        model,
+        "--endpoint",
+        "/v1/completions",
+        "--host",
+        "localhost",
+        "--port",
+        str(port),
+        "--dataset-name",
+        "random",
+        "--ignore-eos",
+        "--trust-remote-code",
+    ]
 
 
 PATTERNS = {
@@ -268,7 +305,7 @@ def append_csv(row, filename, columns):
         writer.writerow(row)
 
 
-def run_once(case, run_id):
+def run_once(case, run_id, common_args):
     input_len, output_len, concurrency, num_prompts = case
 
     name = f"{input_len}_{output_len}_c{concurrency}"
@@ -277,7 +314,7 @@ def run_once(case, run_id):
     print(f"Running: {name} | Run {run_id}/{RUNS}")
     print("=" * 80)
 
-    cmd = COMMON_ARGS + [
+    cmd = common_args + [
         "--random-input-len",
         str(input_len),
         "--random-output-len",
@@ -327,11 +364,11 @@ def average_metrics(results):
     return avg_result
 
 
-def run_test_case(case, raw_csv):
+def run_test_case(case, raw_csv, common_args):
     all_runs = []
 
     for run_id in range(1, RUNS + 1):
-        metrics = run_once(case, run_id)
+        metrics = run_once(case, run_id, common_args)
 
         raw_row = format_result(case, metrics, include_successful_requests=True)
         expected_successful_requests = case[3]
@@ -384,6 +421,7 @@ def print_summary(results):
 
 def main():
     args = parse_args()
+    common_args = build_common_args(args.model, args.port)
 
     if args.test_cases:
         test_cases = args.test_cases
@@ -404,6 +442,8 @@ def main():
     print()
     print(f"RUNS={RUNS}")
     print(f"SKIP_FIRST={SKIP_FIRST}")
+    print(f"MODEL={args.model}")
+    print(f"PORT={args.port}")
     print(f"ENABLE_ALL={args.enable_all}")
     print(f"TOTAL_CASES={len(test_cases)}")
     print(f"TEST_CASES={test_cases}")
@@ -414,6 +454,7 @@ def main():
             summary_row, has_failed_run = run_test_case(
                 case,
                 raw_csv,
+                common_args,
             )
 
             if has_failed_run:
