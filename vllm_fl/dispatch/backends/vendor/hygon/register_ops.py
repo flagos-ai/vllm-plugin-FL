@@ -113,6 +113,50 @@ def register_builtins(registry) -> None:
             vendor="hygon",
             priority=BackendPriority.VENDOR,
         ),
+        OpImpl(
+            op_name="glm_indexer_fp8_mqa_logits",
+            impl_id="vendor.hygon",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.glm_hygon_indexer_fp8_mqa_logits,
+                is_avail,
+            ),
+            vendor="hygon",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="glm_indexer_fp8_paged_mqa_logits",
+            impl_id="vendor.hygon",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.glm_hygon_indexer_fp8_paged_mqa_logits,
+                is_avail,
+            ),
+            vendor="hygon",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="glm_top_k_per_row_prefill",
+            impl_id="vendor.hygon",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.glm_hygon_top_k_per_row_prefill,
+                is_avail,
+            ),
+            vendor="hygon",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="glm_top_k_per_row_decode",
+            impl_id="vendor.hygon",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(
+                backend.glm_hygon_top_k_per_row_decode,
+                is_avail,
+            ),
+            vendor="hygon",
+            priority=BackendPriority.VENDOR,
+        ),
     ]
 
     registry.register_many(impls)
