@@ -17,6 +17,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from vllm.model_executor.models.utils import PPMissingLayer, make_layers
+from vllm.models.deepseek_v4.common.ops import fused_q_kv_rmsnorm
 from vllm.models.deepseek_v4.nvidia.flashmla import (
     DeepseekV4FlashMLAAttention,
 )
@@ -60,30 +61,56 @@ _patch_hopper_fp8_inv_rope_kernel()
 
 def _deepseek_v4_fl_attention(
     hidden_states: torch.Tensor,
+    qr: torch.Tensor,
+    kv: torch.Tensor,
+    kv_score: torch.Tensor,
+    indexer_kv_score: torch.Tensor,
+    indexer_weights: torch.Tensor,
     positions: torch.Tensor,
+    out: torch.Tensor,
     layer_name: str,
-) -> torch.Tensor:
+) -> None:
     layer = get_forward_context().no_compile_layers[layer_name]
-    return DeepseekV4FlashMLAAttention.forward(layer, positions, hidden_states, None)
+    layer.attention_impl(
+        hidden_states,
+        qr,
+        kv,
+        kv_score,
+        indexer_kv_score,
+        indexer_weights,
+        positions,
+        out,
+    )
 
 
 def _deepseek_v4_fl_attention_fake(
     hidden_states: torch.Tensor,
+    qr: torch.Tensor,
+    kv: torch.Tensor,
+    kv_score: torch.Tensor,
+    indexer_kv_score: torch.Tensor,
+    indexer_weights: torch.Tensor,
     positions: torch.Tensor,
+    out: torch.Tensor,
     layer_name: str,
-) -> torch.Tensor:
-    del positions, layer_name
-    return torch.empty(
-        (hidden_states.shape[0], hidden_states.shape[-1]),
-        dtype=hidden_states.dtype,
-        device=hidden_states.device,
+) -> None:
+    del (
+        hidden_states,
+        qr,
+        kv,
+        kv_score,
+        indexer_kv_score,
+        indexer_weights,
+        positions,
+        out,
+        layer_name,
     )
 
 
 direct_register_custom_op(
     op_name="deepseek_v4_fl_attention",
     op_func=_deepseek_v4_fl_attention,
-    mutates_args=[],
+    mutates_args=["out"],
     fake_impl=_deepseek_v4_fl_attention_fake,
 )
 
@@ -98,9 +125,38 @@ class DeepseekV4FLFlashMLAAttention(DeepseekV4FlashMLAAttention):
         llama_4_scaling: torch.Tensor | None = None,
     ) -> torch.Tensor:
         del llama_4_scaling
-        return torch.ops.vllm.deepseek_v4_fl_attention(
-            hidden_states, positions, self.prefix
+        num_tokens = hidden_states.shape[0]
+        o_padded = torch.empty(
+            (num_tokens, self.padded_heads, self.head_dim),
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
         )
+
+        qr_kv, kv_score, indexer_kv_score, indexer_weights = (
+            self.attn_gemm_parallel_execute(hidden_states)
+        )
+        qr, kv = qr_kv.split([self.q_lora_rank, self.head_dim], dim=-1)
+        qr, kv = fused_q_kv_rmsnorm(
+            qr,
+            kv,
+            self.q_norm.weight.data,
+            self.kv_norm.weight.data,
+            self.eps,
+        )
+
+        torch.ops.vllm.deepseek_v4_fl_attention(
+            hidden_states,
+            qr,
+            kv,
+            kv_score,
+            indexer_kv_score,
+            indexer_weights,
+            positions,
+            o_padded,
+            self.prefix,
+        )
+        o = o_padded[:, : self.n_local_heads, :]
+        return self._o_proj(o, positions)
 
     def _o_proj(self, o: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         grouped_weight = getattr(self.wo_a, "_fl_w8a8_grouped_weight", None)
