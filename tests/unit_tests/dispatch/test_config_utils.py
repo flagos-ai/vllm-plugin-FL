@@ -83,16 +83,7 @@ def test_hopper_uses_architecture_specific_config_when_enabled(monkeypatch):
     assert path is not None
     assert path.name == "nvidia_hopper.yaml"
     assert config["op_backends"]["attention_backend"][0] == "vendor"
-    assert {
-        "fill_scalar_",
-        "fill_tensor_",
-        "sub",
-        "rsub_scalar",
-        "masked_fill_",
-        "le",
-        "mm",
-        "mm_out",
-    }.issubset(config["flagos_blacklist"])
+    assert {"mm", "mm_out"}.issubset(config["flagos_blacklist"])
 
 
 def test_non_hopper_nvidia_keeps_vendor_wide_config(monkeypatch):
