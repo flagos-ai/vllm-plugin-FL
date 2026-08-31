@@ -41,7 +41,6 @@ python3 "$TOOL_DIR/run_concurrent_requests.py" \
 stop_profile
 
 python3 "$TOOL_DIR/extract_operator_shapes.py" \
-  --capture "$PROFILE_DIR/capture_traces" \
   --runtime "$PROFILE_DIR" \
   --rank 0 \
   --output-dir "$RUN_DIR/results"

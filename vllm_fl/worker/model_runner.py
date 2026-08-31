@@ -292,6 +292,18 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def _graph_capture_profile_enabled() -> bool:
+    value = os.environ.get("VLLM_FL_ENABLE_GRAPH_CAPTURE_PROFILE", "")
+    value = value.strip().lower()
+    if value in {"", "0", "false", "off", "no"}:
+        return False
+    if value in {"1", "true", "on", "yes"}:
+        return True
+    raise ValueError(
+        "VLLM_FL_ENABLE_GRAPH_CAPTURE_PROFILE must be a boolean value"
+    )
+
+
 @contextmanager
 def _profile_graph_capture(
     num_tokens: int,
@@ -303,10 +315,15 @@ def _profile_graph_capture(
     intentionally unchanged. This hook captures graph-construction operators
     with shape/dtype metadata without a sitecustomize monkey patch.
     """
-    trace_root = os.environ.get("VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR", "")
-    if not trace_root:
+    if not _graph_capture_profile_enabled():
         yield
         return
+    trace_root = os.environ.get("VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR", "")
+    if not trace_root:
+        raise ValueError(
+            "VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR is required when "
+            "VLLM_FL_ENABLE_GRAPH_CAPTURE_PROFILE is enabled"
+        )
 
     os.makedirs(trace_root, exist_ok=True)
     rank = (
@@ -6813,7 +6830,7 @@ class ModelRunnerFL(
                 num_active_loras=desc.num_active_loras,
                 profile_seq_lens=profile_seq_lens,
             )
-        if os.environ.get("VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR", ""):
+        if _graph_capture_profile_enabled():
             with _profile_graph_capture(
                 desc.num_tokens,
                 cudagraph_runtime_mode,

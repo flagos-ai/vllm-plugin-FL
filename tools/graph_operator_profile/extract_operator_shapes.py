@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
-"""Extract rank-scoped operator metadata and runtime GPU timing."""
+"""Extract a rank-scoped runtime GPU event inventory from PyTorch traces."""
 
 from __future__ import annotations
 
 import argparse
-import csv
 import gzip
 import json
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 GPU_CATEGORIES = {"kernel", "gpu_memcpy", "gpu_memset"}
-
-
-def compact(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+MetadataKey = tuple[str, str | None, str | None, str]
 
 
 def iter_events(path: Path) -> Iterable[dict[str, Any]]:
@@ -56,10 +52,6 @@ def trace_files(path: Path) -> list[Path]:
     return files
 
 
-def capture_trace_files(path: Path | None) -> list[Path]:
-    return [] if path is None else trace_files(path)
-
-
 def runtime_trace_files(path: Path) -> list[Path]:
     return [
         file for file in trace_files(path) if not file.name.startswith("graph_capture_")
@@ -71,12 +63,20 @@ def rank_in_filename(file: Path) -> int:
     return int(match.group(1)) if match else -1
 
 
-def metadata(event: dict[str, Any]) -> tuple[str, str, str, str]:
+def canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def decode(value: str | None) -> Any:
+    return None if value is None else json.loads(value)
+
+
+def metadata(event: dict[str, Any]) -> MetadataKey:
     args = event.get("args", {})
     has_shapes = "Input Dims" in args
     has_dtypes = "Input type" in args
-    shapes = compact(args.get("Input Dims", []))
-    dtypes = compact(args.get("Input type", []))
+    shapes = canonical(args["Input Dims"]) if has_shapes else None
+    dtypes = canonical(args["Input type"]) if has_dtypes else None
     status = (
         "shape_and_dtype"
         if has_shapes and has_dtypes
@@ -94,359 +94,297 @@ def external_id(event: dict[str, Any]) -> int | str | None:
     return value if isinstance(value, (int, str)) else None
 
 
-def write_csv(path: Path, header: list[str], rows: Iterable[Iterable[Any]]) -> None:
-    with path.open("w", encoding="utf-8", newline="") as output:
-        writer = csv.writer(output)
-        writer.writerow(header)
-        writer.writerows(rows)
+def mapping(
+    event_external_id: int | str | None,
+    cpu_by_external_id: dict[int | str, set[MetadataKey]],
+) -> dict[str, Any]:
+    if event_external_id is None:
+        return {
+            "mapping_status": "missing_external_id",
+            "operator": None,
+            "input_shapes": None,
+            "input_dtypes": None,
+        }
+    candidates = sorted(
+        cpu_by_external_id.get(event_external_id, set()),
+        key=lambda item: (
+            item[0],
+            item[1] or "",
+            item[2] or "",
+            item[3],
+        ),
+    )
+    if not candidates:
+        return {
+            "mapping_status": "no_cpu_op_match",
+            "operator": None,
+            "input_shapes": None,
+            "input_dtypes": None,
+        }
+    if len(candidates) > 1:
+        candidate_rows = [
+            {
+                "operator": item[0],
+                "input_shapes": decode(item[1]),
+                "input_dtypes": decode(item[2]),
+                "metadata_status": item[3],
+            }
+            for item in candidates
+        ]
+        names = {item[0] for item in candidates}
+        return {
+            "mapping_status": (
+                "shape_ambiguous" if len(names) == 1 else "operator_ambiguous"
+            ),
+            "operator": next(iter(names)) if len(names) == 1 else None,
+            "input_shapes": None,
+            "input_dtypes": None,
+            "candidate_operators": candidate_rows,
+        }
 
-
-def collect(files: list[Path]) -> tuple[Counter, Counter, dict[str, Any]]:
-    aggregate: Counter[tuple[str, str, str, str]] = Counter()
-    by_rank: Counter[tuple[int, str, str, str, str]] = Counter()
-    total = with_shapes = with_dtypes = 0
-    for trace in files:
-        rank = rank_in_filename(trace)
-        for event in iter_events(trace):
-            if event.get("cat") != "cpu_op":
-                continue
-            total += 1
-            key = metadata(event)
-            with_shapes += int(key[3] in {"shape_and_dtype", "shape_only"})
-            with_dtypes += int(key[3] in {"shape_and_dtype", "dtype_only"})
-            aggregate[key] += 1
-            by_rank[(rank, *key)] += 1
-    summary = {
-        "trace_files": len(files),
-        "ranks": sorted({rank_in_filename(file) for file in files}),
-        "cpu_operator_events": total,
-        "cpu_operator_events_with_shapes": with_shapes,
-        "cpu_operator_events_with_dtypes": with_dtypes,
-        "operator_rows": len(aggregate),
-        "effective_operator_rows": sum(
-            key[3] == "shape_and_dtype" for key in aggregate
-        ),
-        "unique_effective_operator_names": len(
-            {key[0] for key in aggregate if key[3] == "shape_and_dtype"}
-        ),
-        "no_input_metadata_events": sum(
-            count for key, count in aggregate.items() if key[3] == "no_input_metadata"
-        ),
-        "no_input_metadata_operator_names": sorted(
-            {key[0] for key in aggregate if key[3] == "no_input_metadata"}
-        ),
-        "csv_event_output_coverage_pct": (
-            sum(aggregate.values()) / total * 100 if total else 0.0
-        ),
+    operator, shapes, dtypes, metadata_status = candidates[0]
+    status_by_metadata = {
+        "shape_and_dtype": "operator_shape_matched",
+        "shape_only": "operator_matched_dtype_missing",
+        "dtype_only": "operator_matched_shape_missing",
+        "no_input_metadata": "operator_matched_metadata_missing",
     }
-    return aggregate, by_rank, summary
+    return {
+        "mapping_status": status_by_metadata[metadata_status],
+        "operator": operator,
+        "input_shapes": decode(shapes),
+        "input_dtypes": decode(dtypes),
+    }
 
 
-def collect_runtime_timing(
-    files: list[Path],
-) -> tuple[Counter, Counter, Counter, dict[str, Any]]:
-    cpu_us: Counter[tuple[str, str, str]] = Counter()
-    kernel_count: Counter[tuple[str, str, str]] = Counter()
-    kernel_us: Counter[tuple[str, str, str]] = Counter()
-    gpu_rows: Counter[tuple[str, str, str, str, str, str]] = Counter()
-    gpu_us_by_row: Counter[tuple[str, str, str, str, str, str]] = Counter()
+def event_details(
+    event: dict[str, Any],
+    event_external_id: int | str | None,
+    link: dict[str, Any],
+) -> dict[str, Any]:
+    args = event.get("args", {})
+    details = {
+        "category": str(event.get("cat", "")),
+        "duration_us": float(event.get("dur", 0.0)),
+        "timestamp_us": event.get("ts"),
+        "process_id": event.get("pid"),
+        "thread_id": event.get("tid"),
+        "device": args.get("device"),
+        "stream": args.get("stream"),
+        "external_id": event_external_id,
+    }
+    details.update(link)
+    return details
+
+
+def collect_runtime(
+    files: list[Path], rank: int
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    operator_variants: dict[str, Counter[tuple[str | None, str | None, str]]] = (
+        defaultdict(Counter)
+    )
+    operator_cpu_us: Counter[str] = Counter()
+    cpu_event_count = 0
+    cpu_metadata_count: Counter[str] = Counter()
+
+    kernel_groups: dict[str, dict[str, Any]] = {}
+    non_kernel_groups: dict[str, dict[str, Any]] = {}
+    kernel_mapping_count: Counter[str] = Counter()
+    kernel_mapping_us: Counter[str] = Counter()
     category_count: Counter[str] = Counter()
     category_us: Counter[str] = Counter()
+    operator_kernel_names: dict[str, set[str]] = defaultdict(set)
+    operator_kernel_event_count: Counter[str] = Counter()
 
-    for trace in files:
-        cpu_by_external_id: dict[int | str, tuple[str, str, str, str]] = {}
+    for trace_index, trace in enumerate(files):
+        cpu_by_external_id: dict[int | str, set[MetadataKey]] = defaultdict(set)
         for event in iter_events(trace):
             if event.get("cat") != "cpu_op":
                 continue
+            cpu_event_count += 1
             key = metadata(event)
-            if key[3] == "shape_and_dtype":
-                cpu_us[key[:3]] += float(event.get("dur", 0.0))
+            operator, shapes, dtypes, metadata_status = key
+            operator_variants[operator][(shapes, dtypes, metadata_status)] += 1
+            operator_cpu_us[operator] += float(event.get("dur", 0.0))
+            cpu_metadata_count[metadata_status] += 1
             event_external_id = external_id(event)
             if event_external_id is not None:
-                cpu_by_external_id[event_external_id] = key
+                cpu_by_external_id[event_external_id].add(key)
 
+        gpu_event_index = 0
         for event in iter_events(trace):
             category = str(event.get("cat", ""))
             if category not in GPU_CATEGORIES:
                 continue
+            name = str(event.get("name", ""))
             duration_us = float(event.get("dur", 0.0))
+            event_external_id = external_id(event)
+            link = mapping(event_external_id, cpu_by_external_id)
+            event_id = f"rank{rank}:trace_{trace_index:03d}:gpu_{gpu_event_index:09d}"
+            gpu_event_index += 1
+            row = event_details(event, event_external_id, link)
+            row["trace_file"] = trace.name
+
             category_count[category] += 1
             category_us[category] += duration_us
-            event_external_id = external_id(event)
-            linked = (
-                cpu_by_external_id.get(event_external_id)
-                if event_external_id is not None
-                else None
+            target = kernel_groups if category == "kernel" else non_kernel_groups
+            group_key = name if category == "kernel" else f"{category}:{name}"
+            group = target.setdefault(
+                group_key,
+                {
+                    "summary": {"total_call_count": 0, "total_time_us": 0.0},
+                    "events": {},
+                },
             )
-            if event_external_id is None:
-                status = "missing_external_id"
-                operator, shapes, dtypes = "", "[]", "[]"
-            elif linked is None:
-                status = "no_cpu_op_match"
-                operator, shapes, dtypes = "", "[]", "[]"
-            elif linked[3] != "shape_and_dtype":
-                status = "cpu_op_missing_shape_or_dtype"
-                operator, shapes, dtypes = linked[:3]
-            else:
-                status = "attributed_shape_dtype"
-                operator, shapes, dtypes = linked[:3]
-                if category == "kernel":
-                    key = operator, shapes, dtypes
-                    kernel_count[key] += 1
-                    kernel_us[key] += duration_us
-            row = (
-                category,
-                str(event.get("name", "")),
-                status,
-                operator,
-                shapes,
-                dtypes,
-            )
-            gpu_rows[row] += 1
-            gpu_us_by_row[row] += duration_us
+            group["summary"]["total_call_count"] += 1
+            group["summary"]["total_time_us"] += duration_us
+            group["events"][event_id] = row
+
+            if category != "kernel":
+                continue
+            status = link["mapping_status"]
+            kernel_mapping_count[status] += 1
+            kernel_mapping_us[status] += duration_us
+            operator = link["operator"]
+            if operator is not None:
+                operator_kernel_names[operator].add(name)
+                operator_kernel_event_count[operator] += 1
 
     kernel_total_us = category_us["kernel"]
-    attributed_kernel_us = sum(kernel_us.values())
+    ordered_kernel_groups: dict[str, Any] = {}
+    for name, group in sorted(
+        kernel_groups.items(),
+        key=lambda item: (-item[1]["summary"]["total_time_us"], item[0]),
+    ):
+        total_us = group["summary"]["total_time_us"]
+        group["summary"]["total_time_us"] = round(total_us, 3)
+        group["summary"]["profiling_time_ratio"] = (
+            total_us / kernel_total_us if kernel_total_us else 0.0
+        )
+        group["summary"]["profiling_time_pct"] = (
+            total_us / kernel_total_us * 100 if kernel_total_us else 0.0
+        )
+        ordered_kernel_groups[name] = group
+
+    ordered_non_kernel_groups: dict[str, Any] = {}
+    for name, group in sorted(
+        non_kernel_groups.items(),
+        key=lambda item: (-item[1]["summary"]["total_time_us"], item[0]),
+    ):
+        group["summary"]["total_time_us"] = round(group["summary"]["total_time_us"], 3)
+        ordered_non_kernel_groups[name] = group
+
+    operator_index: dict[str, Any] = {}
+    for operator in sorted(operator_variants):
+        variants = []
+        for (shapes, dtypes, status), count in sorted(
+            operator_variants[operator].items(),
+            key=lambda item: (-item[1], item[0][2], item[0][0] or "", item[0][1] or ""),
+        ):
+            variants.append(
+                {
+                    "input_shapes": decode(shapes),
+                    "input_dtypes": decode(dtypes),
+                    "metadata_status": status,
+                    "runtime_call_count": count,
+                }
+            )
+        operator_index[operator] = {
+            "summary": {
+                "runtime_call_count": sum(operator_variants[operator].values()),
+                "runtime_cpu_duration_total_us": round(operator_cpu_us[operator], 3),
+                "metadata_variant_count": len(variants),
+                "mapped_kernel_event_count": operator_kernel_event_count[operator],
+            },
+            "metadata_variants": variants,
+            "kernel_names": sorted(operator_kernel_names[operator]),
+        }
+
+    kernel_inventory_count = sum(
+        len(group["events"]) for group in ordered_kernel_groups.values()
+    )
+    kernel_inventory_us = sum(
+        sum(event["duration_us"] for event in group["events"].values())
+        for group in ordered_kernel_groups.values()
+    )
     summary = {
+        "scope": {
+            "rank": rank,
+            "phase": "runtime_only",
+            "graph_capture_included": False,
+            "timing_denominator": "sum_of_rank0_runtime_kernel_durations",
+        },
+        "runtime_trace_files": [str(file) for file in files],
+        "cpu_operator_event_count": cpu_event_count,
+        "unique_cpu_operator_names": len(operator_variants),
+        "cpu_operator_event_count_by_metadata_status": dict(
+            sorted(cpu_metadata_count.items())
+        ),
         "gpu_event_count": sum(category_count.values()),
-        "gpu_activity_total_us": sum(category_us.values()),
         "gpu_event_count_by_category": dict(sorted(category_count.items())),
         "gpu_activity_us_by_category": {
             key: round(value, 3) for key, value in sorted(category_us.items())
         },
+        "kernel_event_count": category_count["kernel"],
+        "unique_kernel_names": len(kernel_groups),
         "kernel_time_total_us": round(kernel_total_us, 3),
-        "kernel_time_attributed_to_shape_dtype_us": round(attributed_kernel_us, 3),
-        "kernel_time_attributed_to_shape_dtype_pct": (
-            attributed_kernel_us / kernel_total_us * 100 if kernel_total_us else 0.0
+        "kernel_mapping_event_count_by_status": dict(
+            sorted(kernel_mapping_count.items())
         ),
-        "kernel_event_count_attributed_to_shape_dtype": sum(kernel_count.values()),
-    }
-    return (
-        cpu_us,
-        kernel_count,
-        kernel_us,
-        {
-            "summary": summary,
-            "rows": gpu_rows,
-            "row_us": gpu_us_by_row,
+        "kernel_mapping_time_us_by_status": {
+            key: round(value, 3) for key, value in sorted(kernel_mapping_us.items())
         },
-    )
+        "conservation": {
+            "kernel_event_count_in_trace": category_count["kernel"],
+            "kernel_event_count_in_inventory": kernel_inventory_count,
+            "kernel_event_count_matches": (
+                category_count["kernel"]
+                == kernel_inventory_count
+                == sum(kernel_mapping_count.values())
+            ),
+            "kernel_time_us_in_trace": round(kernel_total_us, 3),
+            "kernel_time_us_in_inventory": round(kernel_inventory_us, 3),
+            "kernel_time_matches": abs(kernel_total_us - kernel_inventory_us) < 0.001,
+            "kernel_mapping_time_matches": (
+                abs(kernel_total_us - sum(kernel_mapping_us.values())) < 0.001
+            ),
+        },
+    }
+    return ordered_kernel_groups, ordered_non_kernel_groups, operator_index, summary
 
 
-def write_phase(output: Path, phase: str, aggregate: Counter, by_rank: Counter) -> None:
-    write_csv(
-        output / f"{phase}_operator_shape_dtype.csv",
-        ["operator", "input_shapes", "input_dtypes", "metadata_status", "call_count"],
-        (
-            (*key, count)
-            for key, count in sorted(
-                aggregate.items(), key=lambda item: (-item[1], item[0])
-            )
-        ),
-    )
-    write_csv(
-        output / f"{phase}_effective_operator_shape_dtype.csv",
-        ["operator", "input_shapes", "input_dtypes", "call_count"],
-        (
-            (key[0], key[1], key[2], count)
-            for key, count in sorted(
-                aggregate.items(), key=lambda item: (-item[1], item[0])
-            )
-            if key[3] == "shape_and_dtype"
-        ),
-    )
-    write_csv(
-        output / f"{phase}_operator_shape_dtype_by_rank.csv",
-        [
-            "rank",
-            "operator",
-            "input_shapes",
-            "input_dtypes",
-            "metadata_status",
-            "call_count",
-        ],
-        (
-            (*key, count)
-            for key, count in sorted(
-                by_rank.items(), key=lambda item: (item[0][0], -item[1], item[0])
-            )
-        ),
+def write_json(path: Path, value: Any) -> None:
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", required=True, type=Path)
-    parser.add_argument("--capture", type=Path)
     parser.add_argument("--rank", type=int, default=0)
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    graph_files = capture_trace_files(args.capture)
-    actual_capture_files = [
-        file
-        for file in graph_files
-        if re.search(r"graph_capture_rank_\d+_capture_", file.name)
-        and rank_in_filename(file) == args.rank
-    ]
     runtime_files = [
         file
         for file in runtime_trace_files(args.runtime)
         if rank_in_filename(file) == args.rank
     ]
     if not runtime_files:
-        raise FileNotFoundError(f"no runtime profiler traces under {args.runtime}")
-
-    actual_capture, actual_capture_by_rank, actual_capture_summary = collect(
-        actual_capture_files
-    )
-    runtime, runtime_by_rank, runtime_summary = collect(runtime_files)
-    runtime_cpu_us, runtime_kernel_count, runtime_kernel_us, gpu_timing = (
-        collect_runtime_timing(runtime_files)
-    )
-    if actual_capture_files:
-        write_phase(
-            args.output_dir, "actual_capture", actual_capture, actual_capture_by_rank
+        raise FileNotFoundError(
+            f"no rank-{args.rank} runtime profiler traces under {args.runtime}"
         )
-    write_phase(args.output_dir, "runtime", runtime, runtime_by_rank)
 
-    actual_capture_effective = Counter(
-        {
-            key[:3]: count
-            for key, count in actual_capture.items()
-            if key[3] == "shape_and_dtype"
-        }
+    kernel_summary, non_kernel_summary, operator_index, summary = collect_runtime(
+        runtime_files, args.rank
     )
-    runtime_effective = Counter(
-        {
-            key[:3]: count
-            for key, count in runtime.items()
-            if key[3] == "shape_and_dtype"
-        }
-    )
-    kernel_total_us = gpu_timing["summary"]["kernel_time_total_us"]
-
-    timing_header = [
-        "operator",
-        "input_shapes",
-        "input_dtypes",
-        "runtime_call_count",
-        "runtime_cpu_duration_total_us",
-        "runtime_cpu_duration_avg_us",
-        "runtime_kernel_event_count",
-        "runtime_kernel_time_total_us",
-        "runtime_kernel_time_avg_per_call_us",
-        "runtime_kernel_time_pct_of_all_runtime_kernels",
-    ]
-    write_csv(
-        args.output_dir / "runtime_operator_timing.csv",
-        timing_header,
-        (
-            (
-                *key,
-                runtime_effective[key],
-                f"{runtime_cpu_us[key]:.3f}",
-                f"{runtime_cpu_us[key] / runtime_effective[key]:.3f}",
-                runtime_kernel_count[key],
-                f"{runtime_kernel_us[key]:.3f}",
-                f"{runtime_kernel_us[key] / runtime_effective[key]:.3f}",
-                f"{runtime_kernel_us[key] / kernel_total_us * 100:.6f}"
-                if kernel_total_us
-                else "0.000000",
-            )
-            for key in sorted(
-                runtime_effective, key=lambda item: (-runtime_kernel_us[item], item)
-            )
-        ),
-    )
-
-    union_keys = set(actual_capture_effective) | set(runtime_effective)
-    write_csv(
-        args.output_dir / "operator_summary.csv",
-        [
-            "operator",
-            "input_shapes",
-            "input_dtypes",
-            "actual_capture_call_count",
-            "runtime_call_count",
-            "runtime_cpu_duration_total_us",
-            "runtime_kernel_event_count",
-            "runtime_kernel_time_total_us",
-            "runtime_kernel_time_avg_per_call_us",
-            "runtime_kernel_time_pct_of_all_runtime_kernels",
-            "observed_in",
-        ],
-        (
-            (
-                *key,
-                actual_capture_effective[key],
-                runtime_effective[key],
-                f"{runtime_cpu_us[key]:.3f}",
-                runtime_kernel_count[key],
-                f"{runtime_kernel_us[key]:.3f}",
-                (
-                    f"{runtime_kernel_us[key] / runtime_effective[key]:.3f}"
-                    if runtime_effective[key]
-                    else "0.000"
-                ),
-                f"{runtime_kernel_us[key] / kernel_total_us * 100:.6f}"
-                if kernel_total_us
-                else "0.000000",
-                ",".join(
-                    phase
-                    for phase, phase_rows in (
-                        ("actual_capture", actual_capture_effective),
-                        ("runtime", runtime_effective),
-                    )
-                    if key in phase_rows
-                ),
-            )
-            for key in sorted(union_keys)
-        ),
-    )
-
-    gpu_rows = gpu_timing["rows"]
-    gpu_row_us = gpu_timing["row_us"]
-    gpu_header = [
-        "category",
-        "gpu_event",
-        "attribution_status",
-        "operator",
-        "input_shapes",
-        "input_dtypes",
-        "event_count",
-        "duration_total_us",
-    ]
-    write_csv(
-        args.output_dir / "runtime_gpu_event_summary.csv",
-        gpu_header,
-        (
-            (*key, gpu_rows[key], f"{gpu_row_us[key]:.3f}")
-            for key in sorted(gpu_rows, key=lambda item: (-gpu_row_us[item], item))
-        ),
-    )
-    write_csv(
-        args.output_dir / "runtime_unattributed_kernel_summary.csv",
-        gpu_header,
-        (
-            (*key, gpu_rows[key], f"{gpu_row_us[key]:.3f}")
-            for key in sorted(gpu_rows, key=lambda item: (-gpu_row_us[item], item))
-            if key[0] == "kernel" and key[2] != "attributed_shape_dtype"
-        ),
-    )
-
-    summary = {
-        "actual_capture": actual_capture_summary,
-        "runtime": runtime_summary,
-        "runtime_timing": gpu_timing["summary"],
-        "parsed_rank": args.rank,
-        "logical_union_shape_dtype_rows": len(union_keys),
-        "logical_union_unique_operator_names": len({key[0] for key in union_keys}),
-    }
-    (args.output_dir / "summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    write_json(args.output_dir / "kernel_summary.json", kernel_summary)
+    write_json(args.output_dir / "non_kernel_gpu_activity.json", non_kernel_summary)
+    write_json(args.output_dir / "operator_index.json", operator_index)
+    write_json(args.output_dir / "summary.json", summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
