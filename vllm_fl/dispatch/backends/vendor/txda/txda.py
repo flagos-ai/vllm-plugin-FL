@@ -59,7 +59,10 @@ class TxdaBackend(Backend):
         """
         Get the attention backend class path for tsingmicro TX.
 
-        Returns the FlagGems attention backend (MLA-aware).
+        Returns the txda SDPA backend (reuses the flag_gems metadata machinery
+        but computes attention with torch SDPA, which is numerically correct on
+        TX8110 where flag_gems flash_attn_varlen_func is not). The MLA branch
+        still points at the flag_gems MLA backend; MLA is unverified on TX8110.
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
@@ -71,6 +74,6 @@ class TxdaBackend(Backend):
         if use_mla:
             return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
         return (
-            "vllm_fl.dispatch.backends.flaggems.impl.attention."
-            "AttentionFLBackend"
+            "vllm_fl.dispatch.backends.vendor.txda.impl.attention."
+            "TxdaSDPAAttentionBackend"
         )
