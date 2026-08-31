@@ -92,16 +92,17 @@ def _fused_dsv4_qnorm_rope_kv_quant_insert_impl(
     num_tokens, num_heads, head_dim = q_in.shape
     if q_head_padded == num_heads:
         q = q_in.contiguous()
+        real_heads = -1
     else:
-        q = torch.zeros(
+        # empty (not zeros): the kernel zero-fills padding slots itself via
+        # the num_real_heads fast path, skipping their RMSNorm/RoPE math.
+        q = torch.empty(
             (num_tokens, q_head_padded, head_dim),
             dtype=q_in.dtype,
             device=q_in.device,
         )
         q[:, :num_heads].copy_(q_in)
-    # The FlagGems kernel RMSNorms every head slot; zero-filled padding rows
-    # stay zero under RMSNorm (0/sqrt(eps)) and RoPE, so running it over the
-    # padded tensor matches the reference kernel's zero-fill semantics.
+        real_heads = num_heads
     fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
         q,
         kv.contiguous(),
@@ -111,6 +112,7 @@ def _fused_dsv4_qnorm_rope_kv_quant_insert_impl(
         cos_sin_cache,
         eps,
         cache_block_size,
+        num_real_heads=real_heads,
     )
     return q
 
