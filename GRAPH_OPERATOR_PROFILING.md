@@ -63,7 +63,7 @@ Results:
 
 ## Result files
 
-Use `logical_operator_shape_dtype_union.csv` as the primary inventory. It has
+Use `operator_summary.csv` as the primary inventory. It has
 one row per `(operator, input_shapes, input_dtypes)` combination:
 
 | Field | Meaning |

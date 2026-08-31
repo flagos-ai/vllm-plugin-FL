@@ -234,7 +234,7 @@ def main() -> None:
     )
     union_keys = set(actual_capture_effective) | set(runtime_effective)
     write_csv(
-        args.output_dir / "logical_operator_shape_dtype_union.csv",
+        args.output_dir / "operator_summary.csv",
         [
             "operator",
             "input_shapes",
