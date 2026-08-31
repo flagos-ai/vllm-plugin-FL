@@ -43,79 +43,41 @@ op_backends:
     - vendor
     - reference
 
-# FlagOS operators known to be incompatible with the NVIDIA runtime.
-# Keep this list evidence-based: add an operator only after a real inference
-# failure has been reproduced and attributed to its FlagGems implementation.
+# FlagOS operators with a currently reproducible NVIDIA correctness failure.
+# The standalone A800 diagnostic covers every entry independently against
+# native PyTorch. Keep this list minimal, then validate removals with real
+# dense and MoE model inference before merging.
 flagos_blacklist:
-  - index_put_
-  - index_put
-  - _index_put_impl_
-  - nonzero
-  - copy_
-  - to_copy
-  - index
-  # The FlagGems 5.4 kernels below are incompatible with the PyTorch 2.13
-  # runtime required by vLLM 0.28 (reproduced by Qwen3-8B and DeepSeek-V2).
+  # Qwen3-8B model initialization segfaults in the FlagGems scalar fill
+  # launcher after loading real BF16 weights. The tensor overload calls the
+  # same internal launcher directly, bypassing the scalar ATen blacklist.
   - fill_scalar_
   - fill_tensor_
+  # Qwen3-8B sampler profiling segfaults in the FlagGems Tensor sub launcher.
   - sub
-  - rsub_scalar
-  - masked_fill_
-  - le
-  # MOSS-Transcribe-Diarize audio encoder/profile failures.
-  - le_scalar
-  - gelu
-  - clamp
-  # LLaVA-OneVision-2 visual encoder failures.
-  # FlagGems filters by implementation function name, so scalar overloads
-  # must be listed explicitly.
-  - pow_scalar
-  - pow_tensor_scalar
-  - cos
-  - sin
-  - floor_divide
-  # Qwen3.5 hybrid-attention and multimodal generation failures.
-  - lt
-  - lt_scalar
-  - gt_scalar
-  - rsqrt
-  - sigmoid
-  - where_self
-  - where_self_out
-  - true_divide_
-  - bitwise_not
-  - clamp_
-  # Unlimited-OCR visual encoder/generation failures.
-  - sqrt
-  - sum
-  - bitwise_or_tensor
-  # LongCat-Flash-Lite scales loaded n-gram weights in place.
-  - mul_
-  # LongCat zero-expert routing and n-gram input preparation compare ids with scalars.
-  - ge_scalar
-  - eq_scalar
-  # LongCat expands per-request n-gram state from tensor repeat counts.
-  - repeat_interleave_self_tensor
-  # LongCat V2 input preparation combines tensor masks during decode.
-  - bitwise_and_tensor
-  # DeepSeek-V2-Lite MLA/MoE and sampling failures.
+  # Qwen3-8B sampler warmup fails converting and copying FlashInfer sample ids.
+  - to_copy
+  - copy_
+  # DeepSeek-V2 rotary-cache construction fails in the FlagGems reciprocal
+  # launcher for its real frequency tensor. Tensor.__rdiv__ then multiplies
+  # the native reciprocal by a scalar, which the FlagGems mul path rejects.
   - reciprocal
   - mul
+  # DeepSeek-V2 then reaches a Tensor/Tensor division whose FlagGems launcher
+  # segfaults during rotary-cache construction.
   - true_divide
-  - repeat_interleave_self_int
-  - neg
+  # The following rotary-scaling step segfaults in rsub.Scalar.
+  - rsub_scalar
+  # DeepSeek-V2 MoE warmup segfaults in add.Tensor after real weights load.
   - add
-  - silu_and_mul
-  - constant_pad_nd
+  # DeepSeek-V2 MLA prefill warmup fails in the FlagGems pad launcher.
   - pad
-  - bmm_out
-  - topk
+  # The constant-pad overload calls the same FlagGems implementation directly.
+  - constant_pad_nd
+  # DeepSeek-V2 KV-cache setup segfaults constructing a real full tensor.
   - full
-  - gather
-  - argmax
-# FlagGems 5.4 fused MoE enters its internal pointwise activation kernel
-# directly, bypassing the ATen-level flagos_blacklist, and fails on A800 with
-# the PyTorch 2.13 runtime used by vLLM 0.28. Keep the rest of the FL OOT
-# implementations enabled and delegate only fused MoE to native vLLM CUDA.
-oot_blacklist:
-  - fused_moe
+  # FlagGems 5.4 returns incorrect indices for BF16 largest and smallest
+  # selections with PyTorch 2.13 / Triton 3.7.1 on NVIDIA A800.
+  - topk
+# No NVIDIA OOT implementation is disabled without a reproduced model failure.
+oot_blacklist: []
