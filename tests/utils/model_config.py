@@ -103,9 +103,6 @@ class GenerateConfig:
     """Test generation configuration parsed from the ``generate`` section."""
 
     modality: str = "text"
-    placeholder: str = ""
-    runner_override: str = ""
-    expected_runner: str = ""
     prompts: list[Any] = field(default_factory=list)
     assets: list[str] = field(default_factory=list)
     sampling: dict[str, Any] = field(default_factory=dict)
@@ -115,9 +112,6 @@ class GenerateConfig:
     def from_dict(cls, raw: dict[str, Any]) -> GenerateConfig:
         return cls(
             modality=raw.get("modality", "text"),
-            placeholder=raw.get("placeholder", ""),
-            runner_override=raw.get("runner_override", ""),
-            expected_runner=raw.get("expected_runner", ""),
             prompts=raw.get("prompts", []),
             assets=raw.get("assets", []),
             sampling=raw.get("sampling", {}),
@@ -164,7 +158,7 @@ class ServeConfig:
         extra_engine: Engine param overrides for serving (e.g. dtype).
         extra_args: Raw command-line arguments appended to ``vllm serve``.
         endpoints: List of endpoints to test (``"completion"``, ``"chat"``,
-                   ``"embedding"``, ``"transcription"``).
+                   ``"embedding"``).
         completion_prompt: Prompt string for ``/v1/completions`` endpoint.
         chat_messages: Messages list for ``/v1/chat/completions`` endpoint.
         chat_cases: Named chat cases to run against one server instance.
@@ -180,10 +174,6 @@ class ServeConfig:
         extra_body: Free-form dict passed as ``extra_body`` to the OpenAI SDK
             or merged into the request JSON (e.g. top_k, chat_template_kwargs).
         embedding_input: Input text for ``/v1/embeddings`` endpoint tests.
-        transcription_asset: Name of a vLLM audio asset uploaded to
-            ``/v1/audio/transcriptions``.
-        transcription_expected: Case-insensitive substrings; at least one must
-            appear in the returned transcript.
     """
 
     api_key: str = ""
@@ -200,8 +190,6 @@ class ServeConfig:
     sampling: dict[str, Any] = field(default_factory=dict)
     extra_body: dict[str, Any] = field(default_factory=dict)
     embedding_input: str = ""
-    transcription_asset: str = "mary_had_lamb"
-    transcription_expected: list[str] = field(default_factory=list)
 
     def request_model(self, model_path: str) -> str:
         """Return the model name to use in API requests."""
@@ -224,8 +212,6 @@ class ServeConfig:
             sampling=raw.get("sampling", {}),
             extra_body=raw.get("extra_body", {}),
             embedding_input=raw.get("embedding_input", ""),
-            transcription_asset=raw.get("transcription_asset", "mary_had_lamb"),
-            transcription_expected=raw.get("transcription_expected", []),
         )
 
 

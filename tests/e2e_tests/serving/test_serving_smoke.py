@@ -9,8 +9,7 @@ Driven by environment variables set by ``tests/run.py``:
 - ``FL_TEST_CASE``:  Case name within the family (e.g. ``next_tp8``, ``o45_tp2``)
 - ``FL_TEST_PLATFORM``/``FL_TEST_DEVICE``: Apply platform device overrides
 Loads ``tests/models/<model>/<case>.yaml``, starts a vLLM server with the
-engine config, and validates configured endpoints (completion, chat, embedding,
-transcription).
+engine config, and validates configured endpoints (completion, chat, embedding).
 
 Supports both non-streaming (raw requests) and streaming (OpenAI SDK) modes,
 controlled by the ``serve.stream`` flag in the model YAML.
@@ -301,58 +300,17 @@ def _run_embedding(base_url: str, headers: dict) -> None:
     print(f"\nEmbedding dimension: {len(data['data'][0]['embedding'])}")
 
 
-def _run_transcription(base_url: str, headers: dict) -> None:
-    """Validate the OpenAI-compatible audio transcription endpoint."""
-    from vllm.assets.audio import AudioAsset
-
-    serve = _CFG.serve
-    audio_path = AudioAsset(serve.transcription_asset).get_local_path()
-    multipart_headers = {
-        key: value for key, value in headers.items() if key.lower() != "content-type"
-    }
-    with open(audio_path, "rb") as audio_file:
-        response = requests.post(
-            f"{base_url}/audio/transcriptions",
-            headers=multipart_headers,
-            data={
-                "model": _REQUEST_MODEL,
-                "response_format": "json",
-                "temperature": "0",
-            },
-            files={"file": (audio_path.name, audio_file, "audio/ogg")},
-            proxies=_NO_PROXY,
-            timeout=600,
-        )
-
-    assert response.status_code == 200, response.text
-    transcript = response.json().get("text", "").strip()
-    assert transcript, f"Empty transcription response: {response.text}"
-    expected = [item.casefold() for item in serve.transcription_expected]
-    if expected:
-        folded = transcript.casefold()
-        assert any(item in folded for item in expected), (
-            f"Expected one of {serve.transcription_expected!r} in transcript, "
-            f"got: {transcript!r}"
-        )
-    print(f"\nTranscription: {transcript}")
-
-
 _ENDPOINT_RUNNERS = {
     "completion": _run_completion,
     "chat": _run_chat,
     "embedding": _run_embedding,
-    "transcription": _run_transcription,
 }
 
 
 @pytest.mark.e2e
 @pytest.mark.parametrize("endpoint", _CFG.serve.endpoints, ids=_CFG.serve.endpoints)
-def test_endpoint(endpoint: str, base_url, headers, server):
+def test_endpoint(endpoint: str, base_url, headers):
     """Validate a serving endpoint configured in the model YAML."""
     runner = _ENDPOINT_RUNNERS.get(endpoint)
     assert runner is not None, f"Unknown endpoint type: {endpoint}"
-    try:
-        runner(base_url, headers)
-    except Exception:
-        server._keep_log = True
-        raise
+    runner(base_url, headers)

@@ -130,19 +130,11 @@ V2 在 0.28 支持的 speculative method 主要是 `eagle`、`eagle3`、`mtp`、
 
 测试必须按表中顺序执行。每个模型失败时先保存完整日志并定位失败阶段，再继续下一个；不能用后续模型的成功掩盖前一项失败。
 
-### 6.1 测试路径与新增能力对应关系
+### 6.1 验证工具与提交范围
 
-本轮没有为每个模型新增独立 Python 客户端，而是扩展现有 YAML 驱动的 inference/serving smoke harness。新增字段或分支都由真实 P0 用例执行：
+P0 验证期间曾临时扩展 YAML 驱动的 inference/serving smoke harness，用来覆盖 runner 断言、文本语义断言、多模态 placeholder、本地图片以及音频 multipart 请求。这些临时 harness 和模型 YAML 已在 A800 上执行完毕，但按本次 PR 的范围要求不提交。
 
-| Harness 能力 | 实际覆盖用例 |
-|---|---|
-| `runner_override` / `expected_runner`，并断言 engine 的实际 runner | Qwen3.5 V1/V2、Unlimited-OCR V1/V2、Qwen3.8 V2、LongCat V2 |
-| 文本 `expected` / `expected_regex` 语义断言 | Qwen3、DeepSeek-V2、Qwen3.5、Qwen3.8、LongCat |
-| 可配置多模态 placeholder | LLaVA-OneVision-2、Qwen3.5、Qwen3.8、Unlimited-OCR |
-| vLLM 内置图片与显式本地图片路径 | stop-sign 视觉测试、Unlimited-OCR 官方百度图片 |
-| `/v1/audio/transcriptions` multipart 请求与转写语义断言 | MOSS-Transcribe-Diarize 真实音频服务测试 |
-
-模型目录只保存模型参数、输入与断言；共用的加载、推理、runner 检查和清理逻辑仍集中在两个 smoke harness 中。
+本 PR 在 `tests/` 下只保留 `tests/unit_tests/**` 的必要改动；`tests/e2e_tests/**`、`tests/models/**`、`tests/platforms/**` 和 `tests/utils/**` 均保持与 `upstream/main` 一致。P0 实测结果与日志位置仍记录在第 9 节，作为 NVIDIA 适配的验证证据。
 
 ## 7. 建议记录项
 
@@ -169,7 +161,7 @@ V2 在 0.28 支持的 speculative method 主要是 `eagle`、`eagle3`、`mtp`、
 - 镜像：`vllm-fl-test-env:0.28.0`（本地镜像 ID `878fccdd...`）。
 - vLLM：`0.28.0`。
 - 完整单测：`372 passed, 19 skipped`；NVIDIA 平台/blacklist 聚焦测试：`18 passed`。
-- 静态验证：改动 Python 文件通过 Ruff（忽略仓库既有的 `UP007`/`UP045` 注解风格），`git diff --check` 通过；CUDA 11 个 e2e 配置 dry-run 全部成功解析。
+- 静态验证：改动 Python 文件通过 Ruff（忽略仓库既有的 `UP007`/`UP045` 注解风格），`git diff --check` 通过；验证期间使用的 CUDA e2e 配置均成功解析，但未纳入本 PR。
 - 详细 P0 推理日志：`/nfs/wlx/adapt/nvidia-vllm-0.28.0/logs/p0-*`；最终 Qwen3/DeepSeek-V2/LLaVA 回归：`nvidia-final-regressions.log`；最终单测：`nvidia-final-validation.log`。
 
 已完成结果：

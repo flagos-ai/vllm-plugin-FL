@@ -17,9 +17,6 @@ Supports both text-only and multimodal (audio/image/video) models via the
 """
 
 import os
-import re
-from contextlib import contextmanager
-from pathlib import Path
 
 import pytest
 
@@ -70,7 +67,7 @@ def _prepare_cleanup_for_platform() -> None:
 
 
 def _load_assets(modality: str, asset_names: list[str], count: int) -> dict:
-    """Load vLLM built-in assets or explicit local image paths.
+    """Load vllm built-in assets for multimodal input.
 
     Args:
         modality: One of ``audio``, ``image``, ``video``.
@@ -90,20 +87,9 @@ def _load_assets(modality: str, asset_names: list[str], count: int) -> dict:
 
         return {"audio": [AudioAsset(name).audio_and_sample_rate for name in selected]}
     elif modality == "image":
-        from PIL import Image
-
         from vllm.assets.image import ImageAsset
 
-        images = []
-        for name in selected:
-            path = Path(name)
-            image = (
-                Image.open(path).convert("RGB")
-                if path.is_file()
-                else ImageAsset(name).pil_image
-            )
-            images.append(image)
-        return {"image": images}
+        return {"image": [ImageAsset(name).pil_image for name in selected]}
     elif modality == "video":
         from vllm.assets.video import VideoAsset
 
@@ -117,7 +103,6 @@ def _build_multimodal_prompt(
     question: str,
     modality: str,
     asset_count: int,
-    placeholder_override: str = "",
 ) -> str:
     """Build a chat prompt with multimodal placeholders.
 
@@ -129,13 +114,10 @@ def _build_multimodal_prompt(
         "image": "(<image>./</image>)",
         "video": "(<video>./</video>)",
     }
-    placeholder = placeholder_override or placeholder_map.get(modality, "")
+    placeholder = placeholder_map.get(modality, "")
     content = (
         f"{placeholder * asset_count}\n{question}" if asset_count > 0 else question
     )
-
-    if not getattr(tokenizer, "chat_template", None):
-        return content
 
     messages = [{"role": "user", "content": content}]
     return tokenizer.apply_chat_template(
@@ -165,7 +147,7 @@ def _run_text_test(llm: LLM, sampling_params: SamplingParams) -> None:
     """Run text-only generation test.
 
     Prompts can be plain strings or dicts with ``text`` and optional
-    ``expected`` substring and ``expected_regex`` pattern assertions.
+    ``expected`` (substring that must appear in the output).
     """
     gen = _CFG.generate
     raw_prompts = gen.prompts
@@ -189,7 +171,6 @@ def _run_text_test(llm: LLM, sampling_params: SamplingParams) -> None:
         text = output.outputs[0].text
         prompt = prompt_cfgs[i]["text"]
         expected = prompt_cfgs[i].get("expected")
-        expected_regex = prompt_cfgs[i].get("expected_regex")
 
         assert len(text) > 0, f"Empty output for prompt[{i}]: {prompt}"
         print(f"  prompt[{i}]: {prompt!r}")
@@ -198,11 +179,6 @@ def _run_text_test(llm: LLM, sampling_params: SamplingParams) -> None:
         if expected:
             assert expected in text, (
                 f"Expected '{expected}' in output for prompt[{i}], got: {text!r}"
-            )
-        if expected_regex:
-            assert re.search(expected_regex, text), (
-                f"Expected output for prompt[{i}] to match {expected_regex!r}, "
-                f"got: {text!r}"
             )
 
 
@@ -240,7 +216,6 @@ def _run_multimodal_test(llm: LLM, sampling_params: SamplingParams) -> None:
             question,
             gen.modality,
             asset_count,
-            gen.placeholder,
         )
         mm_data = _load_assets(gen.modality, gen.assets, asset_count)
 
@@ -250,22 +225,9 @@ def _run_multimodal_test(llm: LLM, sampling_params: SamplingParams) -> None:
         assert len(outputs) > 0, f"No output for prompt[{i}]"
         text = outputs[0].outputs[0].text
         assert isinstance(text, str), f"Output is not str for prompt[{i}]"
-        assert text, f"Empty output for prompt[{i}]"
 
         print(f"  [{gen.modality} count={asset_count}] Q: {question}")
         print(f"  Output: {text!r}")
-
-        expected = prompt_cfg.get("expected")
-        expected_regex = prompt_cfg.get("expected_regex")
-        if expected:
-            assert expected.casefold() in text.casefold(), (
-                f"Expected {expected!r} in output for prompt[{i}], got: {text!r}"
-            )
-        if expected_regex:
-            assert re.search(expected_regex, text), (
-                f"Expected output for prompt[{i}] to match {expected_regex!r}, "
-                f"got: {text!r}"
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -308,22 +270,9 @@ def test_inference(combo: dict) -> None:
     print(f"\n[{_MODEL}/{_CASE}] combo: {combo_desc}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")
 
-    with _model_runner_override(gen.runner_override):
-        llm = LLM(**llm_kwargs)
-        try:
-            expected_runner = (
-                os.environ.get("FL_EXPECTED_MODEL_RUNNER") or gen.expected_runner
-            )
-            actual_runner = (
-                "v2" if llm.llm_engine.vllm_config.use_v2_model_runner else "v1"
-            )
-            print(f"[{_MODEL}/{_CASE}] model runner: {actual_runner}")
-            if expected_runner:
-                assert actual_runner == expected_runner.lower(), (
-                    f"Expected {expected_runner} model runner, got {actual_runner}"
-                )
-
-            sampling_params = SamplingParams(**gen.sampling)
+    llm = LLM(**llm_kwargs)
+    try:
+        sampling_params = SamplingParams(**gen.sampling)
 
         if gen.modality == "text":
             _run_text_test(llm, sampling_params)
