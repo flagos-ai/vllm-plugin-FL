@@ -1,9 +1,11 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import importlib
-import os
 import logging
+import os
+import platform
 import sys
+from importlib import metadata
 
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
@@ -26,20 +28,15 @@ from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 logger = logging.getLogger(__name__)
 
 
-def _is_arm_cpu_target() -> bool:
-    """Return whether FlagGems and vLLM both selected an ARM CPU target."""
-    import platform
-
+def _is_arm_cpu_build() -> bool:
+    """Return whether vLLM is an AArch64 CPU build."""
     if platform.machine().lower() not in {"aarch64", "arm64"}:
         return False
-
-    import flag_gems
-
-    if flag_gems.vendor_name != "arm":
-        return False
-    from vllm.platforms import cpu_platform_plugin
-
-    return cpu_platform_plugin() is not None
+    target_is_cpu = os.environ.get("VLLM_TARGET_DEVICE", "").lower() == "cpu"
+    try:
+        return "cpu" in metadata.version("vllm").lower() or target_is_cpu
+    except metadata.PackageNotFoundError:
+        return target_is_cpu
 
 
 def __getattr__(name):
@@ -113,11 +110,9 @@ def _patch_custom_ops():
 
 def register():
     """Register the FL platform."""
-    # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
-    # preserve vLLM's stock CPU platform and install kernels in register_model().
-    if _is_arm_cpu_target():
-        logger.info("[vllm_fl] FlagGems ARM target -> vLLM CPU platform")
-        return "vllm.platforms.cpu.CpuPlatform"
+    if _is_arm_cpu_build():
+        logger.info("[vllm_fl] ARM CPU -> native-backed FL CPU platform")
+        return "vllm_fl.platform_cpu.CpuPlatformFL"
 
     _patch_custom_ops()
     _patch_flash_attn_import()
@@ -160,6 +155,16 @@ def register_router():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+    from vllm.model_executor.models import ModelRegistry
+
+    # Register before the short-lived registry probe exits. The subprocess
+    # resolves architectures without loading the ARM runtime, but it still
+    # needs to know which module owns the DFlash2 checkpoint entry point.
+    ModelRegistry.register_model(
+        "DFlash2DraftModel",
+        "vllm_fl.models.qwen3_dflash2:DFlash2Qwen3ForCausalLM",
+    )
+
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
     from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
@@ -168,12 +173,56 @@ def register_model():
     apply_qwen3_5_text_patches()
 
     from vllm.platforms import current_platform
-    if current_platform.device_type == "cpu" and _is_arm_cpu_target():
-        # FlagGems owns the ARM CPU runtime and its compiler/runtime details.
-        # vLLM's quantization config still selects the checkpoint kernel.
-        from flag_gems.integrations.vllm import install_arm_cpu_runtime
+    if current_platform.device_type == "cpu" and _is_arm_cpu_build():
+        # Registry inspection only needs model declarations. Loading the ARM
+        # runtime here would consume process locks before the engine starts.
+        if os.path.basename(sys.argv[0]) == "registry.py":
+            return
 
-        install_arm_cpu_runtime()
+        # Spec-decode and hybrid-cache compatibility apply to BF16 and every
+        # quant backend. FlagGems model kernels are selected independently.
+        from vllm_fl.patches.arm_cpu_vllm_0240 import (
+            install_arm_cpu_vllm_0240_compat,
+        )
+
+        install_arm_cpu_vllm_0240_compat()
+
+        int8_enabled = os.environ.get("FL_CPU_INT8", "0").lower()
+        if int8_enabled not in {"0", "1", "false", "true"}:
+            raise ValueError("FL_CPU_INT8 must be one of: 0, 1, false, true")
+        if int8_enabled in {"1", "true"}:
+            backend = os.environ.get(
+                "FL_CPU_INT8_BACKEND", "libtriton_jit"
+            ).lower()
+            if backend == "torchpack":
+                from vllm_fl.ops.cpu_int8_pack import enable_int8
+
+                enable_int8()
+                return
+            if backend != "libtriton_jit":
+                raise ValueError(
+                    "FL_CPU_INT8_BACKEND must be 'libtriton_jit' or "
+                    "'torchpack'"
+                )
+            from vllm_fl.ops.cpu_qwen_runtime import enable_qwen_runtime
+
+            enable_qwen_runtime()
+            return
+
+        int4_enabled = os.environ.get("FL_CPU_INT4", "0").lower()
+        if int4_enabled not in {"0", "1", "false", "true"}:
+            raise ValueError("FL_CPU_INT4 must be one of: 0, 1, false, true")
+        if int4_enabled in {"1", "true"}:
+            backend = os.environ.get(
+                "FL_CPU_INT4_BACKEND", "libtriton_jit"
+            ).lower()
+            if backend != "libtriton_jit":
+                raise ValueError("FL_CPU_INT4_BACKEND must be 'libtriton_jit'")
+            from vllm_fl.ops.cpu_qwen_runtime import enable_qwen_runtime
+
+            enable_qwen_runtime()
+        else:
+            logger.info("[vllm_fl] FL_CPU_INT4=0 -> bf16")
         return
 
     patch_vllm_moe_sum()
