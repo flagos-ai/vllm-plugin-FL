@@ -59,7 +59,7 @@ ENV PATH="/root/.local/bin:${PATH}"
 RUN gcc --version
 
 # Install pip via uv
-RUN uv pip install --system --break-system-packages pip setuptools wheel
+RUN uv pip install --system --break-system-packages pip setuptools setuptools-scm wheel
 
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
