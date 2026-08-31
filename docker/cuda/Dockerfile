@@ -121,6 +121,7 @@ ARG FLAGGEMS_VERSION=v5.3.5
 # Install FlagGems
 RUN uv pip install --system --break-system-packages scikit-build-core==0.11 pybind11 \
     && git clone --branch ${FLAGGEMS_VERSION} --depth 1 https://github.com/flagos-ai/FlagGems /workspace/FlagGems \
+    && touch /workspace/FlagGems/src/flag_gems/fused/DSA/__init__.py \
     && uv pip install --system --break-system-packages --no-build-isolation /workspace/FlagGems
 
 # Install DeepGEMM
@@ -129,6 +130,8 @@ RUN git clone https://github.com/deepseek-ai/DeepGEMM.git /workspace/DeepGEMM \
     && git checkout 891d57b \
     && git submodule update --init --recursive \
     && TORCH_DEVICE_BACKEND_AUTOLOAD=0 uv pip install --system --break-system-packages --no-build-isolation .
+
+ENV VLLM_PLUGINS=fl
 
 WORKDIR /workspace
 
