@@ -32,6 +32,7 @@ from vllm.v1.attention.backends.utils import (
     split_decodes_and_prefills,
 )
 from vllm.v1.attention.backend import (
+    AttentionCGSupport,
     AttentionLayer,
     AttentionType,
     AttentionMetadataBuilder,
@@ -335,6 +336,7 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
     """Builder for Kunlunxin attention metadata."""
 
     reorder_batch_threshold: ClassVar[int] = 1
+    _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.UNIFORM_BATCH
     # _cudagraph_support removed: AttentionCGSupport not available in vllm 0.20.2
 
     def __init__(self, kv_cache_spec: AttentionSpec,
