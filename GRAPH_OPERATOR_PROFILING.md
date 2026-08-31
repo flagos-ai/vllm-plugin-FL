@@ -19,13 +19,6 @@ default CSV results; nonzero-rank raw traces remain available for audit.
 
 ## DeepSeek-V4-Flash
 
-Clean up existing workers with both commands:
-
-```bash
-pkill -9 -f vllm
-pkill -9 -f VLLM
-```
-
 Terminal A:
 
 ```bash
@@ -48,13 +41,6 @@ Results:
 
 ## Qwen3.6-35B-A3B
 
-Clean up existing workers with both commands:
-
-```bash
-pkill -9 -f vllm
-pkill -9 -f VLLM
-```
-
 Terminal A:
 
 ```bash
@@ -73,13 +59,6 @@ Results:
 
 ```text
 /vllm-workspace/graph_operator_profile_runs/qwen3_6_35b_a3b/results/
-```
-
-Clean up after the run with both commands:
-
-```bash
-pkill -9 -f vllm
-pkill -9 -f VLLM
 ```
 
 ## Result files
@@ -140,6 +119,8 @@ files only; it does not delete raw traces.
 The launch scripts do not set `cudagraph_mode`. vLLM 0.24 resolves the tested
 configuration to its default `FULL_AND_PIECEWISE` mode.
 
+The launch scripts capture CUDA Graph token sizes 1, 2, 4, 8, 16, 32, and 64.
+
 Native vLLM 0.24 automatically enables breakable CUDA Graph for DeepSeek-V4
 unless `VLLM_USE_BREAKABLE_CUDAGRAPH` is explicitly set. Breakable FULL replay
 causes a CUDA illegal memory access in the tested software combination, so the
@@ -155,8 +136,8 @@ The implementation does not use `sitecustomize` or `logical_reference`.
 
 ## Coverage limits
 
-For a fixed model, TP size, capture size, request, and selected rank, the parser
-retains every emitted trace and every profiler `cpu_op` event.
+For a fixed model, TP size, capture-size set, request, and selected rank, the
+parser retains every emitted trace and every profiler `cpu_op` event.
 
 - Different prompt lengths, batch sizes, concurrency, prefill/decode lengths,
   sampling settings, or capture sizes can activate additional shapes or paths
@@ -175,12 +156,14 @@ retains every emitted trace and every profiler `cpu_op` event.
 
 | Model | Raw capture traces | Raw runtime traces | Rank-0 capture traces | Rank-0 runtime traces | Union rows/names |
 |---|---:|---:|---:|---:|---:|
-| DeepSeek-V4-Flash, TP8 | 32 | 8 | 4 | 1 | 405 / 91 |
-| Qwen3.6-35B-A3B, TP2 | 8 | 2 | 4 | 1 | 245 / 75 |
+| DeepSeek-V4-Flash, TP8 | 88 | 8 | 11 | 1 | 1273 / 94 |
+| Qwen3.6-35B-A3B, TP2 | 22 | 2 | 11 | 1 | 675 / 75 |
 
-Each rank produced four capture traces in the validated runs. Both models used
-`FULL_AND_PIECEWISE`, returned four completion tokens, and completed without a
-CUDA error, illegal memory access, traceback, or engine initialization failure.
+Each rank produced eleven capture traces in the validated runs. PIECEWISE
+captured all seven configured token sizes, while FULL decode captured one graph
+because `max_num_seqs` is 1. Both models used `FULL_AND_PIECEWISE`, returned
+four completion tokens, and completed without a CUDA error, illegal memory
+access, traceback, or engine initialization failure.
 
 If extraction is empty, check `serve.log`, confirm that the server reached
 `FULL_AND_PIECEWISE`, verify that `/stop_profile` completed, and check for

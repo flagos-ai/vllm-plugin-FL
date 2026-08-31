@@ -12,6 +12,8 @@ if [[ -d "$RUN_DIR" ]]; then
 fi
 mkdir -p "$PROFILE_DIR" "$CAPTURE_DIR"
 
+printf -v PROFILER_CONFIG '{"profiler":"torch","torch_profiler_dir":"%s","torch_profiler_record_shapes":true,"torch_profiler_with_stack":false,"torch_profiler_dump_cuda_time_total":false,"torch_profiler_with_memory":false,"ignore_frontend":true}' "$PROFILE_DIR"
+
 export VLLM_PLUGINS=fl
 export VLLM_FL_GRAPH_CAPTURE_PROFILE_DIR="$CAPTURE_DIR"
 export VLLM_USE_BREAKABLE_CUDAGRAPH=0
@@ -25,6 +27,6 @@ exec vllm serve /models/Qwen3.6-35B-A3B \
   --max-num-seqs 1 \
   --no-enable-prefix-caching \
   --trust-remote-code \
-  --compilation-config '{"cudagraph_capture_sizes":[1],"cudagraph_num_of_warmups":0}' \
-  --profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILE_DIR\",\"torch_profiler_record_shapes\":true,\"torch_profiler_with_stack\":false,\"torch_profiler_dump_cuda_time_total\":false,\"torch_profiler_with_memory\":false,\"ignore_frontend\":true}" \
+  --compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,32,64],"cudagraph_num_of_warmups":0}' \
+  --profiler-config "$PROFILER_CONFIG" \
   > "$RUN_DIR/serve.log" 2>&1
