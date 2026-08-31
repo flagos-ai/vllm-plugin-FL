@@ -28,6 +28,7 @@ exec vllm serve /models/DeepSeek-V4-Flash \
   --safetensors-load-strategy prefetch \
   --max-model-len 32768 \
   --max-num-seqs 64 \
+  --no-async-scheduling \
   --no-enable-prefix-caching \
   --trust-remote-code \
   --compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,32,64],"cudagraph_num_of_warmups":0}' \

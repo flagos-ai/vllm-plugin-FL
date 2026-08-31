@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract a rank-scoped runtime GPU event inventory from PyTorch traces."""
+"""Extract rank-scoped runtime kernel summaries from PyTorch traces."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from typing import Any
 
 GPU_CATEGORIES = {"kernel", "gpu_memcpy", "gpu_memset"}
 MetadataKey = tuple[str, str | None, str | None, str]
+MappingKey = tuple[str, str | None, str, str, str | None]
 
 
 def iter_events(path: Path) -> Iterable[dict[str, Any]]:
@@ -69,6 +70,14 @@ def canonical(value: Any) -> str:
 
 def decode(value: str | None) -> Any:
     return None if value is None else json.loads(value)
+
+
+def duration_ns(event: dict[str, Any]) -> int:
+    return round(float(event.get("dur", 0.0)) * 1000)
+
+
+def ns_to_us(value: int) -> float:
+    return value / 1000
 
 
 def metadata(event: dict[str, Any]) -> MetadataKey:
@@ -157,156 +166,162 @@ def mapping(
     }
 
 
-def event_details(
-    event: dict[str, Any],
-    event_external_id: int | str | None,
-    link: dict[str, Any],
+def mapping_key(link: dict[str, Any]) -> MappingKey:
+    candidates = link.get("candidate_operators")
+    return (
+        link["mapping_status"],
+        link["operator"],
+        canonical(link["input_shapes"]),
+        canonical(link["input_dtypes"]),
+        canonical(candidates) if candidates is not None else None,
+    )
+
+
+def variant_row(
+    key: MappingKey,
+    count: int,
+    time_ns: int,
 ) -> dict[str, Any]:
-    args = event.get("args", {})
-    details = {
-        "category": str(event.get("cat", "")),
-        "duration_us": float(event.get("dur", 0.0)),
-        "timestamp_us": event.get("ts"),
-        "process_id": event.get("pid"),
-        "thread_id": event.get("tid"),
-        "device": args.get("device"),
-        "stream": args.get("stream"),
-        "external_id": event_external_id,
+    status, _operator, shapes, dtypes, candidates = key
+    row = {
+        "mapping_status": status,
+        "input_shapes": decode(shapes),
+        "input_dtypes": decode(dtypes),
+        "kernel_event_count": count,
+        "kernel_time_us": ns_to_us(time_ns),
     }
-    details.update(link)
-    return details
+    if candidates is not None:
+        row["candidate_operators"] = decode(candidates)
+    return row
 
 
 def collect_runtime(
     files: list[Path], rank: int
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    operator_variants: dict[str, Counter[tuple[str | None, str | None, str]]] = (
-        defaultdict(Counter)
-    )
-    operator_cpu_us: Counter[str] = Counter()
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     cpu_event_count = 0
     cpu_metadata_count: Counter[str] = Counter()
+    cpu_operator_names: set[str] = set()
 
-    kernel_groups: dict[str, dict[str, Any]] = {}
-    non_kernel_groups: dict[str, dict[str, Any]] = {}
-    kernel_mapping_count: Counter[str] = Counter()
-    kernel_mapping_us: Counter[str] = Counter()
     category_count: Counter[str] = Counter()
-    category_us: Counter[str] = Counter()
-    operator_kernel_names: dict[str, set[str]] = defaultdict(set)
-    operator_kernel_event_count: Counter[str] = Counter()
+    category_ns: Counter[str] = Counter()
+    kernel_count: Counter[str] = Counter()
+    kernel_ns: Counter[str] = Counter()
+    kernel_status_count: dict[str, Counter[str]] = defaultdict(Counter)
+    kernel_status_ns: dict[str, Counter[str]] = defaultdict(Counter)
+    kernel_variant_count: dict[str, Counter[MappingKey]] = defaultdict(Counter)
+    kernel_variant_ns: dict[str, Counter[MappingKey]] = defaultdict(Counter)
 
-    for trace_index, trace in enumerate(files):
+    for trace in files:
         cpu_by_external_id: dict[int | str, set[MetadataKey]] = defaultdict(set)
         for event in iter_events(trace):
             if event.get("cat") != "cpu_op":
                 continue
             cpu_event_count += 1
             key = metadata(event)
-            operator, shapes, dtypes, metadata_status = key
-            operator_variants[operator][(shapes, dtypes, metadata_status)] += 1
-            operator_cpu_us[operator] += float(event.get("dur", 0.0))
-            cpu_metadata_count[metadata_status] += 1
+            cpu_operator_names.add(key[0])
+            cpu_metadata_count[key[3]] += 1
             event_external_id = external_id(event)
             if event_external_id is not None:
                 cpu_by_external_id[event_external_id].add(key)
 
-        gpu_event_index = 0
         for event in iter_events(trace):
             category = str(event.get("cat", ""))
             if category not in GPU_CATEGORIES:
                 continue
-            name = str(event.get("name", ""))
-            duration_us = float(event.get("dur", 0.0))
-            event_external_id = external_id(event)
-            link = mapping(event_external_id, cpu_by_external_id)
-            event_id = f"rank{rank}:trace_{trace_index:03d}:gpu_{gpu_event_index:09d}"
-            gpu_event_index += 1
-            row = event_details(event, event_external_id, link)
-            row["trace_file"] = trace.name
-
+            event_ns = duration_ns(event)
             category_count[category] += 1
-            category_us[category] += duration_us
-            target = kernel_groups if category == "kernel" else non_kernel_groups
-            group_key = name if category == "kernel" else f"{category}:{name}"
-            group = target.setdefault(
-                group_key,
-                {
-                    "summary": {"total_call_count": 0, "total_time_us": 0.0},
-                    "events": {},
-                },
-            )
-            group["summary"]["total_call_count"] += 1
-            group["summary"]["total_time_us"] += duration_us
-            group["events"][event_id] = row
-
+            category_ns[category] += event_ns
             if category != "kernel":
                 continue
+
+            name = str(event.get("name", ""))
+            link = mapping(external_id(event), cpu_by_external_id)
+            link_key = mapping_key(link)
             status = link["mapping_status"]
-            kernel_mapping_count[status] += 1
-            kernel_mapping_us[status] += duration_us
-            operator = link["operator"]
-            if operator is not None:
-                operator_kernel_names[operator].add(name)
-                operator_kernel_event_count[operator] += 1
+            kernel_count[name] += 1
+            kernel_ns[name] += event_ns
+            kernel_status_count[name][status] += 1
+            kernel_status_ns[name][status] += event_ns
+            kernel_variant_count[name][link_key] += 1
+            kernel_variant_ns[name][link_key] += event_ns
 
-    kernel_total_us = category_us["kernel"]
-    ordered_kernel_groups: dict[str, Any] = {}
-    for name, group in sorted(
-        kernel_groups.items(),
-        key=lambda item: (-item[1]["summary"]["total_time_us"], item[0]),
-    ):
-        total_us = group["summary"]["total_time_us"]
-        group["summary"]["total_time_us"] = round(total_us, 3)
-        group["summary"]["profiling_time_ratio"] = (
-            total_us / kernel_total_us if kernel_total_us else 0.0
-        )
-        group["summary"]["profiling_time_pct"] = (
-            total_us / kernel_total_us * 100 if kernel_total_us else 0.0
-        )
-        ordered_kernel_groups[name] = group
+    kernel_total_ns = category_ns["kernel"]
+    ordered_names = sorted(kernel_count, key=lambda name: (-kernel_ns[name], name))
+    kernel_summary: dict[str, Any] = {}
+    kernel_report: dict[str, Any] = {}
+    per_kernel_count_matches = True
+    per_kernel_time_matches = True
+    per_kernel_status_count_matches = True
+    per_kernel_status_time_matches = True
 
-    ordered_non_kernel_groups: dict[str, Any] = {}
-    for name, group in sorted(
-        non_kernel_groups.items(),
-        key=lambda item: (-item[1]["summary"]["total_time_us"], item[0]),
-    ):
-        group["summary"]["total_time_us"] = round(group["summary"]["total_time_us"], 3)
-        ordered_non_kernel_groups[name] = group
-
-    operator_index: dict[str, Any] = {}
-    for operator in sorted(operator_variants):
-        variants = []
-        for (shapes, dtypes, status), count in sorted(
-            operator_variants[operator].items(),
-            key=lambda item: (-item[1], item[0][2], item[0][0] or "", item[0][1] or ""),
-        ):
-            variants.append(
-                {
-                    "input_shapes": decode(shapes),
-                    "input_dtypes": decode(dtypes),
-                    "metadata_status": status,
-                    "runtime_call_count": count,
-                }
-            )
-        operator_index[operator] = {
-            "summary": {
-                "runtime_call_count": sum(operator_variants[operator].values()),
-                "runtime_cpu_duration_total_us": round(operator_cpu_us[operator], 3),
-                "metadata_variant_count": len(variants),
-                "mapped_kernel_event_count": operator_kernel_event_count[operator],
-            },
-            "metadata_variants": variants,
-            "kernel_names": sorted(operator_kernel_names[operator]),
+    for name in ordered_names:
+        total_ns = kernel_ns[name]
+        kernel_summary[name] = {
+            "total_call_count": kernel_count[name],
+            "total_time_us": ns_to_us(total_ns),
+            "profiling_time_ratio": (
+                total_ns / kernel_total_ns if kernel_total_ns else 0.0
+            ),
+            "profiling_time_pct": (
+                total_ns / kernel_total_ns * 100 if kernel_total_ns else 0.0
+            ),
         }
 
-    kernel_inventory_count = sum(
-        len(group["events"]) for group in ordered_kernel_groups.values()
+        status_breakdown = {
+            status: {
+                "kernel_event_count": kernel_status_count[name][status],
+                "kernel_time_us": ns_to_us(kernel_status_ns[name][status]),
+            }
+            for status in sorted(kernel_status_count[name])
+        }
+        operator_variants: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        unattributed_variants: list[dict[str, Any]] = []
+        for key in sorted(
+            kernel_variant_count[name],
+            key=lambda item: (
+                -kernel_variant_ns[name][item],
+                item[0],
+                item[1] or "",
+                item[2],
+                item[3],
+                item[4] or "",
+            ),
+        ):
+            row = variant_row(
+                key,
+                kernel_variant_count[name][key],
+                kernel_variant_ns[name][key],
+            )
+            operator = key[1]
+            if operator is None:
+                unattributed_variants.append(row)
+            else:
+                operator_variants[operator].append(row)
+
+        kernel_report[name] = {
+            "mapping_status_breakdown": status_breakdown,
+            "operator_variants": dict(sorted(operator_variants.items())),
+            "unattributed_variants": unattributed_variants,
+        }
+        variant_count = sum(kernel_variant_count[name].values())
+        variant_ns = sum(kernel_variant_ns[name].values())
+        status_count = sum(kernel_status_count[name].values())
+        status_ns = sum(kernel_status_ns[name].values())
+        per_kernel_count_matches &= variant_count == kernel_count[name]
+        per_kernel_time_matches &= variant_ns == total_ns
+        per_kernel_status_count_matches &= status_count == kernel_count[name]
+        per_kernel_status_time_matches &= status_ns == total_ns
+
+    summary_count = sum(item["total_call_count"] for item in kernel_summary.values())
+    summary_ns = sum(kernel_ns.values())
+    report_count = sum(
+        sum(kernel_variant_count[name].values()) for name in kernel_report
     )
-    kernel_inventory_us = sum(
-        sum(event["duration_us"] for event in group["events"].values())
-        for group in ordered_kernel_groups.values()
+    report_ns = sum(sum(kernel_variant_ns[name].values()) for name in kernel_report)
+    status_count = sum(
+        sum(kernel_status_count[name].values()) for name in kernel_report
     )
+    status_ns = sum(sum(kernel_status_ns[name].values()) for name in kernel_report)
     summary = {
         "scope": {
             "rank": rank,
@@ -316,48 +331,63 @@ def collect_runtime(
         },
         "runtime_trace_files": [str(file) for file in files],
         "cpu_operator_event_count": cpu_event_count,
-        "unique_cpu_operator_names": len(operator_variants),
+        "unique_cpu_operator_names": len(cpu_operator_names),
         "cpu_operator_event_count_by_metadata_status": dict(
             sorted(cpu_metadata_count.items())
         ),
         "gpu_event_count": sum(category_count.values()),
         "gpu_event_count_by_category": dict(sorted(category_count.items())),
         "gpu_activity_us_by_category": {
-            key: round(value, 3) for key, value in sorted(category_us.items())
+            key: ns_to_us(value) for key, value in sorted(category_ns.items())
         },
         "kernel_event_count": category_count["kernel"],
-        "unique_kernel_names": len(kernel_groups),
-        "kernel_time_total_us": round(kernel_total_us, 3),
-        "kernel_mapping_event_count_by_status": dict(
-            sorted(kernel_mapping_count.items())
-        ),
+        "unique_kernel_names": len(kernel_summary),
+        "kernel_time_total_us": ns_to_us(kernel_total_ns),
+        "kernel_mapping_event_count_by_status": {
+            status: sum(rows[status] for rows in kernel_status_count.values())
+            for status in sorted(
+                {status for rows in kernel_status_count.values() for status in rows}
+            )
+        },
         "kernel_mapping_time_us_by_status": {
-            key: round(value, 3) for key, value in sorted(kernel_mapping_us.items())
+            status: ns_to_us(sum(rows[status] for rows in kernel_status_ns.values()))
+            for status in sorted(
+                {status for rows in kernel_status_ns.values() for status in rows}
+            )
         },
         "conservation": {
+            "kernel_key_sets_match": set(kernel_summary) == set(kernel_report),
             "kernel_event_count_in_trace": category_count["kernel"],
-            "kernel_event_count_in_inventory": kernel_inventory_count,
+            "kernel_event_count_in_summary": summary_count,
+            "kernel_event_count_in_report": report_count,
             "kernel_event_count_matches": (
                 category_count["kernel"]
-                == kernel_inventory_count
-                == sum(kernel_mapping_count.values())
+                == summary_count
+                == report_count
+                == status_count
             ),
-            "kernel_time_us_in_trace": round(kernel_total_us, 3),
-            "kernel_time_us_in_inventory": round(kernel_inventory_us, 3),
-            "kernel_time_matches": abs(kernel_total_us - kernel_inventory_us) < 0.001,
-            "kernel_mapping_time_matches": (
-                abs(kernel_total_us - sum(kernel_mapping_us.values())) < 0.001
+            "kernel_time_us_in_trace": ns_to_us(kernel_total_ns),
+            "kernel_time_us_in_summary": ns_to_us(summary_ns),
+            "kernel_time_us_in_report": ns_to_us(report_ns),
+            "kernel_time_matches": (
+                kernel_total_ns == summary_ns == report_ns == status_ns
             ),
+            "per_kernel_call_count_matches": per_kernel_count_matches,
+            "per_kernel_time_matches": per_kernel_time_matches,
+            "per_kernel_status_call_count_matches": per_kernel_status_count_matches,
+            "per_kernel_status_time_matches": per_kernel_status_time_matches,
         },
     }
-    return ordered_kernel_groups, ordered_non_kernel_groups, operator_index, summary
+    return kernel_summary, kernel_report, summary
 
 
 def write_json(path: Path, value: Any) -> None:
-    path.write_text(
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
         json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
+    temporary.replace(path)
 
 
 def main() -> None:
@@ -378,13 +408,20 @@ def main() -> None:
             f"no rank-{args.rank} runtime profiler traces under {args.runtime}"
         )
 
-    kernel_summary, non_kernel_summary, operator_index, summary = collect_runtime(
-        runtime_files, args.rank
-    )
+    kernel_summary, kernel_report, summary = collect_runtime(runtime_files, args.rank)
+    failed_checks = [
+        key
+        for key, value in summary["conservation"].items()
+        if isinstance(value, bool) and not value
+    ]
+    if failed_checks:
+        raise RuntimeError(f"kernel conservation failed: {summary['conservation']}")
+
     write_json(args.output_dir / "kernel_summary.json", kernel_summary)
-    write_json(args.output_dir / "non_kernel_gpu_activity.json", non_kernel_summary)
-    write_json(args.output_dir / "operator_index.json", operator_index)
+    write_json(args.output_dir / "kernel_report.json", kernel_report)
     write_json(args.output_dir / "summary.json", summary)
+    for obsolete in ("non_kernel_gpu_activity.json", "operator_index.json"):
+        (args.output_dir / obsolete).unlink(missing_ok=True)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
