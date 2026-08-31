@@ -25,6 +25,7 @@
 # python benchmarks/benchmark_throughput_serve.py --enable-all
 #
 # [Optional] Run custom test cases:
+# Each test case: [input_len, output_len, concurrency, num_prompts]
 # python benchmarks/benchmark_throughput_serve.py \
 #   --test-cases '[[1024,1024,32,128],[4096,1024,64,256]]'
 
