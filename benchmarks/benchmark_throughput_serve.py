@@ -16,7 +16,7 @@
 
 # Usage:
 #  1. Start the server as follows (adjust model path and args as needed):
-# vllm serve /models/Qwen3.6-35B-A3B --port 8000 --tensor-parallel-size 2 --max-model-len 32768 --trust-remote-code
+# vllm serve /models/Qwen3.6-35B-A3B --tensor-parallel-size 2 --max-model-len 262144 --no-enable-log-requests --no-enable-prefix-caching
 
 #  2. Run this benchmark script (default: 4 test cases):
 # python benchmarks/benchmark_throughput_serve.py \
