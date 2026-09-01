@@ -144,3 +144,23 @@ def deepseek_v4_fused_indexer_q_rope_quant_flaggems(*args, **kwargs):
     return _reference_kwargs(
         "deepseek_v4_fused_indexer_q_rope_quant_torch", *args, **kwargs
     )
+
+
+def deepseek_v4_fused_indexer_q_rope_quant_int8_flaggems(*args, **kwargs):
+    return _reference_kwargs(
+        "deepseek_v4_fused_indexer_q_rope_quant_int8_torch", *args, **kwargs
+    )
+
+
+def deepseek_v4_compress_int8_indexer_k_cache_flaggems(*args, **kwargs):
+    return _reference_kwargs(
+        "deepseek_v4_compress_int8_indexer_k_cache_torch", *args, **kwargs
+    )
+
+
+def deepseek_v4_int8_mqa_logits_flaggems(*args, **kwargs):
+    return _reference_kwargs("deepseek_v4_int8_mqa_logits_torch", *args, **kwargs)
+
+
+def deepseek_v4_int8_paged_mqa_logits_flaggems(*args, **kwargs):
+    return _reference_kwargs("deepseek_v4_int8_paged_mqa_logits_torch", *args, **kwargs)

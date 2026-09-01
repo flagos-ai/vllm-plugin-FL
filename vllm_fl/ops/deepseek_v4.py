@@ -24,6 +24,10 @@ _OPS = {
         "combine_topk_swa_indices",
         "flash_mla_sparse_fwd",
         "fused_indexer_q_rope_quant",
+        "fused_indexer_q_rope_quant_int8",
+        "compress_int8_indexer_k_cache",
+        "int8_mqa_logits",
+        "int8_paged_mqa_logits",
     )
 }
 
@@ -90,3 +94,19 @@ def flash_mla_sparse_fwd(*args, **kwargs):
 
 def fused_indexer_q_rope_quant(*args, **kwargs):
     return _OPS["fused_indexer_q_rope_quant"](*args, **kwargs)
+
+
+def fused_indexer_q_rope_quant_int8(*args, **kwargs):
+    return _OPS["fused_indexer_q_rope_quant_int8"](*args, **kwargs)
+
+
+def compress_int8_indexer_k_cache(*args, **kwargs):
+    return _OPS["compress_int8_indexer_k_cache"](*args, **kwargs)
+
+
+def int8_mqa_logits(*args, **kwargs):
+    return _OPS["int8_mqa_logits"](*args, **kwargs)
+
+
+def int8_paged_mqa_logits(*args, **kwargs):
+    return _OPS["int8_paged_mqa_logits"](*args, **kwargs)

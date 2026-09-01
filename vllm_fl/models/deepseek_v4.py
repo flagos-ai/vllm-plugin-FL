@@ -36,11 +36,13 @@ from vllm.v1.worker.workspace import current_workspace_manager
 
 from vllm_fl.ops.deepseek_v4 import (
     combine_topk_swa_indices,
+    compress_int8_indexer_k_cache,
     compute_global_topk_indices_and_lens,
     dequantize_and_gather_k_cache,
     flash_mla_sparse_fwd,
     flash_mla_with_kvcache,
     fused_indexer_q_rope_quant,
+    fused_indexer_q_rope_quant_int8,
     fused_q_kv_rmsnorm,
     hc_head,
     int8_scaled_mm,
@@ -53,6 +55,7 @@ from vllm_fl.ops.deepseek_v4 import (
     qnorm_rope_kv_quant_insert,
 )
 from vllm_fl.ops.deepseek_v4_int8_woa import fused_inv_rope_quant_int8
+from vllm_fl.ops.sparse_attn_indexer import SparseAttnIndexerFL
 
 
 def _patch_hopper_fp8_inv_rope_kernel() -> None:
@@ -130,6 +133,38 @@ direct_register_custom_op(
 class DeepseekV4FLFlashMLAAttention(DeepseekV4FlashMLAAttention):
     """FlashMLA attention with a W8A8-only wo_a branch."""
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        indexer = self.indexer
+        if indexer is None:
+            return
+        quantization_config = getattr(indexer.config, "quantization_config", None)
+        use_int8_kv = (
+            isinstance(quantization_config, dict)
+            and quantization_config.get("format") == "int-quantized"
+        )
+        indexer.use_int8_kv = use_int8_kv
+        if not use_int8_kv:
+            return
+
+        # The 512-wide Sparse FlashMLA cache remains FP8. Only the independent
+        # 128-wide lightning-indexer cache switches to INT8 plus one fp32 scale.
+        indexer.use_fp4_kv = False
+        indexer.compressor.use_fp4_cache = False
+        native_op = indexer.indexer_op
+        indexer.indexer_op = SparseAttnIndexerFL(
+            native_op.k_cache,
+            native_op.quant_block_size,
+            native_op.scale_fmt,
+            native_op.topk_tokens,
+            native_op.head_dim,
+            native_op.max_model_len,
+            native_op.max_total_seq_len,
+            native_op.topk_indices_buffer,
+            skip_k_cache_insert=native_op.skip_k_cache_insert,
+            use_fp4_cache=False,
+        )
+
     def _indexer_forward(
         self,
         indexer,
@@ -144,6 +179,15 @@ class DeepseekV4FLFlashMLAAttention(DeepseekV4FlashMLAAttention):
         def wq_b_and_q_quant():
             q, _ = indexer.wq_b(qr)
             q = q.view(-1, indexer.n_head, indexer.head_dim)
+            if getattr(indexer, "use_int8_kv", False):
+                return fused_indexer_q_rope_quant_int8(
+                    positions,
+                    q,
+                    self.indexer_rotary_emb.cos_sin_cache,
+                    indexer_weights,
+                    indexer.softmax_scale,
+                    indexer.n_head**-0.5,
+                )
             return fused_indexer_q_rope_quant(
                 positions,
                 q,
@@ -156,7 +200,20 @@ class DeepseekV4FLFlashMLAAttention(DeepseekV4FlashMLAAttention):
 
         (q_quant, weights), k = maybe_execute_in_parallel(
             wq_b_and_q_quant,
-            lambda: compressor(compressed_kv_score, positions, self.indexer_rotary_emb),
+            lambda: (
+                compress_int8_indexer_k_cache(
+                    compressor,
+                    compressed_kv_score,
+                    positions,
+                    self.indexer_rotary_emb,
+                )
+                if getattr(indexer, "use_int8_kv", False)
+                else compressor(
+                    compressed_kv_score,
+                    positions,
+                    self.indexer_rotary_emb,
+                )
+            ),
             indexer.ln_events[0],
             indexer.ln_events[1],
             indexer.aux_stream,

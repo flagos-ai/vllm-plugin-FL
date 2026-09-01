@@ -33,6 +33,10 @@ DSV4_OPS = {
     "deepseek_v4_combine_topk_swa_indices",
     "deepseek_v4_flash_mla_sparse_fwd",
     "deepseek_v4_fused_indexer_q_rope_quant",
+    "deepseek_v4_fused_indexer_q_rope_quant_int8",
+    "deepseek_v4_compress_int8_indexer_k_cache",
+    "deepseek_v4_int8_mqa_logits",
+    "deepseek_v4_int8_paged_mqa_logits",
 }
 
 

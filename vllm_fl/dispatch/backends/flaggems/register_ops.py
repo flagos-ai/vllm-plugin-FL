@@ -80,6 +80,10 @@ def register_builtins(registry) -> None:
                 "combine_topk_swa_indices",
                 "flash_mla_sparse_fwd",
                 "fused_indexer_q_rope_quant",
+                "fused_indexer_q_rope_quant_int8",
+                "compress_int8_indexer_k_cache",
+                "int8_mqa_logits",
+                "int8_paged_mqa_logits",
             )
         ],
         # Quantization

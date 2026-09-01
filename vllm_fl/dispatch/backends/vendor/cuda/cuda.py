@@ -138,6 +138,20 @@ class CudaBackend(Backend):
     def deepseek_v4_fused_indexer_q_rope_quant(self, *args, **kwargs):
         return self._deepseek_v4_call("fused_indexer_q_rope_quant", *args, **kwargs)
 
+    def deepseek_v4_fused_indexer_q_rope_quant_int8(self, *args, **kwargs):
+        return self._deepseek_v4_call(
+            "fused_indexer_q_rope_quant_int8", *args, **kwargs
+        )
+
+    def deepseek_v4_compress_int8_indexer_k_cache(self, *args, **kwargs):
+        return self._deepseek_v4_call("compress_int8_indexer_k_cache", *args, **kwargs)
+
+    def deepseek_v4_int8_mqa_logits(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_mqa_logits", *args, **kwargs)
+
+    def deepseek_v4_int8_paged_mqa_logits(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_paged_mqa_logits", *args, **kwargs)
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.

@@ -69,6 +69,28 @@ def deepseek_v4_fused_indexer_q_rope_quant_torch(*args, **kwargs):
     return fused_indexer_q_rope_quant(*args, **kwargs)
 
 
+def _int8_indexer_op(name, *args, **kwargs):
+    from vllm_fl.ops import deepseek_v4_int8_indexer
+
+    return getattr(deepseek_v4_int8_indexer, name)(*args, **kwargs)
+
+
+def deepseek_v4_fused_indexer_q_rope_quant_int8_torch(*args, **kwargs):
+    return _int8_indexer_op("fused_indexer_q_rope_quant_int8", *args, **kwargs)
+
+
+def deepseek_v4_compress_int8_indexer_k_cache_torch(*args, **kwargs):
+    return _int8_indexer_op("compress_int8_indexer_k_cache", *args, **kwargs)
+
+
+def deepseek_v4_int8_mqa_logits_torch(*args, **kwargs):
+    return _int8_indexer_op("int8_mqa_logits", *args, **kwargs)
+
+
+def deepseek_v4_int8_paged_mqa_logits_torch(*args, **kwargs):
+    return _int8_indexer_op("int8_paged_mqa_logits", *args, **kwargs)
+
+
 def deepseek_v4_inv_rope_quant_int8_torch(
     o: torch.Tensor,
     positions: torch.Tensor,

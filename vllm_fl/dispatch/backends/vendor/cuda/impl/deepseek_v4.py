@@ -63,6 +63,22 @@ def deepseek_v4_fused_indexer_q_rope_quant_cuda(*args, **kwargs):
     return _vllm_dsv4_op("fused_indexer_q_rope_quant", *args, **kwargs)
 
 
+def deepseek_v4_fused_indexer_q_rope_quant_int8_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("fused_indexer_q_rope_quant_int8", *args, **kwargs)
+
+
+def deepseek_v4_compress_int8_indexer_k_cache_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("compress_int8_indexer_k_cache", *args, **kwargs)
+
+
+def deepseek_v4_int8_mqa_logits_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("int8_mqa_logits", *args, **kwargs)
+
+
+def deepseek_v4_int8_paged_mqa_logits_cuda(*args, **kwargs):
+    return _vllm_dsv4_op("int8_paged_mqa_logits", *args, **kwargs)
+
+
 def deepseek_v4_inv_rope_quant_int8_cuda(
     o: torch.Tensor,
     positions: torch.Tensor,
