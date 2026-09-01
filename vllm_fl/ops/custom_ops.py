@@ -164,20 +164,29 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
             )
         else:
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
-        # Apply Ascend NPU monkey-patches if running on NPU.
-        # These replace upstream module-level functions (e.g. in qwen3_next) with
-        # Ascend implementations that bypass the CustomOp/dispatch path.
-        from vllm.platforms import current_platform
-        if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
-            apply_ascend_patches()
 
-        # Apply Sunrise/PTPU monkey-patches if running on PTPU.
-        if current_platform.device_type == "ptpu":
-            from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
-            apply_sunrise_patches()
+    # Apply platform-specific monkey-patches unconditionally (outside the OOT
+    # registration loop) so they run even when the whitelist is empty or all ops
+    # are excluded.  Each patch function is idempotent.
+    from vllm.platforms import current_platform
 
-        # Apply GCU monkey-patches (Triton grid limits, etc.).
-        if getattr(current_platform, "vendor_name", None) == "gcu":
-            from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
-            apply_gcu_patches()
+    # Apply Ascend NPU monkey-patches if running on NPU.
+    if current_platform.device_type == "npu":
+        from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
+        apply_ascend_patches()
+
+    # Apply Sunrise/PTPU monkey-patches if running on PTPU.
+    if current_platform.device_type == "ptpu":
+        from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
+        apply_sunrise_patches()
+
+    # Apply GCU monkey-patches (Triton grid limits, etc.).
+    if getattr(current_platform, "vendor_name", None) == "gcu":
+        from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+        apply_gcu_patches()
+
+    # Apply Kunlunxin monkey-patches if running on Kunlunxin hardware.
+    from vllm_fl.dispatch.config.utils import get_platform_name
+    if get_platform_name() == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import apply_kunlunxin_patches
+        apply_kunlunxin_patches()

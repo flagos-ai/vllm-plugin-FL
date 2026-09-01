@@ -18,10 +18,8 @@
 name: CI
 
 on:
-  schedule:
-    - cron: '0 18 * * *'  # daily at 2:00 AM CST (UTC+8)
   pull_request:
-    branches: [main, devops]
+    branches: [release/0.2]
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - "**.md"
@@ -165,4 +163,15 @@ jobs:
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: enflame
+    secrets: inherit
+
+  # ============================================================
+  # Job 4g: Kunlunxin platform testing
+  # ============================================================
+  test-kunlunxin:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: kunlunxin
     secrets: inherit

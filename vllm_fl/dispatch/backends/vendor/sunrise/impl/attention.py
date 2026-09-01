@@ -41,12 +41,10 @@ from vllm.v1.attention.backends.utils import (
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.platforms.interface import DeviceCapability
 from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
-# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash,
-# from flag_gems import reshape_and_cache_flash
 
 logger = init_logger(__name__)
 
-
+# Attention via FlagGems flash_attn_varlen_func and reshape_and_cache_flash.
 
 class AttentionFLBackend(AttentionBackend):
     accept_output_buffer: bool = True
@@ -468,6 +466,12 @@ class AttentionFLImpl(AttentionImpl):
         ### TODO(lms): support quant to int8/int4 each query input and low precision compute
         self.supports_quant_query_input = False
 
+        # ``dcp_world_size`` is consulted by ``forward`` but is never assigned in
+        # the base ``AttentionImpl``. Provide a safe default; real DCP values
+        # get set externally when DCP is enabled.
+        if not hasattr(self, "dcp_world_size"):
+            self.dcp_world_size = 1
+
     def forward(
         self,
         layer: torch.nn.Module,
@@ -550,6 +554,9 @@ class AttentionFLImpl(AttentionImpl):
             # and value[:num_actual_tokens] because the reshape_and_cache_flash
             # op uses the slot_mapping's shape to determine the number of
             # actual tokens.
+            #
+            # Always FlagGems: uses ``cache.stride(0)`` so hybrid interleaved
+            # ``(num_pages, 2, block_size, ...)`` K/V slabs are correct.
             reshape_and_cache_flash(
                 key,
                 value,
@@ -585,31 +592,33 @@ class AttentionFLImpl(AttentionImpl):
                     v_descale=layer._v_scale.expand(descale_shape),
                 )
                 return output
-            else:
-                flash_attn_varlen_func(
-                    q=query[:num_actual_tokens],
-                    k=key_cache,
-                    v=value_cache,
-                    out=output[:num_actual_tokens],
-                    cu_seqlens_q=cu_seqlens_q,
-                    max_seqlen_q=max_seqlen_q,
-                    seqused_k=seqused_k,
-                    max_seqlen_k=max_seqlen_k,
-                    softmax_scale=self.scale,
-                    causal=attn_metadata.causal,
-                    alibi_slopes=self.alibi_slopes,
-                    window_size=self.sliding_window,
-                    block_table=block_table,
-                    softcap=self.logits_soft_cap,
-                    scheduler_metadata=scheduler_metadata,
-                    fa_version=self.vllm_flash_attn_version,
-                    q_descale=layer._q_scale.expand(descale_shape),
-                    k_descale=layer._k_scale.expand(descale_shape),
-                    v_descale=layer._v_scale.expand(descale_shape),
-                    num_splits=attn_metadata.max_num_splits,
-                    s_aux=None, ### self.sinks is support in FA3
-                )
-                return output
+
+            # FlagGems unified varlen attention compute.
+
+            flash_attn_varlen_func(
+                q=query[:num_actual_tokens],
+                k=key_cache,
+                v=value_cache,
+                out=output[:num_actual_tokens],
+                cu_seqlens_q=cu_seqlens_q,
+                max_seqlen_q=max_seqlen_q,
+                seqused_k=seqused_k,
+                max_seqlen_k=max_seqlen_k,
+                softmax_scale=self.scale,
+                causal=attn_metadata.causal,
+                alibi_slopes=self.alibi_slopes,
+                window_size=self.sliding_window,
+                block_table=block_table,
+                softcap=self.logits_soft_cap,
+                scheduler_metadata=scheduler_metadata,
+                fa_version=self.vllm_flash_attn_version,
+                q_descale=layer._q_scale.expand(descale_shape),
+                k_descale=layer._k_scale.expand(descale_shape),
+                v_descale=layer._v_scale.expand(descale_shape),
+                num_splits=attn_metadata.max_num_splits,
+                s_aux=None, ### self.sinks is support in FA3
+            )
+            return output
 
         # Cascade attention (rare case).
         cascade_attention(

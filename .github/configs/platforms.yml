@@ -32,3 +32,5 @@ platforms:
     enabled: true
   enflame:
     enabled: true
+  kunlunxin:
+    enabled: true

@@ -78,8 +78,6 @@ jobs:
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
       - name: Install project
-        env:
-          HYGON_USE_IMAGE_PLUGIN: "0"
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run unit tests

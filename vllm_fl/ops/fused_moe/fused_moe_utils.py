@@ -47,7 +47,9 @@ from vllm.triton_utils import tl
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import use_flaggems
-
+# Kunlunxin: always use TritonExpertsFL regardless of flaggems setting
+# (avoids _moe_C arg mismatch when flaggems is off)
+from vllm_fl.dispatch.config.utils import get_platform_name
 _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
 _moe_sum = CachedOp("moe_sum")
@@ -92,7 +94,8 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
     elif current_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
-    elif current_platform.is_out_of_tree():
+    else:
+        # Out-of-tree platforms (e.g. Kunlunxin): fallback to TRITON
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
@@ -325,38 +328,69 @@ class TritonExpertsFL(TritonExperts):
                 "W8A8 MoE must use TritonW8A8Experts, not TritonExpertsFL"
             )
 
-        # Fast path (no LoRA, NVIDIA only): let FlagGems own both expert GEMMs
-        # for unquantized and W8A16 inputs.
-        if self._lora_context is None and current_platform.is_cuda():
-            import flag_gems
+        # Fast path (no LoRA): platform-specific implementations
+        if self._lora_context is None:
+            if get_platform_name() == "kunlunxin":
+                # Kunlunxin: use patched fused_experts_impl
+                from vllm_fl.ops.fused_moe.fused_moe import fused_experts_impl
 
-            output.copy_(
-                flag_gems.fused_experts_impl(
-                    hidden_states,
-                    w1,
-                    w2,
-                    topk_weights,
-                    topk_ids,
-                    inplace=False,
-                    activation=activation.value,
-                    apply_router_weight_on_input=apply_router_weight_on_input,
-                    use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
-                    use_int8_w8a8=False,
-                    use_int8_w8a16=self.quant_config.use_int8_w8a16,
-                    use_int4_w4a16=self.quant_config.use_int4_w4a16,
-                    per_channel_quant=self.per_act_token_quant,
-                    global_num_experts=global_num_experts,
-                    expert_map=expert_map,
-                    w1_scale=self.w1_scale,
-                    w2_scale=self.w2_scale,
-                    a1_scale=a1q_scale,
-                    a2_scale=a2_scale,
-                    block_shape=self.block_shape,
-                    w1_bias=self.w1_bias,
-                    w2_bias=self.w2_bias,
+                output.copy_(
+                    fused_experts_impl(
+                        hidden_states,
+                        w1,
+                        w2,
+                        topk_weights,
+                        topk_ids,
+                        inplace=False,
+                        activation=activation.value,
+                        apply_router_weight_on_input=apply_router_weight_on_input,
+                        use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                        use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                        use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                        use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                        per_channel_quant=self.per_act_token_quant,
+                        global_num_experts=global_num_experts,
+                        expert_map=expert_map,
+                        w1_scale=self.w1_scale,
+                        w2_scale=self.w2_scale,
+                        a1_scale=a1q_scale,
+                        a2_scale=a2_scale,
+                        block_shape=self.block_shape,
+                    )
                 )
-            )
-            return
+                return
+
+            elif current_platform.device_name == "nvidia":
+                # NVIDIA: let FlagGems own both expert GEMMs for unquantized and W8A16 inputs
+                import flag_gems
+
+                output.copy_(
+                    flag_gems.fused_experts_impl(
+                        hidden_states,
+                        w1,
+                        w2,
+                        topk_weights,
+                        topk_ids,
+                        inplace=False,
+                        activation=activation.value,
+                        apply_router_weight_on_input=apply_router_weight_on_input,
+                        use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                        use_int8_w8a8=False,
+                        use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                        use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                        per_channel_quant=self.per_act_token_quant,
+                        global_num_experts=global_num_experts,
+                        expert_map=expert_map,
+                        w1_scale=self.w1_scale,
+                        w2_scale=self.w2_scale,
+                        a1_scale=a1q_scale,
+                        a2_scale=a2_scale,
+                        block_shape=self.block_shape,
+                        w1_bias=self.w1_bias,
+                        w2_bias=self.w2_bias,
+                    )
+                )
+                return
 
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA
         # adapters can be injected between GEMM1/activation/GEMM2.

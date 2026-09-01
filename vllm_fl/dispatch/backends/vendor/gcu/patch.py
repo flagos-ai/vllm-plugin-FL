@@ -7,6 +7,7 @@ import torch
 from .impl.apply_moe_activation_gcu import apply_moe_activation_gcu_patch
 from .impl.fp8_config import apply_fp8_config_gcu_patch
 from .impl.bilinear_pos_embed import apply_bilinear_pos_embed_gcu_patch
+from .impl.causal_conv1d import apply_causal_conv1d_gcu_patch
 from .impl.chunk_delta_h import apply_chunk_delta_h_gcu_patch
 from .impl.fused_recurrent_packed_decode import (
     apply_fused_recurrent_packed_decode_gcu_patch,
@@ -52,8 +53,9 @@ def apply_gcu_patches() -> None:
     global _patches_applied
     if _patches_applied:
         return
-    
+
     apply_bilinear_pos_embed_gcu_patch()
+    apply_causal_conv1d_gcu_patch()
     apply_chunk_delta_h_gcu_patch()
     apply_fused_recurrent_packed_decode_gcu_patch()
     apply_moe_activation_gcu_patch()

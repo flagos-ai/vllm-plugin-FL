@@ -1,0 +1,100 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+platform: kunlunxin
+vendor: kunlunxin
+
+device_types:
+  p800:
+    memory_gb: 96
+    tags: [kunlunxin, p800, bf16, fp16, fp32]
+
+tolerance:
+  inference:
+    default:
+      rtol: 1e-3
+      atol: 1e-3
+    bfloat16:
+      rtol: 1e-2
+      atol: 1e-2
+
+device_overrides:
+  p800:
+    cases:
+      - qwen3_6/27b_tp4_eager
+      - qwen3_6/27b_tp4_graph
+      - qwen3_6/35b_a3b_tp4_eager
+      - qwen3_6/35b_a3b_tp4_graph
+    llm:
+      max_model_len: 16384
+      block_size: 128
+      gpu_memory_utilization: 0.8
+      disable_custom_all_reduce: false
+    serve:
+      served_model_name: "qwen3"
+      startup_retries: 300
+      max_tokens: 256
+      extra_args:
+        - "--reasoning-parser"
+        - "qwen3"
+      chat_cases:
+        - name: text
+          messages:
+            - role: "user"
+              content: "The capital of France is"
+          expected: "Paris"
+        - name: image
+          generated_image: true
+          prompt: "Describe all visible text, colors, and shapes in English."
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+unsupported_features: []
+
+env_defaults:
+  GEMS_VENDOR: "kunlunxin"
+  VLLM_PLUGINS: "fl"
+  FLAGCX_PATH: "/workspace/FlagCX"
+  CUDA_VISIBLE_DEVICES: "4,5,6,7"
+  USE_RESHAPE_AND_CACHE_FLASH: "1"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "1800"
+
+p800:
+  name: "p800"
+  tests:
+    e2e:
+      inference:
+        qwen3_6:
+          - "27b_tp4_eager"
+          - "35b_a3b_tp4_graph"
+      serving:
+        qwen3_6:
+          - "27b_tp4_graph"
+          - "35b_a3b_tp4_eager"
+    timeouts:
+      e2e:
+        inference: 180
+        serving: 180
+    functional:
+      include: "*"
+      exclude:
+        - compilation/test_graph_capture.py
+    unit:
+      include: "*"
+      exclude: []
+    benchmark:
+      enabled: true
+      smoke: ["serve"]

@@ -49,6 +49,14 @@ ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/plugin/enflame001-ge
 ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.9.29}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
 ENFLAME_VLLM_VERSION="${ENFLAME_VLLM_VERSION:-0.20.2}"
+KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/plugin/xvllm-ubuntu2204-py310-torch29-0200:v20.0.10.0}"
+KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.0.21.43}"
+KUNLUNXIN_PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION:-3.10}"
+KUNLUNXIN_TORCH_VERSION="${KUNLUNXIN_TORCH_VERSION:-2.9.0}"
+KUNLUNXIN_VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION:-0.20.2}"
+KUNLUNXIN_FLAGGEMS_REF="${KUNLUNXIN_FLAGGEMS_REF:-v5.0.0}"
+KUNLUNXIN_FLAGCX_REF="${KUNLUNXIN_FLAGCX_REF:-v0.13.0}"
+KUNLUNXIN_PLUGIN_FL_REF="${KUNLUNXIN_PLUGIN_FL_REF:-38e7dbc20197e2db742c4e4c9687d36ea4df9900}"
 HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6}"
 HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.20.2}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
@@ -155,7 +163,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -196,6 +204,15 @@ VERSIONS (override via environment variables):
     ENFLAME_DRIVER_VERSION Driver version used in generated image tag (default: ${ENFLAME_DRIVER_VERSION})
     ENFLAME_PYTHON_VERSION Python version in the base image (default: ${ENFLAME_PYTHON_VERSION})
     ENFLAME_VLLM_VERSION   vLLM version in the base image (default: ${ENFLAME_VLLM_VERSION})
+  Kunlunxin:
+    KUNLUNXIN_BASE_IMAGE     Base image (default: ${KUNLUNXIN_BASE_IMAGE})
+    KUNLUNXIN_DRIVER_VERSION Driver version used in generated image tag (default: ${KUNLUNXIN_DRIVER_VERSION})
+    KUNLUNXIN_PYTHON_VERSION Python version in the base image (default: ${KUNLUNXIN_PYTHON_VERSION})
+    KUNLUNXIN_TORCH_VERSION  PyTorch version in the base image (default: ${KUNLUNXIN_TORCH_VERSION})
+    KUNLUNXIN_VLLM_VERSION   vLLM version installed in empty mode (default: ${KUNLUNXIN_VLLM_VERSION})
+    KUNLUNXIN_FLAGGEMS_REF   FlagGems git ref (default: ${KUNLUNXIN_FLAGGEMS_REF})
+    KUNLUNXIN_FLAGCX_REF     FlagCX git ref (default: ${KUNLUNXIN_FLAGCX_REF})
+    KUNLUNXIN_PLUGIN_FL_REF  vllm-plugin-FL git ref (default: ${KUNLUNXIN_PLUGIN_FL_REF})
   Hygon:
     HYGON_BASE_IMAGE     Base image (default: ${HYGON_BASE_IMAGE})
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
@@ -228,6 +245,9 @@ EXAMPLES:
 
     # Build Enflame CI image
     ./build.sh --platform enflame --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
+
+    # Build Kunlunxin CI image
+    ./build.sh --platform kunlunxin --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
 
     # Build with custom PyPI mirror
     ./build.sh --target dev --index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -369,8 +389,27 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-ci"
     fi
+elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
+    PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION}"
+    VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
+    BUILD_ARGS+=(
+        --build-arg "KUNLUNXIN_BASE_IMAGE=${KUNLUNXIN_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${KUNLUNXIN_VLLM_VERSION}"
+        --build-arg "FLAGGEMS_REF=${KUNLUNXIN_FLAGGEMS_REF}"
+        --build-arg "FLAGCX_REF=${KUNLUNXIN_FLAGCX_REF}"
+        --build-arg "VLLM_PLUGIN_FL_REF=${KUNLUNXIN_PLUGIN_FL_REF}"
+        --build-arg "DRIVER_VERSION=${KUNLUNXIN_DRIVER_VERSION}"
+        --build-arg "INDEX_URL=${INDEX_URL}"
+        --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
+    fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', or 'enflame'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', or 'kunlunxin'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -403,6 +442,13 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
     msg "  Driver:         ${ENFLAME_DRIVER_VERSION}"
     msg "  Enflame Python: ${ENFLAME_PYTHON_VERSION}"
     msg "  Base image:     ${ENFLAME_BASE_IMAGE}"
+elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
+    msg "  Driver:         ${KUNLUNXIN_DRIVER_VERSION}"
+    msg "  Kunlunxin base: ${KUNLUNXIN_BASE_IMAGE}"
+    msg "  Kunlunxin PyTorch: ${KUNLUNXIN_TORCH_VERSION}"
+    msg "  FlagGems:       ${KUNLUNXIN_FLAGGEMS_REF}"
+    msg "  FlagCX:         ${KUNLUNXIN_FLAGCX_REF}"
+    msg "  Plugin:         ${KUNLUNXIN_PLUGIN_FL_REF}"
 fi
 if [[ "${PLATFORM}" != "ascend" ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"
