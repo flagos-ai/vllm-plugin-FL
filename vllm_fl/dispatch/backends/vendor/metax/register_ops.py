@@ -73,6 +73,14 @@ def register_builtins(registry) -> None:
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),
+        OpImpl(
+            op_name="flash_mla_sparse_fwd",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.flash_mla_sparse_fwd, is_avail),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
         # topk softmax
         OpImpl(
             op_name="topk_softmax",

@@ -26,6 +26,7 @@ from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
 from vllm.triton_utils import tl, triton
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
+from vllm_fl.patches.glm_moe_dsa_metax import is_glm_moe_dsa_metax_active
 from vllm_fl.utils import use_flaggems
 
 _moe_align_block_size = CachedOp("moe_align_block_size")
@@ -277,6 +278,21 @@ def _prepare_expert_assignment(
     )
 
 class TritonExpertsFL(TritonExperts):
+    @staticmethod
+    def _supports_quant_scheme(weight_key, activation_key) -> bool:
+        from vllm.model_executor.layers.quantization.utils.quant_utils import (
+            kInt8DynamicTokenSym,
+            kInt8StaticChannelSym,
+        )
+
+        if (
+            is_glm_moe_dsa_metax_active()
+            and (weight_key, activation_key)
+            == (kInt8StaticChannelSym, kInt8DynamicTokenSym)
+        ):
+            return True
+        return TritonExperts._supports_quant_scheme(weight_key, activation_key)
+
     def apply(
         self,
         output: torch.Tensor,
@@ -339,13 +355,19 @@ class TritonExpertsFL(TritonExperts):
         assert hidden_states.dim() == 2
         assert w1.stride(-1) == 1, "Stride of last dimension must be 1"
         assert w2.stride(-1) == 1, "Stride of last dimension must be 1"
-        assert hidden_states.dtype in [
+        supported_dtypes = [
             torch.float32,
             torch.float16,
             torch.bfloat16,
             torch.float8_e4m3fn,
             torch.float8_e4m3fnuz,
         ]
+        if (
+            is_glm_moe_dsa_metax_active()
+            and self.quant_config.use_int8_w8a8
+        ):
+            supported_dtypes.append(torch.int8)
+        assert hidden_states.dtype in supported_dtypes
 
         E, num_tokens, N, K, top_k_num = self.moe_problem_size(
             hidden_states, w1, w2, topk_ids
@@ -363,6 +385,13 @@ class TritonExpertsFL(TritonExperts):
             block_shape=self.block_shape,
         )
 
+        if (
+            is_glm_moe_dsa_metax_active()
+            and self.quant_config.use_int8_w8a8
+        ):
+            config = config.copy()
+            config["num_stages"] = 1
+
         if hidden_states.dtype == torch.bfloat16:
             compute_type = tl.bfloat16
         elif hidden_states.dtype == torch.float16:
@@ -372,6 +401,12 @@ class TritonExpertsFL(TritonExperts):
         elif (
             hidden_states.dtype == torch.float8_e4m3fn
             or hidden_states.dtype == torch.float8_e4m3fnuz
+        ):
+            compute_type = tl.bfloat16
+        elif (
+            hidden_states.dtype == torch.int8
+            and is_glm_moe_dsa_metax_active()
+            and self.quant_config.use_int8_w8a8
         ):
             compute_type = tl.bfloat16
         else:

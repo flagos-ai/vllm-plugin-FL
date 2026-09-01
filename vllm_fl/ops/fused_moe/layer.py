@@ -61,7 +61,8 @@ def FusedMoEFL(*args, **kwargs) -> MoERunner:
 
     # 2. Replace only an upstream unquantized method with the FL version.
     # Quantized methods own their weight/activation scaling metadata and must
-    # remain attached to the runner.
+    # remain attached to the runner. This also preserves GLM W8A8's
+    # CompressedTensorsW8A8Int8MoEMethod selected by its quantization oracle.
     if isinstance(runner._quant_method, UnquantizedFusedMoEMethod):
         fl_quant_method = UnquantizedFusedMoEMethodFL(runner.moe_config)
         runner._replace_quant_method(fl_quant_method)

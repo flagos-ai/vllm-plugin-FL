@@ -152,13 +152,17 @@ def register_model():
     register_quant_linear()
     register_router()
 
-    # Register GLM-5 (GlmMoeDsa) — config not yet upstream
-    try:
-        from vllm.transformers_utils.config import _CONFIG_REGISTRY
-        from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
-        _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
+    from vllm.transformers_utils.config import _CONFIG_REGISTRY
+    from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
 
-        #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
-        #glm5_model()
-    except Exception as e:
-        logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+    _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
+
+    from vllm.platforms import current_platform
+
+    if current_platform.vendor_name == "metax":
+        from vllm.model_executor.models import ModelRegistry
+
+        ModelRegistry.register_model(
+            "GlmMoeDsaForCausalLM",
+            "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
+        )

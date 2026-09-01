@@ -236,6 +236,36 @@ def flash_mla_sparse_prefill(
     return results
 
 
+def flash_mla_sparse_fwd_maca(
+    q: torch.Tensor,
+    kv: torch.Tensor,
+    indices: torch.Tensor,
+    sm_scale: float,
+    topk_length: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Run the MetaX Sparse MLA kernel with its 64-head layout."""
+    num_heads = q.shape[1]
+    if num_heads % 64 != 0:
+        assert 64 % num_heads == 0
+        padded_q = q.new_empty((q.shape[0], 64, q.shape[2]))
+        padded_q[:, :num_heads] = q
+        q = padded_q
+
+    all_valid = None
+    if topk_length is not None:
+        all_valid = (topk_length == indices.shape[-1]).reshape(-1, 1)
+
+    output = flash_mla.flash_mla_interface.flash_mla_sparse_fwd(
+        q,
+        kv,
+        indices,
+        sm_scale,
+        512,
+        indices_all_valid_per_q=all_valid,
+    )[0]
+    return output[:, :num_heads]
+
+
 #
 # TODO: Add fake functions
 #
