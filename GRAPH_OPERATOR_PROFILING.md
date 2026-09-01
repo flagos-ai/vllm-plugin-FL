@@ -55,42 +55,43 @@ Results:
 
 ## Output files
 
-`kernel_summary.json` is the compact physical inventory. Its top-level key is
-the kernel name. Every value contains only:
+`kernel_summary.csv` is the compact physical inventory. It has one row per
+kernel and the following columns:
 
-- `total_call_count`: physical kernel event count
-- `total_time_us`: summed kernel duration
-- `profiling_time_ratio`: fraction of all rank-0 runtime kernel duration
-- `profiling_time_pct`: the same fraction as a percentage
+- `kernel_name`
+- `total_call_count`
+- `total_time_us`
+- `profiling_time_ratio`
+- `profiling_time_pct`
 
-Example:
+`kernel_details_report.csv` is the detailed aggregate. It has one row per
+kernel/operator/shape/dtype/mapping-status combination and the following
+columns:
 
-```json
-{
-  "kernel_name": {
-    "total_call_count": 12345,
-    "total_time_us": 45678.9,
-    "profiling_time_ratio": 0.123,
-    "profiling_time_pct": 12.3
-  }
-}
-```
+- `kernel_name`
+- `variant_index`: stable one-based index within a kernel
+- `mapping_status`
+- `operator_name`
+- `input_shapes`
+- `input_dtypes`
+- `candidate_operators`
+- `kernel_event_count`
+- `kernel_time_us`
 
-`kernel_report.json` is the detailed aggregate. It has exactly the same
-top-level kernel keys as `kernel_summary.json`. It contains:
-
-- `mapping_status_breakdown`: event count and time grouped by mapping status
-- `operator_variants`: uniquely identified operator names and their available
-  shape/dtype variants
-- `unattributed_variants`: kernels without a unique logical operator match
+The summary contains each kernel once. The details report can contain multiple
+rows for one kernel, but its distinct `kernel_name` values have exactly the
+same order and set as the summary.
 
 Repeated physical events with the same kernel, mapping status, operator,
 shape, dtype, and candidate metadata are represented by one aggregate row.
 `kernel_event_count` and `kernel_time_us` preserve their complete physical
 totals.
 
-Missing shape or dtype information is JSON `null`. Missing or ambiguous
-metadata never removes a kernel. `mapping_status` is one of:
+Shapes, dtypes, and candidate operators are compact JSON values stored inside
+CSV cells. Missing shape, dtype, operator, or candidate information is the
+literal `null`, not an empty cell. Standard CSV quoting protects embedded
+commas and quotes. Missing or ambiguous metadata never removes a kernel.
+`mapping_status` is one of:
 
 - `operator_shape_matched`
 - `operator_matched_shape_missing`
@@ -101,14 +102,18 @@ metadata never removes a kernel. `mapping_status` is one of:
 - `missing_external_id`
 - `no_cpu_op_match`
 
+`mapping_status` totals are derived by grouping the details rows; they are not
+duplicated as separate rows.
+
 `summary.json` records collection scope, CPU and GPU event counts, mapping
 coverage, and conservation results. A valid extraction requires every boolean
 in `conservation` to be `true`. The checks prove:
 
-- summary and report kernel-key sets are identical
+- summary and details kernel sets and order are identical
 - trace, summary, report, and mapping-status event counts are identical
 - trace, summary, report, and mapping-status kernel times are identical
 - every individual kernel preserves its count and time in all report variants
+- re-reading both CSV files preserves every kernel, count, and duration
 
 Kernel time is stored internally as integer nanoseconds and emitted in
 microseconds. This avoids floating-point drift in aggregate conservation.
@@ -156,7 +161,7 @@ CUDA Graph replay exposes physical kernels but usually does not replay the
 original PyTorch CPU operators. A graph-internal kernel may therefore have no
 recoverable operator, input shape, or dtype in the runtime trace. Its count and
 time remain in both primary files, with the missing logical metadata recorded
-in `unattributed_variants`.
+as `null` and an explicit `mapping_status` in the details report.
 
 Fused kernels may represent multiple logical operators and are not assigned by
 kernel-name guessing. Different requests, batch sizes, sequence lengths,

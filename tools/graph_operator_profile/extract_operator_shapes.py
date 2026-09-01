@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import json
 import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -390,6 +392,111 @@ def write_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+    temporary.replace(path)
+
+
+def summary_csv_rows(kernel_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "kernel_name": name,
+            "total_call_count": values["total_call_count"],
+            "total_time_us": values["total_time_us"],
+            "profiling_time_ratio": values["profiling_time_ratio"],
+            "profiling_time_pct": values["profiling_time_pct"],
+        }
+        for name, values in kernel_summary.items()
+    ]
+
+
+def details_csv_rows(kernel_report: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for kernel_name, report in kernel_report.items():
+        variants: list[tuple[str | None, dict[str, Any]]] = []
+        for operator, operator_variants in report["operator_variants"].items():
+            variants.extend((operator, row) for row in operator_variants)
+        variants.extend((None, row) for row in report["unattributed_variants"])
+        variants.sort(
+            key=lambda item: (
+                -item[1]["kernel_time_us"],
+                item[1]["mapping_status"],
+                item[0] or "",
+                canonical(item[1]["input_shapes"]),
+                canonical(item[1]["input_dtypes"]),
+                canonical(item[1].get("candidate_operators")),
+            )
+        )
+        for variant_index, (operator, row) in enumerate(variants, start=1):
+            rows.append(
+                {
+                    "kernel_name": kernel_name,
+                    "variant_index": variant_index,
+                    "mapping_status": row["mapping_status"],
+                    "operator_name": operator if operator is not None else "null",
+                    "input_shapes": canonical(row["input_shapes"]),
+                    "input_dtypes": canonical(row["input_dtypes"]),
+                    "candidate_operators": canonical(row.get("candidate_operators")),
+                    "kernel_event_count": row["kernel_event_count"],
+                    "kernel_time_us": row["kernel_time_us"],
+                }
+            )
+    return rows
+
+
+def csv_us_to_ns(value: str) -> int:
+    return int(Decimal(value) * 1000)
+
+
+def validate_csv_outputs(
+    summary_path: Path,
+    details_path: Path,
+    kernel_summary: dict[str, Any],
+) -> dict[str, bool]:
+    with summary_path.open(encoding="utf-8", newline="") as source:
+        summary_rows = list(csv.DictReader(source))
+    with details_path.open(encoding="utf-8", newline="") as source:
+        details_rows = list(csv.DictReader(source))
+
+    expected_keys = list(kernel_summary)
+    summary_keys = [row["kernel_name"] for row in summary_rows]
+    details_keys = list(dict.fromkeys(row["kernel_name"] for row in details_rows))
+    details_count: Counter[str] = Counter()
+    details_ns: Counter[str] = Counter()
+    for row in details_rows:
+        details_count[row["kernel_name"]] += int(row["kernel_event_count"])
+        details_ns[row["kernel_name"]] += csv_us_to_ns(row["kernel_time_us"])
+
+    summary_count = {
+        row["kernel_name"]: int(row["total_call_count"]) for row in summary_rows
+    }
+    summary_ns = {
+        row["kernel_name"]: csv_us_to_ns(row["total_time_us"]) for row in summary_rows
+    }
+    expected_count = {
+        name: values["total_call_count"] for name, values in kernel_summary.items()
+    }
+    expected_ns = {
+        name: csv_us_to_ns(str(values["total_time_us"]))
+        for name, values in kernel_summary.items()
+    }
+    return {
+        "csv_kernel_key_sets_match": (
+            summary_keys == expected_keys and details_keys == expected_keys
+        ),
+        "csv_kernel_event_count_matches": (
+            summary_count == expected_count and dict(details_count) == expected_count
+        ),
+        "csv_kernel_time_matches": (
+            summary_ns == expected_ns and dict(details_ns) == expected_ns
+        ),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", required=True, type=Path)
@@ -417,10 +524,52 @@ def main() -> None:
     if failed_checks:
         raise RuntimeError(f"kernel conservation failed: {summary['conservation']}")
 
-    write_json(args.output_dir / "kernel_summary.json", kernel_summary)
-    write_json(args.output_dir / "kernel_report.json", kernel_report)
+    summary_path = args.output_dir / "kernel_summary.csv"
+    details_path = args.output_dir / "kernel_details_report.csv"
+    write_csv(
+        summary_path,
+        [
+            "kernel_name",
+            "total_call_count",
+            "total_time_us",
+            "profiling_time_ratio",
+            "profiling_time_pct",
+        ],
+        summary_csv_rows(kernel_summary),
+    )
+    write_csv(
+        details_path,
+        [
+            "kernel_name",
+            "variant_index",
+            "mapping_status",
+            "operator_name",
+            "input_shapes",
+            "input_dtypes",
+            "candidate_operators",
+            "kernel_event_count",
+            "kernel_time_us",
+        ],
+        details_csv_rows(kernel_report),
+    )
+    summary["conservation"].update(
+        validate_csv_outputs(summary_path, details_path, kernel_summary)
+    )
+    failed_checks = [
+        key
+        for key, value in summary["conservation"].items()
+        if isinstance(value, bool) and not value
+    ]
+    if failed_checks:
+        raise RuntimeError(f"CSV conservation failed: {summary['conservation']}")
     write_json(args.output_dir / "summary.json", summary)
-    for obsolete in ("non_kernel_gpu_activity.json", "operator_index.json"):
+    for obsolete in (
+        "kernel_summary.json",
+        "kernel_report.json",
+        "kernel_report.csv",
+        "non_kernel_gpu_activity.json",
+        "operator_index.json",
+    ):
         (args.output_dir / obsolete).unlink(missing_ok=True)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
