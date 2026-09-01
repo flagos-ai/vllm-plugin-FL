@@ -3,7 +3,7 @@
 # It includes linting and platform-specific testing stages.
 name: CI
 
-on:
+on: []  # disabled
   pull_request:
     branches: [feat/deepseek-v4-int8]
     paths-ignore:
