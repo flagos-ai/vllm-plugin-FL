@@ -10,9 +10,7 @@ from vllm_fl.ops.deepseek_v4_int8_indexer import (
     int8_paged_mqa_logits,
 )
 
-pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="requires CUDA"
-)
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 
 
 def test_int8_mqa_logits_matches_torch():
@@ -77,14 +75,10 @@ def test_int8_paged_mqa_logits_matches_torch():
     for block in range(num_blocks):
         page_base = block * cache.stride(0)
         k_bytes = k[block].contiguous().view(torch.uint8).reshape(-1)
-        scale_bytes = (
-            k_scale[block].contiguous().view(torch.uint8).reshape(-1)
-        )
+        scale_bytes = k_scale[block].contiguous().view(torch.uint8).reshape(-1)
         flat_cache[page_base : page_base + k_bytes.numel()].copy_(k_bytes)
         scale_start = page_base + k_bytes.numel()
-        flat_cache[scale_start : scale_start + scale_bytes.numel()].copy_(
-            scale_bytes
-        )
+        flat_cache[scale_start : scale_start + scale_bytes.numel()].copy_(scale_bytes)
 
     context_lens = torch.tensor([[context_len]], dtype=torch.int32)
     block_table = torch.tensor([[0, 1]], dtype=torch.int32)
@@ -103,7 +97,5 @@ def test_int8_paged_mqa_logits_matches_torch():
     expected = (dots * flat_scale[None, :]).relu()
     expected = (expected * weights[0, :, None]).sum(dim=0)
 
-    torch.testing.assert_close(
-        actual[0, :context_len], expected, atol=2e-3, rtol=2e-3
-    )
+    torch.testing.assert_close(actual[0, :context_len], expected, atol=2e-3, rtol=2e-3)
     assert torch.isfinite(actual[0, :context_len]).all()

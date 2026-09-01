@@ -282,9 +282,7 @@ def sparse_attn_indexer_fl(
         decode_metadata = attn_metadata_narrowed.decode
         assert decode_metadata is not None
         if not use_int8_cache:
-            kv_cache = kv_cache_as_quant_view(
-                kv_cache, head_dim, use_fp4_cache
-            )
+            kv_cache = kv_cache_as_quant_view(kv_cache, head_dim, use_fp4_cache)
         decode_lens = decode_metadata.decode_lens
         if decode_metadata.requires_padding:
             # pad in edge case where we have short chunked prefill length <
