@@ -174,7 +174,6 @@ def build_common_args(model, port, served_model_name=None):
         "--dataset-name",
         "random",
         "--ignore-eos",
-        "--trust-remote-code",
     ]
 
 
