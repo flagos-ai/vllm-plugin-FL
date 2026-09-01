@@ -8,8 +8,6 @@ This backend provides operator implementations for NVIDIA CUDA GPUs.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -23,14 +21,14 @@ class CudaBackend(Backend):
     operator implementations for NVIDIA GPUs.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "cuda"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "nvidia"
 
     def is_available(self) -> bool:
@@ -62,6 +60,125 @@ class CudaBackend(Backend):
         return CudaBackend._available
 
     # ==================== Operator Implementations ====================
+    def deepseek_v4_inv_rope_quant_int8(
+        self,
+        o: torch.Tensor,
+        positions: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        n_groups: int,
+        heads_per_group: int,
+        nope_dim: int,
+        rope_dim: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.deepseek_v4 import deepseek_v4_inv_rope_quant_int8_cuda
+
+        return deepseek_v4_inv_rope_quant_int8_cuda(
+            o,
+            positions,
+            cos_sin_cache,
+            n_groups,
+            heads_per_group,
+            nope_dim,
+            rope_dim,
+        )
+
+    def _deepseek_v4_call(self, op_name, *args, **kwargs):
+        from .impl import deepseek_v4
+
+        fn = getattr(deepseek_v4, f"deepseek_v4_{op_name}_cuda")
+        return fn(*args, **kwargs)
+
+    def deepseek_v4_inv_rope_quant_fp8(self, *args, **kwargs):
+        return self._deepseek_v4_call("inv_rope_quant_fp8", *args, **kwargs)
+
+    def deepseek_v4_int8_scaled_mm(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_scaled_mm", *args, **kwargs)
+
+    def deepseek_v4_mhc_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_fused_post_pre(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_fused_post_pre", *args, **kwargs)
+
+    def deepseek_v4_mhc_post(self, *args, **kwargs):
+        return self._deepseek_v4_call("mhc_post", *args, **kwargs)
+
+    def deepseek_v4_hc_head(self, *args, **kwargs):
+        return self._deepseek_v4_call("hc_head", *args, **kwargs)
+
+    def deepseek_v4_fused_q_kv_rmsnorm(self, *args, **kwargs):
+        return self._deepseek_v4_call("fused_q_kv_rmsnorm", *args, **kwargs)
+
+    def deepseek_v4_qnorm_rope_kv_quant_insert(self, *args, **kwargs):
+        return self._deepseek_v4_call("qnorm_rope_kv_quant_insert", *args, **kwargs)
+
+    def deepseek_v4_qnorm_rope_kv_bf16_insert(self, *args, **kwargs):
+        return self._deepseek_v4_call("qnorm_rope_kv_bf16_insert", *args, **kwargs)
+
+    def deepseek_v4_qnorm_rope_kv_fp8_insert(self, *args, **kwargs):
+        return self._deepseek_v4_call("qnorm_rope_kv_fp8_insert", *args, **kwargs)
+
+    def deepseek_v4_compute_global_topk_indices_and_lens(self, *args, **kwargs):
+        return self._deepseek_v4_call(
+            "compute_global_topk_indices_and_lens", *args, **kwargs
+        )
+
+    def deepseek_v4_flash_mla_with_kvcache(self, *args, **kwargs):
+        return self._deepseek_v4_call("flash_mla_with_kvcache", *args, **kwargs)
+
+    def deepseek_v4_dequantize_and_gather_k_cache(self, *args, **kwargs):
+        return self._deepseek_v4_call("dequantize_and_gather_k_cache", *args, **kwargs)
+
+    def deepseek_v4_combine_topk_swa_indices(self, *args, **kwargs):
+        return self._deepseek_v4_call("combine_topk_swa_indices", *args, **kwargs)
+
+    def deepseek_v4_flash_mla_sparse_fwd(self, *args, **kwargs):
+        return self._deepseek_v4_call("flash_mla_sparse_fwd", *args, **kwargs)
+
+    def deepseek_v4_fused_indexer_q_rope_quant(self, *args, **kwargs):
+        return self._deepseek_v4_call("fused_indexer_q_rope_quant", *args, **kwargs)
+
+    def deepseek_v4_fused_indexer_q_rope_quant_int8(self, *args, **kwargs):
+        return self._deepseek_v4_call(
+            "fused_indexer_q_rope_quant_int8", *args, **kwargs
+        )
+
+    def deepseek_v4_compress_int8_indexer_k_cache(self, *args, **kwargs):
+        return self._deepseek_v4_call(
+            "compress_int8_indexer_k_cache", *args, **kwargs
+        )
+
+    def deepseek_v4_int8_mqa_logits(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_mqa_logits", *args, **kwargs)
+
+    def deepseek_v4_int8_paged_mqa_logits(self, *args, **kwargs):
+        return self._deepseek_v4_call("int8_paged_mqa_logits", *args, **kwargs)
+
+    def _sparse_indexer_call(self, op_name, *args, **kwargs):
+        from .impl import sparse_attn_indexer
+
+        fn = getattr(sparse_attn_indexer, f"{op_name}_cuda")
+        return fn(*args, **kwargs)
+
+    def indexer_k_quant_and_cache(self, *args, **kwargs):
+        return self._sparse_indexer_call("indexer_k_quant_and_cache", *args, **kwargs)
+
+    def cp_gather_indexer_k_quant_cache(self, *args, **kwargs):
+        return self._sparse_indexer_call(
+            "cp_gather_indexer_k_quant_cache", *args, **kwargs
+        )
+
+    def top_k_per_row_prefill(self, *args, **kwargs):
+        return self._sparse_indexer_call("top_k_per_row_prefill", *args, **kwargs)
+
+    def top_k_per_row_decode(self, *args, **kwargs):
+        return self._sparse_indexer_call("top_k_per_row_decode", *args, **kwargs)
+
+    def pack_seq_triton(self, *args, **kwargs):
+        return self._sparse_indexer_call("pack_seq_triton", *args, **kwargs)
+
+    def unpack_seq_triton(self, *args, **kwargs):
+        return self._sparse_indexer_call("unpack_seq_triton", *args, **kwargs)
 
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
@@ -101,8 +218,8 @@ class CudaBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization using vLLM's CUDA implementation.
 
@@ -189,7 +306,7 @@ class CudaBackend(Backend):
         topk_ids: torch.Tensor,
         block_size: int,
         num_experts: int,
-        expert_map: Optional[torch.Tensor] = None,
+        expert_map: torch.Tensor | None = None,
         pad_sorted_ids: bool = False,
         ignore_invalid_experts: bool = False,
     ):
@@ -285,6 +402,12 @@ class CudaBackend(Backend):
         from .impl.fused_moe import grouped_topk_cuda
 
         return grouped_topk_cuda(
-            scores, n_group, topk_group, topk,
-            renormalize, routed_scaling_factor, bias, scoring_func,
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
         )

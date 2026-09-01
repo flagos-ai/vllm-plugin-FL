@@ -152,6 +152,15 @@ def register_model():
     register_quant_linear()
     register_router()
 
+    # Replace only the DSV4 registry entry. The lazy thin model subclasses the
+    # vLLM 0.24 NVIDIA implementation and preserves its non-INT8 behavior.
+    from vllm import ModelRegistry
+
+    ModelRegistry.register_model(
+        "DeepseekV4ForCausalLM",
+        "vllm_fl.models.deepseek_v4:DeepseekV4FLForCausalLM",
+    )
+
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY

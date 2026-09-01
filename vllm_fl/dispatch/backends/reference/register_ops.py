@@ -37,6 +37,71 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
+        # DeepSeek-V4
+        OpImpl(
+            op_name="deepseek_v4_inv_rope_quant_int8",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(
+                backend.deepseek_v4_inv_rope_quant_int8,
+                is_avail,
+            ),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
+        *[
+            OpImpl(
+                op_name=f"deepseek_v4_{op_name}",
+                impl_id="reference.torch",
+                kind=BackendImplKind.REFERENCE,
+                fn=_bind_is_available(
+                    getattr(backend, f"deepseek_v4_{op_name}"),
+                    is_avail,
+                ),
+                vendor=None,
+                priority=BackendPriority.REFERENCE,
+            )
+            for op_name in (
+                "inv_rope_quant_fp8",
+                "int8_scaled_mm",
+                "mhc_pre",
+                "mhc_fused_post_pre",
+                "mhc_post",
+                "hc_head",
+                "fused_q_kv_rmsnorm",
+                "qnorm_rope_kv_quant_insert",
+                "qnorm_rope_kv_bf16_insert",
+                "qnorm_rope_kv_fp8_insert",
+                "compute_global_topk_indices_and_lens",
+                "flash_mla_with_kvcache",
+                "dequantize_and_gather_k_cache",
+                "combine_topk_swa_indices",
+                "flash_mla_sparse_fwd",
+                "fused_indexer_q_rope_quant",
+                "fused_indexer_q_rope_quant_int8",
+                "compress_int8_indexer_k_cache",
+                "int8_mqa_logits",
+                "int8_paged_mqa_logits",
+            )
+        ],
+        *[
+            OpImpl(
+                op_name=op_name,
+                impl_id="reference.torch",
+                kind=BackendImplKind.REFERENCE,
+                fn=_bind_is_available(getattr(backend, op_name), is_avail),
+                vendor=None,
+                priority=BackendPriority.REFERENCE,
+            )
+            for op_name in (
+                "indexer_k_quant_and_cache",
+                "cp_gather_indexer_k_quant_cache",
+                "top_k_per_row_prefill",
+                "top_k_per_row_decode",
+                "pack_seq_triton",
+                "unpack_seq_triton",
+            )
+        ],
         # Quantization
         OpImpl(
             op_name="dynamic_per_token_quant_int8",
@@ -93,48 +158,12 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),
-        # MoE align
-        OpImpl(
-            op_name="moe_align_block_size",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # MoE sum
-        OpImpl(
-            op_name="moe_sum",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.moe_sum, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # topk softmax
-        OpImpl(
-            op_name="topk_softmax",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.topk_softmax, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
         # invoke fused moe triton kernel
         OpImpl(
             op_name="invoke_fused_moe_triton_kernel",
             impl_id="reference.torch",
             kind=BackendImplKind.REFERENCE,
             fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # grouped topk
-        OpImpl(
-            op_name="grouped_topk",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.grouped_topk, is_avail),
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),

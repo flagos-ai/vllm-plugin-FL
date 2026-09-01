@@ -254,3 +254,51 @@ def test_w8a8_linear_weight_layout_and_numerics_match_flaggems_contract(
 
     assert actual.shape == (1, 2, 3)
     assert torch.equal(actual, expected)
+
+
+def test_w8a8_grouped_linear_prepares_group_major_weights():
+    checkpoint_weight = torch.arange(32, dtype=torch.int8).reshape(8, 4)
+    checkpoint_scale = torch.arange(1, 9, dtype=torch.float32).reshape(8, 1)
+    layer = torch.nn.Module()
+    layer.is_bmm = True
+    layer.bmm_batch_size = 2
+    layer.register_parameter(
+        "weight",
+        torch.nn.Parameter(checkpoint_weight.clone(), requires_grad=False),
+    )
+    layer.register_parameter(
+        "weight_scale",
+        torch.nn.Parameter(checkpoint_scale.clone(), requires_grad=False),
+    )
+    layer.register_parameter("input_scale", None)
+    layer.register_parameter("input_zero_point", None)
+    layer.register_parameter("azp_adj", None)
+
+    kernel = object.__new__(linear.FLW8A8DynamicLinearKernel)
+    kernel.layer_param_names = [
+        "weight",
+        "weight_scale",
+        "input_scale",
+        "input_zero_point",
+        "azp_adj",
+    ]
+    kernel.process_weights_after_loading(layer)
+
+    grouped_weight = layer._fl_w8a8_grouped_weight
+    assert grouped_weight.shape == (2, 4, 4)
+    assert grouped_weight.is_contiguous()
+    assert torch.equal(
+        grouped_weight[0],
+        checkpoint_weight[:4].contiguous(),
+    )
+    assert torch.equal(
+        grouped_weight[1],
+        checkpoint_weight[4:].contiguous(),
+    )
+    assert grouped_weight[0].transpose(0, 1).stride() == (1, 4)
+    assert torch.equal(
+        layer._fl_w8a8_grouped_weight_scale,
+        checkpoint_scale.reshape(2, 4),
+    )
+    assert "_fl_w8a8_grouped_weight" not in layer.state_dict()
+    assert "_fl_w8a8_grouped_weight_scale" not in layer.state_dict()
