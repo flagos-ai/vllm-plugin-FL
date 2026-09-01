@@ -127,13 +127,41 @@ class FlagGemsBackend(Backend):
         )
 
     def deepseek_v4_compress_int8_indexer_k_cache(self, *args, **kwargs):
-        return self._deepseek_v4_call("compress_int8_indexer_k_cache", *args, **kwargs)
+        return self._deepseek_v4_call(
+            "compress_int8_indexer_k_cache", *args, **kwargs
+        )
 
     def deepseek_v4_int8_mqa_logits(self, *args, **kwargs):
         return self._deepseek_v4_call("int8_mqa_logits", *args, **kwargs)
 
     def deepseek_v4_int8_paged_mqa_logits(self, *args, **kwargs):
         return self._deepseek_v4_call("int8_paged_mqa_logits", *args, **kwargs)
+
+    def _sparse_indexer_call(self, op_name, *args, **kwargs):
+        from .impl import sparse_attn_indexer
+
+        fn = getattr(sparse_attn_indexer, f"{op_name}_flaggems")
+        return fn(*args, **kwargs)
+
+    def indexer_k_quant_and_cache(self, *args, **kwargs):
+        return self._sparse_indexer_call("indexer_k_quant_and_cache", *args, **kwargs)
+
+    def cp_gather_indexer_k_quant_cache(self, *args, **kwargs):
+        return self._sparse_indexer_call(
+            "cp_gather_indexer_k_quant_cache", *args, **kwargs
+        )
+
+    def top_k_per_row_prefill(self, *args, **kwargs):
+        return self._sparse_indexer_call("top_k_per_row_prefill", *args, **kwargs)
+
+    def top_k_per_row_decode(self, *args, **kwargs):
+        return self._sparse_indexer_call("top_k_per_row_decode", *args, **kwargs)
+
+    def pack_seq_triton(self, *args, **kwargs):
+        return self._sparse_indexer_call("pack_seq_triton", *args, **kwargs)
+
+    def unpack_seq_triton(self, *args, **kwargs):
+        return self._sparse_indexer_call("unpack_seq_triton", *args, **kwargs)
 
     def dynamic_per_token_quant_int8(
         self,

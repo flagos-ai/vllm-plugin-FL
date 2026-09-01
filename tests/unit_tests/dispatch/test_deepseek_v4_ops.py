@@ -39,6 +39,15 @@ DSV4_OPS = {
     "deepseek_v4_int8_paged_mqa_logits",
 }
 
+SPARSE_INDEXER_OPS = {
+    "indexer_k_quant_and_cache",
+    "cp_gather_indexer_k_quant_cache",
+    "top_k_per_row_prefill",
+    "top_k_per_row_decode",
+    "pack_seq_triton",
+    "unpack_seq_triton",
+}
+
 
 def test_reference_inv_rope_quant_int8():
     o = torch.tensor(
@@ -178,7 +187,7 @@ def test_all_backends_register_all_deepseek_v4_ops(monkeypatch):
     monkeypatch.setattr(
         flaggems_ops,
         "use_flaggems_op",
-        lambda op_name: op_name in DSV4_OPS,
+        lambda op_name: op_name in DSV4_OPS | SPARSE_INDEXER_OPS,
     )
     registry = Registry()
     flaggems_ops.register_builtins(registry)
@@ -186,6 +195,14 @@ def test_all_backends_register_all_deepseek_v4_ops(monkeypatch):
     reference_ops.register_builtins(registry)
 
     for op_name in DSV4_OPS:
+        implementations = [impl for impl in registered if impl.op_name == op_name]
+        assert {impl.impl_id for impl in implementations} == {
+            "default.flagos",
+            "vendor.cuda",
+            "reference.torch",
+        }
+
+    for op_name in SPARSE_INDEXER_OPS:
         implementations = [impl for impl in registered if impl.op_name == op_name]
         assert {impl.impl_id for impl in implementations} == {
             "default.flagos",

@@ -5,14 +5,13 @@
 import torch
 
 import vllm.envs as envs
-from vllm._aiter_ops import rocm_aiter_ops
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
+from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
 from vllm.platforms import current_platform
 from vllm.utils.deep_gemm import (
     fp8_fp4_mqa_logits,
     fp8_fp4_paged_mqa_logits,
-    has_deep_gemm,
 )
 from vllm.utils.torch_utils import (
     LayerNameType,
@@ -25,19 +24,22 @@ from vllm.v1.attention.backends.mla.indexer import (
 )
 from vllm.v1.worker.workspace import current_workspace_manager
 
-from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.dispatch import resolve_op
 from vllm_fl.ops.deepseek_v4 import (
     int8_mqa_logits,
     int8_paged_mqa_logits,
 )
 
-_indexer_k_quant_and_cache = CachedOp("indexer_k_quant_and_cache")
-_cp_gather_indexer_k_quant_cache = CachedOp("cp_gather_indexer_k_quant_cache")
-_top_k_per_row_prefill = CachedOp("top_k_per_row_prefill")
-_pack_seq_triton = CachedOp("pack_seq_triton")
-_top_k_per_row_decode = CachedOp("top_k_per_row_decode")
-_unpack_seq_triton = CachedOp("unpack_seq_triton")
+# Resolve before torch.compile traces sparse_attn_indexer_fl. Lazy CachedOp
+# lookup would make Dynamo enter OpManager's synchronization path. Backend
+# selection still belongs to OpManager; the compiled graph only sees the
+# selected implementation.
+_indexer_k_quant_and_cache = resolve_op("indexer_k_quant_and_cache")
+_cp_gather_indexer_k_quant_cache = resolve_op("cp_gather_indexer_k_quant_cache")
+_top_k_per_row_prefill = resolve_op("top_k_per_row_prefill")
+_pack_seq_triton = resolve_op("pack_seq_triton")
+_top_k_per_row_decode = resolve_op("top_k_per_row_decode")
+_unpack_seq_triton = resolve_op("unpack_seq_triton")
 
 logger = init_logger(__name__)
 

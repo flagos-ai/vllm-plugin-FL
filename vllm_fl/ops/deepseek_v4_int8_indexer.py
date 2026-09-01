@@ -23,7 +23,9 @@ def _round_to_int8(x):
     Written with plain arithmetic rather than libdevice ``rint`` to stay
     portable across the vendor backends this plugin targets.
     """
-    return tl.clamp(x + tl.where(x >= 0, 0.5, -0.5), -127.0, 127.0).to(tl.int8)
+    return tl.clamp(
+        x + tl.where(x >= 0, 0.5, -0.5), -127.0, 127.0
+    ).to(tl.int8)
 
 
 @triton.jit
@@ -75,7 +77,9 @@ def fused_compress_rope_int8_indexer_cache_kernel(
     history_valid = history_pos >= 0
     logical_blocks = history_pos // state_block_size
     physical_blocks = tl.load(
-        state_block_table + request * state_block_table_stride + logical_blocks,
+        state_block_table
+        + request * state_block_table_stride
+        + logical_blocks,
         mask=history_valid,
         other=0,
     ).to(tl.int64)
@@ -95,7 +99,9 @@ def fused_compress_rope_int8_indexer_cache_kernel(
         other=float("-inf"),
     )
     scores = tl.softmax(scores, dim=0)
-    values = tl.load(rows[:, None] + dims[None, :], mask=valid, other=0.0)
+    values = tl.load(
+        rows[:, None] + dims[None, :], mask=valid, other=0.0
+    )
     compressed = tl.sum(values * scores, axis=0)
 
     weight = tl.load(norm_weight + dims)
@@ -120,7 +126,9 @@ def fused_compress_rope_int8_indexer_cache_kernel(
         normalized * cos_v - partner * sin_v,
         normalized * cos_v + partner * sin_v,
     )
-    result = tl.where(is_rope, rotated, normalized).to(tl.bfloat16).to(tl.float32)
+    result = tl.where(is_rope, rotated, normalized).to(tl.bfloat16).to(
+        tl.float32
+    )
 
     absmax = tl.maximum(tl.max(tl.abs(result), axis=0), 1.0e-4)
     scale = absmax / 127.0
@@ -132,7 +140,9 @@ def fused_compress_rope_int8_indexer_cache_kernel(
     data_base = block_base + kv_pos * HEAD_SIZE
     tl.store(k_cache + data_base + dims, quant)
     scale_byte = block_base + kv_block_size * HEAD_SIZE + kv_pos * 4
-    tl.store(k_cache.to(tl.pointer_type(tl.float32)) + scale_byte // 4, scale)
+    tl.store(
+        k_cache.to(tl.pointer_type(tl.float32)) + scale_byte // 4, scale
+    )
 
 
 @triton.jit
@@ -166,7 +176,9 @@ def _indexer_q_rope_int8_kernel(
     cache = cos_sin + position * cos_sin_stride
     rope_local = offsets - nope_dim
     is_rope = offsets >= nope_dim
-    partner = tl.load(base + (offsets ^ 1), mask=is_rope, other=0.0).to(tl.float32)
+    partner = tl.load(base + (offsets ^ 1), mask=is_rope, other=0.0).to(
+        tl.float32
+    )
     cs_idx = tl.maximum(rope_local >> 1, 0)
     cos_v = tl.load(cache + cs_idx, mask=is_rope, other=1.0)
     sin_v = tl.load(cache + HALF_ROPE + cs_idx, mask=is_rope, other=0.0)
@@ -276,7 +288,9 @@ def compress_int8_indexer_k_cache(
 
     cos_sin_cache = rotary_emb.cos_sin_cache
     k_cache_metadata = attn_metadata[compressor.k_cache_prefix]
-    kv_cache = compressor._static_forward_context[compressor.k_cache_prefix].kv_cache
+    kv_cache = compressor._static_forward_context[
+        compressor.k_cache_prefix
+    ].kv_cache
     fused_compress_rope_int8_indexer_cache_kernel[(num_actual,)](
         state_cache,
         state_cache.stride(0),
@@ -349,33 +363,25 @@ def _int8_mqa_logits_h64_d128_kernel(
         query_rows = pid_m * BLOCK_M + q_rows32 // 32
         query_heads = q_rows32 % 32
         q_tile0 = tl.load(
-            q
-            + query_rows[:, None] * (64 * 128)
-            + query_heads[:, None] * 128
-            + dims[None, :],
-            mask=(query_rows < num_rows)[:, None],
-            other=0,
+            q + query_rows[:, None] * (64 * 128)
+            + query_heads[:, None] * 128 + dims[None, :],
+            mask=(query_rows < num_rows)[:, None], other=0,
             eviction_policy="evict_last",
         )
         q_tile1 = tl.load(
-            q
-            + query_rows[:, None] * (64 * 128)
-            + (query_heads[:, None] + 32) * 128
-            + dims[None, :],
-            mask=(query_rows < num_rows)[:, None],
-            other=0,
+            q + query_rows[:, None] * (64 * 128)
+            + (query_heads[:, None] + 32) * 128 + dims[None, :],
+            mask=(query_rows < num_rows)[:, None], other=0,
             eviction_policy="evict_last",
         )
         head_weights0 = tl.load(
             weights + rows[:, None] * 64 + heads32[None, :],
-            mask=row_mask[:, None],
-            other=0.0,
+            mask=row_mask[:, None], other=0.0,
             eviction_policy="evict_last",
         )
         head_weights1 = tl.load(
             weights + rows[:, None] * 64 + (heads32[None, :] + 32),
-            mask=row_mask[:, None],
-            other=0.0,
+            mask=row_mask[:, None], other=0.0,
             eviction_policy="evict_last",
         )
         starts = tl.load(cu_ks + rows, mask=row_mask, other=0)
@@ -405,39 +411,38 @@ def _int8_mqa_logits_h64_d128_kernel(
             # this M tile.  Reject wholly out-of-window tiles before loading K
             # or issuing the Tensor Core dot; the per-element mask below still
             # handles partial boundary tiles.
-            tile_overlaps_window = (tile_max_key >= starts_min) & (
-                tile_min_key < ends_max
+            tile_overlaps_window = (
+                (tile_max_key >= starts_min) & (tile_min_key < ends_max)
             )
             if tile_overlaps_window:
                 k_tile = _async_load(
                     k + keys[:, None] * 128 + dims[None, :],
-                    key_mask[:, None],
-                    0,
+                    key_mask[:, None], 0,
                 )
                 scales = _async_load(k_scale + keys, key_mask, 0.0)
                 dots0 = tl.dot(k_tile, tl.trans(q_tile0), out_dtype=tl.int32)
-                scores0 = tl.reshape(dots0, (BLOCK_N, BLOCK_M, 32)).to(tl.float32)
+                scores0 = tl.reshape(dots0, (BLOCK_N, BLOCK_M, 32)).to(
+                    tl.float32
+                )
                 values = tl.sum(
                     tl.maximum(scores0, 0.0) * head_weights0[None, :, :],
                     axis=2,
                 )
                 dots1 = tl.dot(k_tile, tl.trans(q_tile1), out_dtype=tl.int32)
-                scores1 = tl.reshape(dots1, (BLOCK_N, BLOCK_M, 32)).to(tl.float32)
+                scores1 = tl.reshape(dots1, (BLOCK_N, BLOCK_M, 32)).to(
+                    tl.float32
+                )
                 values += tl.sum(
                     tl.maximum(scores1, 0.0) * head_weights1[None, :, :],
                     axis=2,
                 )
                 values *= scales[:, None]
-                valid = (
-                    row_mask[:, None]
-                    & key_mask[None, :]
-                    & (keys[None, :] >= starts[:, None])
-                    & (keys[None, :] < ends[:, None])
-                )
+                valid = (row_mask[:, None] & key_mask[None, :]
+                         & (keys[None, :] >= starts[:, None])
+                         & (keys[None, :] < ends[:, None]))
                 tl.store(
                     logits + rows[:, None] * num_keys + keys[None, :],
-                    tl.trans(values),
-                    mask=valid,
+                    tl.trans(values), mask=valid,
                     eviction_policy="evict_first",
                 )
 
@@ -503,16 +508,21 @@ def _int8_mqa_logits_tensor_core_kernel(
     scales = tl.load(k_scale + keys, mask=key_mask, other=0.0)
 
     dots = tl.dot(k_tile, tl.trans(q_tile), out_dtype=tl.int32)
-    scores = tl.reshape(dots, (BLOCK_N, BLOCK_M, BLOCK_H)).to(tl.float32)
+    scores = tl.reshape(dots, (BLOCK_N, BLOCK_M, BLOCK_H)).to(
+        tl.float32
+    )
     heads = tl.arange(0, BLOCK_H)
     head_weights = tl.load(
-        weights + rows[:, None] * weights_stride_m + heads[None, :] * weights_stride_h,
+        weights
+        + rows[:, None] * weights_stride_m
+        + heads[None, :] * weights_stride_h,
         mask=row_mask[:, None] & (heads < NUM_HEADS)[None, :],
         other=0.0,
         eviction_policy="evict_last",
     )
     values = tl.sum(
-        tl.maximum(scores * scales[:, None, None], 0.0) * head_weights[None, :, :],
+        tl.maximum(scores * scales[:, None, None], 0.0)
+        * head_weights[None, :, :],
         axis=2,
     )
 
@@ -525,7 +535,9 @@ def _int8_mqa_logits_tensor_core_kernel(
         & (keys[None, :] < ends[:, None])
     )
     tl.store(
-        logits + rows[:, None] * logits_stride_m + keys[None, :],
+        logits
+        + rows[:, None] * logits_stride_m
+        + keys[None, :],
         tl.trans(values),
         mask=valid,
         eviction_policy="evict_first",
@@ -542,7 +554,9 @@ def int8_mqa_logits(
 ) -> torch.Tensor:
     """Contiguous INT8 indexer logits used by prefill."""
     num_keys = k.shape[0]
-    logits = torch.empty((q.shape[0], num_keys), dtype=torch.float32, device=q.device)
+    logits = torch.empty(
+        (q.shape[0], num_keys), dtype=torch.float32, device=q.device
+    )
     if (
         q.shape[1] == 64
         and q.shape[2] == 128
@@ -653,7 +667,9 @@ def _int8_paged_mqa_logits_h64_d128_kernel(
     # Strides come from the caller: a compact (B, 1) ``context_lens`` passes a
     # zero column stride so the shared length broadcasts across next_n.
     context_len = tl.load(
-        context_lens + batch * context_row_stride + next_idx * context_col_stride
+        context_lens
+        + batch * context_row_stride
+        + next_idx * context_col_stride
     )
     first_key_start = first_logical_block * 64
     if first_key_start >= context_len:
@@ -668,7 +684,9 @@ def _int8_paged_mqa_logits_h64_d128_kernel(
         q + row * (64 * 128) + heads[:, None] * 128 + dims[None, :],
         eviction_policy="evict_last",
     )
-    head_weights = tl.load(weights + row * 64 + heads, eviction_policy="evict_last")
+    head_weights = tl.load(
+        weights + row * 64 + heads, eviction_policy="evict_last"
+    )
 
     for page_offset in tl.static_range(0, PAGES_PER_CTA):
         logical_block = first_logical_block + page_offset
@@ -696,7 +714,9 @@ def _int8_paged_mqa_logits_h64_d128_kernel(
         )
 
         dots = tl.dot(k_tile, tl.trans(q_tile), out_dtype=tl.int32)
-        activated = tl.maximum(dots.to(tl.float32) * k_scales[:, None], 0.0)
+        activated = tl.maximum(
+            dots.to(tl.float32) * k_scales[:, None], 0.0
+        )
         result = tl.sum(activated * head_weights[None, :], axis=1)
         output = logits + row * max_model_len + key_start + positions
         tl.store(
@@ -739,7 +759,9 @@ def _int8_paged_mqa_logits_kernel(
     # See int8_paged_mqa_logits: a compact (B, 1) ``context_lens`` passes a zero
     # column stride so the shared length broadcasts across next_n positions.
     context_len = tl.load(
-        context_lens + batch * context_row_stride + next_idx * context_col_stride
+        context_lens
+        + batch * context_row_stride
+        + next_idx * context_col_stride
     )
 
     # The logits buffer is deliberately not cleaned: the downstream top-k
@@ -767,7 +789,9 @@ def _int8_paged_mqa_logits_kernel(
         other=0,
     ).to(tl.int8)
     scale_offsets = (
-        physical_blocks * cache_block_stride + block_size * HEAD_DIM + block_offsets * 4
+        physical_blocks * cache_block_stride
+        + block_size * HEAD_DIM
+        + block_offsets * 4
     )
     k_scales = tl.load(
         cache.to(tl.pointer_type(tl.float32)) + scale_offsets // 4,
@@ -799,7 +823,9 @@ def _int8_paged_mqa_logits_kernel(
             mask=head_mask,
             other=0.0,
         )
-        activated = tl.maximum(dots.to(tl.float32) * k_scales[:, None], 0.0)
+        activated = tl.maximum(
+            dots.to(tl.float32) * k_scales[:, None], 0.0
+        )
         acc += tl.sum(activated * head_weights[None, :], axis=1)
     tl.store(logits + row * logits_stride + keys, acc, mask=key_mask)
 
@@ -841,7 +867,9 @@ def int8_paged_mqa_logits(
     ):
         # A context cannot address more pages than its block-table row. Avoid
         # launching capacity-only CTAs when metadata carries a compact table.
-        grid_blocks = min(triton.cdiv(max_model_len, 64), block_table.shape[1])
+        grid_blocks = min(
+            triton.cdiv(max_model_len, 64), block_table.shape[1]
+        )
         pages_per_cta = 2
         _int8_paged_mqa_logits_h64_d128_kernel[
             (batch * next_n, triton.cdiv(grid_blocks, pages_per_cta))
@@ -864,7 +892,9 @@ def int8_paged_mqa_logits(
         )
         return logits
 
-    _int8_paged_mqa_logits_kernel[(batch * next_n, triton.cdiv(max_model_len, 128))](
+    _int8_paged_mqa_logits_kernel[
+        (batch * next_n, triton.cdiv(max_model_len, 128))
+    ](
         q,
         q.stride(0),
         q.stride(1),

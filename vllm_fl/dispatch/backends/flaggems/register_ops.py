@@ -86,6 +86,24 @@ def register_builtins(registry) -> None:
                 "int8_paged_mqa_logits",
             )
         ],
+        *[
+            OpImpl(
+                op_name=op_name,
+                impl_id="default.flagos",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(getattr(backend, op_name), is_avail),
+                vendor=None,
+                priority=BackendPriority.DEFAULT,
+            )
+            for op_name in (
+                "indexer_k_quant_and_cache",
+                "cp_gather_indexer_k_quant_cache",
+                "top_k_per_row_prefill",
+                "top_k_per_row_decode",
+                "pack_seq_triton",
+                "unpack_seq_triton",
+            )
+        ],
         # Quantization
         OpImpl(
             op_name="dynamic_per_token_quant_int8",

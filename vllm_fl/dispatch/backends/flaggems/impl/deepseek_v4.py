@@ -163,4 +163,6 @@ def deepseek_v4_int8_mqa_logits_flaggems(*args, **kwargs):
 
 
 def deepseek_v4_int8_paged_mqa_logits_flaggems(*args, **kwargs):
-    return _reference_kwargs("deepseek_v4_int8_paged_mqa_logits_torch", *args, **kwargs)
+    return _reference_kwargs(
+        "deepseek_v4_int8_paged_mqa_logits_torch", *args, **kwargs
+    )

@@ -42,6 +42,30 @@ op_backends:
     - flagos
     - vendor
     - reference
+  indexer_k_quant_and_cache:
+    - flagos
+    - vendor:cuda
+    - reference
+  cp_gather_indexer_k_quant_cache:
+    - flagos
+    - vendor:cuda
+    - reference
+  top_k_per_row_prefill:
+    - flagos
+    - vendor:cuda
+    - reference
+  top_k_per_row_decode:
+    - flagos
+    - vendor:cuda
+    - reference
+  pack_seq_triton:
+    - flagos
+    - vendor:cuda
+    - reference
+  unpack_seq_triton:
+    - flagos
+    - vendor:cuda
+    - reference
 
 # FlagOS operator blacklist
 flagos_blacklist:

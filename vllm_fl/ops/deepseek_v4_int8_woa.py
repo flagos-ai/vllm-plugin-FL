@@ -7,10 +7,13 @@ import torch
 
 from vllm.triton_utils import tl, triton
 
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.dispatch import resolve_op
 
 DSV4_INV_ROPE_QUANT_INT8_OP = "deepseek_v4_inv_rope_quant_int8"
-_dispatch_inv_rope_quant_int8 = CachedOp(DSV4_INV_ROPE_QUANT_INT8_OP)
+# The output projection runs inside the full-graph compiled model. Resolve the
+# backend before tracing so Dynamo never enters OpManager's synchronization
+# path; backend selection still goes through OpManager once at module import.
+_dispatch_inv_rope_quant_int8 = resolve_op(DSV4_INV_ROPE_QUANT_INT8_OP)
 
 
 @triton.jit

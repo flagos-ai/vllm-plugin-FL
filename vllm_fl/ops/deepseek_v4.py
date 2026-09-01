@@ -3,10 +3,15 @@
 
 from __future__ import annotations
 
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.dispatch import resolve_op
 
 _OPS = {
-    name: CachedOp(f"deepseek_v4_{name}")
+    # Resolve once while the model module is imported.  These frontends are
+    # called from vLLM's full-graph compiled model; a lazy CachedOp lookup would
+    # make Dynamo trace OpManager's RLock on the first profile run.  Import-time
+    # resolution keeps backend selection in OpManager while exposing only the
+    # selected callable to torch.compile and CUDA graph capture.
+    name: resolve_op(f"deepseek_v4_{name}")
     for name in (
         "inv_rope_quant_fp8",
         "int8_scaled_mm",
