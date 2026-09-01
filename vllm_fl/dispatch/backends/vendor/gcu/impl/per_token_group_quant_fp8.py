@@ -91,14 +91,18 @@ def _per_token_group_quant_fp8_gcu(
         row = g_id // groups_per_row
         row_g_id = g_id % groups_per_row
 
-        # Offset calculations use int32 (GCU constraint: no int64 indexing)
+        # Offset calculations use int32 (GCU constraint: no int64 indexing).
+        # NB: do NOT call .to() on the scalar kernel args (y_row_stride /
+        # group_size): torch's triton HOP analysis (identify_mutated_tensors)
+        # binds them as plain Python ints, which have no .to().  They are
+        # already i32 in the real compilation, so this is a no-op there.
         y_ptr_offset = (
-            row.to(tl.int32) * y_row_stride.to(tl.int32)
-            + row_g_id.to(tl.int32) * group_size.to(tl.int32)
+            row.to(tl.int32) * y_row_stride
+            + row_g_id.to(tl.int32) * group_size
         )
         y_cur = y_ptr + y_ptr_offset
 
-        y_q_cur = y_q_ptr + g_id.to(tl.int32) * group_size.to(tl.int32)
+        y_q_cur = y_q_ptr + g_id.to(tl.int32) * group_size
         y_s_cur = y_s_ptr + g_id
 
         cols = tl.arange(0, BLOCK)  # group_size <= BLOCK
@@ -157,19 +161,19 @@ def _per_token_group_quant_fp8_colmajor_gcu(
         row_g_id = g_id % groups_per_row
 
         y_ptr_offset = (
-            row.to(tl.int32) * y_row_stride.to(tl.int32)
-            + row_g_id.to(tl.int32) * group_size.to(tl.int32)
+            row.to(tl.int32) * y_row_stride
+            + row_g_id.to(tl.int32) * group_size
         )
         y_cur = y_ptr + y_ptr_offset
 
-        y_q_cur = y_q_ptr + g_id.to(tl.int32) * group_size.to(tl.int32)
+        y_q_cur = y_q_ptr + g_id.to(tl.int32) * group_size
 
         # Column-major scale indexing
         blocks_per_row = groups_per_row
         scale_col = g_id % blocks_per_row
         scale_row = g_id // blocks_per_row
         y_s_offset = (
-            scale_col.to(tl.int32) * y_s_col_stride.to(tl.int32)
+            scale_col.to(tl.int32) * y_s_col_stride
             + scale_row.to(tl.int32)
         )
         y_s_cur = y_s_ptr + y_s_offset

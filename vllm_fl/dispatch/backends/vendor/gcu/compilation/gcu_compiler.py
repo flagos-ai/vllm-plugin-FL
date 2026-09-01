@@ -97,6 +97,24 @@ def lowering():
         til.lowerings.pop(op_overload)
 
 
+@contextmanager
+def _no_fp64_for_triton_float_args():
+    """Force inductor to emit ``fp32`` (not ``fp64``) for Python-float
+    arguments of user-defined Triton kernels.
+
+    Inductor's ``signature_of`` maps Python floats to ``fp64`` when
+    ``config._use_fp64_for_unbacked_floats`` is True (the default).  The GCU
+    backend has no fp64 support: mixing an fp64 scalar with fp32 values in a
+    kernel generates ``arith.extf`` (f32->f64), which the GCU MLIR pipeline
+    marks illegal, failing compilation of user-defined Triton kernels that
+    reach inductor via the ``triton_kernel_wrapper_mutation`` HOP.
+    """
+    import torch._inductor.config as inductor_config
+
+    with inductor_config.patch(_use_fp64_for_unbacked_floats=False):
+        yield
+
+
 class GCUInductorAdaptor(InductorAdaptor):
     """vllm-plugin-FL GCU compile backend.
 
@@ -111,6 +129,7 @@ class GCUInductorAdaptor(InductorAdaptor):
                 lambda node: False,
             ),
             lowering(),
+            _no_fp64_for_triton_float_args(),
         ):
             return super().compile(*args, **kwargs)
 
@@ -122,11 +141,14 @@ class GCUInductorStandaloneAdaptor(InductorStandaloneAdaptor):
         super().__init__(save_format=envs.VLLM_COMPILE_CACHE_SAVE_FORMAT)
 
     def compile(self, *args, **kwargs):
-        with lowering():
+        with (
+            lowering(),
+            _no_fp64_for_triton_float_args(),
+        ):
             return super().compile(*args, **kwargs)
 
 
-def update_gcu_compilation_config(compilation_config):
+def update_gcu_compilation_config(vllm_config, compilation_config):
     if compilation_config.mode is None:
         if vllm_config.optimization_level > OptimizationLevel.O0:
             compilation_config.mode = CompilationMode.VLLM_COMPILE
@@ -153,5 +175,11 @@ def update_gcu_compilation_config(compilation_config):
         ] = False
         compilation_config.inductor_compile_config[
             "triton.autotune_at_compile_time"
+        ] = False
+
+        # GCU has no fp64 support: Python-float args of user-defined Triton
+        # kernels must be emitted as fp32 (see _no_fp64_for_triton_float_args).
+        compilation_config.inductor_compile_config[
+            "_use_fp64_for_unbacked_floats"
         ] = False
 
