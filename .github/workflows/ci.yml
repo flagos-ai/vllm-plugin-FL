@@ -4,17 +4,6 @@
 name: CI
 
 on: []  # disabled
-  pull_request:
-    branches: [feat/deepseek-v4-int8]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "examples/**"
-      - "docker/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
-  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
