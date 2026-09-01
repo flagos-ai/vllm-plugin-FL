@@ -4,10 +4,8 @@
 name: CI
 
 on:
-  schedule:
-    - cron: '0 18 * * *'  # daily at 2:00 AM CST (UTC+8)
   pull_request:
-    branches: [main, devops]
+    branches: [feat/deepseek-v4-int8]
     paths-ignore:
       - "**.md"
       - "docs/**"
