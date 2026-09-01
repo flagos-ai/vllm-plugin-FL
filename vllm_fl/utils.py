@@ -5,6 +5,7 @@ import os
 from typing import Optional, Tuple
 
 import flag_gems
+
 try:
     # FlagGems<=5.0.2: DeviceDetector lives in device.
     from flag_gems.runtime.backend.device import DeviceDetector
@@ -30,6 +31,7 @@ _OP_CONFIG: Optional[dict[str, str]] = None
 #
 # Values are normalized to lowercase and matched against available backend
 # subdirectories (for example, cuda/ascend/metax/iluvatar/mthreads).
+#
 VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/cuda
     "nvidia": {"device_type": "cuda", "device_name": "nvidia"},
@@ -48,6 +50,11 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
 }
+
+# Keep the vLLM base-class no-op for platforms not validated by this change.
+# Operators can opt a platform in without a code change via the override below.
+_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER = "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER"
+_VALIDATED_DEVICE_CONTROL_ENV_VARS = {"nvidia": "CUDA_VISIBLE_DEVICES"}
 
 
 def _get_vendor_device_field(vendor_name: str, field: str) -> str:
@@ -79,6 +86,21 @@ def get_device_type(vendor_name: str) -> str:
 def get_device_name(vendor_name: str) -> str:
     """Return the configured device_name for the given vendor."""
     return _get_vendor_device_field(vendor_name, "device_name")
+
+
+def get_device_control_env_var(vendor_name: str) -> str:
+    """Return the validated vLLM device-control variable for a vendor.
+
+    Only NVIDIA is enabled by default because this mapping path was validated
+    on NVIDIA H20. Other vendors retain the vLLM base-class no-op unless an
+    operator explicitly sets ``FLAGOS_DEVICE_CONTROL_ENV_VAR``.
+    """
+    override = os.environ.get("FLAGOS_DEVICE_CONTROL_ENV_VAR", "").strip()
+    if override:
+        return override
+    return _VALIDATED_DEVICE_CONTROL_ENV_VARS.get(
+        vendor_name, _DEVICE_CONTROL_ENV_VAR_PLACEHOLDER
+    )
 
 
 def use_flaggems(default: bool = True) -> bool:

@@ -109,6 +109,16 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
+### Runtime compatibility hooks
+
+The plugin installs runtime compatibility hooks through vLLM's plugin entry
+points without modifying the installed vLLM package. Model-specific config and
+model registrations are loaded only for their corresponding architectures.
+
+Operator adapters use the plugin dispatch manager, so backend selection,
+fallback, per-op policy, operator-list recording, and I/O diagnostics continue
+to follow the common FlagOS controls.
+
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
     4.1 Clone the repository:
@@ -170,7 +180,7 @@ With vLLM and vLLM-fl installed, you can start generating texts for list of inpu
 from vllm import LLM, SamplingParams
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]

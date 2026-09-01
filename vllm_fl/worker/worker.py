@@ -201,6 +201,15 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
+
+        if (
+            vllm_config.num_speculative_tokens == 1
+            and vllm_config.scheduler_config.async_scheduling
+        ):
+            vllm_config.scheduler_config.scheduler_cls = (
+                "vllm_fl.worker.scheduler_fl.AsyncSchedulerFL"
+            )
+
         super().__init__(
             vllm_config=vllm_config,
             local_rank=local_rank,
@@ -389,7 +398,26 @@ class WorkerFL(WorkerBase):
                 f"be less than or equal to the number of visible devices "
                 f"({visible_device_count})."
             )
-        self.device = torch.device(f"{current_platform.device_type}:{self.local_rank}")
+        # local_rank is an index into this node's assigned devices, not a
+        # visible device ordinal: a launcher may isolate each worker to a
+        # subset of the node's GPUs. Translate it the way stock gpu_worker
+        # does, otherwise `local_rank > 0` selects a device that is not
+        # visible to this process.
+        assigned_physical_gpu_ids = getattr(
+            self.parallel_config, "assigned_physical_gpu_ids", None
+        )
+        if assigned_physical_gpu_ids is not None:
+            from vllm.platforms.interface import set_assigned_physical_gpu_ids
+
+            set_assigned_physical_gpu_ids(assigned_physical_gpu_ids)
+            assert self.local_rank < len(assigned_physical_gpu_ids), (
+                f"local_rank {self.local_rank} is out of bounds for "
+                f"assigned_physical_gpu_ids {assigned_physical_gpu_ids}"
+            )
+        visible_device_index = current_platform.logical_device_id_to_visible_device_id(
+            self.local_rank
+        )
+        self.device = torch.device(f"{current_platform.device_type}:{visible_device_index}")
         current_platform.set_device(self.device)
 
         current_platform.check_if_supports_dtype(self.model_config.dtype)

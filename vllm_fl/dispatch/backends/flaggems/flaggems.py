@@ -43,6 +43,22 @@ class FlagGemsBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def dynamic_per_token_quant_int8(
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.quantization import dynamic_per_token_quant_int8_flaggems_vllm
+
+        return dynamic_per_token_quant_int8_flaggems_vllm(x)
+
+    def dynamic_per_token_quant_int8_triton(
+        self,
+        x: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.quantization import dynamic_per_token_quant_int8_flaggems_triton
+
+        return dynamic_per_token_quant_int8_flaggems_triton(x)
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.

@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
 
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Usage:
 #  1. Start the server as follows (adjust model path and args as needed):
-# vllm serve /models/Qwen3.6-27B --tensor-parallel-size 2 --max-model-len 262144 --no-enable-log-requests --no-enable-prefix-caching
+# vllm serve /data/models/Qwen/Qwen3.6-27B --tensor-parallel-size 2 --max-model-len 262144 --no-enable-log-requests --no-enable-prefix-caching
 
 #  2. Run this benchmark script (default: 4 test cases):
 # python benchmarks/benchmark_throughput_serve.py
@@ -20,7 +34,7 @@ import time
 from datetime import datetime
 from statistics import mean
 
-MODEL = "/models/Qwen3.6-27B"
+MODEL = "/data/models/Qwen/Qwen3.6-27B"
 
 # total runs for each case
 RUNS = 4

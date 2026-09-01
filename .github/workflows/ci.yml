@@ -1,13 +1,26 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # CI Workflow for VLLM Plugin FL
 # This workflow defines the CI process for the VLLM Plugin FL project.
 # It includes linting and platform-specific testing stages.
 name: CI
 
 on:
-  schedule:
-    - cron: '0 18 * * *'  # daily at 2:00 AM CST (UTC+8)
   pull_request:
-    branches: [main, devops]
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - "**.md"
       - "docs/**"
@@ -28,6 +41,15 @@ jobs:
   # Runs on every push/PR. Fast, no special requirements.
   # ============================================================
   lint:
+    # Skip: fork-internal PRs, draft PRs, PRs with WIP/wip in title
+    if: |
+      github.event_name != 'pull_request' ||
+      (
+        github.repository == 'flagos-ai/vllm-plugin-FL' &&
+        !github.event.pull_request.draft &&
+        !contains(github.event.pull_request.title, 'WIP') &&
+        !contains(github.event.pull_request.title, 'wip')
+      )
     uses: ./.github/workflows/_lint.yml
 
   # ============================================================
@@ -97,4 +119,59 @@ jobs:
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: ascend
+    secrets: inherit
+
+  # ============================================================
+  # Job 4c: Hygon platform testing
+  # ============================================================
+  test-hygon:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: hygon
+    secrets: inherit
+
+  # ============================================================
+  # Job 4d: MetaX platform testing
+  # ============================================================
+  test-metax:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: metax
+    secrets: inherit
+
+  # ============================================================
+  # Job 4e: MUSA platform testing
+  # ============================================================
+  test-musa:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: musa
+    secrets: inherit
+
+  # ============================================================
+  # Job 4f: Enflame platform testing
+  # ============================================================
+  test-enflame:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: enflame
+    secrets: inherit
+
+  # ============================================================
+  # Job 4g: Kunlunxin platform testing
+  # ============================================================
+  test-kunlunxin:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: kunlunxin
     secrets: inherit

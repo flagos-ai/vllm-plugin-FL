@@ -524,6 +524,7 @@ Currently supported operators:
 
 | Operator | Description | FlagGems | Reference | Vendor |
 |----------|-------------|----------|-----------|--------|
+| `dynamic_per_token_quant_int8` | vLLM-compatible symmetric dynamic per-token INT8 quantization | ✓ | ✓ | - |
 | `silu_and_mul` | SiLU activation + element-wise multiplication | ✓ | ✓ | ✓ |
 | `rms_norm` | RMS normalization | ✓ | ✓ | ✓ |
 | `rotary_embedding` | Rotary position embedding | ✓ | ✓ | ✓ |
