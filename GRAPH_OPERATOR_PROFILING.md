@@ -61,8 +61,10 @@ kernel and the following columns:
 - `kernel_name`
 - `total_call_count`
 - `total_time_us`
-- `profiling_time_ratio`
-- `profiling_time_pct`
+- `percent`
+
+`percent` has three digits after the decimal point. Values smaller than
+`0.001%` are emitted as `<0.001%`.
 
 `kernel_details_report.csv` is the detailed aggregate. It has one row per
 kernel/operator/shape/dtype/mapping-status combination and the following

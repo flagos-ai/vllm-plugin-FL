@@ -82,6 +82,13 @@ def ns_to_us(value: int) -> float:
     return value / 1000
 
 
+def format_percent(value_ns: int, total_ns: int) -> str:
+    percent = value_ns / total_ns * 100 if total_ns else 0.0
+    if percent < 0.001:
+        return "<0.001%"
+    return f"{percent:.3f}%"
+
+
 def metadata(event: dict[str, Any]) -> MetadataKey:
     args = event.get("args", {})
     has_shapes = "Input Dims" in args
@@ -261,12 +268,7 @@ def collect_runtime(
         kernel_summary[name] = {
             "total_call_count": kernel_count[name],
             "total_time_us": ns_to_us(total_ns),
-            "profiling_time_ratio": (
-                total_ns / kernel_total_ns if kernel_total_ns else 0.0
-            ),
-            "profiling_time_pct": (
-                total_ns / kernel_total_ns * 100 if kernel_total_ns else 0.0
-            ),
+            "percent": format_percent(total_ns, kernel_total_ns),
         }
 
         status_breakdown = {
@@ -407,8 +409,7 @@ def summary_csv_rows(kernel_summary: dict[str, Any]) -> list[dict[str, Any]]:
             "kernel_name": name,
             "total_call_count": values["total_call_count"],
             "total_time_us": values["total_time_us"],
-            "profiling_time_ratio": values["profiling_time_ratio"],
-            "profiling_time_pct": values["profiling_time_pct"],
+            "percent": values["percent"],
         }
         for name, values in kernel_summary.items()
     ]
@@ -532,8 +533,7 @@ def main() -> None:
             "kernel_name",
             "total_call_count",
             "total_time_us",
-            "profiling_time_ratio",
-            "profiling_time_pct",
+            "percent",
         ],
         summary_csv_rows(kernel_summary),
     )
