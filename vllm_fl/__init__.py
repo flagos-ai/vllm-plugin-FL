@@ -152,6 +152,12 @@ def register_model():
     register_quant_linear()
     register_router()
 
+    from vllm_fl.dispatch.backends.vendor.hygon.patch import (
+        apply_hygon_moe_patches,
+    )
+
+    apply_hygon_moe_patches()
+
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
