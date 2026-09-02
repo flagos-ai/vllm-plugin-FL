@@ -47,11 +47,15 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 1. Install vLLM
 
-    For **NVIDIA** GPUs, install vLLM from the official [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) release (optional if the correct version is already installed):
+    The tested **NVIDIA** baseline is the official CUDA 12.9 image:
     ```sh
-    pip install vllm==0.28.0 \
-      --extra-index-url https://wheels.vllm.ai/2cf0a6915ce544dc493a0990f2ea38d81601128a/cu130
+    docker pull vllm/vllm-openai:v0.28.0-cu129
     ```
+
+    For a non-container NVIDIA installation, install the matching official
+    [vLLM v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0)
+    package first. The NVIDIA FlagTree step below intentionally replaces the
+    standalone Triton package from vLLM while leaving vLLM itself unchanged.
 
     For **non-NVIDIA** chips, install vLLM from source with the `empty` device target:
     ```sh
@@ -95,27 +99,47 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/)
 
-    3.1 Install Build Dependencies
+    3.1 For NVIDIA, install the tested FlagTree/Triton runtime
+
+    FlagTree and FlagGems are a matched runtime. vLLM 0.28.0 normally installs
+    standalone Triton 3.7.1, but the NVIDIA baseline validated here uses
+    FlagTree `0.6.2a1`, which provides Triton `3.6.0`. Do not install a second
+    standalone Triton package on top of FlagTree.
+
+    ```sh
+    # Repeat this command until no standalone Triton distribution remains.
+    python3 -m pip uninstall -y triton
+
+    RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple"
+    python3 -m pip install flagtree===0.6.2a1 $RES
+    ```
+
+    3.2 Install build dependencies
 
     ```sh
     pip install -U scikit-build-core==0.11 pybind11 ninja cmake
     ```
 
-    3.2 Install FlagGems
+    3.3 Install the latest FlagGems master
 
     ```sh
-    git clone -b v5.4.0.dev0 https://github.com/flagos-ai/FlagGems
+    git clone --branch master https://github.com/flagos-ai/FlagGems
     cd FlagGems
-    pip install --no-build-isolation .
+    pip install --no-build-isolation --no-deps .
     # or editable install
-    pip install --no-build-isolation -e .
+    pip install --no-build-isolation --no-deps -e .
     ```
+
+    The NVIDIA results in this repository were produced with FlagGems commit
+    `34c6d2ce416d32a98f1dd2bb6e4cfb67c59342d9`
+    (`5.3.5+g34c6d2ce4`). Re-run the blacklist and model tests when moving to a
+    newer FlagGems master revision.
 
 ### Runtime compatibility hooks
 
 The plugin installs runtime compatibility hooks through vLLM's plugin entry
-points without modifying the installed vLLM package. Model-specific config and
-model registrations are loaded only for their corresponding architectures.
+points without modifying the installed vLLM package. Model configs and classes
+that are native in vLLM 0.28.0 and Transformers 5 are not duplicated here.
 
 Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
