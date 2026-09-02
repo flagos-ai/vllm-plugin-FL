@@ -50,5 +50,13 @@ op_backends:
 flagos_blacklist:
   # BF16 largest and smallest selections return incorrect indices on A800.
   - topk
+  # Gemma3n grouped-query vision attention reshapes KV heads incorrectly.
+  - _scaled_dot_product_attention_math
+  # Gemma3n AltUp compares a CUDA tensor with a CPU scalar tensor; FlagGems
+  # requires both operands to be on the same device.
+  - maximum
+  # Gemma3n AltUp divides a CUDA tensor by a CPU scalar tensor; FlagGems passes
+  # the CPU pointer to Triton and fails at runtime.
+  - true_divide
 # No NVIDIA OOT implementation is disabled without a reproduced model failure.
 oot_blacklist: []
