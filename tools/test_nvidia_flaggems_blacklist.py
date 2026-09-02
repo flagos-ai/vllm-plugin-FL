@@ -113,6 +113,60 @@ def _binary_cases(function: Callable[[Any, Any], Any]) -> list[Case]:
     ]
 
 
+def _maximum_cases() -> list[Case]:
+    torch = _torch()
+
+    def cuda_tensor_cpu_scalar():
+        x = _randn((4, 128, 256), torch.bfloat16).abs()
+        epsilon = torch.tensor(1e-6)
+        return lambda: torch.maximum(x, epsilon)
+
+    return [_case("cuda_tensor_cpu_scalar", cuda_tensor_cpu_scalar)]
+
+
+def _true_divide_cases() -> list[Case]:
+    torch = _torch()
+    cases = _binary_cases(
+        lambda x, y: torch.true_divide(x, y.abs().add_(0.25))
+    )
+
+    def cuda_tensor_cpu_scalar():
+        x = _randn((4, 128, 256), torch.bfloat16)
+        denominator = torch.sqrt(torch.tensor(2.0))
+        return lambda: torch.true_divide(x, denominator)
+
+    cases.append(_case("cuda_tensor_cpu_scalar", cuda_tensor_cpu_scalar))
+    return cases
+
+
+def _scaled_dot_product_attention_math_cases() -> list[Case]:
+    torch = _torch()
+
+    def grouped_query_attention():
+        query = _randn((2, 6, 32, 64), torch.bfloat16)
+        key = _randn((2, 1, 32, 64), torch.bfloat16)
+        value = _randn((2, 1, 32, 64), torch.bfloat16)
+        return lambda: torch.ops.aten._scaled_dot_product_attention_math.default(
+            query,
+            key,
+            value,
+            None,
+            0.0,
+            False,
+            None,
+            enable_gqa=True,
+        )
+
+    return [
+        _case(
+            "bf16_grouped_query_attention",
+            grouped_query_attention,
+            rtol=5e-2,
+            atol=5e-2,
+        )
+    ]
+
+
 def _comparison_cases(function: Callable[[Any, Any], Any]) -> list[Case]:
     return _binary_cases(function)
 
@@ -718,8 +772,10 @@ def build_cases() -> dict[str, list[Case]]:
         "bitwise_and_tensor": _bitwise_binary_cases(torch.bitwise_and),
         "reciprocal": _unary_cases(torch.reciprocal, positive=True),
         "mul": _binary_cases(torch.mul),
-        "true_divide": _binary_cases(
-            lambda x, y: torch.true_divide(x, y.abs().add_(0.25))
+        "maximum": _maximum_cases(),
+        "true_divide": _true_divide_cases(),
+        "_scaled_dot_product_attention_math": (
+            _scaled_dot_product_attention_math_cases()
         ),
         "repeat_interleave_self_int": _repeat_interleave_cases(False),
         "neg": _unary_cases(torch.neg),
