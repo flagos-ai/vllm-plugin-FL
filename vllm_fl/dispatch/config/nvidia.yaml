@@ -43,41 +43,12 @@ op_backends:
     - vendor
     - reference
 
-# FlagOS operators with a currently reproducible NVIDIA correctness failure.
-# The standalone A800 diagnostic covers every entry independently against
-# native PyTorch. Keep this list minimal, then validate removals with real
-# dense and MoE model inference before merging.
+# FlagOS operators with a reproducible NVIDIA correctness failure under the
+# supported FlagTree/Triton 3.6 environment. The standalone A800 diagnostic
+# covers every entry independently against native PyTorch, and removals are
+# revalidated with real dense and MoE model inference.
 flagos_blacklist:
-  # Qwen3-8B model initialization segfaults in the FlagGems scalar fill
-  # launcher after loading real BF16 weights. The tensor overload calls the
-  # same internal launcher directly, bypassing the scalar ATen blacklist.
-  - fill_scalar_
-  - fill_tensor_
-  # Qwen3-8B sampler profiling segfaults in the FlagGems Tensor sub launcher.
-  - sub
-  # Qwen3-8B sampler warmup fails converting and copying FlashInfer sample ids.
-  - to_copy
-  - copy_
-  # DeepSeek-V2 rotary-cache construction fails in the FlagGems reciprocal
-  # launcher for its real frequency tensor. Tensor.__rdiv__ then multiplies
-  # the native reciprocal by a scalar, which the FlagGems mul path rejects.
-  - reciprocal
-  - mul
-  # DeepSeek-V2 then reaches a Tensor/Tensor division whose FlagGems launcher
-  # segfaults during rotary-cache construction.
-  - true_divide
-  # The following rotary-scaling step segfaults in rsub.Scalar.
-  - rsub_scalar
-  # DeepSeek-V2 MoE warmup segfaults in add.Tensor after real weights load.
-  - add
-  # DeepSeek-V2 MLA prefill warmup fails in the FlagGems pad launcher.
-  - pad
-  # The constant-pad overload calls the same FlagGems implementation directly.
-  - constant_pad_nd
-  # DeepSeek-V2 KV-cache setup segfaults constructing a real full tensor.
-  - full
-  # FlagGems 5.4 returns incorrect indices for BF16 largest and smallest
-  # selections with PyTorch 2.13 / Triton 3.7.1 on NVIDIA A800.
+  # BF16 largest and smallest selections return incorrect indices on A800.
   - topk
 # No NVIDIA OOT implementation is disabled without a reproduced model failure.
 oot_blacklist: []
