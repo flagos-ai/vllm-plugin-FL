@@ -44,7 +44,7 @@ def _klx_fused_experts(
     Pipeline: gen_block_statistic -> moe_pre_sorted -> moe_fc(w1) -> activation -> moe_fc(w2) -> post (weight+sum)
 
     Args:
-        activation: Activation function type. Supported: "silu", "gelu", "relu"
+        activation: Activation function type. Supported: "silu", "gelu", "relu2", "gelu_no_mul", "silu_no_mul"
         w1_bias: Optional bias for gate+up projection [E, 2*ffn_hd]
         w2_bias: Optional bias for down projection [E, hidden_dim]
     """
@@ -96,11 +96,11 @@ def _klx_fused_experts(
         gate = inner_fc_out[:, :ffn_hd]
         up = inner_fc_out[:, ffn_hd:]
         swiglu_out = xtorch_ops.gelu(gate) * up
-    elif activation == "relu":
-        # ReLU: relu(gate) * up
+    elif activation == "relu2":
+        # ReLU²: relu(gate)^2 * up (matches MoEActivation.RELU2)
         gate = inner_fc_out[:, :ffn_hd]
         up = inner_fc_out[:, ffn_hd:]
-        swiglu_out = xtorch_ops.relu(gate) * up
+        swiglu_out = torch.square(xtorch_ops.relu(gate)) * up
     elif activation in ["gelu_no_mul", "silu_no_mul"]:
         # No mul variant: only apply activation, no gating
         if activation == "gelu_no_mul":
@@ -110,7 +110,7 @@ def _klx_fused_experts(
     else:
         raise ValueError(
             f"Unsupported activation '{activation}'. "
-            f"Supported: ['silu', 'gelu', 'relu', 'gelu_no_mul', 'silu_no_mul']"
+            f"Supported: ['silu', 'gelu', 'relu2', 'gelu_no_mul', 'silu_no_mul']"
         )
 
     # Step 5: Outer FC (down projection)
@@ -165,7 +165,7 @@ def fused_experts_impl(
     and is patched in by the Kunlunxin patch system.
 
     Args:
-        activation: Activation function. Supported: "silu", "gelu", "relu", "gelu_no_mul", "silu_no_mul"
+        activation: Activation function. Supported: "silu", "gelu", "relu2", "gelu_no_mul", "silu_no_mul"
         apply_router_weight_on_input: If True, apply router weights on input (NOT SUPPORTED)
         w1_bias: Optional bias for gate+up projection
         w2_bias: Optional bias for down projection
@@ -185,8 +185,12 @@ def fused_experts_impl(
             "Router weights are always applied in the moe_post stage (after down projection)."
         )
 
-    # 1.3: Validate activation function
-    SUPPORTED_ACTIVATIONS = ["silu", "gelu", "relu", "gelu_no_mul", "silu_no_mul"]
+    # 1.3: Normalize and validate activation function
+    # activation may arrive as a MoEActivation enum or a plain string.
+    from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+    if isinstance(activation, MoEActivation):
+        activation = activation.value
+    SUPPORTED_ACTIVATIONS = ["silu", "gelu", "relu2", "gelu_no_mul", "silu_no_mul"]
     if activation not in SUPPORTED_ACTIVATIONS:
         raise NotImplementedError(
             f"Kunlunxin fused_experts does not support activation '{activation}'. "
