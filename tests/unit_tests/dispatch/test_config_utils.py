@@ -22,22 +22,7 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
     assert path is not None
     assert path.name == "nvidia.yaml"
     assert config["op_backends"]["attention_backend"][0] == "flagos"
-    assert config["flagos_blacklist"] == [
-        "fill_scalar_",
-        "fill_tensor_",
-        "sub",
-        "to_copy",
-        "copy_",
-        "reciprocal",
-        "mul",
-        "true_divide",
-        "rsub_scalar",
-        "add",
-        "pad",
-        "constant_pad_nd",
-        "full",
-        "topk",
-    ]
+    assert config["flagos_blacklist"] == ["topk"]
     assert config["oot_blacklist"] == []
 
 
