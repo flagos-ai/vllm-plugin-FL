@@ -67,9 +67,7 @@ def _inv_rope_quant_int8_kernel(
     )
     x = tl.where(is_rope, inv, x).to(tl.bfloat16).to(tl.float32)
 
-    absmax = tl.maximum(
-        tl.max(tl.where(valid, tl.abs(x), 0.0), axis=0), 1.0e-4
-    )
+    absmax = tl.maximum(tl.max(tl.where(valid, tl.abs(x), 0.0), axis=0), 1.0e-4)
     scale = absmax / 127.0
     rounded = x / scale + tl.where(x >= 0, 0.5, -0.5)
     quant = tl.clamp(rounded, -127.0, 127.0).to(tl.int8)
