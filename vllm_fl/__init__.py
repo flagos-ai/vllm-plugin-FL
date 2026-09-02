@@ -260,5 +260,15 @@ try:
 
         _run_no_task_type._flagos_task_type_patched = True
         _tr_jit.JITFunction.run = _run_no_task_type
+
+    # triton_unified_attention.py (vllm 0.24.0) references tl.make_tensor_descriptor
+    # from module-level TD helper JITFunctions, but triton 3.2.0+mlu1.7.2
+    # (cambricon 4.4.3) lacks the symbol. triton's dependency finder walks every
+    # referenced JITFunction with an unconditional getattr, ignoring the
+    # constexpr gate that keeps the TD path dead on MLU, so the symbol must
+    # merely exist — inject a stub (never invoked) on forks that lack it.
+    import triton.language as _tl
+    if not hasattr(_tl, "make_tensor_descriptor"):
+        _tl.make_tensor_descriptor = lambda *args, **kwargs: None
 except ImportError:
     pass
