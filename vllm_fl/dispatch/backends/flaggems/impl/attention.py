@@ -52,6 +52,13 @@ class AttentionFLBackend(AttentionBackend):
     accept_output_buffer: bool = True
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
+    # do_kv_cache_update is invoked by vLLM's unified_kv_cache_update custom
+    # op before forward() -- which Attention.forward only calls when this flag
+    # is False. The inherited True default silently skips the KV write and
+    # leaves forward() reading an empty cache (garbage outputs on every
+    # platform using this backend).
+    forward_includes_kv_cache_update: bool = False
+
     @staticmethod
     def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
         vllm_config = get_current_vllm_config()
