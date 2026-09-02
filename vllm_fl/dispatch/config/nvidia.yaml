@@ -44,9 +44,9 @@ op_backends:
     - reference
 
 # FlagOS operators with a reproducible NVIDIA correctness failure under the
-# supported FlagTree/Triton 3.6 environment. The standalone A800 diagnostic
-# covers every entry independently against native PyTorch, and removals are
-# revalidated with real dense and MoE model inference.
+# supported FlagTree/Triton 3.6 environment. Each entry was reproduced
+# independently against native PyTorch, and removals are revalidated with real
+# dense and MoE model inference.
 flagos_blacklist:
   # BF16 largest and smallest selections return incorrect indices on A800.
   - topk
