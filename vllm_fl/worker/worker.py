@@ -238,6 +238,12 @@ class WorkerFL(WorkerBase):
             logger.debug("%s=%r", k, v)
 
         register_oot_ops()
+        if getattr(current_platform, "vendor_name", None) in ("metax", "maca"):
+            from vllm_fl.dispatch.backends.vendor.metax.selective_scan_patch import (
+                apply_metax_selective_scan_patch,
+            )
+
+            apply_metax_selective_scan_patch()
 
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
