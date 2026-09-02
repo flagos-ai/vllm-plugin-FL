@@ -94,9 +94,11 @@ def _fused_dsv4_qnorm_rope_kv_quant_insert_impl(
         q = q_in.contiguous()
         real_heads = -1
     else:
-        # empty (not zeros): the kernel zero-fills padding slots itself via
-        # the num_real_heads fast path, skipping their RMSNorm/RoPE math.
-        q = torch.empty(
+        # zeros (not empty): must not depend on any implicit zero-fill from
+        # the allocator/FlagGems empty override — aten::empty is native and
+        # truly uninitialized. The kernel's num_real_heads fast path still
+        # skips RMSNorm/RoPE for the padding slots, which was the actual win.
+        q = torch.zeros(
             (num_tokens, q_head_padded, head_dim),
             dtype=q_in.dtype,
             device=q_in.device,

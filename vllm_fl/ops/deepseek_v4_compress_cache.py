@@ -14,6 +14,10 @@ import torch  # noqa: F401
 import triton
 import triton.language as tl
 
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
+
 # Software E4M3FN encoder (already ported into FlagGems for the qnorm insert
 # kernel); triton @jit functions are importable across modules.
 from flag_gems.fused.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert import (
@@ -399,6 +403,26 @@ def compress_norm_rope_store_triton_ppu(
 ) -> None:
     """PPU replacement for upstream compress_norm_rope_store_triton."""
     assert not use_fp4_cache, "MXFP4 KV cache is not supported on PPU"
+    import os as _os
+    if _os.environ.get("VLLM_FL_DEBUG_COMPRESS_INPUTS") == "1":
+        _n_blocks = kv_cache.shape[0]
+        _bt = block_table[:, :]
+        logger.warning(
+            "[fl-probe] num_actual=%s | block_table max=%s min=%s (num_blocks=%s, shape=%s) | "
+            "slot_mapping max=%s min=%s | k_slot max=%s min=%s | "
+            "tok2req max=%s min=%s (max_reqs~%s) | positions max=%s min=%s | "
+            "state_cache shape=%s",
+            num_actual,
+            int(_bt.max()), int(_bt.min()), _n_blocks, tuple(block_table.shape),
+            int(slot_mapping.max()), int(slot_mapping.min()),
+            int(k_cache_metadata.slot_mapping.max()),
+            int(k_cache_metadata.slot_mapping.min()),
+            int(token_to_req_indices[:num_actual].max()),
+            int(token_to_req_indices[:num_actual].min()),
+            block_table.shape[0],
+            int(positions[:num_actual].max()), int(positions[:num_actual].min()),
+            tuple(state_cache.shape),
+        )
     if head_dim == 512:
         kernel = _fused_kv_compress_norm_rope_insert_sparse_attn_sm80
         num_warps = 4

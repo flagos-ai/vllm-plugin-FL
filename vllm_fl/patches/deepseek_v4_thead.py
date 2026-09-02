@@ -746,6 +746,56 @@ def _patch_torch_compile_model():
                    "support_torch_compile (full-graph mode)")
 
 
+
+
+def _patch_empty_int_zero():
+    """Zero-fill only integer aten::empty allocations (see module docstring
+    of vllm_fl.ops.empty_int_zero). Bridges the gap left by upstream
+    FlagGems PR #5438 for consumers that rely on zeroed index buffers."""
+    from vllm_fl.ops import empty_int_zero
+
+    if empty_int_zero.register():
+        logger.warning("[vllm_fl] aten::empty int-dtype zero-fill installed")
+
+
+
+def _patch_topk_indices_buffer_init():
+    """Fully initialize DeepseekV4Model.topk_indices_buffer.
+
+    Upstream allocates it with torch.empty (max_num_batched_tokens x
+    index_topk, int32) and each step only writes the rows for the current
+    tokens (`buffer[:num_tokens] = -1`). Padding rows / unused columns keep
+    whatever was in memory, and CUDA-graph replay reads the full captured
+    extent -> garbage int32 indices -> out-of-bounds gather in the sparse
+    attention (illegal memory access).
+
+    This was masked while FlagGems overrode aten::empty with a zero-filling
+    triton kernel; upstream FlagGems PR #5438 removed that override, so the
+    buffer must be initialized explicitly. -1 is the sentinel the indexer
+    itself uses for "no index".
+    """
+    import vllm.models.deepseek_v4.nvidia.model as nv_model
+
+    if getattr(nv_model, "_fl_topk_buf_patch", False):
+        return
+
+    cls = nv_model.DeepseekV4Model
+    orig_init = cls.__init__
+
+    import functools
+
+    @functools.wraps(orig_init)
+    def __init__(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        buf = getattr(self, "topk_indices_buffer", None)
+        if buf is not None:
+            buf.fill_(-1)
+
+    cls.__init__ = __init__
+    nv_model._fl_topk_buf_patch = True
+    logger.warning("[vllm_fl] topk_indices_buffer fully initialized to -1")
+
+
 def apply_deepseek_v4_thead_patches():
     """Entry point called from vllm_fl.register_model()."""
     from vllm.platforms import current_platform
@@ -765,6 +815,8 @@ def apply_deepseek_v4_thead_patches():
     _patch_compressor_cache_insert()
     _patch_indexer_num_sms()
     _patch_asymmetric_capture_sizes()
+    _patch_topk_indices_buffer_init()
+    _patch_empty_int_zero()
     _patch_torch_compile_model()
     _patch_int8_weights_mapper()
     _patch_disable_cutedsl()
