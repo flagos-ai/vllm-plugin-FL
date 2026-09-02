@@ -82,6 +82,9 @@ env_defaults: {}
 910c:
   name: "910c"
   tests:
+    timeouts:
+      e2e:
+        serving: 120
     e2e:
       # Add or remove test cases per model
       inference:
