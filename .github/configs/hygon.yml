@@ -18,7 +18,7 @@
 platform: hygon
 
 # Docker image for this hardware.
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-plugin-fl-hygon-vllm0.20.2-dtk26.04-py3.10-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-hygon-ci
 
 # Runner labels for this hardware.
 runner_labels:
