@@ -209,3 +209,10 @@ def test_all_backends_register_all_deepseek_v4_ops(monkeypatch):
             "vendor.cuda",
             "reference.torch",
         }
+
+
+def test_sparse_indexer_overrides_upstream_cuda_entrypoint():
+    from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
+    from vllm_fl.ops.sparse_attn_indexer import SparseAttnIndexerFL
+
+    assert SparseAttnIndexerFL.forward_cuda is not SparseAttnIndexer.forward_cuda

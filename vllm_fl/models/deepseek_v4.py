@@ -130,6 +130,39 @@ direct_register_custom_op(
 )
 
 
+def _deepseek_v4_fl_fp8_o_proj(
+    o: torch.Tensor,
+    positions: torch.Tensor,
+    hidden_size: int,
+    layer_name: str,
+) -> torch.Tensor:
+    del hidden_size
+    layer = get_forward_context().no_compile_layers[layer_name]
+    return DeepseekV4FlashMLAAttention._o_proj(layer, o, positions)
+
+
+def _deepseek_v4_fl_fp8_o_proj_fake(
+    o: torch.Tensor,
+    positions: torch.Tensor,
+    hidden_size: int,
+    layer_name: str,
+) -> torch.Tensor:
+    del positions, layer_name
+    return torch.empty(
+        (o.shape[0], hidden_size),
+        dtype=o.dtype,
+        device=o.device,
+    )
+
+
+direct_register_custom_op(
+    op_name="deepseek_v4_fl_fp8_o_proj",
+    op_func=_deepseek_v4_fl_fp8_o_proj,
+    mutates_args=[],
+    fake_impl=_deepseek_v4_fl_fp8_o_proj_fake,
+)
+
+
 class DeepseekV4FLFlashMLAAttention(DeepseekV4FlashMLAAttention):
     """FlashMLA attention with a W8A8-only wo_a branch."""
 
@@ -565,7 +598,12 @@ class DeepseekV4FLFlashMLAAttention(DeepseekV4FlashMLAAttention):
             weight = getattr(self.wo_a, "weight", None)
             weight_scale = getattr(self.wo_a, "weight_scale", None)
             if weight is None or weight.dtype != torch.int8 or weight_scale is None:
-                return super()._o_proj(o, positions)
+                return torch.ops.vllm.deepseek_v4_fl_fp8_o_proj(
+                    o,
+                    positions,
+                    self.hidden_size,
+                    self.prefix,
+                )
             output_per_group = weight.shape[1] // self.n_local_groups
             grouped_scale = weight_scale.reshape(self.n_local_groups, output_per_group)
 

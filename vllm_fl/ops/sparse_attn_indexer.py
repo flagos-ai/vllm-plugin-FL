@@ -484,6 +484,24 @@ class SparseAttnIndexerFL(SparseAttnIndexer):
     ):
         return self.forward_oot(hidden_states, q_quant, k, weights)
 
+    def forward_cuda(
+        self,
+        hidden_states: torch.Tensor,
+        q_quant: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
+        k: torch.Tensor,
+        weights: torch.Tensor,
+    ):
+        """Keep NVIDIA CUDA on the FL INT8-aware indexer path.
+
+        vLLM 0.24 selects its in-tree CUDA platform even when the FL plugin is
+        loaded.  Without this override ``CustomOp.forward`` resolves the
+        inherited upstream ``SparseAttnIndexer.forward_cuda``, which sends an
+        INT8 query to DeepGEMM's FP8-only MQA kernel.  The FL entrypoint owns
+        the mixed-cache dispatch and routes its helper kernels through
+        OpManager.
+        """
+        return self.forward_oot(hidden_states, q_quant, k, weights)
+
     def forward_oot(
         self,
         hidden_states: torch.Tensor,

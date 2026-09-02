@@ -35,9 +35,10 @@ class CudaBackend(Backend):
         """
         Check if CUDA hardware and libraries are available.
 
-        This method uses the platform's vendor information from FlagGems
-        to determine if the device is a real NVIDIA GPU, decoupling from
-        CUDA-alike devices (MACA, MUSA, etc.) which have their own vendor names.
+        Use vLLM's platform discriminator rather than ``device_name``.  The
+        in-tree NVIDIA platform reports ``device_name == "cuda"`` and has no
+        ``vendor_name``, while CUDA-alike out-of-tree platforms override
+        ``is_cuda()`` to remain distinct from NVIDIA.
         """
         if CudaBackend._available is None:
             try:
@@ -48,13 +49,7 @@ class CudaBackend(Backend):
 
                 from vllm.platforms import current_platform
 
-                if (
-                    hasattr(current_platform, "device_name")
-                    and current_platform.device_name == "nvidia"
-                ):
-                    CudaBackend._available = True
-                else:
-                    CudaBackend._available = False
+                CudaBackend._available = current_platform.is_cuda()
             except Exception:
                 CudaBackend._available = False
         return CudaBackend._available

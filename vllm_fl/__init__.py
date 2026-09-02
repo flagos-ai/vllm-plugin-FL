@@ -25,6 +25,8 @@ from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 logger = logging.getLogger(__name__)
 
+_DEEPSEEK_V4_FL_ATTENTION_OP = "vllm::deepseek_v4_fl_attention"
+
 
 def __getattr__(name):
     if name == "distributed":
@@ -95,11 +97,25 @@ def _patch_custom_ops():
     register_op_schemas()
 
 
+def _register_compilation_splitting_ops():
+    """Keep stateful FL attention outside compiled graph partitions."""
+    from vllm.config.compilation import CompilationConfig
+
+    if _DEEPSEEK_V4_FL_ATTENTION_OP not in CompilationConfig._attention_ops:
+        CompilationConfig._attention_ops.append(_DEEPSEEK_V4_FL_ATTENTION_OP)
+
+
 def register():
     """Register the FL platform."""
     _patch_custom_ops()
     _patch_flash_attn_import()
     _patch_transformers_compat()
+
+    # Platform plugins are evaluated while vllm.platforms is still resolving
+    # current_platform. Importing CompilationConfig here re-enters platform
+    # resolution on vLLM 0.24; the plugin loader suppresses that exception and
+    # silently falls back to the in-tree CUDA platform. Register model-specific
+    # splitting ops later from register_model(), after PlatformFL is active.
 
     # Model-specific platform patches
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
@@ -140,6 +156,8 @@ def register_model():
     """Register FL-specific models not yet upstream."""
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
+    _register_compilation_splitting_ops()
+
     from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
 
