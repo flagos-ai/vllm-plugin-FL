@@ -1,17 +1,22 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-#
-# 2026 - Modified by Kunlunxin, Inc. All Rights Reserved.
 
 import json
 import os
+import re
+import subprocess
+from pathlib import Path
 from typing import Optional, Tuple
 
 import flag_gems
-from flag_gems.runtime.backend.device import DeviceDetector
+try:
+    # FlagGems<=5.0.2: DeviceDetector lives in device.
+    from flag_gems.runtime.backend.device import DeviceDetector
+except (ImportError, FileNotFoundError):
+    # FlagGems>5.0.2: DeviceDetector lives in device_finder.
+    from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend
 
 _OP_CONFIG: Optional[dict[str, str]] = None
-
 
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
@@ -27,7 +32,7 @@ _OP_CONFIG: Optional[dict[str, str]] = None
 #   Source: runtime platform detection (current_platform.device_name).
 #
 # Values are normalized to lowercase and matched against available backend
-# subdirectories (for example, cuda/ascend/metax/iluvatar/mthreads/kunlunxin).
+# subdirectories (for example, cuda/ascend/metax/iluvatar/mthreads).
 VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     # Registered backend: vendor/cuda
     "nvidia": {"device_type": "cuda", "device_name": "nvidia"},
@@ -39,12 +44,14 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "metax": {"device_type": "cuda", "device_name": "metax"},
     # Registered backend: vendor/musa
     "mthreads": {"device_type": "musa", "device_name": "musa"},
-    # Registered backend: vendor/kunlunxin
-    "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
+    # Registered backend: vendor/sunrise
+    "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
     # Registered backend: vendor/hygon
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
      # Registered backend: vendor/txda
     "tsingmicro": {"device_type": "txda", "device_name": "txda"},
+    # Registered backend: vendor/thead (PPU)
+    "thead": {"device_type": "cuda", "device_name": "thead"},
 }
 
 
@@ -213,7 +220,7 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "kunlunxin", "hygon"]
+        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
@@ -335,6 +342,86 @@ def is_oot_enabled() -> bool:
         return False
     enabled_str = os.environ.get("VLLM_FL_OOT_ENABLED", "1")
     return enabled_str.lower() in ("1", "true")
+
+
+_CUSTOM_OP_ENABLED = None
+
+
+def enable_custom_op() -> bool:
+    """
+    Enable vllm-plugin-FL CANN custom ops deployed under vllm_fl/_cann_ops_custom.
+
+    Mirrors vllm_ascend.utils.enable_custom_op: sources the generated
+    set_env.bash (or falls back to setting ASCEND_CUSTOM_OPP_PATH and
+    LD_LIBRARY_PATH directly) so that the aclnn custom-op symbols can be
+    discovered at runtime.
+
+    The absolute paths baked into set_env.bash during installation are not
+    trusted blindly, because the installed package may have been moved to a
+    different prefix.  We always override the two critical variables with
+    paths derived from the actual vllm_fl package location.
+
+    Returns:
+        True if custom-op environment was configured, False otherwise.
+    """
+    global _CUSTOM_OP_ENABLED
+    if _CUSTOM_OP_ENABLED is not None:
+        return _CUSTOM_OP_ENABLED
+
+    custom_ops_root = Path(__file__).parent / "_cann_ops_custom"
+    if not custom_ops_root.is_dir():
+        _CUSTOM_OP_ENABLED = False
+        return _CUSTOM_OP_ENABLED
+
+    vendor_dir = custom_ops_root / "vendors" / "custom_transformer"
+    set_env_script = vendor_dir / "bin" / "set_env.bash"
+
+    if set_env_script.is_file():
+        try:
+            # Source the script in a subshell and capture exported variables.
+            output = subprocess.check_output(
+                ["bash", "-c", f"source '{set_env_script}' && env"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            for line in output.splitlines():
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                # Preserve any extra environment variables exported by the
+                # script, but do NOT keep ASCEND_CUSTOM_OPP_PATH or
+                # LD_LIBRARY_PATH from set_env.bash: they contain absolute
+                # paths that become stale when the package is relocated.
+                if key and key not in (
+                    "ASCEND_CUSTOM_OPP_PATH",
+                    "LD_LIBRARY_PATH",
+                ):
+                    os.environ[key] = value
+        except subprocess.CalledProcessError:
+            # Fall back to setting the two known variables directly.
+            pass
+
+    # Always use paths derived from the actual installed location.
+    _set_custom_op_env_paths(vendor_dir)
+
+    _CUSTOM_OP_ENABLED = True
+    return _CUSTOM_OP_ENABLED
+
+
+def _set_custom_op_env_paths(vendor_dir: Path) -> None:
+    """Set ASCEND_CUSTOM_OPP_PATH and LD_LIBRARY_PATH for the custom op package."""
+    vendor_str = str(vendor_dir)
+    lib_dir = str(vendor_dir / "op_api" / "lib")
+
+    old_opp_path = os.environ.get("ASCEND_CUSTOM_OPP_PATH", "")
+    os.environ["ASCEND_CUSTOM_OPP_PATH"] = (
+        f"{vendor_str}:{old_opp_path}" if old_opp_path else vendor_str
+    )
+
+    old_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = (
+        f"{lib_dir}:{old_ld_path}" if old_ld_path else lib_dir
+    )
 
 
 if __name__ == "__main__":

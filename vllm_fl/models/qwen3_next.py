@@ -58,6 +58,19 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
 )
+
+try:
+    # Ascend-only eager mm+allreduce+add+rmsnorm MC2 fusion
+    # (VLLM_FL_ENABLE_MM_AR_RMSNORM=1). Guarded for other vendors.
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.mm_allreduce_rmsnorm import (  # noqa: E501
+        MM_AR_RMSNORM_MIN_TOKENS,
+        mm_ar_rmsnorm_enabled,
+    )
+except ImportError:
+    MM_AR_RMSNORM_MIN_TOKENS = 1 << 62
+
+    def mm_ar_rmsnorm_enabled() -> bool:
+        return False
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader,
     sharded_weight_loader,
@@ -492,7 +505,13 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         core_attn_out = self.norm(core_attn_out, z)
         core_attn_out = core_attn_out.reshape(z_shape_og)
         core_attn_out = rearrange(core_attn_out, "... h d -> ... (h d)")
+        if mm_ar_rmsnorm_enabled():
+            # Skip out_proj: the caller fuses projection + all-reduce +
+            # residual + RMSNorm via matmul_allreduce_add_rmsnorm. Return the
+            # pre-projection activation instead of writing ``output``.
+            return core_attn_out.contiguous()
         output[:num_tokens], _ = self.out_proj(core_attn_out)
+        return None
 
     def _forward_core(
         self,
@@ -805,7 +824,14 @@ class Qwen3NextAttention(nn.Module):
             gate = torch.sigmoid(gate)
             attn_output = attn_output * gate
 
+        if mm_ar_rmsnorm_enabled():
+            # Skip o_proj: the caller fuses projection + all-reduce +
+            # residual + RMSNorm via matmul_allreduce_add_rmsnorm. Return the
+            # pre-projection activation instead of writing ``output``.
+            return attn_output.reshape(
+                -1, self.num_heads * self.head_dim).contiguous()
         output[:], _ = self.o_proj(attn_output)
+        return None
 
 
 class Qwen3NextDecoderLayer(nn.Module):
@@ -906,19 +932,43 @@ class Qwen3NextDecoderLayer(nn.Module):
 
         self_attention_output = torch.empty_like(hidden_states)
         if self.layer_type == "linear_attention":
-            self.linear_attn(
+            attn_pre_proj = self.linear_attn(
                 hidden_states=hidden_states,
                 output=self_attention_output,
             )
         elif self.layer_type == "full_attention":
-            self.self_attn(
+            attn_pre_proj = self.self_attn(
                 hidden_states=hidden_states,
                 output=self_attention_output,
                 positions=positions,
             )
         else:
             raise ValueError("Invalid layer_type")
-        hidden_states = self_attention_output
+
+        if attn_pre_proj is not None:
+            # Eager MC2 fusion path (VLLM_FL_ENABLE_MM_AR_RMSNORM=1): the
+            # attention block returned the pre-projection activation.
+            proj = (self.linear_attn.out_proj
+                    if self.layer_type == "linear_attention" else
+                    self.self_attn.o_proj)
+            if (not self.layer_scale and attn_pre_proj.shape[0]
+                    > MM_AR_RMSNORM_MIN_TOKENS):
+                # Fuse projection + TP all-reduce + residual add + RMSNorm.
+                # Only worth it above the token threshold; small-M steps
+                # (decode) take the unfused path below.
+                hidden_states, residual = torch.ops.vllm.fused_mm_allreduce_add_rmsnorm(
+                    attn_pre_proj,
+                    proj.weight,
+                    residual,
+                    1.0 + self.post_attention_layernorm.weight,
+                    self.post_attention_layernorm.variance_epsilon,
+                )
+                hidden_states = self.mlp(hidden_states)
+                return hidden_states, residual
+            # layer_scale or below-threshold M: project unfused.
+            hidden_states, _ = proj(attn_pre_proj)
+        else:
+            hidden_states = self_attention_output
 
         if self.layer_scale:
             if len(hidden_states.shape) == 2:

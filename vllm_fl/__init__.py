@@ -5,6 +5,52 @@
 import os
 import logging
 
+
+def _bootstrap_cann_custom_op_env():
+    """Make the packaged CANN custom-op package discoverable at runtime.
+
+    The AscendC custom ops under ``vllm_fl/_cann_ops_custom`` require
+    ``ASCEND_CUSTOM_OPP_PATH`` to be set *before* the CANN runtime is
+    initialized (the op registration/infershape scan happens at aclInit
+    time), and ``libcust_opapi.so`` to be resolvable by bare-name
+    ``dlopen`` (which only consults the startup-time ``LD_LIBRARY_PATH``).
+    Running this at vllm_fl package import time — before torch_npu/CANN
+    initialization — makes the ops work without sourcing ``set_env.bash``.
+    The libcust preload uses RTLD_LOCAL: RTLD_GLOBAL causes a double-free
+    at process teardown.
+    """
+    vendor_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "_cann_ops_custom",
+        "vendors",
+        "custom_transformer",
+    )
+    if not os.path.isdir(vendor_dir):
+        return
+    opp_path = os.environ.get("ASCEND_CUSTOM_OPP_PATH", "")
+    if vendor_dir not in opp_path:
+        os.environ["ASCEND_CUSTOM_OPP_PATH"] = vendor_dir + (
+            ":" + opp_path if opp_path else ""
+        )
+    lib_dir = os.path.join(vendor_dir, "op_api", "lib")
+    if lib_dir not in os.environ.get("LD_LIBRARY_PATH", ""):
+        os.environ["LD_LIBRARY_PATH"] = lib_dir + (
+            ":" + os.environ["LD_LIBRARY_PATH"]
+            if os.environ.get("LD_LIBRARY_PATH")
+            else ""
+        )
+        try:
+            import ctypes
+
+            ctypes.CDLL(
+                os.path.join(lib_dir, "libcust_opapi.so"), mode=ctypes.RTLD_LOCAL
+            )
+        except OSError:
+            pass
+
+
+_bootstrap_cann_custom_op_env()
+
 from vllm_fl.utils import get_op_config as _get_op_config
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
@@ -168,3 +214,35 @@ def register_model():
         )
     except Exception as e:
         logger.error(f"Register BgeM3EmbeddingModel error: {str(e)}")
+
+    # Ensure Qwen3NextMTP draft configs are treated as text-only even when
+    # ModelConfig is reconstructed in worker processes before the platform
+    # post-init patch is active.
+    try:
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_qwen3_mtp import (
+            patch_qwen3_next_mtp_multimodal_flag,
+        )
+        patch_qwen3_next_mtp_multimodal_flag()
+    except Exception as e:
+        logger.error(f"Patch Qwen3NextMTP multimodal flag error: {str(e)}")
+
+    # Use Ascend-compatible rejection-sampler helpers for speculative decoding.
+    try:
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_qwen3_mtp import (
+            patch_ascend_rejection_sampler,
+        )
+        patch_ascend_rejection_sampler()
+    except Exception as e:
+        logger.error(f"Patch Ascend rejection sampler error: {str(e)}")
+
+    # Honor VLLM_CUDAGRAPH_* environment variables so that scripts can limit
+    # NPU graph capture sizes without passing --compilation-config.
+    try:
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_qwen3_mtp import (
+            patch_cudagraph_env_vars,
+        )
+        patch_cudagraph_env_vars()
+    except Exception as e:
+        logger.error(f"Apply cudagraph env patch error: {str(e)}")
+
+    return "vllm_fl.platform.PlatformFL"
