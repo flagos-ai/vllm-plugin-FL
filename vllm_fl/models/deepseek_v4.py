@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 
 from vllm.compilation.decorators import support_torch_compile
-from vllm.config import VllmConfig, get_current_vllm_config
+from vllm.config import CUDAGraphMode, VllmConfig, get_current_vllm_config
 from vllm.distributed import (
     get_ep_group,
     get_tensor_model_parallel_rank,
@@ -68,10 +68,7 @@ from vllm.model_executor.models.utils import (
 )
 from vllm_fl.ops.deepseek_v4_attention import (
     DeepseekV4Indexer as DeepseekV4IndexerFP8,
-)
-from vllm_fl.ops.deepseek_v4_attention_bf16 import (
-    DeepseekV4Indexer as DeepseekV4IndexerBF16,
-    DeepseekV4MultiHeadLatentAttentionBF16Wrapper,
+    is_metax_w8a8,
 )
 
 _DEEPSEEK_V4_EXPERT_DTYPES = ("bf16", "fp4", "fp8")
@@ -160,6 +157,8 @@ class WOAColumnParallelLinear(ColumnParallelLinear):
             if not getattr(layer, "is_bmm", False):
                 return
             w = layer.weight
+            if w.dtype == torch.int8:
+                return
             if w.ndim != 2:
                 # Already reshaped by the kernel (e.g. DeepGemm kernel)
                 return
@@ -1161,10 +1160,8 @@ class DeepseekV4Attention(nn.Module):
             prefix=f"{prefix}.wo_b",
         )
         self.softmax_scale = self.head_dim**-0.5
-        hf_quant_config = getattr(config, "quantization_config", None)
-        self.scale_fmt = (
-            hf_quant_config["scale_fmt"] if hf_quant_config is not None else None
-        )
+        hf_quant_config = getattr(config, "quantization_config", None) or {}
+        self.scale_fmt = hf_quant_config.get("scale_fmt")
 
         self.rope_parameters = config.rope_scaling
 
@@ -1193,11 +1190,12 @@ class DeepseekV4Attention(nn.Module):
         self.indexer = None
         if self.compress_ratio == 4:
             # Only C4A uses sparse attention and hence has indexer.
-            indexer_cls = (
-                DeepseekV4IndexerBF16
-                if getattr(config, "expert_dtype", "fp4") == "bf16"
-                else DeepseekV4IndexerFP8
-            )
+            if getattr(config, "expert_dtype", "fp4") == "bf16":
+                from vllm_fl.ops.deepseek_v4_attention_bf16 import (
+                    DeepseekV4Indexer as indexer_cls,
+                )
+            else:
+                indexer_cls = DeepseekV4IndexerFP8
             self.indexer = indexer_cls(
                 vllm_config,
                 config=config,
@@ -1230,11 +1228,12 @@ class DeepseekV4Attention(nn.Module):
         use_bf16_attention = isinstance(
             self.wo_a.quant_method, UnquantizedLinearMethod
         )
-        attention_wrapper_cls = (
-            DeepseekV4MultiHeadLatentAttentionBF16Wrapper
-            if use_bf16_attention
-            else DeepseekV4MultiHeadLatentAttentionWrapper
-        )
+        if use_bf16_attention:
+            from vllm_fl.ops.deepseek_v4_attention_bf16 import (
+                DeepseekV4MultiHeadLatentAttentionBF16Wrapper as attention_wrapper_cls,
+            )
+        else:
+            attention_wrapper_cls = DeepseekV4MultiHeadLatentAttentionWrapper
         self.mla_attn = attention_wrapper_cls(
             hidden_size=self.hidden_size,
             num_heads=self.n_local_heads,
@@ -1273,11 +1272,19 @@ class DeepseekV4DecoderLayer(nn.Module):
     ):
         super().__init__()
 
-        # Lazy import to avoid top-level tilelang dependency.
-        # Registers both torch.ops.vllm.mhc_pre and mhc_post
-        import vllm.model_executor.layers.mhc  # noqa: F401
-
         config = vllm_config.model_config.hf_config
+        use_metax_int8 = is_metax_w8a8(vllm_config)
+        use_metax_graph = (
+            use_metax_int8
+            and vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        )
+        if not use_metax_int8:
+            import vllm.model_executor.layers.mhc  # noqa: F401
+
+        self.prefix = prefix
+        if use_metax_graph:
+            vllm_config.compilation_config.static_forward_context[prefix] = self
+
         self.hidden_size = config.hidden_size
 
         self.rms_norm_eps = config.rms_norm_eps
@@ -1367,7 +1374,7 @@ class DeepseekV4DecoderLayer(nn.Module):
         post: torch.Tensor,
         comb: torch.Tensor,
     ):
-        return _mhc_post( x=x, residual=residual, post=post, comb=comb)
+        return _mhc_post(x=x, residual=residual, post=post, comb=comb)
 
     def forward(
         self,
@@ -1401,6 +1408,10 @@ class DeepseekV4Model(nn.Module):
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         self.config = config
+        self.use_metax_graph = (
+            is_metax_w8a8(vllm_config)
+            and vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        )
         self.use_mega_moe = (
             vllm_config.kernel_config.moe_backend == "deep_gemm_mega_moe"
         )
@@ -1495,24 +1506,39 @@ class DeepseekV4Model(nn.Module):
         hidden_states = hidden_states.unsqueeze(-2).repeat(1, self.hc_mult, 1)
 
         for layer in islice(self.layers, self.start_layer, self.end_layer):
-            hidden_states = layer(
-                hidden_states,
-                positions,
-                input_ids,
-            )
+            if self.use_metax_graph:
+                hidden_states = torch.ops.vllm.deepseek_v4_decoder_layer_fl(
+                    hidden_states, positions, input_ids, layer.prefix
+                )
+            else:
+                hidden_states = layer(
+                    hidden_states,
+                    positions,
+                    input_ids,
+                )
 
         # Stash pre-hc_head residual for the MTP draft (captured copy_).
         num_tokens = hidden_states.shape[0]
         self._mtp_hidden_buffer[:num_tokens].copy_(hidden_states.flatten(1))
 
-        hidden_states = hc_head(
-            hidden_states,
-            self.hc_head_fn,
-            self.hc_head_scale,
-            self.hc_head_base,
-            self.rms_norm_eps,
-            self.hc_eps,
-        )
+        if self.use_metax_graph:
+            hidden_states = torch.ops.vllm.deepseek_v4_hc_head_fl(
+                hidden_states,
+                self.hc_head_fn,
+                self.hc_head_scale,
+                self.hc_head_base,
+                self.rms_norm_eps,
+                self.hc_eps,
+            )
+        else:
+            hidden_states = hc_head(
+                hidden_states,
+                self.hc_head_fn,
+                self.hc_head_scale,
+                self.hc_head_base,
+                self.rms_norm_eps,
+                self.hc_eps,
+            )
         hidden_states = self.norm(hidden_states)
         return hidden_states
 
@@ -1635,8 +1661,26 @@ class DeepseekV4Model(nn.Module):
             layer.ffn.finalize_mega_moe_weights()
 
 
-@torch.compile(backend=current_platform.simple_compile_backend)
-def hc_head(
+def _deepseek_v4_decoder_layer_fl(
+    x: torch.Tensor,
+    positions: torch.Tensor,
+    input_ids: torch.Tensor | None,
+    layer_name: str,
+) -> torch.Tensor:
+    layer = get_forward_context().no_compile_layers[layer_name]
+    return layer(x, positions, input_ids)
+
+
+def _deepseek_v4_decoder_layer_fl_fake(
+    x: torch.Tensor,
+    positions: torch.Tensor,
+    input_ids: torch.Tensor | None,
+    layer_name: str,
+) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
+def _deepseek_v4_hc_head_fl(
     hidden_states: torch.Tensor,
     hc_fn: torch.Tensor,
     hc_scale: torch.Tensor,
@@ -1665,6 +1709,53 @@ def hc_head(
     return out.view(*outer_shape, hidden_size)
 
 
+def _deepseek_v4_hc_head_fl_fake(
+    hidden_states: torch.Tensor,
+    hc_fn: torch.Tensor,
+    hc_scale: torch.Tensor,
+    hc_base: torch.Tensor,
+    rms_norm_eps: float,
+    hc_eps: float,
+) -> torch.Tensor:
+    del hc_fn, hc_scale, hc_base, rms_norm_eps, hc_eps
+    return hidden_states.new_empty(
+        (*hidden_states.shape[:-2], hidden_states.shape[-1])
+    )
+
+
+direct_register_custom_op(
+    op_name="deepseek_v4_decoder_layer_fl",
+    op_func=_deepseek_v4_decoder_layer_fl,
+    mutates_args=[],
+    fake_impl=_deepseek_v4_decoder_layer_fl_fake,
+)
+direct_register_custom_op(
+    op_name="deepseek_v4_hc_head_fl",
+    op_func=_deepseek_v4_hc_head_fl,
+    mutates_args=[],
+    fake_impl=_deepseek_v4_hc_head_fl_fake,
+)
+
+
+@torch.compile(backend=current_platform.simple_compile_backend)
+def hc_head(
+    hidden_states: torch.Tensor,
+    hc_fn: torch.Tensor,
+    hc_scale: torch.Tensor,
+    hc_base: torch.Tensor,
+    rms_norm_eps: float,
+    hc_eps: float,
+) -> torch.Tensor:
+    return _deepseek_v4_hc_head_fl(
+        hidden_states,
+        hc_fn,
+        hc_scale,
+        hc_base,
+        rms_norm_eps,
+        hc_eps,
+    )
+
+
 def _make_deepseek_v4_weights_mapper(expert_dtype: str) -> WeightsMapper:
     if expert_dtype == "fp4":
         # MXFP4 experts use Mxfp4MoEMethod, which registers scales as
@@ -1674,6 +1765,10 @@ def _make_deepseek_v4_weights_mapper(expert_dtype: str) -> WeightsMapper:
         scale_regex = {
             re.compile(r"(\.experts\.\d+\.w[123])\.scale$"): r"\1.weight_scale",
             re.compile(r"\.scale$"): ".weight_scale_inv",
+        }
+    elif expert_dtype == "int8":
+        scale_regex = {
+            re.compile(r"\.scale$"): ".weight_scale",
         }
     else:
         # FP8 experts use Fp8MoEMethod (block_quant=True), which registers
@@ -1716,8 +1811,24 @@ class DeepseekV4ForCausalLM(nn.Module):
         config = vllm_config.model_config.hf_config
         self.config = config
         expert_dtype = getattr(config, "expert_dtype", "fp4")
-        if expert_dtype != "fp4":
-            self.hf_to_vllm_mapper = _make_deepseek_v4_weights_mapper(expert_dtype)
+        use_metax_int8 = is_metax_w8a8(vllm_config)
+        if use_metax_int8:
+            from vllm_fl.dispatch.backends.vendor.metax.impl.deepseek_v4_swa import (
+                apply_metax_swa_patch,
+            )
+            from vllm_fl.quantization.w8a8.deepseek_v4 import DeepseekV4W8A8Config
+
+            if vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+                vllm_config.compilation_config.cudagraph_mode = (
+                    CUDAGraphMode.FULL_DECODE_ONLY
+                )
+            apply_metax_swa_patch()
+            vllm_config.quant_config = DeepseekV4W8A8Config.from_config(
+                vllm_config.quant_config.config
+            )
+        if use_metax_int8 or expert_dtype != "fp4":
+            mapper_dtype = "int8" if use_metax_int8 else expert_dtype
+            self.hf_to_vllm_mapper = _make_deepseek_v4_weights_mapper(mapper_dtype)
 
         self.model = self.model_cls(
             vllm_config=vllm_config, prefix=maybe_prefix(prefix, "model")
