@@ -48,6 +48,16 @@ def reshape_and_cache_flash(
       - No dynamic shapes (no boolean masking)
       - No CPU-GPU synchronization (no .item()/.cpu()/.tolist())
     """
+    # In PIECEWISE CUDA graph mode, key/value tensors are padded to the
+    # capture size by the compiled graph, but slot_mapping only contains
+    # entries for actual tokens. Truncate key/value to match slot_mapping
+    # length to avoid shape mismatch in index_put_.
+    # In FULL CUDA graph mode, slot_mapping is also padded to the capture
+    # size, so this slice is a no-op.
+    num_tokens = slot_mapping.shape[0]
+    key = key[:num_tokens]
+    value = value[:num_tokens]
+
     block_size = key_cache.size(1)
 
     # Clamp negative slots to 0 (NULL_BLOCK_ID). Block 0 is reserved

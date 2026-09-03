@@ -222,9 +222,7 @@ def fused_recurrent_gated_delta_rule_packed_decode_gcu(
         raise ValueError(
             f"Packed decode kernel only supports NK=1 (got K={K}, BK={BK})."
         )
-    # Qwen3.8 GDN uses V=128. Covering V in one tile avoids four duplicate
-    # Q/K and scalar loads per value head compared with a 32-element tile.
-    BV = min(triton.next_power_of_2(V), 128)
+    BV = min(triton.next_power_of_2(V), 32)
     num_stages = 3
     num_warps = 1
 
