@@ -89,6 +89,7 @@ jobs:
       - name: Upload coverage report
         if: inputs.upload_coverage && always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: coverage-${{ inputs.platform }}
           path: |

@@ -96,6 +96,14 @@ jobs:
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
+      - name: Check test models
+        run: |
+          python .github/scripts/generate_matrix.py \
+            --platform ${{ inputs.platform }} \
+            --device "${{ inputs.device }}" \
+            --cases '${{ inputs.cases }}' \
+            --check-models
+
       - name: Run E2E test
         run: |
           python tests/run.py \
@@ -108,6 +116,7 @@ jobs:
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}
           path: |

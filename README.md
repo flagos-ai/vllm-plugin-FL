@@ -32,6 +32,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Moore Threads | Supported | - |
 | Hygon | Supported | - |
 | Sunrise | Supported | - |
+| Enflame | Supported | - |
 
 ## Quick Start
 
@@ -98,7 +99,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     ```sh
     git clone https://github.com/flagos-ai/FlagCX.git
     cd FlagCX
-    git checkout -b v0.9.0
+    git checkout -b v0.13.0
     git submodule update --init --recursive
     ```
 
@@ -154,7 +155,7 @@ import torch
 from vllm.config.compilation import CompilationConfig
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     prompts = [
         "Hello, my name is",
     ]

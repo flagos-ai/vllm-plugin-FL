@@ -1,14 +1,16 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import logging
-from typing import Optional, List
 
 from vllm.model_executor.custom_op import CustomOp, PluggableLayer
-from .layernorm import *  # noqa F403 F401
+
 from .activation import *  # noqa F403 F401
-from .rotary_embedding import *  # noqa F403 F401
+from .deepseek_v4_attention import (
+    DeepseekV4MultiHeadLatentAttentionFLWrapper,  # noqa F403 F401
+)
 from .fused_moe import *  # noqa F403 F401
-from .deepseek_v4_attention import DeepseekV4MultiHeadLatentAttentionFLWrapper # noqa F403 F401
+from .layernorm import *  # noqa F403 F401
+from .rotary_embedding import *  # noqa F403 F401
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,11 @@ OOT_OPS = {
     ),
     "deepseek_v4_multi_head_latent_attention": (
         DeepseekV4MultiHeadLatentAttentionFLWrapper,
-        "DeepseekV4MultiHeadLatentAttentionWrapper"
+        "DeepseekV4MultiHeadLatentAttentionWrapper",
     ),  # noqa F405
     "gated_layer": (GateLinearFL, "GateLinear"),
 }
+
 
 def _patch_unquantized_moe_oracle() -> None:
     """
@@ -48,15 +51,40 @@ def _patch_unquantized_moe_oracle() -> None:
     would get (OOT, None), skip _setup_kernel, and crash at inference time.
     """
     import vllm.model_executor.layers.fused_moe.oracle.unquantized as _oracle_mod
+
     from vllm_fl.ops.fused_moe.fused_moe_utils import select_unquantized_moe_backend_oot
+
     _oracle_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
     # Also patch the import in unquantized_fused_moe_method module
     import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as _method_mod
+
     _method_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
     logger.info("Patched select_unquantized_moe_backend to bypass OOT short-circuit")
 
 
-def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
+def _patch_w8a8_moe_oracle() -> None:
+    """Route dynamic-token INT8 MoE to vLLM's functional experts path."""
+    from vllm_fl.quantization.w8a8.moe import (
+        install_fl_w8a8_moe_selector,
+    )
+
+    install_fl_w8a8_moe_selector()
+    logger.info("Configured dynamic-token W8A8 MoE for the FL OOT platform")
+
+
+def _patch_wna16_moe() -> None:
+    """Route pack-quantized WNA16 MoE to an available FL backend."""
+    from vllm_fl.quantization.marlin import configure_wna16_moe_backend
+    from vllm_fl.quantization.wna16.moe import (
+        install_fl_wna16_moe_method,
+    )
+
+    if install_fl_wna16_moe_method():
+        backend = configure_wna16_moe_backend()
+        logger.info("Configured WNA16 MoE backend for FL: %s", backend)
+
+
+def register_oot_ops(whitelist: list[str] | None = None) -> None:
     """
     Register OOT (out-of-tree) custom operators.
 
@@ -72,7 +100,25 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     the upstream select_unquantized_moe_backend oracle is monkey-patched
     so it picks native CUDA backends instead of returning (OOT, None).
     """
-    from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
+    from vllm_fl.utils import (
+        get_oot_blacklist,
+        get_oot_whitelist,
+        is_oot_enabled,
+        use_flaggems_op,
+    )
+
+    # This is independent of PluggableLayer registration. In particular, MUSA
+    # skips the generic linear-kernel import path, but still needs the INT8 MoE
+    # oracle patched before model construction.
+    try:
+        _patch_w8a8_moe_oracle()
+    except (ImportError, AttributeError, OSError, RuntimeError) as exc:
+        logger.warning("Could not configure FL W8A8 MoE: %s", exc)
+
+    try:
+        _patch_wna16_moe()
+    except (ImportError, AttributeError, OSError, RuntimeError) as exc:
+        logger.warning("Could not configure FL WNA16 MoE: %s", exc)
 
     # Check if OOT registration is enabled
     if not is_oot_enabled():
@@ -113,18 +159,34 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
         op_cls, registration_name = OOT_OPS[op_name]
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
         if issubclass(op_cls, PluggableLayer):
-            PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)
+            PluggableLayer.register_oot(
+                _decorated_layer_cls=op_cls, name=registration_name
+            )
         else:
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
-        # Apply Ascend NPU monkey-patches if running on NPU.
-        # These replace upstream module-level functions (e.g. in qwen3_next) with
-        # Ascend implementations that bypass the CustomOp/dispatch path.
-        from vllm.platforms import current_platform
-        if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
-            apply_ascend_patches()
 
-        # Apply Sunrise/PTPU monkey-patches if running on PTPU.
-        if current_platform.device_type == "ptpu":
-            from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
-            apply_sunrise_patches()
+    # Apply platform-specific monkey-patches unconditionally (outside the OOT
+    # registration loop) so they run even when the whitelist is empty or all ops
+    # are excluded.  Each patch function is idempotent.
+    from vllm.platforms import current_platform
+
+    # Apply Ascend NPU monkey-patches if running on NPU.
+    if current_platform.device_type == "npu":
+        from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
+        apply_ascend_patches()
+
+    # Apply Sunrise/PTPU monkey-patches if running on PTPU.
+    if current_platform.device_type == "ptpu":
+        from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
+        apply_sunrise_patches()
+
+    # Apply GCU monkey-patches (Triton grid limits, etc.).
+    if getattr(current_platform, "vendor_name", None) == "gcu":
+        from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+        apply_gcu_patches()
+
+    # Apply Kunlunxin monkey-patches if running on Kunlunxin hardware.
+    from vllm_fl.dispatch.config.utils import get_platform_name
+    if get_platform_name() == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import apply_kunlunxin_patches
+        apply_kunlunxin_patches()

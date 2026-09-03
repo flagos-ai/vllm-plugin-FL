@@ -18,15 +18,11 @@
 platform: ascend
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.2.0-ascend-ci
+ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:ascend-vllm0.20.2-a3-ci
 
 # Runner labels for this hardware
 runner_labels:
-  - self-hosted
-  - Linux
-  - ARM64
-  - ascend
-  - npu-16
+  - flagcicd-910c
 
 # Container volumes (hardware-specific paths)
 container_volumes:
@@ -44,6 +40,8 @@ container_options: >-
   --hostname vllm-plugin-fl
   --ipc=host
   --privileged
+  --env ASCEND_RT_VISIBLE_DEVICES=14,15
+  --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
   --device /dev/davinci0
   --device /dev/davinci1
   --device /dev/davinci2

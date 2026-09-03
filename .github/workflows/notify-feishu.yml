@@ -22,6 +22,8 @@ on:
 jobs:
   notify:
     name: "Notify (overall)"
+    # Don't notify when CI was skipped (draft/WIP/fork-internal PRs)
+    if: github.event.workflow_run.conclusion != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
