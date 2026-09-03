@@ -390,7 +390,7 @@ def patch_decode_attention():
             if max_window_size > 0:
                 window_left = max_window_size
                 window_right = 0
-
+            alpha = scale * (float(decode_query.shape[2]) ** 0.5)
             xtorch_ops.prefill_attention(
                 decode_query,
                 key_cache,
@@ -398,7 +398,7 @@ def patch_decode_attention():
                 decode_output,
                 is_causal=True,
                 is_prefix_cache=True,
-                alpha=scale,
+                alpha=alpha,
                 context_qlen_lod_cpu=query_start_loc_host,
                 context_qlen_lod_xpu=query_start_loc,
                 context_kvlen_lod_cpu=kv_prefix_start_loc_host,
