@@ -8,13 +8,14 @@ based kernel that lets the GCU compiler lower A/B tile loads to DMA.
 VPD profile (Qwen3.5-397B-A17B-FP8, TP=8):
   _w8a8_triton_block_scaled_mm = 21.64% of GPU time (122.66s, 19200 calls)
 
-Launch config (auto-tuned on GCU):
-  BLOCK_SIZE_M=128 BLOCK_SIZE_N=128 BLOCK_SIZE_K=128
-  GROUP_SIZE_M=64 num_warps=4 num_stages=2
+Launch config (auto-tuned on GCU, see _select_gcu_config):
+  BLOCK_SIZE_N=128 BLOCK_SIZE_K=128 GROUP_SIZE_M=64 num_warps=4 num_stages=3
+  BLOCK_SIZE_M adapts to M: min(128, max(16, next_pow2(M)))  — decode win.
 """
 
 from __future__ import annotations
 
+import importlib
 import logging
 
 import torch
@@ -23,6 +24,13 @@ from vllm.triton_utils import tl, triton
 logger = logging.getLogger(__name__)
 
 _patched = False
+
+# The torch.library.Library object that owns our PrivateUse1 impl overrides.
+# It MUST stay alive for the lifetime of the process: a custom-op impl's
+# lifetime is tied to its Library object, so a function-local Library would be
+# garbage-collected on return and silently un-register the override (the op
+# would fall back to the upstream impl).  Kept at module scope on purpose.
+_impl_lib: "torch.library.Library | None" = None
 
 # ---------------------------------------------------------------------------
 # GCU hardware constants (must match fused_moe.py)
@@ -144,6 +152,37 @@ def _w8a8_triton_block_scaled_mm_gcu(
 
 
 # ---------------------------------------------------------------------------
+# Launch-config selection (auto-tuned on GCU S60/L600, see sweep_w8a8_config.py)
+# ---------------------------------------------------------------------------
+#
+# Empirical findings on GCU (N=4096, K=7168, block=[128,128]):
+#   * BLOCK_SIZE_N=128 is always optimal — narrower N tiles (64) are ~2x
+#     slower because the GCU DMA loses efficiency on short contiguous runs,
+#     even though they expose more (idle) SPs.  So we keep BN=128.
+#   * BLOCK_SIZE_K=128 (== group_k) so each K-iter maps to exactly one scale
+#     group; larger K would straddle groups (incorrect), smaller is slower.
+#   * BLOCK_SIZE_M should track M: for decode (small M) a 128-row tile wastes
+#     ~8x compute on padding rows and inflates the fp32 accumulator.  Shrinking
+#     BM to the next power of two >= M removes that waste (M=1: 0.291 -> 0.227
+#     ms, ~22% faster; M=64: 0.295 -> 0.260 ms).  For prefill (M>=128) BM=128.
+#   * num_stages=3 pipelines the K-loop best within the DSM budget.
+def _select_gcu_config(M: int, group_k: int) -> dict:
+    # BM = smallest power-of-two in [16, 128] that covers M.
+    BLOCK_SIZE_M = min(128, max(16, triton.next_power_of_2(M)))
+    BLOCK_SIZE_N = 128
+    # K tile must not exceed the quant group (else a tile spans 2 groups).
+    BLOCK_SIZE_K = min(128, group_k) if group_k > 0 else 128
+    return {
+        "BLOCK_SIZE_M": BLOCK_SIZE_M,
+        "BLOCK_SIZE_N": BLOCK_SIZE_N,
+        "BLOCK_SIZE_K": BLOCK_SIZE_K,
+        "GROUP_SIZE_M": 64,
+        "num_warps": GCU_MAX_WARPS,
+        "num_stages": 3,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Host-side launcher
 # ---------------------------------------------------------------------------
 
@@ -174,13 +213,13 @@ def _w8a8_block_scaled_mm_gcu(
 
     C = torch.empty((M, N), dtype=output_dtype, device=A.device)
 
-    # Launch config (auto-tuned on GCU for Qwen3.5 decode shapes).
-    BLOCK_SIZE_M = 128
-    BLOCK_SIZE_N = 128
-    BLOCK_SIZE_K = 128
-    GROUP_SIZE_M = 64
-    num_warps = GCU_MAX_WARPS
-    num_stages = 2
+    cfg = _select_gcu_config(M, group_k)
+    BLOCK_SIZE_M = cfg["BLOCK_SIZE_M"]
+    BLOCK_SIZE_N = cfg["BLOCK_SIZE_N"]
+    BLOCK_SIZE_K = cfg["BLOCK_SIZE_K"]
+    GROUP_SIZE_M = cfg["GROUP_SIZE_M"]
+    num_warps = cfg["num_warps"]
+    num_stages = cfg["num_stages"]
 
     # GCU Fixed-Grid: 1-D, <= GCU_NUM_GRID.
     total_pid = triton.cdiv(M, BLOCK_SIZE_M) * triton.cdiv(N, BLOCK_SIZE_N)
@@ -210,17 +249,50 @@ def _w8a8_block_scaled_mm_gcu(
 # Patch application
 # ---------------------------------------------------------------------------
 
-def apply_w8a8_block_scaled_mm_gcu_patch() -> None:
-    """Patch ``flaggems_fp8_block_gemm`` to use the GCU-optimized Triton
-    kernel with ``tl.make_block_ptr`` for DMA-friendly tile loads.
+# Custom-op names whose PrivateUse1 impl we override with the GCU kernel.
+#
+#   * ``vllm::w8a8_triton_block_scaled_mm_func`` — the op that ACTUALLY runs
+#     on GCU.  ``TritonFp8BlockScaledMMKernel`` is selected because its
+#     ``is_supported`` only needs ``is_cuda_alike()`` (True on GCU), and it
+#     dispatches to this op.  This is the one that shows up in the VPD profile
+#     as ``_w8a8_triton_block_scaled_mm``.
+#   * ``vllm::flaggems_fp8_block_gemm`` — kept for configs that route through
+#     the FlagGems op.  NOTE: ``FlagGemsFp8BlockScaledMMLinearKernel.is_supported``
+#     requires BOTH its base (FlashInfer) and fallback (DeepGemm) sub-kernels
+#     to be supported, which is false on GCU, so this op is normally NOT called.
+_TARGET_OPS = (
+    "vllm::w8a8_triton_block_scaled_mm_func",
+    "vllm::flaggems_fp8_block_gemm",
+)
 
-    On GCU, the default ``flag_gems.w8a8_block_fp8_matmul`` uses
-    pointer-arithmetic tile loads which the GCU compiler cannot lower to
-    DMA.  This patch replaces the op implementation with a block-pointer
-    based kernel, while keeping the same custom op schema so that
-    ``torch.compile`` graph tracing still works.
+
+def _ensure_op_registered(op_name: str) -> None:
+    """Import the module that defines ``op_name`` so its schema exists.
+
+    ``torch.library.impl`` can only override an op whose schema is already
+    defined.  ``w8a8_triton_block_scaled_mm_func`` is registered at import
+    time of ``...scaled_mm.triton``; force that import here.
     """
-    global _patched
+    if op_name == "vllm::w8a8_triton_block_scaled_mm_func":
+        importlib.import_module(
+            "vllm.model_executor.kernels.linear.scaled_mm.triton"
+        )
+
+
+def apply_w8a8_block_scaled_mm_gcu_patch() -> None:
+    """Route the GCU W8A8 block-scaled FP8 matmul to the GCU Triton kernel.
+
+    Replaces the PrivateUse1 implementation of the block-scaled-mm custom
+    op(s) with ``_w8a8_block_scaled_mm_gcu`` (a ``tl.make_block_ptr`` kernel
+    the GCU compiler lowers to DMA, with an M-adaptive launch config).  The
+    custom-op schema is unchanged, so ``torch.compile`` tracing still works.
+
+    The critical target is ``vllm::w8a8_triton_block_scaled_mm_func`` — the op
+    actually invoked on GCU via ``TritonFp8BlockScaledMMKernel``.  Overriding
+    only the FlagGems op leaves the profiled ``_w8a8_triton_block_scaled_mm``
+    kernel running, because the FlagGems kernel is filtered out at selection.
+    """
+    global _patched, _impl_lib
     if _patched:
         return
 
@@ -228,30 +300,31 @@ def apply_w8a8_block_scaled_mm_gcu_patch() -> None:
     if gcu is None or not gcu.is_available():
         return
 
-    try:
-        # Override the custom op implementation on the GCU (PrivateUse1)
-        # backend.  The op "vllm:flaggems_fp8_block_gemm" was registered in
-        # vllm_fl/quantization/fp8.py on the default (CPU) backend.
-        # torch.library.impl with allow_override=True replaces the impl
-        # for the specified backend key.
-        vllm_lib = torch.library.Library("vllm", "IMPL")
-        vllm_lib.impl(
-            "vllm::flaggems_fp8_block_gemm",
-            _w8a8_block_scaled_mm_gcu,
-            "PrivateUse1",
-            allow_override=True,
-        )
+    # Hoist the Library to module scope so the override is not GC'd (see
+    # _impl_lib comment above).
+    if _impl_lib is None:
+        _impl_lib = torch.library.Library("vllm", "IMPL")
+    patched_ops: list[str] = []
+    for op_name in _TARGET_OPS:
+        try:
+            _ensure_op_registered(op_name)
+            _impl_lib.impl(
+                op_name,
+                _w8a8_block_scaled_mm_gcu,
+                "PrivateUse1",
+                allow_override=True,
+            )
+            patched_ops.append(op_name)
+        except Exception as exc:
+            logger.warning("Failed to patch %s for GCU: %s", op_name, exc)
 
+    if patched_ops:
         _patched = True
         logger.info(
-            "Patched flaggems_fp8_block_gemm for GCU "
-            "(make_block_ptr, grid <= %d, NUM_SPC=%d, num_warps <= %d)",
+            "Patched W8A8 block-scaled mm for GCU -> _w8a8_triton_block_scaled_mm_gcu "
+            "(ops=%s; make_block_ptr, grid <= %d, NUM_SPC=%d, num_warps <= %d)",
+            patched_ops,
             GCU_NUM_GRID,
             GCU_NUM_GRID,
             GCU_MAX_WARPS,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to patch flaggems_fp8_block_gemm for GCU: %s",
-            exc,
         )

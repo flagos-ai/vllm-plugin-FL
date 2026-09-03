@@ -18,7 +18,10 @@ from .impl.per_token_group_quant_fp8 import (
     apply_per_token_group_quant_fp8_gcu_patch,
 )
 from .impl.quant_fp8 import apply_quant_fp8_gcu_patch
-from .impl.fused_moe import apply_fused_moe_triton_kernel_gcu_patch
+from .impl.fused_moe import (
+    apply_fused_moe_config_gcu_patch,
+    apply_fused_moe_triton_kernel_gcu_patch,
+)
 from .impl.w8a8_block_scaled_mm import apply_w8a8_block_scaled_mm_gcu_patch
 
 logger = logging.getLogger(__name__)
@@ -116,6 +119,7 @@ def apply_gcu_patches() -> None:
     apply_fp8_config_gcu_patch()
     apply_quant_fp8_gcu_patch()
     apply_fused_moe_triton_kernel_gcu_patch()
+    apply_fused_moe_config_gcu_patch()
     apply_w8a8_block_scaled_mm_gcu_patch()
 
     # Inductor compatibility patches (gcnArchName etc.)

@@ -17,6 +17,8 @@ This patch converts the launch to GCU Fixed-Grid + strided-loop pattern:
 
 from __future__ import annotations
 
+import functools
+import importlib
 import logging
 from typing import Any
 
@@ -523,6 +525,101 @@ def invoke_fused_moe_triton_kernel_gcu(
         num_stages=num_stages,
         **config,
     )
+
+
+# ---------------------------------------------------------------------------
+# GCU MoE launch-config override (block-wise fp8/int8)
+# ---------------------------------------------------------------------------
+#
+# Empirically (bench_fused_moe_gcu.py, Qwen3.5-35B-A3B: E=256, top_k=8,
+# w13 N=1024/K=2048, w2 N=2048/K=512), BLOCK_SIZE_M=16 + BLOCK_SIZE_N=128 is
+# optimal on GCU for *every* M from decode (1) to prefill (4096):
+#   * With 256 experts the per-expert token count is tiny, so a 16-row tile is
+#     well filled while 64/128-row tiles compute mostly padding.  At M=1024,
+#     BM=16 is ~1.4x faster than BM=64 and ~2.8x faster than BM=128.
+#   * BN=128 beats BN=64 by ~1.7x (narrow tiles lose GCU DMA efficiency).
+#   * num_stages 3 ~= 4; GROUP_SIZE_M=1 (too few M-blocks per expert to group).
+#
+# BLOCK_SIZE_M is coupled to ``moe_align_block_size``'s block_size (both read
+# the same config dict), so the override MUST happen at config-selection time,
+# not inside the launcher.  We wrap ``try_get_optimal_moe_config``.
+def _gcu_tune_moe_config(config: Any, dtype: Any, block_shape: Any) -> Any:
+    if not isinstance(config, dict):
+        return config
+    is_block = (
+        block_shape is not None
+        and len(block_shape) == 2
+        and block_shape[0] > 0
+        and block_shape[1] > 0
+        and dtype in ("fp8_w8a8", "int8_w8a8")
+    )
+    if not is_block:
+        return config
+    config = dict(config)
+    config["BLOCK_SIZE_M"] = 16
+    config["BLOCK_SIZE_N"] = min(int(block_shape[0]), 128)
+    config["BLOCK_SIZE_K"] = min(int(block_shape[1]), 128)
+    config["GROUP_SIZE_M"] = 1
+    config["num_warps"] = min(
+        int(config.get("num_warps", GCU_MAX_WARPS)), GCU_MAX_WARPS
+    )
+    config["num_stages"] = 3
+    return config
+
+
+def _make_gcu_moe_config_wrapper(orig):
+    """Wrap ``try_get_optimal_moe_config`` to apply the GCU tile override."""
+
+    @functools.wraps(orig)
+    def wrapper(*args, **kwargs):
+        cfg = orig(*args, **kwargs)
+        # signature: (w1_shape, w2_shape, top_k, dtype, M, block_shape=None)
+        dtype = kwargs.get("dtype")
+        if dtype is None and len(args) > 3:
+            dtype = args[3]
+        block_shape = kwargs.get("block_shape")
+        if block_shape is None and len(args) > 5:
+            block_shape = args[5]
+        return _gcu_tune_moe_config(cfg, dtype, block_shape)
+
+    wrapper._gcu_patched = True
+    return wrapper
+
+
+def apply_fused_moe_config_gcu_patch() -> None:
+    """Force GCU-optimal MoE tile config for the block-wise fp8/int8 path.
+
+    ``try_get_optimal_moe_config`` is imported by-reference into the vllm_fl
+    fused_moe module, so both the definition site and the importer binding are
+    wrapped (each call site resolves its own module global at call time).
+    """
+    gcu = getattr(torch, "gcu", None)
+    if gcu is None or not gcu.is_available():
+        return
+
+    _MODULES = [
+        "vllm.model_executor.layers.fused_moe.fused_moe",
+        "vllm_fl.ops.fused_moe.fused_moe",
+    ]
+    patched_any = False
+    for module_name in _MODULES:
+        try:
+            mod = importlib.import_module(module_name)
+        except Exception:
+            continue
+        orig = getattr(mod, "try_get_optimal_moe_config", None)
+        if orig is None or getattr(orig, "_gcu_patched", False):
+            continue
+        mod.try_get_optimal_moe_config = _make_gcu_moe_config_wrapper(orig)
+        patched_any = True
+
+    if patched_any:
+        logger.info(
+            "Patched try_get_optimal_moe_config for GCU "
+            "(block-wise fp8/int8 -> BLOCK_SIZE_M=16, BLOCK_SIZE_N=128, "
+            "GROUP_SIZE_M=1, num_warps<=%d, num_stages=3)",
+            GCU_MAX_WARPS,
+        )
 
 
 # ---------------------------------------------------------------------------
