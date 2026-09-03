@@ -2,6 +2,11 @@
 
 from vllm.platforms import PlatformEnum, current_platform
 
+from .fp8 import FlagGemsFp8BlockScaledMMLinearKernel
+from vllm_fl.utils import use_flaggems_op
+
+FLAGGEMS_FP8_BLOCK_GEMM_OP = "flaggems_fp8_block_gemm"
+
 
 def _resolve_source_platform() -> PlatformEnum:
     """
@@ -32,17 +37,16 @@ def add_oot_quant_kernel() -> None:
     is_supported() / can_implement() will filter at runtime.
     """
     from vllm.model_executor.kernels.linear import (
-        _POSSIBLE_INT8_KERNELS,
-        _POSSIBLE_FP8_KERNELS,
-        _POSSIBLE_KERNELS,
         _POSSIBLE_FP8_BLOCK_KERNELS,
+        _POSSIBLE_FP8_KERNELS,
+        _POSSIBLE_INT8_KERNELS,
+        _POSSIBLE_KERNELS,
     )
+
     source = _resolve_source_platform()
 
     if PlatformEnum.OOT not in _POSSIBLE_KERNELS:
-        _POSSIBLE_KERNELS[PlatformEnum.OOT] = list(
-            _POSSIBLE_KERNELS.get(source, [])
-        )
+        _POSSIBLE_KERNELS[PlatformEnum.OOT] = list(_POSSIBLE_KERNELS.get(source, []))
 
     if PlatformEnum.OOT not in _POSSIBLE_INT8_KERNELS:
         _POSSIBLE_INT8_KERNELS[PlatformEnum.OOT] = list(
@@ -58,3 +62,20 @@ def add_oot_quant_kernel() -> None:
         _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT] = list(
             _POSSIBLE_FP8_BLOCK_KERNELS.get(source, [])
         )
+
+    if (
+        current_platform.supports_fp8()
+        and use_flaggems_op(FLAGGEMS_FP8_BLOCK_GEMM_OP)
+        and FlagGemsFp8BlockScaledMMLinearKernel
+        not in _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT]
+    ):
+        _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT].insert(
+            0, FlagGemsFp8BlockScaledMMLinearKernel
+        )
+
+    # Quantization hooks are self-gated on backend/kernel availability.
+    from .compressed_tensors import register_compressed_tensors_oot
+    from .wna16.linear import register_fl_wna16_linear_kernel
+
+    register_fl_wna16_linear_kernel(_POSSIBLE_KERNELS)
+    register_compressed_tensors_oot()

@@ -34,6 +34,8 @@ from vllm.model_executor.layers.fused_moe.config import (
 )
 
 from .fused_moe_utils import select_unquantized_moe_backend_oot
+from .mxfp4_selector import select_fixed_mxfp4_method
+from vllm_fl.quantization.mxfp4.mxfp4_marlin import MarlinExpertsFL
 
 class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
     """OOT replacement for UnquantizedFusedMoEMethod that routes computation through flaggems."""
@@ -65,12 +67,12 @@ class FusedMoEFL(FusedMoE):
     """
 
     def __init__(self, *args, **kwargs):
-        routed_scaling_factor = kwargs.pop("routed_scaling_factor", 1.0)
-        shared_experts = kwargs.pop("shared_experts", None)
-        gate = kwargs.pop("gate", None)
-        routed_input_transform = kwargs.pop("routed_input_transform", None)
-        routed_output_transform = kwargs.pop("routed_output_transform", None)
-        apply_routed_scale_to_output = kwargs.pop("apply_routed_scale_to_output", False)
+        routed_scaling_factor = kwargs.get("routed_scaling_factor", 1.0)
+        shared_experts = kwargs.get("shared_experts", None)
+        gate = kwargs.get("gate", None)
+        routed_input_transform = kwargs.get("routed_input_transform", None)
+        routed_output_transform = kwargs.get("routed_output_transform", None)
+        apply_routed_scale_to_output = kwargs.get("apply_routed_scale_to_output", False)
         super().__init__(*args, **kwargs)
         self._routed_scaling_factor = routed_scaling_factor
         self._apply_routed_scale_to_output = apply_routed_scale_to_output
@@ -78,6 +80,17 @@ class FusedMoEFL(FusedMoE):
         if isinstance(self.quant_method, UnquantizedFusedMoEMethod) and not isinstance(self.quant_method, UnquantizedFusedMoEMethodFL):
             self.quant_method = UnquantizedFusedMoEMethodFL(self.moe_config)
             self.base_quant_method = self.quant_method
+        else:
+            from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod
+            from vllm.model_executor.layers.fused_moe.fused_marlin_moe import MarlinExperts
+
+            if isinstance(self.quant_method, Mxfp4MoEMethod):
+                self.quant_method = select_fixed_mxfp4_method(
+                    self.quant_method, self.moe_config
+                )
+                self.base_quant_method = self.quant_method
+            elif getattr(self.quant_method, "experts_cls", None) is MarlinExperts:
+                self.quant_method.experts_cls = MarlinExpertsFL
         # Replace router with FL version that uses call_op for flaggems dispatch.
         # NOTE: shared_experts / gate / routed transforms are passed through to
         # the runner rather than stored as attributes on this layer.  Assigning

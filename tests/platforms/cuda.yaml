@@ -1,7 +1,21 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # CUDA-Based Platform Configuration
 # Flexible test selection mechanism for NVIDIA GPU environments
 #
-# This platform configuration supports multiple device types (a100, a800, h100)
+# This platform configuration supports multiple device types (a100, a800, h100, h20)
 # Users can modify the following:
 # - functional: Add/remove test case names in the support lists
 #   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
@@ -31,6 +45,10 @@ device_types:
     compute_capability: "9.0"
     memory_gb: 80
     tags: [hopper, fp8, bf16]
+  h20:
+    compute_capability: "9.0"
+    memory_gb: 140
+    tags: [hopper, fp8, bf16, china-variant]
 
 # Default numerical tolerance for result comparison (used when device doesn't override)
 tolerance:
@@ -43,6 +61,17 @@ device_overrides:
     tolerance:
       inference:
         default: {rtol: 1e-4, atol: 1e-7}
+  h20:
+    cases:
+      - qwen3_6/27b_tp2_eager
+      - qwen3_6/27b_tp2_graph
+      - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_graph
+    llm:
+      max_model_len: 262144
+    serve:
+      stream: true
+      max_tokens: 1024
 
 # Features not supported on this platform.
 # Test cases whose model name contains any of these strings will be skipped.
@@ -66,20 +95,21 @@ a100:
         minicpm: ["o45_tp4"]
       serving:
         qwen3: ["next_tp8"]
-        # The bug is that MiniCPMOBaseModel.load_weights
-        # doesn't call _ensure_resampler_device().
-        # minicpm: ["o45_tp4"]
     functional:
-      # Include patterns: "*" for all, or list specific paths
       include: "*"
-      # Exclude patterns: empty list or list paths to exclude
       exclude: []
     unit:
-      # Include patterns: "*" for all, or list specific paths
       include: "*"
-      # Exclude patterns: empty list or list paths to exclude
       exclude: []
-    
     benchmark:
       enabled: true
       smoke: ["throughput", "latency", "serve"]
+
+h20:
+  name: "h20"
+  tests:
+    e2e:
+      inference:
+        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+      serving:
+        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]

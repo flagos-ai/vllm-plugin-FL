@@ -45,12 +45,24 @@ op_backends:
 
 # FlagOS operator blacklist
 flagos_blacklist:
+  - copy_
+  - to_copy
+  - pow_scalar
+  - clamp
+  - clamp_
   - index_put_
   - index_put
   - _index_put_impl_
   - nonzero
-  - copy_
-  - to_copy
   - index
+  # --- DeepSeek-V4 regression ops (measured on 4xH800, 4k/1k, c64) ---
+  # flash_mla_with_kvcache: -3.3% throughput regression
+  - flash_mla_with_kvcache
+  # hc_head_fused_kernel + mhc_post + mhc_pre: -2.0% regression (MoE dispatch/combine)
+  - hc_head_fused_kernel
+  - mhc_post
+  - mhc_pre
+  # deepseek_v4_fp8_einsum: -1.1% regression
+  - deepseek_v4_fp8_einsum
 # OOT (Out-of-Tree) operator blacklist
 # oot_blacklist: []

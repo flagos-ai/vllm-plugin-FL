@@ -8,7 +8,7 @@ import flag_gems
 try:
     # FlagGems<=5.0.2: DeviceDetector lives in device.
     from flag_gems.runtime.backend.device import DeviceDetector
-except ImportError:
+except (ImportError, FileNotFoundError):
     # FlagGems>5.0.2: DeviceDetector lives in device_finder.
     from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend
@@ -47,6 +47,12 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
+    # Registered backend: vendor/gcu (Enflame GCU / torch_gcu)
+    "enflame": {"device_type": "gcu", "device_name": "gcu"},
+    # Registered backend: vendor/txda
+    "tsingmicro": {"device_type": "txda", "device_name": "txda"},
+    # Registered backend: vendor/kunlunxin
+    "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
 }
 
 
@@ -215,7 +221,7 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead"]
+        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead", "gcu", "kunlunxin"]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property

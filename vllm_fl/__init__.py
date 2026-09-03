@@ -77,19 +77,35 @@ def _patch_flash_attn_import():
 
 
 def _patch_custom_ops():
-    """Register torch.ops._C op schemas when vllm._C is unavailable."""
-    try:
-        import vllm._C  # noqa: F401
-        return
-    except (ImportError, OSError):
-        pass
+    """Load native vLLM ops before registering missing fallback schemas."""
+    from vllm_fl.ops._C_ops_registry import (
+        load_vllm_native_extensions,
+        register_op_schemas,
+    )
 
-    from vllm_fl.ops._C_ops_registry import register_op_schemas
+    if load_vllm_native_extensions():
+        return
+
+    try:
+        import vllm_fl._C  # noqa: F401
+    except (ImportError, OSError) as e:
+        logger.debug("Failed to import vllm_fl._C: %s", e)
+
     register_op_schemas()
+
+
+def _init_vendor_device():
+    """Vendor-specific device initialization patches."""
+    from vllm_fl.utils import DeviceInfo
+    if DeviceInfo().vendor_name == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import _patch_xpu_get_device
+        _patch_xpu_get_device()
 
 
 def register():
     """Register the FL platform."""
+    _init_vendor_device()
+
     _patch_custom_ops()
     _patch_flash_attn_import()
     _patch_transformers_compat()
@@ -112,8 +128,9 @@ def register():
 def register_quant_linear():
     from vllm.platforms import current_platform
     # vllm.model_executor.kernels.linear triggers cutlass_scaled_mm_supports_fp8
-    # at module level, which requires torch.ops._C — not available on MUSA.
-    if current_platform.device_type == "musa":
+    # at module level, which requires torch.ops._C — not available on these
+    # platforms.
+    if current_platform.device_type in {"musa", "txda", "gcu"}:
         return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
     add_oot_quant_kernel()
@@ -123,11 +140,16 @@ def register_router():
     # fused_moe import chain triggers cutlass_scaled_mm_supports_fp8 on MUSA
     if current_platform.device_type == "musa":
         return
+    from vllm_fl.utils import is_oot_enabled
+    if not is_oot_enabled():
+        return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+    from vllm import ModelRegistry
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
@@ -144,3 +166,21 @@ def register_model():
         #glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+
+    # Register DeepseekV4 model
+    try:
+        ModelRegistry.register_model(
+            "DeepseekV4ForCausalLM",
+            "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM"
+        )
+    except Exception as e:
+        logger.error(f"Register DeepseekV4 model error: {str(e)}")
+
+    # Register DeepseekV4 model
+    try:
+        ModelRegistry.register_model(
+            "DeepSeekV4MTPModel",
+            "vllm_fl.models.deepseek_v4_mtp:DeepSeekV4MTP"
+        )
+    except Exception as e:
+        logger.error(f"Register DeepseekV4 model error: {str(e)}")

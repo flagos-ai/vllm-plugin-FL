@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # vLLM-FL Dispatch Configuration for Ascend NPU
 # Auto-loaded when running on Ascend hardware
 
@@ -44,69 +58,65 @@ op_backends:
     - vendor
     - flagos
     - reference
+  # invoke_fused_moe_triton_kernel: prioritize vendor (torch.mm) because
+  # FlagGems Triton kernel overflows NPU unified buffer on some model shapes
+  invoke_fused_moe_triton_kernel:
+    - vendor
+    - flagos
+  # moe_align_block_size: prioritize vendor (pure-torch) because
+  # FlagGems Triton kernel causes DDR address OOB on NPU
+  moe_align_block_size:
+    - vendor
+    - flagos
+  moe_sum:
+    - vendor
+    - flagos
+  topk_softmax:
+    - vendor
+    - flagos
 
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
+# Operators are blacklisted because their FlagGems Triton kernels are either
+# incorrect, imprecise, or crash on Ascend NPU during inference.
 flagos_blacklist:
+  # --- Crash: GDN recurrent path precision ---
+  - exp
+  - exp_
+  - log
+  # --- Crash: Indexing (corrupts ViT rotary cos[pos_ids]) ---
+  - index
+  # --- Crash: Fill (ZeroDivisionError on zero-size slices) ---
+  - fill_scalar_
+  - fill_tensor_
+  # --- Crash: Conv (assertion failure with grouped conv) ---
+  - conv1d
+  # --- Arithmetic (Triton compilation hang on MoE 256-expert shapes) ---
+  - mm
+  - addmm
+  - add
+  - sub
+  - mul
+  - true_divide
+  - true_divide_
+  - floor_divide
+  - reciprocal
+  - neg
+  - neg_
+  - abs
+  - abs_
+  # --- Scatter/Gather (worker hard-crash, NPU segfault) ---
   - masked_scatter_
   - masked_scatter
   - scatter_add_
-  - ones
-  - ones_like
-  - isclose
-  - allclose
-  - mean_dim
-  - chunk_gated_delta_rule_fwd
-  - rsqrt # performance loss
-  - index_select
-  - true_divide
-  - silu
-  - silu_and_mul # performance loss end
-  - to_copy
-  - _to_copy
-  - zeros
-  - acos
-  - copy_
-  - fill_scalar_
-  - sum_dim
-  - exponential_
-  - mm
-  - resolve_neg
-  - resolve_conj
-  - eq_scalar
-  - floor_divide
-  - cumsum
-  - cumsum_out
-  - mul
-  - reciprocal
-  - repeat
-  - randn
-  - add
-  - ge_scalar
-  - sub
-  - bitwise_and
-  - bitwise_not
-  - slice_scatter
-  - fill_tensor_
-  - conv1d
-  - conv2d
-  - uniform_
-  - prod
-  - max
-  - amax
-  - cat
-  - stack
-  - flatten
-  - reshape
-  - view
-  - tensor
-  - rand
-  - rand_like
-  - gather
-  - _log_softmax
-  - _flash_attention_forward
   - scatter
   - scatter_
+  - gather
+  - index_put
+  - index_put_
+  - _index_put_impl_
+  # --- Reduction (argmax only - Invalid Runtime Function on NPU) ---
+  - argmax
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

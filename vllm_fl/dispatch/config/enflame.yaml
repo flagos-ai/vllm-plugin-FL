@@ -1,0 +1,26 @@
+# vLLM-FL Dispatch Configuration for GCU (Enflame / torch_gcu)
+
+prefer: flagos
+
+strict: false
+
+op_backends:
+  attention_backend:
+    - vendor:gcu
+    - flagos
+    - reference
+  rms_norm:
+    - flagos
+    - vendor:gcu
+    - reference
+  silu_and_mul:
+    - flagos
+    - vendor:gcu
+    - reference
+  rotary_embedding:
+    - flagos
+    - vendor:gcu
+    - reference
+
+flagos_blacklist:
+  - scaled_dot_product_attention

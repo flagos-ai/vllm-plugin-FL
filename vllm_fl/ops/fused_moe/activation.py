@@ -1,7 +1,25 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 import torch.nn.functional as F
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
-from vllm_fl.dispatch import call_op
+from vllm_fl.dispatch import CachedOp
+
+_silu_and_mul = CachedOp("silu_and_mul")
+_gelu_and_mul = CachedOp("gelu_and_mul")
+
 
 def apply_moe_activation(
     activation: MoEActivation,
@@ -24,9 +42,9 @@ def apply_moe_activation(
 
     # Activations with gated multiplication (gate × activation(up))
     if activation == MoEActivation.SILU:
-        output.copy_(call_op("silu_and_mul", None, input))
+        output.copy_(_silu_and_mul(None, input))
     elif activation == MoEActivation.GELU:
-        output.copy_(call_op("gelu_and_mul", None, input))
+        output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.SWIGLUOAI:
         torch.ops._C.swigluoai_and_mul(output, input)
     elif activation == MoEActivation.SWIGLUSTEP:
