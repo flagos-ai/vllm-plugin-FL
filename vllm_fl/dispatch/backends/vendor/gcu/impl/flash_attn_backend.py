@@ -63,17 +63,35 @@ def apply_flash_attn_backend_gcu_patch() -> None:
 
     fa_utils = importlib.import_module(_FA_UTILS)
 
-    # Bind the ops onto fa_utils so flash_attn.py's conditional import (if it
-    # runs after this patch) resolves them, and flip the availability gate.
+    # Enflame's vendor flash_attn is FA2 (vllm_flash_attn); 0.24.0's stock
+    # fa_utils decides FA2 support by importing
+    # vllm.vllm_flash_attn.flash_attn_interface / _vllm_fa2_C, which neither
+    # the empty vllm wheel nor the vendor package provides -> it would declare
+    # FA2 unavailable and the native backend would not run (the port fell back
+    # to the flag_gems attention backend, which garbage-decodes on the
+    # torch_gcu 2.10 / tops1.9.10 stack). Override the version gating the same
+    # way the metax fa_utils override does: GCU is always FA2.
+    def _gcu_fa_version(*args, **kwargs):
+        return 2
+
+    def _gcu_is_fa_supported(fa_version: int, *args, **kwargs) -> bool:
+        return fa_version == 2
+
+    # Bind the ops + the version gate onto fa_utils so flash_attn.py's imports
+    # (if they run after this patch) resolve them.
     fa_utils.flash_attn_varlen_func = flash_attn_varlen_func
     fa_utils.get_scheduler_metadata = get_scheduler_metadata
     fa_utils.reshape_and_cache_flash = reshape_and_cache_flash
+    fa_utils.get_flash_attn_version = _gcu_fa_version
+    fa_utils.is_fa_version_supported = _gcu_is_fa_supported
     fa_utils._GCU_FLASH_ATTN_AVAILABLE = True
     fa_utils._gcu_flash_attn_patched = True
     fa_utils.is_flash_attn_varlen_func_available = lambda: True
 
     # If flash_attn.py already imported (its gate ran False and it skipped the
-    # conditional import), inject the four names + the gate directly.
+    # conditional import), inject the names + the gate directly into its module
+    # namespace — its module-level `from fa_utils import ...` already bound the
+    # stock functions, so overwriting the module globals is required.
     flash_attn_mod = sys.modules.get(_FLASH_ATTN)
     if flash_attn_mod is not None:
         flash_attn_mod.flash_attn_varlen_func = flash_attn_varlen_func
@@ -81,8 +99,11 @@ def apply_flash_attn_backend_gcu_patch() -> None:
         flash_attn_mod.reshape_and_cache_flash = reshape_and_cache_flash
         flash_attn_mod.flash_attn_supports_sinks = fa_utils.flash_attn_supports_sinks
         flash_attn_mod.is_flash_attn_varlen_func_available = lambda: True
+        flash_attn_mod.get_flash_attn_version = _gcu_fa_version
+        flash_attn_mod.is_fa_version_supported = _gcu_is_fa_supported
 
     logger.info(
-        "GCU: enabled native FLASH_ATTN backend "
-        "(vendor flash_attn_varlen_func + flag_gems reshape_and_cache_flash)"
+        "GCU: enabled native FLASH_ATTN backend (FA2; vendor "
+        "flash_attn_varlen_func + flag_gems reshape_and_cache_flash)"
     )
+
