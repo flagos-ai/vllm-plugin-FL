@@ -55,6 +55,8 @@ class Graph:
         # Cambricon runs eager-only (see PlatformFL.support_static_graph_mode):
         # torch.mlu.MLUGraph capture OOMs at the model's cudagraph budget.
         graph = None
+    elif current_platform.device_type == "gcu":
+        graph = torch.gcu.GCUGraph
     else:
         raise NotImplementedError("not support graph")
 

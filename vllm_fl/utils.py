@@ -54,6 +54,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
     # Cambricon MLU (torch_mlu); ops dispatched via flag_gems
     "cambricon": {"device_type": "mlu", "device_name": "mlu"},
+    # Registered backend: vendor/gcu (Enflame GCU / torch_gcu)
+    "enflame": {"device_type": "gcu", "device_name": "gcu"},
 }
 
 # Keep the vLLM base-class no-op for platforms not validated by this change.

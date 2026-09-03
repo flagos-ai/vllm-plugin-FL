@@ -105,10 +105,24 @@ def get_config_path(platform: Optional[str] = None) -> Optional[Path]:
         if config_file.exists():
             return config_file
 
-    # Try platform-specific config
+    # Try platform-specific config, keyed on vendor_name.
     config_file = _CONFIG_DIR / f"{platform}.yaml"
     if config_file.exists():
         return config_file
+
+    # Fall back to the device_name alias.  Some vendors ship a config named
+    # after their device family rather than their vendor_name (e.g. enflame's
+    # config is gcu.yaml, mthreads' is musa.yaml).  Without this the config
+    # (op_backends AND flagos_blacklist) silently fails to load.
+    try:
+        from vllm_fl.utils import get_device_name
+        device_name = get_device_name(platform)
+        if device_name and device_name != platform:
+            alias_file = _CONFIG_DIR / f"{device_name}.yaml"
+            if alias_file.exists():
+                return alias_file
+    except Exception:
+        pass
 
     return None
 

@@ -1,0 +1,64 @@
+# vLLM-FL Dispatch Configuration for GCU (Enflame / torch_gcu)
+
+prefer: flagos
+
+strict: false
+
+op_backends:
+  attention_backend:
+    - vendor:gcu
+    - flagos
+    - reference
+  rms_norm:
+    - flagos
+    - vendor:gcu
+    - reference
+  silu_and_mul:
+    - flagos
+    - vendor:gcu
+    - reference
+  rotary_embedding:
+    - flagos
+    - vendor:gcu
+    - reference
+
+flagos_blacklist:
+  - scaled_dot_product_attention
+  # GCU300 triton backend rejects 64-bit dtypes ("64-bit data type not
+  # supported on GCU300").  These input-prep / index ops run on int64 token
+  # positions / counts.  Blacklisting (matched by function __name__) makes
+  # FlagGems skip them so they fall back to torch_gcu, which transparently
+  # substitutes Long->Int.  Note zeroing routes through torch_gcu's factory
+  # wrapper -> zero_, so zero_ is the op that must be excluded (not just
+  # zeros/zeros_like).  Same rationale as ptg.yaml (another int32-only backend).
+  - sub
+  # sort: vLLM sampler's non-greedy path (topk_topp_sampler.apply_top_k_top_p ->
+  # logits.sort(dim=-1)) routes to FlagGems GCU300 radix_sort, whose sweep kernel
+  # scatter-store widens the pointer index to 64-bit (arith.extui) -> GCU300
+  # make_gcuir "failed to legalize arith.extui" -> PassManager execution failed.
+  # This is inside the kernel's address arithmetic, not a boundary cast, so it
+  # can't be intercepted by a torch-level int32 cast (unlike slot_mapping).
+  # Native torch_gcu sort is correct (returns int64 indices matching CPU), so
+  # blacklisting falls through to it.  Greedy sampling (temperature=0) skips
+  # sort entirely, which is why E2E passed without this; non-greedy needs it.
+  - sort
+  - sort_stable  # sort.stable overload (torch.Tensor.sort resolves here); excludes by func __name__
+  # rsub: top-p mask computes `1 - p`; the scalar `1` enters the FlagGems
+  # pointwise kernel as int64 -> same GCU300 "64-bit not supported" wall as sort.
+  # Both overloads (rsub.Scalar/rsub.Tensor) route through these funcs.
+  - rsub_scalar
+  - rsub_tensor
+  # argmax: random_sample's Gumbel-max pick is `probs.div(q).argmax(dim=-1)`.
+  # The FlagGems GCU300 argmax kernel (argmax.py:103) builds its bounds mask with
+  # Python `and` on tensors (`m_offset[:,None] < M and n_offset[None,:] < N`) —
+  # `and` is not elementwise, so the mask is wrong and argmax scans past the
+  # vocab, returning out-of-range token ids (observed 155374/153865 for a
+  # 151936-vocab model) -> degenerate output (".", "\n\n"). Greedy also argmaxes
+  # but over a full-width logits row where the winner is unambiguous, so it
+  # survived; non-greedy's peaked post-softmax distribution exposes it. torch_gcu
+  # argmax is correct, so blacklisting falls through to it.
+  - argmax
+  - add
+  - zeros
+  - zeros_like
+  - zero_
