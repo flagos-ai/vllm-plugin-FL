@@ -167,6 +167,13 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
+        if cls.device_type == "gcu":
+            try:
+                from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+                apply_gcu_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply GCU patches: {e}")
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""
