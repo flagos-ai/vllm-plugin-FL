@@ -7671,3 +7671,17 @@ class EncoderTimingStats:
             "encoder_forward_secs": self.encoder_forward_secs,
             "num_encoder_calls": self.num_encoder_calls,
         }
+
+
+# GCU only: torch_gcu does not support torch.Generator-seeded exponential_;
+# degrade the sampler's per-request-seed path to seed-free noise. Side-effect
+# import of the patch module replaces random_sample in topk_topp_sampler.
+try:
+    import torch as _torch
+
+    if getattr(_torch, "gcu", None) is not None and _torch.gcu.is_available():
+        from vllm_fl.dispatch.backends.vendor.gcu.sampler import (  # noqa: F401
+            _random_sample_gcu,
+        )
+except Exception:
+    pass
