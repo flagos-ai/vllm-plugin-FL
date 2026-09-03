@@ -48,7 +48,7 @@ def apply_flash_attn_backend_gcu_patch() -> None:
 
     try:
         from flash_attn.vllm_flash_attn import (
-            flash_attn_varlen_func,
+            flash_attn_varlen_func as _vendor_flash_attn_varlen_func,
             get_scheduler_metadata,
         )
         from flag_gems.fused import reshape_and_cache_flash
@@ -60,6 +60,28 @@ def apply_flash_attn_backend_gcu_patch() -> None:
         return
 
     import importlib
+    import inspect
+    import functools
+
+    # 0.24.0's native FLASH_ATTN prefill passes dynamic_causal; the enflame
+    # vendor FA2 wrapper (flash_attn 2.7.2 on torch_gcu 2.10 / tops1.9.10)
+    # forwards it into a kernel path that rejects the kwarg
+    # (TypeError: ...unexpected keyword argument 'dynamic_causal'), while the
+    # tops1.10.6 vendor build happens to tolerate a None value. GCU only ever
+    # runs plain causal attention, so strip the kwarg when it is not set —
+    # uniformly across both stacks, so one wheel serves both.
+    if "dynamic_causal" in inspect.signature(
+        _vendor_flash_attn_varlen_func
+    ).parameters:
+
+        @functools.wraps(_vendor_flash_attn_varlen_func)
+        def flash_attn_varlen_func(*args, **kwargs):
+            if kwargs.get("dynamic_causal", None) is None:
+                kwargs.pop("dynamic_causal", None)
+            return _vendor_flash_attn_varlen_func(*args, **kwargs)
+
+    else:
+        flash_attn_varlen_func = _vendor_flash_attn_varlen_func
 
     fa_utils = importlib.import_module(_FA_UTILS)
 
