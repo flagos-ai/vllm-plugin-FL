@@ -63,25 +63,21 @@ def apply_flash_attn_backend_gcu_patch() -> None:
     import inspect
     import functools
 
-    # 0.24.0's native FLASH_ATTN prefill passes dynamic_causal; the enflame
-    # vendor FA2 wrapper (flash_attn 2.7.2 on torch_gcu 2.10 / tops1.9.10)
-    # forwards it into a kernel path that rejects the kwarg
-    # (TypeError: ...unexpected keyword argument 'dynamic_causal'), while the
-    # tops1.10.6 vendor build happens to tolerate a None value. GCU only ever
-    # runs plain causal attention, so strip the kwarg when it is not set —
-    # uniformly across both stacks, so one wheel serves both.
-    if "dynamic_causal" in inspect.signature(
-        _vendor_flash_attn_varlen_func
-    ).parameters:
+    # vLLM 0.24.0's native FLASH_ATTN prefill grew FA3/FA4-era kwargs
+    # (dynamic_causal, mask_mod, aux_tensors, ...) that the enflame vendor
+    # FA2 (flash_attn 2.7.2) does not accept — the python forwarder on
+    # tops1.9.10 forwards them into a kernel path that raises
+    # TypeError: ... unexpected keyword argument '<kw>'. GCU only ever runs
+    # plain FA2 causal attention, so forward only the kwargs the vendor
+    # signature actually names (whitelist), dropping the 0.24-only ones.
+    _vendor_params = set(
+        inspect.signature(_vendor_flash_attn_varlen_func).parameters
+    )
 
-        @functools.wraps(_vendor_flash_attn_varlen_func)
-        def flash_attn_varlen_func(*args, **kwargs):
-            if kwargs.get("dynamic_causal", None) is None:
-                kwargs.pop("dynamic_causal", None)
-            return _vendor_flash_attn_varlen_func(*args, **kwargs)
-
-    else:
-        flash_attn_varlen_func = _vendor_flash_attn_varlen_func
+    @functools.wraps(_vendor_flash_attn_varlen_func)
+    def flash_attn_varlen_func(*args, **kwargs):
+        filtered = {k: v for k, v in kwargs.items() if k in _vendor_params}
+        return _vendor_flash_attn_varlen_func(*args, **filtered)
 
     fa_utils = importlib.import_module(_FA_UTILS)
 
@@ -128,4 +124,3 @@ def apply_flash_attn_backend_gcu_patch() -> None:
         "GCU: enabled native FLASH_ATTN backend (FA2; vendor "
         "flash_attn_varlen_func + flag_gems reshape_and_cache_flash)"
     )
-
