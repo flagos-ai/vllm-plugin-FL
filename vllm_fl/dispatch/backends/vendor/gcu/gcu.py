@@ -81,13 +81,19 @@ class GCUBackend(Backend):
             raise NotImplementedError("GCU does not support MLA yet")
 
         try:
-            import flash_attn.vllm_flash_attn
-            import flash_attn.vllm_flash_attn._vllm_fa2_C  # noqa: F401
+            # The vendor flash_attn package ships the FA2 compute ops under
+            # vllm_flash_attn; _vllm_fa2_C (the compiled submodule the stock
+            # fa_utils probes) is absent on enflame, and the empty vllm wheel
+            # has no vllm._C at all. The flash_attn_backend_gcu patch binds
+            # these ops + the FA2 version gate onto fa_utils, so the native
+            # FLASH_ATTN backend runs the vendor compute + flag_gems KV write.
+            import flash_attn.vllm_flash_attn as vendor_fa
+            vendor_fa.flash_attn_varlen_func  # noqa: B018
         except Exception:
-            # Empty vllm wheel ships no compiled _vllm_fa2_C; fall back to the
-            # plugin flag_gems attention backend instead of asserting later.
+            # No vendor flash_attn: fall back to the plugin flag_gems attention
+            # backend instead of asserting later.
             return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
 
-        sys.modules["vllm.vllm_flash_attn"] = flash_attn.vllm_flash_attn
+        sys.modules["vllm.vllm_flash_attn"] = vendor_fa
 
         return AttentionBackendEnum.FLASH_ATTN.get_path()
