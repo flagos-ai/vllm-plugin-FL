@@ -121,6 +121,20 @@ class FlagGemsBackend(Backend):
 
         return silu_and_mul_with_clamp_flaggems(x, swiglu_limit_tensor)
 
+    def reshape_and_cache_flash(self, *args, **kwargs):
+        """Write key/value into the paged KV cache (flash layout).
+
+        Forwards to flag_gems.fused.reshape_and_cache_flash, which is a
+        pure-Triton in-place op. Sourced from the concrete submodule (not the
+        lazy top-level flag_gems re-export) so it resolves to the real
+        implementation regardless of flag_gems init ordering. Call signature:
+        (key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype,
+        k_scale, v_scale) -> None.
+        """
+        from flag_gems.fused import reshape_and_cache_flash
+
+        return reshape_and_cache_flash(*args, **kwargs)
+
     def rms_norm(
         self,
         obj,
