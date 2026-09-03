@@ -71,5 +71,4 @@ def register_builtins(registry) -> None:
             priority=BackendPriority.VENDOR,
         ),
     ]
-    for impl in impls:
-        registry.register(impl)
+    registry.register_many(impls)
