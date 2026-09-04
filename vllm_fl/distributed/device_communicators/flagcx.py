@@ -127,6 +127,10 @@ class PyFlagcxCommunicator:
             device_ctx = torch.musa.device(self.device)
         elif self.device.type == "ptpu":
             device_ctx = torch.device(self.device)
+        elif self.device.type == "txda":
+            # Tsingmicro Txda NPU: use the torch.txda device context manager.
+            # The torch.cuda.device fallback below has no CUDA runtime on txda.
+            device_ctx = torch.txda.device(self.device)
         else:
             device_ctx = torch.cuda.device(self.device)
 
