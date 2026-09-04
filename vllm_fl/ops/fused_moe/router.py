@@ -4,10 +4,18 @@
 import torch
 from functools import partial
 
-from vllm._aiter_ops import rocm_aiter_ops
-from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
-    rocm_aiter_grouped_topk,
-)
+# ROCm-only aiter symbols: vllm 0.24.0 moved rocm_aiter_grouped_topk under
+# fused_moe/experts/ (the old fused_moe.rocm_aiter_fused_moe module is gone,
+# and non-ROCm wheels never shipped it). Guard the imports and fall back to
+# the pure-torch path when aiter is unavailable.
+try:
+    from vllm._aiter_ops import rocm_aiter_ops
+    from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
+        rocm_aiter_grouped_topk,
+    )
+except ImportError:
+    rocm_aiter_ops = None
+    rocm_aiter_grouped_topk = None
 from vllm.model_executor.layers.fused_moe.router.fused_topk_router import (
     FusedTopKRouter,
 )
@@ -202,7 +210,7 @@ class GroupedTopKRouterFL(GroupedTopKRouter):
                 )
             return topk_weights, topk_ids
 
-        if rocm_aiter_ops.is_fused_moe_enabled():
+        if rocm_aiter_ops is not None and rocm_aiter_ops.is_fused_moe_enabled():
             if not rocm_aiter_ops.is_fusion_moe_shared_experts_enabled():
                 assert self.num_fused_shared_experts == 0
             grouped_topk_impl = partial(
