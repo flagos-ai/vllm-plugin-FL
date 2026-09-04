@@ -108,10 +108,37 @@ def _patch_custom_ops():
     register_op_schemas()
 
 
+def _patch_rotary_flash_attn_import():
+    """Guard vllm 0.20.2's ungated flash_attn.ops.triton.rotary import."""
+    import contextlib
+    from importlib import import_module
+    from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
+
+    if getattr(ApplyRotaryEmb, "_fl_rotary_import_guarded", False):
+        return
+
+    def _guarded_init(self, enforce_enable=False, is_neox_style=True,
+                      enable_fp32_compute=False):
+        super(ApplyRotaryEmb, self).__init__(enforce_enable=enforce_enable)
+        self.is_neox_style = is_neox_style
+        self.enable_fp32_compute = enable_fp32_compute
+        self.apply_rotary_emb_flash_attn = None
+        # vllm 0.20.2 imports flash_attn.ops.triton.rotary whenever flash_attn
+        # is installed; that module hard-imports triton_gcu.triton (only the
+        # vendor triton side ships it). suppress matches vllm 0.24.0 upstream.
+        with contextlib.suppress(ModuleNotFoundError):
+            self.apply_rotary_emb_flash_attn = import_module(
+                "flash_attn.ops.triton.rotary").apply_rotary
+
+    ApplyRotaryEmb.__init__ = _guarded_init
+    ApplyRotaryEmb._fl_rotary_import_guarded = True
+
+
 def register():
     """Register the FL platform."""
     _patch_custom_ops()
     _patch_flash_attn_import()
+    _patch_rotary_flash_attn_import()
     _patch_transformers_compat()
 
     # Model-specific platform patches
