@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
 
@@ -38,6 +39,14 @@ def to_cli_args(params: dict[str, Any], skip: set[str] | None = None) -> list[st
             args.extend([flag, str(value)])
 
     return args
+
+
+def benchmark_result_file(tmp_path: Path, filename: str) -> Path:
+    """Return a stable result path when CI sets a benchmark result directory."""
+    result_dir = os.environ.get("FL_BENCHMARK_RESULT_DIR")
+    base_dir = Path(result_dir) if result_dir else tmp_path
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir / filename
 
 
 def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
