@@ -44,69 +44,131 @@ op_backends:
     - vendor
     - flagos
     - reference
+  # invoke_fused_moe_triton_kernel: prioritize vendor (torch.mm) because
+  # FlagGems Triton kernel overflows NPU unified buffer on some model shapes
+  invoke_fused_moe_triton_kernel:
+    - vendor
+    - flagos
+  # moe_align_block_size: prioritize vendor (pure-torch) because
+  # FlagGems Triton kernel causes DDR address OOB on NPU
+  moe_align_block_size:
+    - vendor
+    - flagos
+  moe_sum:
+    - vendor
+    - flagos
+  topk_softmax:
+    - vendor
+    - flagos
 
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
+# Operators are blacklisted because their FlagGems Triton kernels are either
+# incorrect, imprecise, or crash on Ascend NPU during inference.
 flagos_blacklist:
+  # --- Crash: GDN recurrent path precision ---
+  - exp
+  - exp_
+  - log
+  # --- Crash: Indexing (corrupts ViT rotary cos[pos_ids]) ---
+  - index
+  # --- Crash: Fill (ZeroDivisionError on zero-size slices) ---
+  - fill_scalar_
+  - fill_tensor_
+  # --- Crash: Conv (assertion failure with grouped conv) ---
+  - conv1d
+  # --- Arithmetic (Triton compilation hang on MoE 256-expert shapes) ---
+  - mm
+  - addmm
+  - linear  # flag_gems linear (aten::linear) kernel spins forever on device
+            # under triton_ascend 3.2.0 for decode (M=1) shapes; AICore pinned
+            # at ~111% while EngineCore stalls in get_current_stream; flagtree
+            # 0.6.0+ascend3.2 compiles the same kernel fine. mm/addmm already
+            # blacklisted; linear is the remaining GEMM path in the hot decode
+            # loop. Falling back to torch_npu.linear is exact.
+  - add
+  - sub
+  - mul
+  - true_divide
+  - true_divide_
+  - floor_divide
+  - reciprocal
+  - neg
+  - neg_
+  - abs
+  - abs_
+  # --- Scatter/Gather (worker hard-crash, NPU segfault) ---
   - masked_scatter_
   - masked_scatter
   - scatter_add_
-  - ones
-  - ones_like
-  - isclose
-  - allclose
-  - mean_dim
-  - chunk_gated_delta_rule_fwd
-  - rsqrt # performance loss
-  - index_select
-  - true_divide
-  - silu
-  - silu_and_mul # performance loss end
-  - to_copy
-  - _to_copy
-  - zeros
-  - acos
-  - copy_
-  - fill_scalar_
-  - sum_dim
-  - exponential_
-  - mm
-  - resolve_neg
-  - resolve_conj
-  - eq_scalar
-  - floor_divide
-  - cumsum
-  - cumsum_out
-  - mul
-  - reciprocal
-  - repeat
-  - randn
-  - add
-  - ge_scalar
-  - sub
-  - bitwise_and
-  - bitwise_not
-  - slice_scatter
-  - fill_tensor_
-  - conv1d
-  - conv2d
-  - uniform_
-  - prod
-  - max
-  - amax
-  - cat
-  - stack
-  - flatten
-  - reshape
-  - view
-  - tensor
-  - rand
-  - rand_like
-  - gather
-  - _log_softmax
-  - _flash_attention_forward
   - scatter
   - scatter_
+  - gather
+  - index_put
+  - index_put_
+  - _index_put_impl_
+  # --- Reduction (argmax only - Invalid Runtime Function on NPU) ---
+  - argmax
+  # --- Constant materialization (coreDim=0 kernel launch on scalar tensors) ---
+  # register_buffer("_k_scale", torch.tensor(1.0)) during model construction
+  # routes torch.tensor(scalar) through aten::lift_fresh; the FlagGems copy
+  # kernel computes a zero grid for a scalar/tiny tensor and the NPU aborts
+  # engine startup with "coreDim is invalid (value 0)". These are trivial
+  # copies, so falling back to torch_npu is lossless.
+  - lift_fresh
+  - lift_fresh_copy
+  - _to_copy
+
+  # --- Compile: triton_ascend fork rejects chained boolean (or) ---
+  # flag_gems ascend pow kernels use `if (A or B or C)` which the
+  # triton_ascend 3.2.0 fork frontend refuses (UnsupportedLanguageConstruct:
+  # chained boolean operators), so the Triton path crashes compiling the
+  # RoPE _compute_inv_freq `10000.0 ** t` (pow.Scalar -> pow_scalar).
+  # config_filter() matches on the impl function name (item[1].__name__),
+  # so the blacklist must list the wrapper names below — the op short name
+  # "pow" does NOT match and is ineffective. Falling back to torch_npu.pow
+  # is exact.
+  - pow_tensor_tensor
+  - pow_tensor_tensor_
+  - pow_tensor_scalar
+  - pow_tensor_scalar_
+  - pow_scalar
+
+  # --- Crash: cumsum get_num_sms returns None (large-row scan) ---
+  # flag_gems cumsum kernels call get_num_sms(device_idx) ->
+  # torch_device_fn.get_device_properties(idx).multi_processor_count when
+  # N > 16384. On torch_npu 2.9.0 / triton_ascend 3.2.0 (cann8.5.0) the
+  # properties object lacks multi_processor_count -> None * 4 -> TypeError
+  # ("unsupported operand type(s) for *: 'NoneType' and 'int'"), killing
+  # EngineCore on the first decode step (vllm topk_topp_sampler
+  # torch.cumsum(probs_sort, dim=-1, out=probs_sort), batch < 8 -> pytorch
+  # path). hw25 (cann9.0.0, torch_npu 2.10.0) has a working
+  # multi_processor_count, so this is cann8.5.0-specific. Falling back to
+  # torch_npu.cumsum is exact. Both the plain and out= overloads are listed
+  # because config_filter() matches on the impl function name
+  # (item[1].__name__): "cumsum" (aten::cumsum) and "cumsum_out"
+  # (aten::cumsum.out).
+  - cumsum
+  - cumsum_out
+
+  # --- Crash: repeat_interleave (triton_ascend 3.2.0 MLIR stride assertion) ---
+  # The ATB rotary path (torch_npu._npu_rotary_embedding -> torch.ops.atb.*)
+  # uses repeat_interleave to expand the cos/sin cache for GQA. With flag_gems
+  # patching it, the pointwise copy kernel (rank-3, t2048) fails to compile on
+  # triton_ascend 3.2.0 / cann8.5.0: ConvertTritonIRToLinalgIR "strides must
+  # not be zero" -> MLIRCompilationError. That exception is raised inside the
+  # vendor rotary impl on its first decode call, which silently poisons the
+  # vendor.ascend impl (CachedOp fast path marks it failed without a warning
+  # log) and forces a fallback to the flag_gems rope kernel -> hangs/garbage
+  # on first request under the triton compiler. Falling back to
+  # torch_npu.repeat_interleave is exact. All three overload wrappers are
+  # listed because config_filter() matches on the impl function name
+  # (item[1].__name__): "repeat_interleave_self_int" (ATB internal),
+  # "repeat_interleave_self_tensor" and "repeat_interleave_tensor" (plugin's
+  # own patch.py / gdn_torch_ops.py / mm_encoder_attention.py calls).
+  - repeat_interleave_self_int
+  - repeat_interleave_self_tensor
+  - repeat_interleave_tensor
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
