@@ -125,9 +125,11 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     1. VLLM_FL_FLAGOS_WHITELIST env var: Only these ops use FlagGems
     2. VLLM_FL_FLAGOS_BLACKLIST env var: These ops don't use FlagGems
     3. Platform config flagos_blacklist: Default blacklist from config file
+    4. VLLM_FL_FLAGOS_BLACKLIST_APPEND: Ops appended to the selected blacklist
 
     Note: VLLM_FL_FLAGOS_WHITELIST and VLLM_FL_FLAGOS_BLACKLIST cannot be set
-    simultaneously. If whitelist is set, it completely overrides any blacklist.
+    simultaneously. If whitelist is set, it completely overrides any blacklist,
+    including VLLM_FL_FLAGOS_BLACKLIST_APPEND.
 
     Returns:
         Tuple[Optional[list[str]], Optional[list[str]]]:
@@ -139,6 +141,7 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     """
     whitelist_str = os.environ.get("VLLM_FL_FLAGOS_WHITELIST", "")
     blacklist_str = os.environ.get("VLLM_FL_FLAGOS_BLACKLIST", "")
+    blacklist_append_str = os.environ.get("VLLM_FL_FLAGOS_BLACKLIST_APPEND", "")
 
     # Check if both env vars are set (conflict)
     if whitelist_str and blacklist_str:
@@ -158,17 +161,28 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     # Priority 2: Blacklist from env var
     if blacklist_str:
         blacklist = [op.strip() for op in blacklist_str.split(",") if op.strip()]
-        return None, blacklist
+    else:
+        # Priority 3: Blacklist from platform config
+        try:
+            from vllm_fl.dispatch.config import get_flagos_blacklist
 
-    # Priority 3: Blacklist from platform config
-    try:
-        from vllm_fl.dispatch.config import get_flagos_blacklist
+            config_blacklist = get_flagos_blacklist()
+            if config_blacklist:
+                blacklist = list(config_blacklist)
+        except Exception:
+            pass
 
-        config_blacklist = get_flagos_blacklist()
-        if config_blacklist:
-            blacklist = config_blacklist
-    except Exception:
-        pass
+    # Add deployment exclusions without replacing platform safety defaults.
+    # Preserve insertion order so startup logs and dispatch policy stay stable.
+    if blacklist_append_str:
+        if blacklist is None:
+            blacklist = []
+        seen = set(blacklist)
+        for op in blacklist_append_str.split(","):
+            op = op.strip()
+            if op and op not in seen:
+                blacklist.append(op)
+                seen.add(op)
 
     return whitelist, blacklist
 

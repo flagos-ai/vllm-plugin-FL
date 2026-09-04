@@ -334,8 +334,9 @@ Environment variables can override specific items from platform config. If not s
 | `USE_FLAGGEMS` | `true` | Enable/disable FlagGems |
 | `VLLM_FL_FLAGOS_WHITELIST` | (none) | FlagGems ops whitelist (mutually exclusive with blacklist) |
 | `VLLM_FL_FLAGOS_BLACKLIST` | (none) | FlagGems ops blacklist (mutually exclusive with whitelist) |
+| `VLLM_FL_FLAGOS_BLACKLIST_APPEND` | (none) | Add exclusions without replacing the platform blacklist; ignored when a whitelist is active |
 
-**Priority**: `WHITELIST` > `BLACKLIST` (env) > `flagos_blacklist` (config file)
+**Priority**: `WHITELIST` > (`BLACKLIST` env or platform `flagos_blacklist`) + `BLACKLIST_APPEND`
 
 #### OOT Operator Control
 
@@ -379,6 +380,9 @@ export VLLM_FL_PREFER=vendor
 
 # Override FlagGems blacklist (overrides config file blacklist)
 export VLLM_FL_FLAGOS_BLACKLIST="mm,to_copy,zeros"
+
+# Keep platform defaults and add one deployment-specific exclusion
+export VLLM_FL_FLAGOS_BLACKLIST_APPEND="linear"
 
 # Use whitelist instead (completely ignores any blacklist)
 export VLLM_FL_FLAGOS_WHITELIST="silu_and_mul,rms_norm"
@@ -447,12 +451,16 @@ WHITELIST (env) ──▶ Completely overrides blacklist
                               └── Not set ──▶ Config file blacklist
                                                     │
                                                     └── Not set ──▶ Allow all
+
+BLACKLIST_APPEND (env) ──▶ Appended to the selected blacklist above
 ```
 
 **Important Notes:**
 - Whitelist and blacklist environment variables are mutually exclusive (error if both set)
 - If whitelist is set, it completely ignores any blacklist (env or config)
 - Environment blacklist overrides config file blacklist (not merged)
+- `VLLM_FL_FLAGOS_BLACKLIST_APPEND` retains the selected platform or explicit
+  blacklist while adding deployment-specific exclusions
 
 #### Example: Combined Environment Variables
 
