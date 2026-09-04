@@ -47,3 +47,19 @@ class TestGraphEntry:
         assert entry.graph is None
         assert entry.output is None
         assert entry.input_addresses is None
+
+
+def test_ascend_graph_params_are_initialized_per_capture_size():
+    from vllm_fl.compilation.graph import (
+        get_ascend_graph_params,
+        set_ascend_graph_params,
+    )
+
+    set_ascend_graph_params([4, 1, 4])
+    params = get_ascend_graph_params()
+
+    assert params is not None
+    assert set(params.events) == {1, 4}
+    assert set(params.workspaces) == {1, 4}
+    assert set(params.handles) == {1, 4}
+    assert set(params.attention_params) == {1, 4}
