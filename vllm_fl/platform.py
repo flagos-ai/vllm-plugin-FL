@@ -167,6 +167,13 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
+        if cls.device_type == "gcu":
+            try:
+                from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+                apply_gcu_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply GCU patches: {e}")
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""
@@ -259,6 +266,24 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_ragged_deepseek_prefill = False
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
+
+        # --------------------------------------------------------
+        # enflame specific config updates
+        if cls.vendor_name == "enflame":
+            # GCU grid.x caps at 65535; the Qwen q_norm kernel grids
+            # batch × 32, so a 2048-token step overflows (2048×32=65536).
+            # 2047 is the largest safe step size — verified on-node.
+            scheduler_config = vllm_config.scheduler_config
+            if (
+                scheduler_config is not None
+                and scheduler_config.max_num_batched_tokens > 2047
+            ):
+                logger.info(
+                    "GCU: clamping max_num_batched_tokens from %s to 2047 "
+                    "(grid.x 65535 cap)",
+                    scheduler_config.max_num_batched_tokens,
+                )
+                scheduler_config.max_num_batched_tokens = 2047
 
     @classmethod
     def get_attn_backend_cls(
