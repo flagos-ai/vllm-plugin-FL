@@ -119,7 +119,9 @@ class FlagGemsBackend(Backend):
     def silu_and_mul_with_clamp(self, x: torch.Tensor, swiglu_limit: float, swiglu_limit_tensor: torch.Tensor) -> torch.Tensor:
         from .impl.activation import silu_and_mul_with_clamp_flaggems
 
-        return silu_and_mul_with_clamp_flaggems(x, swiglu_limit_tensor)
+        return silu_and_mul_with_clamp_flaggems(
+            x, swiglu_limit, swiglu_limit_tensor
+        )
 
     def rms_norm(
         self,
