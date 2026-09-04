@@ -403,6 +403,16 @@ class PlatformFL(Platform):
                 patch_triton_chained_or_for_iluvatar,
             )
             patch_triton_chained_or_for_iluvatar()
+        if cls.vendor_name == "cambricon":
+            # Cambricon 4.4.3's triton 3.2.0+mlu1.7.2 rejects chained boolean
+            # `or` inside @triton.jit bodies (UnsupportedLanguageConstruct,
+            # escapes the autotuner → EngineCore dead → HTTP 500). Rewrite the
+            # affected vllm sources in the main process before Worker
+            # subprocesses start, so Workers import the patched files from disk.
+            from vllm_fl.dispatch.backends.vendor.cambricon.cambricon import (
+                patch_triton_chained_or_for_cambricon,
+            )
+            patch_triton_chained_or_for_cambricon()
 
     def supports_fp8(cls) -> bool:
         if cls.vendor_name == "nvidia":
