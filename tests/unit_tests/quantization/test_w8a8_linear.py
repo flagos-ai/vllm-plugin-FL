@@ -83,6 +83,37 @@ def test_w8a8_linear_registration_keeps_native_fallback():
     ]
 
 
+def test_oot_quant_registry_inherits_mxfp8_candidates(monkeypatch):
+    from vllm.model_executor.kernels import linear as linear_kernels
+
+    from vllm_fl.quantization import quant_linear
+    from vllm_fl.quantization.w8a8 import moe, packed
+
+    candidate = object()
+    monkeypatch.setattr(
+        quant_linear,
+        "_resolve_source_platform",
+        lambda: PlatformEnum.CUDA,
+    )
+    monkeypatch.setitem(
+        linear_kernels._POSSIBLE_MXFP8_KERNELS,
+        PlatformEnum.CUDA,
+        [candidate],
+    )
+    monkeypatch.delitem(
+        linear_kernels._POSSIBLE_MXFP8_KERNELS,
+        PlatformEnum.OOT,
+        raising=False,
+    )
+    monkeypatch.setattr(linear, "register_fl_w8a8_linear_kernel", lambda _: True)
+    monkeypatch.setattr(moe, "install_fl_w8a8_moe_selector", lambda: None)
+    monkeypatch.setattr(packed, "install_packed_w8a8_scheme", lambda: None)
+
+    quant_linear.add_oot_quant_kernel()
+
+    assert linear_kernels._POSSIBLE_MXFP8_KERNELS[PlatformEnum.OOT] == [candidate]
+
+
 def test_w8a8_linear_uses_common_flaggems_policy(monkeypatch):
     monkeypatch.setattr(linear, "is_oot_enabled", lambda: True)
     policy_calls = []

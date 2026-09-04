@@ -36,6 +36,7 @@ def add_oot_quant_kernel() -> None:
         _POSSIBLE_FP8_KERNELS,
         _POSSIBLE_INT8_KERNELS,
         _POSSIBLE_KERNELS,
+        _POSSIBLE_MXFP8_KERNELS,
     )
 
     source = _resolve_source_platform()
@@ -56,6 +57,14 @@ def add_oot_quant_kernel() -> None:
     if PlatformEnum.OOT not in _POSSIBLE_FP8_BLOCK_KERNELS:
         _POSSIBLE_FP8_BLOCK_KERNELS[PlatformEnum.OOT] = list(
             _POSSIBLE_FP8_BLOCK_KERNELS.get(source, [])
+        )
+
+    # ModelOpt MXFP8 has a separate registry from ordinary FP8. PlatformFL
+    # reports OOT even on NVIDIA, so inherit the native candidates, including
+    # the emulation fallback, without adding or reordering device kernels.
+    if PlatformEnum.OOT not in _POSSIBLE_MXFP8_KERNELS:
+        _POSSIBLE_MXFP8_KERNELS[PlatformEnum.OOT] = list(
+            _POSSIBLE_MXFP8_KERNELS.get(source, [])
         )
 
     # compressed-tensors selects its Linear and MoE implementations while the
