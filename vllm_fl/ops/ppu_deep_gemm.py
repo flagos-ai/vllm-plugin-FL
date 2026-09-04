@@ -45,12 +45,33 @@ def get_deep_gemm_best_configs():
 
     config_dict_in_all = dict()
 
-    device_name = current_platform.get_device_name().replace(" ", "_")
-    device_name_signature = f",device_name={device_name}-"
+    # Escape hatch / A-B knob: VLLM_FL_DEEPGEMM_CONFIGS=0 reproduces the old
+    # behaviour where no tuned config was ever found, without editing code.
+    if os.environ.get("VLLM_FL_DEEPGEMM_CONFIGS", "1") != "1":
+        logger.warning_once("ppu deepgemm tuned configs disabled by env")
+        return dict()
+
+    # Config filenames are tagged with the *chip* name (e.g. PPU-ZW810E), but
+    # current_platform.get_device_name() returns the vendor tag from the plugin's
+    # vendor config ("thead"), so matching on it alone silently loads nothing.
+    # Try the chip name reported by the driver first, then the platform tag.
+    candidate_names = []
+    try:
+        candidate_names.append(torch.cuda.get_device_name(0))
+    except Exception:  # driver not up yet / no device
+        pass
+    candidate_names.append(current_platform.get_device_name())
+    signatures = []
+    for name in candidate_names:
+        if not name:
+            continue
+        sig = f",device_name={name.replace(' ', '_')}-"
+        if sig not in signatures:
+            signatures.append(sig)
     logger.info_once("ppu deepgemm start loading config......")
 
     for config in configs:
-        if device_name_signature not in config:
+        if not any(sig in config for sig in signatures):
             logger.debug_once(f"ppu deepgemm skipping device_name_signature {config}")
             continue
         logger.info_once(f"ppu deepgemm loading device_name_signature {config}")
@@ -76,6 +97,13 @@ def get_deep_gemm_best_configs():
     return config_dict_in_all
 
 
+def _parse_config(entry):
+    """Vendor config files store `config` as a repr string; configs written by
+    deep_gemm's own tuner store it as a real dict. Accept both."""
+    cfg = entry["config"]
+    return cfg if isinstance(cfg, dict) else ast.literal_eval(cfg)
+
+
 @functools.cache
 def get_deep_gemm_config(M, N, K, num_groups):
     best_configs = get_deep_gemm_best_configs()
@@ -83,7 +111,7 @@ def get_deep_gemm_config(M, N, K, num_groups):
         # find neariest config
         config = None
         if (M, N, K, num_groups) in best_configs:
-            config = ast.literal_eval(best_configs[(M, N, K, num_groups)]["config"])
+            config = _parse_config(best_configs[(M, N, K, num_groups)])
             logger.debug_once("directly hit best config")
         else:
 
@@ -97,7 +125,7 @@ def get_deep_gemm_config(M, N, K, num_groups):
             candidate_Ms = CANDIDATE_Ms
             M_candidate = find_closest(candidate_Ms, M)
             if (M_candidate, N, K, num_groups) in best_configs:
-                config = ast.literal_eval(best_configs[(M_candidate, N, K, num_groups)]["config"])
+                config = _parse_config(best_configs[(M_candidate, N, K, num_groups)])
                 logger.debug_once("find closest best config")
         if config is None:
             logger.debug_once(
