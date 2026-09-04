@@ -504,6 +504,14 @@ class WorkerFL(WorkerBase):
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
+        if current_platform.device_type == "txda":
+            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
+            # e.g., 20 GiB or similar default cache memory size.
+            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
+            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
+                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
+            return fallback_val
+
         GiB = lambda b: b / GiB_bytes
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
@@ -719,15 +727,18 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        try:
-            kernel_warmup(self)
-        except ImportError as e:
-            # vllm 0.24.0's kernel_warmup unconditionally imports
-            # minimax_m3_msa_warmup, whose chain reaches torchvision.
-            # torchvision is not installed on OOT runtimes (installing it
-            # would overwrite the vendor-matched torch matrix); the warmup
-            # is a no-op for any model other than MiniMaxM3, so skip it.
-            logger.warning("kernel_warmup skipped: %s", e)
+        if current_platform.device_type == "txda":
+            logger.warning("Detected txda device, skipping kernel_warmup")
+        else:
+            try:
+                kernel_warmup(self)
+            except ImportError as e:
+                # vllm 0.24.0's kernel_warmup unconditionally imports
+                # minimax_m3_msa_warmup, whose chain reaches torchvision.
+                # torchvision is not installed on OOT runtimes (installing it
+                # would overwrite the vendor-matched torch matrix); the warmup
+                # is a no-op for any model other than MiniMaxM3, so skip it.
+                logger.warning("kernel_warmup skipped: %s", e)
 
         cuda_graph_memory_bytes = 0
         if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
