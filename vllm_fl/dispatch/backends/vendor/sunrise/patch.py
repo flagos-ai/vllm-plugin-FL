@@ -23,6 +23,7 @@ def apply_sunrise_patches():
     patch_distributed_runtime()
     patch_op_cls()
     patch_accelerator_empty_cache()
+    patch_accelerator_memory_stats()
 
 
 def patch_flagcx_stream_adapter():
@@ -208,3 +209,30 @@ def patch_accelerator_empty_cache():
         logger.info("Patched torch.accelerator.empty_cache for Sunrise/PTPU")
     except Exception as e:
         logger.warning("Failed to patch torch.accelerator.empty_cache: %s", e)
+
+
+def patch_accelerator_memory_stats():
+    """Provide torch.ptpu.memory_stats() for FL worker memory profiling.
+
+    torch.ptpu exposes max_memory_allocated/memory_reserved but not the
+    torch.cuda-style memory_stats() dict that the FL worker's KV-cache sizing
+    reads ("allocated_bytes.all.peak"). Synthesize the keys the worker uses
+    from the ptpu peak APIs. Guarded: never overrides a real implementation.
+    """
+    try:
+        if getattr(torch.ptpu, "_sunrise_memory_stats_patched", False):
+            return
+        if hasattr(torch.ptpu, "memory_stats"):
+            return
+
+        def _memory_stats(device=None):
+            return {
+                "allocated_bytes.all.peak": torch.ptpu.max_memory_allocated(device),
+                "reserved_bytes.all.peak": torch.ptpu.memory_reserved(device),
+            }
+
+        torch.ptpu.memory_stats = _memory_stats
+        torch.ptpu._sunrise_memory_stats_patched = True
+        logger.info("Patched torch.ptpu.memory_stats for Sunrise/PTPU")
+    except Exception as e:
+        logger.warning("Failed to patch torch.ptpu.memory_stats: %s", e)
