@@ -51,8 +51,6 @@ class TestArmCpuPackedW4A8(unittest.TestCase):
         if not cls.first_install:
             return
 
-        from vllm_fl.quantization import arm_cpu_w4a8 as adapter
-
         cls.scheme_cls.__init__ = cls.originals["scheme_init"]
         cls.scheme_cls.create_weights = cls.originals["scheme_create_weights"]
         cls.config_cls._get_scheme_from_parts = cls.originals["config_get_scheme"]
@@ -69,7 +67,6 @@ class TestArmCpuPackedW4A8(unittest.TestCase):
         ):
             if attribute in owner.__dict__:
                 delattr(owner, attribute)
-        adapter._INSTALLED = False
 
     def test_installer_is_idempotent(self):
         self.assertFalse(install_arm_cpu_packed_w4a8())

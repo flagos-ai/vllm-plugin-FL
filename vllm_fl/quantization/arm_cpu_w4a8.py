@@ -9,16 +9,11 @@ import threading
 import torch
 
 _INSTALL_LOCK = threading.Lock()
-_INSTALLED = False
 
 
 def install_arm_cpu_packed_w4a8() -> bool:
     """Teach vLLM 0.24 to retain packed W4 G128 checkpoint parameters."""
-    global _INSTALLED
     with _INSTALL_LOCK:
-        if _INSTALLED:
-            return False
-
         from compressed_tensors.compressors.pack_quantized.helpers import (
             unpack_from_int32,
         )
@@ -54,7 +49,6 @@ def install_arm_cpu_packed_w4a8() -> bool:
         if scheme_installed != kernel_installed:
             raise RuntimeError("incomplete ARM W4A8 runtime installation detected")
         if scheme_installed:
-            _INSTALLED = True
             return False
 
         original_init = scheme_cls.__init__
@@ -95,7 +89,7 @@ def install_arm_cpu_packed_w4a8() -> bool:
             **kwargs,
         ) -> None:
             if not getattr(self, "_vllm_fl_checkpoint_packed", False):
-                return original_create_weights(
+                original_create_weights(
                     self,
                     layer,
                     output_size,
@@ -106,6 +100,7 @@ def install_arm_cpu_packed_w4a8() -> bool:
                     weight_loader,
                     **kwargs,
                 )
+                return
 
             output_size_per_partition = sum(output_partition_sizes)
             row_parallel = input_size != input_size_per_partition
@@ -185,6 +180,7 @@ def install_arm_cpu_packed_w4a8() -> bool:
             # checkpoint path.  Stock vLLM W4A8 kernels must keep their
             # original loading and execution behavior.
             self.kernel._vllm_fl_arm_packed_checkpoint = True
+            return
 
         def get_scheme_from_parts(
             self,
@@ -218,11 +214,13 @@ def install_arm_cpu_packed_w4a8() -> bool:
 
         def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
             if not getattr(self, "_vllm_fl_arm_packed_checkpoint", False):
-                return original_process(self, layer)
+                original_process(self, layer)
+                return
 
             config = self.config
             if config.group_size != 128 or config.zero_points:
-                return original_process(self, layer)
+                original_process(self, layer)
+                return
 
             quantized = getattr(layer, self.w_q_name)
             scales = getattr(layer, self.w_s_name)
@@ -293,6 +291,7 @@ def install_arm_cpu_packed_w4a8() -> bool:
             if packed_checkpoint:
                 layer.weight_shape = None
             self._vllm_fl_arm_w4a8_shape = (n, k)
+            return
 
         def apply_weights(
             self,
@@ -337,5 +336,4 @@ def install_arm_cpu_packed_w4a8() -> bool:
         Dynamic4bitLinearKernel._vllm_fl_arm_w4a8 = True
         Dynamic4bitLinearKernel._vllm_fl_arm_original_process = original_process
         Dynamic4bitLinearKernel._vllm_fl_arm_original_apply = original_apply
-        _INSTALLED = True
         return True
