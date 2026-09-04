@@ -1,8 +1,8 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import importlib
-import os
 import logging
+import os
 import sys
 
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
@@ -18,12 +18,21 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
+from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 from vllm_fl.utils import get_op_config as _get_op_config
 
-from . import version as version  # PyTorch-style: vllm_fl.version.git_version
-
-
 logger = logging.getLogger(__name__)
+
+
+def _arm_cpu_platform() -> str | None:
+    """Return vLLM's CPU platform on AArch64 hosts, if available."""
+    import platform
+
+    if platform.machine().lower() not in {"aarch64", "arm64"}:
+        return None
+    from vllm.platforms import cpu_platform_plugin
+
+    return cpu_platform_plugin()
 
 
 def __getattr__(name):
@@ -97,6 +106,13 @@ def _patch_custom_ops():
 
 def register():
     """Register the FL platform."""
+    # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
+    # preserve vLLM's stock CPU platform and install kernels in register_model().
+    arm_cpu_platform = _arm_cpu_platform()
+    if arm_cpu_platform is not None:
+        logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
+        return arm_cpu_platform
+
     _patch_custom_ops()
     _patch_flash_attn_import()
     _patch_transformers_compat()
@@ -163,6 +179,42 @@ def register_model():
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
 
     apply_qwen3_5_text_patches()
+
+    from vllm.platforms import current_platform
+    if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
+        from vllm_fl.patches.arm_cpu_gdn import (
+            apply_arm_cpu_gdn_state_indices_patch,
+        )
+
+        apply_arm_cpu_gdn_state_indices_patch()
+
+        # FlagGems owns the generic Triton operator. This plugin owns vLLM's
+        # checkpoint metadata and kernel-lifecycle integration.
+        try:
+            import flag_gems
+        except ModuleNotFoundError as error:
+            if error.name != "flag_gems":
+                raise
+            logger.warning(
+                "[vllm_fl] FlagGems is not installed; ARM packed W4A8 "
+                "integration is disabled and other vLLM paths are unchanged"
+            )
+            return
+        if flag_gems.vendor_name != "arm":
+            logger.warning(
+                "[vllm_fl] FlagGems selected vendor %r, not 'arm'; ARM CPU "
+                "runtime integration was not installed",
+                flag_gems.vendor_name,
+            )
+            return
+
+        from vllm_fl.quantization.arm_cpu_w4a8 import (
+            install_arm_cpu_packed_w4a8,
+        )
+
+        install_arm_cpu_packed_w4a8()
+        return
+
     patch_vllm_moe_sum()
 
     _register_flagcx_connector()
@@ -176,6 +228,7 @@ def register_model():
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
+
         from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
         _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
 
