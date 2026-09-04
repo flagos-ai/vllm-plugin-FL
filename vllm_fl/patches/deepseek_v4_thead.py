@@ -12,6 +12,7 @@ model-inspection, and every worker subprocess.
 """
 
 import logging
+import os
 
 import torch
 
@@ -99,6 +100,68 @@ def _patch_flashmla_ops():
 
     fl_mod._fl_thead_patch = True
     logger.info("[vllm_fl] flashmla ops rebound to PPU flash_mla package")
+
+
+def _patch_no_q_head_padding():
+    """Stop padding Q heads to 64 on PPU.
+
+    Upstream ``DeepseekV4FlashMLAAttention.get_padded_num_q_heads`` returns
+    ``64 if num_heads <= 64 else 128`` because NVIDIA's *FP8 decode* kernel only
+    supports h_q in {64, 128}. The PPU flash_mla wheel has no such restriction,
+    and the T-Head fork carries exactly this branch:
+
+        if current_platform.is_ppu():
+            self.padded_heads = num_heads   # PPU FlashMLA supports arbitrary h_q
+
+    DeepSeek-V4 has 64 heads, so at TP=8 each rank owns 8. Padding them to 64
+    makes flash_mla instantiate a different, much slower kernel variant.
+    Measured on 8x PPU-ZW810E at batch 64 (decode, per step, rank 0):
+
+        flash_sparse_decode_fwd_kernel<512,64,...>  82.3 us  (padded, FL)
+        flash_sparse_decode_fwd_kernel<512,16,...>  51.4 us  (unpadded, T-Head)
+        flash_fwd_splitkv_mla_combine<512,64,...>    9.9 us  vs <512,16,...> 3.8 us
+
+    i.e. +2.124 ms/step out of a 4.9 ms TPOT gap — the single largest item.
+
+    The abstract contract sanctions this: ``get_padded_num_q_heads``'s docstring
+    says "Backends with no padding constraint return num_heads". Every consumer
+    degrades correctly when padded_heads == n_local_heads:
+      * ``attn_sink`` is allocated at padded_heads and weight loading fills the
+        first n_local_heads slots -> exactly sized, no -inf tail.
+      * ``o_padded`` is allocated at padded_heads and sliced to n_local_heads
+        afterwards -> the slice becomes a no-op.
+      * the profile-run ``F.pad`` in _fused_qnorm_rope_kv_insert is guarded by
+        ``if n_local_heads < padded_heads`` -> skipped.
+      * FlagGems' fused qnorm kernel takes q_head_padded; the FL wrapper in
+        vllm_fl/ops/_C_ops_registry.py already has a fast path for
+        ``q_head_padded == num_heads`` that skips the torch.zeros allocation,
+        the copy_ and the pad zero-fill entirely -> strictly cheaper.
+      * flash_mla asserts ``sched_meta.config.h_q == q.shape[2]``, but the
+        tile-scheduler plan is allocated empty and populated by the kernel's own
+        planner from the actual q shape on the first call, so h_q follows.
+
+    Set VLLM_FL_Q_HEAD_PADDING=1 to restore upstream padding.
+    """
+    from vllm.models.deepseek_v4.nvidia.flashmla import (
+        DeepseekV4FlashMLAAttention,
+    )
+
+    if getattr(DeepseekV4FlashMLAAttention, "_fl_no_head_pad_patch", False):
+        return
+    if os.environ.get("VLLM_FL_Q_HEAD_PADDING") == "1":
+        logger.warning("[vllm_fl] Q head padding left at upstream (env override)")
+        return
+
+    @classmethod
+    def get_padded_num_q_heads(cls, num_heads: int) -> int:
+        # PPU flash_mla places no constraint on h_q; the kernel picks its own
+        # tile size internally (8 real heads select the kBlockM=16 variant).
+        return num_heads
+
+    DeepseekV4FlashMLAAttention.get_padded_num_q_heads = get_padded_num_q_heads
+    DeepseekV4FlashMLAAttention._fl_no_head_pad_patch = True
+    logger.warning("[vllm_fl] Q head padding disabled on PPU "
+                   "(padded_heads = n_local_heads)")
 
 
 def _patch_int8_o_proj():
@@ -806,6 +869,7 @@ def apply_deepseek_v4_thead_patches():
     _patch_int8_moe_quant_scheme()
     _patch_int8_moe_deepgemm_backend()
     _patch_flashmla_ops()
+    _patch_no_q_head_padding()
     _patch_int8_o_proj()
     _patch_topk_softplus_sqrt()
     _patch_moe_align_block_size()
