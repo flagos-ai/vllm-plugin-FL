@@ -28,6 +28,12 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorRole,
     SupportsHMA,
 )
+from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
+    KVConnectorPromMetrics,
+    KVConnectorStats,
+    PromMetric,
+    PromMetricT,
+)
 from vllm.distributed.parallel_state import (
     get_pp_group,
     get_tensor_model_parallel_rank,
@@ -53,6 +59,11 @@ from vllm.v1.request import RequestStatus
 from vllm.v1.worker.block_table import BlockTable
 from vllm.v1.worker.utils import select_common_block_size
 
+from vllm_fl.distributed.kv_transfer.flagcx_stats import (
+    FlagCXKVConnectorStats,
+    FlagCXPromMetrics,
+)
+
 if TYPE_CHECKING:
     from vllm.v1.core.kv_cache_manager import KVCacheBlocks
     from vllm.v1.kv_cache_interface import KVCacheConfig
@@ -74,6 +85,7 @@ except ImportError as e:
 
 EngineId = str
 ReqId = str
+TransferId = str
 
 TRANS_DONE = b"trans_done"
 TRANS_ERROR = b"trans_error"
@@ -109,8 +121,7 @@ class FlagCXAgentMetadata(
     remote_port: int
     remote_tp_size: int
     remote_tp_rank: int
-    # req_id -> per KV-cache-group block ids on the Decode (receiver) side.
-    req_blocks: dict[ReqId, list[list[int]]]
+    req_blocks: dict[ReqId, tuple[TransferId, list[list[int]]]]
     kv_caches_base_addr: list[int]
     block_lens: list[int]
     kv_block_lens: list[int]
@@ -124,11 +135,14 @@ class RecvReqMeta:
     local_block_ids: list[list[int]]
     remote_host: str
     remote_port: int
+    transfer_id: TransferId
     remote_tp_size: int = 0
 
 
 @dataclass
 class SendBlockMeta:
+    p_req_id: ReqId
+    transfer_id: TransferId
     local_block_ids: list[list[int]]
     ready: threading.Event
     expire_time: float = float("inf")
@@ -138,7 +152,7 @@ class SendBlockMeta:
 
 @dataclass
 class SendReqMeta:
-    reqs: dict[ReqId, SendBlockMeta]
+    reqs: dict[TransferId, SendBlockMeta]
     lock: threading.Lock
 
 
@@ -158,7 +172,9 @@ class FlagCXConnectorMetadata(KVConnectorMetadata):
     def __init__(self):
         self.reqs_to_recv: dict[ReqId, RecvReqMeta] = {}
         # Per-request, per KV-cache-group block ids.
-        self.reqs_to_send: dict[ReqId, list[list[int]]] = {}
+        self.reqs_to_send: dict[
+            ReqId, tuple[TransferId, list[list[int]]]
+        ] = {}
 
     def add_new_req(
         self,
@@ -167,15 +183,17 @@ class FlagCXConnectorMetadata(KVConnectorMetadata):
         kv_transfer_params: dict[str, Any],
         load_remote_cache: bool = True,
     ):
+        transfer_id = kv_transfer_params["transfer_id"]
         if load_remote_cache:
             self.reqs_to_recv[request_id] = RecvReqMeta(
                 local_block_ids=local_block_ids,
                 remote_host=kv_transfer_params["remote_host"],
                 remote_port=kv_transfer_params["remote_port"],
+                transfer_id=transfer_id,
                 remote_tp_size=kv_transfer_params.get("remote_tp_size", 0),
             )
         else:
-            self.reqs_to_send[request_id] = local_block_ids
+            self.reqs_to_send[request_id] = (transfer_id, local_block_ids)
 
 
 class FlagCXConnector(KVConnectorBase_V1, SupportsHMA):
@@ -294,6 +312,43 @@ class FlagCXConnector(KVConnectorBase_V1, SupportsHMA):
     def wait_for_save(self):
         pass
 
+    def get_kv_connector_stats(self) -> "KVConnectorStats | None":
+        """Return worker-local transfer stats since the last call.
+
+        Note the P/D asymmetry: FlagCX is P-push (P issues the one-sided
+        flagcxP2pBatchWriteSync), so P records successful transfer latency,
+        bytes and descriptor counts, while D only records failures (ZMQ /
+        side-channel errors). NIXL-style dashboards will therefore find
+        successful-transfer metrics on the P worker, not D.
+        """
+        if self.connector_worker is None:
+            return None
+        return self.connector_worker.get_kv_connector_stats()
+
+    @classmethod
+    def build_kv_connector_stats(
+        cls, data: dict[str, Any] | None = None
+    ) -> "KVConnectorStats | None":
+        return FlagCXKVConnectorStats(data=data or {})
+
+    @classmethod
+    def build_prom_metrics(
+        cls,
+        vllm_config: VllmConfig,
+        metric_types: dict[type[PromMetric], type[PromMetricT]],
+        labelnames: list[str],
+        per_engine_labelvalues: dict[int, list[object]],
+    ) -> KVConnectorPromMetrics:
+        """Register the FlagCX Prometheus metrics.
+
+        Without this the base class returns None and the stats above only
+        reach the periodic CLI log line; the counters registered here are
+        what make rate()/increase() queries possible.
+        """
+        return FlagCXPromMetrics(
+            vllm_config, metric_types, labelnames, per_engine_labelvalues
+        )
+
 
 class FlagCXConnectorScheduler:
     def __init__(
@@ -334,7 +389,9 @@ class FlagCXConnectorScheduler:
         ]
 
         self._reqs_need_recv: dict[ReqId, tuple[Request, list[list[int]]]] = {}
-        self._reqs_need_send: dict[ReqId, list[list[int]]] = {}
+        self._reqs_need_send: dict[
+            ReqId, tuple["Request", list[list[int]]]
+        ] = {}
 
     def get_sw_clipped_blocks(
         self,
@@ -415,7 +472,9 @@ class FlagCXConnectorScheduler:
 
         if params.get("do_remote_prefill"):
             assert self.kv_role != "kv_producer"
-            if all(p in params for p in ("remote_host", "remote_port")):
+            if all(
+                p in params for p in ("remote_host", "remote_port", "transfer_id")
+            ):
                 unhashed_block_ids = (
                     blocks.get_unhashed_block_ids_all_groups()
                     if num_external_tokens > 0
@@ -431,7 +490,10 @@ class FlagCXConnectorScheduler:
             params["do_remote_prefill"] = False
 
         elif params.get("do_remote_decode"):
-            self._reqs_need_send[request.request_id] = []
+            if not params.get("transfer_id"):
+                logger.warning("Missing transfer_id in KVTransferParams: %s", params)
+            else:
+                self._reqs_need_send[request.request_id] = (request, [])
 
     def build_connector_meta(
         self, scheduler_output: SchedulerOutput
@@ -449,11 +511,12 @@ class FlagCXConnectorScheduler:
             self._reqs_need_recv.clear()
 
         if self.kv_role != "kv_consumer":
-            for req_id, block_ids in self._reqs_need_send.items():
+            for req_id, (req, block_ids) in self._reqs_need_send.items():
+                assert req.kv_transfer_params is not None
                 meta.add_new_req(
                     request_id=req_id,
                     local_block_ids=block_ids,
-                    kv_transfer_params={},
+                    kv_transfer_params=req.kv_transfer_params,
                     load_remote_cache=False,
                 )
             self._reqs_need_send.clear()
@@ -464,7 +527,7 @@ class FlagCXConnectorScheduler:
         self, request: "Request", block_ids: tuple[list[int], ...]
     ) -> tuple[bool, dict[str, Any] | None]:
         params = request.kv_transfer_params
-        if not params:
+        if not params or not params.get("transfer_id"):
             return False, None
 
         if params.get("do_remote_prefill"):
@@ -483,8 +546,9 @@ class FlagCXConnectorScheduler:
         delay_free_blocks = any(len(group) > 0 for group in block_ids)
 
         if delay_free_blocks:
-            self._reqs_need_send[request.request_id] = self.get_sw_clipped_blocks(
-                block_ids
+            self._reqs_need_send[request.request_id] = (
+                request,
+                self.get_sw_clipped_blocks(block_ids),
             )
 
         return delay_free_blocks, dict(
@@ -493,6 +557,7 @@ class FlagCXConnectorScheduler:
             remote_host=self.side_channel_host,
             remote_port=self.side_channel_port,
             remote_tp_size=self.vllm_config.parallel_config.tensor_parallel_size,
+            transfer_id=params["transfer_id"],
         )
 
 
@@ -578,6 +643,8 @@ class FlagCXConnectorWorker:
                 daemon=True,
             )
             self._receiver_t.start()
+
+        self.xfer_stats = FlagCXKVConnectorStats()
 
         self.finished_sending_reqs = FinishedSendReqSet(set(), threading.Lock())
         self.finished_recving_reqs = FinishedReceiveReqSet(set(), asyncio.Lock())
@@ -920,19 +987,30 @@ class FlagCXConnectorWorker:
 
         ready_reqs: list[tuple[ReqId, SendBlockMeta]] = []
         with self.reqs_need_send.lock:
-            for req_id in meta.req_blocks:
-                send_meta = self.reqs_need_send.reqs.get(req_id)
+            for d_req_id, (transfer_id, _) in meta.req_blocks.items():
+                send_meta = self.reqs_need_send.reqs.get(transfer_id)
                 if send_meta is None:
-                    logger.warning("Request %s not found in reqs_need_send", req_id)
-                    return
+                    send_meta = SendBlockMeta(
+                        p_req_id="",
+                        transfer_id=transfer_id,
+                        local_block_ids=[],
+                        ready=threading.Event(),
+                    )
+                    self.reqs_need_send.reqs[transfer_id] = send_meta
                 # Mark it as not expired. We will send it now.
                 send_meta.expire_time = float("inf")
                 send_meta.need_send = need
-                ready_reqs.append((req_id, send_meta))
+                ready_reqs.append((d_req_id, send_meta))
 
         # Wait until the scheduler has committed each request's blocks.
-        for _, send_meta in ready_reqs:
-            send_meta.ready.wait()
+        deadline = time.perf_counter() + self._abort_request_timeout
+        for d_req_id, send_meta in ready_reqs:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0 or not send_meta.ready.wait(timeout=remaining):
+                raise RuntimeError(
+                    "Timed out waiting for prefill blocks of transfer "
+                    f"{send_meta.transfer_id} (decode request {d_req_id})."
+                )
 
         remote_session = f"{meta.remote_hostname}:{meta.remote_port}"
         conn = self._get_conn(remote_session)
@@ -976,15 +1054,31 @@ class FlagCXConnectorWorker:
         )
 
         if sizes:
-            self.flagcx.flagcxP2pBatchWriteSync(conn, src_vas, dst_vas, sizes)
+            write_start = time.perf_counter()
+            try:
+                self.flagcx.flagcxP2pBatchWriteSync(conn, src_vas, dst_vas, sizes)
+            except Exception:
+                # Only the one-sided write itself counts as a failed transfer;
+                # earlier setup errors are reported by the sender worker.
+                self.xfer_stats.record_failed_transfer()
+                raise
+            self.xfer_stats.record_transfer(
+                duration_s=time.perf_counter() - write_start,
+                total_bytes=sum(sizes),
+                num_descs=len(sizes),
+            )
 
         finished: list[ReqId] = []
         with self.reqs_need_send.lock:
-            for req_id, send_meta in ready_reqs:
+            for _, send_meta in ready_reqs:
                 send_meta.sent += 1
                 if send_meta.sent >= max(send_meta.need_send, 1):
-                    self.reqs_need_send.reqs.pop(req_id, None)
-                    finished.append(req_id)
+                    self.reqs_need_send.reqs.pop(send_meta.transfer_id, None)
+                    if not send_meta.p_req_id:
+                        raise RuntimeError(
+                            f"Missing Prefill request ID for {send_meta.transfer_id}."
+                        )
+                    finished.append(send_meta.p_req_id)
         if finished:
             with self.finished_sending_reqs.lock:
                 self.finished_sending_reqs.set.update(finished)
@@ -1011,7 +1105,7 @@ class FlagCXConnectorWorker:
         group_specs = self.kv_cache_config.kv_cache_groups
 
         for d_req_id, send_meta in ready_reqs:
-            remote_block_ids_per_group = agent_meta.req_blocks[d_req_id]
+            _, remote_block_ids_per_group = agent_meta.req_blocks[d_req_id]
             if not remote_block_ids_per_group or all(
                 len(g) == 0 for g in remote_block_ids_per_group
             ):
@@ -1129,7 +1223,7 @@ class FlagCXConnectorWorker:
     async def _receive_kv(
         self,
         path: str,
-        req_blocks: dict[ReqId, list[list[int]]],
+        req_blocks: dict[ReqId, tuple[TransferId, list[list[int]]]],
     ):
         req_ids = list(req_blocks.keys())
 
@@ -1152,7 +1246,9 @@ class FlagCXConnectorWorker:
         sock: zmq.asyncio.Socket = make_zmq_socket(
             self.async_zmq_ctx, path, zmq.REQ, bind=False, linger=0
         )
-        sock.setsockopt(zmq.RCVTIMEO, 60000)
+        sock.setsockopt(
+            zmq.RCVTIMEO, (self._abort_request_timeout + 60) * 1000
+        )
 
         try:
             await sock.send(encoded_data)
@@ -1163,12 +1259,14 @@ class FlagCXConnectorWorker:
                     "see logs in prefiller.",
                     req_ids,
                 )
+                self.xfer_stats.record_failed_recv()
                 return
 
         except zmq.ContextTerminated:
             logger.debug("ZMQ context terminated, exiting FlagCX receiver thread.")
         except Exception as e:
             logger.error("FlagCXAgentMetadata transfer failed for %s: %s", req_ids, e)
+            self.xfer_stats.record_failed_recv()
             return
         finally:
             sock.close()
@@ -1193,13 +1291,21 @@ class FlagCXConnectorWorker:
 
         if self.kv_role != "kv_consumer":
             with self.reqs_need_send.lock:
-                for req_id, block_ids in metadata.reqs_to_send.items():
-                    send_meta = self.reqs_need_send.reqs.get(req_id)
+                for p_req_id, (
+                    transfer_id,
+                    block_ids,
+                ) in metadata.reqs_to_send.items():
+                    send_meta = self.reqs_need_send.reqs.get(transfer_id)
                     if send_meta is None:
                         send_meta = SendBlockMeta(
-                            local_block_ids=[], ready=threading.Event()
+                            p_req_id=p_req_id,
+                            transfer_id=transfer_id,
+                            local_block_ids=[],
+                            ready=threading.Event(),
                         )
-                        self.reqs_need_send.reqs[req_id] = send_meta
+                        self.reqs_need_send.reqs[transfer_id] = send_meta
+                    else:
+                        send_meta.p_req_id = p_req_id
                     # Non-empty means request_finished() has committed the
                     # per-group block ids; arm the send.
                     if block_ids:
@@ -1223,7 +1329,9 @@ class FlagCXConnectorWorker:
         loop; populates ``_pull_pending`` and launches the per-peer pulls
         without an intervening await, so it is atomic w.r.t. other coroutines.
         """
-        kv_pulls: dict[str, dict[ReqId, list[list[int]]]] = defaultdict(dict)
+        kv_pulls: dict[
+            str, dict[ReqId, tuple[TransferId, list[list[int]]]]
+        ] = defaultdict(dict)
         for req_id, meta in reqs_to_recv.items():
             remote_tp_size = meta.remote_tp_size or self.tp_size
             target_p_ranks = self.kv_topo.handshake_target_ranks(remote_tp_size)
@@ -1232,7 +1340,10 @@ class FlagCXConnectorWorker:
                 path = make_zmq_path(
                     "tcp", meta.remote_host, meta.remote_port + p_rank
                 )
-                kv_pulls[path][req_id] = meta.local_block_ids
+                kv_pulls[path][req_id] = (
+                    meta.transfer_id,
+                    meta.local_block_ids,
+                )
         for path, req_blocks in kv_pulls.items():
             asyncio.ensure_future(self._receive_kv(path, req_blocks))
 
@@ -1261,17 +1372,29 @@ class FlagCXConnectorWorker:
         now = time.perf_counter()
         with self.reqs_need_send.lock:
             expired = [
-                rid
-                for rid, sm in self.reqs_need_send.reqs.items()
+                transfer_id
+                for transfer_id, sm in self.reqs_need_send.reqs.items()
                 if sm.expire_time < now
             ]
-            for rid in expired:
-                logger.warning("Request %s send timed out, freeing blocks", rid)
-                del self.reqs_need_send.reqs[rid]
-            if expired:
-                finished_sending.update(expired)
+            for transfer_id in expired:
+                send_meta = self.reqs_need_send.reqs.pop(transfer_id)
+                logger.warning(
+                    "Transfer %s send timed out after %d seconds, freeing blocks",
+                    transfer_id,
+                    self._abort_request_timeout,
+                )
+                self.xfer_stats.record_kv_expired_req()
+                if send_meta.p_req_id:
+                    finished_sending.add(send_meta.p_req_id)
 
         return finished_sending or None, finished_recving or None
+
+    def get_kv_connector_stats(self) -> "KVConnectorStats | None":
+        """Return transfer stats collected since the last call, or None
+        if nothing has been recorded in this interval."""
+        if self.xfer_stats.is_empty():
+            return None
+        return self.xfer_stats.clone_and_reset()
 
     def __del__(self):
         self.shutdown()
