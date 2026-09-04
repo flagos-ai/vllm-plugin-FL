@@ -119,6 +119,10 @@ Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
 
+For a reproducible procedure that extracts graph-mode logical operators,
+input shapes, dtypes, and call counts, see
+[Graph-mode operator profiling](./GRAPH_OPERATOR_PROFILING.md).
+
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
     4.1 Clone the repository:

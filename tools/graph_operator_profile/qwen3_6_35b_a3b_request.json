@@ -1,0 +1,7 @@
+{
+  "model": "qwen",
+  "concurrency": 64,
+  "input_tokens": 4096,
+  "output_tokens": 1024,
+  "seed": 0
+}
