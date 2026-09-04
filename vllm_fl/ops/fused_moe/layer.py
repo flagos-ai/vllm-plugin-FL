@@ -142,6 +142,7 @@ class FusedMoEFL(FusedMoE):
                 routed_scaling_factor=router.routed_scaling_factor,
                 enable_eplb=router.enable_eplb,
                 indices_type_getter=router.indices_type_getter,
+                hash_indices_table=router._hash_indices_table,
             )
         elif isinstance(router, FusedTopKRouter):
             self.router = FusedTopKRouterFL(

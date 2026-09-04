@@ -76,7 +76,13 @@ Configuration File (YAML):
             - reference
 """
 
+import hashlib
+import json
 import os
+import threading
+import weakref
+from dataclasses import dataclass
+from typing import Any, Iterable, Optional
 
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
@@ -148,6 +154,197 @@ def resolve_op(op_name: str):
 _OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
 
 
+@dataclass(frozen=True)
+class FrozenOpSelection:
+    """One logical operator selected for a frozen execution phase."""
+
+    op_name: str
+    impl_id: str
+    kind: str
+    vendor: Optional[str]
+    callable_name: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "op_name": self.op_name,
+            "impl_id": self.impl_id,
+            "kind": self.kind,
+            "vendor": self.vendor,
+            "callable": self.callable_name,
+        }
+
+
+@dataclass(frozen=True)
+class FrozenDispatchManifest:
+    """Stable dispatch choices used by one compiled execution phase."""
+
+    policy_fingerprint: str
+    selections: tuple[FrozenOpSelection, ...]
+    unresolved: tuple[tuple[str, str], ...]
+    fingerprint: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "policy_fingerprint": self.policy_fingerprint,
+            "selections": [selection.to_dict() for selection in self.selections],
+            "unresolved": [
+                {"op_name": op_name, "error": error}
+                for op_name, error in self.unresolved
+            ],
+            "fingerprint": self.fingerprint,
+        }
+
+
+_CACHED_OPS: "weakref.WeakSet[CachedOp]" = weakref.WeakSet()
+_FREEZE_LOCK = threading.RLock()
+_DISPATCH_FROZEN = False
+_FROZEN_MANIFEST: Optional[FrozenDispatchManifest] = None
+
+
+def _callable_name(fn: Any) -> str:
+    module = getattr(fn, "__module__", type(fn).__module__)
+    qualname = getattr(fn, "__qualname__", type(fn).__qualname__)
+    return f"{module}.{qualname}"
+
+
+def _is_torch_compiling() -> bool:
+    """Query Dynamo lazily so importing dispatch does not require torch."""
+
+    try:
+        import torch
+
+        return bool(torch.compiler.is_compiling())
+    except (AttributeError, ImportError):
+        return False
+
+
+def is_dispatch_frozen() -> bool:
+    """Return whether runtime policy selection has been frozen."""
+
+    return _DISPATCH_FROZEN
+
+
+def get_frozen_dispatch_manifest() -> Optional[FrozenDispatchManifest]:
+    """Return the manifest for the current frozen execution phase."""
+
+    return _FROZEN_MANIFEST
+
+
+def _make_frozen_manifest(
+    policy_fingerprint: str,
+    resolved: dict[str, OpImpl],
+    unresolved: dict[str, str],
+) -> FrozenDispatchManifest:
+    selections = tuple(
+        FrozenOpSelection(
+            op_name=op_name,
+            impl_id=impl.impl_id,
+            kind=impl.kind.value,
+            vendor=impl.vendor,
+            callable_name=_callable_name(impl.fn),
+        )
+        for op_name, impl in sorted(resolved.items())
+    )
+    unresolved_items = tuple(sorted(unresolved.items()))
+    payload = {
+        "policy_fingerprint": policy_fingerprint,
+        "selections": [selection.to_dict() for selection in selections],
+        "unresolved": list(unresolved_items),
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return FrozenDispatchManifest(
+        policy_fingerprint=policy_fingerprint,
+        selections=selections,
+        unresolved=unresolved_items,
+        fingerprint=fingerprint,
+    )
+
+
+def freeze_dispatch(
+    op_names: Optional[Iterable[str]] = None,
+    *,
+    strict: bool = True,
+) -> FrozenDispatchManifest:
+    """Resolve ``CachedOp`` instances before Dynamo starts tracing.
+
+    Frozen calls contain no policy lookup, manager access, lock, IO dump, or
+    exception-driven backend fallback.  ``strict=False`` is useful for a model
+    process that imported optional operator modules it will never execute; an
+    unresolved operator still fails immediately if it is called later.
+    """
+
+    global _DISPATCH_FROZEN, _FROZEN_MANIFEST
+
+    requested = set(op_names) if op_names is not None else None
+    with _FREEZE_LOCK:
+        mgr = get_default_manager()
+        mgr.ensure_initialized()
+
+        instances = [
+            cached_op
+            for cached_op in list(_CACHED_OPS)
+            if requested is None or cached_op.op_name in requested
+        ]
+        names = sorted({cached_op.op_name for cached_op in instances})
+
+        resolved: dict[str, OpImpl] = {}
+        unresolved: dict[str, str] = {}
+        for op_name in names:
+            try:
+                impl = mgr._resolve_impl(op_name)
+                mgr._record_first_use(op_name, impl)
+                resolved[op_name] = impl
+            except Exception as exc:
+                unresolved[op_name] = f"{type(exc).__name__}: {exc}"
+
+        if strict and unresolved:
+            details = "; ".join(
+                f"{op_name}: {error}" for op_name, error in unresolved.items()
+            )
+            raise RuntimeError(f"Unable to freeze vLLM-FL dispatch: {details}")
+
+        for cached_op in instances:
+            cached_op._frozen_impl = resolved.get(cached_op.op_name)
+            cached_op._freeze_error = unresolved.get(cached_op.op_name)
+
+        manifest = _make_frozen_manifest(
+            get_policy().fingerprint(), resolved, unresolved
+        )
+        _FROZEN_MANIFEST = manifest
+        _DISPATCH_FROZEN = True
+        return manifest
+
+
+def thaw_dispatch() -> None:
+    """Leave the frozen phase.
+
+    Existing compiled graphs must be discarded before this is used in a model
+    process.  The function primarily exists for post-fork reset and tests.
+    """
+
+    global _DISPATCH_FROZEN, _FROZEN_MANIFEST
+
+    with _FREEZE_LOCK:
+        _DISPATCH_FROZEN = False
+        _FROZEN_MANIFEST = None
+        for cached_op in list(_CACHED_OPS):
+            cached_op._clear_all_caches()
+
+
+def _reset_frozen_dispatch_after_fork() -> None:
+    """Reset without acquiring a lock that may be owned by a vanished thread."""
+
+    global _FREEZE_LOCK, _DISPATCH_FROZEN, _FROZEN_MANIFEST
+
+    _FREEZE_LOCK = threading.RLock()
+    _DISPATCH_FROZEN = False
+    _FROZEN_MANIFEST = None
+    for cached_op in list(_CACHED_OPS):
+        cached_op._clear_all_caches()
+
+
 class CachedOp:
     """Resolve an op once at the call site and refresh on policy changes.
 
@@ -166,8 +363,11 @@ class CachedOp:
     """
 
     __slots__ = (
+        "__weakref__",
         "_op_name",
         "_impl",
+        "_frozen_impl",
+        "_freeze_error",
         "_use_manager_call",
         "_manager_id",
         "_manager_epoch",
@@ -177,12 +377,54 @@ class CachedOp:
     def __init__(self, op_name: str) -> None:
         self._op_name = op_name
         self._impl = None
+        self._frozen_impl = None
+        self._freeze_error = None
+        self._use_manager_call = False
+        self._manager_id = -1
+        self._manager_epoch = -1
+        self._policy_epoch = -1
+        _CACHED_OPS.add(self)
+
+    @property
+    def op_name(self) -> str:
+        return self._op_name
+
+    @property
+    def frozen_impl_id(self) -> Optional[str]:
+        impl = self._frozen_impl
+        return None if impl is None else impl.impl_id
+
+    def _clear_all_caches(self) -> None:
+        self._impl = None
+        self._frozen_impl = None
+        self._freeze_error = None
         self._use_manager_call = False
         self._manager_id = -1
         self._manager_epoch = -1
         self._policy_epoch = -1
 
     def __call__(self, *args, **kwargs):
+        # This is the only path used by a frozen compiled runner.  Keep it
+        # before every manager/policy/debug check so Dynamo sees a stable
+        # callable and no dispatch control-plane state.
+        frozen_impl = self._frozen_impl
+        if frozen_impl is not None:
+            return frozen_impl.fn(*args, **kwargs)
+
+        if _DISPATCH_FROZEN:
+            detail = f" ({self._freeze_error})" if self._freeze_error else ""
+            raise RuntimeError(
+                f"CachedOp '{self._op_name}' was not bound before the dispatch "
+                f"phase was frozen{detail}. Rebuild the compiled runner after "
+                "registering the operator."
+            )
+
+        if _is_torch_compiling():
+            raise RuntimeError(
+                f"CachedOp '{self._op_name}' entered torch.compile before "
+                "vllm_fl.dispatch.freeze_dispatch() was called"
+            )
+
         mgr = get_default_manager()
 
         if not _OP_FAST_PATH_ENABLED:
@@ -282,4 +524,18 @@ __all__ = [
     "call_op",
     "resolve_op",
     "CachedOp",
+    "FrozenOpSelection",
+    "FrozenDispatchManifest",
+    "freeze_dispatch",
+    "thaw_dispatch",
+    "is_dispatch_frozen",
+    "get_frozen_dispatch_manifest",
 ]
+
+
+# A manager and its registrations are process-local.  Never inherit frozen
+# callables across a fork; each worker binds again after loading its model.
+try:
+    os.register_at_fork(after_in_child=_reset_frozen_dispatch_after_fork)
+except AttributeError:
+    pass
