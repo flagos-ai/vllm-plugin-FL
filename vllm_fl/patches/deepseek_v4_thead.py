@@ -859,6 +859,141 @@ def _patch_topk_indices_buffer_init():
     logger.warning("[vllm_fl] topk_indices_buffer fully initialized to -1")
 
 
+# Cache of pinned identity buffers, keyed by (builder id, dtype).
+_FL_PIN_CACHE: dict = {}
+
+
+def _fl_cached_pinned_arange(owner, n, dtype, max_n):
+    """Return a pinned CPU tensor whose first `n` entries are arange(n).
+
+    One pinned allocation per (builder, dtype) for the process lifetime. The
+    contents are write-once: arange(k) is a prefix of arange(max_n), so a slice
+    of the full buffer is already correct for every n <= max_n. That matters for
+    safety as well as speed — the previous step's non_blocking H2D copy may still
+    be in flight, and re-writing identical bytes cannot corrupt it.
+    """
+    key = (id(owner), dtype)
+    buf = _FL_PIN_CACHE.get(key)
+    if buf is None or buf.numel() < max_n:
+        buf = torch.arange(max_n, dtype=dtype).pin_memory()
+        _FL_PIN_CACHE[key] = buf
+    return buf[:n]
+
+
+def _patch_metadata_pinned_arange():
+    """Stop reallocating a pinned buffer every decode step.
+
+    Both DeepSeek-V4 metadata builders do, once per step:
+
+        x = torch.repeat_interleave(torch.arange(num_reqs), query_lens).pin_memory()
+        token_to_req_indices[: x.shape[0]].copy_(x, non_blocking=True)
+
+    `pin_memory()` allocates fresh pinned host memory on every call, measured at
+    ~480 us on this host — and it runs twice per step (compressor + sparse SWA),
+    so ~0.96 ms/step with the GPU idle waiting. Decode profiling attributed
+    ~3.2 ms/step (8.7% of the step) to bubbles in this metadata build, with
+    aten::pin_memory and aten::repeat_interleave named directly.
+
+    In pure decode every query_len is 1, so the result is exactly arange(num_reqs)
+    — a constant. We return a slice of a cached pinned arange instead, which makes
+    the subsequent `.pin_memory()` a no-op (it returns self when already pinned)
+    and removes the allocation and the host-side repeat_interleave.
+
+    MEASURED RESULT (09-03, case1 on cards 8-15): DISABLED BY DEFAULT — it works
+    as designed but is a net loss. GPU idle fell 5.14 -> 3.91 ms/step exactly as
+    intended, yet output throughput dropped 1500.9 -> 1484.8 tok/s (-1.1%,
+    tightly clustered over 3 runs). The cost does not appear in the GPU trace:
+    reassigning the `torch.repeat_interleave` global twice per step invalidates
+    Dynamo's guards on a torch.compile'd model (this stack runs with
+    VLLM_FL_DSV4_TORCH_COMPILE=1), and that outweighs the ~0.15 ms/step saved.
+    To pursue this properly, eliminate the pinned realloc without touching a torch
+    global — e.g. reimplement the two build() bodies, or upstream a persistent
+    pinned buffer into vLLM's builders.
+
+    Scope is deliberately tight:
+      * torch.repeat_interleave is swapped only for the duration of the two
+        build() calls, then restored, so nothing else in the process is affected.
+      * The fast path requires every repeat to be 1 AND verifies the input really
+        is arange, so any mixed prefill/decode batch falls through to the original
+        implementation untouched.
+      * token_to_req_indices itself is never re-pointed. Kernels inside the
+        captured CUDA graphs hold its address, so only its contents may change.
+    """
+    try:
+        from vllm.models.deepseek_v4 import compressor as comp_mod
+        from vllm.v1.attention.backends.mla import sparse_swa as swa_mod
+    except ImportError:
+        logger.warning("[vllm_fl] metadata pinned-arange patch: modules missing")
+        return
+
+    import functools
+
+    targets = [
+        (comp_mod.CompressorMetadataBuilder, "CompressorMetadataBuilder"),
+        (swa_mod.DeepseekSparseSWAMetadataBuilder, "DeepseekSparseSWAMetadataBuilder"),
+    ]
+    if all(getattr(cls, "_fl_pin_arange_patch", False) for cls, _ in targets):
+        return
+
+    def make_wrapper(cls):
+        orig_build = cls.build
+
+        @functools.wraps(orig_build)
+        def build(self, *args, **kwargs):
+            real_ri = torch.repeat_interleave
+
+            def fast_ri(input, repeats, *a, **kw):
+                # Only the exact per-step pattern: 1-D CPU arange, 1-D repeats.
+                if (
+                    not a
+                    and not kw
+                    and isinstance(input, torch.Tensor)
+                    and isinstance(repeats, torch.Tensor)
+                    and input.device.type == "cpu"
+                    and input.dim() == 1
+                    and repeats.dim() == 1
+                    and input.numel() == repeats.numel()
+                    and input.numel() > 0
+                ):
+                    n = input.numel()
+                    # Pure decode: one token per request.
+                    if int(repeats.sum()) == n:
+                        cached = _fl_cached_pinned_arange(
+                            self, n, input.dtype, self._fl_pin_max
+                        )
+                        # Cheap guard (~n int64 compares) that the caller really
+                        # passed arange(n); protects against future call sites.
+                        if torch.equal(input, cached.to(input.dtype)):
+                            return cached
+                return real_ri(input, repeats, *a, **kw)
+
+            # Upper bound for the cached buffer: max requests the scheduler can
+            # put in one batch. token_to_req_indices is sized by max_num_batched
+            # _tokens, and in pure decode num_reqs <= that, so it is a safe cap.
+            if not hasattr(self, "_fl_pin_max"):
+                cap = 0
+                for attr in ("token_to_req_indices",):
+                    t = getattr(self, attr, None)
+                    if t is not None:
+                        cap = max(cap, int(t.numel()))
+                self._fl_pin_max = cap or 8192
+
+            torch.repeat_interleave = fast_ri
+            try:
+                return orig_build(self, *args, **kwargs)
+            finally:
+                torch.repeat_interleave = real_ri
+
+        return build
+
+    for cls, name in targets:
+        if getattr(cls, "_fl_pin_arange_patch", False):
+            continue
+        cls.build = make_wrapper(cls)
+        cls._fl_pin_arange_patch = True
+        logger.warning("[vllm_fl] %s.build: cached pinned arange for decode", name)
+
+
 def apply_deepseek_v4_thead_patches():
     """Entry point called from vllm_fl.register_model()."""
     from vllm.platforms import current_platform
@@ -885,3 +1020,8 @@ def apply_deepseek_v4_thead_patches():
     _patch_int8_weights_mapper()
     _patch_disable_cutedsl()
     _patch_dequant_gather()
+    # OFF by default: measured a 1.1% throughput LOSS despite removing 1.23 ms/step
+    # of GPU idle. See the docstring for the full result. Opt in with
+    # VLLM_FL_PIN_ARANGE_CACHE=1 only if the guard-invalidation cost is addressed.
+    if os.environ.get("VLLM_FL_PIN_ARANGE_CACHE") == "1":
+        _patch_metadata_pinned_arange()
