@@ -1,0 +1,36 @@
+# vLLM-FL Dispatch Configuration for DeepSeek V4 on NVIDIA Hopper GPUs
+prefer: flagos
+strict: false
+
+allow_vendors:
+  - cuda
+
+op_backends:
+  attention_backend:
+    - vendor
+    - flagos
+    - reference
+  rotary_embedding:
+    - flagos
+    - vendor
+    - reference
+  cutlass_scaled_mm:
+    - vendor
+    - flagos
+
+# FlagGems operators validated without end-to-end throughput regression.
+flagos_whitelist:
+  - rms_norm
+  - silu_and_mul
+  - add
+  - mul
+  - sub
+  - where_self
+  - softmax
+  - cat
+  - arange
+  - argmax
+  - reciprocal
+  - repeat
+  - sin
+  - cos

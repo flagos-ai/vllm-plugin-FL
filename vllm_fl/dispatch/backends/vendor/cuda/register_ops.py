@@ -41,6 +41,14 @@ def register_builtins(registry) -> None:
                kind=BackendImplKind.VENDOR,
                fn=_bind_is_available(backend.fused_marlin_moe, is_avail),
                vendor="cuda", priority=BackendPriority.VENDOR),
+        OpImpl(
+            op_name="cutlass_scaled_mm",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.cutlass_scaled_mm, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
         # MoE router GEMM (BF16 inputs, FP32 output)
         OpImpl(
             op_name="router_gemm_bf16_fp32",

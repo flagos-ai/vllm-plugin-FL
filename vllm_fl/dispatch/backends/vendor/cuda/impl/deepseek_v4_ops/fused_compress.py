@@ -34,7 +34,7 @@ def _fused_kv_compress_norm_rope_insert_indexer_attn_bf16(
     COMPRESS_RATIO: tl.constexpr,
     OVERLAP: tl.constexpr,
     ROPE_HEAD_DIM: tl.constexpr,
-    TOKEN_STRIDE: tl.constexpr,  # 256 for indexer
+    TOKEN_STRIDE: tl.constexpr,  # 128 BF16 elements for indexer
     KV_BLOCK_STRIDE: tl.constexpr,
 ):
     """Fused compress → RMSNorm → RoPE → BF16 quant → store.
@@ -178,7 +178,7 @@ def _fused_kv_compress_norm_rope_insert_sparse_attn_bf16(
     COMPRESS_RATIO: tl.constexpr,
     OVERLAP: tl.constexpr,
     ROPE_HEAD_DIM: tl.constexpr,
-    TOKEN_STRIDE: tl.constexpr,  # 1024 for DeepseekV4 bf16
+    TOKEN_STRIDE: tl.constexpr,  # 512 BF16 elements for DeepseekV4
     KV_BLOCK_STRIDE: tl.constexpr,
 ):
     """Fused compress → RMSNorm → FP8 quant (nope) → RoPE → bf16 store (rope).

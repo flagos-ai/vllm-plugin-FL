@@ -159,6 +159,49 @@ class WOAColumnParallelLinear(ColumnParallelLinear):
             orig_fn(layer)
             if not getattr(layer, "is_bmm", False):
                 return
+            # Cutlass stores INT8 B as [K, N].  Materialize each wo_a output
+            # group's N slice now: a forward-time ``weight[:, start:end]`` is
+            # non-contiguous and forces the hot path onto the Triton fallback.
+            if (
+                hasattr(layer, "weight")
+                and layer.weight.dtype == torch.int8
+                and layer.weight.ndim == 2
+                and hasattr(layer, "weight_scale")
+            ):
+                g = layer.bmm_batch_size
+                rank = layer.weight.shape[1] // g
+                # Store physically contiguous [G, N_group, K].  Selecting a
+                # group and transposing gives a zero-copy [K, N_group] view
+                # with stride (1, K), exactly CUTLASS's column-major contract.
+                grouped_weight = layer.weight.T.view(
+                    g, rank, layer.weight.shape[0]
+                ).contiguous()
+                ws = layer.weight_scale
+                if ws.numel() == layer.weight.shape[1]:
+                    grouped_scale = ws.view(g, rank, *ws.shape[1:]).contiguous()
+                else:
+                    # Per-tensor weights: retain one scalar scale per group.
+                    grouped_scale = ws.reshape(1, *ws.shape).expand(
+                        g, *ws.shape
+                    ).contiguous()
+                layer.register_buffer(
+                    "_wo_a_grouped_weight", grouped_weight, persistent=False
+                )
+                layer.register_buffer(
+                    "_wo_a_grouped_weight_scale", grouped_scale,
+                    persistent=False,
+                )
+                return
+            # This grouped-BMM layout is exclusively for FP8 block weights
+            # consumed by fp8_einsum. INT W8A8 layers also expose ``weight``
+            # but their quantized Linear kernels require the original 2-D
+            # per-channel layout.
+            if (
+                not hasattr(layer, "weight")
+                or layer.weight.dtype != torch.float8_e4m3fn
+                or not hasattr(layer, "weight_scale_inv")
+            ):
+                return
             w = layer.weight
             if w.ndim != 2:
                 # Already reshaped by the kernel (e.g. DeepGemm kernel)
@@ -1161,9 +1204,14 @@ class DeepseekV4Attention(nn.Module):
             prefix=f"{prefix}.wo_b",
         )
         self.softmax_scale = self.head_dim**-0.5
-        hf_quant_config = getattr(config, "quantization_config", None)
+        # ``scale_fmt`` is a DeepSeek FP8 checkpoint extension.  Standard
+        # compressed-tensors checkpoints (including W8A16/W4A16 INT models)
+        # do not define it, and the attention wrapper does not require it.
+        quantization_config = getattr(config, "quantization_config", None)
         self.scale_fmt = (
-            hf_quant_config["scale_fmt"] if hf_quant_config is not None else None
+            quantization_config.get("scale_fmt")
+            if isinstance(quantization_config, dict)
+            else None
         )
 
         self.rope_parameters = config.rope_scaling
@@ -1397,7 +1445,6 @@ class DeepseekV4DecoderLayer(nn.Module):
 class DeepseekV4Model(nn.Module):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
-
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         self.config = config

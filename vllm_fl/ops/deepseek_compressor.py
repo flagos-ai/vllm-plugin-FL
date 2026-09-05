@@ -36,6 +36,9 @@ from vllm.v1.kv_cache_interface import (
     MLAAttentionSpec,
     SlidingWindowMLASpec,
 )
+from vllm_fl.ops.deepseek_v4_int8_indexer import (
+    fused_compress_rope_int8_indexer_cache_kernel,
+)
 from vllm_fl.dispatch.backends.vendor.cuda.impl.deepseek_v4_ops.fused_compress import (
     _fused_kv_compress_norm_rope_insert_sparse_attn_bf16,
     _fused_kv_compress_norm_rope_insert_indexer_attn_bf16,
@@ -189,6 +192,7 @@ class DeepseekCompressor(nn.Module):
         prefix: str = "",
         k_cache_prefix="",
         use_fp4_cache: bool = False,
+        use_int8_indexer_cache: bool = False,
     ):
         super().__init__()
         self.compress_ratio = compress_ratio
@@ -199,6 +203,7 @@ class DeepseekCompressor(nn.Module):
         self.k_cache_prefix = k_cache_prefix
         self.quant_config = vllm_config.quant_config
         self.use_fp4_cache = use_fp4_cache
+        self.use_int8_indexer_cache = use_int8_indexer_cache
 
         config = vllm_config.model_config.hf_config
         self.rope_head_dim = config.qk_rope_head_dim
@@ -256,7 +261,17 @@ class DeepseekCompressor(nn.Module):
                 self._scale_dim = self.nope_head_dim // 64 + 1  # 7 real + 1 pad
                 self._num_warps = 4
             elif self.head_dim == 128:
-                if use_fp4_cache:
+                if use_int8_indexer_cache:
+                    assert not use_fp4_cache, (
+                        "INT8 and MXFP4 indexer cache cannot both be enabled"
+                    )
+                    self._fused_kernel = (
+                        fused_compress_rope_int8_indexer_cache_kernel
+                    )
+                    self._quant_block = 128
+                    self._token_stride = self.head_dim
+                    self._scale_dim = 4
+                elif use_fp4_cache:
                     self._fused_kernel = (
                         _fused_kv_compress_norm_rope_insert_indexer_mxfp4_attn
                     )

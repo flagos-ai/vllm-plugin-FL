@@ -4,7 +4,17 @@
 FlagGems implementations for mHC (Multi-Head Convolution) operators.
 """
 
+import importlib
+
 import torch
+from flag_gems import (
+    hc_head_fused_kernel as _hc_head_fused_kernel,
+    mhc_post as _mhc_post,
+    mhc_pre as _mhc_pre,
+)
+
+_mhc_pre_mod = importlib.import_module("flag_gems.fused.mhc.mhc_pre")
+
 
 
 def mhc_pre_flaggems(
@@ -20,18 +30,12 @@ def mhc_pre_flaggems(
     n_splits: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """FlagGems native implementation of mhc_pre."""
-    import importlib
-    from flag_gems import mhc_pre
-
     # Workaround: flag_gems uses a WeakKeyDictionary with tensor keys.
     # WeakKeyDictionary.get() creates a new weakref and dict lookup calls
     # ref.__eq__ which delegates to tensor.__eq__, returning a multi-element
     # tensor instead of a scalar bool — causing RuntimeError.
     # Patch the module's _FN_BF16_CACHE with an id-based cache.
-    _mhc_pre_mod = importlib.import_module('flag_gems.fused.mhc.mhc_pre')
-    _patch_fn_bf16_cache(_mhc_pre_mod)
-
-    return mhc_pre(
+    return _mhc_pre(
         residual=residual,
         fn=fn,
         hc_scale=hc_scale,
@@ -72,6 +76,10 @@ def _patch_fn_bf16_cache(mod):
     mod._FN_BF16_CACHE_PATCHED = True
 
 
+# Patch once during module import, outside torch.compile graph capture.
+_patch_fn_bf16_cache(_mhc_pre_mod)
+
+
 def mhc_post_flaggems(
     x: torch.Tensor,
     residual: torch.Tensor,
@@ -79,9 +87,7 @@ def mhc_post_flaggems(
     comb: torch.Tensor,
 ) -> torch.Tensor:
     """FlagGems native implementation of mhc_post."""
-    from flag_gems import mhc_post
-
-    return mhc_post(x, residual, post, comb)
+    return _mhc_post(x, residual, post, comb)
 
 
 def hc_head_fused_kernel_flaggems(
@@ -96,9 +102,7 @@ def hc_head_fused_kernel_flaggems(
     hc_mult: int,
 ) -> None:
     """FlagGems native implementation of hc_head_fused_kernel. Mutates `out` in-place."""
-    from flag_gems import hc_head_fused_kernel
-
-    hc_head_fused_kernel(
+    _hc_head_fused_kernel(
         hs_flat, fn, hc_scale, hc_base, out,
         hidden_size, rms_eps, hc_eps, hc_mult,
     )
