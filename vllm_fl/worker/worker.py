@@ -437,6 +437,18 @@ class WorkerFL(WorkerBase):
     # FIXME(youkaichao & ywang96): Use TorchDispatchMode instead of memory pool
     # to hijack tensor allocation.
     def load_model(self, *, load_dummy_weights: bool = False) -> None:
+        # Enflame/GCU: apply the GCU backend patches (native-FLASH_ATTN
+        # binding, slot_mapping int32, rotary flash_attn import guard) in the
+        # worker BEFORE model structure construction. The gcu backend package
+        # runs apply_gcu_patches() on import; in the EngineCore process that
+        # import otherwise fires lazily at first dispatch — i.e. AFTER
+        # model build has already instantiated ApplyRotaryEmb (ungated
+        # flash_attn.ops.triton.rotary import -> ModuleNotFoundError under a
+        # pure flagtree stack). Gated on torch_gcu (enflame-only torch
+        # backend) so other platforms are untouched.
+        import importlib.util
+        if importlib.util.find_spec("torch_gcu") is not None:
+            import vllm_fl.dispatch.backends.vendor.gcu  # noqa: F401
         ### TODO(lms): support manages a memory pool for device tensors.
         with set_current_vllm_config(self.vllm_config):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
