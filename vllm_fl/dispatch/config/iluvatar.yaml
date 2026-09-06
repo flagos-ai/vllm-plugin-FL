@@ -63,7 +63,16 @@ op_backends:
 # FlagOS operator blacklist
 # Iluvatar is CUDA-compatible, so most FlagGems ops should work
 # Blacklist only ops that are known to have issues
-flagos_blacklist: []
+flagos_blacklist:
+  # flag_gems `silu_and_mul` produces ~1-2 bf16 ulp jitter on the corex
+  # GEMM path that lands in the argmax near-tie band under vllm 0.20.2,
+  # making temp=0 decode flip between near-tie branches (4.4.0 AND 4.5.0,
+  # flagtree F path; e.g. 90 requests → 4 flipped "in Paris" variants on
+  # 4.5.0). The vendor iluvatar silu_and_mul is plain torch (F.silu(x1)*x2,
+  # aten, compiler-independent) — deterministic and faster (~+50% tok/s on
+  # both corex stacks). FlagGems attention/rms_norm/rotary stay flagos.
+  # Measured 2026-09-06 on corex4.4.0 + corex4.5.0 (F/T), 30-90 requests each.
+  - silu_and_mul
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
