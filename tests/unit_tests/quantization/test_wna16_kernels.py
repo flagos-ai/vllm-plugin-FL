@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from vllm_fl.quantization.wna16.kernels import gemm, moe
+from vllm_fl.quantization.wna16.kernels import gemm, moe, triton as triton_kernel
 
 
 def test_gemm_is_unavailable_without_plugin_operator(monkeypatch):
@@ -33,6 +33,34 @@ def test_gemm_calls_fixed_plugin_operator(monkeypatch):
         8,
     )
     assert gemm.is_wna16_gemm_available() is True
+    assert result.shape == (2, 3)
+    assert len(calls) == 1
+
+
+def test_w8a16_gemm_uses_triton_fallback(monkeypatch):
+    calls = []
+
+    def fallback(*args):
+        calls.append(args)
+        return torch.ones(2, 3)
+
+    monkeypatch.setattr(gemm, "_resolve_wna16_gemm", lambda: None)
+    monkeypatch.setattr(
+        triton_kernel,
+        "is_triton_w8a16_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(triton_kernel, "triton_w8a16_gemm", fallback)
+
+    result = gemm.wna16_gemm(
+        torch.empty(2, 8),
+        torch.empty(3, 2, dtype=torch.int32),
+        torch.empty(3, 1),
+        8,
+        num_bits=8,
+    )
+
+    assert gemm.is_w8a16_gemm_available() is True
     assert result.shape == (2, 3)
     assert len(calls) == 1
 

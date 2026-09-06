@@ -96,9 +96,17 @@ class PyFlagcxCommunicator:
         self.available = True
         self.disabled = False
 
+        self._legacy_unique_id_api = (
+            hasattr(self.flagcx, "handler")
+            and not hasattr(self.flagcx, "devHandle")
+        )
+
         if self.rank == 0:
             # get the unique id from NCCL
-            self.unique_id = self.flagcx.flagcxGetUniqueId().contents
+            if self._legacy_unique_id_api:
+                self.unique_id = self.flagcx.flagcxGetUniqueId().contents
+            else:
+                self.unique_id = self.flagcx.flagcxGetUniqueId()
         else:
             # construct an empty unique id
             self.unique_id = flagcxUniqueId()
@@ -133,8 +141,12 @@ class PyFlagcxCommunicator:
             device_ctx = torch.cuda.device(self.device)
 
         with device_ctx:
-            self.comm = self.flagcx.flagcxCommInitRank(
-                self.world_size, ctypes.byref(self.unique_id), self.rank)
+            if self._legacy_unique_id_api:
+                self.comm = self.flagcx.flagcxCommInitRank(
+                    self.world_size, ctypes.pointer(self.unique_id), self.rank)
+            else:
+                self.comm = self.flagcx.flagcxCommInitRank(
+                    self.world_size, self.unique_id, self.rank)
 
             stream = current_stream()
             # A small all_reduce for warmup.

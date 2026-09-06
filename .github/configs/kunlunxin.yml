@@ -1,0 +1,42 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kunlunxin P800 OAM hardware configuration.
+platform: kunlunxin
+
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-kunlunxin-ci
+
+runner_labels:
+  - kunlunxin-p800
+
+container_volumes:
+  - /data:/data
+
+container_options: >-
+  --hostname vllm-plugin-fl
+  --ipc=host
+  --privileged
+  --security-opt seccomp=unconfined
+  --cap-add=SYS_PTRACE
+  --ulimit memlock=-1
+  --ulimit nofile=120000
+  --ulimit stack=67108864
+  --shm-size=128g
+  --env GEMS_VENDOR=kunlunxin
+  --env VLLM_PLUGINS=fl
+  --env FLAGCX_PATH=/workspace/FlagCX
+  --env CUDA_VISIBLE_DEVICES=4,5,6,7
+  --env USE_RESHAPE_AND_CACHE_FLASH=1
+  --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+  --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800

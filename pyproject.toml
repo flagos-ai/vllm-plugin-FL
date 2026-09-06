@@ -65,6 +65,7 @@ test = [
     "numpy",
     "requests",
     "openai",
+    "pillow",
     "decorator",
     "vllm[audio]==0.20.2",
     "modelscope>=1.18.1",

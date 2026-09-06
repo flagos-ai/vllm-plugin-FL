@@ -67,10 +67,17 @@ def configure_wna16_moe_backend() -> str:
     from vllm_fl.quantization.wna16.kernels import (
         is_wna16_moe_available,
     )
+    from vllm_fl.quantization.wna16.moe import (
+        is_flaggems_wna16_moe_available,
+    )
 
     _install_platform_guard()
     if is_wna16_moe_available():
         return "plugin-local"
+    if is_flaggems_wna16_moe_available():
+        if is_marlin_moe_platform(current_platform):
+            return "marlin"
+        return "FlagGems"
     if not is_marlin_moe_platform(current_platform):
         return "generic"
     return "marlin"

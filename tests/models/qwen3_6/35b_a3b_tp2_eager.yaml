@@ -26,7 +26,8 @@ llm:
 
 generate:
   prompts:
-    - "Introduce yourself,please"
+    - text: "The capital of France is"
+      expected: "Paris"
   sampling:
     max_tokens: 100
     temperature: 0.0
@@ -37,8 +38,17 @@ serve:
   endpoints: ["chat"]
   stream: false
   max_tokens: 256
-  chat_messages:
-    - role: "user"
-      content: "Introduce yourself,please"
+  chat_cases:
+    - name: text
+      messages:
+        - role: "user"
+          content: "The capital of France is"
+      expected: "Paris"
+    - name: image
+      generated_image: true
+      prompt: "Describe all visible text, colors, and shapes in English."
+      expected:
+        - "Hello VLM"
+        - "blue rectangle"
   sampling:
     temperature: 0.0

@@ -1,11 +1,9 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-import os
 from vllm.platforms import PlatformEnum, current_platform
-from vllm_fl.utils import use_flaggems_op
 
 from .fp8 import FlagGemsFp8BlockScaledMMLinearKernel
-
+from vllm_fl.utils import use_flaggems_op
 
 FLAGGEMS_FP8_BLOCK_GEMM_OP = "flaggems_fp8_block_gemm"
 
@@ -39,17 +37,16 @@ def add_oot_quant_kernel() -> None:
     is_supported() / can_implement() will filter at runtime.
     """
     from vllm.model_executor.kernels.linear import (
-        _POSSIBLE_INT8_KERNELS,
-        _POSSIBLE_FP8_KERNELS,
-        _POSSIBLE_KERNELS,
         _POSSIBLE_FP8_BLOCK_KERNELS,
+        _POSSIBLE_FP8_KERNELS,
+        _POSSIBLE_INT8_KERNELS,
+        _POSSIBLE_KERNELS,
     )
+
     source = _resolve_source_platform()
 
     if PlatformEnum.OOT not in _POSSIBLE_KERNELS:
-        _POSSIBLE_KERNELS[PlatformEnum.OOT] = list(
-            _POSSIBLE_KERNELS.get(source, [])
-        )
+        _POSSIBLE_KERNELS[PlatformEnum.OOT] = list(_POSSIBLE_KERNELS.get(source, []))
 
     if PlatformEnum.OOT not in _POSSIBLE_INT8_KERNELS:
         _POSSIBLE_INT8_KERNELS[PlatformEnum.OOT] = list(
@@ -76,10 +73,9 @@ def add_oot_quant_kernel() -> None:
             0, FlagGemsFp8BlockScaledMMLinearKernel
         )
 
-    # WNA16 hooks below are self-gated on kernel availability and are a
-    # no-op until the plugin's csrc-side operators are built.
-    from .wna16.linear import register_fl_wna16_linear_kernel
+    # Quantization hooks are self-gated on backend/kernel availability.
     from .compressed_tensors import register_compressed_tensors_oot
+    from .wna16.linear import register_fl_wna16_linear_kernel
 
     register_fl_wna16_linear_kernel(_POSSIBLE_KERNELS)
     register_compressed_tensors_oot()

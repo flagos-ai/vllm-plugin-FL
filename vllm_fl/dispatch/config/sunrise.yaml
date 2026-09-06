@@ -43,8 +43,8 @@ strict: false
 op_backends:
   # All operators: prioritize FlagGems (Triton), fallback to vendor, then reference
   attention_backend:
-    - flagos
     - vendor:sunrise
+    - flagos
     - reference
 
   rms_norm:
@@ -58,6 +58,21 @@ op_backends:
     - reference
 
   rotary_embedding:
+    - vendor:sunrise
+    - flagos
+    - reference
+
+  topk_softmax:
+    - flagos
+    - vendor:sunrise
+    - reference
+
+  moe_sum:
+    - flagos
+    - vendor:sunrise
+    - reference
+
+  moe_align_block_size:
     - flagos
     - vendor:sunrise
     - reference
@@ -65,7 +80,10 @@ op_backends:
 # FlagOS operator blacklist
 # Sunrise is CUDA-compatible, so most FlagGems ops should work
 # Blacklist only ops that are known to have issues
-flagos_blacklist: []
+flagos_blacklist: 
+    - linear
+    - mm
+    - mm_out
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

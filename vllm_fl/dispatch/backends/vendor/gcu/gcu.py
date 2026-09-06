@@ -73,15 +73,11 @@ class GCUBackend(Backend):
         )
 
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
-        from vllm.v1.attention.backends.registry import AttentionBackendEnum
-
         if use_mla:
             if use_sparse:
                 raise NotImplementedError("GCU does not support sparse attention yet")
             raise NotImplementedError("GCU does not support MLA yet")
-
-        import flash_attn.vllm_flash_attn
-
-        sys.modules["vllm.vllm_flash_attn"] = flash_attn.vllm_flash_attn
-
-        return AttentionBackendEnum.FLASH_ATTN.get_path()
+        # GCU uses a standalone flash_attn backend (AttentionGCUBackend) that calls
+        # Enflame's native flash_attn_varlen_func directly, without depending on
+        # vllm upstream FlashAttentionBackend / FlashAttentionImpl.
+        return "vllm_fl.dispatch.backends.vendor.gcu.impl.attention.AttentionGCUBackend"
