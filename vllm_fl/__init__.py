@@ -18,6 +18,23 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
+# torch.distributed._symmetric_memory exists only in PyTorch 2.8+.
+# vllm.distributed.parallel_state imports it at module level, so vendor
+# torch builds < 2.8 (iluvatar corex on 2.7.x) die with ImportError before
+# engine start. vllm's later uses of the module are lazy, so an empty
+# pre-registered stub suffices to get past the import gate.
+import torch.distributed as _torch_distributed
+if not hasattr(_torch_distributed, "_symmetric_memory"):
+    import types as _types
+    _symm_mem_stub = _types.ModuleType("torch.distributed._symmetric_memory")
+    sys.modules["torch.distributed._symmetric_memory"] = _symm_mem_stub
+    # `import torch.distributed._symmetric_memory` resolves via sys.modules
+    # without setting the parent attribute; mirror it so attribute access
+    # and from-imports see the module too.
+    _torch_distributed._symmetric_memory = _symm_mem_stub
+    del _symm_mem_stub, _types
+del _torch_distributed
+
 from vllm_fl.utils import get_op_config as _get_op_config
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
