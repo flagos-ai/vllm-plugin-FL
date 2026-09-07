@@ -739,6 +739,12 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         query = query.view(-1, self.num_heads, self.head_size)
         if output is None:
             output = torch.empty_like(query)
+        if (
+            attn_metadata is not None
+            and getattr(attn_metadata, "num_actual_tokens", None) is not None
+            and attn_metadata.num_actual_tokens < output.shape[0]
+        ):
+            output[attn_metadata.num_actual_tokens:].zero_()
         if attn_metadata is None:
             # Profiling run.
 
