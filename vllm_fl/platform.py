@@ -68,6 +68,13 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
+    # Prevent Ray from restricting CUDA_VISIBLE_DEVICES per-actor so that
+    # all GPUs on the node remain visible and local_rank-based device indexing works.
+    ray_noset_device_env_vars: list[str] = (
+        ["RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES"]
+        if device_info.device_type == "cuda"
+        else []
+    )
     dist_backend: str = (
         "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
     )
