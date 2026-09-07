@@ -19,7 +19,14 @@
 import torch
 from einops import rearrange
 
-from vllm.model_executor.layers.mamba.gdn.base import GatedDeltaNetAttention
+try:
+    # vLLM < 0.24: module lives in the mamba package root.
+    from vllm.model_executor.layers.mamba.gdn_linear_attn import (
+        GatedDeltaNetAttention,
+    )
+except ModuleNotFoundError:
+    # vLLM 0.24+: moved under the mamba/gdn/ package.
+    from vllm.model_executor.layers.mamba.gdn.base import GatedDeltaNetAttention
 from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
 from vllm.config import VllmConfig
 
