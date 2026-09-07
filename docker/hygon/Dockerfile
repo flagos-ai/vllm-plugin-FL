@@ -71,7 +71,7 @@ FROM base AS ci
 
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
-ARG FLAGGEMS_VERSION=v5.3.5
+ARG FLAGGEMS_VERSION=master
 
 # Install dev/test tools in the image instead of every CI job.
 RUN python -m pip install \
@@ -89,6 +89,7 @@ RUN python -m pip install \
         sqlalchemy \
         setuptools-scm \
         scikit-build-core==0.11 \
+        compressed-tensors==0.17.0 \
         pybind11 \
         ninja \
         cmake
@@ -111,6 +112,8 @@ RUN rm -rf /opt/vllm-src/FlagTree \
     && python3 -m pip uninstall -y triton \
     && RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple" \
     && python3.10 -m pip install flagtree===0.6.1+hcu3.6 $RES
+
+ENV TRITON_HIP_CLANG_PATH=/opt/rocm/aillvm/bin/clang-18
 
 WORKDIR /workspace
 
