@@ -161,8 +161,12 @@ def register_model():
     # worker processes, so all runtime compatibility hooks must be idempotent.
     from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
+    from vllm_fl.patches.qwen3_8_flash_next import (
+        apply_qwen3_8_flash_next_patches,
+    )
 
     apply_qwen3_5_text_patches()
+    apply_qwen3_8_flash_next_patches()
     patch_vllm_moe_sum()
 
     _register_flagcx_connector()

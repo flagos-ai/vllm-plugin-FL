@@ -39,6 +39,116 @@ pytestmark = pytest.mark.skipif(
 
 
 # =============================================================================
+# Layer 1: async accelerator event waiting
+# =============================================================================
+
+
+class TestAsyncOutputEventWait:
+    def test_non_cuda_platform_does_not_initialize_native_extension(
+        self, monkeypatch
+    ):
+        from vllm_fl.worker import model_runner
+
+        constructor = MagicMock(
+            side_effect=AssertionError("native extension must not be loaded")
+        )
+        monkeypatch.setattr(model_runner.current_platform, "is_cuda", lambda: False)
+        monkeypatch.setattr(
+            model_runner, "_NativeEventfdCompletionPool", constructor
+        )
+        monkeypatch.setattr(model_runner, "_native_completion_pool", None)
+
+        assert model_runner._get_native_completion_pool() is None
+        constructor.assert_not_called()
+
+    def test_cuda_platform_missing_native_extension_uses_event_fallback(
+        self, monkeypatch
+    ):
+        from vllm_fl.worker import model_runner
+
+        constructor_calls = []
+
+        class MissingNativeCompletionPool:
+            def __init__(self):
+                constructor_calls.append(True)
+                raise ImportError("vllm_fl._C is absent")
+
+        monkeypatch.setattr(model_runner.current_platform, "is_cuda", lambda: True)
+        monkeypatch.setattr(
+            model_runner,
+            "_NativeEventfdCompletionPool",
+            MissingNativeCompletionPool,
+        )
+        monkeypatch.setattr(model_runner, "_native_completion_pool", None)
+
+        assert model_runner._get_native_completion_pool() is None
+        assert model_runner._native_completion_pool is False
+        assert constructor_calls == [True]
+
+    def test_native_completion_avoids_accelerator_sync(self):
+        from vllm_fl.worker import model_runner
+
+        event = MagicMock()
+        pool = MagicMock()
+        completion = model_runner._NativeEventfdCompletion(pool, 3)
+
+        model_runner._wait_for_async_output_event(event, completion)
+
+        event.synchronize.assert_not_called()
+        pool.wait.assert_called_once_with(3)
+        pool.release.assert_called_once_with(3)
+
+    def test_synchronize_fallback_without_host_completion(self):
+        from vllm_fl.worker import model_runner
+
+        class LegacyEvent:
+            def __init__(self):
+                self.synchronized = False
+
+            def synchronize(self):
+                self.synchronized = True
+
+        event = LegacyEvent()
+        model_runner._wait_for_async_output_event(event, None)
+        assert event.synchronized
+
+    def test_native_completion_wait_failure_uses_event_fallback(self):
+        from vllm_fl.worker import model_runner
+
+        event = MagicMock()
+        pool = MagicMock()
+        pool.wait.side_effect = OSError("eventfd read failed")
+        completion = model_runner._NativeEventfdCompletion(pool, 5)
+
+        model_runner._wait_for_async_output_event(event, completion)
+
+        pool.wait.assert_called_once_with(5)
+        event.synchronize.assert_called_once_with()
+        pool.release.assert_called_once_with(5)
+
+    def test_native_completion_pool_wait_consumes_eventfd(self):
+        import os
+
+        from vllm_fl.worker import model_runner
+
+        if not hasattr(os, "eventfd"):
+            pytest.skip("Linux eventfd is unavailable")
+        event_fd = os.eventfd(0, os.EFD_CLOEXEC)
+        pool = model_runner._NativeEventfdCompletionPool.__new__(
+            model_runner._NativeEventfdCompletionPool
+        )
+        pool._event_fds = [event_fd]
+        try:
+            os.eventfd_write(event_fd, 1)
+            pool.wait(0)
+            os.set_blocking(event_fd, False)
+            with pytest.raises(BlockingIOError):
+                os.read(event_fd, 8)
+        finally:
+            os.close(event_fd)
+
+
+# =============================================================================
 # Layer 1: ExecuteModelState Data Structure Tests
 # =============================================================================
 

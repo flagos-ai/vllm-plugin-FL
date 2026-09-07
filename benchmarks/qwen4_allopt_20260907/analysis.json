@@ -1,0 +1,512 @@
+{
+  "comparison_caveat": "Historical cross-round references, not paired experiments or component attribution.",
+  "all_formal": {
+    "rounds": 6,
+    "output_throughput": {
+      "min": 2108.3348187737593,
+      "max": 3400.676624941005,
+      "mean": 3062.253069932757,
+      "median": 3243.8869635946266,
+      "p05": 2327.3988887646833,
+      "p95": 3398.542956194521
+    },
+    "range_over_mean_pct": 42.20231890225923,
+    "mean_ttft_ms": 2229.4685579775737,
+    "mean_tpot_ms": 19.323101159851984
+  },
+  "groups": {
+    "initial": {
+      "rounds": 3,
+      "output_throughput": {
+        "min": 2108.3348187737593,
+        "max": 3153.2555797534087,
+        "mean": 2748.7271657548745,
+        "median": 2984.5910987374555,
+        "p05": 2195.960446770129,
+        "p95": 3136.3891316518134
+      },
+      "range_over_mean_pct": 38.01471364629549,
+      "mean_ttft_ms": 3046.484368279683,
+      "mean_tpot_ms": 21.06323240281811
+    },
+    "repeat2": {
+      "rounds": 3,
+      "output_throughput": {
+        "min": 3334.5183474358446,
+        "max": 3400.676624941005,
+        "mean": 3375.77897411064,
+        "median": 3392.1419499550707,
+        "p05": 3340.280707687767,
+        "p95": 3399.8231574424112
+      },
+      "range_over_mean_pct": 1.9597929252044648,
+      "mean_ttft_ms": 1412.452747675464,
+      "mean_tpot_ms": 17.58296991688586
+    }
+  },
+  "group_formal2_plus3": {
+    "initial": {
+      "rounds": 2,
+      "output_throughput": {
+        "min": 2108.3348187737593,
+        "max": 2984.5910987374555,
+        "mean": 2546.4629587556074,
+        "median": 2546.4629587556074,
+        "p05": 2152.1476327719442,
+        "p95": 2940.7782847392705
+      },
+      "range_over_mean_pct": 34.410721622744546,
+      "mean_ttft_ms": 3594.1422954965674,
+      "mean_tpot_ms": 22.39646269607699
+    },
+    "repeat2": {
+      "rounds": 2,
+      "output_throughput": {
+        "min": 3334.5183474358446,
+        "max": 3392.1419499550707,
+        "mean": 3363.330148695458,
+        "median": 3363.330148695458,
+        "p05": 3337.399527561806,
+        "p95": 3389.2607698291094
+      },
+      "range_over_mean_pct": 1.713290101525617,
+      "mean_ttft_ms": 1399.3138810601522,
+      "mean_tpot_ms": 17.66583965287328
+    }
+  },
+  "historical_output_throughput": {
+    "selfdev_cache_stable_selected_rounds": 3197.071771660053,
+    "official_all_three_mean": 3573.490746037726,
+    "official_formal2_plus3_mean": 3572.186517632009
+  },
+  "relative_output_throughput_pct": {
+    "all_formal": {
+      "selfdev_cache_stable_selected_rounds": -4.216943232941317,
+      "official_all_three_mean": -14.3063942916832,
+      "official_formal2_plus3_mean": -14.275107001895437
+    },
+    "initial": {
+      "selfdev_cache_stable_selected_rounds": -14.02360153060872,
+      "official_all_three_mean": -23.080053619765106,
+      "official_formal2_plus3_mean": -23.05196964975398
+    },
+    "repeat2": {
+      "selfdev_cache_stable_selected_rounds": 5.589715064726075,
+      "official_all_three_mean": -5.5327349636012935,
+      "official_formal2_plus3_mean": -5.498244354036896
+    }
+  },
+  "per_round": [
+    {
+      "group": "initial",
+      "round": 1,
+      "date": "20260907-100656",
+      "completed": 128,
+      "failed": 0,
+      "total_input_tokens": 131072,
+      "total_output_tokens": 131072,
+      "duration": 41.56719830818474,
+      "output_throughput": 3153.2555797534087,
+      "mean_ttft_ms": 1951.1685138459143,
+      "mean_tpot_ms": 18.39677181630034,
+      "p99_ttft_ms": 2775.0179800065234,
+      "p99_tpot_ms": 19.681291328092176,
+      "p99_itl_ms": 18.33493169862777,
+      "p95_itl_ms_from_detailed": 17.96573381870985,
+      "max_itl_ms_from_detailed": 1666.9961716979742,
+      "itl_over_100ms_count": 307,
+      "itl_count": 130944
+    },
+    {
+      "group": "initial",
+      "round": 2,
+      "date": "20260907-100812",
+      "completed": 128,
+      "failed": 0,
+      "total_input_tokens": 131072,
+      "total_output_tokens": 131072,
+      "duration": 62.16849374817684,
+      "output_throughput": 2108.3348187737593,
+      "mean_ttft_ms": 5711.064221799461,
+      "mean_tpot_ms": 24.78607100612083,
+      "p99_ttft_ms": 15217.87599959878,
+      "p99_tpot_ms": 35.455543971037855,
+      "p99_itl_ms": 18.176255133002996,
+      "p95_itl_ms_from_detailed": 17.73788183927536,
+      "max_itl_ms_from_detailed": 7618.266711011529,
+      "itl_over_100ms_count": 319,
+      "itl_count": 130944
+    },
+    {
+      "group": "initial",
+      "round": 3,
+      "date": "20260907-100909",
+      "completed": 128,
+      "failed": 0,
+      "total_input_tokens": 131072,
+      "total_output_tokens": 131072,
+      "duration": 43.916233635973185,
+      "output_throughput": 2984.5910987374555,
+      "mean_ttft_ms": 1477.2203691936738,
+      "mean_tpot_ms": 20.00685438603315,
+      "p99_ttft_ms": 2246.056758048944,
+      "p99_tpot_ms": 22.86911288227609,
+      "p99_itl_ms": 18.400917332619414,
+      "p95_itl_ms_from_detailed": 17.732856539078057,
+      "max_itl_ms_from_detailed": 4443.345263134688,
+      "itl_over_100ms_count": 288,
+      "itl_count": 130944
+    },
+    {
+      "group": "repeat2",
+      "round": 1,
+      "date": "20260907-101054",
+      "completed": 128,
+      "failed": 0,
+      "total_input_tokens": 131072,
+      "total_output_tokens": 131072,
+      "duration": 38.54291791189462,
+      "output_throughput": 3400.676624941005,
+      "mean_ttft_ms": 1438.730480906088,
+      "mean_tpot_ms": 17.417230444911024,
+      "p99_ttft_ms": 2233.64416109398,
+      "p99_tpot_ms": 18.29240085729621,
+      "p99_itl_ms": 18.151882197707888,
+      "p95_itl_ms_from_detailed": 17.772619938477874,
+      "max_itl_ms_from_detailed": 522.072282154113,
+      "itl_over_100ms_count": 288,
+      "itl_count": 130944
+    },
+    {
+      "group": "repeat2",
+      "round": 2,
+      "date": "20260907-101146",
+      "completed": 128,
+      "failed": 0,
+      "total_input_tokens": 131072,
+      "total_output_tokens": 131072,
+      "duration": 38.63989241421223,
+      "output_throughput": 3392.1419499550707,
+      "mean_ttft_ms": 1439.6212294559518,
+      "mean_tpot_ms": 17.4645305508839,
+      "p99_ttft_ms": 2229.4619134534155,
+      "p99_tpot_ms": 18.329798686022226,
+      "p99_itl_ms": 18.143914318643507,
+      "p95_itl_ms_from_detailed": 17.739522363990545,
+      "max_itl_ms_from_detailed": 519.6399688720703,
+      "itl_over_100ms_count": 288,
+      "itl_count": 130944
+    },
+    {
+      "group": "repeat2",
+      "round": 3,
+      "date": "20260907-101238",
+      "completed": 128,
+      "failed": 0,
+      "total_input_tokens": 131072,
+      "total_output_tokens": 131072,
+      "duration": 39.307625972665846,
+      "output_throughput": 3334.5183474358446,
+      "mean_ttft_ms": 1359.0065326643526,
+      "mean_tpot_ms": 17.867148754862658,
+      "p99_ttft_ms": 2235.295506650582,
+      "p99_tpot_ms": 18.748035907207324,
+      "p99_itl_ms": 18.241867925971746,
+      "p95_itl_ms_from_detailed": 17.97899198718369,
+      "max_itl_ms_from_detailed": 522.2989250905812,
+      "itl_over_100ms_count": 319,
+      "itl_count": 130944
+    }
+  ],
+  "telemetry_scope": "Entire server lifecycle, including load/capture/warmup/formal/idle/shutdown; active sample means GPU utilization >= 50%, not formal-only.",
+  "telemetry_per_gpu": [
+    {
+      "gpu": 0,
+      "samples": 1011,
+      "active_samples": 280,
+      "first_timestamp": "2026/09/07 09:54:42.779",
+      "last_timestamp": "2026/09/07 10:13:26.796",
+      "temperature_c_all": {
+        "min": 29.0,
+        "max": 49.0,
+        "mean": 35.12265084075173,
+        "median": 32.0,
+        "p05": 29.0,
+        "p95": 44.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 115.57,
+        "max": 568.24,
+        "mean": 351.29492857142856,
+        "median": 355.565,
+        "p05": 223.9375,
+        "p95": 456.3795
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    },
+    {
+      "gpu": 1,
+      "samples": 1011,
+      "active_samples": 278,
+      "first_timestamp": "2026/09/07 09:54:42.805",
+      "last_timestamp": "2026/09/07 10:13:26.808",
+      "temperature_c_all": {
+        "min": 29.0,
+        "max": 48.0,
+        "mean": 33.98021760633036,
+        "median": 31.0,
+        "p05": 29.0,
+        "p95": 42.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 117.81,
+        "max": 577.62,
+        "mean": 358.7786330935252,
+        "median": 363.53,
+        "p05": 221.265,
+        "p95": 461.5819999999998
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    },
+    {
+      "gpu": 2,
+      "samples": 1011,
+      "active_samples": 272,
+      "first_timestamp": "2026/09/07 09:54:42.826",
+      "last_timestamp": "2026/09/07 10:13:26.822",
+      "temperature_c_all": {
+        "min": 28.0,
+        "max": 46.0,
+        "mean": 32.803165182987144,
+        "median": 30.0,
+        "p05": 28.0,
+        "p95": 40.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 119.25,
+        "max": 567.95,
+        "mean": 356.75430147058825,
+        "median": 357.96,
+        "p05": 255.074,
+        "p95": 460.08199999999994
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    },
+    {
+      "gpu": 3,
+      "samples": 1011,
+      "active_samples": 280,
+      "first_timestamp": "2026/09/07 09:54:42.848",
+      "last_timestamp": "2026/09/07 10:13:26.835",
+      "temperature_c_all": {
+        "min": 29.0,
+        "max": 48.0,
+        "mean": 34.25222551928783,
+        "median": 31.0,
+        "p05": 29.0,
+        "p95": 42.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 117.68,
+        "max": 560.69,
+        "mean": 352.0456785714286,
+        "median": 355.83,
+        "p05": 238.92649999999998,
+        "p95": 448.8415000000001
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    },
+    {
+      "gpu": 4,
+      "samples": 1011,
+      "active_samples": 275,
+      "first_timestamp": "2026/09/07 09:54:42.864",
+      "last_timestamp": "2026/09/07 10:13:26.849",
+      "temperature_c_all": {
+        "min": 29.0,
+        "max": 51.0,
+        "mean": 35.453016815034616,
+        "median": 32.0,
+        "p05": 29.0,
+        "p95": 45.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 118.78,
+        "max": 581.3,
+        "mean": 362.82523636363635,
+        "median": 365.22,
+        "p05": 251.393,
+        "p95": 466.34400000000005
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    },
+    {
+      "gpu": 5,
+      "samples": 1011,
+      "active_samples": 273,
+      "first_timestamp": "2026/09/07 09:54:42.915",
+      "last_timestamp": "2026/09/07 10:13:26.861",
+      "temperature_c_all": {
+        "min": 28.0,
+        "max": 48.0,
+        "mean": 33.2215628090999,
+        "median": 30.0,
+        "p05": 28.0,
+        "p95": 42.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 118.82,
+        "max": 575.81,
+        "mean": 356.326043956044,
+        "median": 356.48,
+        "p05": 260.87,
+        "p95": 458.59799999999996
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    },
+    {
+      "gpu": 6,
+      "samples": 1011,
+      "active_samples": 285,
+      "first_timestamp": "2026/09/07 09:54:42.932",
+      "last_timestamp": "2026/09/07 10:13:26.872",
+      "temperature_c_all": {
+        "min": 29.0,
+        "max": 48.0,
+        "mean": 34.37685459940653,
+        "median": 31.0,
+        "p05": 29.0,
+        "p95": 43.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 113.32,
+        "max": 567.13,
+        "mean": 344.6004210526316,
+        "median": 352.85,
+        "p05": 190.908,
+        "p95": 449.35800000000006
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    },
+    {
+      "gpu": 7,
+      "samples": 1011,
+      "active_samples": 278,
+      "first_timestamp": "2026/09/07 09:54:42.950",
+      "last_timestamp": "2026/09/07 10:13:26.883",
+      "temperature_c_all": {
+        "min": 28.0,
+        "max": 46.0,
+        "mean": 32.653808110781405,
+        "median": 30.0,
+        "p05": 28.0,
+        "p95": 40.0
+      },
+      "sm_mhz_active": {
+        "min": 1830.0,
+        "max": 1830.0,
+        "mean": 1830.0,
+        "median": 1830.0,
+        "p05": 1830.0,
+        "p95": 1830.0
+      },
+      "power_w_active": {
+        "min": 120.19,
+        "max": 571.25,
+        "mean": 355.8826978417266,
+        "median": 357.28499999999997,
+        "p05": 249.0365,
+        "p95": 440.74149999999986
+      },
+      "limit_active_samples_all": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0,
+        "clocks_event_reasons.hw_slowdown": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "target_branch": "day0-qwen4",
+  "day0_parent": "025874dc7b48701998ca9e039d9babff09415ee2",
+  "measured_checkpoint": "efc05b365ed12675098d95ac65f80c80457f16f6",
+  "merged_branch_e2e_retested": false,
+  "new_cpu_integration_tests": {
+    "passed": 6,
+    "failed": 0,
+    "command": "python -m unittest discover -s tests/unit_tests/worker -p test_allopt_day0_integration.py -v"
+  },
+  "critical_lint": {
+    "new_findings": 0,
+    "pre_existing": "model_runner.py ROCm shutdown references undefined CUDAGraphWrapper; present in the day0 parent and outside the NVIDIA validation scope"
+  },
+  "unchanged_from_measured_checkpoint": [
+    "vllm_fl/patches/gdn_packed_decode.py",
+    "vllm_fl/models/qwen3_8_flash_next/gpu/ops/qsa.py",
+    "vllm_fl/models/qwen3_8_flash_next/gpu/ops/hyperconnection.py",
+    "vllm_fl/worker/packed_block_table.py",
+    "vllm_fl/worker/common_slot_mapping.py"
+  ],
+  "preserved_day0_features": [
+    "W8A8 and MXFP8 registration",
+    "shape-aware MM and other-model hooks",
+    "existing common-attention metadata graph when packed arena is not requested",
+    "existing vendored operator sources",
+    "PLE index and rollback boundary guards",
+    "vLLM 0.24 multimodal-pruning compatibility",
+    "QSA cache binding and breakable-graph support"
+  ],
+  "merge_specific_changes": [
+    "Explicit plan-cache request retains generic FlagGems ATen dispatch",
+    "Packed arena is opt-in outside the all-on harness",
+    "Packed producer retains builder-side padded-row cleanup",
+    "Clear both metadata graph caches before input-batch rebinding"
+  ]
+}

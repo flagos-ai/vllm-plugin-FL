@@ -7,6 +7,7 @@
 import functools
 import gc
 import itertools
+import os
 import threading
 import time
 from collections import defaultdict
@@ -281,6 +282,16 @@ from vllm_fl.dispatch.io_dumper import (
     init_io_dump_from_env,
     register_io_module_hooks,
 )
+from vllm_fl.worker.common_attention_metadata import (
+    CommonAttentionMetadataGraphRunner,
+    compute_common_attention_metadata,
+)
+
+from vllm_fl.worker.common_slot_mapping import (
+    CommonSlotMappingGraphRunner,
+    compute_common_slot_mapping,
+)
+from vllm_fl.worker.packed_block_table import PackedBlockTableArena
 GraphWrapper = GraphWrapper
 
 if TYPE_CHECKING:
@@ -293,6 +304,181 @@ logger = init_logger(__name__)
 AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
 # list when ubatching is enabled
 PerLayerAttnMetadata: TypeAlias = list[AttnMetadataDict] | AttnMetadataDict
+
+
+# Waiting on a CUDA event from the async-output thread introduces a second
+# stream of CUDA runtime calls into the output-rank process. Under a busy
+# CUDA-graph serving loop, those calls contend with the model thread's launch
+# path and turn rank-arrival skew into apparent first-collective time.
+#
+# A Python cudaLaunchHostFunc callback is not safe here: the callback needs the
+# GIL, while a CUDA API running on the model thread may hold the GIL and wait
+# for the callback's stream (cudaProfilerStop is one concrete example). The
+# plugin C++ extension instead enqueues a native callback which only writes to
+# a Linux eventfd. The output thread blocks in os.read(), which releases the
+# GIL and does not enter the accelerator runtime. Unsupported platforms,
+# extension/driver ABI failures, and pool exhaustion retain vLLM's Event
+# synchronization fallback.
+_ASYNC_OUTPUT_COMPLETION_POOL_SIZE = 64
+
+
+class _NativeEventfdCompletionPool:
+    """Process-local pool of native stream-callback completion events."""
+
+    def __init__(self, capacity: int = _ASYNC_OUTPUT_COMPLETION_POOL_SIZE):
+        if capacity <= 0:
+            raise ValueError("Native completion pool capacity must be positive.")
+        if not hasattr(os, "eventfd"):
+            raise RuntimeError("Linux eventfd is unavailable.")
+
+        # Import lazily because non-NVIDIA platforms may intentionally ship no
+        # plugin extension. The op itself dynamically resolves libcuda.
+        import importlib
+
+        importlib.import_module("vllm_fl._C")
+        namespace = getattr(torch.ops, "vllm_fl", None)
+        enqueue_op = (
+            getattr(namespace, "enqueue_cuda_eventfd_completion", None)
+            if namespace is not None
+            else None
+        )
+        if enqueue_op is None:
+            raise RuntimeError(
+                "vllm_fl native eventfd completion op is unavailable."
+            )
+
+        event_fds: list[int] = []
+        try:
+            for _ in range(capacity):
+                event_fds.append(os.eventfd(0, os.EFD_CLOEXEC))
+        except Exception:
+            for event_fd in event_fds:
+                os.close(event_fd)
+            raise
+
+        self._enqueue_op = enqueue_op
+        self._event_fds = event_fds
+        self._available = list(range(capacity - 1, -1, -1))
+        self._lock = threading.Lock()
+        self._supported = True
+
+    def acquire(self) -> int | None:
+        with self._lock:
+            if not self._supported or not self._available:
+                return None
+            return self._available.pop()
+
+    def enqueue(self, stream: Any) -> "_NativeEventfdCompletion | None":
+        slot = self.acquire()
+        if slot is None:
+            return None
+        try:
+            status = int(
+                self._enqueue_op(
+                    int(stream.cuda_stream), self._event_fds[slot]
+                )
+            )
+            if status != 0:
+                raise RuntimeError(
+                    "native CUDA host callback enqueue failed with status "
+                    f"{status}"
+                )
+        except Exception as exc:
+            with self._lock:
+                self._supported = False
+                self._available.append(slot)
+            logger.warning_once(
+                "Native async-output completion is unavailable; using "
+                "accelerator Event synchronization instead: %s",
+                exc,
+            )
+            return None
+        return _NativeEventfdCompletion(self, slot)
+
+    def wait(self, slot: int) -> None:
+        # CPython releases the GIL around the blocking read. The native CUDA
+        # callback writes one uint64 after all preceding copy-stream work.
+        payload = os.read(self._event_fds[slot], 8)
+        if len(payload) != 8 or int.from_bytes(payload, "little") == 0:
+            raise RuntimeError("Invalid native completion eventfd payload.")
+
+    def release(self, slot: int) -> None:
+        with self._lock:
+            self._available.append(slot)
+
+
+class _NativeEventfdCompletion(NamedTuple):
+    pool: _NativeEventfdCompletionPool
+    slot: int
+
+
+_native_completion_pool: _NativeEventfdCompletionPool | bool | None = None
+_native_completion_pool_lock = threading.Lock()
+
+
+def _get_native_completion_pool() -> _NativeEventfdCompletionPool | None:
+    global _native_completion_pool
+    if not current_platform.is_cuda() or _native_completion_pool is False:
+        return None
+    if _native_completion_pool is None:
+        with _native_completion_pool_lock:
+            if _native_completion_pool is None:
+                try:
+                    _native_completion_pool = _NativeEventfdCompletionPool()
+                except (
+                    ImportError,
+                    AttributeError,
+                    OSError,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                ) as exc:
+                    _native_completion_pool = False
+                    logger.warning_once(
+                        "Native async-output completion initialization "
+                        "failed; using accelerator Event synchronization: %s",
+                        exc,
+                    )
+    return (
+        _native_completion_pool
+        if isinstance(_native_completion_pool, _NativeEventfdCompletionPool)
+        else None
+    )
+
+
+def _enqueue_native_completion(
+    stream: Any,
+) -> _NativeEventfdCompletion | None:
+    pool = _get_native_completion_pool()
+    if pool is None:
+        return None
+    completion = pool.enqueue(stream)
+    if completion is None and pool._supported:
+        logger.warning_once(
+            "Native async-output completion pool exhausted; using "
+            "accelerator Event synchronization for this output."
+        )
+    return completion
+
+
+def _wait_for_async_output_event(
+    event: Any, completion: _NativeEventfdCompletion | None
+) -> None:
+    """Wait until async D2H copies are safe to consume on the CPU."""
+    if completion is None:
+        event.synchronize()
+        return
+    try:
+        completion.pool.wait(completion.slot)
+    except (OSError, RuntimeError) as exc:
+        logger.warning_once(
+            "Native async-output completion wait failed; synchronizing the "
+            "accelerator Event instead: %s",
+            exc,
+        )
+        event.synchronize()
+    finally:
+        completion.pool.release(completion.slot)
 
 
 # Wrapper for ModelRunnerOutput to support overlapped execution.
@@ -337,6 +523,9 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
                 if self._routed_experts is not None
                 else None
             )
+            self._async_copy_completion = _enqueue_native_completion(
+                async_output_copy_stream
+            )
             self.async_copy_ready_event.record()
 
     def get_output(self) -> ModelRunnerOutput:
@@ -345,7 +534,10 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
         This function blocks until the copy is finished.
         """
         max_gen_len = self.sampled_token_ids_cpu.shape[-1]
-        self.async_copy_ready_event.synchronize()
+        _wait_for_async_output_event(
+            self.async_copy_ready_event, self._async_copy_completion
+        )
+        self._async_copy_completion = None
 
         # Release the device tensors once the copy has completed.
         del self._logprobs_tensors
@@ -446,13 +638,19 @@ class AsyncGPUPoolingModelRunnerOutput(AsyncModelRunnerOutput):
                 raw_pooler_output=self._raw_pooler_output,
                 finished_mask=finished_mask,
             )
+            self._async_copy_completion = _enqueue_native_completion(
+                async_output_copy_stream
+            )
             self.async_copy_ready_event.record()
 
     def get_output(self) -> ModelRunnerOutput:
         """Copy the device tensors to the host and return a ModelRunnerOutput.
         This function blocks until the copy is finished.
         """
-        self.async_copy_ready_event.synchronize()
+        _wait_for_async_output_event(
+            self.async_copy_ready_event, self._async_copy_completion
+        )
+        self._async_copy_completion = None
 
         # Release the device tensors once the copy has completed.
         del self._raw_pooler_output
@@ -541,6 +739,25 @@ class ModelRunnerFL(
         self.inputs_embeds_size = model_config.get_inputs_embeds_size()
         # Only relevant for models using ALiBi (e.g, MPT)
         self.use_alibi = model_config.uses_alibi
+
+        # Qwen3.8-Flash-Next PLE consumes the raw token history preceding each
+        # scheduled chunk. Keep this in the plugin-owned v0.24 runner so the
+        # installed vLLM tree remains unmodified.
+        ple_layer_ids = getattr(model_config.hf_text_config, "ple_layer_ids", ())
+        self.uses_ngram_embedding = bool(ple_layer_ids)
+        if self.uses_ngram_embedding:
+            self.ngram_context_len = int(model_config.hf_text_config.ngram_size) - 1
+            self.ngram_eos_token_id = int(model_config.hf_text_config.eos_token_id)
+        else:
+            self.ngram_context_len = 0
+            self.ngram_eos_token_id = 0
+        if self.uses_ngram_embedding and self.ngram_context_len <= 0:
+            raise ValueError("N-gram embedding requires context length >= 1.")
+        if self.uses_ngram_embedding and len(get_pp_group().ranks) > 1:
+            raise RuntimeError(
+                "N-gram PLE embedding currently requires "
+                "pipeline_parallel_size=1."
+            )
 
         self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
@@ -783,6 +1000,10 @@ class ModelRunnerFL(
         self.query_start_loc = self._make_buffer(
             self.max_num_reqs + 1, dtype=torch.int32
         )
+        self.common_attention_metadata_graph = CommonAttentionMetadataGraphRunner()
+        self.common_slot_mapping_graph = CommonSlotMappingGraphRunner()
+        self.packed_block_table_arena: PackedBlockTableArena | None = None
+        self._install_packed_block_table_arena()
         self.seq_lens = torch.zeros(
             self.max_num_reqs, dtype=torch.int32, device=self.device
         )
@@ -813,6 +1034,12 @@ class ModelRunnerFL(
         self.inputs_embeds = self._make_buffer(
             self.max_num_tokens, self.inputs_embeds_size, dtype=self.dtype, numpy=False
         )
+        if self.uses_ngram_embedding:
+            self.ngram_context = self._make_buffer(
+                self.max_num_reqs,
+                self.ngram_context_len,
+                dtype=torch.int32,
+            )
         self.is_token_ids = self._make_buffer(self.max_num_tokens, dtype=torch.bool)
         self.discard_request_mask = self._make_buffer(
             self.max_num_reqs, dtype=torch.bool
@@ -1948,6 +2175,74 @@ class ModelRunnerFL(
 
         return encoder_seq_lens, encoder_seq_lens_cpu
 
+    def _install_packed_block_table_arena(self) -> None:
+        """Install the fixed-address packed block-table/slot arena.
+
+        This is intentionally a best-effort metadata optimization.  A vendor
+        ``CpuGpuBuffer`` may have stronger assumptions than the vLLM buffer
+        (for example, contiguous group storage), so construction failure must
+        retain the stock per-group commit path rather than change correctness.
+        The all-on harness explicitly enables this switch. Other day0 users
+        retain the existing common-attention metadata path by default.
+        """
+        old_arena = getattr(self, "packed_block_table_arena", None)
+        if old_arena is not None:
+            old_arena.close()
+        self.packed_block_table_arena = None
+
+        disabled = os.getenv("VLLM_FL_PACKED_BLOCK_TABLE_ARENA", "0").lower()
+        require = os.getenv("VLLM_FL_PACKED_BLOCK_TABLE_REQUIRE", "0").lower()
+        require = require not in {"0", "false", "off", "no"}
+        if disabled in {"0", "false", "off", "no"}:
+            if require:
+                raise RuntimeError(
+                    "VLLM_FL_PACKED_BLOCK_TABLE_REQUIRE=1 but the packed "
+                    "block-table arena is disabled"
+                )
+            return
+
+        try:
+            self.packed_block_table_arena = PackedBlockTableArena(
+                self.input_batch.block_table,
+                device=self.device,
+                pin_memory=self.pin_memory,
+            )
+        except Exception as exc:
+            if require:
+                raise RuntimeError(
+                    "Packed block-table arena is required but could not be "
+                    "installed"
+                ) from exc
+            # Do not make model startup depend on an optional aliasing
+            # optimization.  The warning includes the exception for remote
+            # diagnosis while the normal per-group path remains unchanged.
+            logger.warning_once(
+                "Packed block-table arena disabled; falling back to per-group "
+                "metadata copies: %s",
+                exc,
+            )
+        else:
+            logger.info(
+                "Packed block-table arena enabled: groups=%d packed_width=%d "
+                "h2d_copies=1 slot_producer=2d",
+                self.packed_block_table_arena.group_count,
+                self.packed_block_table_arena.total_block_width,
+            )
+
+    def _close_packed_block_table_arena(self) -> None:
+        arena = getattr(self, "packed_block_table_arena", None)
+        if arena is not None:
+            arena.close()
+            self.packed_block_table_arena = None
+
+    def _commit_block_table(self, num_reqs: int) -> None:
+        """Copy block-table rows once, with a safe stock fallback."""
+        arena = self.packed_block_table_arena
+        if arena is not None and arena.block_table is self.input_batch.block_table:
+            arena.commit(num_reqs)
+        else:
+            self.input_batch.block_table.commit_block_table(num_reqs)
+
     def _prepare_inputs(
         self,
         scheduler_output: "SchedulerOutput",
@@ -1968,7 +2263,7 @@ class ModelRunnerFL(
 
         # OPTIMIZATION: Start copying the block table first.
         # This way, we can overlap the copy with the following CPU operations.
-        self.input_batch.block_table.commit_block_table(num_reqs)
+        self._commit_block_table(num_reqs)
 
         # Get request indices.
         # E.g., [2, 5, 3] -> [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
@@ -2186,12 +2481,6 @@ class ModelRunnerFL(
         )
         self.seq_lens[num_reqs:].fill_(0)
 
-        self.input_batch.block_table.compute_slot_mapping(
-            num_reqs,
-            self.query_start_loc.gpu[: num_reqs + 1],
-            self.positions[:total_num_scheduled_tokens],
-        )
-
         # Copy the tensors to the GPU.
         self._prepare_input_ids(
             scheduler_output,
@@ -2290,6 +2579,7 @@ class ModelRunnerFL(
         num_scheduled_tokens: dict[str, int] | None = None,
         cascade_attn_prefix_lens: list[list[int]] | None = None,
         slot_mappings: dict[int, torch.Tensor] | None = None,
+        block_table_rows_are_current: bool = False,
     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
         """
         :return: tuple[attn_metadata, spec_decode_common_attn_metadata]
@@ -2329,9 +2619,10 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 blk_table_tensor = blk_table.get_device_tensor(num_reqs_padded)
 
-            # Fill unused block table entries with NULL_BLOCK_ID (null block)
-            # for CUDAGraph padding. Block 0 is reserved for padding.
-            blk_table_tensor[num_reqs:num_reqs_padded].fill_(NULL_BLOCK_ID)
+            if not block_table_rows_are_current:
+                # Fill unused block table entries with NULL_BLOCK_ID (null
+                # block) for graph padding. Block 0 is reserved for padding.
+                blk_table_tensor[num_reqs:num_reqs_padded].fill_(NULL_BLOCK_ID)
             return blk_table_tensor
 
         assert slot_mappings is not None
@@ -2403,6 +2694,7 @@ class ModelRunnerFL(
             seq_lens=self.seq_lens[:num_reqs_padded],
             _seq_lens_cpu=seq_lens_cpu,
             _num_computed_tokens_cpu=num_computed_tokens_cpu,
+            _num_computed_tokens_cache=self.num_computed_tokens[:num_reqs_padded],
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             num_reqs=num_reqs_padded,
             num_actual_tokens=num_tokens_padded,
@@ -3505,10 +3797,86 @@ class ModelRunnerFL(
         inputs_embeds = self.inputs_embeds.gpu[:num_tokens]
         return input_ids, inputs_embeds
 
+    def _prepare_ngram_context(
+        self,
+        num_reqs: int,
+        num_reqs_padded: int,
+    ) -> torch.Tensor:
+        """Build the left context for every real or CUDA-graph padding row."""
+        if not self.uses_ngram_embedding:
+            raise RuntimeError("N-gram context requested for non-ngram model.")
+        eos_token_id = int(self.ngram_eos_token_id)
+        if num_reqs_padded == 0 or self.ngram_context_len == 0:
+            return self.ngram_context.gpu[:num_reqs_padded]
+
+        context_cpu = self.ngram_context.np[:num_reqs_padded]
+        context_cpu.fill(eos_token_id)
+        num_computed = self.input_batch.num_computed_tokens_cpu
+        token_ids = self.input_batch.token_ids_cpu
+        is_token_ids = self.input_batch.is_token_ids
+
+        for req_idx in range(num_reqs):
+            end = int(num_computed[req_idx])
+            if end <= 0:
+                continue
+            start = max(0, end - self.ngram_context_len)
+            context_tokens = token_ids[req_idx, start:end]
+            if context_tokens.size == 0:
+                continue
+            if self.enable_prompt_embeds and not is_token_ids[
+                req_idx, start:end
+            ].all():
+                context_tokens = context_tokens.copy()
+                context_tokens[~is_token_ids[req_idx, start:end]] = eos_token_id
+            context_cpu[req_idx, -context_tokens.size :] = context_tokens
+
+        self.ngram_context.copy_to_gpu(num_reqs_padded)
+        return self.ngram_context.gpu[:num_reqs_padded]
+
+    def _maybe_add_ngram_kwargs(
+        self,
+        model_kwargs: dict[str, Any],
+        *,
+        num_reqs: int,
+        num_reqs_padded: int,
+        is_first_rank: bool,
+        is_encoder_decoder: bool,
+        use_dummy_context: bool,
+        query_start_loc: torch.Tensor | None = None,
+        num_scheduled_tokens: np.ndarray | None = None,
+    ) -> None:
+        if not self.uses_ngram_embedding or not is_first_rank or is_encoder_decoder:
+            return
+
+        eos_token_id = int(self.ngram_eos_token_id)
+        if query_start_loc is None:
+            if num_scheduled_tokens is None:
+                raise RuntimeError("query_start_loc is required for N-gram input.")
+            cu_num_tokens = np.cumsum(num_scheduled_tokens, dtype=np.int32)
+            last = int(cu_num_tokens[-1]) if num_reqs > 0 else 0
+            self.query_start_loc.np[0] = 0
+            if num_reqs > 0:
+                self.query_start_loc.np[1 : num_reqs + 1] = cu_num_tokens
+            self.query_start_loc.np[num_reqs + 1 :].fill(last)
+            self.query_start_loc.copy_to_gpu()
+            query_start_loc = self.query_start_loc.gpu[: num_reqs_padded + 1]
+        model_kwargs["query_start_loc"] = query_start_loc
+
+        if use_dummy_context:
+            self.ngram_context.np[:num_reqs_padded].fill(eos_token_id)
+            self.ngram_context.copy_to_gpu(num_reqs_padded)
+            model_kwargs["ngram_context"] = self.ngram_context.gpu[:num_reqs_padded]
+        else:
+            model_kwargs["ngram_context"] = self._prepare_ngram_context(
+                num_reqs, num_reqs_padded
+            )
+
     def _preprocess(
         self,
         scheduler_output: "SchedulerOutput",
         num_input_tokens: int,  # Padded
+        num_reqs: int,
+        num_reqs_padded: int,
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> tuple[
         torch.Tensor | None,
@@ -3612,6 +3980,26 @@ class ModelRunnerFL(
             input_ids = self.input_ids.gpu[:num_input_tokens]
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
+
+        if (
+            self.uses_ngram_embedding
+            and is_first_rank
+            and not is_encoder_decoder
+            and input_ids is None
+        ):
+            raise RuntimeError(
+                "N-gram PLE requires token ids on the first pipeline rank; "
+                "inputs_embeds-only batches are not supported."
+            )
+        self._maybe_add_ngram_kwargs(
+            model_kwargs,
+            num_reqs=num_reqs,
+            num_reqs_padded=num_reqs_padded,
+            is_first_rank=is_first_rank,
+            is_encoder_decoder=is_encoder_decoder,
+            use_dummy_context=False,
+            query_start_loc=self.query_start_loc.gpu[: num_reqs_padded + 1],
+        )
 
         if self.uses_mrope:
             positions = self.mrope_positions.gpu[:, :num_input_tokens]
@@ -4038,12 +4426,46 @@ class ModelRunnerFL(
                 pyt_hooks.register_hooks(self.model, self.model.__class__.__name__)
                 self.layerwise_nvtx_hooks_registered = True
 
+    def _run_common_attention_metadata(
+        self,
+        num_reqs: int,
+        cudagraph_mode: CUDAGraphMode,
+        *,
+        capture: bool = False,
+    ) -> bool:
+        # Follow the globally resolved graph mode. The standalone metadata
+        # graph also benefits piecewise execution; ubatching retains eager
+        # generation because its metadata is sliced per microbatch.
+        use_graph = (
+            cudagraph_mode != CUDAGraphMode.NONE
+            and not self.parallel_config.use_ubatching
+        )
+        arena = getattr(self, "packed_block_table_arena", None)
+        if arena is not None and arena.block_table is self.input_batch.block_table:
+            runner = self.common_slot_mapping_graph
+            compute = compute_common_slot_mapping
+        else:
+            runner = self.common_attention_metadata_graph
+            compute = compute_common_attention_metadata
+        return runner.run(
+            self.input_batch.block_table,
+            num_reqs,
+            self.query_start_loc.gpu[: num_reqs + 1],
+            self.positions,
+            self.seq_lens[:num_reqs],
+            self.num_computed_tokens[:num_reqs],
+            use_graph=use_graph,
+            capture=capture,
+            compute=compute,
+        )
+
     def _get_slot_mappings(
         self,
         num_tokens_padded: int,
         num_reqs_padded: int,
         num_tokens_unpadded: int,
         ubatch_slices: "UBatchSlices | None" = None,
+        slot_mapping_is_current: bool = False,
     ) -> tuple[
         dict[int, torch.Tensor] | None,
         dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None,
@@ -4084,9 +4506,10 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 slot_mapping = blk_table.slot_mapping.gpu[:num_tokens_padded]
 
-            # Fill unused with -1. Needed for reshape_and_cache in full cuda
-            # graph mode. `blk_table_tensor` -1 to match mamba PAD_SLOT_ID
-            slot_mapping[num_tokens_unpadded:num_tokens_padded].fill_(-1)
+            if not slot_mapping_is_current:
+                # Fill unused with -1. Needed for reshape_and_cache in full
+                # graph mode. `blk_table_tensor` -1 matches mamba PAD_SLOT_ID.
+                slot_mapping[num_tokens_unpadded:num_tokens_padded].fill_(-1)
 
             return slot_mapping
 
@@ -4322,6 +4745,7 @@ class ModelRunnerFL(
             use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
             ubatch_slices_attn = ubatch_slices_padded if pad_attn else ubatch_slices
 
+            self._run_common_attention_metadata(num_reqs_padded, cudagraph_mode)
             slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
                 num_tokens_padded=num_tokens_padded
                 if pad_attn or has_separate_kv_update
@@ -4331,6 +4755,7 @@ class ModelRunnerFL(
                 ),
                 num_tokens_unpadded=num_tokens_unpadded,
                 ubatch_slices=ubatch_slices_padded,
+                slot_mapping_is_current=True,
             )
 
             attn_metadata, spec_decode_common_attn_metadata = (
@@ -4346,6 +4771,9 @@ class ModelRunnerFL(
                     num_scheduled_tokens=scheduler_output.num_scheduled_tokens,
                     cascade_attn_prefix_lens=cascade_attn_prefix_lens,
                     slot_mappings=slot_mappings_by_group,
+                    # The packed producer updates slots but retains the tested
+                    # builder-side NULL_BLOCK_ID cleanup for padded rows.
+                    block_table_rows_are_current=self.packed_block_table_arena is None,
                 )
             )
 
@@ -4357,7 +4785,11 @@ class ModelRunnerFL(
                 model_kwargs,
                 ec_connector_output,
             ) = self._preprocess(
-                scheduler_output, num_tokens_padded, intermediate_tensors
+                scheduler_output,
+                num_tokens_padded,
+                num_reqs,
+                num_reqs_padded,
+                intermediate_tensors,
             )
 
         # Set cudagraph mode to none if calc_kv_scales is true.
@@ -5912,13 +6344,8 @@ class ModelRunnerFL(
             num_reqs_padded=num_reqs_padded,
             num_tokens_unpadded=num_tokens_unpadded,
             ubatch_slices=ubatch_slices_padded,
+            slot_mapping_is_current=True,
         )
-
-        # Dummy runs have no real slot assignments — fill with -1 so
-        # concat_and_cache kernels skip the KV write.
-        if slot_mappings_by_group is not None:
-            for sm in slot_mappings_by_group.values():
-                sm.fill_(-1)
 
         # _dummy_run shares pinned CPU buffers (seq_lens, query_start_loc,
         # etc.) with execute_model.  It must participate in the same event
@@ -5957,7 +6384,12 @@ class ModelRunnerFL(
                 # remove_request() are visible to the attention metadata
                 # builder. Without this, stale block IDs from finished
                 # requests can corrupt Mamba state.
-                self.input_batch.block_table.commit_block_table(num_reqs_padded)
+                self._commit_block_table(num_reqs_padded)
+                self._run_common_attention_metadata(
+                    num_reqs_padded,
+                    cudagraph_runtime_mode,
+                    capture=is_graph_capturing,
+                )
 
                 pad_attn = cudagraph_runtime_mode == CUDAGraphMode.FULL
                 attn_metadata, _ = self._build_attention_metadata(
@@ -5969,7 +6401,16 @@ class ModelRunnerFL(
                     for_cudagraph_capture=is_graph_capturing,
                     slot_mappings=slot_mappings_by_group,
                     use_spec_decode=self.speculative_config is not None,
+                    block_table_rows_are_current=self.packed_block_table_arena is None,
                 )
+
+            # Dummy forwards must not update real KV-cache slots. Capture the
+            # metadata producer first, then restore the existing PAD_SLOT_ID
+            # behavior before the model dummy/capture forward. Runtime replay
+            # overwrites these fixed-address buffers with current metadata.
+            if slot_mappings_by_group is not None:
+                for slot_mapping in slot_mappings_by_group.values():
+                    slot_mapping.fill_(-1)
 
         with self.maybe_dummy_run_with_lora(
             self.lora_config,
@@ -5995,6 +6436,16 @@ class ModelRunnerFL(
             else:
                 input_ids = self.input_ids.gpu[:num_tokens_padded]
                 inputs_embeds = None
+
+            self._maybe_add_ngram_kwargs(
+                model_kwargs,
+                num_reqs=num_reqs,
+                num_reqs_padded=num_reqs_padded,
+                is_first_rank=get_pp_group().is_first_rank,
+                is_encoder_decoder=self.model_config.is_encoder_decoder,
+                use_dummy_context=True,
+                num_scheduled_tokens=num_scheduled_tokens,
+            )
 
             if self.uses_mrope:
                 positions = self.mrope_positions.gpu[:, :num_tokens_padded]
@@ -6441,6 +6892,9 @@ class ModelRunnerFL(
 
         # Calls torch.accelerator.synchronize()
         self._cleanup_profiling_kv_cache()
+        # The cleanup above synchronizes and destroys slot-mapping graphs
+        # first; only then is it safe to release the arena's graph addresses.
+        self._close_packed_block_table_arena()
         if current_platform.is_rocm():
             # Drop captured graphs before distributed teardown. On ROCm, delayed
             # graph destruction can surface HSA faults in the next engine startup.
@@ -6458,6 +6912,8 @@ class ModelRunnerFL(
 
     def _cleanup_profiling_kv_cache(self) -> None:
         _accelerator_synchronize()
+        self.common_attention_metadata_graph.clear()
+        self.common_slot_mapping_graph.clear()
         if hasattr(self, "kv_caches") and self.kv_caches:
             for i in range(len(self.kv_caches)):
                 self.kv_caches[i] = None  # type: ignore
@@ -7079,6 +7535,12 @@ class ModelRunnerFL(
             block_sizes != self._init_block_sizes
             or kernel_block_sizes != self._init_kernel_block_sizes
         ):
+            # Graphs and packed views retain pointers into the old input batch.
+            # Tear both down before replacing it; the new batch is installed
+            # below with fresh, capture-stable addresses.
+            self.common_attention_metadata_graph.clear()
+            self.common_slot_mapping_graph.clear()
+            self._close_packed_block_table_arena()
             self._init_block_sizes = block_sizes
             self._init_kernel_block_sizes = kernel_block_sizes
             self.input_batch = InputBatch(
@@ -7096,6 +7558,7 @@ class ModelRunnerFL(
                 is_pooling_model=self.is_pooling_model,
                 reasoning_config=self.vllm_config.reasoning_config,
             )
+            self._install_packed_block_table_arena()
 
         assert self._init_block_sizes == block_sizes, (
             f"InputBatch block_sizes {self._init_block_sizes} != "
@@ -7347,6 +7810,16 @@ class ModelRunnerFL(
             logger.debug("%s reuses KV cache of %s", layer_name, target_layer_name)
             kv_caches[layer_name] = kv_caches[target_layer_name]
 
+        # vLLM 0.24 assigns ``layer.kv_cache`` directly. QSA's raw side cache
+        # additionally needs its bind hook to expose typed key/position views;
+        # newer vLLM calls this hook natively.
+        for layer_name, kv_cache in kv_caches.items():
+            layer = self.compilation_config.static_forward_context[layer_name]
+            if layer.__class__.__module__.endswith(
+                "qwen3_8_flash_next.common.qsa_cache"
+            ):
+                layer.bind_kv_cache(kv_cache)
+
         num_attn_module = (
             2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
         )
@@ -7356,6 +7829,15 @@ class ModelRunnerFL(
             self.kv_caches,
             num_attn_module,
         )
+        # vLLM 0.24's helper assigns ``layer.kv_cache`` directly. QSA's raw
+        # side cache needs its bind hook to expose typed key/position views;
+        # newer vLLM calls this hook natively.
+        for layer_name, kv_cache in kv_caches.items():
+            layer = self.compilation_config.static_forward_context[layer_name]
+            if layer.__class__.__module__.endswith(
+                "qwen3_8_flash_next.common.qsa_cache"
+            ):
+                layer.bind_kv_cache(kv_cache)
         return kv_caches
 
     def maybe_add_kv_sharing_layers_to_kv_cache_groups(

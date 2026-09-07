@@ -12,7 +12,6 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEConfig,
 )
-from vllm.platforms import current_platform
 from vllm.utils.flashinfer import has_flashinfer_cutlass_fused_moe
 from vllm.model_executor.layers.fused_moe.oracle.unquantized import UnquantizedMoeBackend, map_unquantized_backend, backend_to_kernel_cls
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
@@ -35,6 +34,13 @@ _moe_sum = CachedOp("moe_sum")
 logger = init_logger(__name__)
 
 
+def _get_current_platform():
+    """Resolve PlatformFL after the OOT platform plugin has activated."""
+    from vllm.platforms import current_platform as runtime_platform
+
+    return runtime_platform
+
+
 def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBackend]:
     """
     Get available backends in priority order based on platform and config.
@@ -48,13 +54,15 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
     ) -> None:
         backends.append(backends.pop(backends.index(backend)))
 
-    if current_platform.is_rocm():
+    runtime_platform = _get_current_platform()
+
+    if runtime_platform.is_rocm():
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.AITER,
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
         ]
-    elif current_platform.is_cuda():
+    elif runtime_platform.is_cuda():
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.FLASHINFER_TRTLLM,
             UnquantizedMoeBackend.FLASHINFER_CUTLASS,
@@ -68,28 +76,73 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         if moe_config.moe_parallel_config.dp_size > 1:
             _move_to_back(_AVAILABLE_BACKENDS, UnquantizedMoeBackend.FLASHINFER_CUTLASS)
 
-    elif current_platform.is_xpu():
+    elif runtime_platform.is_xpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
-    elif current_platform.is_cpu():
+    elif runtime_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
+    else:
+        # PlatformFL is intentionally OOT.  Unknown CUDA-alike vendors (for
+        # example Hygon) must not fall through to an unbound local or inherit
+        # NVIDIA-only FlashInfer candidates.  Triton is the portable fallback
+        # and keeps the backend choice fail-safe until a vendor adds a native
+        # expert implementation.
+        _AVAILABLE_BACKENDS = [
+            UnquantizedMoeBackend.TRITON,
+            UnquantizedMoeBackend.BATCHED_TRITON,
+        ]
     return _AVAILABLE_BACKENDS
 
 ## Adopt from select_unquantized_moe_backend
-def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
+def select_unquantized_moe_backend_oot(
+    moe_config: FusedMoEConfig,
+    *,
+    prefer_flaggems_experts: bool = False,
 ) -> tuple[UnquantizedMoeBackend, type[mk.FusedMoEExperts] | None]:
     """
     Select the primary Unquantized MoE backend.
     Note: Shape-specific fallbacks may still occur at runtime.
+
+    ``prefer_flaggems_experts`` is set only by the FusedMoEFL provider.  The
+    upstream-oracle fallback leaves it disabled so an OOT blacklist/whitelist
+    can genuinely return execution to vLLM's native expert implementation.
     """
 
-    if current_platform.is_cpu():
+    # This module can be imported while vLLM is still resolving the OOT
+    # platform plugin.  Resolve the platform again at selection time instead
+    # of relying on the module-level object captured during plugin import.
+    runtime_platform = _get_current_platform()
+
+    if runtime_platform.is_cpu():
         # TODO: migrate to MK structure.
         return UnquantizedMoeBackend.CPU, None
 
-    if current_platform.is_tpu():
+    if runtime_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
 
-    if current_platform.is_out_of_tree() and use_flaggems():
+    # Keep the FlagGems Triton path for both the default and an explicitly
+    # requested Triton backend.  Other explicit choices remain authoritative;
+    # in particular, do not make AITER/FlashInfer unreachable on AMD/NVIDIA.
+    rocm_aiter_requested = (
+        runtime_platform.is_rocm()
+        and (
+            envs.is_set("VLLM_ROCM_USE_AITER")
+            or envs.is_set("VLLM_ROCM_USE_AITER_MOE")
+        )
+        and envs.VLLM_ROCM_USE_AITER
+        and envs.VLLM_ROCM_USE_AITER_MOE
+    )
+    if (
+        prefer_flaggems_experts
+        and runtime_platform.is_out_of_tree()
+        and use_flaggems()
+        and (
+            moe_config.moe_backend == "triton"
+            or (
+                moe_config.moe_backend == "auto"
+                and not rocm_aiter_requested
+            )
+        )
+    ):
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     if moe_config.is_lora_enabled:
@@ -296,9 +349,17 @@ class TritonExpertsFL(TritonExperts):
         apply_router_weight_on_input: bool,
     ):
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        if self._lora_context is None and current_platform.is_cuda():
+        # Resolve dynamically for the same reason as the backend selector:
+        # this module may have been imported before PlatformFL activation.
+        runtime_platform = _get_current_platform()
+
+        if self._lora_context is None and runtime_platform.is_cuda():
             import flag_gems
 
+            logger.warning_once(
+                "QWEN4_FLAGGEMS_MOE_FASTPATH: calling "
+                "flag_gems.fused_experts_impl"
+            )
             output.copy_(flag_gems.fused_experts_impl(
                 hidden_states,
                 w1,

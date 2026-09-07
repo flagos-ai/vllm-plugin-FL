@@ -88,8 +88,18 @@ class PlatformFL(Platform):
             return False
         return self.device_type == "cuda"
 
+    def is_rocm(self) -> bool:
+        """Return whether the OOT platform uses the ROCm/HIP runtime.
+
+        ``PlatformFL`` is registered as ``PlatformEnum.OOT``, so the inherited
+        enum-based implementation cannot classify AMD or Hygon correctly.
+        PyTorch intentionally exposes both through its CUDA-shaped API; keep
+        the vendor boundary explicit instead of inferring it from that API.
+        """
+        return self.vendor_name in ("amd", "hygon")
+
     def is_cuda(self) -> bool:
-        """Stateless version of [torch.cuda.is_available][]."""
+        """Return whether this is the NVIDIA CUDA platform."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
     def is_musa(self) -> bool:
@@ -415,7 +425,9 @@ class PlatformFL(Platform):
             # Iluvatar is CUDA-compatible but has no NVML library.
             # Return a synthetic UUID based on device index.
             return f"ILUVATAR-{device_id}"
-        if cls.device_type == "cuda":
+        # NVML is NVIDIA-only. ROCm/HIP and other CUDA-alike platforms must
+        # not import it merely because their torch device type is ``cuda``.
+        if cls.device_type == "cuda" and cls.vendor_name == "nvidia":
             import pynvml
             pynvml.nvmlInit()
             physical_device_id = cls.device_id_to_physical_device_id(device_id)
@@ -472,6 +484,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def is_fully_connected(cls, physical_device_ids: list[int]) -> bool:
+        if cls.vendor_name != "nvidia" or cls.device_type != "cuda":
+            return False
         try:
             import pynvml
 
