@@ -65,6 +65,7 @@ op_backends:
 # Blacklist only ops that are known to have issues
 flagos_blacklist:
   - scaled_dot_product_attention
+  - mm
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
