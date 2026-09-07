@@ -202,15 +202,21 @@ class FlagGemsBackend(Backend):
                 "Falling back to vendor implementation."
             )
 
+        use_flaggems_attn = os.environ.get(
+            "VLLM_FL_USE_FLAGGEMS_ATTN", "0"
+        ).lower() in ("1", "true", "yes")
+
         if use_mla:
+            if use_sparse:
+                raise NotImplementedError(
+                    "NOT support Sparse MLA"
+                )
+            if use_flaggems_attn:
+                return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
             raise NotImplementedError("NOT support mla now!")
 
         if use_sparse:
             raise ValueError("use_sparse=True requires use_mla=True.")
-
-        use_flaggems_attn = os.environ.get(
-            "VLLM_FL_USE_FLAGGEMS_ATTN", "0"
-        ).lower() in ("1", "true", "yes")
 
         if use_flaggems_attn:
             print("Using FlagGems attention backend.")
