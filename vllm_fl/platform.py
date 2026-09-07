@@ -273,7 +273,53 @@ class PlatformFL(Platform):
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
 
-        backend_path = call_op("attention_backend", use_mla=use_mla, use_sparse=use_sparse)
+        # A process-start GLM5 A/B override must also cover attention-backend
+        # selection; the generic FlagOS whitelist may otherwise keep the
+        # validated NVIDIA MLA backend.  Bypass only for MLA, so this env does
+        # not alter ViT/standard attention dispatch.
+        if use_mla:
+            from vllm_fl.kernels.glm5_next.provider import (
+                get_glm5_provider,
+                use_nvidia_reference,
+            )
+
+            provider = get_glm5_provider()
+            auto_portable = (
+                provider == "auto"
+                and cls.device_type == "cuda"
+                and cls.vendor_name == "nvidia"
+                and not use_nvidia_reference()
+            )
+            if provider == "flaggems" or auto_portable:
+                from vllm_fl.dispatch.backends.flaggems.flaggems import (
+                    FlagGemsBackend,
+                )
+
+                flaggems_backend = FlagGemsBackend()
+                if not flaggems_backend.is_available():
+                    if provider == "flaggems":
+                        raise RuntimeError(
+                            "VLLM_FL_GLM5_PROVIDER=flaggems requires FlagGems"
+                        )
+                    raise RuntimeError(
+                        "GLM5 auto provider selected a portable MLA backend "
+                        "because the NVIDIA ABI/DeepGEMM is unavailable, but "
+                        "FlagGems is not installed"
+                    )
+                backend_path = flaggems_backend.attention_backend(
+                    use_mla=use_mla,
+                    use_sparse=use_sparse,
+                )
+                logger.info_once(
+                    "GLM5 provider override selected attention backend: %s",
+                    backend_path,
+                    scope="local",
+                )
+                return backend_path
+
+        backend_path = call_op(
+            "attention_backend", use_mla=use_mla, use_sparse=use_sparse
+        )
 
         logger.info_once(
             "Using attention backend via dispatch (use_mla=%s, use_sparse=%s): %s",

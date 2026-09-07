@@ -7,6 +7,7 @@
 import functools
 import gc
 import itertools
+import os
 import threading
 import time
 from collections import defaultdict
@@ -29,7 +30,7 @@ from vllm.compilation.breakable_cudagraph import (
     is_breakable_cudagraph_enabled,
 )
 from vllm.compilation.counter import compilation_counter
-from vllm.compilation.cuda_graph import CUDAGraphStat
+from vllm.compilation.cuda_graph import CUDAGraphStat, CUDAGraphWrapper
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
 from vllm.config import (
     CompilationMode,
@@ -281,7 +282,24 @@ from vllm_fl.dispatch.io_dumper import (
     init_io_dump_from_env,
     register_io_module_hooks,
 )
+from vllm_fl.worker.common_attention_metadata import (
+    CommonAttentionMetadataGraphRunner,
+    compute_common_attention_metadata,
+)
+
 GraphWrapper = GraphWrapper
+
+
+def _decoder_graph_wrappers():
+    """Return every decoder graph wrapper used by the CUDA runner."""
+    return list(GraphWrapper._all_instances) + list(
+        BreakableCUDAGraphWrapper._all_instances
+    )
+
+
+def _clear_decoder_graphs() -> None:
+    GraphWrapper.clear_all_graphs()
+    BreakableCUDAGraphWrapper.clear_all_graphs()
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
@@ -783,6 +801,7 @@ class ModelRunnerFL(
         self.query_start_loc = self._make_buffer(
             self.max_num_reqs + 1, dtype=torch.int32
         )
+        self.common_attention_metadata_graph = CommonAttentionMetadataGraphRunner()
         self.seq_lens = torch.zeros(
             self.max_num_reqs, dtype=torch.int32, device=self.device
         )
@@ -2186,12 +2205,6 @@ class ModelRunnerFL(
         )
         self.seq_lens[num_reqs:].fill_(0)
 
-        self.input_batch.block_table.compute_slot_mapping(
-            num_reqs,
-            self.query_start_loc.gpu[: num_reqs + 1],
-            self.positions[:total_num_scheduled_tokens],
-        )
-
         # Copy the tensors to the GPU.
         self._prepare_input_ids(
             scheduler_output,
@@ -2290,6 +2303,7 @@ class ModelRunnerFL(
         num_scheduled_tokens: dict[str, int] | None = None,
         cascade_attn_prefix_lens: list[list[int]] | None = None,
         slot_mappings: dict[int, torch.Tensor] | None = None,
+        block_table_rows_are_current: bool = False,
     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
         """
         :return: tuple[attn_metadata, spec_decode_common_attn_metadata]
@@ -2329,9 +2343,10 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 blk_table_tensor = blk_table.get_device_tensor(num_reqs_padded)
 
-            # Fill unused block table entries with NULL_BLOCK_ID (null block)
-            # for CUDAGraph padding. Block 0 is reserved for padding.
-            blk_table_tensor[num_reqs:num_reqs_padded].fill_(NULL_BLOCK_ID)
+            if not block_table_rows_are_current:
+                # Fill unused block table entries with NULL_BLOCK_ID (null
+                # block) for graph padding. Block 0 is reserved for padding.
+                blk_table_tensor[num_reqs:num_reqs_padded].fill_(NULL_BLOCK_ID)
             return blk_table_tensor
 
         assert slot_mappings is not None
@@ -2403,6 +2418,7 @@ class ModelRunnerFL(
             seq_lens=self.seq_lens[:num_reqs_padded],
             _seq_lens_cpu=seq_lens_cpu,
             _num_computed_tokens_cpu=num_computed_tokens_cpu,
+            _num_computed_tokens_cache=self.num_computed_tokens[:num_reqs_padded],
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             num_reqs=num_reqs_padded,
             num_actual_tokens=num_tokens_padded,
@@ -4038,12 +4054,39 @@ class ModelRunnerFL(
                 pyt_hooks.register_hooks(self.model, self.model.__class__.__name__)
                 self.layerwise_nvtx_hooks_registered = True
 
+    def _run_common_attention_metadata(
+        self,
+        num_reqs: int,
+        cudagraph_mode: CUDAGraphMode,
+        *,
+        capture: bool = False,
+    ) -> bool:
+        # Follow the globally resolved graph mode. The standalone metadata
+        # graph also benefits piecewise execution; ubatching retains eager
+        # generation because its metadata is sliced per microbatch.
+        use_graph = (
+            cudagraph_mode != CUDAGraphMode.NONE
+            and not self.parallel_config.use_ubatching
+        )
+        return self.common_attention_metadata_graph.run(
+            self.input_batch.block_table,
+            num_reqs,
+            self.query_start_loc.gpu[: num_reqs + 1],
+            self.positions,
+            self.seq_lens[:num_reqs],
+            self.num_computed_tokens[:num_reqs],
+            use_graph=use_graph,
+            capture=capture,
+            compute=compute_common_attention_metadata,
+        )
+
     def _get_slot_mappings(
         self,
         num_tokens_padded: int,
         num_reqs_padded: int,
         num_tokens_unpadded: int,
         ubatch_slices: "UBatchSlices | None" = None,
+        slot_mapping_is_current: bool = False,
     ) -> tuple[
         dict[int, torch.Tensor] | None,
         dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None,
@@ -4084,9 +4127,10 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 slot_mapping = blk_table.slot_mapping.gpu[:num_tokens_padded]
 
-            # Fill unused with -1. Needed for reshape_and_cache in full cuda
-            # graph mode. `blk_table_tensor` -1 to match mamba PAD_SLOT_ID
-            slot_mapping[num_tokens_unpadded:num_tokens_padded].fill_(-1)
+            if not slot_mapping_is_current:
+                # Fill unused with -1. Needed for reshape_and_cache in full
+                # graph mode. `blk_table_tensor` -1 matches mamba PAD_SLOT_ID.
+                slot_mapping[num_tokens_unpadded:num_tokens_padded].fill_(-1)
 
             return slot_mapping
 
@@ -4322,6 +4366,7 @@ class ModelRunnerFL(
             use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
             ubatch_slices_attn = ubatch_slices_padded if pad_attn else ubatch_slices
 
+            self._run_common_attention_metadata(num_reqs_padded, cudagraph_mode)
             slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
                 num_tokens_padded=num_tokens_padded
                 if pad_attn or has_separate_kv_update
@@ -4331,6 +4376,7 @@ class ModelRunnerFL(
                 ),
                 num_tokens_unpadded=num_tokens_unpadded,
                 ubatch_slices=ubatch_slices_padded,
+                slot_mapping_is_current=True,
             )
 
             attn_metadata, spec_decode_common_attn_metadata = (
@@ -4346,6 +4392,7 @@ class ModelRunnerFL(
                     num_scheduled_tokens=scheduler_output.num_scheduled_tokens,
                     cascade_attn_prefix_lens=cascade_attn_prefix_lens,
                     slot_mappings=slot_mappings_by_group,
+                    block_table_rows_are_current=True,
                 )
             )
 
@@ -5912,13 +5959,8 @@ class ModelRunnerFL(
             num_reqs_padded=num_reqs_padded,
             num_tokens_unpadded=num_tokens_unpadded,
             ubatch_slices=ubatch_slices_padded,
+            slot_mapping_is_current=True,
         )
-
-        # Dummy runs have no real slot assignments — fill with -1 so
-        # concat_and_cache kernels skip the KV write.
-        if slot_mappings_by_group is not None:
-            for sm in slot_mappings_by_group.values():
-                sm.fill_(-1)
 
         # _dummy_run shares pinned CPU buffers (seq_lens, query_start_loc,
         # etc.) with execute_model.  It must participate in the same event
@@ -5958,6 +6000,11 @@ class ModelRunnerFL(
                 # builder. Without this, stale block IDs from finished
                 # requests can corrupt Mamba state.
                 self.input_batch.block_table.commit_block_table(num_reqs_padded)
+                self._run_common_attention_metadata(
+                    num_reqs_padded,
+                    cudagraph_runtime_mode,
+                    capture=is_graph_capturing,
+                )
 
                 pad_attn = cudagraph_runtime_mode == CUDAGraphMode.FULL
                 attn_metadata, _ = self._build_attention_metadata(
@@ -5969,7 +6016,16 @@ class ModelRunnerFL(
                     for_cudagraph_capture=is_graph_capturing,
                     slot_mappings=slot_mappings_by_group,
                     use_spec_decode=self.speculative_config is not None,
+                    block_table_rows_are_current=True,
                 )
+
+            # Dummy forwards must not update real KV-cache slots. Capture the
+            # metadata producer first, then restore the existing PAD_SLOT_ID
+            # behavior before the model dummy/capture forward. Runtime replay
+            # overwrites these fixed-address buffers with current metadata.
+            if slot_mappings_by_group is not None:
+                for slot_mapping in slot_mappings_by_group.values():
+                    slot_mapping.fill_(-1)
 
         with self.maybe_dummy_run_with_lora(
             self.lora_config,
@@ -6445,6 +6501,7 @@ class ModelRunnerFL(
             # Drop captured graphs before distributed teardown. On ROCm, delayed
             # graph destruction can surface HSA faults in the next engine startup.
             CUDAGraphWrapper.clear_all_graphs()
+            BreakableCUDAGraphWrapper.clear_all_graphs()
             self.encoder_cudagraph_manager = None
         self.compilation_config.static_forward_context.clear()
         self.model = None  # type: ignore[assignment]
@@ -6458,6 +6515,7 @@ class ModelRunnerFL(
 
     def _cleanup_profiling_kv_cache(self) -> None:
         _accelerator_synchronize()
+        self.common_attention_metadata_graph.clear()
         if hasattr(self, "kv_caches") and self.kv_caches:
             for i in range(len(self.kv_caches)):
                 self.kv_caches[i] = None  # type: ignore
@@ -6576,9 +6634,18 @@ class ModelRunnerFL(
         profiling_pool = current_platform.graph_pool_handle()
         encoder_profiling_pool = current_platform.graph_pool_handle()
         original_pools: dict[int, Any] = {}
-        for instance in list(GraphWrapper._all_instances):
+        for instance in _decoder_graph_wrappers():
             original_pools[id(instance)] = instance.graph_pool
             instance.graph_pool = profiling_pool
+
+        # The common-attention metadata producer captures its own graphs before
+        # the decoder wrapper is entered.  Keep those profiling graphs in the
+        # same temporary pool as the decoder graphs.  If they use the global
+        # runtime pool here, the profiling cleanup drops the last graph owning
+        # that pool; the first real decoder capture then reuses a zero-refcount
+        # CachingHostAllocator pool and aborts in capture_begin().
+        original_metadata_pool = self.common_attention_metadata_graph.graph_pool
+        self.common_attention_metadata_graph.graph_pool = profiling_pool
 
         shared_memory_estimate = {}
         per_graph_estimate = {}
@@ -6643,8 +6710,8 @@ class ModelRunnerFL(
                     )
         finally:
             set_cudagraph_capturing_enabled(False)
-            GraphWrapper.clear_all_graphs()
-            for instance in list(GraphWrapper._all_instances):
+            _clear_decoder_graphs()
+            for instance in _decoder_graph_wrappers():
                 if id(instance) in original_pools:
                     instance.graph_pool = original_pools[id(instance)]
             for key_set in self.cudagraph_dispatcher.cudagraph_keys.values():
@@ -6652,6 +6719,7 @@ class ModelRunnerFL(
             self.cudagraph_dispatcher.keys_initialized = False
             self.maybe_remove_all_loras(self.lora_config)
             self._cleanup_profiling_kv_cache()
+            self.common_attention_metadata_graph.graph_pool = original_metadata_pool
             compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
 
         # FULL and PIECEWISE graphs share the global pool at runtime and are
@@ -7177,6 +7245,15 @@ class ModelRunnerFL(
         kv_caches: dict[str, torch.Tensor] = {}
         has_attn, has_mamba = False, False
 
+        if os.getenv("VLLM_FL_DEBUG_KV_CACHE") == "1":
+            logger.warning(
+                "KV cache config before reshape: tensors=%s groups=%s "
+                "kernel_block_sizes=%s",
+                self.kv_cache_config.kv_cache_tensors,
+                self.kv_cache_config.kv_cache_groups,
+                kernel_block_sizes,
+            )
+
         # Map layer names to (offset, block_stride) within the packed
         # backing tensor so we can create strided views per layer.
         layer_packing: dict[str, tuple[int, int]] = {}
@@ -7204,15 +7281,27 @@ class ModelRunnerFL(
                     num_blocks = raw_tensor.numel() // kv_cache_spec.page_size_bytes
                 if isinstance(kv_cache_spec, AttentionSpec):
                     has_attn = True
-                    num_blocks_per_kv_block = (
-                        kv_cache_spec.block_size // kernel_block_size
-                    )
-                    kernel_num_blocks = num_blocks * num_blocks_per_kv_block
-
-                    # For MLA with compression, storage_block_size != block_size
                     if kv_cache_spec.storage_block_size != kv_cache_spec.block_size:
-                        shape_block_size = kv_cache_spec.storage_block_size
+                        # Compressed index caches are addressed in storage
+                        # entries, not logical token slots. DeepGEMM accepts
+                        # 32/64-entry pages; split only the compressed storage
+                        # block and never multiply by logical block_size.
+                        storage_block_size = kv_cache_spec.storage_block_size
+                        shape_block_size = (
+                            64
+                            if storage_block_size % 64 == 0
+                            else 32
+                        )
+                        assert storage_block_size % shape_block_size == 0
+                        num_blocks_per_kv_block = (
+                            storage_block_size // shape_block_size
+                        )
+                        kernel_num_blocks = num_blocks * num_blocks_per_kv_block
                     else:
+                        num_blocks_per_kv_block = (
+                            kv_cache_spec.block_size // kernel_block_size
+                        )
+                        kernel_num_blocks = num_blocks * num_blocks_per_kv_block
                         shape_block_size = kernel_block_size
 
                     kv_cache_shape = attn_backend.get_kv_cache_shape(
@@ -7222,15 +7311,58 @@ class ModelRunnerFL(
                         kv_cache_spec.head_size,
                         cache_dtype_str=self.cache_config.cache_dtype,
                     )
+                    if os.getenv("VLLM_FL_DEBUG_KV_CACHE") == "1":
+                        logger.warning(
+                            "KV cache reshape layer=%s spec=%s backend=%s "
+                            "raw_bytes=%d num_blocks=%d kernel_blocks=%d "
+                            "kernel_block_size=%d shape=%s packing=%s",
+                            layer_name,
+                            kv_cache_spec,
+                            attn_backend.__name__,
+                            raw_tensor.numel(),
+                            num_blocks,
+                            kernel_num_blocks,
+                            kernel_block_size,
+                            kv_cache_shape,
+                            packing,
+                        )
                     try:
                         kv_cache_stride_order = attn_backend.get_kv_cache_stride_order()
                         assert len(kv_cache_stride_order) == len(kv_cache_shape)
                     except (AttributeError, NotImplementedError):
                         kv_cache_stride_order = tuple(range(len(kv_cache_shape)))
                     raw_tensor = kv_cache_raw_tensors[layer_name]
+                    # A padded logical cache block can be split into multiple
+                    # backend blocks (for example, GLM5-Next uses a 192-token
+                    # logical DSA indexer block and the indexer kernel consumes
+                    # 64-token blocks).  The upstream v0.24 helper applies the
+                    # complete logical-page stride to every backend block,
+                    # which makes the strided view run past the allocation.
+                    # Divide the physical page evenly across the backend blocks
+                    # so flattened kernel block ids retain a constant stride.
+                    reshape_spec = kv_cache_spec
+                    if (
+                        packing is None
+                        and kv_cache_spec.page_size_padded is not None
+                        and num_blocks_per_kv_block > 1
+                    ):
+                        assert (
+                            kv_cache_spec.page_size_bytes
+                            % num_blocks_per_kv_block
+                            == 0
+                        )
+                        reshape_spec = replace(
+                            kv_cache_spec,
+                            block_size=kernel_block_size,
+                            page_size_padded=(
+                                kv_cache_spec.page_size_bytes
+                                // num_blocks_per_kv_block
+                            ),
+                        )
+
                     kv_caches[layer_name] = _reshape_attention_kv_cache(
                         raw_tensor,
-                        kv_cache_spec,
+                        reshape_spec,
                         kv_cache_shape,
                         kv_cache_stride_order,
                         kernel_num_blocks,

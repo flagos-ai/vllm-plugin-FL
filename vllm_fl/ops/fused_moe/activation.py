@@ -11,6 +11,7 @@ def apply_moe_activation(
     activation: MoEActivation,
     output: torch.Tensor,
     input: torch.Tensor,
+    clamp_limit: float | None = None,
 ) -> torch.Tensor:
     """Apply MoE activation function."""
     assert input.dim() == 2, "Input must be 2D"
@@ -28,7 +29,22 @@ def apply_moe_activation(
 
     # Activations with gated multiplication (gate × activation(up))
     if activation == MoEActivation.SILU:
-        output.copy_(_silu_and_mul(None, input))
+        if clamp_limit is None:
+            output.copy_(_silu_and_mul(None, input))
+        else:
+            dim = input.shape[-1] // 2
+            try:
+                from flag_gems.fused.silu_and_mul_with_clamp import (
+                    silu_and_mul_with_clamp_out,
+                )
+
+                silu_and_mul_with_clamp_out(
+                    input[..., :dim], input[..., dim:], output, clamp_limit
+                )
+            except (ImportError, OSError, NotImplementedError, RuntimeError):
+                gate = input[..., :dim].clamp(max=clamp_limit)
+                up = input[..., dim:].clamp(min=-clamp_limit, max=clamp_limit)
+                output.copy_(F.silu(gate) * up)
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.SWIGLUOAI:

@@ -244,10 +244,26 @@ class WorkerFL(WorkerBase):
         register_oot_ops()
 
         if fl_envs.USE_FLAGGEMS:
-            import flag_gems
+            # Capture native CUDA aten::mm before FlagGems changes the CUDA
+            # registration. The common policy is opt-in; model integrations
+            # may supply a validated default in their own commit.
+            from vllm_fl.patches.flaggems_mm_shape_aware import (
+                capture_native_mm_kernel,
+                is_mm_dispatch_enabled,
+                is_shape_aware_mm_enabled,
+            )
 
-            # Get whitelist and blacklist from environment variables
+            shape_aware_mm_enabled = is_shape_aware_mm_enabled()
+
+            # Resolve policy before capturing native mm. An override is valid
+            # only when FlagGems retains ownership of aten::mm.
             whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+            mm_dispatch_enabled = is_mm_dispatch_enabled(whitelist, blacklist)
+            native_mm_kernel = None
+            if shape_aware_mm_enabled and mm_dispatch_enabled:
+                native_mm_kernel = capture_native_mm_kernel()
+
+            import flag_gems
 
             # Only rank 0 records the oplist to avoid file truncation and
             # interleaved writes when tensor-parallel-size > 1.
@@ -275,6 +291,16 @@ class WorkerFL(WorkerBase):
                 flag_gems.enable(
                     record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
                 )
+
+            from vllm_fl.patches.flaggems_mm_shape_aware import apply_shape_aware_mm
+
+            if shape_aware_mm_enabled and not mm_dispatch_enabled:
+                logger.warning(
+                    "[FlagGems] Skip shape-aware aten.mm because mm is "
+                    "excluded by the active whitelist/blacklist"
+                )
+            elif shape_aware_mm_enabled:
+                apply_shape_aware_mm(native_mm_kernel=native_mm_kernel)
 
     # def sleep(self, level: int = 1) -> None:
     #     TODO(lms): rewrite CuMemAllocator

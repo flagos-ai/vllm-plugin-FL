@@ -25,6 +25,7 @@ from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
 )
 from vllm.triton_utils import tl, triton
 from vllm_fl.dispatch import CachedOp
+from vllm_fl.kernels.glm5_next.provider import use_nvidia_reference
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import use_flaggems
 
@@ -295,8 +296,47 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
+        # FlagGems 5.3.3's fused_experts_impl only accepts the activation
+        # enum/string and therefore drops FusedMoEQuantConfig's
+        # gemm1_clamp_limit.  GLM5-Next was trained with a finite SwiGLU
+        # limit, so taking that fast path changes every routed expert in 42
+        # layers and quickly destroys model semantics.  Keep the FlagGems
+        # path for ordinary, unclamped MoE models.  On NVIDIA, bounded SwiGLU
+        # stays on the already-validated upstream TritonExperts implementation.
+        # Other accelerators continue through the per-step FlagGems GEMMs and
+        # use the exact clamped activation below.
+        if (
+            self.quant_config.gemm1_clamp_limit is not None
+            and current_platform.is_cuda()
+            and use_nvidia_reference()
+        ):
+            return super().apply(
+                output,
+                hidden_states,
+                w1,
+                w2,
+                topk_weights,
+                topk_ids,
+                activation,
+                global_num_experts,
+                expert_map,
+                a1q_scale,
+                a2_scale,
+                workspace13,
+                workspace2,
+                expert_tokens_meta,
+                apply_router_weight_on_input,
+            )
+
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        if self._lora_context is None and current_platform.is_cuda():
+        if (
+            self._lora_context is None
+            and current_platform.is_cuda()
+            and (
+                self.quant_config.gemm1_clamp_limit is None
+                or use_nvidia_reference()
+            )
+        ):
             import flag_gems
 
             output.copy_(flag_gems.fused_experts_impl(
@@ -450,7 +490,10 @@ class TritonExpertsFL(TritonExperts):
             )
 
         apply_moe_activation(
-            activation, intermediate_cache2, intermediate_cache1.view(-1, N)
+            activation,
+            intermediate_cache2,
+            intermediate_cache1.view(-1, N),
+            clamp_limit=self.quant_config.gemm1_clamp_limit,
         )
 
         a2q_scale: torch.Tensor | None = None

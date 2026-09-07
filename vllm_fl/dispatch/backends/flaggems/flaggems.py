@@ -161,7 +161,29 @@ class FlagGemsBackend(Backend):
         Returns:
             Fully qualified class path string
         """
+        from vllm.platforms import current_platform
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
+        from vllm_fl.kernels.glm5_next.provider import use_nvidia_reference
+
+        if use_sparse and not use_mla:
+            raise ValueError("use_sparse=True requires use_mla=True.")
+
+        # Keep the validated NVIDIA vendor implementation in the default
+        # provider path.  The FlagGems MLA implementation is an explicit
+        # portable/A-B path and must not be selected accidentally by the
+        # process-wide FlagGems dispatcher.
+        if use_mla and current_platform.is_cuda() and use_nvidia_reference():
+            raise NotImplementedError(
+                "FlagGems portable MLA is reserved for non-NVIDIA platforms"
+            )
+
+        if use_mla and use_sparse:
+            return (
+                "vllm_fl.dispatch.backends.flaggems.impl.mla_sparse."
+                "FlagGemsSparseMLABackend"
+            )
+        if use_mla:
+            return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
 
         # TritonAttentionBackend requires CUDA, check if available
         if not torch.cuda.is_available():
@@ -169,12 +191,6 @@ class FlagGemsBackend(Backend):
                 "TritonAttentionBackend requires CUDA but CUDA is not available. "
                 "Falling back to vendor implementation."
             )
-
-        if use_mla:
-            raise NotImplementedError("NOT support mla now!")
-
-        if use_sparse:
-            raise ValueError("use_sparse=True requires use_mla=True.")
 
         use_flaggems_attn = os.environ.get(
             "VLLM_FL_USE_FLAGGEMS_ATTN", "0"

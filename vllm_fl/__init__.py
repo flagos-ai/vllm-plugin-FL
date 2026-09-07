@@ -18,7 +18,16 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
-from vllm_fl.utils import get_op_config as _get_op_config
+try:
+    from vllm_fl.utils import get_op_config as _get_op_config
+except ModuleNotFoundError as exc:
+    # The native GLM5-Next baseline reuses only this package's config/model
+    # modules and deliberately does not install or activate FlagGems.
+    if exc.name != "flag_gems":
+        raise
+
+    def _get_op_config():
+        return None
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
@@ -159,9 +168,15 @@ def register_model():
     """Register FL-specific models not yet upstream."""
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
+    from vllm_fl.patches.glm5_next_v024 import (
+        apply_glm5_next_v024_patches,
+    )
     from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
 
+    # GLM5-Next is intentionally registered only by its vLLM-0.24 adapter;
+    # the plugin main branch is ABI-pinned to that release line.
+    apply_glm5_next_v024_patches()
     apply_qwen3_5_text_patches()
     patch_vllm_moe_sum()
 
