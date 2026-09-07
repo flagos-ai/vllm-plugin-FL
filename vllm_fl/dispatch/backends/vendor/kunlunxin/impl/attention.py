@@ -32,6 +32,7 @@ from vllm.v1.attention.backends.utils import (
     split_decodes_and_prefills,
 )
 from vllm.v1.attention.backend import (
+    AttentionCGSupport,
     AttentionLayer,
     AttentionType,
     AttentionMetadataBuilder,
@@ -335,8 +336,7 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
     """Builder for Kunlunxin attention metadata."""
 
     reorder_batch_threshold: ClassVar[int] = 1
-    # _cudagraph_support removed: AttentionCGSupport not available in vllm 0.20.2
-
+    _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.UNIFORM_BATCH
     def __init__(self, kv_cache_spec: AttentionSpec,
                  layer_names: list[str],
                  vllm_config: VllmConfig,
@@ -583,7 +583,7 @@ class KunlunxinPagedAttention(PagedAttention):
 
         Args:
             key (torch.Tensor): Shape [num_tokens, num_heads, head_size], dtype bf16/fp16/fp32.
-            value (torch.Tensor): Shape [num_tokens, num_heads, head_size], same dtype as key. 
+            value (torch.Tensor): Shape [num_tokens, num_heads, head_size], same dtype as key.
             Can be empty; quantization is not supported when value is empty.
             slot_mapping (torch.Tensor): Maps tokens to position indices in the cache.
             k_max (torch.Tensor, optional): Shape [num_heads] (quant_mode=0)
@@ -599,7 +599,7 @@ class KunlunxinPagedAttention(PagedAttention):
             key_cache (torch.Tensor): Output cache for k, shape [num_blocks, block_size,  num_heads, head_size],
                 same dtype as key or int8.
                 When key is bfloat16, key_cache can be float16.
-            value_cache (torch.Tensor): Output cache for v, shape [num_blocks, block_size,  num_heads, head_size], 
+            value_cache (torch.Tensor): Output cache for v, shape [num_blocks, block_size,  num_heads, head_size],
                 same dtype as key.
                 Can be empty; quantization is not supported when value is empty.
         """
