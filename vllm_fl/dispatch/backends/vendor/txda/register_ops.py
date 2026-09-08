@@ -1,9 +1,9 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-METAX backend operator registrations.
+Txda (tsingmicro) backend operator registrations.
 
-This module registers all VENDOR (METAX) implementations.
+This module registers the VENDOR (txda) implementations.
 """
 
 from __future__ import annotations
@@ -46,25 +46,6 @@ def register_builtins(registry) -> None:
             impl_id="vendor.txda",
             kind=BackendImplKind.VENDOR,
             fn=_bind_is_available(backend.attention_backend, is_avail),
-            vendor="txda",
-            priority=BackendPriority.VENDOR,
-        ),
-        # Fused MoE Triton Kernel — delegates to vLLM upstream
-        OpImpl(
-            op_name="invoke_fused_moe_triton_kernel",
-            impl_id="vendor.txda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
-            vendor="txda",
-            priority=BackendPriority.VENDOR,
-        ),
-        # RMS Norm — stub (raises NotImplementedError), so dispatch falls
-        # through to the next backend (reference) per tsingmicro.yaml config.
-        OpImpl(
-            op_name="rms_norm",
-            impl_id="vendor.txda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
             vendor="txda",
             priority=BackendPriority.VENDOR,
         ),
