@@ -53,6 +53,7 @@ dist_backend_dict = {
     # which torch_mlu's ProcessGroup does not implement.
     "mlu": "cncl",
     "gcu": "eccl",
+    "txda": "tccl",
 }
 
 
