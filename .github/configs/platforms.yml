@@ -21,7 +21,7 @@
 
 platforms:
   cuda:
-    enabled: true
+    enabled: false
   ascend:
     enabled: false
   hygon:

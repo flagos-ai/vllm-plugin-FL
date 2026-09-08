@@ -27,23 +27,12 @@ runner_labels:
 # Container volumes (hardware-specific paths).
 container_volumes:
   - /opt/hyhal:/opt/hyhal
-  - /usr/local/hyhal:/usr/local/hyhal
   - /data:/data
-  - /workspace:/workspace
 
 # Container options (hardware-specific settings).
 container_options: >-
   --hostname vllm-plugin-fl
   --ipc=host
-  --env DTK_HOME=/opt/dtk
-  --env GEMS_VENDOR=hygon
-  --env ROCM_PATH=/opt/dtk
-  --env HIP_PATH=/opt/dtk/hip
-  --env HSA_PATH=/opt/dtk/hsa
-  --env HIP_CLANG_PATH=/opt/dtk/llvm/bin
-  --env DEVICE_LIB_PATH=/opt/dtk/amdgcn/bitcode
-  --env PATH=/opt/dtk/bin:/opt/dtk/hip/bin:/opt/dtk/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-  --env LD_LIBRARY_PATH=/opt/hyhal/lib/criu:/opt/hyhal/lib/rocprofiler:/opt/hyhal/lib:/usr/local/hyhal/lib:/opt/dtk/hip/lib:/opt/dtk/lib:/opt/dtk/llvm/lib:/opt/dtk/dcc/lib:/opt/dtk/aillvm/lib:/opt/dtk/hsa/lib
   --device=/dev/kfd
   --device=/dev/mkfd
   --device=/dev/dri
