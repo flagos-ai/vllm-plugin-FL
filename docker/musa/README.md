@@ -41,9 +41,9 @@ GEMS_VENDOR=mthreads VLLM_PLUGINS=fl MTHREADS_VISIBLE_DEVICES=all \
   bash .github/scripts/musa/setup.sh
 
 # 3. Run the same suites CI would run.
-python tests/run.py --platform musa --suite unit
-python tests/run.py --platform musa --suite functional
-python tests/run.py --platform musa --suite e2e
+python tests/run.py --platform musa --scope unit
+python tests/run.py --platform musa --scope functional
+python tests/run.py --platform musa --scope e2e
 ```
 
 E2E cases (`tests/platforms/musa.yaml`, device `s5000`) expect model files
