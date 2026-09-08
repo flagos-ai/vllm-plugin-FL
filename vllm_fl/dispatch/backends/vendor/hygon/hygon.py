@@ -129,7 +129,26 @@ class HygonBackend(Backend):
 
         if use_mla:
             if use_sparse:
-                return AttentionBackendEnum.ROCM_AITER_MLA_SPARSE.get_path()
+                sparse_backend = os.environ.get(
+                    "VLLM_FL_HYGON_SPARSE_MLA_BACKEND",
+                    "aiter",
+                ).strip().lower()
+
+                if sparse_backend == "aiter":
+                    return AttentionBackendEnum.ROCM_AITER_MLA_SPARSE.get_path()
+                # Keep AITER as the default for backward compatibility with existing
+                # Hygon deployments. GLM-5.2 on BW1000 can explicitly select the
+                # validated FL/FlagGems path through the environment variable.
+                if sparse_backend == "flag_gems":
+                    return (
+                        "vllm_fl.dispatch.backends.flaggems.impl.sparse_mla."
+                        "SparseMLAFLBackend"
+                    )
+
+                raise ValueError(
+                    "Unsupported VLLM_FL_HYGON_SPARSE_MLA_BACKEND value: "
+                    f"{sparse_backend!r}. Expected 'aiter' or 'flag_gems'."
+                )
 
             from vllm._aiter_ops import rocm_aiter_ops
 
@@ -255,4 +274,103 @@ class HygonBackend(Backend):
             routed_scaling_factor,
             bias,
             scoring_func,
+        )
+
+    def glm_hygon_indexer_fp8_mqa_logits(
+        self,
+        q,
+        kv,
+        weights,
+        cu_seqlen_ks,
+        cu_seqlen_ke,
+        clean_logits,
+    ):
+        """Compute GLM Indexer logits for the prefill phase.
+
+        """
+        from .impl.indexer_mqa import glm_hygon_indexer_fp8_mqa_logits
+
+        return glm_hygon_indexer_fp8_mqa_logits(
+            q,
+            kv,
+            weights,
+            cu_seqlen_ks,
+            cu_seqlen_ke,
+            clean_logits,
+        )
+
+    def glm_hygon_indexer_fp8_paged_mqa_logits(
+        self,
+        q,
+        kv_cache,
+        weights,
+        context_lens,
+        block_tables,
+        max_model_len,
+        head_dim,
+        quant_block_size,
+    ):
+        from .impl.indexer_mqa import (
+            glm_hygon_indexer_fp8_paged_mqa_logits,
+        )
+
+        return glm_hygon_indexer_fp8_paged_mqa_logits(
+            q,
+            kv_cache,
+            weights,
+            context_lens,
+            block_tables,
+            max_model_len,
+            head_dim,
+            quant_block_size,
+        )
+
+    def glm_hygon_top_k_per_row_prefill(
+        self,
+        logits,
+        row_starts,
+        row_ends,
+        indices,
+        num_rows,
+        stride0,
+        stride1,
+        topk_tokens,
+    ):
+        from .impl.top_k_per_row import glm_hygon_top_k_per_row_prefill
+
+        return glm_hygon_top_k_per_row_prefill(
+            logits,
+            row_starts,
+            row_ends,
+            indices,
+            num_rows,
+            stride0,
+            stride1,
+            topk_tokens,
+        )
+
+    def glm_hygon_top_k_per_row_decode(
+        self,
+        logits,
+        next_n,
+        seq_lens,
+        indices,
+        num_rows,
+        stride0,
+        stride1,
+        topk_tokens,
+        max_seq_len,
+    ):
+        from .impl.top_k_per_row import glm_hygon_top_k_per_row_decode
+
+        return glm_hygon_top_k_per_row_decode(
+            logits,
+            next_n,
+            seq_lens,
+            indices,
+            num_rows,
+            stride0,
+            stride1,
+            topk_tokens,
+            max_seq_len,
         )
