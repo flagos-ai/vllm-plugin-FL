@@ -7,6 +7,9 @@ this by registering mhc_pre/mhc_post as torch custom ops; do the same here
 around the upstream tilelang wrappers so dynamo sees opaque calls.
 """
 
+import contextlib
+import os
+
 import torch
 
 from vllm.model_executor.kernels.mhc.tilelang import (
@@ -16,6 +19,65 @@ from vllm.model_executor.kernels.mhc.tilelang import (
     mhc_pre_tilelang,
 )
 from vllm.utils.torch_utils import direct_register_custom_op
+
+
+# --- mHC prenorm GEMM: route to PPU deep_gemm instead of tilelang -------------
+#
+# Upstream mhc_pre_tilelang / mhc_fused_post_pre_tilelang ALREADY have a
+# deep_gemm path for the prenorm GEMM; it is gated on is_deep_gemm_supported(),
+# which is False on PPU because PlatformFL.support_deep_gemm() only returns True
+# for nvidia. So FL silently falls back to the tilelang kernel. Measured on
+# 8x PPU-ZW810E, ctx 16384 prefill, 11 clean chunk steps per stack:
+#
+#     deep_gemm::sm80_tf32_hc_prenorm_gemm_impl   146.55 ms/step  (T-Head)
+#     hc_prenorm_gemm_block_m_tilelang_kernel     332.30 ms/step  (FL)
+#
+# i.e. the tilelang kernel is 2.27x slower and accounts for +185.75 ms/chunk of
+# the +453 ms (+15.5%) prefill-chunk gap vs T-Head. The block_m variant is
+# selected by `x.shape[0] >= 1024`, which is why this hits prefill, not decode.
+#
+# The T-Head fork instead branches directly (model_executor/layers/mhc.py:281):
+#     if current_platform.is_ppu():
+#         from vllm.utils.ppu_deep_gemm import tf32_hc_prenorm_gemm
+# and critically ALSO forces n_splits = 1 on PPU (mhc.py:242) where upstream
+# would compute compute_num_split(...) > 1. Both are required: enabling the
+# deep_gemm branch without pinning n_splits feeds the PPU kernel a split-k it
+# does not expect.
+#
+# Scope: patched only for the duration of the two mHC calls, via the plugin's
+# own opaque-op wrappers. Both symbols are imported INSIDE the upstream
+# functions (mhc/tilelang.py:165 and :408), so a scoped patch reaches them,
+# while the module-level importers of is_deep_gemm_supported (fp8.py:88,
+# deep_gemm_moe.py:43, scaled_mm/deep_gemm.py:20) bound the original object at
+# import time and are untouched. Not relying on that import order alone is why
+# this is scoped rather than a global flip of support_deep_gemm().
+#
+# mHC runs inside an opaque custom op, i.e. outside the compiled graph, so the
+# per-call patch cannot invalidate Dynamo guards — unlike an earlier attempt at
+# patching torch.repeat_interleave per step, which cost 1.1% for that reason.
+#
+# Set VLLM_FL_MHC_DEEPGEMM=0 to restore the upstream tilelang path.
+_MHC_DEEPGEMM = os.environ.get("VLLM_FL_MHC_DEEPGEMM", "1") == "1"
+
+
+@contextlib.contextmanager
+def _ppu_deepgemm_prenorm():
+    """Make upstream's mHC prenorm take its deep_gemm branch with n_splits=1."""
+    if not _MHC_DEEPGEMM:
+        yield
+        return
+    import vllm.model_executor.kernels.mhc.tilelang_kernels as tk
+    import vllm.utils.deep_gemm as udg
+
+    orig_supported = udg.is_deep_gemm_supported
+    orig_split = tk.compute_num_split
+    udg.is_deep_gemm_supported = lambda: True
+    tk.compute_num_split = lambda *a, **k: 1
+    try:
+        yield
+    finally:
+        udg.is_deep_gemm_supported = orig_supported
+        tk.compute_num_split = orig_split
 
 
 def _fl_mhc_pre(
@@ -32,11 +94,12 @@ def _fl_mhc_pre(
     norm_weight: torch.Tensor | None,
     norm_eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    out = mhc_pre_tilelang(
-        residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps,
-        hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat,
-        n_splits=n_splits, norm_weight=norm_weight, norm_eps=norm_eps,
-    )
+    with _ppu_deepgemm_prenorm():
+        out = mhc_pre_tilelang(
+            residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps,
+            hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat,
+            n_splits=n_splits, norm_weight=norm_weight, norm_eps=norm_eps,
+        )
     return tuple(t.contiguous() for t in out)
 
 
@@ -85,12 +148,13 @@ def _fl_mhc_fused_post_pre(
     norm_weight: torch.Tensor | None,
     norm_eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    out = mhc_fused_post_pre_tilelang(
-        x, residual, post_layer_mix, comb_res_mix, fn, hc_scale, hc_base,
-        rms_eps, hc_pre_eps, hc_sinkhorn_eps, hc_post_mult_value,
-        sinkhorn_repeat, n_splits=n_splits, tile_n=tile_n,
-        norm_weight=norm_weight, norm_eps=norm_eps,
-    )
+    with _ppu_deepgemm_prenorm():
+        out = mhc_fused_post_pre_tilelang(
+            x, residual, post_layer_mix, comb_res_mix, fn, hc_scale, hc_base,
+            rms_eps, hc_pre_eps, hc_sinkhorn_eps, hc_post_mult_value,
+            sinkhorn_repeat, n_splits=n_splits, tile_n=tile_n,
+            norm_weight=norm_weight, norm_eps=norm_eps,
+        )
     return tuple(t.contiguous() for t in out)
 
 
