@@ -457,6 +457,9 @@ class PlatformFL(Platform):
         # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
             return None
+        # Non-CUDA devices (e.g. txda/tsingmicro) have no CUDA-style capability
+        if cls.device_type == "txda":
+            return None
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 

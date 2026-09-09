@@ -164,6 +164,41 @@ def test_get_flag_gems_whitelist_blacklist_blacklist_only(monkeypatch):
     assert blacklist == ["index", "index_put_"]
 
 
+def test_get_flag_gems_blacklist_append_preserves_platform_defaults(monkeypatch):
+    monkeypatch.delenv("VLLM_FL_FLAGOS_WHITELIST", raising=False)
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
+    monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", "linear,index")
+
+    with patch(
+        "vllm_fl.dispatch.config.get_flagos_blacklist",
+        return_value=["index", "copy_"],
+    ):
+        whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+
+    assert whitelist is None
+    assert blacklist == ["index", "copy_", "linear"]
+
+
+def test_get_flag_gems_blacklist_append_extends_explicit_blacklist(monkeypatch):
+    monkeypatch.delenv("VLLM_FL_FLAGOS_WHITELIST", raising=False)
+    monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST", "linear")
+    monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", "index,linear")
+
+    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+    assert whitelist is None
+    assert blacklist == ["linear", "index"]
+
+
+def test_get_flag_gems_whitelist_ignores_blacklist_append(monkeypatch):
+    monkeypatch.setenv("VLLM_FL_FLAGOS_WHITELIST", "rms_norm")
+    monkeypatch.delenv("VLLM_FL_FLAGOS_BLACKLIST", raising=False)
+    monkeypatch.setenv("VLLM_FL_FLAGOS_BLACKLIST_APPEND", "linear,index")
+
+    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+    assert whitelist == ["rms_norm"]
+    assert blacklist is None
+
+
 def test_get_flag_gems_whitelist_blacklist_both_set_raises(monkeypatch):
     """When both whitelist and blacklist are set, ValueError is raised."""
     monkeypatch.setenv("VLLM_FL_FLAGOS_WHITELIST", "silu_and_mul")

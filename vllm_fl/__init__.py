@@ -152,6 +152,25 @@ def register_router():
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
     replace_router_with_fl()
 
+
+def _register_gdn_packed_decode_patch() -> bool:
+    """Install the packed GDN fix when this vLLM build provides it.
+
+    Vendor images may omit vLLM's FLA package or route GDN through a different
+    implementation. Keep the compatibility hook capability-based: any build
+    carrying the vulnerable kernel is patched, while builds without the
+    required module or symbol remain untouched.
+    """
+    try:
+        patch_module = importlib.import_module("vllm_fl.patches.gdn_packed_decode")
+        patch_fn = patch_module.patch_vllm_packed_gdn_beta
+    except (ImportError, AttributeError) as exc:
+        logger.debug("Packed GDN decode patch is unavailable: %s", exc)
+        return False
+
+    return patch_fn()
+
+
 def register_model():
     """Register FL-specific models not yet upstream."""
     # General plugins are loaded independently in spawned model-inspection and
@@ -203,6 +222,8 @@ def register_model():
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
     register_router()
+
+    _register_gdn_packed_decode_patch()
 
     # Register GLM-5 (GlmMoeDsa) — config not yet upstream
     try:

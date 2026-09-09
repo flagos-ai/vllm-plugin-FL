@@ -8,6 +8,7 @@ from vllm_fl.dispatch.builtin_ops import (
     _find_vendor_backend_dir,
     _register_vendor_backends,
 )
+from vllm_fl.dispatch.registry import OpRegistry
 
 
 class TestFindVendorBackendDir:
@@ -54,3 +55,33 @@ class TestRegisterVendorBackends:
             package="vllm_fl.dispatch",
         )
         module.register_builtins.assert_called_once_with(registry)
+
+
+def test_reference_registration_keeps_implemented_fallbacks():
+    """A missing optional method must not drop every reference fallback."""
+    from vllm_fl.dispatch.backends.reference.register_ops import (
+        register_builtins as register_reference,
+    )
+
+    registry = OpRegistry()
+    register_reference(registry)
+
+    implemented = {
+        "dynamic_per_token_quant_int8",
+        "silu_and_mul",
+        "gelu_and_mul",
+        "rms_norm",
+        "rotary_embedding",
+        "attention_backend",
+        "invoke_fused_moe_triton_kernel",
+    }
+    missing = {
+        "moe_align_block_size",
+        "moe_sum",
+        "topk_softmax",
+        "grouped_topk",
+    }
+    for op_name in implemented:
+        assert registry.get_implementation(op_name, "reference.torch") is not None
+    for op_name in missing:
+        assert registry.get_implementation(op_name, "reference.torch") is None
