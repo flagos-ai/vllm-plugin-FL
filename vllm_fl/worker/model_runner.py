@@ -4966,6 +4966,15 @@ class ModelRunnerFL(
         ):
             self.eplb_state.start_async_loop()
 
+        # Resolve the FL control-plane dispatch after the model and its optional
+        # operator modules have been loaded, but before either stock
+        # torch.compile or vLLM's first profiling/compile call can trace the
+        # forward path.  Frozen CachedOp sites directly call their selected
+        # implementation and never enter policy, locks, IO dump, or fallback.
+        from vllm_fl.compilation import freeze_dispatch_for_compile
+
+        freeze_dispatch_for_compile(self.vllm_config)
+
         if (
             self.vllm_config.compilation_config.mode
             == CompilationMode.STOCK_TORCH_COMPILE
@@ -5085,7 +5094,7 @@ class ModelRunnerFL(
             logger.warning_once(
                 "Reloading with `is_checkpoint_format=True` requires that "
                 "weights be in kernel format and already sharded",
-                
+
             )
             loaded_weights = set()
             for name, loaded_weight in weights_iterator:
@@ -5099,7 +5108,7 @@ class ModelRunnerFL(
         logger.info_once(
             "Reloading and processing weights took %.2f seconds",
             diff_seconds,
-            
+
         )
         if self.model_config.quantization is None and loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
@@ -5883,7 +5892,7 @@ class ModelRunnerFL(
                             encoder_budget,
                             max_mm_items_per_batch,
                             dummy_modality,
-                            
+
                         )
 
                         # Create dummy batch of multimodal inputs.
@@ -6200,7 +6209,7 @@ class ModelRunnerFL(
             "Graph capturing finished in %.0f secs, took %.2f GiB",
             elapsed_time,
             cuda_graph_size / (1 << 30),
-            
+
         )
         return cuda_graph_size
 
@@ -6922,7 +6931,7 @@ class ModelRunnerFL(
         self,
         kv_cache_config: KVCacheConfig,
         is_profiling: bool = False,
-    ) -> None:        
+    ) -> None:
         """
         Initialize KV cache based on `kv_cache_config`.
         Args:

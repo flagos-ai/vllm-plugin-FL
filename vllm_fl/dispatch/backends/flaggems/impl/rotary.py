@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import torch
 
+from flag_gems.pt2 import rotary_embedding_inplace
+
 
 def rotary_embedding_flaggems(
     obj,
@@ -35,6 +37,24 @@ def rotary_embedding_flaggems(
     Returns:
         Tuple of (embedded_query, embedded_key)
     """
+    if inplace:
+        if position_ids is None:
+            raise ValueError(
+                "The compiler-integrated FlagGems RoPE path requires position_ids"
+            )
+        rotary_embedding_inplace(
+            query,
+            key,
+            cos,
+            sin,
+            position_ids,
+            rotary_interleaved,
+        )
+        return query, key
+
+    # vLLM uses the in-place path above.  Keep the generic out-of-place API on
+    # FlagGems' original implementation until it receives its own manifest
+    # entry; do not substitute a native PyTorch implementation.
     from flag_gems.modules.rotary_embedding import gems_rope_forward
 
     return gems_rope_forward(
@@ -44,5 +64,5 @@ def rotary_embedding_flaggems(
         sin,
         position_ids=position_ids,
         rotary_interleaved=rotary_interleaved,
-        inplace=inplace,
+        inplace=False,
     )
