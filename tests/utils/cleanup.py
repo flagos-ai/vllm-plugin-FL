@@ -11,8 +11,9 @@ Usage::
     from tests.utils.cleanup import device_cleanup
 
     # Between test cases:
-    device_cleanup("cuda")  # NVIDIA GPU cleanup
-    device_cleanup("ascend")  # Huawei NPU cleanup
+    device_cleanup("cuda")    # NVIDIA GPU cleanup
+    device_cleanup("ascend")  # Huawei Ascend NPU cleanup
+    device_cleanup("hygon")   # Hygon DCU cleanup
 """
 
 from __future__ import annotations
@@ -29,36 +30,45 @@ def device_cleanup(platform: str, wait: float = 3.0) -> None:
     """Run platform-specific cleanup between E2E test cases.
 
     1. Kill stale vllm/model-serving processes
-    2. Wait briefly for resources to be released
-    3. Log device memory state
+    2. Clear framework allocator cache to reclaim held memory
+    3. Wait briefly for device resources to be released
+    4. Log device memory state
 
     Args:
-        platform: Platform name (e.g. ``"cuda"``, ``"ascend"``).
-        wait: Seconds to wait after killing processes.
+        platform: Platform name (e.g. ``"cuda"``, ``"ascend"``, ``"hygon"``).
+        wait: Seconds to wait after killing processes before logging memory.
     """
     _kill_stale_processes()
 
-    # Clear framework cache to reclaim memory held by PyTorch allocator
+    # Clear framework cache to reclaim memory held by the PyTorch allocator
     cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
     cache_fn()
 
     if wait > 0:
         time.sleep(wait)
 
-    cleanup_fn = _PLATFORM_CLEANUP.get(platform, _cleanup_noop)
-    cleanup_fn()
+    # Log current device memory state for diagnostic purposes
+    log_fn = _PLATFORM_MEMORY_LOG.get(platform, _log_memory_noop)
+    log_fn()
 
 
 # ---------------------------------------------------------------------------
 # Stale process cleanup (platform-agnostic)
 # ---------------------------------------------------------------------------
 
-# Process name patterns that indicate a stale serving process
-_STALE_PATTERNS = ["vllm serve", "vllm.entrypoints"]
+# Process name patterns that indicate a stale vllm process.
+# Includes both serving processes (vllm.entrypoints) and inference worker
+# processes that rename themselves via prctl (VLLM::Worker, VLLM::EngineCore).
+_STALE_PATTERNS = [
+    "vllm serve",
+    "vllm.entrypoints",
+    "VLLM::Worker",
+    "VLLM::EngineCore",
+]
 
 
 def _kill_stale_processes() -> None:
-    """Kill any leftover vllm serving processes."""
+    """Kill any leftover vllm serving or inference worker processes."""
     for pattern in _STALE_PATTERNS:
         try:
             result = subprocess.run(
@@ -80,12 +90,12 @@ def _kill_stale_processes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Platform-specific cleanup
+# Platform-specific memory logging
 # ---------------------------------------------------------------------------
 
 
-def _cleanup_cuda() -> None:
-    """Log NVIDIA GPU memory state."""
+def _log_memory_cuda() -> None:
+    """Log NVIDIA GPU memory state via nvidia-smi."""
     try:
         result = subprocess.run(
             [
@@ -109,8 +119,8 @@ def _cleanup_cuda() -> None:
         pass
 
 
-def _cleanup_ascend() -> None:
-    """Log Huawei Ascend NPU memory state."""
+def _log_memory_ascend() -> None:
+    """Log Huawei Ascend NPU memory state via npu-smi."""
     try:
         result = subprocess.run(
             ["npu-smi", "info"],
@@ -129,15 +139,37 @@ def _cleanup_ascend() -> None:
         pass
 
 
-def _cleanup_noop() -> None:
-    """No-op cleanup for unknown platforms."""
+def _log_memory_hygon() -> None:
+    """Log Hygon DCU memory state via hy-smi."""
+    try:
+        result = subprocess.run(
+            ["hy-smi", "--showmeminfo", "vram"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            print("[cleanup] DCU memory (MiB):")
+            for line in result.stdout.strip().split("\n"):
+                # Lines look like: HCU[0]  : vram Total Memory (MiB): 65520
+                #                  HCU[0]  : vram Total Used Memory (MiB): 51920
+                if "Total Memory" in line or "Total Used Memory" in line:
+                    print(f"  {line.strip()}")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # hy-smi not available or timed out — skip memory logging
+        pass
+
+
+def _log_memory_noop() -> None:
+    """No-op memory log for unknown platforms."""
     pass
 
 
-# Registry: platform name → cleanup function
-_PLATFORM_CLEANUP = {
-    "cuda": _cleanup_cuda,
-    "ascend": _cleanup_ascend,
+# Registry: platform name → memory logging function
+_PLATFORM_MEMORY_LOG: dict[str, Callable[[], None]] = {
+    "cuda": _log_memory_cuda,
+    "ascend": _log_memory_ascend,
+    "hygon": _log_memory_hygon,
 }
 
 
@@ -180,6 +212,8 @@ def _mem_info_noop() -> list[tuple[int, int]]:
 _PLATFORM_MEMORY_INFO: dict[str, Callable[[], list[tuple[int, int]]]] = {
     "cuda": _mem_info_cuda,
     "ascend": _mem_info_ascend,
+    # Hygon DCUs are exposed to PyTorch as CUDA devices, so torch.cuda APIs work.
+    "hygon": _mem_info_cuda,
 }
 
 
@@ -214,6 +248,8 @@ def _cache_clear_noop() -> None:
 _PLATFORM_CACHE_CLEAR: dict[str, Callable[[], None]] = {
     "cuda": _cache_clear_cuda,
     "ascend": _cache_clear_ascend,
+    # Hygon DCUs are exposed to PyTorch as CUDA devices, so torch.cuda APIs work.
+    "hygon": _cache_clear_cuda,
 }
 
 

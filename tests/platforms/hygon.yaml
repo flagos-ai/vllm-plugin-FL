@@ -48,7 +48,7 @@ device_overrides:
 env_defaults:
   GEMS_VENDOR: "hygon"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-  VLLM_FL_FLAGOS_BLACKLIST: "pow_scalar,pow_tensor_scalar,pow_tensor_tensor,pow_tensor_scalar_,pow_tensor_tensor_,cat"
+  VLLM_FL_FLAGOS_BLACKLIST: "cat,slice"
 
 bw1000:
   name: "bw1000"
