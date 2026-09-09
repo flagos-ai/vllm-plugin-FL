@@ -49,6 +49,7 @@ dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
     "musa": "mccl",
+    "gcu": "eccl",
 }
 
 
@@ -86,6 +87,8 @@ class PlatformFL(Platform):
             return True
         if self.vendor_name == "hygon":
             return False
+        if self.vendor_name in ("gcu", "enflame"):
+            return True
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
@@ -94,6 +97,11 @@ class PlatformFL(Platform):
 
     def is_musa(self) -> bool:
         if hasattr(torch, 'musa') and torch.musa.is_available():
+            return True
+        return False
+
+    def is_gcu(self) -> bool:
+        if hasattr(torch, 'gcu') and torch.gcu.is_available():
             return True
         return False
     @property
@@ -133,7 +141,7 @@ class PlatformFL(Platform):
     ### TODO(lms): change pin_memory depend device
     @classmethod
     def is_pin_memory_available(cls):
-        if cls.device_type in ["cuda", "xpu", "npu", "musa"]:
+        if cls.device_type in ["cuda", "xpu", "npu", "musa", "gcu"]:
             return True
         return False
 
@@ -260,6 +268,11 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
 
+        # GCU relies on ECCL for collectives; custom all-reduce kernels are
+        # not available.
+        if cls.vendor_name in ("gcu", "enflame"):
+            parallel_config.disable_custom_all_reduce = True
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -346,7 +359,17 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead"]:
+        if cls.vendor_name in [
+            "nvidia",
+            "ascend",
+            "metax",
+            "hygon",
+            "mthreads",
+            "iluvatar",
+            "thead",
+            "gcu",
+            "enflame",
+        ]:
             return True
         return False
 
@@ -460,6 +483,12 @@ class PlatformFL(Platform):
         # Non-CUDA devices (e.g. txda/tsingmicro) have no CUDA-style capability
         if cls.device_type == "txda":
             return None
+        if cls.device_type == "gcu":
+            gcu = getattr(torch, "gcu", None)
+            if gcu is None:
+                return None
+            major, minor = gcu.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 
