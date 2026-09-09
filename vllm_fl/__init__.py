@@ -1,3 +1,15 @@
+# Inject float4_e2m1fn_x2 sentinel for MUSA torch (missing in torch 2.7.1)
+import torch
+if not hasattr(torch, "float4_e2m1fn_x2"):
+    torch.float4_e2m1fn_x2 = None
+
+# Apply MUSA compatibility patches
+try:
+    from vllm_fl.dispatch.backends.vendor.musa.patch import apply_musa_patches
+    apply_musa_patches()
+except ImportError:
+    pass  # MUSA backend not available
+
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import os
