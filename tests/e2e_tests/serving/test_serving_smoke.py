@@ -220,6 +220,8 @@ def _run_chat_non_streaming(
     }
     if serve.extra_body:
         payload.update(serve.extra_body)
+    if serve.chat_template_kwargs:
+        payload["chat_template_kwargs"] = serve.chat_template_kwargs
 
     response = requests.post(
         f"{base_url}/chat/completions",
@@ -264,6 +266,11 @@ def _run_chat_streaming(
     }
     if serve.extra_body:
         create_kwargs["extra_body"] = serve.extra_body
+    if serve.chat_template_kwargs:
+        create_kwargs["extra_body"] = {
+            **create_kwargs.get("extra_body", {}),
+            "chat_template_kwargs": serve.chat_template_kwargs,
+        }
 
     response = client.chat.completions.create(**create_kwargs)
 

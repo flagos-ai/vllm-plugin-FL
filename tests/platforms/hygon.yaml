@@ -38,10 +38,10 @@ device_overrides:
       - qwen3_6/35b_a3b_tp4_graph
     llm:
       gpu_memory_utilization: 0.8
+      enforce_eager: true
+      disable_custom_all_reduce: false
     serve:
       extra_engine:
-        enforce_eager: true
-        disable_custom_all_reduce: false
         enable_log_requests: false
         enable_prefix_caching: false
 
