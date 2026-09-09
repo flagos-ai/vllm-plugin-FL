@@ -57,6 +57,9 @@ device_overrides:
         - name: image
           generated_image: true
           prompt: "Describe all visible text, colors, and shapes in English."
+          expected:
+            - "Hello VLM"
+            - "blue rectangle"
       extra_body:
         chat_template_kwargs:
           enable_thinking: false
