@@ -75,7 +75,7 @@ def patch_flagcx_stream_adapter():
             new_stream = flagcxStream_t()
             raw_stream_ptr = _extract_raw_stream_ptr(old_stream)
             self.FLAGCX_CHECK(
-                self.handler.contents.devHandle.contents.streamCopy(
+                self.devHandle.contents.streamCopy(
                     ctypes.byref(new_stream), _to_void_p(raw_stream_ptr)
                 )
             )
