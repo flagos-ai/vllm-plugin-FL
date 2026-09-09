@@ -53,6 +53,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "tsingmicro": {"device_type": "txda", "device_name": "txda"},
     # Registered backend: vendor/kunlunxin
     "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
+    # Cambricon MLU (torch_mlu); ops dispatched via flag_gems
+    "cambricon": {"device_type": "mlu", "device_name": "mlu"},
 }
 
 
