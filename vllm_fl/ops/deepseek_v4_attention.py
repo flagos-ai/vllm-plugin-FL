@@ -17,7 +17,14 @@ import vllm.envs as envs
 from vllm.model_executor.layers.linear import (
     ReplicatedLinear,
 )
-from vllm_fl.ops.sparse_attn_indexer import SparseAttnIndexer
+from vllm.platforms import current_platform
+from vllm_fl.ops.sparse_attn_indexer import (
+    SparseAttnIndexer,
+    SparseAttnIndexerFL,
+)
+from vllm_fl.ops.deepseek_compressor import (
+    DeepseekCompressor as FLDeepseekCompressor,
+)
 from vllm.model_executor.layers.utils import cublas_gemm_bf16_bf16_fp32
 from vllm_fl.dispatch import CachedOp
 
@@ -51,7 +58,9 @@ from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.custom_op import PluggableLayer
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
-from vllm.model_executor.layers.deepseek_compressor import DeepseekCompressor
+from vllm.model_executor.layers.deepseek_compressor import (
+    DeepseekCompressor as VllmDeepseekCompressor,
+)
 from vllm.model_executor.layers.layernorm import LayerNorm, RMSNorm
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.quantization.input_quant_fp8 import (
@@ -87,6 +96,26 @@ from vllm.model_executor.layers.deepseek_v4_attention import (
     )
 
 logger = init_logger(__name__)
+
+
+def is_metax_w8a8(vllm_config: VllmConfig) -> bool:
+    config = vllm_config.model_config.hf_config
+    quant_config = getattr(config, "quantization_config", None) or {}
+    groups = quant_config.get("config_groups") or {}
+    return (
+        current_platform.vendor_name == "metax"
+        and quant_config.get("quant_method") == "compressed-tensors"
+        and quant_config.get("format") == "int-quantized"
+        and bool(groups)
+        and all(
+            group["weights"]["num_bits"] == 8
+            and group["weights"]["strategy"] == "channel"
+            and group["input_activations"]["num_bits"] == 8
+            and group["input_activations"]["strategy"] == "token"
+            and group["input_activations"]["dynamic"] is True
+            for group in groups.values()
+        )
+    )
 
 
 # --8<-- [start:multi_head_latent_attention]
@@ -132,6 +161,7 @@ class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAtten
                          qk_rope_head_dim, v_head_dim, q_lora_rank, kv_lora_rank, o_lora_rank,
                          mla_modules, window_size, compress_ratio, cache_config, quant_config,
                          prefix)
+        self.use_metax_int8 = is_metax_w8a8(mla_modules.vllm_config)
         # TODO(yifan): currently hardcoded for FP8 sparse, make it more generic
         head_bytes = (
             self.nope_head_dim  # 448 fp8 NoPE
@@ -170,6 +200,20 @@ class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAtten
             raise ValueError(f"Duplicate layer name: {self.layer_name}")
         compilation_config.static_forward_context[self.layer_name] = self
 
+        if self.use_metax_int8 and self.compressor is not None:
+            compilation_config.static_forward_context.pop(
+                self.compressor.state_cache.prefix
+            )
+            self.compressor = FLDeepseekCompressor(
+                vllm_config=mla_modules.vllm_config,
+                compress_ratio=self.compress_ratio,
+                hidden_size=self.hidden_size,
+                head_dim=self.head_dim,
+                rotate=True,
+                prefix=f"{prefix}.compressor",
+                k_cache_prefix=self.mla_attn.prefix,
+            )
+
     def forward(
         self,
         positions: torch.Tensor,
@@ -193,6 +237,38 @@ class DeepseekV4MultiHeadLatentAttentionFLWrapper(DeepseekV4MultiHeadLatentAtten
             self.layer_name,
         )
         o = o_padded[:, : self.n_local_heads, :]
+
+        if self.use_metax_int8:
+            cos_sin = self.rotary_emb.cos_sin_cache.index_select(0, positions)
+            half_rope = self.rope_head_dim // 2
+            cos = cos_sin[:, :half_rope].to(o.dtype).unsqueeze(1)
+            sin = cos_sin[:, half_rope : self.rope_head_dim].to(o.dtype).unsqueeze(1)
+            rope = o[..., self.nope_head_dim :]
+            rope_even = rope[..., 0::2]
+            rope_odd = rope[..., 1::2]
+            inv_rope = torch.stack(
+                (
+                    rope_even * cos + rope_odd * sin,
+                    rope_odd * cos - rope_even * sin,
+                ),
+                dim=-1,
+            ).flatten(-2)
+            o = torch.cat((o[..., : self.nope_head_dim], inv_rope), dim=-1)
+
+            o = o.reshape(num_tokens * self.n_local_groups, -1)
+            z_all = self.wo_a(o).view(num_tokens, self.n_local_groups, -1)
+            z = torch.stack(
+                [
+                    z_all[
+                        :,
+                        group,
+                        group * self.o_lora_rank : (group + 1) * self.o_lora_rank,
+                    ]
+                    for group in range(self.n_local_groups)
+                ],
+                dim=1,
+            )
+            return self.wo_b(z.flatten(1))
 
         # O projection: inverse RoPE + FP8 quant + einsum + wo_b
         o_fp8, o_scale = _fused_inv_rope_fp8_quant(
@@ -967,7 +1043,12 @@ class DeepseekV4Indexer(nn.Module):
             cache_config=cache_config,
             compress_ratio=self.compress_ratio,
         )
-        self.compressor = DeepseekCompressor(
+        compressor_cls = (
+            FLDeepseekCompressor
+            if is_metax_w8a8(vllm_config)
+            else VllmDeepseekCompressor
+        )
+        self.compressor = compressor_cls(
             vllm_config=vllm_config,
             compress_ratio=self.compress_ratio,
             hidden_size=hidden_size,
@@ -978,7 +1059,12 @@ class DeepseekV4Indexer(nn.Module):
             use_fp4_cache=self.use_fp4_kv,
         )
 
-        self.indexer_op = SparseAttnIndexer(
+        indexer_cls = (
+            SparseAttnIndexerFL
+            if is_metax_w8a8(vllm_config)
+            else SparseAttnIndexer
+        )
+        self.indexer_op = indexer_cls(
             self.k_cache,
             self.quant_block_size,
             self.scale_fmt,
