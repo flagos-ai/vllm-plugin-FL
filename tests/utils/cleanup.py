@@ -11,9 +11,9 @@ Usage::
     from tests.utils.cleanup import device_cleanup
 
     # Between test cases:
-    device_cleanup("cuda")    # NVIDIA GPU cleanup
+    device_cleanup("cuda")  # NVIDIA GPU cleanup
     device_cleanup("ascend")  # Huawei Ascend NPU cleanup
-    device_cleanup("hygon")   # Hygon DCU cleanup
+    device_cleanup("hygon")  # Hygon DCU cleanup
 """
 
 from __future__ import annotations
