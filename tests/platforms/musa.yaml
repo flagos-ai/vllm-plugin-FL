@@ -37,10 +37,19 @@ s5000:
   name: "s5000"
   tests:
     e2e:
+      # Vendor-stack interim limits on torch_musa 2.9.0 (S5000,
+      # mthreads-gmi 2.3.2 / driver 3.3.5-server), tracked with Moore
+      # Threads:
+      # 1. TP >= 2: worker ranks >= 1 hang during weight loading in the
+      #    native h2d copy path (rank 0 loads normally); e2e therefore runs
+      #    single-GPU cases only.
+      # 2. `vllm serve` cannot start: vllm 0.24.0's device-properties probe
+      #    (vllm/utils/platform_utils.py) hardcodes a fork-context
+      #    subprocess, which torch_musa forbids ("Cannot re-initialize MUSA
+      #    in forked subprocess"). Serving e2e and the serve benchmark stay
+      #    disabled until the fork conflict is resolved.
       inference:
-        qwen3_6: ["27b_tp4_eager"]
-      serving:
-        qwen3_6: ["35b_a3b_tp4_eager"]
+        qwen3: ["06b_tp1"]
     functional:
       include: "*"
       exclude: []
@@ -48,5 +57,5 @@ s5000:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
+      enabled: false
       smoke: ["serve"]
