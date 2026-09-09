@@ -15,7 +15,7 @@
 # Enflame S60 hardware configuration.
 platform: enflame
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-enflame-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-enflame-ci
 
 # Replace this with the exact label configured on the Enflame S60 runner.
 runner_labels:

@@ -21,7 +21,7 @@
 
 platforms:
   cuda:
-    enabled: true
+    enabled: false
   ascend:
     enabled: false
   hygon:
@@ -31,6 +31,6 @@ platforms:
   musa:
     enabled: false
   enflame:
-    enabled: false
+    enabled: true
   kunlunxin:
     enabled: false
