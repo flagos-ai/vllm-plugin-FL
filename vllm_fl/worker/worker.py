@@ -438,6 +438,11 @@ class WorkerFL(WorkerBase):
         checkpoint_restore_distributed_state()
 
     def _maybe_get_memory_pool_context(self, tag: str) -> AbstractContextManager:
+        # Ascend allocates weights and KV cache through torch_npu. The empty
+        # vLLM build has no CuMem sleep-mode allocator.
+        if current_platform.device_type == "npu":
+            return nullcontext()
+
         if (
             current_platform.is_cuda_alike()
             and not self.vllm_config.model_config.enable_cumem_allocator
