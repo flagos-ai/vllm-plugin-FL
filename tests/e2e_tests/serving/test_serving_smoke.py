@@ -183,7 +183,7 @@ def _generated_image_messages(prompt: str) -> list[dict]:
     """Create the local image payload used by the Qwen multimodal smoke case."""
     from PIL import Image, ImageDraw
 
-    image = Image.new("RGB", (300, 200), color="white")
+    image = Image.new("RGB", (800, 600), color="white")
     draw = ImageDraw.Draw(image)
     draw.rectangle((50, 50, 250, 150), fill="blue")
     draw.text((90, 80), "Hello VLM", fill="yellow")

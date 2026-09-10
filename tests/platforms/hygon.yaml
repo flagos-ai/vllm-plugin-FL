@@ -38,21 +38,7 @@ device_overrides:
       - qwen3_6/35b_a3b_tp4_graph
     llm:
       gpu_memory_utilization: 0.8
-      enforce_eager: true
-      disable_custom_all_reduce: false
     serve:
-      chat_cases:
-        - name: text
-          messages:
-            - role: "user"
-              content: "The capital of France is"
-          expected: "Paris"
-        - name: image
-          generated_image: true
-          prompt: "Describe all visible text, colors, and shapes in English."
-      extra_body:
-        chat_template_kwargs:
-          enable_thinking: false
       extra_engine:
         enable_log_requests: false
         enable_prefix_caching: false
