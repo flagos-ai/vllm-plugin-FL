@@ -35,19 +35,22 @@ def test_ascend_patches_current_qwen_gdn_imports():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("key_dim", [64, 128])
-def test_gdn_chunk_matches_recurrence_with_v_first_state(key_dim):
+@pytest.mark.parametrize("key_heads,value_heads", [(2, 2), (8, 24)])
+def test_gdn_chunk_matches_recurrence_with_v_first_state(
+    key_dim, key_heads, value_heads
+):
     patch_fla_ops()
     generator = torch.Generator().manual_seed(23)
     q, k = [
-        F.normalize(torch.randn(1, 9, 2, key_dim, generator=generator), dim=-1).to(
-            torch.bfloat16
-        )
+        F.normalize(
+            torch.randn(1, 9, key_heads, key_dim, generator=generator), dim=-1
+        ).to(torch.bfloat16)
         for _ in range(2)
     ]
-    v = torch.randn(1, 9, 2, 128, generator=generator).to(torch.bfloat16)
-    g = -torch.rand(1, 9, 2, generator=generator)
-    beta = torch.rand(1, 9, 2, generator=generator).to(torch.bfloat16)
-    initial = torch.randn(2, 2, 128, key_dim, generator=generator) * 0.1
+    v = torch.randn(1, 9, value_heads, 128, generator=generator).to(torch.bfloat16)
+    g = -torch.rand(1, 9, value_heads, generator=generator)
+    beta = torch.rand(1, 9, value_heads, generator=generator).to(torch.bfloat16)
+    initial = torch.randn(2, value_heads, 128, key_dim, generator=generator) * 0.1
     expected_state = initial.clone()
     expected = torch.empty_like(v, dtype=torch.float32)
     scale = key_dim**-0.5
@@ -55,12 +58,19 @@ def test_gdn_chunk_matches_recurrence_with_v_first_state(key_dim):
         state = expected_state[sequence]
         for token in range(start, end):
             state *= g[0, token].exp()[:, None, None]
-            key = k[0, token].float()
+            key = k[0, token].float().repeat_interleave(value_heads // key_heads, dim=0)
             residual = v[0, token].float() - torch.einsum("hvk,hk->hv", state, key)
             residual *= beta[0, token].float()[:, None]
             state += torch.einsum("hv,hk->hvk", residual, key)
             expected[0, token] = (
-                torch.einsum("hvk,hk->hv", state, q[0, token].float()) * scale
+                torch.einsum(
+                    "hvk,hk->hv",
+                    state,
+                    q[0, token]
+                    .float()
+                    .repeat_interleave(value_heads // key_heads, dim=0),
+                )
+                * scale
             )
 
     buffer = torch.full((v.numel() + 8,), 7, device="npu", dtype=torch.bfloat16)

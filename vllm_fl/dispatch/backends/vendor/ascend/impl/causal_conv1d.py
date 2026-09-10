@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 import triton
 import triton.language as tl
-from vllm.v1.attention.backends.utils import PAD_SLOT_ID
+from vllm.v1.attention.backends.utils import NULL_BLOCK_ID, PAD_SLOT_ID
 
 
 def causal_conv1d_ref(
@@ -64,14 +64,21 @@ def causal_conv1d_ref(
 def causal_conv1d_fn(
     x: torch.Tensor,
     weight: torch.Tensor,
-    bias: Optional[torch.Tensor] = None,
-    activation: Optional[str] = "silu",
-    conv_states: Optional[torch.Tensor] = None,
-    has_initial_state: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor],
+    conv_states: torch.Tensor,
+    query_start_loc: torch.Tensor,
     cache_indices: Optional[torch.Tensor] = None,
-    query_start_loc: Optional[torch.Tensor] = None,
-    metadata: Optional[Any] = None,
+    has_initial_state: Optional[torch.Tensor] = None,
+    activation: Optional[str] = "silu",
     pad_slot_id: int = PAD_SLOT_ID,
+    null_block_id: int = NULL_BLOCK_ID,
+    block_idx_first_scheduled_token=None,
+    block_idx_last_scheduled_token=None,
+    initial_state_idx=None,
+    num_computed_tokens=None,
+    block_size_to_align=0,
+    metadata: Optional[Any] = None,
+    validate_data=False,
 ):
     """
     x: (batch, dim, seqlen) or (dim,cu_seq_len) for varlen
@@ -100,39 +107,49 @@ def causal_conv1d_fn(
             indices 0 and 3
     out: (batch, dim, seqlen)
     """
+    if any(arg is not None for arg in (
+        block_idx_first_scheduled_token, block_idx_last_scheduled_token,
+        initial_state_idx, num_computed_tokens,
+    )) or block_size_to_align:
+        raise NotImplementedError("Ascend causal conv prefill requires prefix caching disabled")
+    if cache_indices is not None and cache_indices.ndim != 1:
+        raise NotImplementedError("Ascend causal conv prefill requires one state per sequence")
+    if activation is True:
+        activation = "silu"
     if activation not in [None, "silu", "swish"]:
         raise NotImplementedError("activation must be None, silu, or swish")
     if x.stride(-1) != 1:
         x = x.contiguous()
     bias = bias.contiguous() if bias is not None else None
 
-    out_ref = []
-    out_ref_b = []
     seqlens = query_start_loc[1:] - query_start_loc[:-1]
     seqlens = seqlens.tolist()
     splits = torch.split(x, seqlens, dim=-1)
     width = weight.shape[1]
 
-    for i in range(len(seqlens)):
-        x_s = splits[i]
-        if cache_indices[i] == PAD_SLOT_ID:
+    # The caller transposes [channels, tokens] back to [tokens, channels].
+    # vLLM 0.28's fused_post_conv_prep assumes unit channel stride, so
+    # return channel-contiguous storage even though conv1d uses time last.
+    output = torch.zeros_like(x.T, memory_format=torch.contiguous_format).T
+    start = 0
+    for i, x_s in enumerate(splits):
+        end = start + seqlens[i]
+        cache_index = int(cache_indices[i]) if cache_indices is not None else i
+        if seqlens[i] == 0 or (
+            cache_indices is not None and cache_index in (pad_slot_id, null_block_id)
+        ):
+            start = end
             continue
-        out_ref_b.append(
-            causal_conv1d_ref(
-                x_s,
-                weight,
-                bias,
-                activation=activation,
-                return_final_states=True,
-                final_states_out=conv_states[cache_indices[i]][..., : (width - 1)].unsqueeze(0),
-                initial_states=conv_states[cache_indices[i]][..., : (width - 1)]
-                if has_initial_state[i]
-                else None,
-            )
+        state = conv_states[cache_index][..., :width - 1]
+        result, _ = causal_conv1d_ref(
+            x_s.unsqueeze(0), weight, bias, activation=activation,
+            return_final_states=True, final_states_out=state.unsqueeze(0),
+            initial_states=state.unsqueeze(0)
+            if has_initial_state is not None and has_initial_state[i] else None,
         )
-    out_ref.append(torch.cat([t[0] for t in out_ref_b], dim=-1))
-    out_ref_tensor = torch.cat(out_ref, dim=0)
-    return out_ref_tensor
+        output[:, start:end] = result.squeeze(0)
+        start = end
+    return output
 
 
 @triton.jit
