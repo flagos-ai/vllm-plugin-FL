@@ -28,7 +28,11 @@ generate:
     max_tokens: 5
     temperature: 0.0
   parametrize:
-    enforce_eager: [true, false]
+    # Eager only: torch.compile / PIECEWISE cudagraph capture hangs on
+    # torch_musa 2.9.0 with no output (CI e2e 2026-09-10: 58 min of
+    # silence, then the 60 min job timeout). Consistent with every
+    # vendor-authored musa case being `_eager`-suffixed.
+    enforce_eager: [true]
     dtype: ["bfloat16"]
 
 serve:
