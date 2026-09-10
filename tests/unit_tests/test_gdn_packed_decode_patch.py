@@ -6,6 +6,17 @@ import vllm_fl
 from vllm_fl.patches import gdn_packed_decode
 
 
+def test_patch_matches_vllm_028_fla_location_and_kernel_signature():
+    assert gdn_packed_decode._TARGET_MODULE == (
+        "vllm.third_party.flash_linear_attention.ops.fused_recurrent"
+    )
+    replacement = getattr(
+        gdn_packed_decode,
+        "_fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta",
+    )
+    assert "SPLIT_BATCH_HEAD_GRID" in replacement.arg_names
+
+
 def _vulnerable_kernel():
     beta_val = "tl.sigmoid(b_val).to(b.dtype.element_ty).to(tl.float32)"
     return beta_val
