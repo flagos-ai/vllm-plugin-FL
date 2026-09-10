@@ -54,9 +54,7 @@ def test_rejects_blocks_smaller_than_ascend_kernel(block_size):
 @pytest.mark.parametrize("manager_block_size", [128, 256, 384])
 def test_hybrid_blocks_use_128_token_kernel_blocks(manager_block_size):
     assert AscendAttentionBackend.supports_block_size(manager_block_size)
-    assert select_common_block_size(
-        manager_block_size, [AscendAttentionBackend]
-    ) == 128
+    assert select_common_block_size(manager_block_size, [AscendAttentionBackend]) == 128
 
 
 @pytest.mark.parametrize("state", list(AscendAttentionState))
@@ -76,9 +74,7 @@ def test_fia_preserves_cache_blocks_and_model_kv_width(state, kv_heads):
         actual_seq_lengths_q=[2, 5],
         block_tables=torch.tensor([[0, 1], [2, 0]], dtype=torch.int32),
     )
-    k, v, block_size, block_table, lengths = impl._get_fia_params(
-        key, value, metadata
-    )
+    k, v, block_size, block_table, lengths = impl._get_fia_params(key, value, metadata)
 
     assert block_size == 128
     if state == AscendAttentionState.PrefillNoCache:
@@ -91,3 +87,61 @@ def test_fia_preserves_cache_blocks_and_model_kv_width(state, kv_heads):
         assert v.data_ptr() == impl.value_cache.data_ptr()
         torch.testing.assert_close(block_table, metadata.block_tables)
         assert lengths == [130, 3]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("via_forward", [False, True])
+def test_hybrid_kv_cache_updates_shared_storage(via_forward):
+    from types import SimpleNamespace
+
+    import torch
+
+    from vllm.v1.attention.backend import AttentionType
+
+    impl = object.__new__(AscendAttentionBackendImpl)
+    impl.key_cache = impl.value_cache = None
+    # vLLM hybrid models physically interleave K/V blocks.
+    backing = torch.zeros(3, 2, 128, 2, 128, dtype=torch.bfloat16, device="npu")
+    kv_cache = backing.permute(1, 0, 2, 3, 4)
+    assert not kv_cache[0].is_contiguous()
+    key = (
+        torch.arange(3 * 2 * 128, device="npu", dtype=torch.float32)
+        .view(3, 2, 128)
+        .to(torch.bfloat16)
+    )
+    value = -key
+    metadata = AscendMetadata(
+        num_actual_tokens=3,
+        slot_mapping=torch.tensor([0, 131, -1], dtype=torch.int32, device="npu"),
+    )
+    if via_forward:
+        impl.attn_type = AttentionType.DECODER
+        impl.forward_impl = lambda *args: args[-1]
+        impl.forward(
+            SimpleNamespace(_k_scale_float=1.0, _v_scale_float=1.0),
+            key,
+            key,
+            value,
+            kv_cache,
+            metadata,
+            output=torch.empty_like(key),
+        )
+    else:
+        impl.reshape_and_cache(key, value, kv_cache, metadata)
+    torch.testing.assert_close(backing[0, 0, 0].cpu(), key[0].cpu())
+    torch.testing.assert_close(backing[1, 0, 3].cpu(), key[1].cpu())
+    torch.testing.assert_close(backing[0, 1, 0].cpu(), value[0].cpu())
+    torch.testing.assert_close(backing[1, 1, 3].cpu(), value[1].cpu())
+    assert backing[2].cpu().count_nonzero().item() == 0
+    impl.num_heads = impl.num_kv_heads = 2
+    impl.scale = 128**-0.5
+    output = torch.empty_like(key[:1])
+    impl.forward_paged_attention(
+        torch.zeros_like(output),
+        AscendMetadata(
+            seq_lens=torch.tensor([1], dtype=torch.int32),
+            block_tables=torch.tensor([[0]], dtype=torch.int32, device="npu"),
+        ),
+        output,
+    )
+    torch.testing.assert_close(output[0].cpu(), value[0].cpu())
