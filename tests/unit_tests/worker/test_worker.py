@@ -137,6 +137,7 @@ def test_nvidia_platform_selects_target_version_worker_wrapper():
 
 
 def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -159,6 +160,7 @@ def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
 
 
 def test_nvidia_platform_honors_explicit_flaggems_attention(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
