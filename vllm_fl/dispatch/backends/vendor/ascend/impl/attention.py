@@ -563,8 +563,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
             # Cached FIA uses [blocks, block_size, kv_heads * head_size].
             # The KV width varies with the model and tensor parallel size.
             num_blocks, block_size, _, _ = self.key_cache.shape
-            key = self.key_cache.view(num_blocks, block_size, -1)
-            value = self.value_cache.view(num_blocks, block_size, -1)
+            key = self.key_cache.view(num_blocks, block_size, -1).contiguous()
+            value = self.value_cache.view(num_blocks, block_size, -1).contiguous()
             block_table = attn_metadata.block_tables
             if attn_metadata.attn_state == AscendAttentionState.PrefillCacheHit:
                 block_table = block_table[:attn_metadata.seq_lens.shape[0], :]
@@ -581,20 +581,32 @@ class AscendAttentionBackendImpl(AttentionImpl):
     ):
         """Reshape and cache key/value tensors."""
         if len(kv_cache) > 1:
-            if self.key_cache is None:
-                self.key_cache, self.value_cache = kv_cache[0], kv_cache[1]
-            slots = attn_metadata.slot_mapping
+            self.key_cache, self.value_cache = kv_cache[0], kv_cache[1]
+            num_tokens = attn_metadata.num_actual_tokens
+            slots = attn_metadata.slot_mapping[:num_tokens]
+            if not (self.key_cache.is_contiguous() and self.value_cache.is_contiguous()):
+                # Hybrid caches interleave K/V blocks. The native cache op
+                # requires contiguous outputs; update the actual strided
+                # storage instead of retaining a disconnected cache copy.
+                valid = slots >= 0
+                slots = slots[valid].long()
+                block_size = self.key_cache.shape[1]
+                blocks = slots // block_size
+                offsets = slots % block_size
+                self.key_cache[blocks, offsets] = key[:num_tokens][valid]
+                self.value_cache[blocks, offsets] = value[:num_tokens][valid]
+                return key, value
             # torch_npu requires int32 for slot_indices
             # TODO(yxa): block_table.py: CUDA uses int64, NPU uses int32.
             if slots.dtype != torch.int32:
                 slots = slots.to(torch.int32)
             # Use torch_npu reshape_and_cache
             torch_npu._npu_reshape_and_cache(
-                key=key[:attn_metadata.num_actual_tokens],
-                value=value[:attn_metadata.num_actual_tokens],
+                key=key[:num_tokens],
+                value=value[:num_tokens],
                 key_cache=self.key_cache,
                 value_cache=self.value_cache,
-                slot_indices=slots[:attn_metadata.num_actual_tokens]
+                slot_indices=slots
             )
         return key, value
 
@@ -649,8 +661,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
         """Forward pass using paged attention for decode."""
         torch_npu._npu_paged_attention(
             query=query,
-            key_cache=self.key_cache,
-            value_cache=self.value_cache,
+            key_cache=self.key_cache.contiguous(),
+            value_cache=self.value_cache.contiguous(),
             num_kv_heads=self.num_kv_heads,
             num_heads=self.num_heads,
             scale_value=self.scale,
@@ -771,8 +783,6 @@ class AscendAttentionBackendImpl(AttentionImpl):
             return output.fill_(0)
 
         # Reshape and cache KV
-        if attn_metadata != AscendAttentionState.DecodeOnly:
-            kv_cache = [i.contiguous() for i in kv_cache]
         if key is not None and value is not None:
             key = key.contiguous()
             value = value.contiguous()

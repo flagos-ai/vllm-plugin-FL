@@ -54,6 +54,10 @@ flagos_blacklist:
   # FlagTree cannot lower pow(float32, int32) in FlagGems' tanh GELU.
   # Keep vision activation on the native torch_npu implementation.
   - gelu
+  # FlagGems index_put cannot compile GDN's boolean state reset on Ascend.
+  - index_put
+  - index_put_
+  - _index_put_impl_
   - masked_scatter_
   - masked_scatter
   - scatter_add_
