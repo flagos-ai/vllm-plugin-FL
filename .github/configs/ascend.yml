@@ -35,6 +35,7 @@ container_volumes:
   - /usr/local/sbin:/usr/local/sbin
   - /etc/ascend_install.info:/etc/ascend_install.info
   - /data:/data
+  - /public-flash/models:/data/models/Qwen:ro
 
 # Container options (hardware-specific settings)
 container_options: >-

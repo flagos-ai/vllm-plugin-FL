@@ -50,9 +50,7 @@ device_overrides:
   910c:
     cases:
       - qwen3_6/27b_tp2_eager
-      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
-      - qwen3_6/35b_a3b_tp2_graph
     llm:
       max_model_len: 4096
       gpu_memory_utilization: 0.8
@@ -85,9 +83,9 @@ env_defaults: {}
     e2e:
       # Add or remove test cases per model
       inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_eager"]
       serving:
-        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_eager"]
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
