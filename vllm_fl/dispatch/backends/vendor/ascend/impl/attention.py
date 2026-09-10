@@ -32,11 +32,13 @@ from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionImpl,
     AttentionLayer,
+    AttentionMetadataBuilder,
     AttentionType,
 )
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.utils.math_utils import cdiv
 from vllm.v1.attention.backend import AttentionCGSupport
+from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.attention.backends.utils import CommonAttentionMetadata
 
 from vllm_fl.dispatch.backends.vendor.ascend.impl.attention_mask import (
@@ -209,7 +211,7 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
         )
 
 
-class AscendAttentionMetadataBuilder:
+class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
     """Builder for Ascend attention metadata."""
 
     # ACL graph support - ALWAYS means full graph capture is supported
@@ -232,6 +234,7 @@ class AscendAttentionMetadataBuilder:
         vllm_config: VllmConfig,
         device: torch.device,
     ):
+        super().__init__(kv_cache_spec, layer_names, vllm_config, device)
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.device = device
@@ -295,7 +298,7 @@ class AscendAttentionMetadataBuilder:
         self,
         common_prefix_len: int,
         common_attn_metadata,
-        model: Optional[nn.Module] = None,
+        fast_build: bool = False,
     ):
         """Build AscendMetadata from common attention metadata."""
         num_reqs = common_attn_metadata.num_reqs
@@ -422,6 +425,7 @@ class AscendAttentionMetadataBuilder:
         return False
 
 
+@register_backend(AttentionBackendEnum.CUSTOM)
 class AscendAttentionBackend(AttentionBackend):
     """
     Ascend NPU native attention backend.
@@ -433,7 +437,7 @@ class AscendAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "ASCEND_FL"
+        return "CUSTOM"
 
     @staticmethod
     def get_impl_cls() -> Type["AscendAttentionBackendImpl"]:
@@ -555,29 +559,15 @@ class AscendAttentionBackendImpl(AttentionImpl):
             block_size = 128
             block_table = None
             actual_seq_lengths_kv = attn_metadata.actual_seq_lengths_q
-        elif attn_metadata.attn_state == AscendAttentionState.PrefillCacheHit:
-            batch_size = attn_metadata.seq_lens.shape[0]
-            block_table = attn_metadata.block_tables[:batch_size, :]
-            num_block, block_size, _, _ = self.key_cache.shape
-            key = self.key_cache.view(num_block, block_size, -1)
-            value = self.value_cache.view(num_block, block_size, -1)
-            actual_seq_lengths_kv = attn_metadata.seq_lens_list
-        elif attn_metadata.attn_state == AscendAttentionState.DecodeOnly:
-            # num_block, block_size, _, _ = self.key_cache.shape
-            # key = self.key_cache.view(num_block, block_size, -1)
-            # value = self.value_cache.view(num_block, block_size, -1)
-            key = self.key_cache.view(-1, block_size, 256)
-            value = self.value_cache.view(-1, block_size, 256)
-            block_table = attn_metadata.block_tables
-            actual_seq_lengths_kv = attn_metadata.seq_lens_list
         else:
-            # ChunkedPrefill
-            # num_block, block_size, _, _ = self.key_cache.shape
-            # key = self.key_cache.view(num_block, block_size, -1)
-            # value = self.value_cache.view(num_block, block_size, -1)
-            key = self.key_cache.view(-1, block_size, 256)
-            value = self.value_cache.view(-1, block_size, 256)
+            # Cached FIA uses [blocks, block_size, kv_heads * head_size].
+            # The KV width varies with the model and tensor parallel size.
+            num_blocks, block_size, _, _ = self.key_cache.shape
+            key = self.key_cache.view(num_blocks, block_size, -1)
+            value = self.value_cache.view(num_blocks, block_size, -1)
             block_table = attn_metadata.block_tables
+            if attn_metadata.attn_state == AscendAttentionState.PrefillCacheHit:
+                block_table = block_table[:attn_metadata.seq_lens.shape[0], :]
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
 
         return key, value, block_size, block_table, actual_seq_lengths_kv
