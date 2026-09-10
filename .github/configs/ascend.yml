@@ -18,7 +18,8 @@
 platform: ascend
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:ascend-vllm0.20.2-a3-ci
+# Build and publish this image before dispatching the manual Ascend workflow.
+ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci
 
 # Runner labels for this hardware
 runner_labels:
