@@ -4,12 +4,14 @@ import pytest
 
 pytest.importorskip("torch_npu")
 
+from vllm.v1.attention.backend import AttentionCGSupport
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 from vllm.v1.worker.utils import select_common_block_size
 
 from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
     AscendAttentionBackend,
     AscendAttentionBackendImpl,
+    AscendAttentionMetadataBuilder,
     AscendAttentionState,
     AscendMetadata,
 )
@@ -18,6 +20,13 @@ from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
 def test_ascend_backend_resolves_through_upstream_registry():
     backend = AttentionBackendEnum[AscendAttentionBackend.get_name()]
     assert backend.get_class() is AscendAttentionBackend
+
+
+def test_ascend_attention_does_not_advertise_cudagraph_support():
+    assert (
+        AscendAttentionMetadataBuilder.get_cudagraph_support(None, None)
+        is AttentionCGSupport.NEVER
+    )
 
 
 def test_upstream_creates_ascend_metadata_builder():
