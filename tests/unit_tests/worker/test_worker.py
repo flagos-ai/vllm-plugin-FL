@@ -142,6 +142,7 @@ def test_nvidia_platform_keeps_native_cuda_semantics():
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -171,6 +172,7 @@ def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from unittest.mock import patch
 
     from vllm.platforms.cuda import CudaPlatform
@@ -206,6 +208,7 @@ def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -241,6 +244,7 @@ def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -265,6 +269,7 @@ def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_honors_explicit_flaggems_attention(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
