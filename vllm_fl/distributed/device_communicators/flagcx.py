@@ -137,6 +137,8 @@ class PyFlagcxCommunicator:
             device_ctx = torch.device(self.device)
         elif self.device.type == "txda":
             device_ctx = torch.txda.device(self.device)
+        elif self.device.type == "npu":
+            device_ctx = torch.npu.device(self.device)
         else:
             device_ctx = torch.cuda.device(self.device)
 
