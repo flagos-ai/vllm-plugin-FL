@@ -34,7 +34,7 @@ generate:
     temperature: 0.0
 
 serve:
-  # Endpoints to validate (completion and/or chat)
   endpoints: [completion]
   completion_prompt: "please introduce yourself"
   max_tokens: 20
+  startup_retries: 180
