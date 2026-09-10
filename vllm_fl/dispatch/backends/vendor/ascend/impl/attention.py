@@ -237,7 +237,7 @@ class AscendAttentionMetadataBuilder:
         self.device = device
         self.max_num_blocks_per_req = cdiv(
             self.model_config.max_model_len,
-            AscendAttentionBackend.get_supported_block_size()[0]
+            AscendAttentionBackend.get_supported_kernel_block_sizes()[0]
         )
 
         self.speculative_config = vllm_config.speculative_config
@@ -484,7 +484,9 @@ class AscendAttentionBackend(AttentionBackend):
             value_caches[dst_indices] = value_caches[src_indices]
 
     @staticmethod
-    def get_supported_block_size() -> list[int]:
+    def get_supported_kernel_block_sizes() -> list[int]:
+        # vLLM 0.28 uses this contract for validation and hybrid KV blocks.
+        # Inheriting AttentionBackend's default would accept every block size.
         return [128]
 
 
