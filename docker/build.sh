@@ -42,9 +42,10 @@ MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.20.2}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.7.1}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.0.0}"
-ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.20.2}"
+ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
-ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3e6528cf04f5f964a7b0fa6628de6f0410dbfd02}"
+ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
+ASCEND_FLAGTREE_VERSION="${ASCEND_FLAGTREE_VERSION:-0.6.2a1+ascend3.5}"
 ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/plugin/enflame001-gems5.4.0-treenone-triton3.6.0-cxnone-plugin0.2.0-vllm0.20.2-cp312-pt211-x64-1.9.29:202607221058}"
 ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.9.29}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
@@ -183,9 +184,10 @@ VERSIONS (override via environment variables):
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
-    ASCEND_VLLM_VERSION  vLLM version in the validated image (default: ${ASCEND_VLLM_VERSION})
-    ASCEND_BASE_IMAGE    Validated Ascend vLLM base image (default: ${ASCEND_BASE_IMAGE})
+    ASCEND_VLLM_VERSION  vLLM version to install in empty mode (default: ${ASCEND_VLLM_VERSION})
+    ASCEND_BASE_IMAGE    Ascend CANN / torch_npu base image (default: ${ASCEND_BASE_IMAGE})
     ASCEND_FLAGGEMS_VERSION FlagGems git ref for Ascend (default: ${ASCEND_FLAGGEMS_VERSION})
+    ASCEND_FLAGTREE_VERSION FlagTree Ascend wheel (default: ${ASCEND_FLAGTREE_VERSION})
   MetaX:
     METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
     METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
@@ -331,7 +333,9 @@ elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
     BUILD_ARGS+=(
         --build-arg "ASCEND_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${ASCEND_VLLM_VERSION}"
         --build-arg "FLAGGEMS_VERSION=${ASCEND_FLAGGEMS_VERSION}"
+        --build-arg "FLAGTREE_VERSION=${ASCEND_FLAGTREE_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="ascend-vllm${VLLM_VERSION}-a3-${TARGET}"
@@ -422,6 +426,7 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
     msg "  FlagGems:       ${ASCEND_FLAGGEMS_VERSION}"
+    msg "  FlagTree:       ${ASCEND_FLAGTREE_VERSION}"
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  DTK:            ${HYGON_DTK_VERSION}"
     msg "  Hygon Python:   ${HYGON_PYTHON_VERSION}"
