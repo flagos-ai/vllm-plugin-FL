@@ -39,6 +39,29 @@ def test_ascend_rejects_explicit_upstream_v2_runner(monkeypatch):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
 
 
+def test_ascend_rejects_non_eager_execution(monkeypatch):
+    from types import SimpleNamespace
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    config = SimpleNamespace(
+        use_v2_model_runner=False,
+        model_config=SimpleNamespace(enforce_eager=False),
+    )
+    with pytest.raises(ValueError, match="--enforce-eager"):
+        PlatformFL.check_and_update_config(config)
+
+
+def test_ascend_does_not_advertise_static_graph_support(monkeypatch):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
+
+    assert not PlatformFL.support_static_graph_mode()
+
+
 def test_register_preserves_upstream_runner_selection(monkeypatch):
     from types import SimpleNamespace
 
