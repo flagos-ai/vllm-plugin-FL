@@ -30,6 +30,21 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
   workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to test (auto uses the platform registry)"
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - cuda
+          - ascend
+          - hygon
+          - metax
+          - musa
+          - enflame
+          - kunlunxin
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -97,7 +112,15 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
       - id: detect
-        run: python3 .github/scripts/detect_platforms.py
+        env:
+          SELECTED_PLATFORM: ${{ inputs.platform }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${SELECTED_PLATFORM}" && "${SELECTED_PLATFORM}" != "auto" ]]; then
+            printf 'platforms=["%s"]\n' "${SELECTED_PLATFORM}" >> "${GITHUB_OUTPUT}"
+            printf 'Manual platform: %s\n' "${SELECTED_PLATFORM}"
+          else
+            python3 .github/scripts/detect_platforms.py
+          fi
 
   # ============================================================
   # Job 4a: CUDA platform testing

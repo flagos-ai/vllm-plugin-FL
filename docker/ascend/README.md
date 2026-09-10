@@ -80,8 +80,10 @@ export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
 multi-host jobs must use an interface reachable by all ranks.
 
 Ascend defaults to `ModelRunnerFL` (`VLLM_USE_V2_MODEL_RUNNER=0`). The upstream
-V2 runner requires CUDA/UVA operations unavailable on NPU. For the initial
-eager inference baseline, use:
+V2 runner requires CUDA/UVA operations unavailable on NPU. This stack also
+requires eager execution: the platform rejects non-eager configuration early
+because vLLM 0.28's compilation and graph paths still contain CUDA-only
+assumptions. Use:
 
 ```bash
 vllm serve /models/Qwen3-0.6B \
@@ -130,6 +132,11 @@ UB overflow and invalid memory accesses after reducing the tile size.
 The native bridge preserves expert mapping, biases and the prepare stage's
 input-side router weighting. Quantized MoE and MoE LoRA remain unvalidated.
 
+The vLLM Triton top-k/top-p sampler is disabled on Ascend. FlagTree 0.6.2a1
+cannot lower its large-batch kernel on 910C, including the profiling batch
+used by the OpenAI server. Sampling uses vLLM's PyTorch implementation; this
+allows the normal server batch-size default without changing request behavior.
+
 ## Validation on 910C_174
 
 The following checks ran in the prepared task container on NPUs 14 and 15
@@ -138,25 +145,34 @@ with the versions above and the default Ascend operator policy:
 | Check | Settings | Result |
 | --- | --- | --- |
 | Qwen3-0.6B text | TP1 and TP2, BF16, eager, 2048 tokens, memory 0.3 | Correct arithmetic and Chinese capital answers |
+| Qwen3 scheduling | TP2, chunked prefill, prefix caching, async scheduling | Long prompt crossed the prefill chunk; second prefix pass reused 384 cached tokens; async answers correct |
+| Qwen3-4B OpenAI API | TP2, BF16, eager, streaming Chat API | `/v1/models` and streaming chat passed |
 | Qwen3.6-27B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, yellow text, blue rectangle |
 | Qwen3.6-35B-A3B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, blue rectangle; text color described ambiguously as white or pale yellow |
-| Runtime and operator regressions | Allocator, runner, attention, GDN, convolution, vision indexing, modular MoE, factory, worker | 68 passed; 2 CUDA-extension tests skipped |
+| Qwen3.6-35B-A3B OpenAI API | TP2, BF16, eager, text and generated image | `/v1/models`, Paris, Hello VLM and blue rectangle passed |
+| Unit regression | Entire `tests/unit_tests` suite | 550 passed; 7 platform-specific tests skipped |
+| Functional device checks | Ascend ops, HCCL helpers and raw `torch.npu.NPUGraph` primitives | All selected tests passed |
 
-Graph capture, chunked prefill, prefix caching, async scheduling, video and
-performance benchmarks remain unvalidated. The hybrid attention bridge
+Full-model vLLM compilation and graph capture are unsupported and rejected
+explicitly; the raw `torch.npu.NPUGraph` checks above do not exercise that
+model path. Video and performance benchmarks remain unvalidated. The hybrid attention bridge
 currently makes contiguous cache inputs for native attention kernels;
-performance tuning is still needed. The full Docker build, image publication
-and manual CI workflow have not been run.
+performance tuning is still needed. A clean Docker build was attempted with
+the correct context and host networking, but 910C_174 could not resolve
+`pypi.org`; image publication and the manual CI job therefore remain pending.
 
 ## Model provisioning
 
-Models are stored on the host and mounted into the container through `/data`.
-The common convention is:
+On 910C_174, models are stored under `/public-flash/models`. The Ascend CI
+configuration mounts that directory read-only at `/data/models/Qwen`, matching
+the model YAML files. The resulting container layout is:
 
 ```text
 /data/models/
 └── Qwen/
-    └── Qwen3-0.6B/
+    ├── Qwen3-0.6B/
+    ├── Qwen3.6-27B/
+    └── Qwen3.6-35B-A3B/
 ```
 
 E2E jobs expect these model directories to be provisioned before CI starts.
@@ -166,6 +182,6 @@ The workflow validates the selected model paths with the shared
 
 To avoid occupying a scarce NPU runner during development, validate changes
 on the host with the same image, setup script, and `tests/run.py` command
-first. When host validation passes, dispatch the `Ascend Manual CI` workflow
-to produce the recorded unit, functional, E2E, and benchmark results. Ascend
-is intentionally excluded from the automatic PR platform registry.
+first. When host validation passes, dispatch the `CI` workflow and select
+`ascend` for the platform input. Ascend remains excluded from the automatic PR
+platform registry.

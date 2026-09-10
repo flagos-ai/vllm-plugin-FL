@@ -178,22 +178,27 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
-1. Install [FlagTree](https://github.com/flagos-ai/flagtree/)
+1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
+   and FlagGems revisions
 
     ```sh
-    RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple --trusted-host=https://resource.flagos.net"
-    python3 -m pip install flagtree==0.6.1rc1+ascend3.5 $RES
+    python3 -m pip uninstall -y triton triton-ascend flagtree flag-gems
+    python3 -m pip install --no-deps flagtree===0.6.2a1+ascend3.5 \
+      --index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+    python3 -m pip install --no-deps cann-shmem==1.6.0 \
+      --index-url=https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/
+
+    git clone --branch qwen-vllm_for_ascend https://github.com/flagos-ai/FlagGems.git
+    cd FlagGems
+    git checkout 3b406c36212744b98b9720bf6d0a5387c09fe96b
+    python3 -m pip install --no-build-isolation --no-deps .
     ```
 
-    For other chips, please refer to [FlagTree](https://github.com/flagos-ai/flagtree/) for the corresponding version (e.g., `flagtree==0.6.1+iluvatar3.6`, `flagtree==0.6.1+metax3.6`, etc.).
+    This FlagTree wheel supplies Triton 3.5.1. See the
+    [Ascend image guide](./docker/ascend/README.md) for the complete CANN,
+    PyTorch, vLLM empty-package, and dependency constraints.
 
-2. Set required environment variable
-
-    ```sh
-    export TRITON_ALL_BLOCKS_PARALLEL=1
-    ```
-
-3. Enable eager execution
+2. Enable eager execution
 
     Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
 
@@ -204,6 +209,7 @@ If there are multiple plugins in the current environment, you can specify use vl
 With vLLM and vLLM-fl installed, you can start generating texts for list of input prompts (i.e. offline batch inferencing). See the example script: [offline_inference](./examples/offline_inference.py). Or use blow python script directly.
 ```python
 from vllm import LLM, SamplingParams
+from vllm.platforms import current_platform
 
 
 if __name__ == "__main__":
@@ -213,7 +219,12 @@ if __name__ == "__main__":
     # Create a sampling params object.
     sampling_params = SamplingParams(max_tokens=10, temperature=0.0)
     # Create an LLM.
-    llm = LLM(model="Qwen/Qwen3-4B", max_num_batched_tokens=16384, max_num_seqs=2048)
+    llm = LLM(
+        model="Qwen/Qwen3-4B",
+        max_num_batched_tokens=16384,
+        max_num_seqs=4,
+        enforce_eager=current_platform.device_type == "npu",
+    )
     # Generate texts from the prompts.
     outputs = llm.generate(prompts, sampling_params)
     for output in outputs:
