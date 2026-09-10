@@ -137,6 +137,7 @@ def test_nvidia_platform_selects_target_version_worker_wrapper():
 
 
 def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -159,6 +160,7 @@ def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
 
 
 def test_nvidia_platform_honors_explicit_flaggems_attention(monkeypatch):
+    pytest.importorskip("vllm._C_stable_libtorch", exc_type=ImportError)
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -232,15 +234,9 @@ def test_nvidia_worker_initializes_io_dump_once_after_model_load():
     worker.model_runner = SimpleNamespace(get_model=Mock(return_value=model))
 
     with (
-        patch(
-            "vllm_fl.dispatch.io_dumper.init_io_dump_from_env"
-        ) as init_io_dump,
-        patch(
-            "vllm_fl.dispatch.io_dumper.is_dump_enabled", return_value=True
-        ),
-        patch(
-            "vllm_fl.dispatch.io_dumper.register_io_module_hooks"
-        ) as register_hooks,
+        patch("vllm_fl.dispatch.io_dumper.init_io_dump_from_env") as init_io_dump,
+        patch("vllm_fl.dispatch.io_dumper.is_dump_enabled", return_value=True),
+        patch("vllm_fl.dispatch.io_dumper.register_io_module_hooks") as register_hooks,
         patch(
             "vllm_fl.worker.worker._install_native_runner_io_methods"
         ) as install_methods,

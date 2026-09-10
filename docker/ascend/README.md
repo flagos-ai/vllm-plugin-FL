@@ -125,6 +125,12 @@ The latter is required for correct visual RoPE caches. GDN prefill also
 bridges the upstream state layout and preserves the channel-contiguous
 convolution output expected by vLLM 0.28.
 
+CANN 9.0's ATB RoPE kernel is used only for FP16 and BF16 inputs. FP32 RoPE
+runs through the reference implementation before ATB is launched, avoiding a
+deferred device error that would otherwise surface during a later operation.
+The FlagGems adapter also accepts the six-argument Ascend RoPE interface in the
+pinned `qwen-vllm_for_ascend` revision.
+
 Unquantized modular MoE experts use native `torch_npu.npu_grouped_matmul`.
 The legacy Ascend `fused_experts_impl` patch does not cover vLLM 0.28's
 modular entry point. Generic Triton MoE kernels failed on 910C with both
@@ -150,7 +156,7 @@ with the versions above and the default Ascend operator policy:
 | Qwen3.6-27B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, yellow text, blue rectangle |
 | Qwen3.6-35B-A3B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, blue rectangle; text color described ambiguously as white or pale yellow |
 | Qwen3.6-35B-A3B OpenAI API | TP2, BF16, eager, text and generated image | `/v1/models`, Paris, Hello VLM and blue rectangle passed |
-| Unit regression | Entire `tests/unit_tests` suite | 550 passed; 7 platform-specific tests skipped |
+| Unit regression | Entire `tests/unit_tests` suite | 555 passed; 9 platform-specific tests skipped |
 | Functional device checks | Ascend ops, HCCL helpers and raw `torch.npu.NPUGraph` primitives | All selected tests passed |
 
 Full-model vLLM compilation and graph capture are unsupported and rejected
