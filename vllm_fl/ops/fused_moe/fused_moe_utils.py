@@ -286,6 +286,31 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
+        if (
+            hidden_states.device.type == "npu"
+            and self._lora_context is None
+            and self.quant_config.quant_dtype is None
+            and self.quant_config.weight_quant_dtype is None
+        ):
+            # v0.28 modular experts bypass the legacy fused_experts_impl patch.
+            # Generic Triton MoE kernels are not usable on Ascend 910C.
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.grouped_moe import (
+                grouped_experts,
+            )
+
+            output.copy_(
+                grouped_experts(
+                    hidden_states, w1, w2, topk_weights, topk_ids,
+                    activation=activation.value,
+                    expert_map=expert_map,
+                    apply_router_weight_on_input=apply_router_weight_on_input,
+                    w1_bias=self.w1_bias,
+                    w2_bias=self.w2_bias,
+                    clamp_limit=self.activation_config.clamp_limit,
+                )
+            )
+            return
+
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
         if self._lora_context is None and current_platform.is_cuda():
             import flag_gems
