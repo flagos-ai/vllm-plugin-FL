@@ -214,14 +214,14 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
 class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
     """Builder for Ascend attention metadata."""
 
-    # ACL graph support - ALWAYS means full graph capture is supported
-    aclgraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.ALWAYS
+    # Ascend is eager-only until the full vLLM graph path is NPU-safe.
+    aclgraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.NEVER
     reorder_batch_threshold: ClassVar[int] = 1
 
     @staticmethod
     def get_cudagraph_support(vllm_config, kv_cache_spec) -> AttentionCGSupport:
         """Get CUDAGraph support level for Ascend backend."""
-        return AttentionCGSupport.ALWAYS
+        return AttentionCGSupport.NEVER
 
     # Class-level mask builder cache
     _mask_builder: ClassVar[Optional[AttentionMaskBuilder]] = None

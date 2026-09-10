@@ -56,13 +56,21 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
                  org_num_embeddings: Optional[int] = None,
                  padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
                  quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 *,
+                 disable_tp: bool = False):
         nn.Module.__init__(self)
         self.forward_type = None
-        self.comm_group = get_tp_group()
 
-        self.tp_size = self.comm_group.world_size
-        self.tp_rank = self.comm_group.rank_in_group
+        self.disable_tp = disable_tp
+        if disable_tp:
+            self.comm_group = None
+            self.tp_size = 1
+            self.tp_rank = 0
+        else:
+            self.comm_group = get_tp_group()
+            self.tp_size = self.comm_group.world_size
+            self.tp_rank = self.comm_group.rank_in_group
 
         self.num_embeddings = num_embeddings
         self.padding_size = padding_size
@@ -90,7 +98,7 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         # If we are making an embedding layer, then our quantization linear
         # method must implement the embedding operation. If we are another
         # layer type like ParallelLMHead, this is not important.
-        is_embedding_layer = type(self) is VocabParallelEmbedding
+        is_embedding_layer = not isinstance(self, ParallelLMHead)
         quant_method_implements_embedding = method_has_implemented_embedding(
             type(quant_method))
         if is_embedding_layer and not quant_method_implements_embedding:
@@ -123,6 +131,7 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
                                          self.num_embeddings_padded,
                                          params_dtype=params_dtype,
                                          weight_loader=self.weight_loader)
+        self.update_param_tp_status()
 
     def _get_masked_input_and_mask(
             self, input_: torch.Tensor, org_vocab_start_index: int,
@@ -189,9 +198,9 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
-        # Reduce across all the model parallel GPUs.
-        output = maybe_pad_and_reduce(output_parallel)
-        return output
+            # Reduce across all the model parallel GPUs.
+            return maybe_pad_and_reduce(output_parallel)
+        return output_parallel
 
 
 class AscendParallelLMHead(ParallelLMHead):
@@ -206,11 +215,14 @@ class AscendParallelLMHead(ParallelLMHead):
                  org_num_embeddings: Optional[int] = None,
                  padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
                  quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 *,
+                 disable_tp: bool = False):
         AscendVocabParallelEmbedding.__init__(self, num_embeddings,
                                               embedding_dim, params_dtype,
                                               org_num_embeddings, padding_size,
-                                              quant_config, prefix)
+                                              quant_config, prefix,
+                                              disable_tp=disable_tp)
 
         self.quant_config = quant_config
         if bias:
