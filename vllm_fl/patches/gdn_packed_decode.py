@@ -67,6 +67,7 @@ def _fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta(
     state_idx = tl.load(ssm_state_indices + i_n * stride_indices_seq).to(tl.int64)
     p_o = o + (i_n * HV + i_hv) * V + o_v
 
+    # Skip if state index is invalid (NULL_BLOCK_ID=0)
     if state_idx <= 0:
         zero = tl.zeros([BV], dtype=tl.float32).to(p_o.dtype.element_ty)
         tl.store(p_o, zero, mask=mask_v)

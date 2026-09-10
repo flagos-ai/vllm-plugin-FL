@@ -215,8 +215,18 @@ class PlatformFL(Platform):
                 "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
-        parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
+        if (
+            cls.device_type == "npu"
+            and model_config is not None
+            and not model_config.enforce_eager
+        ):
+            raise ValueError(
+                "Ascend with vLLM 0.28 empty requires eager execution. "
+                "Set --enforce-eager; torch.compile and CUDA graph paths "
+                "still contain CUDA-only assumptions."
+            )
+        parallel_config = vllm_config.parallel_config
 
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
@@ -400,6 +410,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
+        if cls.device_type == "npu":
+            return False
         if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar", "thead"]:
             return True
         return False
