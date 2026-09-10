@@ -295,7 +295,7 @@ def wait_for_memory(
         # Clear framework cache
         cache_fn()
         # Brief pause for resources to be released
-        time.sleep(1)
+        time.sleep(5)
 
         mem_info = mem_fn()
         if not mem_info:
