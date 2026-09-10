@@ -112,6 +112,52 @@ def test_nvidia_platform_selects_target_version_worker_wrapper():
     native_update.assert_called_once_with(vllm_config)
 
 
+def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from vllm.platforms.cuda import CudaPlatform
+
+    from vllm_fl.nvidia_platform import NvidiaPlatformFL
+
+    monkeypatch.delenv("VLLM_FL_USE_FLAGGEMS_ATTN", raising=False)
+    selector = SimpleNamespace(use_mla=False, use_sparse=False)
+
+    with patch.object(
+        CudaPlatform,
+        "get_attn_backend_cls",
+        return_value="native.attention.Backend",
+    ) as native_select:
+        result = NvidiaPlatformFL.get_attn_backend_cls(None, selector, 32)
+
+    assert result == "native.attention.Backend"
+    native_select.assert_called_once_with(None, selector, 32)
+
+
+def test_nvidia_platform_honors_explicit_flaggems_attention(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from vllm_fl.dispatch.backends.flaggems.flaggems import FlagGemsBackend
+    from vllm_fl.nvidia_platform import NvidiaPlatformFL
+
+    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_ATTN", "1")
+    selector = SimpleNamespace(use_mla=False, use_sparse=False)
+    backend_path = (
+        "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+    )
+
+    with patch.object(
+        FlagGemsBackend,
+        "attention_backend",
+        return_value=backend_path,
+    ) as flaggems_select:
+        result = NvidiaPlatformFL.get_attn_backend_cls(None, selector, 32)
+
+    assert result == backend_path
+    flaggems_select.assert_called_once_with(use_mla=False, use_sparse=False)
+
+
 def test_nvidia_worker_delegates_to_target_version_gpu_worker():
     from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
 

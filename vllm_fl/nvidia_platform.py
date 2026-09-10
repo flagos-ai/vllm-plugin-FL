@@ -2,6 +2,7 @@
 
 """NVIDIA platform integration for vLLM 0.28."""
 
+import os
 from typing import TYPE_CHECKING
 
 from vllm.platforms import PlatformEnum
@@ -25,4 +26,31 @@ class NvidiaPlatformFL(CudaPlatform):
         super().check_and_update_config(vllm_config)
         vllm_config.parallel_config.worker_cls = (
             "vllm_fl.worker.worker.NvidiaWorkerFL"
+        )
+
+    @classmethod
+    def get_attn_backend_cls(
+        cls,
+        selected_backend,
+        attn_selector_config,
+        num_heads: int | None = None,
+    ) -> str:
+        """Keep native CUDA selection unless FlagGems attention is requested."""
+        use_flaggems_attn = os.environ.get(
+            "VLLM_FL_USE_FLAGGEMS_ATTN", "0"
+        ).lower() in ("1", "true", "yes")
+        if use_flaggems_attn:
+            from vllm_fl.dispatch.backends.flaggems.flaggems import (
+                FlagGemsBackend,
+            )
+
+            return FlagGemsBackend().attention_backend(
+                use_mla=attn_selector_config.use_mla,
+                use_sparse=attn_selector_config.use_sparse,
+            )
+
+        return super().get_attn_backend_cls(
+            selected_backend,
+            attn_selector_config,
+            num_heads,
         )
