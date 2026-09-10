@@ -5,8 +5,10 @@ Ascend (Huawei) backend for vllm-plugin-FL dispatch.
 """
 
 from .ascend import AscendBackend
+from .patches.accelerator_compat import patch_accelerator_memory
 from .patch import patch_mamba_config
 
+patch_accelerator_memory()
 patch_mamba_config()
 
 __all__ = ["AscendBackend"]
