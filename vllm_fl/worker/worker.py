@@ -202,6 +202,18 @@ class WorkerFL(WorkerBase):
         is_driver_worker: bool = False,
     ):
 
+        # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
+        # kernels inside spawned workers; when every rank shares the default
+        # Triton cache directory, concurrent compilation of the same kernel
+        # can deadlock on the cache file locks. Give each rank its own cache
+        # directory unless the operator overrode it.
+        if current_platform.device_type == "gcu" and not os.environ.get(
+            "TRITON_CACHE_DIR"
+        ):
+            os.environ["TRITON_CACHE_DIR"] = (
+                f"/tmp/triton-cache-fl-rank-{rank}"
+            )
+
         if (
             vllm_config.num_speculative_tokens == 1
             and vllm_config.scheduler_config.async_scheduling

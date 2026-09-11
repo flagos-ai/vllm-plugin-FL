@@ -47,6 +47,8 @@ class Graph:
         graph = torch.npu.NPUGraph
     elif current_platform.device_type == "musa":
         graph = torch.musa.MUSAGraph
+    elif current_platform.device_type == "gcu":
+        graph = torch.gcu.GCUGraph
     elif current_platform.device_type == "ptpu":
         graph = torch.ptpu.PTPUGraph
     elif current_platform.device_type == "txda":
