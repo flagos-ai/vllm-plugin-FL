@@ -92,6 +92,16 @@ class PlatformFL(Platform):
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
+    @classmethod
+    def is_arch_support_pdl(cls) -> bool:
+        if cls.vendor_name != "nvidia":
+            return False
+        try:
+            major, _ = cls.torch_device_fn.get_device_capability()
+        except Exception:
+            return False
+        return major >= 9
+
     def is_musa(self) -> bool:
         if hasattr(torch, 'musa') and torch.musa.is_available():
             return True
