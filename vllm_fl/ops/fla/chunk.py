@@ -1,11 +1,13 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-import warnings
 import os
+import warnings
+
 import torch
 
 from vllm.model_executor.custom_op import CustomOp
 from vllm.third_party.flash_linear_attention.ops.l2norm import l2norm_fwd
+
 from .utils import input_guard
 from vllm_fl.utils import use_flaggems_op
 

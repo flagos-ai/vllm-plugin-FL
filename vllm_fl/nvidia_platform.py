@@ -24,9 +24,7 @@ class NvidiaPlatformFL(CudaPlatform):
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
         super().check_and_update_config(vllm_config)
-        vllm_config.parallel_config.worker_cls = (
-            "vllm_fl.worker.worker.NvidiaWorkerFL"
-        )
+        vllm_config.parallel_config.worker_cls = "vllm_fl.worker.worker.NvidiaWorkerFL"
 
     @classmethod
     def get_attn_backend_cls(

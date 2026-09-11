@@ -10,10 +10,7 @@ def test_patch_matches_vllm_028_fla_location_and_kernel_signature():
     assert gdn_packed_decode._TARGET_MODULE == (
         "vllm.third_party.flash_linear_attention.ops.fused_recurrent"
     )
-    replacement = getattr(
-        gdn_packed_decode,
-        "_fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta",
-    )
+    replacement = gdn_packed_decode._fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta
     assert "SPLIT_BATCH_HEAD_GRID" in replacement.arg_names
 
 

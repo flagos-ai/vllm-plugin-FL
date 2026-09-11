@@ -234,21 +234,18 @@ from vllm.v1.worker.ubatch_utils import (
     split_attn_metadata,
 )
 from vllm.v1.worker.utils import (
-    EncoderTimingStats,
-    is_residual_scattered_for_sp,
-    raise_if_nan_logits,
-)
-from vllm.v1.worker.workspace import lock_workspace
-
-from vllm.v1.worker.utils import (
     AttentionGroup,
+    EncoderTimingStats,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
     bind_kv_cache,
     copy_kv_cache_blocks_inplace,
+    is_residual_scattered_for_sp,
     prepare_kernel_block_sizes,
+    raise_if_nan_logits,
     sanity_check_mm_encoder_outputs,
 )
+from vllm.v1.worker.workspace import lock_workspace
 
 from vllm_fl.compilation.graph import GraphWrapper
 from vllm_fl.dispatch.io_common import managed_inference_mode
@@ -264,6 +261,7 @@ if TYPE_CHECKING:
     from vllm.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
 
 logger = init_logger(__name__)
+
 
 def _accelerator_synchronize() -> None:
     """Synchronize through the active accelerator implementation."""
@@ -291,6 +289,7 @@ if current_platform.dist_backend == "flagcx" or current_platform.device_type == 
 
 else:
     from vllm.distributed.parallel_state import graph_capture
+
 
 def _get_parameter_for_reload(model: nn.Module, name: str) -> nn.Parameter:
     """Resolve checkpoint names without changing the model's module tree."""
@@ -821,9 +820,9 @@ class ModelRunnerFL(
 
         # Separate cuda stream for overlapping transfer of sampled token ids from
         # GPU to CPU when async scheduling is enabled.
-        self.async_output_copy_stream: current_platform.torch_device_fn.Stream | None = (
-            None
-        )
+        self.async_output_copy_stream: (
+            current_platform.torch_device_fn.Stream | None
+        ) = None
         # cuda event to synchronize use of reused CPU tensors between steps
         # when async scheduling is enabled.
         self.prepare_inputs_event: torch.Event | None = None
@@ -988,7 +987,9 @@ class ModelRunnerFL(
             self._num_valid_draft_tokens_cpu = torch.empty(
                 self.max_num_reqs, dtype=torch.int32, pin_memory=PIN_MEMORY
             )
-            self._num_valid_draft_tokens_event = current_platform.torch_device_fn.Event()
+            self._num_valid_draft_tokens_event = (
+                current_platform.torch_device_fn.Event()
+            )
             self._num_valid_draft_tokens_copy_stream = (
                 current_platform.torch_device_fn.Stream()
             )
@@ -5101,9 +5102,7 @@ class ModelRunnerFL(
         default_stream = current_platform.torch_device_fn.current_stream()
         num_reqs = draft_token_ids.shape[0]
         num_spec_tokens = draft_token_ids.shape[1]
-        with current_platform.torch_device_fn.stream(
-            self.draft_token_ids_copy_stream
-        ):
+        with current_platform.torch_device_fn.stream(self.draft_token_ids_copy_stream):
             if not zeros_only:
                 # Trigger async copy of draft token ids to cpu.
                 self.draft_token_ids_copy_stream.wait_stream(default_stream)

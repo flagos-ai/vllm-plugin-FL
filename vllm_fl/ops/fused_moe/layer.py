@@ -5,16 +5,15 @@ import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
 
 # Save the target-version factory before custom_ops installs the FL wrapper.
 _OrigFusedMoEFactory = _fused_moe_pkg.FusedMoEFactory
+from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
     UnquantizedFusedMoEMethod,
 )
-from vllm.logger import init_logger
 
 from .fused_moe_utils import select_unquantized_moe_backend_oot
 from vllm_fl.ops.fused_moe.router import replace_router_with_fl
-
 
 logger = init_logger(__name__)
 
