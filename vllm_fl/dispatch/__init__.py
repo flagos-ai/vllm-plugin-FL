@@ -77,6 +77,8 @@ Configuration File (YAML):
 """
 
 import os
+import threading
+import weakref
 
 import torch
 
@@ -148,7 +150,8 @@ def resolve_op(op_name: str):
 # Fast-path opt-out: set VLLM_FL_OP_FAST_PATH=0 to disable per-op fn caching
 # in hot OOT layers and route every call back through OpManager.call.
 _OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
-_CACHED_OPS = []
+_CACHED_OPS = weakref.WeakSet()
+_CACHED_OPS_LOCK = threading.RLock()
 
 
 class CachedOp:
@@ -169,6 +172,7 @@ class CachedOp:
     """
 
     __slots__ = (
+        "__weakref__",
         "_op_name",
         "_impl",
         "_frozen",
@@ -176,6 +180,7 @@ class CachedOp:
         "_manager_id",
         "_manager_epoch",
         "_policy_epoch",
+        "_first_use_pending",
     )
 
     def __init__(self, op_name: str) -> None:
@@ -186,7 +191,27 @@ class CachedOp:
         self._manager_id = -1
         self._manager_epoch = -1
         self._policy_epoch = -1
-        _CACHED_OPS.append(self)
+        self._first_use_pending = False
+        with _CACHED_OPS_LOCK:
+            _CACHED_OPS.add(self)
+
+    def _refresh_cache(self, mgr, *, record_first_use: bool):
+        impl = mgr._resolve_impl(self._op_name)
+        if record_first_use:
+            mgr._record_first_use(self._op_name, impl)
+        self._impl = impl
+        self._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
+        self._use_manager_call = False
+        self._manager_id = id(mgr)
+        # Resolving can initialize the manager and bump its epoch.
+        self._manager_epoch = mgr.policy_epoch
+        self._policy_epoch = get_policy_epoch()
+        self._first_use_pending = not record_first_use
+        return impl
+
+    def prewarm(self, mgr=None) -> None:
+        """Resolve this call site's implementation without executing it."""
+        self._refresh_cache(mgr or get_default_manager(), record_first_use=False)
 
     def __call__(self, *args, **kwargs):
         # Model construction prewarms and freezes CachedOps before Dynamo
@@ -225,19 +250,18 @@ class CachedOp:
             or self._manager_epoch != manager_epoch
             or self._policy_epoch != policy_epoch
         ):
-            impl = mgr._resolve_impl(self._op_name)
+            impl = self._refresh_cache(mgr, record_first_use=True)
+
+        if self._first_use_pending and not torch.compiler.is_compiling():
             mgr._record_first_use(self._op_name, impl)
-            self._impl = impl
-            # resolve() can initialize the manager and bump its epoch.
-            self._manager_id = manager_id
-            self._manager_epoch = mgr.policy_epoch
-            self._policy_epoch = get_policy_epoch()
+            self._first_use_pending = False
 
         try:
             return impl.fn(*args, **kwargs)
         except Exception:
             self._impl = None
             self._frozen = False
+            self._first_use_pending = False
             if get_policy().strict:
                 raise
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
@@ -255,27 +279,31 @@ class CachedOp:
             return result
 
 
-def prewarm_cached_ops() -> int:
-    """Resolve loaded CachedOps before torch.compile graph capture."""
+def prewarm_cached_ops() -> tuple[int, int]:
+    """Resolve loaded CachedOp call sites before full-graph compilation.
+
+    Modules can define CachedOp objects for optional operators that are not
+    available on the active platform. Those call sites are left unresolved and
+    retain their existing lazy error/fallback behavior if they are later used.
+
+    Returns:
+        A ``(prewarmed, unavailable)`` count for diagnostics and tests.
+    """
     mgr = get_default_manager()
-    manager_id = id(mgr)
-    policy_epoch = get_policy_epoch()
-    resolved = 0
-    for cached in tuple(_CACHED_OPS):
+    mgr.ensure_initialized()
+    with _CACHED_OPS_LOCK:
+        cached_ops = tuple(_CACHED_OPS)
+
+    prewarmed = 0
+    unavailable = 0
+    for cached_op in cached_ops:
         try:
-            impl = mgr._resolve_impl(cached._op_name)
-            mgr._record_first_use(cached._op_name, impl)
-            cached._impl = impl
-            cached._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
-            cached._use_manager_call = False
-            cached._manager_id = manager_id
-            cached._manager_epoch = mgr.policy_epoch
-            cached._policy_epoch = policy_epoch
-            resolved += 1
-        except Exception:
-            # Some optional ops are unavailable on the active platform.
-            continue
-    return resolved
+            cached_op.prewarm(mgr)
+            prewarmed += 1
+        except RuntimeError:
+            unavailable += 1
+
+    return prewarmed, unavailable
 
 
 __all__ = [
@@ -328,5 +356,6 @@ __all__ = [
     # Convenience functions
     "call_op",
     "resolve_op",
+    "prewarm_cached_ops",
     "CachedOp",
 ]
