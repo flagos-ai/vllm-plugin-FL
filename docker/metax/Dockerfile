@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG METAX_BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-metax-0.20.0-maca.ai3.7.0.107-torch2.8-py312-ubuntu22.04-amd64
+ARG METAX_BASE_IMAGE=harbor.baai.ac.cn/plugin/metax-maca3.7.0-treenone-triton3.0.0-cxnone-plugin0.2.0-vllm0.24.0-cp312-pt280-x64:202507290700
 
 # ---------- base stage ----------
 FROM ${METAX_BASE_IMAGE} AS base
 
 ARG METAX_BASE_IMAGE
-ARG VLLM_VERSION=0.20.2
-ARG FLAGGEMS_REF=3123859968915e361e8452dd796dc6b27c956324
+ARG VLLM_VERSION=0.24.0
+ARG FLAGGEMS_REF=95ed7f9c43b23cba704baaabca4200978c0d6292
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG IMAGE_VERSION=unknown
@@ -62,40 +62,8 @@ RUN python -m pip install --no-cache-dir \
         ninja \
         cmake
 
-# Replace the vLLM Python package from the vendor image with official vLLM in
-# empty mode. The MetaX kernels and torch runtime remain provided by the base
-# image. Install non-editably so /workspace mounts cannot hide the package.
-RUN python -m pip uninstall -y vllm || true; \
-    python -m pip cache remove vllm || true; \
-    SITE_PACKAGES="$(python -c 'import site; print(site.getsitepackages()[0])')"; \
-    find "${SITE_PACKAGES}" -maxdepth 1 \
-        \( -name "vllm" -o -name "vllm-*.dist-info" -o -name "vllm-*.egg-info" \) \
-        -exec rm -rf {} + 2>/dev/null || true; \
-    rm -rf /tmp/vllm \
-    && git clone --depth 1 --branch "v${VLLM_VERSION}" \
-        https://github.com/vllm-project/vllm.git /tmp/vllm \
-    && VLLM_TARGET_DEVICE=empty python -m pip install --no-cache-dir \
-        --no-build-isolation --no-deps /tmp/vllm \
-    && rm -rf /tmp/vllm
-
-# FlagGems is pinned to the source revision already validated on MetaX C550.
-RUN rm -rf /tmp/FlagGems \
-    && rm -f /tmp/FlagGems.tar.gz \
-    && mkdir -p /tmp/FlagGems \
-    && curl --fail --location --retry 5 --retry-all-errors \
-        --retry-delay 5 --connect-timeout 30 --max-time 1200 \
-        "https://codeload.github.com/FlagOpen/FlagGems/tar.gz/${FLAGGEMS_REF}" \
-        --output /tmp/FlagGems.tar.gz \
-    && tar -xzf /tmp/FlagGems.tar.gz --strip-components=1 -C /tmp/FlagGems \
-    && python -m pip install --no-cache-dir \
-        -r /tmp/FlagGems/requirements/requirements_metax.txt \
-    && GEMS_VENDOR=metax python -m pip install --no-cache-dir \
-        --no-build-isolation /tmp/FlagGems \
-    && rm -rf /tmp/FlagGems /tmp/FlagGems.tar.gz \
-    && python -m pip install --no-cache-dir \
-        numpy==1.26.4 \
-        opencv-python-headless==4.11.0.86 \
-        outlines-core==0.2.14
+# The validated base image already contains vLLM 0.24.0 built with
+# VLLM_TARGET_DEVICE=empty and the MetaX-tested FlagGems revision.
 
 WORKDIR /workspace
 
