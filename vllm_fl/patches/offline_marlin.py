@@ -67,7 +67,7 @@ def _install_flaggems_packed_tensors(method, layer) -> None:
     # activation input.  DSV4's symmetric group-128 checkpoint uses neither;
     # vLLM still materializes empty Marlin metadata, so remove it from the
     # already-created expert object.
-    experts = method.moe_kernel.experts
+    experts = method.moe_kernel.fused_experts
     experts.w13_g_idx = None
     experts.w2_g_idx = None
     experts.w13_g_idx_sort_indices = None
