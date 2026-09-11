@@ -66,10 +66,15 @@ op_backends:
     - flagos
     - vendor:cuda
     - reference
-  # FlagGems PR #5437 invokes this reduction inside fused_marlin_moe.  The
-  # generic FlagGems kernel is not TP8 graph-safe and vLLM 0.24's stable-ABI
-  # CUDA wrapper cannot reduce the PR's workspace layout.
+  # PR #5437's align kernel does not preserve padded -1 expert IDs after the
+  # global-to-local EP map. Keep routing on vLLM CUDA for TP8/EP8.
+  moe_align_block_size:
+    - vendor:cuda
+    - reference
+  # Keep the reduction independently dispatchable. Native CUDA is the normal
+  # path; reference remains available as a correctness fallback.
   moe_sum:
+    - vendor:cuda
     - reference
 
 # FlagOS operator blacklist

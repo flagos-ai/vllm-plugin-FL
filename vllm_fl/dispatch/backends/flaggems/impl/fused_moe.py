@@ -14,6 +14,7 @@ from vllm_fl.dispatch import CachedOp
 
 
 _marlin_moe_sum = CachedOp("moe_sum")
+_marlin_moe_align = CachedOp("moe_align_block_size")
 
 
 def fused_marlin_moe_flaggems(*args, **kwargs):
@@ -48,6 +49,7 @@ def fused_marlin_moe_flaggems(*args, **kwargs):
     # EP path calls the module-global FlagGems moe_sum directly.  Bind the
     # callback selected by vLLM/OpManager so this inner op remains independently
     # dispatchable and does not use the graph-unsafe TP8 implementation.
+    flaggems_marlin.moe_align_block_size = _marlin_moe_align
     flaggems_marlin.moe_sum = _marlin_moe_sum
 
     return flaggems_marlin.fused_marlin_moe(*args, **kwargs)
