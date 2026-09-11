@@ -43,14 +43,20 @@ op_backends:
     - vendor
     - reference
 
-# FlagOS operator blacklist
+# FlagOS operators with a reproducible NVIDIA correctness failure under the
+# supported FlagTree/Triton 3.6 environment. Each entry was reproduced
+# independently against native PyTorch, and removals are revalidated with real
+# dense and MoE model inference.
 flagos_blacklist:
-  - index_put_
-  - index_put
-  - _index_put_impl_
-  - nonzero
-  - copy_
-  - to_copy
-  - index
-# OOT (Out-of-Tree) operator blacklist
-# oot_blacklist: []
+  # BF16 largest and smallest selections return incorrect indices on A800.
+  - topk
+  # Gemma3n grouped-query vision attention reshapes KV heads incorrectly.
+  - _scaled_dot_product_attention_math
+  # Gemma3n AltUp compares a CUDA tensor with a CPU scalar tensor; FlagGems
+  # requires both operands to be on the same device.
+  - maximum
+  # Gemma3n AltUp divides a CUDA tensor by a CPU scalar tensor; FlagGems passes
+  # the CPU pointer to Triton and fails at runtime.
+  - true_divide
+# No NVIDIA OOT implementation is disabled without a reproduced model failure.
+oot_blacklist: []

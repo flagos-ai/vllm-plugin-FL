@@ -8,8 +8,6 @@ This backend provides operator implementations for NVIDIA CUDA GPUs.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -23,14 +21,14 @@ class CudaBackend(Backend):
     operator implementations for NVIDIA GPUs.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "cuda"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "nvidia"
 
     def is_available(self) -> bool:
@@ -50,10 +48,7 @@ class CudaBackend(Backend):
 
                 from vllm.platforms import current_platform
 
-                if (
-                    hasattr(current_platform, "device_name")
-                    and current_platform.device_name == "nvidia"
-                ):
+                if getattr(current_platform, "vendor_name", None) == "nvidia":
                     CudaBackend._available = True
                 else:
                     CudaBackend._available = False
@@ -101,8 +96,8 @@ class CudaBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization using vLLM's CUDA implementation.
 
@@ -189,7 +184,7 @@ class CudaBackend(Backend):
         topk_ids: torch.Tensor,
         block_size: int,
         num_experts: int,
-        expert_map: Optional[torch.Tensor] = None,
+        expert_map: torch.Tensor | None = None,
         pad_sorted_ids: bool = False,
         ignore_invalid_experts: bool = False,
     ):
@@ -285,6 +280,12 @@ class CudaBackend(Backend):
         from .impl.fused_moe import grouped_topk_cuda
 
         return grouped_topk_cuda(
-            scores, n_group, topk_group, topk,
-            renormalize, routed_scaling_factor, bias, scoring_func,
+            scores,
+            n_group,
+            topk_group,
+            topk,
+            renormalize,
+            routed_scaling_factor,
+            bias,
+            scoring_func,
         )

@@ -25,7 +25,7 @@ platforms:
   ascend:
     enabled: false
   hygon:
-    enabled: true
+    enabled: false
   metax:
     enabled: false
   musa:
