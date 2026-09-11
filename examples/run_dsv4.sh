@@ -1,4 +1,7 @@
-export USE_FLAGGEMS=false
+export USE_FLAGGEMS=true
+# Keep the three known unsafe/regressive generic overrides on native CUDA;
+# fused_marlin_moe and the remaining supported operators stay on FlagGems.
+export VLLM_FL_FLAGOS_BLACKLIST=scaled_mm,empty,moe_sum
 export VLLM_USE_BREAKABLE_CUDAGRAPH=0
 
 # The rank-sharded checkpoint stores MoE weights after vLLM's Marlin repack.
