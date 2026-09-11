@@ -108,7 +108,9 @@ def moe_align_block_size_flaggems(
         (max_num_tokens_padded,), dtype=torch.int32, device=topk_ids.device
     )
     max_num_m_blocks = triton.cdiv(max_num_tokens_padded, block_size)
-    expert_ids = torch.empty(
+    # Mapping the full capacity tensor is safe only when the unwritten tail
+    # contains valid global IDs. The kernel consumes just the valid prefix.
+    expert_ids = torch.zeros(
         (max_num_m_blocks,), dtype=torch.int32, device=topk_ids.device
     )
     num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=topk_ids.device)

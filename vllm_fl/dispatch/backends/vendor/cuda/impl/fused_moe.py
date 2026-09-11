@@ -39,7 +39,10 @@ def moe_align_block_size_cuda(
         (max_num_tokens_padded,), dtype=torch.int32, device=topk_ids.device
     )
     max_num_m_blocks = triton.cdiv(max_num_tokens_padded, block_size)
-    expert_ids = torch.empty(
+    # The CUDA op only writes the valid prefix. The EP mapping below indexes
+    # the whole capacity buffer, so initialize the unused tail to a valid
+    # global expert instead of indexing expert_map with uninitialized values.
+    expert_ids = torch.zeros(
         (max_num_m_blocks,), dtype=torch.int32, device=topk_ids.device
     )
     num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=topk_ids.device)
