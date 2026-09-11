@@ -18,7 +18,7 @@
 platform: cuda
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-cuda-ci
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
 
 # Runner labels for this hardware (self-hosted)
 runner_labels:
@@ -49,4 +49,7 @@ container_options: >-
   --ipc=host
   --hostname vllm-plugin-fl
   --user root
+  --env VLLM_PLUGINS=fl
+  --env USE_FLAGGEMS=1
+  --env GEMS_VENDOR=nvidia
   --ulimit nofile=65535:65535
