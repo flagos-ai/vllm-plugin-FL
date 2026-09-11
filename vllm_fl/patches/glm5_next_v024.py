@@ -96,11 +96,17 @@ def is_vllm_024() -> bool:
     has no generic ``patches._version`` module, and importing a historical
     helper would make an otherwise valid 0.24 install fail at plugin startup.
     """
+    if os.environ.get("VLLM_FL_ASSUME_VLLM_024") == "1":
+        return True
     try:
-        release = version("vllm").split("+", 1)[0].split(".")
+        full_release = version("vllm")
+        release = full_release.split("+", 1)[0].split(".")
     except PackageNotFoundError:
         return False
-    return len(release) >= 2 and release[:2] == ["0", "24"]
+    if len(release) >= 2 and release[:2] == ["0", "24"]:
+        return True
+    # The MetaX empty-build image exposes the vLLM 0.24 API as a dev version.
+    return full_release.startswith("0.1.dev") and full_release.endswith(".empty")
 
 
 def _is_missing_cache_op(exc: AttributeError, op_name: str) -> bool:

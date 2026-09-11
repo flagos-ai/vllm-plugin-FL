@@ -44,12 +44,34 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _patch_torchvision_video_compat():
+    """Restore the torchvision video helper expected by Transformers."""
+    try:
+        import torchvision.transforms.v2.functional as tvF
+    except (ImportError, AttributeError):
+        return
+    if hasattr(tvF, "grayscale_to_rgb"):
+        return
+
+    def grayscale_to_rgb(video):
+        if getattr(video, "ndim", 0) >= 3 and video.shape[-3] == 1:
+            return video.repeat_interleave(3, dim=-3)
+        return video
+
+    tvF.grayscale_to_rgb = grayscale_to_rgb
+
+
 def _patch_transformers_compat():
     """Patch transformers compatibility for ALLOWED_LAYER_TYPES and tokenizer."""
     import transformers.configuration_utils as cfg
     if not hasattr(cfg, "ALLOWED_LAYER_TYPES"):
         cfg.ALLOWED_LAYER_TYPES = getattr(
             cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ()
+        )
+
+    if "deepseek_sparse_attention" not in cfg.ALLOWED_LAYER_TYPES:
+        cfg.ALLOWED_LAYER_TYPES = tuple(cfg.ALLOWED_LAYER_TYPES) + (
+            "deepseek_sparse_attention",
         )
 
 
@@ -106,6 +128,7 @@ def _patch_custom_ops():
 
 def register():
     """Register the FL platform."""
+    _patch_torchvision_video_compat()
     _patch_custom_ops()
     _patch_flash_attn_import()
     _patch_transformers_compat()

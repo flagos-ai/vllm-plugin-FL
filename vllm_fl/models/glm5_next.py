@@ -646,7 +646,7 @@ class Glm5NextMLAAttention(DeepseekV2MLAAttention):
         original_has_deep_gemm = None
         mla_attention_module = None
         original_get_prefill_backend = None
-        if current_platform.is_cuda() and not use_nvidia_reference():
+        if not use_nvidia_reference():
             from vllm.model_executor.layers import sparse_attn_indexer
             from vllm.model_executor.layers.attention import (
                 mla_attention as mla_attention_module,

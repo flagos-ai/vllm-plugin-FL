@@ -634,8 +634,12 @@ def kpool_decode_update_and_maybe_write_cache_batched(
                 continue
             kpool_compress_and_write_cache(
                 kv_cache,
-                tail_kv_cache[tail_block, 0].unsqueeze(0),
-                tail_kv_cache[tail_block, 1].unsqueeze(0),
+                tail_kv_cache[
+                    tail_block, 0, tail_offset - pool_size + 1 : tail_offset + 1
+                ].unsqueeze(0),
+                tail_kv_cache[
+                    tail_block, 1, tail_offset - pool_size + 1 : tail_offset + 1
+                ].unsqueeze(0),
                 ape,
                 torch.tensor([cache_loc], dtype=torch.int64, device=key.device),
                 pool_size,

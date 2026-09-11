@@ -566,6 +566,11 @@ class Glm5NextIndexerBackend:
         )
 
     def paged_mqa_logits(self, *args, **kwargs) -> torch.Tensor:
+        if getattr(current_platform, "vendor_name", "") == "metax":
+            logger.warning_once(
+                "FlagGems paged-MQA logits disabled on MetaX; using PyTorch fallback"
+            )
+            return _torch_paged_mqa_logits(*args, **kwargs)
         if self.is_nvidia:
             from vllm.utils.deep_gemm import fp8_fp4_paged_mqa_logits
 
@@ -635,6 +640,17 @@ class Glm5NextIndexerBackend:
         stride1: int,
         top_k: int,
     ) -> None:
+        if getattr(current_platform, "vendor_name", "") == "metax":
+            logger.warning_once(
+                "FlagGems top-k decode disabled on MetaX; using PyTorch fallback"
+            )
+            ends = (
+                seq_lens.reshape(-1)[:num_rows]
+                if seq_lens.ndim == 2
+                else seq_lens.repeat_interleave(next_n)[:num_rows]
+            )
+            indices.copy_(_torch_topk(logits, torch.zeros_like(ends), ends, top_k, False))
+            return
         if self.is_nvidia:
             torch.ops._C.top_k_per_row_decode(
                 logits,
