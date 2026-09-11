@@ -58,7 +58,11 @@ def moe_align_block_size_cuda(
     )
 
     if expert_map is not None and not ignore_invalid_experts:
-        expert_ids = expert_map[expert_ids]
+        # Preserve the -1 sentinel. Direct indexing would treat it as Python's
+        # last-element index, routing skipped blocks to rank 7's final expert.
+        valid_experts = expert_ids >= 0
+        mapped_experts = expert_map[expert_ids.clamp_min(0)]
+        expert_ids = torch.where(valid_experts, mapped_experts, -1)
 
     return sorted_ids, expert_ids, num_tokens_post_pad
 
