@@ -78,6 +78,8 @@ Configuration File (YAML):
 
 import os
 
+import torch
+
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
 from .policy import (
@@ -146,6 +148,7 @@ def resolve_op(op_name: str):
 # Fast-path opt-out: set VLLM_FL_OP_FAST_PATH=0 to disable per-op fn caching
 # in hot OOT layers and route every call back through OpManager.call.
 _OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
+_CACHED_OPS = []
 
 
 class CachedOp:
@@ -168,6 +171,7 @@ class CachedOp:
     __slots__ = (
         "_op_name",
         "_impl",
+        "_frozen",
         "_use_manager_call",
         "_manager_id",
         "_manager_epoch",
@@ -177,12 +181,19 @@ class CachedOp:
     def __init__(self, op_name: str) -> None:
         self._op_name = op_name
         self._impl = None
+        self._frozen = False
         self._use_manager_call = False
         self._manager_id = -1
         self._manager_epoch = -1
         self._policy_epoch = -1
+        _CACHED_OPS.append(self)
 
     def __call__(self, *args, **kwargs):
+        # Model construction prewarms and freezes CachedOps before Dynamo
+        # capture. During tracing, expose only the selected kernel call.
+        if self._frozen and torch.compiler.is_compiling():
+            return self._impl.fn(*args, **kwargs)
+
         mgr = get_default_manager()
 
         if not _OP_FAST_PATH_ENABLED:
@@ -194,12 +205,14 @@ class CachedOp:
         manager_epoch = mgr.policy_epoch
         manager_id = id(mgr)
         policy_epoch = get_policy_epoch()
-        if (
+        cache_invalid = (
             self._manager_id != manager_id
             or self._manager_epoch != manager_epoch
             or self._policy_epoch != policy_epoch
-        ):
+        )
+        if cache_invalid:
             self._impl = None
+            self._frozen = False
             self._use_manager_call = False
 
         if self._use_manager_call:
@@ -229,6 +242,29 @@ class CachedOp:
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)
+
+
+def prewarm_cached_ops() -> int:
+    """Resolve loaded CachedOps before torch.compile graph capture."""
+    mgr = get_default_manager()
+    manager_id = id(mgr)
+    policy_epoch = get_policy_epoch()
+    resolved = 0
+    for cached in tuple(_CACHED_OPS):
+        try:
+            impl = mgr._resolve_impl(cached._op_name)
+            mgr._record_first_use(cached._op_name, impl)
+            cached._impl = impl
+            cached._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
+            cached._use_manager_call = False
+            cached._manager_id = manager_id
+            cached._manager_epoch = mgr.policy_epoch
+            cached._policy_epoch = policy_epoch
+            resolved += 1
+        except Exception:
+            # Some optional ops are unavailable on the active platform.
+            continue
+    return resolved
 
 
 __all__ = [

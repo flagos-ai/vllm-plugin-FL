@@ -242,7 +242,7 @@ class WorkerFL(WorkerBase):
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
 
-            # Get whitelist and blacklist from environment variables
+            # Get the effective model/platform or environment configuration.
             whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
             # Only rank 0 records the oplist to avoid file truncation and

@@ -27,6 +27,10 @@ from vllm.v1.worker.workspace import current_workspace_manager
 
 from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
 from vllm_fl.dispatch import CachedOp
+from vllm_fl.ops.deepseek_v4_int8_indexer import (
+    int8_mqa_logits,
+    int8_paged_mqa_logits,
+)
 
 _indexer_k_quant_and_cache = CachedOp("indexer_k_quant_and_cache")
 _cp_gather_indexer_k_quant_cache = CachedOp("cp_gather_indexer_k_quant_cache")
@@ -48,6 +52,7 @@ def _gather_workspace_shapes(
     head_dim: int,
     fp8_dtype: torch.dtype,
     use_fp4_cache: bool,
+    use_int8_cache: bool = False,
 ) -> tuple[tuple[tuple[int, int], torch.dtype], tuple[tuple[int, int], torch.dtype]]:
     """Return ((values_shape, values_dtype), (scales_shape, scales_dtype)) for
     the K-gather workspace. FP8 path: (T, head_dim) fp8 + (T, 4) uint8 fp32
@@ -57,6 +62,11 @@ def _gather_workspace_shapes(
         return (
             ((total_seq_lens, head_dim // 2), torch.uint8),
             ((total_seq_lens, head_dim // MXFP4_BLOCK_SIZE), torch.uint8),
+        )
+    if use_int8_cache:
+        return (
+            ((total_seq_lens, head_dim), torch.int8),
+            ((total_seq_lens, 4), torch.uint8),
         )
     return (
         ((total_seq_lens, head_dim), fp8_dtype),
@@ -106,12 +116,17 @@ def sparse_attn_indexer_fl(
     attn_metadata = get_forward_context().attn_metadata
     fp8_dtype = current_platform.fp8_dtype()
     k_cache_prefix = _resolve_layer_name(k_cache_prefix)
+    use_int8_cache = q_quant.dtype == torch.int8
 
     # assert isinstance(attn_metadata, dict)
     if not isinstance(attn_metadata, dict):
         # Reserve workspace for indexer during profiling run
         values_spec, scales_spec = _gather_workspace_shapes(
-            total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
+            total_seq_lens,
+            head_dim,
+            fp8_dtype,
+            use_fp4_cache,
+            use_int8_cache,
         )
         current_workspace_manager().get_simultaneous(
             values_spec,
@@ -188,7 +203,11 @@ def sparse_attn_indexer_fl(
         # scales) based on use_fp4_cache.
         workspace_manager = current_workspace_manager()
         values_spec, scales_spec = _gather_workspace_shapes(
-            total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
+            total_seq_lens,
+            head_dim,
+            fp8_dtype,
+            use_fp4_cache,
+            use_int8_cache,
         )
         k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
             values_spec,
@@ -223,16 +242,25 @@ def sparse_attn_indexer_fl(
                 q_slice_cast = q_slice
                 k_quant_cast = k_quant
                 k_scale_cast = k_scale.view(torch.float32).squeeze(-1)
-                
-            ### TODO(lms) replace
-            logits = fp8_fp4_mqa_logits(
-                (q_slice_cast, q_scale_slice),
-                (k_quant_cast, k_scale_cast),
-                weights[chunk.token_start : chunk.token_end],
-                chunk.cu_seqlen_ks,
-                chunk.cu_seqlen_ke,
-                clean_logits=False,
-            )
+
+            if use_int8_cache:
+                logits = int8_mqa_logits(
+                    q_slice_cast,
+                    k_quant_cast,
+                    k_scale_cast,
+                    weights[chunk.token_start : chunk.token_end],
+                    chunk.cu_seqlen_ks,
+                    chunk.cu_seqlen_ke,
+                )
+            else:
+                logits = fp8_fp4_mqa_logits(
+                    (q_slice_cast, q_scale_slice),
+                    (k_quant_cast, k_scale_cast),
+                    weights[chunk.token_start : chunk.token_end],
+                    chunk.cu_seqlen_ks,
+                    chunk.cu_seqlen_ke,
+                    clean_logits=False,
+                )
             num_rows = logits.shape[0]
 
             topk_indices = topk_indices_buffer[
@@ -253,7 +281,10 @@ def sparse_attn_indexer_fl(
     if has_decode:
         decode_metadata = attn_metadata_narrowed.decode
         assert decode_metadata is not None
-        kv_cache = kv_cache_as_quant_view(kv_cache, head_dim, use_fp4_cache)
+        if not use_int8_cache:
+            kv_cache = kv_cache_as_quant_view(
+                kv_cache, head_dim, use_fp4_cache
+            )
         decode_lens = decode_metadata.decode_lens
         if decode_metadata.requires_padding:
             # pad in edge case where we have short chunked prefill length <
@@ -274,7 +305,9 @@ def sparse_attn_indexer_fl(
                 )
             else:
                 padded_q_quant_decode_tokens = _pack_seq_triton(
-                    q_quant[:num_decode_tokens], decode_lens
+                    q_quant[:num_decode_tokens],
+                    decode_lens,
+                    pad_value=0 if use_int8_cache else -float("inf"),
                 )
                 padded_q_scale = None
         else:
@@ -301,17 +334,26 @@ def sparse_attn_indexer_fl(
             else padded_q_quant_decode_tokens
         )
 
-        ### TODO(lms) replace
-        logits = fp8_fp4_paged_mqa_logits(
-            (padded_q_quant_cast, padded_q_scale),
-            kv_cache,
-            weights[:num_padded_tokens],
-            seq_lens,
-            decode_metadata.block_table,
-            decode_metadata.schedule_metadata,
-            max_model_len=max_model_len,
-            clean_logits=False,
-        )
+        if use_int8_cache:
+            logits = int8_paged_mqa_logits(
+                padded_q_quant_decode_tokens,
+                kv_cache,
+                weights[:num_padded_tokens],
+                seq_lens,
+                decode_metadata.block_table,
+                max_model_len=max_model_len,
+            )
+        else:
+            logits = fp8_fp4_paged_mqa_logits(
+                (padded_q_quant_cast, padded_q_scale),
+                kv_cache,
+                weights[:num_padded_tokens],
+                seq_lens,
+                decode_metadata.block_table,
+                decode_metadata.schedule_metadata,
+                max_model_len=max_model_len,
+                clean_logits=False,
+            )
         num_rows = logits.shape[0]
         topk_indices = topk_indices_buffer[:num_padded_tokens, :topk_tokens]
         _top_k_per_row_decode(

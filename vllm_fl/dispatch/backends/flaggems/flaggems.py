@@ -78,6 +78,28 @@ class FlagGemsBackend(Backend):
 
         return fused_marlin_moe(*args, **kwargs)
 
+    def cutlass_scaled_mm(
+        self,
+        a: torch.Tensor,
+        b: torch.Tensor,
+        scale_a: torch.Tensor,
+        scale_b: torch.Tensor,
+        out_dtype: torch.dtype,
+        bias: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Run FlagGems' CUTLASS scaled GEMM."""
+        import flag_gems
+
+        target_shape = (*a.shape[:-1], b.shape[1])
+        a = a.view(-1, a.shape[-1])
+        out = torch.empty(
+            (a.shape[0], b.shape[1]),
+            dtype=out_dtype,
+            device=a.device,
+        )
+        flag_gems.cutlass_scaled_mm(out, a, b, scale_a, scale_b, bias)
+        return out.view(*target_shape)
+
     def router_gemm_bf16_fp32(
         self, x: torch.Tensor, weight: torch.Tensor
     ) -> torch.Tensor:
