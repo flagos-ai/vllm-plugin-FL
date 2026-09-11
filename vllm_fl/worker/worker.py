@@ -115,7 +115,6 @@ if TYPE_CHECKING:
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 
-
 def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
     logger.debug("=== ENVIRONMENT VARIABLES ===")
@@ -163,9 +162,7 @@ def _install_native_runner_io_methods(model_runner: Any) -> None:
     """
     for method_name in _NATIVE_RUNNER_IO_METHODS:
         bound_method = getattr(model_runner, method_name, None)
-        if bound_method is None or getattr(
-            bound_method, "_vllm_fl_managed_io", False
-        ):
+        if bound_method is None or getattr(bound_method, "_vllm_fl_managed_io", False):
             continue
 
         method = getattr(bound_method, "__func__", bound_method)
@@ -673,9 +670,13 @@ class WorkerFL(WorkerBase):
         if current_platform.device_type == "txda":
             # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
             # e.g., 20 GiB or similar default cache memory size.
-            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
-            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
-                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
+            fallback_val = int(
+                os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024)
+            )
+            logger.info(
+                "txda platform detected. Skipping memory profiling to avoid OOM. "
+                f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB."
+            )
             return fallback_val
 
         maybe_apply_startup_plan(self)

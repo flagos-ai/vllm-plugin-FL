@@ -300,7 +300,11 @@ class TritonExpertsFL(TritonExperts):
 
             output.copy_(
                 grouped_experts(
-                    hidden_states, w1, w2, topk_weights, topk_ids,
+                    hidden_states,
+                    w1,
+                    w2,
+                    topk_weights,
+                    topk_ids,
                     activation=activation.value,
                     expert_map=expert_map,
                     apply_router_weight_on_input=apply_router_weight_on_input,

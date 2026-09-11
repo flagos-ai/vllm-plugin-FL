@@ -6,9 +6,8 @@
 
 import dataclasses
 import weakref
-from collections import Counter
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from typing import Any, ClassVar
 from unittest.mock import patch
 
@@ -35,6 +34,7 @@ logger = init_logger(__name__)
 def weak_ref_tensors(tensor: Any) -> Any:
     try:
         from vllm.utils.torch_utils import weak_ref_tensors
+
         return weak_ref_tensors(tensor)
     except Exception:
         return tensor
@@ -90,11 +90,13 @@ class GraphWrapper:
         for instance in list(cls._all_instances):
             instance.clear_graphs()
 
-    def __init__(self,
-                 runnable: Callable,
-                 vllm_config: VllmConfig,
-                 runtime_mode: CUDAGraphMode,
-                 cudagraph_options: GraphOptions | None = None):
+    def __init__(
+        self,
+        runnable: Callable,
+        vllm_config: VllmConfig,
+        runtime_mode: CUDAGraphMode,
+        cudagraph_options: GraphOptions | None = None,
+    ):
         self.runnable = runnable
         self.vllm_config = vllm_config
         self.runtime_mode = runtime_mode
@@ -223,10 +225,8 @@ class GraphWrapper:
                     stream=current_stream(),
                 ):
                     output = self.runnable(*args, **kwargs)
-                    try:
+                    with suppress(ImportError, RuntimeError, UnboundLocalError):
                         get_offloader().join_after_forward()
-                    except (ImportError, RuntimeError, UnboundLocalError):
-                        pass
                     if self.cudagraph_options.weak_ref_output:
                         output = weak_ref_tensors(output)
 
@@ -254,6 +254,7 @@ class GraphWrapper:
         # Sync offloader before replay if available
         try:
             from vllm.model_executor.offloader.base import get_offloader
+
             get_offloader().sync_prev_onload()
         except (ImportError, RuntimeError):
             pass

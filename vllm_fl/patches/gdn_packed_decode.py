@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 
 _TARGET_MODULE = "vllm.third_party.flash_linear_attention.ops.fused_recurrent"
 _TARGET_NAME = "fused_recurrent_gated_delta_rule_packed_decode_kernel"
-_VULNERABLE_BETA_EXPRESSION = (
-    "tl.sigmoid(b_val).to(b.dtype.element_ty).to(tl.float32)"
-)
+_VULNERABLE_BETA_EXPRESSION = "tl.sigmoid(b_val).to(b.dtype.element_ty).to(tl.float32)"
 
 
 @triton.jit

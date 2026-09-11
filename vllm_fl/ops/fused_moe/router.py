@@ -56,9 +56,7 @@ def _sqrtsoftplus_topk(
             input_tokens = input_tokens.to(hash_indices_table.dtype)
         topk_ids = hash_indices_table[input_tokens]
     else:
-        topk_ids = torch.topk(
-            scores_for_choice, k=topk, dim=-1, sorted=False
-        ).indices
+        topk_ids = torch.topk(scores_for_choice, k=topk, dim=-1, sorted=False).indices
 
     topk_weights = scores.gather(1, topk_ids.long())
     if renormalize:
@@ -69,6 +67,7 @@ def _sqrtsoftplus_topk(
     topk_weights = topk_weights * routed_scaling_factor
     output_dtype = torch.int32 if indices_type is None else indices_type
     return topk_weights.float(), topk_ids.to(output_dtype)
+
 
 def fused_topk(
     hidden_states: torch.Tensor,
@@ -82,7 +81,10 @@ def fused_topk(
 
     # The FL kernel currently implements the unpadded softmax path. Preserve
     # v0.28.0 padding and sigmoid semantics by delegating those cases upstream.
-    if scoring_func != "softmax" or _get_padding_mask(hidden_states.shape[0]) is not None:
+    if (
+        scoring_func != "softmax"
+        or _get_padding_mask(hidden_states.shape[0]) is not None
+    ):
         return upstream_fused_topk(
             hidden_states=hidden_states,
             gating_output=gating_output,
@@ -118,6 +120,7 @@ def fused_topk(
 
     return topk_weights, topk_ids, token_expert_indices
 
+
 class FusedTopKRouterFL(FusedTopKRouter):
     """FL router that routes topk_softmax through call_op."""
 
@@ -152,9 +155,7 @@ def _fl_grouped_topk(
     e_score_correction_bias: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """grouped_topk that routes ops.grouped_topk through call_op."""
-    assert hidden_states.size(0) == gating_output.size(0), (
-        "Number of tokens mismatch"
-    )
+    assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
     if e_score_correction_bias is not None:
         if scoring_func == "sigmoid":
@@ -197,9 +198,7 @@ def _fl_grouped_topk(
 
     scores_grouped = scores.view(-1, num_expert_group, group_size)
     group_scores = scores_grouped.amax(dim=-1)
-    _, selected_groups = torch.topk(
-        group_scores, k=topk_group, dim=-1, sorted=False
-    )
+    _, selected_groups = torch.topk(group_scores, k=topk_group, dim=-1, sorted=False)
     mask = torch.zeros_like(scores)
     for i in range(topk_group):
         group_idx = selected_groups[:, i]
@@ -208,9 +207,7 @@ def _fl_grouped_topk(
             mask.scatter_(1, (start + j).unsqueeze(1), 1.0)
 
     scores = scores * mask
-    topk_weights, topk_ids = torch.topk(
-        scores, k=topk, dim=-1, sorted=False
-    )
+    topk_weights, topk_ids = torch.topk(scores, k=topk, dim=-1, sorted=False)
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
     if routed_scaling_factor != 1.0:
@@ -349,6 +346,7 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
             topk_weights = torch.cat([topk_weights, shared_weights], dim=-1)
 
         return topk_weights, topk_ids
+
 
 def replace_router_with_fl() -> None:
     """Monkey-patch upstream router classes to their FL subclasses (in-place)."""
