@@ -167,6 +167,16 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),
+        # Native vLLM implementation is the correctness reference for the
+        # packed Marlin layout.
+        OpImpl(
+            op_name="fused_marlin_moe",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.fused_marlin_moe, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
     ]
 
     registry.register_many(impls)

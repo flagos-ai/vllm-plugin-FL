@@ -333,6 +333,11 @@ class FlagGemsBackend(Backend):
 
         moe_sum_flaggems(inp, out)
 
+    def fused_marlin_moe(self, *args, **kwargs):
+        from .impl.fused_moe import fused_marlin_moe_flaggems
+
+        return fused_marlin_moe_flaggems(*args, **kwargs)
+
     def topk_softmax(
         self,
         topk_weights,

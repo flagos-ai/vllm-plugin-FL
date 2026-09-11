@@ -164,6 +164,15 @@ def register_builtins(registry) -> None:
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
+        # Fused Marlin MoE
+        OpImpl(
+            op_name="fused_marlin_moe",
+            impl_id="vendor.cuda",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.fused_marlin_moe, is_avail),
+            vendor="cuda",
+            priority=BackendPriority.VENDOR,
+        ),
         # topk softmax
         OpImpl(
             op_name="topk_softmax",

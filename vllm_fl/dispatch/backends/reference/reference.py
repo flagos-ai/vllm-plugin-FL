@@ -333,3 +333,10 @@ class ReferenceBackend(Backend):
             block_shape=block_shape,
             B_bias=B_bias,
         )
+
+    def fused_marlin_moe(self, *args, **kwargs):
+        from vllm.model_executor.layers.fused_moe.experts import marlin_moe
+
+        fn = marlin_moe.fused_marlin_moe
+        native = getattr(fn, "_vllm_fl_original", fn)
+        return native(*args, **kwargs)

@@ -158,11 +158,13 @@ def register_model():
     # worker processes, so all runtime compatibility hooks must be idempotent.
     _register_compilation_splitting_ops()
 
+    from vllm_fl.patches.fused_marlin_moe import patch_vllm_fused_marlin_moe
     from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
 
     apply_qwen3_5_text_patches()
     patch_vllm_moe_sum()
+    patch_vllm_fused_marlin_moe()
 
     _register_flagcx_connector()
 

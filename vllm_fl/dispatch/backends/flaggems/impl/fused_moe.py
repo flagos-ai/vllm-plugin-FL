@@ -11,6 +11,23 @@ from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
 
+def fused_marlin_moe_flaggems(*args, **kwargs):
+    """Call FlagGems' vLLM-compatible fused Marlin MoE implementation."""
+    # FlagGems PR #5437 follows the vLLM API except for the newer GLM-4
+    # activation coefficients. Falling back is safer than silently dropping a
+    # non-default coefficient for models that use them.
+    gemm1_alpha = kwargs.pop("gemm1_alpha", 1.0)
+    gemm1_beta = kwargs.pop("gemm1_beta", 0.0)
+    if gemm1_alpha != 1.0 or gemm1_beta != 0.0:
+        raise NotImplementedError(
+            "FlagGems fused_marlin_moe does not support gemm1_alpha/beta"
+        )
+
+    from flag_gems.fused.fused_marlin_moe import fused_marlin_moe
+
+    return fused_marlin_moe(*args, **kwargs)
+
+
 def moe_align_block_size_flaggems(
     topk_ids: torch.Tensor,
     block_size: int,

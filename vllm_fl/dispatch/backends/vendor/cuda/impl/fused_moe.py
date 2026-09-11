@@ -10,6 +10,14 @@ from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
 
+def fused_marlin_moe_cuda(*args, **kwargs):
+    from vllm.model_executor.layers.fused_moe.experts import marlin_moe
+
+    fn = marlin_moe.fused_marlin_moe
+    native = getattr(fn, "_vllm_fl_original", fn)
+    return native(*args, **kwargs)
+
+
 def moe_align_block_size_cuda(
     topk_ids: torch.Tensor,
     block_size: int,

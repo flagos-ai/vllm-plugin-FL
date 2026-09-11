@@ -189,6 +189,15 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        # Fused Marlin MoE (W4A16/W8A16)
+        OpImpl(
+            op_name="fused_marlin_moe",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.fused_marlin_moe, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # topk softmax
         OpImpl(
             op_name="topk_softmax",
