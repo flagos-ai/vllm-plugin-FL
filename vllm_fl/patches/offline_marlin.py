@@ -92,6 +92,7 @@ def patch_offline_marlin_loader() -> bool:
     from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16_marlin import (  # noqa: E501
         CompressedTensorsWNA16MarlinMoEMethod,
     )
+    from vllm.model_executor.model_loader import base_loader
 
     current_process = CompressedTensorsWNA16MarlinMoEMethod.process_weights_after_loading
     if getattr(current_process, "_vllm_fl_offline_marlin", False):
@@ -120,6 +121,21 @@ def patch_offline_marlin_loader() -> bool:
     CompressedTensorsWNA16MarlinMoEMethod.process_weights_after_loading = (
         process_weights_after_loading
     )
+
+    current_model_process = base_loader.process_weights_after_loading
+
+    @wraps(current_model_process)
+    def process_model_weights(model, model_config, target_device):
+        if offline_marlin_enabled():
+            for name, module in model.named_modules():
+                quant_method = getattr(module, "quant_method", None)
+                if isinstance(quant_method, CompressedTensorsWNA16MarlinMoEMethod):
+                    quant_method._vllm_fl_layer_name = name
+        return current_model_process(model, model_config, target_device)
+
+    process_model_weights._vllm_fl_offline_marlin = True
+    process_model_weights._vllm_fl_original = current_model_process
+    base_loader.process_weights_after_loading = process_model_weights
     logger.info("Enabled opt-in offline Marlin MoE sidecar loading")
     return True
 
