@@ -36,12 +36,12 @@ METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
 METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
-MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-registry.mthreads.com/mcconline/inference/vllm:v0.20.2-ph1-4.3.5-torch2.7.1-v1.1.0}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64:20260804}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
-MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.20.2}"
+MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.24.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
-MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.7.1}"
-MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.0.0}"
+MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
+MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.3.2.post1.dev22+gb1f939eb5}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.20.2}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3e6528cf04f5f964a7b0fa6628de6f0410dbfd02}"
@@ -194,8 +194,8 @@ VERSIONS (override via environment variables):
     METAX_VLLM_VERSION   vLLM version installed in empty mode (default: ${METAX_VLLM_VERSION})
   MUSA:
     MUSA_BASE_IMAGE      Moore Threads base image (default: ${MUSA_BASE_IMAGE})
-    MUSA_VERSION         MUSA version used in image tag (default: ${MUSA_VERSION})
-    MUSA_VLLM_VERSION    vLLM empty-mode version (default: ${MUSA_VLLM_VERSION})
+    MUSA_VERSION         MUSA version in the FlagOS stack (default: ${MUSA_VERSION})
+    MUSA_VLLM_VERSION    vLLM version in base image (default: ${MUSA_VLLM_VERSION})
     MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
     MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
     MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
@@ -368,12 +368,17 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
 elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
     VLLM_VERSION="${MUSA_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
     BUILD_ARGS+=(
         --build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${MUSA_VLLM_VERSION}"
+        --build-arg "TORCH_VERSION=${MUSA_TORCH_VERSION}"
         --build-arg "FLAGGEMS_VERSION=${MUSA_FLAGGEMS_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="musa${MUSA_VERSION}-vllm${VLLM_VERSION}-torch${MUSA_TORCH_VERSION}-py${MUSA_PYTHON_VERSION}-${TARGET}"
+        IMAGE_TAG="v${MUSA_VLLM_VERSION}-musa-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     PYTHON_VERSION="${ENFLAME_PYTHON_VERSION}"
