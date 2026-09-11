@@ -8,17 +8,10 @@ def test_offline_marlin_env(monkeypatch):
     assert offline_marlin.offline_marlin_enabled() is True
 
 
-def test_checkpoint_key_mapping_only_changes_routed_marlin_aliases():
-    prefix = "model.layers.0.ffn.experts.routed_experts"
-    assert offline_marlin._checkpoint_key_to_parameter(
-        f"{prefix}.w13_weight"
-    ) == f"{prefix}.w13_weight_packed"
-    assert offline_marlin._checkpoint_key_to_parameter(
-        f"{prefix}.w2_weight"
-    ) == f"{prefix}.w2_weight_packed"
-    assert (
-        offline_marlin._checkpoint_key_to_parameter(
-            "model.layers.0.ffn.shared_experts.w2_weight"
-        )
-        == "model.layers.0.ffn.shared_experts.w2_weight"
-    )
+def test_layer_checkpoint_prefix_accepts_model_prefix():
+    key = "model.layers.0.ffn.experts.routed_experts.w13_weight"
+    index = {key: "rank-0.safetensors"}
+
+    assert offline_marlin._layer_checkpoint_prefix(
+        "layers.0.ffn.experts.routed_experts", index
+    ) == "model.layers.0.ffn.experts.routed_experts"
