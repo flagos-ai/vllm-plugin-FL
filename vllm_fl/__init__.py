@@ -161,10 +161,12 @@ def register_model():
     from vllm_fl.patches.fused_marlin_moe import patch_vllm_fused_marlin_moe
     from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
+    from vllm_fl.patches.sharded_state import patch_vllm_sharded_state_filter
 
     apply_qwen3_5_text_patches()
     patch_vllm_moe_sum()
     patch_vllm_fused_marlin_moe()
+    patch_vllm_sharded_state_filter()
 
     _register_flagcx_connector()
 
