@@ -11,7 +11,15 @@ logger = logging.getLogger(__name__)
 _OFFLINE_MARLIN_ENV = "VLLM_FL_OFFLINE_MARLIN"
 _OFFLINE_MARLIN_PATH_ENV = "VLLM_FL_OFFLINE_MARLIN_PATH"
 _FLAGGEMS_FUSED_MARLIN_ENV = "VLLM_FL_FLAGGEMS_FUSED_MARLIN"
+_FLAGGEMS_FUSED_MARLIN_PATH_ENV = "VLLM_FL_FLAGGEMS_FUSED_MARLIN_PATH"
 _KEY_INDEX: dict[tuple[str, int], dict[str, str]] = {}
+_FLAGGEMS_KEY_INDEX: dict[tuple[str, int], dict[str, str]] = {}
+_FLAGGEMS_TENSOR_NAMES = (
+    "w13_weight_packed",
+    "w2_weight_packed",
+    "w13_weight_scale",
+    "w2_weight_scale",
+)
 
 
 def offline_marlin_enabled() -> bool:
@@ -52,10 +60,11 @@ def _prepare_flaggems_packed_tensors(layer) -> dict[str, object]:
     }
 
 
-def _install_flaggems_packed_tensors(method, layer) -> None:
+def _install_flaggems_packed_tensors(method, layer, tensors=None) -> None:
     from vllm.model_executor.layers.quantization.utils import replace_parameter
 
-    tensors = getattr(method, "_vllm_fl_flaggems_packed_tensors", None)
+    if tensors is None:
+        tensors = getattr(method, "_vllm_fl_flaggems_packed_tensors", None)
     if tensors is None:
         raise ValueError("Missing pre-repack tensors for FlagGems fused Marlin MoE")
     for name, tensor in tensors.items():
@@ -73,6 +82,99 @@ def _install_flaggems_packed_tensors(method, layer) -> None:
     experts.w13_g_idx_sort_indices = None
     experts.w2_g_idx_sort_indices = None
     experts.input_dtype = None
+
+
+def _flaggems_rank_files(path: str, rank: int) -> list[str]:
+    return sorted(
+        glob.glob(os.path.join(path, f"model-rank-{rank}-part-*.safetensors"))
+    )
+
+
+def _flaggems_key_index(path: str, rank: int) -> dict[str, str]:
+    cache_key = (path, rank)
+    if cache_key in _FLAGGEMS_KEY_INDEX:
+        return _FLAGGEMS_KEY_INDEX[cache_key]
+
+    from safetensors import safe_open
+
+    index: dict[str, str] = {}
+    for filename in _flaggems_rank_files(path, rank):
+        with safe_open(filename, framework="pt") as handle:
+            index.update((key, filename) for key in handle.keys())
+    _FLAGGEMS_KEY_INDEX[cache_key] = index
+    return index
+
+
+def _flaggems_sidecar_complete(model, method_type, path: str, rank: int) -> bool:
+    index = _flaggems_key_index(path, rank)
+    modules = [
+        name
+        for name, module in model.named_modules()
+        if isinstance(getattr(module, "quant_method", None), method_type)
+    ]
+    return bool(modules) and all(
+        f"{name}.{tensor_name}" in index
+        for name in modules
+        for tensor_name in _FLAGGEMS_TENSOR_NAMES
+    )
+
+
+def _load_flaggems_packed_tensors(method, layer) -> dict[str, object]:
+    from safetensors import safe_open
+    from vllm.distributed import get_tensor_model_parallel_rank
+
+    path = os.environ.get(_FLAGGEMS_FUSED_MARLIN_PATH_ENV)
+    if not path:
+        raise ValueError(f"{_FLAGGEMS_FUSED_MARLIN_PATH_ENV} is not configured")
+    layer_name = getattr(method, "_vllm_fl_layer_name", None)
+    if not layer_name:
+        raise ValueError("Missing layer name for FlagGems Marlin sidecar restore")
+
+    rank = get_tensor_model_parallel_rank()
+    index = _flaggems_key_index(path, rank)
+    device = layer.w13_weight_packed.device
+    tensors = {}
+    for tensor_name in _FLAGGEMS_TENSOR_NAMES:
+        key = f"{layer_name}.{tensor_name}"
+        filename = index.get(key)
+        if filename is None:
+            raise KeyError(f"Missing FlagGems Marlin sidecar tensor {key}")
+        with safe_open(filename, framework="pt") as handle:
+            tensor = handle.get_tensor(key)
+        tensors[tensor_name] = tensor.to(device=device, non_blocking=False)
+    return tensors
+
+
+def _export_flaggems_packed_tensors(model, method_type, path: str, rank: int) -> None:
+    """Persist one rank's FlagGems layout in bounded, layer-sized files."""
+    from safetensors.torch import save_file
+
+    os.makedirs(path, exist_ok=True)
+    part = 0
+    for name, module in model.named_modules():
+        if not isinstance(getattr(module, "quant_method", None), method_type):
+            continue
+        tensors = {
+            f"{name}.{tensor_name}": getattr(module, tensor_name)
+            .detach()
+            .to(device="cpu")
+            .contiguous()
+            for tensor_name in _FLAGGEMS_TENSOR_NAMES
+        }
+        filename = os.path.join(
+            path, f"model-rank-{rank}-part-{part:05d}.safetensors"
+        )
+        temporary = f"{filename}.tmp"
+        save_file(tensors, temporary, metadata={"format": "flaggems-fused-marlin-v1"})
+        os.replace(temporary, filename)
+        part += 1
+    _FLAGGEMS_KEY_INDEX.pop((path, rank), None)
+    logger.info(
+        "Exported %d FlagGems fused-Marlin MoE layers for rank %d to %s",
+        part,
+        rank,
+        path,
+    )
 
 
 def _rank_key_index(path: str, rank: int) -> dict[str, str]:
@@ -166,7 +268,11 @@ def patch_offline_marlin_loader() -> bool:
     def process_weights_after_loading(self, layer):
         result = current_process(self, layer)
         if flaggems_fused_marlin_enabled():
-            _install_flaggems_packed_tensors(self, layer)
+            if getattr(self, "_vllm_fl_flaggems_sidecar_ready", False):
+                tensors = _load_flaggems_packed_tensors(self, layer)
+            else:
+                tensors = None
+            _install_flaggems_packed_tensors(self, layer, tensors)
         elif offline_marlin_enabled():
             _restore_prepacked_marlin(self, layer)
         return result
@@ -183,16 +289,40 @@ def patch_offline_marlin_loader() -> bool:
     @wraps(current_model_process)
     def process_model_weights(model, model_config, target_device):
         use_flaggems_layout = flaggems_fused_marlin_enabled()
+        flaggems_path = os.environ.get(_FLAGGEMS_FUSED_MARLIN_PATH_ENV)
+        flaggems_sidecar_ready = False
+        rank = None
+        if use_flaggems_layout and flaggems_path:
+            from vllm.distributed import get_tensor_model_parallel_rank
+
+            rank = get_tensor_model_parallel_rank()
+            flaggems_sidecar_ready = _flaggems_sidecar_complete(
+                model,
+                CompressedTensorsWNA16MarlinMoEMethod,
+                flaggems_path,
+                rank,
+            )
         if offline_marlin_enabled() or use_flaggems_layout:
             for name, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
                 if isinstance(quant_method, CompressedTensorsWNA16MarlinMoEMethod):
                     quant_method._vllm_fl_layer_name = name
-                    if use_flaggems_layout:
+                    quant_method._vllm_fl_flaggems_sidecar_ready = (
+                        flaggems_sidecar_ready
+                    )
+                    if use_flaggems_layout and not flaggems_sidecar_ready:
                         quant_method._vllm_fl_flaggems_packed_tensors = (
                             _prepare_flaggems_packed_tensors(module)
                         )
-        return current_model_process(model, model_config, target_device)
+        result = current_model_process(model, model_config, target_device)
+        if use_flaggems_layout and flaggems_path and not flaggems_sidecar_ready:
+            _export_flaggems_packed_tensors(
+                model,
+                CompressedTensorsWNA16MarlinMoEMethod,
+                flaggems_path,
+                rank,
+            )
+        return result
 
     process_model_weights._vllm_fl_offline_marlin = True
     process_model_weights._vllm_fl_original = current_model_process

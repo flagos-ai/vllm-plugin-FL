@@ -10,6 +10,7 @@ export VLLM_USE_BREAKABLE_CUDAGRAPH=0
 # post-repack int32 CUDA-Marlin layout. Preserve that representation across
 # vLLM's framework initialization and dispatch the fused MoE to FlagGems.
 export VLLM_FL_FLAGGEMS_FUSED_MARLIN=1
+export VLLM_FL_FLAGGEMS_FUSED_MARLIN_PATH=/public-nvme/models/DeepSeek-V4-Flash-0731-INT-FlagGems-Marlin-TP8
 export VLLM_FL_OFFLINE_MARLIN=0
 
 vllm serve /public-nvme/models/DeepSeek-V4-Flash-0731-INT \
