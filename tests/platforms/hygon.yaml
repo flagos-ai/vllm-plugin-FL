@@ -39,16 +39,16 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.8
     serve:
+      startup_retries: 360
       extra_engine:
-        enforce_eager: true
-        disable_custom_all_reduce: false
         enable_log_requests: false
         enable_prefix_caching: false
 
 env_defaults:
   GEMS_VENDOR: "hygon"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-  VLLM_FL_FLAGOS_BLACKLIST: "pow_scalar,pow_tensor_scalar,pow_tensor_tensor,pow_tensor_scalar_,pow_tensor_tensor_,cat"
+  VLLM_FL_FLAGOS_BLACKLIST: "cat,slice"
+  TRITON_CACHE_DIR: "/tmp/triton_cache"
 
 bw1000:
   name: "bw1000"

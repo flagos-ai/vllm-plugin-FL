@@ -16,6 +16,7 @@ Supports both text-only and multimodal (audio/image/video) models via the
 ``generate.modality`` field in the YAML config.
 """
 
+import contextlib
 import os
 
 import pytest
@@ -270,8 +271,9 @@ def test_inference(combo: dict) -> None:
     print(f"\n[{_MODEL}/{_CASE}] combo: {combo_desc}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")
 
-    llm = LLM(**llm_kwargs)
+    llm = None
     try:
+        llm = LLM(**llm_kwargs)
         sampling_params = SamplingParams(**gen.sampling)
 
         if gen.modality == "text":
@@ -279,6 +281,14 @@ def test_inference(combo: dict) -> None:
         else:
             _run_multimodal_test(llm, sampling_params)
     finally:
-        del llm
+        if llm is not None:
+            # Explicitly shut down the engine core so that the executor calls
+            # waitpid() on all worker processes before we return.  Relying on
+            # `del llm` alone is not sufficient: Python's GC does not guarantee
+            # that __del__ fires immediately, which leaves worker processes as
+            # zombies parented by init when the test runner exits.
+            with contextlib.suppress(Exception):
+                llm.llm_engine.engine_core.shutdown()
+            del llm
         _prepare_cleanup_for_platform()
         cleanup_dist_env_and_memory()

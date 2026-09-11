@@ -171,8 +171,10 @@ class ServeConfig:
         stream: Whether to test streaming responses (chat endpoint).
         sampling: Sampling parameters (temperature, top_p, etc.) injected
             into the request payload.
-        extra_body: Free-form dict passed as ``extra_body`` to the OpenAI SDK
-            or merged into the request JSON (e.g. top_k, chat_template_kwargs).
+        chat_template_kwargs: Passed as ``chat_template_kwargs`` in the request
+            body (e.g. ``{"enable_thinking": false}`` for Qwen3 thinking mode).
+        extra_body: Free-form dict merged into the request JSON for parameters
+            not covered by explicit fields.
         embedding_input: Input text for ``/v1/embeddings`` endpoint tests.
     """
 
@@ -188,6 +190,7 @@ class ServeConfig:
     startup_retries: int = 60
     stream: bool = False
     sampling: dict[str, Any] = field(default_factory=dict)
+    chat_template_kwargs: dict[str, Any] = field(default_factory=dict)
     extra_body: dict[str, Any] = field(default_factory=dict)
     embedding_input: str = ""
 
@@ -210,6 +213,7 @@ class ServeConfig:
             startup_retries=int(raw.get("startup_retries", 60)),
             stream=raw.get("stream", False),
             sampling=raw.get("sampling", {}),
+            chat_template_kwargs=raw.get("chat_template_kwargs", {}),
             extra_body=raw.get("extra_body", {}),
             embedding_input=raw.get("embedding_input", ""),
         )
