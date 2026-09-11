@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _OFFLINE_MARLIN_ENV = "VLLM_FL_OFFLINE_MARLIN"
 _OFFLINE_MARLIN_PATH_ENV = "VLLM_FL_OFFLINE_MARLIN_PATH"
+_FLAGGEMS_FUSED_MARLIN_ENV = "VLLM_FL_FLAGGEMS_FUSED_MARLIN"
 _KEY_INDEX: dict[tuple[str, int], dict[str, str]] = {}
 
 
@@ -19,6 +20,59 @@ def offline_marlin_enabled() -> bool:
         "true",
         "yes",
     )
+
+
+def flaggems_fused_marlin_enabled() -> bool:
+    """Use PR #5437's GPTQ-packed input contract for Marlin MoE."""
+    return os.environ.get(_FLAGGEMS_FUSED_MARLIN_ENV, "0").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _prepare_flaggems_packed_tensors(layer) -> dict[str, object]:
+    """Convert vLLM's pre-repack tensors to FlagGems' packed layout.
+
+    vLLM creates transposed int32 checkpoint parameters for its Marlin
+    repacker.  FlagGems PR #5437 consumes the same nibbles as uint8 tensors in
+    output-major order.  Preserve that representation before vLLM replaces
+    the parameters with its CUDA-Marlin layout.
+    """
+    import torch
+
+    def packed_u8(value):
+        return value.transpose(1, 2).contiguous().view(torch.uint8)
+
+    return {
+        "w13_weight_packed": packed_u8(layer.w13_weight_packed),
+        "w2_weight_packed": packed_u8(layer.w2_weight_packed),
+        "w13_weight_scale": layer.w13_weight_scale.transpose(1, 2).contiguous(),
+        "w2_weight_scale": layer.w2_weight_scale.transpose(1, 2).contiguous(),
+    }
+
+
+def _install_flaggems_packed_tensors(method, layer) -> None:
+    from vllm.model_executor.layers.quantization.utils import replace_parameter
+
+    tensors = getattr(method, "_vllm_fl_flaggems_packed_tensors", None)
+    if tensors is None:
+        raise ValueError("Missing pre-repack tensors for FlagGems fused Marlin MoE")
+    for name, tensor in tensors.items():
+        replace_parameter(layer, name, tensor)
+    layer.w13_weight = layer.w13_weight_packed
+    layer.w2_weight = layer.w2_weight_packed
+
+    # PR #5437 does not implement activation-order metadata or quantized
+    # activation input.  DSV4's symmetric group-128 checkpoint uses neither;
+    # vLLM still materializes empty Marlin metadata, so remove it from the
+    # already-created expert object.
+    experts = method.moe_kernel.experts
+    experts.w13_g_idx = None
+    experts.w2_g_idx = None
+    experts.w13_g_idx_sort_indices = None
+    experts.w2_g_idx_sort_indices = None
+    experts.input_dtype = None
 
 
 def _rank_key_index(path: str, rank: int) -> dict[str, str]:
@@ -111,7 +165,9 @@ def patch_offline_marlin_loader() -> bool:
     @wraps(current_process)
     def process_weights_after_loading(self, layer):
         result = current_process(self, layer)
-        if offline_marlin_enabled():
+        if flaggems_fused_marlin_enabled():
+            _install_flaggems_packed_tensors(self, layer)
+        elif offline_marlin_enabled():
             _restore_prepacked_marlin(self, layer)
         return result
 
@@ -126,11 +182,16 @@ def patch_offline_marlin_loader() -> bool:
 
     @wraps(current_model_process)
     def process_model_weights(model, model_config, target_device):
-        if offline_marlin_enabled():
+        use_flaggems_layout = flaggems_fused_marlin_enabled()
+        if offline_marlin_enabled() or use_flaggems_layout:
             for name, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
                 if isinstance(quant_method, CompressedTensorsWNA16MarlinMoEMethod):
                     quant_method._vllm_fl_layer_name = name
+                    if use_flaggems_layout:
+                        quant_method._vllm_fl_flaggems_packed_tensors = (
+                            _prepare_flaggems_packed_tensors(module)
+                        )
         return current_model_process(model, model_config, target_device)
 
     process_model_weights._vllm_fl_offline_marlin = True
@@ -140,4 +201,8 @@ def patch_offline_marlin_loader() -> bool:
     return True
 
 
-__all__ = ["offline_marlin_enabled", "patch_offline_marlin_loader"]
+__all__ = [
+    "flaggems_fused_marlin_enabled",
+    "offline_marlin_enabled",
+    "patch_offline_marlin_loader",
+]
