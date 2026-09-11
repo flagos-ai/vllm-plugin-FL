@@ -104,21 +104,22 @@ def validate_usage(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", default="http://localhost:8000")
+    parser.add_argument("--concurrency", type=int, default=64)
+    parser.add_argument("--input-tokens", type=int, default=4096)
+    parser.add_argument("--output-tokens", type=int, default=256)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--prompt-output", type=Path)
     parser.add_argument("--prompt-input", type=Path)
-    parser.add_argument("--responses", required=True, type=Path)
     parser.add_argument("--metrics", required=True, type=Path)
     parser.add_argument("--timeout-seconds", type=float, default=7200)
     args = parser.parse_args()
 
-    config = json.loads(args.config.read_text(encoding="utf-8"))
     model = args.model
-    concurrency = int(config["concurrency"])
-    input_tokens = int(config["input_tokens"])
-    output_tokens = int(config["output_tokens"])
+    concurrency = args.concurrency
+    input_tokens = args.input_tokens
+    output_tokens = args.output_tokens
     if args.prompt_input:
         prompt_tokens = json.loads(args.prompt_input.read_text(encoding="utf-8"))
     else:
@@ -139,15 +140,12 @@ def main() -> None:
         "max_tokens": output_tokens,
         "temperature": 0,
         "ignore_eos": True,
-        "seed": int(config.get("seed", 0)),
+        "seed": args.seed,
     }
     rows, batch_seconds = run_batch(
         args.base_url, request_body, concurrency, args.timeout_seconds
     )
     validate_usage(rows, input_tokens, output_tokens)
-    args.responses.write_text(
-        json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
     latencies = [float(row["client_latency_seconds"]) for row in rows]
     metrics = {
         "model": model,

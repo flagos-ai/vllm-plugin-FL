@@ -1,107 +1,94 @@
-# Runtime Kernel Profiling
+# Runtime Operator Profiling
 
-This workflow profiles one fixed workload only: 64 concurrent requests, 4096
-input tokens, and 256 output tokens per request. It supports graph and eager
-execution with either vLLM-plugin-FL or native vLLM.
+This tool profiles one vLLM serving scenario at a time. It sends one warmup
+batch, starts the vLLM profiler, sends one measured batch, stops the profiler,
+and extracts the rank-0 runtime trace.
 
-The request driver completes one warmup batch before `/start_profile`. Only the
-second batch is inside the profiling window. CUDA Graph construction is not
-profiled. Reports are generated from the rank-0 runtime trace.
+The default workload is fixed in `run_concurrent_requests.py`: 64 concurrent
+requests, 4096 input tokens, and 256 output tokens per request. CUDA Graph
+capture and the warmup batch are outside the profiling window.
 
-## Models
+Run commands from the vllm-plugin-FL repository root.
 
-Model selection is data-driven. `models.json` contains the model path, served
-name, tensor-parallel size, and model-specific vLLM arguments. Adding a model
-requires one new object in that file; no model-specific script or request file
-is needed.
+## 1. Start one server
 
-| Model | Model key | TP |
-|---|---|---:|
-| Qwen3.6-35B-A3B | `qwen3_6_35b_a3b` | 2 |
-| DeepSeek-V4-Flash | `deepseek_v4_flash` | 8 |
+Choose a new run directory for every invocation. The directory used by
+`torch_profiler_dir` must be `<run-dir>/profile`.
 
-`workload_4096_256.json` defines the shared 64-concurrency, 4096-input-token,
-256-output-token workload independently of model selection.
+The scenario is selected with two controls:
 
-Run commands from `/vllm-workspace/vllm-plugin-FL`.
-
-## Run one scenario
-
-Choose one environment from the table. Use the same `PROFILE_RUN_SUFFIX` in
-both terminals so the server trace and request artifacts share one directory.
-
-| Scenario | Server environment | Suggested suffix |
+| Scenario | `VLLM_PLUGINS` | vLLM argument |
 |---|---|---|
-| plugin graph | none | `_plugin_graph_4096_256` |
-| plugin eager | `PROFILE_EXECUTION_MODE=eager` | `_plugin_eager_4096_256` |
-| native graph | `VLLM_PLUGINS=""` | `_native_graph_4096_256` |
-| native eager | `VLLM_PLUGINS="" PROFILE_EXECUTION_MODE=eager` | `_native_eager_4096_256` |
+| plugin graph | `fl` | none |
+| plugin eager | `fl` | `--enforce-eager` |
+| native graph | empty | none |
+| native eager | empty | `--enforce-eager` |
 
-Terminal A:
-
-```bash
-<server-environment> \
-PROFILE_RUN_SUFFIX=<suffix> \
-python3 tools/graph_operator_profile/serve.py <model-key>
-```
-
-Terminal B can start immediately. The request command waits for `/health`:
+### Qwen plugin graph example
 
 ```bash
-PROFILE_RUN_SUFFIX=<suffix> \
-bash tools/graph_operator_profile/profile_request.sh \
-  <model-key>
+RUN_DIR=/vllm-workspace/graph_operator_profile_runs/qwen_plugin_graph_4096_256
+mkdir -p "$RUN_DIR/profile"
+printf -v PROFILER_CONFIG \
+  '{"profiler":"torch","torch_profiler_dir":"%s/profile","torch_profiler_record_shapes":true,"torch_profiler_with_stack":false,"torch_profiler_dump_cuda_time_total":false,"torch_profiler_with_memory":false,"ignore_frontend":true}' \
+  "$RUN_DIR"
+
+VLLM_PLUGINS=fl VLLM_USE_BREAKABLE_CUDAGRAPH=0 \
+vllm serve /models/Qwen3.6-35B-A3B \
+  --served-model-name qwen \
+  --tensor-parallel-size 2 \
+  --max-model-len 32768 \
+  --max-num-seqs 64 \
+  --no-enable-prefix-caching \
+  --trust-remote-code \
+  --compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,32,64],"cudagraph_num_of_warmups":0}' \
+  --profiler-config "$PROFILER_CONFIG"
 ```
 
-Example: Qwen plugin graph:
+### DeepSeek plugin eager example
 
 ```bash
-PROFILE_RUN_SUFFIX=_plugin_graph_4096_256 \
-python3 tools/graph_operator_profile/serve.py qwen3_6_35b_a3b
+RUN_DIR=/vllm-workspace/graph_operator_profile_runs/deepseek_plugin_eager_4096_256
+mkdir -p "$RUN_DIR/profile"
+printf -v PROFILER_CONFIG \
+  '{"profiler":"torch","torch_profiler_dir":"%s/profile","torch_profiler_record_shapes":true,"torch_profiler_with_stack":false,"torch_profiler_dump_cuda_time_total":false,"torch_profiler_with_memory":false,"ignore_frontend":true}' \
+  "$RUN_DIR"
+
+VLLM_PLUGINS=fl VLLM_USE_BREAKABLE_CUDAGRAPH=0 \
+vllm serve /models/DeepSeek-V4-Flash \
+  --served-model-name deepseek-v4-flash \
+  --tensor-parallel-size 8 \
+  --kv-cache-dtype fp8 \
+  --block-size 256 \
+  --safetensors-load-strategy prefetch \
+  --no-async-scheduling \
+  --max-model-len 32768 \
+  --max-num-seqs 64 \
+  --no-enable-prefix-caching \
+  --trust-remote-code \
+  --enforce-eager \
+  --compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,32,64],"cudagraph_num_of_warmups":0}' \
+  --profiler-config "$PROFILER_CONFIG"
 ```
+
+For a native vLLM run, change `VLLM_PLUGINS=fl` to `VLLM_PLUGINS=""`. For
+graph mode, omit `--enforce-eager`. Other model-specific vLLM arguments are
+independent of this profiling tool.
+
+## 2. Collect one profile
+
+In another terminal, pass the served model name and the same run directory:
 
 ```bash
-PROFILE_RUN_SUFFIX=_plugin_graph_4096_256 \
-bash tools/graph_operator_profile/profile_request.sh \
-  qwen3_6_35b_a3b
+bash tools/graph_operator_profile/profile.sh qwen \
+  /vllm-workspace/graph_operator_profile_runs/qwen_plugin_graph_4096_256
 ```
 
-Results are written to:
+The script waits for `/health`, runs the warmup batch, profiles the second
+batch, and writes results to `<run-dir>/results`. It rejects a profile directory
+that already contains a trace so separate runs cannot be mixed accidentally.
 
-```text
-/vllm-workspace/graph_operator_profile_runs/<run-name><suffix>/results/
-```
-
-For plugin runs, confirm that `/tmp/flaggems_enable_oplist.txt` belongs to the
-current run before moving it into the same `results` directory. For native
-runs, confirm that the server process has an explicitly empty `VLLM_PLUGINS`,
-the server log has no plugin activation message, and no FlagGems oplist is
-created.
-
-## Compare four scenarios
-
-Run all four rows in the scenario table for one model, then compare these pairs
-with `compare_kernel_profiles.py --scan-cpu-operators`:
-
-- plugin graph versus native graph
-- plugin eager versus native eager
-- plugin graph versus plugin eager
-- native graph versus native eager
-
-Generate the consolidated report with:
-
-```bash
-python3 tools/graph_operator_profile/generate_four_scenario_report.py \
-  --model-title <model-title> \
-  --tp-size <tp-size> \
-  --plugin-graph <plugin-graph-run> \
-  --plugin-eager <plugin-eager-run> \
-  --native-graph <native-graph-run> \
-  --native-eager <native-eager-run> \
-  --output-dir <comparison-directory>
-```
-
-## Output files
+## Output
 
 `operator_list.csv` is the deduplicated operator-to-kernel inventory:
 
@@ -110,43 +97,14 @@ python3 tools/graph_operator_profile/generate_four_scenario_report.py \
 - `operator_kind`
 - `kernel_name`
 
-Every row has a positive integer ID. ATen operators are numbered first. Pure
-communication kernels remain in the inventory, receive IDs by normalized
-demangled kernel callable, and appear last. Attributed and unattributed rows
-for the same communication kernel therefore share an ID. Unattributed kernels
-are retained with `operator_name=null`; all `nvjet_tst_*` kernels share one
-operator ID.
+Every physical kernel is retained. Missing attribution is represented by
+`operator_name=null`; it is never dropped. ATen operators appear first and pure
+communication operators appear last. Communication operators still receive
+IDs. Different `torch_compile` or `triton_compiled` kernel names receive
+different IDs. Custom kernel specializations with the same normalized callable
+name share one ID. `moe_align_block_size_stage*` kernels share one ID.
 
-Custom and unattributed kernels are numbered by normalized demangled callable
-identity. Function arguments, template arguments, and a leading `void` return
-type do not affect those IDs, so different specializations of one callable
-share an ID. Each distinct `torch_compile` or `triton_compiled` kernel name
-receives a separate ID, even when multiple kernels map to the same API or
-compile function. Repeated rows with the same compile kernel name share the
-same ID. ATen and runtime-operator rows remain numbered by logical operator
-name so generic launchers do not split or merge unrelated operations. All
-`moe_align_block_size_stage*` kernels are normalized to
-`moe_align_block_size` and share one ID.
-
-`operator_kind` is one of:
-
-- `aten`
-- `custom`
-- `communication`
-- `fused_communication_compute`
-- `runtime_operator`
-- `triton_compiled`
-- `torch_compile`
-- `unattributed_nvjet`
-- `unattributed`
-
-Communication classification is rule-based. NCCL, vLLM custom all-reduce, and
-PyTorch symmetric-memory all-reduce kernels are pure communication. A kernel
-that combines a collective with model computation remains numbered as
-`fused_communication_compute`.
-
-`kernel_time.csv` is the compact timing aggregate. Each row is one unique
-`(operator_name, kernel_name)` relation:
+`kernel_time.csv` contains one row per unique operator/kernel relation:
 
 - `operator_name`
 - `kernel_name`
@@ -154,56 +112,24 @@ that combines a collective with model computation remains numbered as
 - `kernel_time_us`
 - `percent`
 
-`kernel_time_us` is summed runtime kernel duration. `percent` uses the total
-rank-0 runtime kernel duration as its denominator, has three decimal places,
-and emits values below `0.001%` as `<0.001%`. Every physical kernel event
-contributes to exactly one row, so totals are not duplicated.
+`percent` uses the total rank-0 runtime kernel duration as its denominator.
 
-`kernel_shape_dtype.csv` is the input-metadata aggregate. Each row represents
-one kernel/operator/shape/dtype/mapping-status combination:
+`kernel_shape_dtype.csv` contains every kernel/operator/shape/dtype/mapping
+combination. Missing shape or dtype values are written as `null` with an
+explicit `mapping_status` instead of removing the kernel.
 
-- `operator_name`
-- `kernel_name`
-- `variant_index`
-- `mapping_status`
-- `input_shapes`
-- `input_dtypes`
-- `candidate_operators`
-- `kernel_event_count`
-- `kernel_time_us`
-
-Shapes, dtypes, and candidates are compact JSON stored in CSV cells. Missing
-metadata is the literal `null`; it never causes a kernel to be dropped.
-`mapping_status` is one of:
-
-- `operator_shape_matched`
-- `operator_matched_shape_missing`
-- `operator_matched_dtype_missing`
-- `operator_matched_metadata_missing`
-- `shape_ambiguous`
-- `operator_ambiguous`
-- `missing_external_id`
-- `no_cpu_op_match`
-
-`summary.json` records collection scope, event counts, mapping coverage, and
-conservation checks. A valid extraction requires every value in
-`conservation` to be `true`. Kernel time is aggregated as integer nanoseconds
-and emitted in microseconds.
+`summary.json` records trace scope, event counts, mapping coverage, memcpy and
+memset activity, and conservation checks. A valid extraction requires every
+value in `conservation` to be `true`.
 
 ## Coverage boundary
 
-The reports retain every GPU kernel event emitted in the selected rank-0
-runtime trace, including kernels whose operator, shape, or dtype cannot be
-recovered. They exclude CUDA Graph construction, CPU-only operators, and
-per-event timestamps, process IDs, thread IDs, streams, and External ids.
+The CSV files cover every GPU kernel event in the selected rank-0 runtime
+trace. They do not include CUDA Graph construction or CPU-only operators.
+Graph replay usually lacks the original PyTorch CPU events, so some graph
+kernels cannot recover operator names, input shapes, or dtypes; these kernels
+remain present with `null` metadata.
 
-CUDA Graph replay exposes physical kernels but usually does not replay the
-original PyTorch CPU operators. A graph-internal kernel can therefore have no
-recoverable operator, input shape, or dtype. It remains in every kernel
-inventory with `null` metadata and an explicit mapping status.
-
-Memcpy and memset counts and durations remain in `summary.json`, but they are
-not kernel keys. Different requests, batch sizes, sequence lengths, sampling
-settings, TP ranks, or MoE routing can activate different kernels and shapes.
-Rank 0 is a reproducible single-rank view, not proof that another rank has no
-additional activity.
+Rank 0 is a reproducible single-rank view. Different ranks, requests, sequence
+lengths, sampling settings, and MoE routing can activate different kernels and
+shapes.
