@@ -177,6 +177,10 @@ class PlatformFL(Platform):
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
 
+        from vllm_fl.attention.mla_prefill import configure_mla_prefill
+
+        configure_mla_prefill(vllm_config)
+
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         cache_config = vllm_config.cache_config
@@ -272,6 +276,14 @@ class PlatformFL(Platform):
 
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
+
+        if use_mla:
+            # The registry is process-local, so spawned workers configure it
+            # again before vLLM resolves its MLA prefill implementation.
+            from vllm.config import get_current_vllm_config
+            from vllm_fl.attention.mla_prefill import configure_mla_prefill
+
+            configure_mla_prefill(get_current_vllm_config())
 
         backend_path = call_op("attention_backend", use_mla=use_mla, use_sparse=use_sparse)
 

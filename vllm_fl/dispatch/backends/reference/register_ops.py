@@ -9,6 +9,8 @@ This module registers all REFERENCE (PyTorch) implementations.
 from __future__ import annotations
 
 import functools
+from functools import lru_cache
+from importlib import import_module
 
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
@@ -22,6 +24,32 @@ def _bind_is_available(fn, is_available_fn):
 
     wrapper._is_available = is_available_fn
     return wrapper
+
+
+def _lazy_fn(module: str, name: str, is_available):
+    """Import an optional capability only when dispatch selects it."""
+
+    @lru_cache(None)
+    def resolve():
+        return getattr(import_module(module), name)
+
+    def invoke(*args, **kwargs):
+        return resolve()(*args, **kwargs)
+
+    invoke._is_available = is_available
+    invoke._prepare = resolve
+    return invoke
+
+
+def _reference_impl(op_name, module, symbol, is_available):
+    return OpImpl(
+        op_name=op_name,
+        impl_id="reference.torch",
+        kind=BackendImplKind.REFERENCE,
+        fn=_lazy_fn(module, symbol, is_available),
+        vendor=None,
+        priority=BackendPriority.REFERENCE,
+    )
 
 
 def register_builtins(registry) -> None:
@@ -40,6 +68,8 @@ def register_builtins(registry) -> None:
     # vLLM 0.24 builds. One absent optional MoE helper must not prevent all
     # available PyTorch fallbacks from registering.
     op_names = (
+        "bf16_indexer_cache_write",
+        "bf16_indexer_decode",
         "dynamic_per_token_quant_int8",
         "silu_and_mul",
         "gelu_and_mul",
@@ -65,6 +95,20 @@ def register_builtins(registry) -> None:
                 fn=_bind_is_available(fn, is_avail),
                 vendor=None,
                 priority=BackendPriority.REFERENCE,
+            )
+        )
+
+    capability_ops = {
+        "top_k_per_row_prefill": ("top_k_per_row", "top_k_per_row_prefill"),
+        "top_k_per_row_decode": ("top_k_per_row", "top_k_per_row_decode"),
+    }
+    for op_name, (module_name, symbol) in capability_ops.items():
+        impls.append(
+            _reference_impl(
+                op_name,
+                f"vllm_fl.dispatch.backends.reference.impl.{module_name}",
+                symbol,
+                is_avail,
             )
         )
 

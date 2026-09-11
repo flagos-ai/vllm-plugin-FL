@@ -236,3 +236,42 @@ def register_model():
         #glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+
+    from vllm import ModelRegistry
+    from vllm.model_executor import model_loader
+    from vllm.reasoning import ReasoningParserManager
+    from vllm.transformers_utils.config import _CONFIG_REGISTRY
+    from vllm.transformers_utils.model_arch_config_convertor import (
+        MODEL_ARCH_CONFIG_CONVERTORS,
+        ModelArchConfigConvertorBase,
+    )
+
+    from vllm_fl.configs.hy_v4 import HYV4Config
+    from vllm_fl.model_loader.hy_v4_loader import HYV4SafetensorsLoader
+
+    # Keep the converter in the registration phase to avoid importing vLLM's
+    # config conversion machinery from the Hugging Face config module.
+    class HYV4ModelArchConfigConvertor(ModelArchConfigConvertorBase):
+        def get_head_size(self) -> int:
+            return int(self.hf_text_config.kv_lora_rank) + int(
+                self.hf_text_config.qk_rope_head_dim
+            )
+
+        def is_deepseek_mla(self) -> bool:
+            return True
+
+    _CONFIG_REGISTRY["hy_v4"] = HYV4Config
+    MODEL_ARCH_CONFIG_CONVERTORS["hy_v4"] = HYV4ModelArchConfigConvertor
+    ModelRegistry.register_model(
+        "HYV4ForCausalLM", "vllm_fl.models.hy_v4:HYV4ForCausalLM"
+    )
+    ReasoningParserManager.register_lazy_module(
+        "hy_v4",
+        "vllm_fl.reasoning.hy_v4_reasoning",
+        "HYV4ReasoningParser",
+    )
+
+    load_format = "hy4_safetensors"
+    registered_loaders = model_loader._LOAD_FORMAT_TO_MODEL_LOADER
+    if registered_loaders.get(load_format) is not HYV4SafetensorsLoader:
+        model_loader.register_model_loader(load_format)(HYV4SafetensorsLoader)
