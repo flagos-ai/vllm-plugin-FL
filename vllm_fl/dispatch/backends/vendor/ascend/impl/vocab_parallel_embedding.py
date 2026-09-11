@@ -17,11 +17,11 @@
 # limitations under the License.
 #
 
-from typing import Optional, Tuple
 
 import torch
 from torch import nn
 from torch.nn.parameter import Parameter
+
 from vllm.distributed import divide, get_tp_group, tensor_model_parallel_all_reduce
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig,
@@ -38,9 +38,9 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.utils import set_weight_attrs
 
 
-def maybe_pad_and_reduce(x: torch.Tensor,
-                               is_ep_comm: bool = False) -> torch.Tensor:
+def maybe_pad_and_reduce(x: torch.Tensor, is_ep_comm: bool = False) -> torch.Tensor:
     return tensor_model_parallel_all_reduce(x)
+
 
 class AscendVocabParallelEmbedding(VocabParallelEmbedding):
     """
@@ -49,16 +49,18 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
     Added the feature of lmheadTP in pure dp scenario
     """
 
-    def __init__(self,
-                 num_embeddings: int,
-                 embedding_dim: int,
-                 params_dtype: Optional[torch.dtype] = None,
-                 org_num_embeddings: Optional[int] = None,
-                 padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = "",
-                 *,
-                 disable_tp: bool = False):
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        params_dtype: torch.dtype | None = None,
+        org_num_embeddings: int | None = None,
+        padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+        *,
+        disable_tp: bool = False,
+    ):
         nn.Module.__init__(self)
         self.forward_type = None
 
@@ -76,18 +78,22 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         self.padding_size = padding_size
         self.org_vocab_size = org_num_embeddings or num_embeddings
         num_added_embeddings = num_embeddings - self.org_vocab_size
-        self.org_vocab_size_padded = pad_vocab_size(self.org_vocab_size,
-                                                    self.padding_size)
+        self.org_vocab_size_padded = pad_vocab_size(
+            self.org_vocab_size, self.padding_size
+        )
         self.num_embeddings_padded = pad_vocab_size(
-            self.org_vocab_size_padded + num_added_embeddings,
-            self.padding_size)
+            self.org_vocab_size_padded + num_added_embeddings, self.padding_size
+        )
         assert self.org_vocab_size_padded <= self.num_embeddings_padded
 
-        self.shard_indices = self._get_indices(self.num_embeddings_padded,
-                                               self.org_vocab_size_padded,
-                                               self.num_embeddings,
-                                               self.org_vocab_size,
-                                               self.tp_rank, self.tp_size)
+        self.shard_indices = self._get_indices(
+            self.num_embeddings_padded,
+            self.org_vocab_size_padded,
+            self.num_embeddings,
+            self.org_vocab_size,
+            self.tp_rank,
+            self.tp_size,
+        )
         self.embedding_dim = embedding_dim
         quant_method = None
         if quant_config is not None:
@@ -100,11 +106,13 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         # layer type like ParallelLMHead, this is not important.
         is_embedding_layer = not isinstance(self, ParallelLMHead)
         quant_method_implements_embedding = method_has_implemented_embedding(
-            type(quant_method))
+            type(quant_method)
+        )
         if is_embedding_layer and not quant_method_implements_embedding:
             raise NotImplementedError(
                 f"The class {type(quant_method).__name__} must implement "
-                "the 'embedding' method, see UnquantizedEmbeddingMethod.")
+                "the 'embedding' method, see UnquantizedEmbeddingMethod."
+            )
 
         self.quant_method: QuantizeMethodBase = quant_method
 
@@ -113,47 +121,62 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         self.params_dtype = params_dtype
         # Divide the weight matrix along the vocaburaly dimension.
         self.num_added_embeddings = self.num_embeddings - self.org_vocab_size
-        self.num_embeddings_per_partition = divide(self.num_embeddings_padded,
-                                                   self.tp_size)
-        assert (self.shard_indices.num_elements_padded ==
-                self.num_embeddings_per_partition)
+        self.num_embeddings_per_partition = divide(
+            self.num_embeddings_padded, self.tp_size
+        )
+        assert (
+            self.shard_indices.num_elements_padded == self.num_embeddings_per_partition
+        )
         self.num_org_embeddings_per_partition = (
-            self.shard_indices.org_vocab_end_index -
-            self.shard_indices.org_vocab_start_index)
+            self.shard_indices.org_vocab_end_index
+            - self.shard_indices.org_vocab_start_index
+        )
         self.num_added_embeddings_per_partition = (
-            self.shard_indices.added_vocab_end_index -
-            self.shard_indices.added_vocab_start_index)
+            self.shard_indices.added_vocab_end_index
+            - self.shard_indices.added_vocab_start_index
+        )
 
-        self.quant_method.create_weights(self,
-                                         self.embedding_dim,
-                                         [self.num_embeddings_per_partition],
-                                         self.embedding_dim,
-                                         self.num_embeddings_padded,
-                                         params_dtype=params_dtype,
-                                         weight_loader=self.weight_loader)
+        self.quant_method.create_weights(
+            self,
+            self.embedding_dim,
+            [self.num_embeddings_per_partition],
+            self.embedding_dim,
+            self.num_embeddings_padded,
+            params_dtype=params_dtype,
+            weight_loader=self.weight_loader,
+        )
         self.update_param_tp_status()
 
     def _get_masked_input_and_mask(
-            self, input_: torch.Tensor, org_vocab_start_index: int,
-            org_vocab_end_index: int, num_org_vocab_padding: int,
-            added_vocab_start_index: int,
-            added_vocab_end_index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        self,
+        input_: torch.Tensor,
+        org_vocab_start_index: int,
+        org_vocab_end_index: int,
+        num_org_vocab_padding: int,
+        added_vocab_start_index: int,
+        added_vocab_end_index: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # torch.compile will fuse all of the pointwise ops below
         # into a single kernel, making it very fast
         org_vocab_mask = (input_ >= org_vocab_start_index) & (
-            input_ < org_vocab_end_index)
+            input_ < org_vocab_end_index
+        )
         # Adapt: avoid create added_vocab_mask when added_vocab_start_index == added_vocab_end_index.
         if added_vocab_start_index == added_vocab_end_index:
-            valid_offset = (org_vocab_start_index * org_vocab_mask)
+            valid_offset = org_vocab_start_index * org_vocab_mask
             vocab_mask = org_vocab_mask
         else:
             added_vocab_mask = (input_ >= added_vocab_start_index) & (
-                input_ < added_vocab_end_index)
-            added_offset = added_vocab_start_index - (
-                org_vocab_end_index -
-                org_vocab_start_index) - num_org_vocab_padding
-            valid_offset = (org_vocab_start_index *
-                            org_vocab_mask) + (added_offset * added_vocab_mask)
+                input_ < added_vocab_end_index
+            )
+            added_offset = (
+                added_vocab_start_index
+                - (org_vocab_end_index - org_vocab_start_index)
+                - num_org_vocab_padding
+            )
+            valid_offset = (org_vocab_start_index * org_vocab_mask) + (
+                added_offset * added_vocab_mask
+            )
             vocab_mask = org_vocab_mask | added_vocab_mask
         # Adapt end.
         input_ = vocab_mask * (input_ - valid_offset)
@@ -168,14 +191,15 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
     def _forward_embed_tp(self, input_):
         complete_input = self.comm_group.all_gather(input_, dim=0)
         masked_input, input_mask = self._get_masked_input_and_mask(
-            complete_input, self.shard_indices.org_vocab_start_index,
+            complete_input,
+            self.shard_indices.org_vocab_start_index,
             self.shard_indices.org_vocab_end_index,
             self.shard_indices.num_org_vocab_padding,
             self.shard_indices.added_vocab_start_index,
-            self.shard_indices.added_vocab_end_index)
+            self.shard_indices.added_vocab_end_index,
+        )
         # Get the embeddings.
-        output_parallel = self.quant_method.embedding(self,
-                                                      masked_input.long())
+        output_parallel = self.quant_method.embedding(self, masked_input.long())
         output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
         output = self.comm_group.reduce_scatter(output_parallel, dim=0)
         output = output.view(input_.shape[0], -1)
@@ -185,16 +209,17 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         if self.tp_size > 1:
             # Build the mask.
             masked_input, input_mask = self._get_masked_input_and_mask(
-                input_, self.shard_indices.org_vocab_start_index,
+                input_,
+                self.shard_indices.org_vocab_start_index,
                 self.shard_indices.org_vocab_end_index,
                 self.shard_indices.num_org_vocab_padding,
                 self.shard_indices.added_vocab_start_index,
-                self.shard_indices.added_vocab_end_index)
+                self.shard_indices.added_vocab_end_index,
+            )
         else:
             masked_input = input_
         # Get the embeddings.
-        output_parallel = self.quant_method.embedding(self,
-                                                      masked_input.long())
+        output_parallel = self.quant_method.embedding(self, masked_input.long())
         # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
@@ -207,31 +232,42 @@ class AscendParallelLMHead(ParallelLMHead):
     """
     Register ParallelLMHead as a custom op for Ascend."""
 
-    def __init__(self,
-                 num_embeddings: int,
-                 embedding_dim: int,
-                 bias: bool = False,
-                 params_dtype: Optional[torch.dtype] = None,
-                 org_num_embeddings: Optional[int] = None,
-                 padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = "",
-                 *,
-                 disable_tp: bool = False):
-        AscendVocabParallelEmbedding.__init__(self, num_embeddings,
-                                              embedding_dim, params_dtype,
-                                              org_num_embeddings, padding_size,
-                                              quant_config, prefix,
-                                              disable_tp=disable_tp)
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        bias: bool = False,
+        params_dtype: torch.dtype | None = None,
+        org_num_embeddings: int | None = None,
+        padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+        *,
+        disable_tp: bool = False,
+    ):
+        AscendVocabParallelEmbedding.__init__(
+            self,
+            num_embeddings,
+            embedding_dim,
+            params_dtype,
+            org_num_embeddings,
+            padding_size,
+            quant_config,
+            prefix,
+            disable_tp=disable_tp,
+        )
 
         self.quant_config = quant_config
         if bias:
             self.bias = Parameter(
-                torch.empty(self.num_embeddings_per_partition,
-                            dtype=params_dtype))
-            set_weight_attrs(self.bias, {
-                "output_dim": 0,
-                "weight_loader": self.weight_loader,
-            })
+                torch.empty(self.num_embeddings_per_partition, dtype=params_dtype)
+            )
+            set_weight_attrs(
+                self.bias,
+                {
+                    "output_dim": 0,
+                    "weight_loader": self.weight_loader,
+                },
+            )
         else:
             self.register_parameter("bias", None)

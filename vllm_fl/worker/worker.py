@@ -317,9 +317,7 @@ class WorkerFL(WorkerBase):
         if current_platform.device_type == "gcu" and not os.environ.get(
             "TRITON_CACHE_DIR"
         ):
-            os.environ["TRITON_CACHE_DIR"] = (
-                f"/tmp/triton-cache-fl-rank-{rank}"
-            )
+            os.environ["TRITON_CACHE_DIR"] = f"/tmp/triton-cache-fl-rank-{rank}"
 
         if (
             vllm_config.num_speculative_tokens == 1
@@ -933,9 +931,10 @@ class WorkerFL(WorkerBase):
 
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if current_platform.device_type == "txda" or getattr(
-            current_platform, "vendor_name", None
-        ) == "kunlunxin":
+        if (
+            current_platform.device_type == "txda"
+            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+        ):
             logger.warning(
                 "Detected %s device, skipping generic kernel_warmup",
                 getattr(

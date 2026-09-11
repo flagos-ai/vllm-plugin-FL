@@ -75,20 +75,18 @@ def _native_w8a8_fused_experts(
                 inputs = inputs * route_weights.unsqueeze(-1)
 
             inputs = _dynamic_int8_qdq(inputs)
-            gate_up_weight = (
-                w1[expert_id].to(inputs.dtype)
-                * w1_scale[expert_id].squeeze(-1).to(inputs.dtype).unsqueeze(-1)
-            )
+            gate_up_weight = w1[expert_id].to(inputs.dtype) * w1_scale[
+                expert_id
+            ].squeeze(-1).to(inputs.dtype).unsqueeze(-1)
             gate_up = torch.matmul(inputs, gate_up_weight.transpose(0, 1))
             if w1_bias is not None:
                 gate_up = gate_up + w1_bias[expert_id].to(gate_up.dtype)
             gate, up = gate_up.chunk(2, dim=-1)
             intermediate = _dynamic_int8_qdq(F.silu(gate) * up)
 
-            down_weight = (
-                w2[expert_id].to(intermediate.dtype)
-                * w2_scale[expert_id].squeeze(-1).to(intermediate.dtype).unsqueeze(-1)
-            )
+            down_weight = w2[expert_id].to(intermediate.dtype) * w2_scale[
+                expert_id
+            ].squeeze(-1).to(intermediate.dtype).unsqueeze(-1)
             expert_output = torch.matmul(intermediate, down_weight.transpose(0, 1))
             if w2_bias is not None:
                 expert_output = expert_output + w2_bias[expert_id].to(
