@@ -17,6 +17,23 @@ _marlin_moe_sum = CachedOp("moe_sum")
 _marlin_moe_align = CachedOp("moe_align_block_size")
 
 
+@torch.library.custom_op(
+    "vllm_fl::flaggems_moe_sum",
+    mutates_args=("out",),
+    device_types="cuda",
+)
+def _flaggems_moe_sum_op(inp: torch.Tensor, out: torch.Tensor) -> None:
+    """Opaque compile boundary around FlagGems' in-place Triton reduction."""
+    from flag_gems import moe_sum
+
+    moe_sum(inp, out)
+
+
+@_flaggems_moe_sum_op.register_fake
+def _flaggems_moe_sum_op_fake(inp: torch.Tensor, out: torch.Tensor) -> None:
+    return None
+
+
 def fused_marlin_moe_flaggems(*args, **kwargs):
     """Call FlagGems' vLLM-compatible fused Marlin MoE implementation."""
     # FlagGems PR #5437 follows the vLLM API except for the newer GLM-4
@@ -190,6 +207,4 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    from flag_gems import moe_sum
-
-    moe_sum(inp, out)
+    _flaggems_moe_sum_op(inp, out)
