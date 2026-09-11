@@ -12,11 +12,9 @@ from .utils import input_guard
 from vllm_fl.utils import use_flaggems_op
 
 if use_flaggems_op("chunk_gated_delta_rule_fwd"):
-    from flag_gems.fused.FLA import chunk_gated_delta_rule_fwd
+    import flag_gems.fused.FLA as _chunk_impl
 else:
-    from vllm.third_party.flash_linear_attention.ops.chunk import (
-        chunk_gated_delta_rule_fwd,
-    )
+    from vllm.third_party.flash_linear_attention.ops import chunk as _chunk_impl
 
 
 class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
@@ -39,7 +37,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
             q = l2norm_fwd(q)
             k = l2norm_fwd(k)
 
-        g, o, A, final_state, w, h, v_new = chunk_gated_delta_rule_fwd(
+        g, o, A, final_state, w, h, v_new = _chunk_impl.chunk_gated_delta_rule_fwd(
             q=q,
             k=k,
             v=v,

@@ -94,7 +94,6 @@ from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
 from vllm_fl.attention.utils import patch_mm_encoder_attention
 from vllm_fl.dispatch.io_common import managed_inference_mode
-from vllm_fl.ops.custom_ops import register_oot_ops
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
@@ -117,6 +116,8 @@ if TYPE_CHECKING:
 
 def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
+    from vllm_fl.ops.custom_ops import register_oot_ops
+
     logger.debug("=== ENVIRONMENT VARIABLES ===")
     for key, value in sorted(os.environ.items()):
         logger.debug("%s=%r", key, value)
