@@ -52,3 +52,5 @@ serve:
         - "blue rectangle"
   sampling:
     temperature: 0.0
+  chat_template_kwargs:
+    enable_thinking: false
