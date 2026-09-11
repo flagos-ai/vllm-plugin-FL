@@ -217,6 +217,12 @@ def register_model():
 
     patch_vllm_moe_sum()
 
+    # HY4 is not present in vLLM 0.24.  Keep its config/model/loader
+    # registration in the plugin; the adapter itself refuses non-0.24 ABIs.
+    from vllm_fl.patches.hy_v4_v024 import apply_hy_v4_v024_patches
+
+    apply_hy_v4_v024_patches()
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
