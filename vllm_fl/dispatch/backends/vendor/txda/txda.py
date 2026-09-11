@@ -1,9 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-Txda backend implementation.
+Txda (tsingmicro) backend implementation.
 
-This backend provides operator implementations for Tsingmiocro Txda NPUs.
+This backend provides operator implementations for Tsingmicro TX devices.
+For attention it uses the FlagGems attention backend.
 """
 
 from __future__ import annotations
@@ -11,16 +12,17 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
-from torch_txda import transfer_to_txda
-# from vllm_fl.dispatch.backends.flaggems import FlagGemsBackend
+
 from vllm_fl.dispatch.backends.base import Backend
+
 
 class TxdaBackend(Backend):
     """
-    Txda backend for operator implementations.
+    Txda (tsingmicro) backend for operator implementations.
 
-    This backend uses Txda CANN libraries to provide high-performance
-    operator implementations for Tsingmiocro Txda NPUs.
+    Tsingmicro TX devices use torch_txda (a PrivateUse1-based runtime), so the
+    CUDA-style fused ops are not applicable; dispatch falls back to the
+    flag_gems implementations. Only the attention backend is registered here.
     """
 
     _available: Optional[bool] = None
@@ -34,97 +36,44 @@ class TxdaBackend(Backend):
         return "txda"
 
     def is_available(self) -> bool:
-        """Check if Txda hardware and libraries are available."""
+        """
+        Check if tsingmicro TX hardware is available.
+
+        Detection is based on the torch_txda runtime.
+        """
         if TxdaBackend._available is None:
             try:
-                # Check for torch_npu (Txda PyTorch extension)
-                import torch_txda
-
-                # Check if NPU device is available
-                if torch.txda.is_available() and torch.txda.device_count() > 0:
-                    TxdaBackend._available = True
-                else:
-                    TxdaBackend._available = False
-            except (ImportError, AttributeError):
+                import torch_txda  # noqa: F401
+                TxdaBackend._available = (
+                    torch.txda.is_available() and torch.txda.device_count() > 0
+                )
+            except Exception:
                 TxdaBackend._available = False
         return TxdaBackend._available
 
-    def rms_norm(
-        self,
-        obj,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ):
-        from .impl.normalization import rms_norm_txda
+    # ==================== Operator Implementations ====================
 
-        return rms_norm_txda(obj, x, residual)
-
-    def invoke_fused_moe_triton_kernel(
-        self,
-        A,
-        B,
-        C,
-        A_scale,
-        B_scale,
-        topk_weights,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        mul_routed_weight,
-        top_k,
-        config,
-        compute_type,
-        use_fp8_w8a8,
-        use_int8_w8a8,
-        use_int8_w8a16,
-        use_int4_w4a16,
-        per_channel_quant,
-        block_shape=None,
-        B_bias=None,
-    ):
-        from .impl.fused_moe import invoke_fused_moe_triton_kernel_txda
-
-        invoke_fused_moe_triton_kernel_txda(
-            A,
-            B,
-            C,
-            A_scale,
-            B_scale,
-            topk_weights,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            mul_routed_weight,
-            top_k,
-            config,
-            compute_type,
-            use_fp8_w8a8,
-            use_int8_w8a8,
-            use_int8_w8a16,
-            use_int4_w4a16,
-            per_channel_quant,
-            block_shape=block_shape,
-            B_bias=B_bias,
-        )
-
-    def attention_backend(self, use_mla: bool = False) -> str:
+    def attention_backend(
+        self, use_mla: bool = False, use_sparse: bool = False
+    ) -> str:
         """
-        Get the attention backend class path for Txda NPU.
+        Get the attention backend class path for tsingmicro TX.
 
-        This method returns the native Txda attention backend that uses
-        torch_npu operators (npu_fused_infer_attention_score, etc.)
-        instead of flag_gems operators.
-
-        Uses vllm_fl's native Txda implementation which directly calls
-        torch_npu operators without depending on vllm-Txda package.
+        Returns the txda SDPA backend (reuses the flag_gems metadata machinery
+        but computes attention with torch SDPA, which is numerically correct on
+        TX8110 where flag_gems flash_attn_varlen_func is not). The MLA branch
+        still points at the flag_gems MLA backend; MLA is unverified on TX8110.
 
         Args:
             use_mla: Whether to use Multi-head Latent Attention (MLA)
+            use_sparse: Whether to use Deepseek Sparse Attention (DSA)
 
         Returns:
             Fully qualified class path string
         """
         if use_mla:
             return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
-        # return "vllm.v1.attention.backends.triton_attn.TritonAttentionBackend"
-        return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+        return (
+            "vllm_fl.dispatch.backends.vendor.txda.impl.attention."
+            "TxdaSDPAAttentionBackend"
+        )

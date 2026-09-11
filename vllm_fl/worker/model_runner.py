@@ -1267,7 +1267,9 @@ class ModelRunnerFL(
                 sampling_params
                 and sampling_params.sampling_type == SamplingType.RANDOM_SEED
             ):
-                generator = torch.Generator(device=self.device)
+                generator = torch.Generator(
+                    device="cpu" if self.device.type == "txda" else self.device
+                )
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
@@ -6186,7 +6188,9 @@ class ModelRunnerFL(
                     sampling_metadata=replace(
                         dummy_metadata,
                         generators={
-                            0: torch.Generator(device=self.device).manual_seed(0)
+                            0: torch.Generator(
+                                device="cpu" if self.device.type == "txda" else self.device
+                            ).manual_seed(0)
                         },
                     ),
                 )
