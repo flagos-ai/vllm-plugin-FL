@@ -12,7 +12,7 @@ uv pip install \
     --no-deps \
     -e .
 
-python3 - <<'PY'
+python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
 
 import flag_gems
