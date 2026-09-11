@@ -1,27 +1,73 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 # FL router subclasses that route ops through call_op dispatch.
 
-import torch
 from functools import partial
+
+import torch
+import torch.nn.functional as F
 
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
     rocm_aiter_grouped_topk,
 )
+from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
+    FusedTopKBiasRouter,
+    fused_topk_bias,
+)
 from vllm.model_executor.layers.fused_moe.router.fused_topk_router import (
     FusedTopKRouter,
+    _get_padding_mask,
+    fused_topk as upstream_fused_topk,
 )
 from vllm.model_executor.layers.fused_moe.router.grouped_topk_router import (
     GroupedTopKRouter,
 )
-from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
-    FusedTopKBiasRouter,
-    fused_topk_bias
-)
+
 from vllm_fl.dispatch import CachedOp
 
 _topk_softmax = CachedOp("topk_softmax")
 _grouped_topk = CachedOp("grouped_topk")
+
+
+def _has_dsv4_topk_op() -> bool:
+    return hasattr(torch.ops._moe_C, "topk_softplus_sqrt")
+
+
+def _sqrtsoftplus_topk(
+    gating_output: torch.Tensor,
+    e_score_correction_bias: torch.Tensor | None,
+    topk: int,
+    renormalize: bool,
+    indices_type: torch.dtype | None,
+    input_tokens: torch.Tensor | None,
+    hash_indices_table: torch.Tensor | None,
+    routed_scaling_factor: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Native fallback for vLLM's CUDA-only DSV4 routing operator."""
+    scores = torch.sqrt(F.softplus(gating_output.float()))
+    scores_for_choice = scores
+    if e_score_correction_bias is not None:
+        scores_for_choice = scores_for_choice + e_score_correction_bias.float()
+    scores_for_choice = torch.nan_to_num(scores_for_choice, nan=-1e30)
+
+    if hash_indices_table is not None:
+        assert input_tokens is not None
+        if input_tokens.dtype != hash_indices_table.dtype:
+            input_tokens = input_tokens.to(hash_indices_table.dtype)
+        topk_ids = hash_indices_table[input_tokens]
+    else:
+        topk_ids = torch.topk(scores_for_choice, k=topk, dim=-1, sorted=False).indices
+
+    topk_weights = scores.gather(1, topk_ids.long())
+    if renormalize:
+        denominator = topk_weights.sum(dim=-1, keepdim=True)
+        topk_weights = topk_weights / torch.where(
+            denominator > 0, denominator, torch.ones_like(denominator)
+        )
+    topk_weights = topk_weights * routed_scaling_factor
+    output_dtype = torch.int32 if indices_type is None else indices_type
+    return topk_weights.float(), topk_ids.to(output_dtype)
+
 
 def fused_topk(
     hidden_states: torch.Tensor,
@@ -29,8 +75,24 @@ def fused_topk(
     topk: int,
     renormalize: bool,
     indices_type: torch.dtype | None = None,
+    scoring_func: str = "softmax",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
+
+    # The FL kernel currently implements the unpadded softmax path. Preserve
+    # v0.28.0 padding and sigmoid semantics by delegating those cases upstream.
+    if (
+        scoring_func != "softmax"
+        or _get_padding_mask(hidden_states.shape[0]) is not None
+    ):
+        return upstream_fused_topk(
+            hidden_states=hidden_states,
+            gating_output=gating_output,
+            topk=topk,
+            renormalize=renormalize,
+            indices_type=indices_type,
+            scoring_func=scoring_func,
+        )
 
     M, _ = hidden_states.size()
 
@@ -58,6 +120,7 @@ def fused_topk(
 
     return topk_weights, topk_ids, token_expert_indices
 
+
 class FusedTopKRouterFL(FusedTopKRouter):
     """FL router that routes topk_softmax through call_op."""
 
@@ -75,6 +138,7 @@ class FusedTopKRouterFL(FusedTopKRouter):
             topk=self.top_k,
             renormalize=self.renormalize,
             indices_type=indices_type,
+            scoring_func=self.scoring_func,
         )
         return topk_weights, topk_ids
 
@@ -91,9 +155,7 @@ def _fl_grouped_topk(
     e_score_correction_bias: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """grouped_topk that routes ops.grouped_topk through call_op."""
-    assert hidden_states.size(0) == gating_output.size(0), (
-        "Number of tokens mismatch"
-    )
+    assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
     if e_score_correction_bias is not None:
         if scoring_func == "sigmoid":
@@ -136,9 +198,7 @@ def _fl_grouped_topk(
 
     scores_grouped = scores.view(-1, num_expert_group, group_size)
     group_scores = scores_grouped.amax(dim=-1)
-    _, selected_groups = torch.topk(
-        group_scores, k=topk_group, dim=-1, sorted=False
-    )
+    _, selected_groups = torch.topk(group_scores, k=topk_group, dim=-1, sorted=False)
     mask = torch.zeros_like(scores)
     for i in range(topk_group):
         group_idx = selected_groups[:, i]
@@ -147,9 +207,7 @@ def _fl_grouped_topk(
             mask.scatter_(1, (start + j).unsqueeze(1), 1.0)
 
     scores = scores * mask
-    topk_weights, topk_ids = torch.topk(
-        scores, k=topk, dim=-1, sorted=False
-    )
+    topk_weights, topk_ids = torch.topk(scores, k=topk, dim=-1, sorted=False)
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
     if routed_scaling_factor != 1.0:
@@ -238,22 +296,57 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
         *,
         input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        topk_weights, topk_ids = fused_topk_bias(
-            hidden_states=hidden_states,
-            gating_output=router_logits,
-            e_score_correction_bias=self.e_score_correction_bias.data
+        correction_bias = (
+            self.e_score_correction_bias.data
             if self.e_score_correction_bias is not None
-            else None,
-            topk=self.top_k,
-            renormalize=self.renormalize,
-            scoring_func=self.scoring_func,
-            indices_type=indices_type,
+            else None
         )
+        if self.scoring_func == "sqrtsoftplus" and not _has_dsv4_topk_op():
+            topk_weights, topk_ids = _sqrtsoftplus_topk(
+                gating_output=router_logits,
+                e_score_correction_bias=correction_bias,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                indices_type=indices_type,
+                input_tokens=input_ids,
+                hash_indices_table=self._hash_indices_table,
+                routed_scaling_factor=self.routed_scaling_factor,
+            )
+        else:
+            topk_weights, topk_ids = fused_topk_bias(
+                hidden_states=hidden_states,
+                gating_output=router_logits,
+                e_score_correction_bias=correction_bias,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                scoring_func=self.scoring_func,
+                indices_type=indices_type,
+                input_tokens=input_ids,
+                hash_indices_table=self._hash_indices_table,
+                routed_scaling_factor=self.routed_scaling_factor,
+            )
 
-        if self.routed_scaling_factor != 1.0:
-            topk_weights *= self.routed_scaling_factor
+        if self.num_fused_shared_experts > 0:
+            m = topk_ids.shape[0]
+            n = self.num_fused_shared_experts
+            base = self.global_num_experts
+            shared_ids = torch.arange(
+                base,
+                base + n,
+                dtype=topk_ids.dtype,
+                device=topk_ids.device,
+            ).expand(m, n)
+            shared_weights = torch.full(
+                (m, n),
+                self.shared_expert_weight,
+                dtype=topk_weights.dtype,
+                device=topk_weights.device,
+            )
+            topk_ids = torch.cat([topk_ids, shared_ids], dim=-1)
+            topk_weights = torch.cat([topk_weights, shared_weights], dim=-1)
 
         return topk_weights, topk_ids
+
 
 def replace_router_with_fl() -> None:
     """Monkey-patch upstream router classes to their FL subclasses (in-place)."""

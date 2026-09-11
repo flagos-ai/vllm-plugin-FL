@@ -25,9 +25,8 @@ def pytest_sessionfinish(session, exitstatus):
     coverage, etc.) have flushed their output files. os._exit() then bypasses
     Python GC entirely, preventing the NPU destructor crash.
 
-    Secondary fix: also drains any residual inductor SubprocPool whose
-    _read_thread would segfault when the subprocess pipe breaks on NPU teardown.
-    Primary guard for that is TORCHINDUCTOR_COMPILE_THREADS=1 in ascend.yaml.
+    It also drains any residual inductor SubprocPool whose _read_thread could
+    segfault when the subprocess pipe breaks during NPU teardown.
     """
     import contextlib
     import os

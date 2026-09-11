@@ -48,6 +48,7 @@ def install_fl_w8a8_moe_selector() -> bool:
             w1_bias=None,
             w2_bias=None,
             per_act_token_quant=False,
+            **kwargs,
         ):
             if not per_act_token_quant:
                 return current_builder(
@@ -58,6 +59,7 @@ def install_fl_w8a8_moe_selector() -> bool:
                     w1_bias=w1_bias,
                     w2_bias=w2_bias,
                     per_act_token_quant=False,
+                    **kwargs,
                 )
 
             from vllm.model_executor.layers.fused_moe.config import (

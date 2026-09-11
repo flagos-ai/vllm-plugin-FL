@@ -18,7 +18,8 @@
 platform: ascend
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:ascend-vllm0.20.2-a3-ci
+# Build and publish this image before dispatching the manual Ascend workflow.
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260911
 
 # Runner labels for this hardware
 runner_labels:
@@ -34,6 +35,7 @@ container_volumes:
   - /usr/local/sbin:/usr/local/sbin
   - /etc/ascend_install.info:/etc/ascend_install.info
   - /data:/data
+  - /public-flash/models:/data/models/Qwen:ro
 
 # Container options (hardware-specific settings)
 container_options: >-

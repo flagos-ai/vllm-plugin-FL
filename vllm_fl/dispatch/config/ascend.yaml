@@ -48,6 +48,19 @@ op_backends:
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
 flagos_blacklist:
+  # qwen-vllm_for_ascend (3b406c36) wraps argmax twice with LibEntry,
+  # failing sampler warmup with "Invalid Runtime Function". Use torch_npu.
+  - argmax
+  # FlagTree cannot lower pow(float32, int32) in FlagGems' tanh GELU.
+  # Keep vision activation on the native torch_npu implementation.
+  - gelu
+  # FlagGems index_put cannot compile GDN's boolean state reset on Ascend.
+  - index_put
+  - index_put_
+  - _index_put_impl_
+  # FlagGems Ascend index assumes contiguous input and misreads the
+  # strided cosine/sine cache used by Qwen vision RoPE (3b406c36).
+  - index
   - masked_scatter_
   - masked_scatter
   - scatter_add_

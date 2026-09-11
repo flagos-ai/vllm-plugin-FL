@@ -6,8 +6,6 @@
 
 import os
 
-import torch
-
 from vllm import LLM, SamplingParams
 
 # Check Platform
@@ -28,7 +26,12 @@ if __name__ == "__main__":
     # Create a sampling params object.
     sampling_params = SamplingParams(max_tokens=10, temperature=0.0)
     # Create an LLM.
-    llm = LLM(model="Qwen/Qwen3-4B", max_num_batched_tokens=16384, max_num_seqs=2048)
+    llm = LLM(
+        model="Qwen/Qwen3-4B",
+        max_num_batched_tokens=16384,
+        max_num_seqs=4,
+        enforce_eager=current_platform.device_type == "npu",
+    )
 
     # Generate texts from the prompts.
     outputs = llm.generate(prompts, sampling_params)
@@ -39,6 +42,6 @@ if __name__ == "__main__":
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
     del llm
-    torch.cuda.empty_cache()
+    current_platform.empty_cache()
 
     print("\n Reasoning complete, resources cleared.")
