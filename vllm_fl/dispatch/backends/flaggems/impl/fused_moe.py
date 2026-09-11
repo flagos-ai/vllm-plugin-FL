@@ -34,6 +34,21 @@ def _flaggems_moe_sum_op_fake(inp: torch.Tensor, out: torch.Tensor) -> None:
     return None
 
 
+@torch.library.custom_op(
+    "vllm_fl::dispatch_moe_sum",
+    mutates_args=("out",),
+    device_types="cuda",
+)
+def _dispatch_moe_sum_op(inp: torch.Tensor, out: torch.Tensor) -> None:
+    """Defer OpManager selection until execution outside the compiled graph."""
+    _marlin_moe_sum(inp, out)
+
+
+@_dispatch_moe_sum_op.register_fake
+def _dispatch_moe_sum_op_fake(inp: torch.Tensor, out: torch.Tensor) -> None:
+    return None
+
+
 def fused_marlin_moe_flaggems(*args, **kwargs):
     """Call FlagGems' vLLM-compatible fused Marlin MoE implementation."""
     # FlagGems PR #5437 follows the vLLM API except for the newer GLM-4
@@ -67,7 +82,7 @@ def fused_marlin_moe_flaggems(*args, **kwargs):
     # callback selected by vLLM/OpManager so this inner op remains independently
     # dispatchable and does not use the graph-unsafe TP8 implementation.
     flaggems_marlin.moe_align_block_size = _marlin_moe_align
-    flaggems_marlin.moe_sum = _marlin_moe_sum
+    flaggems_marlin.moe_sum = _dispatch_moe_sum_op
 
     return flaggems_marlin.fused_marlin_moe(*args, **kwargs)
 
