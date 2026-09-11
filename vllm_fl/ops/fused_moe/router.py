@@ -4,6 +4,7 @@
 from functools import partial
 
 import torch
+import torch.nn.functional as F
 
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
@@ -21,10 +22,53 @@ from vllm.model_executor.layers.fused_moe.router.fused_topk_router import (
 from vllm.model_executor.layers.fused_moe.router.grouped_topk_router import (
     GroupedTopKRouter,
 )
+
 from vllm_fl.dispatch import CachedOp
 
 _topk_softmax = CachedOp("topk_softmax")
 _grouped_topk = CachedOp("grouped_topk")
+
+
+def _has_dsv4_topk_op() -> bool:
+    return hasattr(torch.ops._moe_C, "topk_softplus_sqrt")
+
+
+def _sqrtsoftplus_topk(
+    gating_output: torch.Tensor,
+    e_score_correction_bias: torch.Tensor | None,
+    topk: int,
+    renormalize: bool,
+    indices_type: torch.dtype | None,
+    input_tokens: torch.Tensor | None,
+    hash_indices_table: torch.Tensor | None,
+    routed_scaling_factor: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Native fallback for vLLM's CUDA-only DSV4 routing operator."""
+    scores = torch.sqrt(F.softplus(gating_output.float()))
+    scores_for_choice = scores
+    if e_score_correction_bias is not None:
+        scores_for_choice = scores_for_choice + e_score_correction_bias.float()
+    scores_for_choice = torch.nan_to_num(scores_for_choice, nan=-1e30)
+
+    if hash_indices_table is not None:
+        assert input_tokens is not None
+        if input_tokens.dtype != hash_indices_table.dtype:
+            input_tokens = input_tokens.to(hash_indices_table.dtype)
+        topk_ids = hash_indices_table[input_tokens]
+    else:
+        topk_ids = torch.topk(
+            scores_for_choice, k=topk, dim=-1, sorted=False
+        ).indices
+
+    topk_weights = scores.gather(1, topk_ids.long())
+    if renormalize:
+        denominator = topk_weights.sum(dim=-1, keepdim=True)
+        topk_weights = topk_weights / torch.where(
+            denominator > 0, denominator, torch.ones_like(denominator)
+        )
+    topk_weights = topk_weights * routed_scaling_factor
+    output_dtype = torch.int32 if indices_type is None else indices_type
+    return topk_weights.float(), topk_ids.to(output_dtype)
 
 def fused_topk(
     hidden_states: torch.Tensor,
@@ -255,20 +299,35 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
         *,
         input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        topk_weights, topk_ids = fused_topk_bias(
-            hidden_states=hidden_states,
-            gating_output=router_logits,
-            e_score_correction_bias=self.e_score_correction_bias.data
+        correction_bias = (
+            self.e_score_correction_bias.data
             if self.e_score_correction_bias is not None
-            else None,
-            topk=self.top_k,
-            renormalize=self.renormalize,
-            scoring_func=self.scoring_func,
-            indices_type=indices_type,
-            input_tokens=input_ids,
-            hash_indices_table=self._hash_indices_table,
-            routed_scaling_factor=self.routed_scaling_factor,
+            else None
         )
+        if self.scoring_func == "sqrtsoftplus" and not _has_dsv4_topk_op():
+            topk_weights, topk_ids = _sqrtsoftplus_topk(
+                gating_output=router_logits,
+                e_score_correction_bias=correction_bias,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                indices_type=indices_type,
+                input_tokens=input_ids,
+                hash_indices_table=self._hash_indices_table,
+                routed_scaling_factor=self.routed_scaling_factor,
+            )
+        else:
+            topk_weights, topk_ids = fused_topk_bias(
+                hidden_states=hidden_states,
+                gating_output=router_logits,
+                e_score_correction_bias=correction_bias,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                scoring_func=self.scoring_func,
+                indices_type=indices_type,
+                input_tokens=input_ids,
+                hash_indices_table=self._hash_indices_table,
+                routed_scaling_factor=self.routed_scaling_factor,
+            )
 
         if self.num_fused_shared_experts > 0:
             m = topk_ids.shape[0]
