@@ -2069,10 +2069,19 @@ class ModelRunnerFL(
 
         if self.uses_mrope:
             # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-            self.mrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
-                self.mrope_positions.cpu[:, :total_num_scheduled_tokens],
-                non_blocking=True,
-            )
+            if current_platform.device_type == "gcu":
+                buf = torch.empty((3, total_num_scheduled_tokens),
+                                  dtype=torch.int64,
+                                  device="cpu",
+                                  pin_memory=True)
+                buf.copy_(self.mrope_positions.cpu[:, :total_num_scheduled_tokens])
+                self.mrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(buf, non_blocking=True)
+            else:
+                self.mrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
+                    self.mrope_positions.cpu[:, :total_num_scheduled_tokens],
+                    non_blocking=True,
+                )
+
         elif self.uses_xdrope_dim > 0:
             # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
             self.xdrope_positions.gpu[:, :total_num_scheduled_tokens].copy_(
@@ -6956,7 +6965,6 @@ class ModelRunnerFL(
         kv_caches = self.initialize_kv_cache_tensors(
             kv_cache_config, kernel_block_sizes
         )
-
         if (
             self.speculative_config
             and self.speculative_config.uses_extract_hidden_states()
