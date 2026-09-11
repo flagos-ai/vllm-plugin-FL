@@ -34,6 +34,8 @@
 
 共通点：**TP1（单卡、in-process、eager）始终健康**——同一容器、同一模型、同一天内 TP1-OK 与 TP2 故障并存。
 
+**回归佐证**：0.20 线（release/0.2）的 CI（run 32817940074，2026-08-25）中，**同一对 musa 用例 `27b_tp4_eager`（inference）与 `35b_a3b_tp4_eager`（serving）均 success**——即 TP4 用例在 0.2 栈可用，迁移到 0.24 栈（torch 2.9.0/torch_musa 2.9.0 组合）后回归，进一步支持问题归属当前栈版本。
+
 ## 2. 问题①：TP≥2 权重加载挂死
 
 - **现象**：`tensor_parallel_size>=2` 时 rank0 数秒完成加载，rank≥1 在权重 H2D 拷贝处永久自旋（用户态 R 状态、非锁等待），显存停在 ~293MB，无任何日志推进。
