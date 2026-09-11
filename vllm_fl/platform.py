@@ -81,6 +81,9 @@ class PlatformFL(Platform):
     device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
+    # NPU Inductor is not part of FL's Ascend graph path. Keep independently
+    # decorated helper functions on the eager backend.
+    simple_compile_backend: str = "eager" if device_type == "npu" else "inductor"
     ray_device_key: str = "GPU"
     dist_backend: str = (
         "flagcx"
@@ -244,17 +247,35 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
-        # Ascend NPU: torch_npu inductor codegen has issues with
-        # multi-device compilation (e.g. reduction scheduling on npu:1).
-        # Disable torch.compile and CUDAGraphs until torch_npu inductor
-        # is stable. check_and_update_config runs after VllmConfig.__init__
-        # processes enforce_eager, so we must set compilation_config directly.
         if cls.device_type == "npu":
             from vllm.config import CompilationMode
-            if compilation_config.mode != CompilationMode.NONE:
+
+            enforce_eager = bool(
+                model_config is not None
+                and getattr(model_config, "enforce_eager", False)
+            )
+            if enforce_eager or compilation_config.cudagraph_mode == CUDAGraphMode.NONE:
+                compilation_config.mode = CompilationMode.NONE
+                compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+            elif compilation_config.cudagraph_mode == CUDAGraphMode.FULL_DECODE_ONLY:
+                compilation_config.mode = CompilationMode.VLLM_COMPILE
+                compilation_config.backend = "eager"
+                compilation_config.use_inductor = False
+                compilation_config.splitting_ops = []
+                # These post-passes are CUDA/Inductor-specific. The eager FX
+                # graph is used only to drive the existing NPUGraph wrapper.
+                compilation_config.pass_config.fuse_norm_quant = False
+                compilation_config.pass_config.fuse_act_quant = False
+                compilation_config.pass_config.fuse_attn_quant = False
+                compilation_config.cudagraph_num_of_warmups = 1
+                logger.info(
+                    "Enabling Ascend FULL_DECODE_ONLY with eager FX and NPUGraph."
+                )
+            else:
                 logger.warning(
-                    "Disabling torch.compile for Ascend NPU to avoid "
-                    "torch_npu inductor codegen issues."
+                    "Ascend FL currently supports only NONE or "
+                    "FULL_DECODE_ONLY graph mode; falling back to NONE from %s.",
+                    compilation_config.cudagraph_mode,
                 )
                 compilation_config.mode = CompilationMode.NONE
                 compilation_config.cudagraph_mode = CUDAGraphMode.NONE

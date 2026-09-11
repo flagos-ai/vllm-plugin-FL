@@ -140,9 +140,15 @@ If there are multiple plugins in the current environment, you can specify use vl
     export TRITON_ALL_BLOCKS_PARALLEL=1
     ```
 
-3. Enable eager execution
+3. Select eager or graph execution
 
-    Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
+    Ascend supports eager execution and `FULL_DECODE_ONLY` graph execution for
+    graph-compatible models and backends. Add `enforce_eager=True` to the `LLM`
+    constructor or pass `--enforce-eager` to force eager execution. To enable
+    graph execution, keep eager enforcement disabled and set
+    `compilation_config={"cudagraph_mode": "FULL_DECODE_ONLY"}` (or pass the
+    equivalent `--compilation-config` value to `vllm serve`). Other graph modes
+    currently fall back to eager execution.
 
 
 ### Run a Task
