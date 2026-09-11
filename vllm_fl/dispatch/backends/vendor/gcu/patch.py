@@ -23,6 +23,7 @@ from .impl.fused_moe import (
     apply_fused_moe_triton_kernel_gcu_patch,
 )
 from .impl.w8a8_block_scaled_mm import apply_w8a8_block_scaled_mm_gcu_patch
+from .impl.vocab_parallel_embedding import apply_patch_get_masked_input_and_mask
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
@@ -121,6 +122,7 @@ def apply_gcu_patches() -> None:
     apply_fused_moe_triton_kernel_gcu_patch()
     apply_fused_moe_config_gcu_patch()
     apply_w8a8_block_scaled_mm_gcu_patch()
+    apply_patch_get_masked_input_and_mask()
 
     # Inductor compatibility patches (gcnArchName etc.)
     _patch_gcu_device_properties_gcn_arch()
