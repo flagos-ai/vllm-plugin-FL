@@ -37,6 +37,7 @@ from vllm.v1.attention.backend import (
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.utils.math_utils import cdiv
 from vllm.v1.attention.backend import AttentionCGSupport
+from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.attention.backends.utils import CommonAttentionMetadata
 
 from vllm_fl.dispatch.backends.vendor.ascend.impl.attention_mask import (
@@ -215,6 +216,7 @@ class AscendAttentionMetadataBuilder:
     # ACL graph support - ALWAYS means full graph capture is supported
     aclgraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.ALWAYS
     reorder_batch_threshold: ClassVar[int] = 1
+    supports_update_block_table: bool = False
 
     @staticmethod
     def get_cudagraph_support(vllm_config, kv_cache_spec) -> AttentionCGSupport:
@@ -433,7 +435,7 @@ class AscendAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "ASCEND_FL"
+        return "CUSTOM"
 
     @staticmethod
     def get_impl_cls() -> Type["AscendAttentionBackendImpl"]:
@@ -442,6 +444,15 @@ class AscendAttentionBackend(AttentionBackend):
     @staticmethod
     def get_builder_cls() -> Type["AscendAttentionMetadataBuilder"]:
         return AscendAttentionMetadataBuilder
+
+    @staticmethod
+    def get_supported_kernel_block_sizes() -> list[int]:
+        # Ascend fused_infer_attention_score and paged_attention kernels
+        # are validated for block size 128 in vllm-ascend. Allowing the
+        # default MultipleOf(1) lets the V1 engine pick unsupported merged
+        # storage block sizes (e.g. 784 for Qwen3.5 hybrid models), which
+        # causes aclnnFusedInferAttentionScoreV3 to fail with error 561002.
+        return [128]
 
     @staticmethod
     def get_kv_cache_shape(
@@ -486,6 +497,12 @@ class AscendAttentionBackend(AttentionBackend):
     @staticmethod
     def get_supported_block_size() -> list[int]:
         return [128]
+
+
+register_backend(
+    AttentionBackendEnum.CUSTOM,
+    "vllm_fl.dispatch.backends.vendor.ascend.impl.attention.AscendAttentionBackend",
+)
 
 
 class AscendAttentionBackendImpl(AttentionImpl):
@@ -561,20 +578,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
             value = self.value_cache.view(num_block, block_size, -1)
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
         elif attn_metadata.attn_state == AscendAttentionState.DecodeOnly:
-            # num_block, block_size, _, _ = self.key_cache.shape
-            # key = self.key_cache.view(num_block, block_size, -1)
-            # value = self.value_cache.view(num_block, block_size, -1)
-            key = self.key_cache.view(-1, block_size, 256)
-            value = self.value_cache.view(-1, block_size, 256)
+            num_block, block_size, _, _ = self.key_cache.shape
+            key = self.key_cache.view(num_block, block_size, -1)
+            value = self.value_cache.view(num_block, block_size, -1)
             block_table = attn_metadata.block_tables
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
         else:
             # ChunkedPrefill
-            # num_block, block_size, _, _ = self.key_cache.shape
-            # key = self.key_cache.view(num_block, block_size, -1)
-            # value = self.value_cache.view(num_block, block_size, -1)
-            key = self.key_cache.view(-1, block_size, 256)
-            value = self.value_cache.view(-1, block_size, 256)
+            num_block, block_size, _, _ = self.key_cache.shape
+            key = self.key_cache.view(num_block, block_size, -1)
+            value = self.value_cache.view(num_block, block_size, -1)
             block_table = attn_metadata.block_tables
             actual_seq_lengths_kv = attn_metadata.seq_lens_list
 
@@ -593,16 +606,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 self.key_cache, self.value_cache = kv_cache[0], kv_cache[1]
             slots = attn_metadata.slot_mapping
             # torch_npu requires int32 for slot_indices
-            # TODO(yxa): block_table.py: CUDA uses int64, NPU uses int32.
             if slots.dtype != torch.int32:
                 slots = slots.to(torch.int32)
-            # Use torch_npu reshape_and_cache
+
+            num_actual = attn_metadata.num_actual_tokens
             torch_npu._npu_reshape_and_cache(
-                key=key[:attn_metadata.num_actual_tokens],
-                value=value[:attn_metadata.num_actual_tokens],
+                key=key[:num_actual],
+                value=value[:num_actual],
                 key_cache=self.key_cache,
                 value_cache=self.value_cache,
-                slot_indices=slots[:attn_metadata.num_actual_tokens]
+                slot_indices=slots[:num_actual]
             )
         return key, value
 
@@ -625,9 +638,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
             key = key[:num_tokens]
             value = value[:num_tokens]
 
-        # Determine sparse_mode based on mask availability
-        # sparse_mode=3 requires attn_mask; sparse_mode=0 does not
-        # sparse_mode = 3 if attn_metadata.attn_mask is not None else 0
+        # sparse_mode: 3 = causal with mask, 0 = no mask
+        sparse_mode = 3 if attn_metadata.attn_mask is not None else 0
+
         attn_output, _ = torch_npu.npu_fused_infer_attention_score(
             query=query,
             key=key,
@@ -641,7 +654,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
             num_key_value_heads=self.num_kv_heads,
             num_heads=self.num_heads,
             scale=self.scale,
-            sparse_mode=3,
+            sparse_mode=sparse_mode,
         )
 
         attn_output = attn_output.view(num_tokens, self.num_heads, self.head_size)
@@ -779,8 +792,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
             return output.fill_(0)
 
         # Reshape and cache KV
-        if attn_metadata != AscendAttentionState.DecodeOnly:
-            kv_cache = [i.contiguous() for i in kv_cache]
+        # Note: kv_cache[0]/[1] may be non-contiguous views of a
+        # [2, num_blocks, ...] tensor.  _npu_reshape_and_cache handles
+        # them directly via slot_indices — no contiguous copy needed.
         if key is not None and value is not None:
             key = key.contiguous()
             value = value.contiguous()
