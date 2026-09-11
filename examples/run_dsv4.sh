@@ -1,7 +1,12 @@
 export USE_FLAGGEMS=false
 export VLLM_USE_BREAKABLE_CUDAGRAPH=0
 
-vllm serve /public-nvme/models/DeepSeek-V4-Flash-0731-INT \
+# The rank-sharded checkpoint stores MoE weights after vLLM's Marlin repack.
+# Keep this paired with --load-format sharded_state and TP/EP size 8.
+export VLLM_FL_OFFLINE_MARLIN=1
+
+vllm serve /public-nvme/models/DeepSeek-V4-Flash-0731-INT-Marlin-TP8 \
+  --load-format sharded_state \
   --trust-remote-code \
   --kv-cache-dtype fp8 \
   --block-size 256 \
