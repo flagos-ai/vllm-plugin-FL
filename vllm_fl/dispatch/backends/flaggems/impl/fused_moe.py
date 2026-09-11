@@ -23,6 +23,20 @@ def fused_marlin_moe_flaggems(*args, **kwargs):
             "FlagGems fused_marlin_moe does not support gemm1_alpha/beta"
         )
 
+    # FlagGems PR #5437 copied vLLM 0.20's small sequential scalar-type IDs.
+    # vLLM 0.24 encodes the scalar type properties into a stable integer, so
+    # translate the three formats implemented by that PR at the adapter edge.
+    from vllm.scalar_type import scalar_types
+
+    quant_type_id = kwargs.get("quant_type_id")
+    quant_type_map = {
+        scalar_types.uint4b8.id: 0,
+        scalar_types.uint8b128.id: 1,
+        scalar_types.float4_e2m1f.id: 6,
+    }
+    if quant_type_id in quant_type_map:
+        kwargs["quant_type_id"] = quant_type_map[quant_type_id]
+
     from flag_gems.fused.fused_marlin_moe import fused_marlin_moe
 
     return fused_marlin_moe(*args, **kwargs)
