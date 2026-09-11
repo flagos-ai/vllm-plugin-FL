@@ -177,6 +177,15 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.REFERENCE,
         ),
+        # Pure PyTorch reduction used as a graph-safe fallback for fused MoE.
+        OpImpl(
+            op_name="moe_sum",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(backend.moe_sum, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        ),
     ]
 
     registry.register_many(impls)

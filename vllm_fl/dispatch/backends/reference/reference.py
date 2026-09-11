@@ -340,3 +340,6 @@ class ReferenceBackend(Backend):
         fn = marlin_moe.fused_marlin_moe
         native = getattr(fn, "_vllm_fl_original", fn)
         return native(*args, **kwargs)
+
+    def moe_sum(self, inp: torch.Tensor, out: torch.Tensor) -> None:
+        torch.sum(inp, dim=1, out=out)

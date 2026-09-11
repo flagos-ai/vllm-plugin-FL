@@ -10,6 +10,11 @@ import torch
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
+from vllm_fl.dispatch import CachedOp
+
+
+_marlin_moe_sum = CachedOp("moe_sum")
+
 
 def fused_marlin_moe_flaggems(*args, **kwargs):
     """Call FlagGems' vLLM-compatible fused Marlin MoE implementation."""
@@ -43,9 +48,7 @@ def fused_marlin_moe_flaggems(*args, **kwargs):
     # EP path calls the module-global FlagGems moe_sum directly.  Bind the
     # callback selected by vLLM/OpManager so this inner op remains independently
     # dispatchable and does not use the graph-unsafe TP8 implementation.
-    moe_sum = kwargs.get("moe_sum")
-    if callable(moe_sum):
-        flaggems_marlin.moe_sum = moe_sum
+    flaggems_marlin.moe_sum = _marlin_moe_sum
 
     return flaggems_marlin.fused_marlin_moe(*args, **kwargs)
 
