@@ -92,12 +92,14 @@ def patch_flagcx_stream_adapter():
 def patch_distributed_runtime():
     """Keep FlagCX path while mapping torch ProcessGroup backend to pccl."""
     try:
-        from vllm.platforms import current_platform
         from vllm.distributed.device_communicators.base_device_communicator import (
             DeviceCommunicatorBase,
         )
+        from vllm.platforms import current_platform
+
         from vllm_fl.distributed.communicator import CommunicatorFL
-        from vllm_fl.worker import worker as worker_mod
+
+        worker_mod = importlib.import_module("vllm_fl.worker.worker")
 
         platform_cls = (
             current_platform
@@ -113,6 +115,7 @@ def patch_distributed_runtime():
         current_platform.dist_backend = "flagcx"
 
         if not getattr(CommunicatorFL, "_sunrise_all_gather_patched", False):
+
             def _all_gather(self, input_: torch.Tensor, dim: int = -1):
                 world_size = self.world_size
                 if world_size == 1:
@@ -147,6 +150,7 @@ def patch_distributed_runtime():
 
         init_dist = worker_mod.init_worker_distributed_environment
         if not getattr(init_dist, "_sunrise_backend_patched", False):
+
             def _init_worker_distributed_environment(
                 vllm_config,
                 rank,
@@ -170,9 +174,7 @@ def patch_distributed_runtime():
                 _init_worker_distributed_environment
             )
 
-        logger.info(
-            "Configured Sunrise/PTPU to use FlagCX communicator with pccl PGs"
-        )
+        logger.info("Configured Sunrise/PTPU to use FlagCX communicator with pccl PGs")
     except Exception as e:
         logger.warning("Failed to configure Sunrise distributed runtime: %s", e)
 
