@@ -3,7 +3,7 @@ export USE_FLAGGEMS=true
 # projection has its own logical op name, and the W8A8 selector must also be
 # disabled so compile uses vLLM's graph-safe CUTLASS kernel.  Marlin MoE and
 # the remaining supported operators stay on FlagGems.
-export VLLM_FL_FLAGOS_BLACKLIST=scaled_mm,deepseek_v4_int8_scaled_mm,w8a8_dynamic_per_token_linear,empty,moe_sum
+export VLLM_FL_FLAGOS_BLACKLIST=scaled_mm,deepseek_v4_int8_scaled_mm,w8a8_dynamic_per_token_linear,empty,moe_sum,sum
 export VLLM_USE_BREAKABLE_CUDAGRAPH=0
 
 # FlagGems PR #5437 consumes output-major GPTQ nibbles rather than vLLM 0.24's
