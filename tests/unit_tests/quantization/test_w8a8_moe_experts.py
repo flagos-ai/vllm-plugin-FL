@@ -123,6 +123,7 @@ def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch)
         "_flaggems_fused_experts_impl",
         fake_fused_experts_impl,
     )
+    monkeypatch.setattr(moe_experts, "_NATIVE_MOE_MAX_TOKENS", 0)
     quant_config = _quant_config()
     instance = SimpleNamespace(quant_config=quant_config)
     arguments = _apply_arguments()
@@ -147,6 +148,23 @@ def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch)
         arguments["output"],
         torch.full_like(arguments["output"], 3),
     )
+
+
+def test_small_batch_uses_native_w8a8_fallback(monkeypatch):
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("small batch must bypass FlagGems Triton"),
+    )
+    arguments = _apply_arguments()
+    moe_experts.FlagGemsW8A8Experts.apply(
+        SimpleNamespace(quant_config=_quant_config(), _lora_context=None),
+        **arguments,
+    )
+
+    assert arguments["output"].shape == arguments["hidden_states"].shape
+    assert torch.isfinite(arguments["output"]).all()
+    assert torch.count_nonzero(arguments["output"]) > 0
 
 
 def test_functional_experts_rejects_prequantized_input(monkeypatch):

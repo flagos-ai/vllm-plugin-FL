@@ -136,7 +136,27 @@ The legacy Ascend `fused_experts_impl` patch does not cover vLLM 0.28's
 modular entry point. Generic Triton MoE kernels failed on 910C with both
 UB overflow and invalid memory accesses after reducing the tile size.
 The native bridge preserves expert mapping, biases and the prepare stage's
-input-side router weighting. Quantized MoE and MoE LoRA remain unvalidated.
+input-side router weighting. Other quantized MoE formats and MoE LoRA remain
+unvalidated.
+
+DeepSeek-V4-Flash ModelSlim checkpoints use the plugin's
+`fl_modelslim_w8a8` quantization config. On 910C, the adapter uses BF16
+short-window attention and a native torch_npu W8A8 MoE path for small
+prefill/decode batches. The validated configuration uses TP8, one output
+projection group per rank, and a maximum sequence length equal to the model's
+128-token sliding window:
+
+```bash
+vllm serve /models/DeepSeek-V4-Flash-w8a8-mtp \
+  --tensor-parallel-size 8 --dtype bfloat16 \
+  --quantization fl_modelslim_w8a8 \
+  --max-model-len 128 --max-num-seqs 1 \
+  --max-num-batched-tokens 128 --gpu-memory-utilization 0.85 \
+  --enforce-eager
+```
+
+Long-context, MTP speculative decoding, graph capture, and performance tuning
+for this fallback path remain outside the validated configuration.
 
 The vLLM Triton top-k/top-p sampler is disabled on Ascend. FlagTree 0.6.2a1
 cannot lower its large-batch kernel on 910C, including the profiling batch
@@ -156,7 +176,8 @@ with the versions above and the default Ascend operator policy:
 | Qwen3.6-27B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, yellow text, blue rectangle |
 | Qwen3.6-35B-A3B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, blue rectangle; text color described ambiguously as white or pale yellow |
 | Qwen3.6-35B-A3B OpenAI API | TP2, BF16, eager, text and generated image | `/v1/models`, Paris, Hello VLM and blue rectangle passed |
-| Unit regression | Entire `tests/unit_tests` suite | 555 passed; 9 platform-specific tests skipped |
+| DeepSeek-V4-Flash W8A8 | TP8, BF16 KV cache, eager, 128 tokens, ModelSlim dynamic INT8 | Loaded 70/70 shards; `The capital of France is` completed as `Paris. The capital` |
+| Unit regression | Entire `tests/unit_tests` suite | 561 passed; 9 platform-specific tests skipped |
 | Functional device checks | Ascend ops, HCCL helpers and raw `torch.npu.NPUGraph` primitives | All selected tests passed |
 
 Full-model vLLM compilation and graph capture are unsupported and rejected
