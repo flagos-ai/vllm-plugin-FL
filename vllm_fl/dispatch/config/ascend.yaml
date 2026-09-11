@@ -170,6 +170,17 @@ flagos_blacklist:
   - repeat_interleave_self_tensor
   - repeat_interleave_tensor
 
+  # --- Wrong result: ATB rotary cos/sin cache index_select ---
+  # flag_gems generic index_select (flag_gems/ops/index_select.py) computes
+  # wrong and non-deterministic output on cann8.5.0 + triton_ascend 3.2.0 for
+  # the ATB rotary cache shape (inp=(40960,128), dim=0, idx=(n,), ~400 calls
+  # per decode). The ascend-specialized impl is unavailable under the vendor
+  # triton tree (no triton.experimental -> the whole _ascend.ops package fails
+  # to import), so the generic kernel is what gets registered. ATB rotary
+  # swallows the corrupted cos/sin and the pollution reaches every attention
+  # head. Falling back to torch_npu.index_select is exact.
+  - index_select
+
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
 # oot_blacklist:
