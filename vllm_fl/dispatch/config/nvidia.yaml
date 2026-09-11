@@ -71,9 +71,11 @@ op_backends:
   moe_align_block_size:
     - vendor:cuda
     - reference
-  # Keep the reduction independently dispatchable. Native CUDA is the normal
-  # path; reference remains available as a correctness fallback.
+  # Keep the reduction independently dispatchable. The vLLM CUDA wrapper
+  # reaches aten::sum.out through the stable ABI, which is not compatible with
+  # global FlagGems interception. Prefer FlagGems' Triton reduction here.
   moe_sum:
+    - default.flagos
     - vendor:cuda
     - reference
 
