@@ -13,7 +13,7 @@ export VLLM_FL_OFFLINE_MARLIN_PATH=/public-nvme/models/DeepSeek-V4-Flash-0731-IN
 if [[ "$VLLM_FL_FLAGGEMS_FUSED_MARLIN" == "1" ]]; then
   export VLLM_FL_FLAGOS_BLACKLIST=scaled_mm,deepseek_v4_int8_scaled_mm,w8a8_dynamic_per_token_linear,empty,sum
 else
-  export VLLM_FL_FLAGOS_BLACKLIST=scaled_mm,deepseek_v4_int8_scaled_mm,w8a8_dynamic_per_token_linear,empty,moe_sum,sum
+  export VLLM_FL_FLAGOS_BLACKLIST=scaled_mm,deepseek_v4_int8_scaled_mm,w8a8_dynamic_per_token_linear,empty,fused_marlin_moe,moe_sum,sum
 fi
 export VLLM_USE_BREAKABLE_CUDAGRAPH=0
 
