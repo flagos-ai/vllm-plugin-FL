@@ -56,9 +56,7 @@ def _sqrtsoftplus_topk(
             input_tokens = input_tokens.to(hash_indices_table.dtype)
         topk_ids = hash_indices_table[input_tokens]
     else:
-        topk_ids = torch.topk(
-            scores_for_choice, k=topk, dim=-1, sorted=False
-        ).indices
+        topk_ids = torch.topk(scores_for_choice, k=topk, dim=-1, sorted=False).indices
 
     topk_weights = scores.gather(1, topk_ids.long())
     if renormalize:

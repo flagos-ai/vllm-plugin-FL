@@ -146,6 +146,7 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         # Apply GCU monkey-patches (Triton grid limits, etc.).
         if getattr(current_platform, "vendor_name", None) in ("gcu", "enflame"):
             from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+
             apply_gcu_patches()
     # Kunlunxin patches must run even when no OOT operator was selected.
     from vllm_fl.dispatch.config.utils import get_platform_name

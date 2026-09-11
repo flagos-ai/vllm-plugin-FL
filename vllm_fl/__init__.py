@@ -22,6 +22,7 @@ def _patch_flag_gems_triton_import_compat():
     except ImportError:
         return
     if not hasattr(tl, "map_elementwise"):
+
         def _unsupported_map_elementwise(*args, **kwargs):
             raise NotImplementedError(
                 "triton.language.map_elementwise is unavailable on Kunlunxin; "

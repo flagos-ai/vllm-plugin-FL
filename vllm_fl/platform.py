@@ -433,9 +433,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.device_type == "npu":
-            return False
-        return cls.vendor_name in [
+        return cls.device_type != "npu" and cls.vendor_name in [
             "nvidia",
             "ascend",
             "metax",
@@ -483,14 +481,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
-        if cls.vendor_name == "hygon":
-            return False
-        return cls.dist_backend != "flagcx"
+        return cls.vendor_name != "hygon" and cls.dist_backend != "flagcx"
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
         if cls.device_name == "npu":
-            pass
+            importlib.import_module("vllm_fl.dispatch.backends.vendor.ascend")
         if cls.vendor_name == "iluvatar":
             # Patches are applied at module import time in iluvatar.py.
             # Also call chained-or patch here explicitly from the main process,
