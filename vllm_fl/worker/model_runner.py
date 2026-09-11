@@ -5361,6 +5361,15 @@ class ModelRunnerFL(
         ):
             self.eplb_state.start_async_loop()
 
+        # Freeze the FL dispatch control plane before any Dynamo trace can
+        # reach a CachedOp site: after all model/operator modules have been
+        # loaded (so every CachedOp is registered) and before any compile call
+        # can trace the forward path.  Frozen CachedOp sites call their
+        # selected implementation directly.
+        from vllm_fl.compilation import freeze_dispatch_for_compile
+
+        freeze_dispatch_for_compile(self.vllm_config)
+
         if (
             self.vllm_config.compilation_config.mode
             == CompilationMode.STOCK_TORCH_COMPILE
