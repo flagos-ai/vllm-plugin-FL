@@ -17,6 +17,26 @@ _marlin_moe_sum = CachedOp("moe_sum")
 _marlin_moe_align = CachedOp("moe_align_block_size")
 
 
+def _dispatch_marlin_moe_align(
+    topk_ids,
+    block_size,
+    num_experts,
+    expert_map=None,
+    pad_sorted_ids=False,
+    ignore_invalid_experts=False,
+):
+    # PR #5437 documents expert_map as unsupported. Filter remote experts in
+    # vLLM's align kernel so its WNA16 GEMMs never receive -1 expert blocks.
+    return _marlin_moe_align(
+        topk_ids,
+        block_size,
+        num_experts,
+        expert_map,
+        pad_sorted_ids,
+        ignore_invalid_experts or expert_map is not None,
+    )
+
+
 @torch.library.custom_op(
     "vllm_fl::flaggems_moe_sum",
     mutates_args=("out",),
@@ -81,7 +101,7 @@ def fused_marlin_moe_flaggems(*args, **kwargs):
     # EP path calls the module-global FlagGems moe_sum directly.  Bind the
     # callback selected by vLLM/OpManager so this inner op remains independently
     # dispatchable and does not use the graph-unsafe TP8 implementation.
-    flaggems_marlin.moe_align_block_size = _marlin_moe_align
+    flaggems_marlin.moe_align_block_size = _dispatch_marlin_moe_align
     flaggems_marlin.moe_sum = _dispatch_moe_sum_op
 
     return flaggems_marlin.fused_marlin_moe(*args, **kwargs)
