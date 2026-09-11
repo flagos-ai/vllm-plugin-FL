@@ -23,7 +23,7 @@ platforms:
   cuda:
     enabled: true
   ascend:
-    enabled: false
+    enabled: true
   hygon:
     enabled: true
   metax:
