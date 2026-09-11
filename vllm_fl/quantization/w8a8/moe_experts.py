@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
@@ -25,12 +26,79 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
     fused_experts as _vllm_fused_experts,
 )
 
+_NATIVE_MOE_MAX_TOKENS = 16
+
 
 def _flaggems_fused_experts_impl(**kwargs) -> torch.Tensor:
     """Resolve FlagGems lazily after the platform runtime is initialized."""
     import flag_gems
 
     return flag_gems.fused_experts_impl(**kwargs)
+
+
+def _dynamic_int8_qdq(value: torch.Tensor) -> torch.Tensor:
+    """Emulate per-token symmetric INT8 quantization in the source dtype."""
+    value_float = value.float()
+    scale = value_float.abs().amax(dim=-1, keepdim=True) / 127.0
+    safe_scale = torch.where(scale > 0, scale, torch.ones_like(scale))
+    quantized = torch.round(value_float / safe_scale).clamp(-127, 127)
+    return (quantized * scale).to(value.dtype)
+
+
+def _native_w8a8_fused_experts(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    w1_scale: torch.Tensor,
+    w2_scale: torch.Tensor,
+    w1_bias: torch.Tensor | None,
+    w2_bias: torch.Tensor | None,
+    expert_map: torch.Tensor | None,
+    apply_router_weight_on_input: bool,
+) -> torch.Tensor:
+    """Small-batch W8A8 MoE fallback using torch/torch_npu operations."""
+    output = torch.zeros_like(hidden_states)
+    local_ids = expert_map[topk_ids.long()] if expert_map is not None else topk_ids
+
+    for slot in range(topk_ids.shape[1]):
+        slot_ids = local_ids[:, slot].long()
+        for expert_id_tensor in torch.unique(slot_ids):
+            expert_id = int(expert_id_tensor.item())
+            if expert_id < 0:
+                continue
+            token_mask = slot_ids == expert_id
+            inputs = hidden_states[token_mask]
+            route_weights = topk_weights[token_mask, slot].to(inputs.dtype)
+            if apply_router_weight_on_input:
+                inputs = inputs * route_weights.unsqueeze(-1)
+
+            inputs = _dynamic_int8_qdq(inputs)
+            gate_up_weight = (
+                w1[expert_id].to(inputs.dtype)
+                * w1_scale[expert_id].squeeze(-1).to(inputs.dtype).unsqueeze(-1)
+            )
+            gate_up = torch.matmul(inputs, gate_up_weight.transpose(0, 1))
+            if w1_bias is not None:
+                gate_up = gate_up + w1_bias[expert_id].to(gate_up.dtype)
+            gate, up = gate_up.chunk(2, dim=-1)
+            intermediate = _dynamic_int8_qdq(F.silu(gate) * up)
+
+            down_weight = (
+                w2[expert_id].to(intermediate.dtype)
+                * w2_scale[expert_id].squeeze(-1).to(intermediate.dtype).unsqueeze(-1)
+            )
+            expert_output = torch.matmul(intermediate, down_weight.transpose(0, 1))
+            if w2_bias is not None:
+                expert_output = expert_output + w2_bias[expert_id].to(
+                    expert_output.dtype
+                )
+            if not apply_router_weight_on_input:
+                expert_output = expert_output * route_weights.unsqueeze(-1)
+            output[token_mask] += expert_output
+
+    return output
 
 
 def _validate_w8a8_contract(
@@ -248,30 +316,45 @@ class FlagGemsW8A8Experts(TritonExperts):
             quant_config.w2_bias,
         )
 
-        result = _flaggems_fused_experts_impl(
-            hidden_states=hidden_states,
-            w1=w1,
-            w2=w2,
-            topk_weights=topk_weights,
-            topk_ids=topk_ids,
-            inplace=False,
-            activation=activation.value,
-            apply_router_weight_on_input=apply_router_weight_on_input,
-            use_fp8_w8a8=False,
-            use_int8_w8a8=True,
-            use_int8_w8a16=False,
-            use_int4_w4a16=False,
-            per_channel_quant=True,
-            global_num_experts=global_num_experts,
-            expert_map=expert_map,
-            w1_scale=quant_config.w1_scale,
-            w2_scale=quant_config.w2_scale,
-            a1_scale=None,
-            a2_scale=None,
-            block_shape=None,
-            w1_bias=quant_config.w1_bias,
-            w2_bias=quant_config.w2_bias,
-        )
+        if hidden_states.shape[0] <= _NATIVE_MOE_MAX_TOKENS:
+            result = _native_w8a8_fused_experts(
+                hidden_states=hidden_states,
+                w1=w1,
+                w2=w2,
+                topk_weights=topk_weights,
+                topk_ids=topk_ids,
+                w1_scale=quant_config.w1_scale,
+                w2_scale=quant_config.w2_scale,
+                w1_bias=quant_config.w1_bias,
+                w2_bias=quant_config.w2_bias,
+                expert_map=expert_map,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+            )
+        else:
+            result = _flaggems_fused_experts_impl(
+                hidden_states=hidden_states,
+                w1=w1,
+                w2=w2,
+                topk_weights=topk_weights,
+                topk_ids=topk_ids,
+                inplace=False,
+                activation=activation.value,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+                use_fp8_w8a8=False,
+                use_int8_w8a8=True,
+                use_int8_w8a16=False,
+                use_int4_w4a16=False,
+                per_channel_quant=True,
+                global_num_experts=global_num_experts,
+                expert_map=expert_map,
+                w1_scale=quant_config.w1_scale,
+                w2_scale=quant_config.w2_scale,
+                a1_scale=None,
+                a2_scale=None,
+                block_shape=None,
+                w1_bias=quant_config.w1_bias,
+                w2_bias=quant_config.w2_bias,
+            )
         output.copy_(result)
 
 

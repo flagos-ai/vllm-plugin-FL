@@ -293,3 +293,17 @@ def register_model():
     register_router()
 
     _register_gdn_packed_decode_patch()
+
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().vendor_name == "ascend":
+        # Import registers the ModelSlim quantization config before model
+        # configuration resolution in worker processes.
+        from vllm.model_executor.models import ModelRegistry
+
+        from vllm_fl.quantization import modelslim_w8a8  # noqa: F401
+
+        ModelRegistry.register_model(
+            "DeepseekV4ForCausalLM",
+            "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM",
+        )
