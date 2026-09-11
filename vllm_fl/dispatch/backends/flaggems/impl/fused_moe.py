@@ -37,9 +37,17 @@ def fused_marlin_moe_flaggems(*args, **kwargs):
     if quant_type_id in quant_type_map:
         kwargs["quant_type_id"] = quant_type_map[quant_type_id]
 
-    from flag_gems.fused.fused_marlin_moe import fused_marlin_moe
+    import flag_gems.fused.fused_marlin_moe as flaggems_marlin
 
-    return fused_marlin_moe(*args, **kwargs)
+    # PR #5437 accepts vLLM's callback in its public signature but its generic
+    # EP path calls the module-global FlagGems moe_sum directly.  Bind the
+    # callback selected by vLLM/OpManager so this inner op remains independently
+    # dispatchable and does not use the graph-unsafe TP8 implementation.
+    moe_sum = kwargs.get("moe_sum")
+    if callable(moe_sum):
+        flaggems_marlin.moe_sum = moe_sum
+
+    return flaggems_marlin.fused_marlin_moe(*args, **kwargs)
 
 
 def moe_align_block_size_flaggems(
