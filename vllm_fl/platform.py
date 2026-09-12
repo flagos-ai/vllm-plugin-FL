@@ -46,6 +46,7 @@ dist_backend_dict = {
     "cuda": "nccl",
     "gcu": "eccl",
     "musa": "mccl",
+    "txda": "tccl",
 }
 
 def _resolve_flagcx_backend() -> bool:
