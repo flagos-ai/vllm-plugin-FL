@@ -1,9 +1,9 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 """
-METAX backend operator registrations.
+Txda (tsingmicro) backend operator registrations.
 
-This module registers all VENDOR (METAX) implementations.
+This module registers the VENDOR (Txda) implementations.
 """
 
 from __future__ import annotations
@@ -26,7 +26,11 @@ def _bind_is_available(fn, is_available_fn):
 
 def register_builtins(registry) -> None:
     """
-    Register all METAX (VENDOR) operator implementations.
+    Register all Txda (VENDOR) operator implementations.
+
+    Only attention is registered: silu_and_mul / rms_norm / rotary_embedding
+    have no vendor kernel to offer, so they stay with flagos (silu_and_mul) or
+    route to reference via the platform config (rms_norm, rotary_embedding).
 
     Args:
         registry: Registry to register into
@@ -37,33 +41,6 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
-        # Activation
-        OpImpl(
-            op_name="silu_and_mul",
-            impl_id="vendor.txda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
-            vendor="txda",
-            priority=BackendPriority.VENDOR,
-        ),
-        # Normalization
-        OpImpl(
-            op_name="rms_norm",
-            impl_id="vendor.txda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
-            vendor="txda",
-            priority=BackendPriority.VENDOR,
-        ),
-        # Rotary Embedding
-        OpImpl(
-            op_name="rotary_embedding",
-            impl_id="vendor.txda",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
-            vendor="txda",
-            priority=BackendPriority.VENDOR,
-        ),
         # Attention Backend
         OpImpl(
             op_name="attention_backend",
