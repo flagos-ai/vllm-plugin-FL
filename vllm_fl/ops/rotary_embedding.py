@@ -22,6 +22,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             head_size, rotary_dim, max_position_embeddings, base,
             is_neox_style, dtype
         )
+        # Memoized contiguous halves of cos_sin_cache; _cos_src tracks which
+        # tensor they were derived from, so a rebound cache (device or dtype
+        # move) invalidates them.
+        self._cos_cache: Optional[torch.Tensor] = None
+        self._sin_cache: Optional[torch.Tensor] = None
+        self._cos_src: Optional[torch.Tensor] = None
 
     def forward_oot(
         self,
@@ -44,7 +50,16 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             query_pass = query[..., self.rotary_dim:]
             key_pass = key[..., self.rotary_dim:]
 
-        cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
+        if self._cos_src is not self.cos_sin_cache:
+            cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
+            # A chunk is a strided view, and reading one costs a per-element
+            # copy on txda (~220 ms per layer, i.e. seconds per token).  Keep
+            # contiguous halves so the lookup in the rotary op stays a plain
+            # gather.
+            self._cos_cache = cos.contiguous()
+            self._sin_cache = sin.contiguous()
+            self._cos_src = self.cos_sin_cache
+        cos, sin = self._cos_cache, self._sin_cache
 
         q_embed, k_embed = _rotary_embedding(
             self,

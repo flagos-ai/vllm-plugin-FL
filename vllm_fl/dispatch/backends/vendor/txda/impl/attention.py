@@ -7,7 +7,7 @@ The flag_gems ``flash_attn_varlen_func`` kernel computes silently wrong values
 on TX8110 (probe: maxrel=inf/nan/37.7 across the causal and non-causal varlen
 cases), so the flag_gems attention impl cannot be used there. This backend
 reuses the flag_gems metadata machinery (KV cache layout, block table, slot
-mapping) but computes attention itself: KV writes go through plain indexing and
+mapping) but computes attention itself: KV writes go through basic indexing and
 the attention math through torch SDPA, both of which are numerically correct on
 txda. Compiler-independent: works under both the flagtree and triton compilers.
 """
@@ -27,6 +27,36 @@ from vllm_fl.dispatch.backends.flaggems.impl.attention import (
 
 _DEBUG = os.environ.get("FL_DEBUG_TXDA_ATTN") == "1"
 _PRINTED = [0]
+
+
+def _scatter_slots(cache: torch.Tensor, src: torch.Tensor, slots: list[int]) -> None:
+    """Copy ``src`` rows into the paged ``cache`` at the given token slots.
+
+    Uses basic (int/slice) indexing only. A tensor-index assignment on txda has
+    no kernel and round-trips the *whole* cache through host memory, so its cost
+    tracks the cache size instead of the rows written: on the engine's 284 MiB
+    cache that is ~166 ms whether 1 row or 2048 are written, which alone costs
+    seconds per decode step. Basic indexing is ~0.02 ms per op.
+    """
+    block_size = cache.shape[1]
+    n = len(slots)
+    i = 0
+    while i < n:
+        slot = slots[i]
+        # Padded positions carry slot_mapping == -1; without this guard they
+        # index the last block (floor division: -1 // block_size == -1) and
+        # corrupt the cache with padded garbage.
+        if slot < 0:
+            i += 1
+            continue
+        # Consecutive slots copy in a single op. Stopping at the block boundary
+        # keeps every write inside one block, where a slice is contiguous.
+        j = i + 1
+        while j < n and slots[j] == slot + (j - i) and (slot + (j - i)) % block_size:
+            j += 1
+        block_id, offset = divmod(slot, block_size)
+        cache[block_id, offset : offset + (j - i)] = src[i:j]
+        i = j
 
 
 class TxdaSDPAAttentionBackend(AttentionFLBackend):
@@ -66,24 +96,17 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
         kv_cache: torch.Tensor,
         slot_mapping: torch.Tensor,
     ):
-        """Write key/value into the paged KV cache via plain indexing.
+        """Write key/value into the paged KV cache.
 
-        Avoids flag_gems reshape_and_cache_flash (wrong on TX8110). Indexing by
-        (block_id, offset) is layout-independent.
+        Avoids flag_gems reshape_and_cache_flash (wrong on TX8110).
         """
         if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             return
 
         key_cache, value_cache = kv_cache.unbind(0)
-        block_size = key_cache.shape[1]
-        block_ids = slot_mapping // block_size
-        offsets = slot_mapping % block_size
-        # Padded slots carry slot_mapping == -1; without this guard they index
-        # the last block (floor division: -1 // block_size == -1) and corrupt
-        # the cache with padded garbage.
-        valid = slot_mapping >= 0
-        key_cache[block_ids[valid], offsets[valid]] = key[valid]
-        value_cache[block_ids[valid], offsets[valid]] = value[valid]
+        slots = slot_mapping.tolist()
+        _scatter_slots(key_cache, key, slots)
+        _scatter_slots(value_cache, value, slots)
 
         if _DEBUG and _PRINTED[0] < 400:
             _PRINTED[0] += 1
@@ -91,9 +114,8 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
                 f"[txda-debug] kv_update#{_PRINTED[0]} n={key.shape[0]} "
                 f"k0={key[0].reshape(-1)[:4].tolist()} "
                 f"v0={value[0].reshape(-1)[:4].tolist()} "
-                f"slot0={slot_mapping[0].item()} slotN={slot_mapping[-1].item()} "
-                f"bids0={block_ids[:4].tolist()} offs0={offsets[:4].tolist()} "
-                f"block_size={block_size}",
+                f"slot0={slots[0]} slotN={slots[-1]} "
+                f"block_size={key_cache.shape[1]}",
                 flush=True,
             )
 
@@ -142,10 +164,15 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
 
         num_reqs = cu_seqlens_q.shape[0] - 1
         window_left = self.sliding_window[0]  # -1 means no sliding window
+        # .item() on txda raises "txMemcpyAsync(...) = Invalid parameters" -- the
+        # 0-dim scalar read path is broken, while tolist() (0-dim included) and
+        # .cpu() work. Read both row vectors once and index on the host instead.
+        cu_q = cu_seqlens_q.tolist()
+        sl = seq_lens.tolist()
         for i in range(num_reqs):
-            qs, qe = cu_seqlens_q[i].item(), cu_seqlens_q[i + 1].item()
+            qs, qe = cu_q[i], cu_q[i + 1]
             q_len = qe - qs
-            seq_len = seq_lens[i].item()
+            seq_len = sl[i]
             if q_len == 0 or seq_len == 0:
                 output[qs:qe] = 0
                 continue
@@ -154,7 +181,13 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
             # (key_cache[blocks]) has no PrivateUse1 kernel on txda, so it falls
             # back to a CPU copy of the whole cache and hangs at engine scale.
             # Gather via per-block slices + cat instead (probe-verified).
-            blocks = block_table[i].tolist()
+            #
+            # The block table row is padded out to max_model_len / block_size,
+            # and each padded entry still costs a device op here: on a
+            # 2048-token config a 10-token decode would gather 128 blocks per
+            # layer to keep 1. Only the blocks that hold tokens are read.
+            n_blocks = -(-seq_len // key_cache.shape[1])
+            blocks = block_table[i].tolist()[:n_blocks]
             k = torch.cat([key_cache[b] for b in blocks], dim=0).reshape(
                 -1, self.num_kv_heads, self.head_size
             )[:seq_len]
@@ -171,8 +204,8 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
                 _PRINTED[0] += 1
                 print(
                     f"[txda-debug] fwd#{_PRINTED[0]} layer={getattr(layer, 'name', '?')} "
-                    f"n={num_actual_tokens} cu_q={cu_seqlens_q.tolist()} "
-                    f"seq_lens={seq_lens.tolist()} reqs={num_reqs} "
+                    f"n={num_actual_tokens} cu_q={cu_q} "
+                    f"seq_lens={sl} reqs={num_reqs} "
                     f"bt0={blocks[:4]} seq_len={seq_len} q_len={q_len} "
                     f"k_rb0={k[0].reshape(-1)[:4].tolist()} "
                     f"q0={q[0].reshape(-1)[:4].tolist()} "
@@ -244,8 +277,9 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
         """Encoder attention over contiguous q/k/v (no paged cache)."""
         cu_seqlens_q = attn_metadata.query_start_loc
         num_reqs = cu_seqlens_q.shape[0] - 1
+        cu_q = cu_seqlens_q.tolist()  # .item() is broken on txda; see forward()
         for i in range(num_reqs):
-            qs, qe = cu_seqlens_q[i].item(), cu_seqlens_q[i + 1].item()
+            qs, qe = cu_q[i], cu_q[i + 1]
             q_len = qe - qs
             if q_len == 0:
                 continue
