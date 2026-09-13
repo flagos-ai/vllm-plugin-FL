@@ -31,11 +31,11 @@ UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 VLLM_VERSION="${VLLM_VERSION:-0.19.0}"
 CANN_VERSION="${CANN_VERSION:-8.5.1}"
 CANN_CHIP="${CANN_CHIP:-910b}"
-METAX_BASE_IMAGE="${METAX_BASE_IMAGE:-harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-metax-0.20.0-maca.ai3.7.0.107-torch2.8-py312-ubuntu22.04-amd64}"
+METAX_BASE_IMAGE="${METAX_BASE_IMAGE:-harbor.baai.ac.cn/plugin/metax-maca3.7.0-treenone-triton3.0.0-cxnone-plugin0.2.0-vllm0.24.0-cp312-pt280-x64:202507290700}"
 METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
-METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
+METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.24.0}"
 MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-registry.mthreads.com/mcconline/inference/vllm:v0.20.2-ph1-4.3.5-torch2.7.1-v1.1.0}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
 MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.20.2}"
@@ -363,7 +363,7 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
         --build-arg "VLLM_VERSION=${METAX_VLLM_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="vllm-metax-${METAX_VLLM_VERSION}-maca.ai${METAX_MACA_VERSION}-torch2.8-${METAX_PYTHON_TAG}-ubuntu22.04-amd64-ci-git"
+        IMAGE_TAG="v${METAX_VLLM_VERSION}-metax-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
