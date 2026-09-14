@@ -58,3 +58,35 @@ class TestRotaryEmbeddingFL:
         mock_cached_op.assert_called_once()
         call_args = mock_cached_op.call_args
         assert call_args[0][0] is layer
+
+    def test_forward_oot_does_not_replace_cache_buffer(
+        self, mock_parent_init, mock_cached_op
+    ):
+        """Graph tracing must not observe a module buffer assignment."""
+        from vllm_fl.ops.rotary_embedding import RotaryEmbeddingFL
+
+        layer = RotaryEmbeddingFL(
+            head_size=64,
+            rotary_dim=32,
+            max_position_embeddings=2048,
+            base=10000.0,
+            is_neox_style=True,
+            dtype=torch.float32,
+        )
+        layer.head_size = 64
+        layer.rotary_dim = 32
+        layer.is_neox_style = True
+        cache = torch.randn(2048, 64)
+        layer.cos_sin_cache = cache
+
+        mock_cached_op.return_value = (
+            torch.randn(4, 8, 32),
+            torch.randn(4, 8, 32),
+        )
+        positions = torch.tensor([0, 1, 2, 3], device="meta")
+        query = torch.randn(4, 8, 64)
+        key = torch.randn(4, 8, 64)
+
+        layer.forward_oot(positions, query, key)
+
+        assert layer.cos_sin_cache is cache
