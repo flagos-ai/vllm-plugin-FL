@@ -409,7 +409,8 @@ class PlatformFL(Platform):
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
         if cls.device_name == "npu":
-            pass
+            # Import for the registration side effect; no name is used here.
+            import vllm_fl.dispatch.backends.vendor.ascend  # noqa: F401
         if cls.vendor_name == "iluvatar":
             # Patches are applied at module import time in iluvatar.py.
             # Also call chained-or patch here explicitly from the main process,
