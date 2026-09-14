@@ -52,7 +52,7 @@ WORKDIR /workspace
 FROM base AS ci
 
 ARG VLLM_VERSION=0.24.0
-ARG FLAGGEMS_REF=c2d04fce89d8226a0e2a544fb23bd66b9f973a6c
+ARG FLAGGEMS_REF=95ed7f9c43b23cba704baaabca4200978c0d6292
 ARG INDEX_URL=https://pypi.org/simple
 
 RUN python -m pip install --no-cache-dir \
@@ -82,7 +82,7 @@ RUN git clone https://github.com/vllm-project/vllm.git /workspace/vllm \
 # resolved from public PyPI rather than the aliyun mirror in the base image.
 RUN git clone https://github.com/FlagOpen/FlagGems.git /workspace/FlagGems \
     && git -C /workspace/FlagGems checkout ${FLAGGEMS_REF} \
-    && GEMS_VENDOR=metax python -m pip install -v --no-build-isolation \
+    && GEMS_VENDOR=metax SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 python -m pip install -v --no-build-isolation \
         ${INDEX_URL:+--index-url ${INDEX_URL}} \
         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
         -e /workspace/FlagGems
