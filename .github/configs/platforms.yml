@@ -27,7 +27,7 @@ platforms:
   hygon:
     enabled: false
   metax:
-    enabled: true
+    enabled: false
   musa:
     enabled: false
   enflame:
