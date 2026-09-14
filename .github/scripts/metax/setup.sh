@@ -26,34 +26,36 @@ python -m pip install --no-build-isolation --no-deps -e .
 # Patch FlagGems LibTuner to fall back to best_config on cache KeyError.
 # TODO: remove when FlagGems fixes kernel hash stability in LibTuner.
 python - <<'PATCH'
-import pathlib, textwrap
+import pathlib
 
 libentry = pathlib.Path("/workspace/FlagGems/src/flag_gems/utils/libentry.py")
 src = libentry.read_text()
 
-old = textwrap.dedent("""\
-                    **self.nargs,
-                    **kwargs,
-                    **self.cache[key].all_kwargs(),
-                }
-                self.pre_hook(full_nargs, reset_only=True)
-                self.configs_timings = timings
-            config = self.cache[key]""")
+old = (
+    "                    **self.nargs,\n"
+    "                    **kwargs,\n"
+    "                    **self.cache[key].all_kwargs(),\n"
+    "                }\n"
+    "                self.pre_hook(full_nargs, reset_only=True)\n"
+    "                self.configs_timings = timings\n"
+    "            config = self.cache[key]"
+)
 
-new = textwrap.dedent("""\
-                    **self.nargs,
-                    **kwargs,
-                    **best_config.all_kwargs(),
-                }
-                self.pre_hook(full_nargs, reset_only=True)
-                self.configs_timings = timings
-            # Fallback: if cache read-back fails due to kernel hash mismatch,
-            # use best_config directly.
-            # TODO: remove when FlagGems fixes kernel hash stability in LibTuner.
-            try:
-                config = self.cache[key]
-            except KeyError:
-                config = best_config""")
+new = (
+    "                    **self.nargs,\n"
+    "                    **kwargs,\n"
+    "                    **best_config.all_kwargs(),\n"
+    "                }\n"
+    "                self.pre_hook(full_nargs, reset_only=True)\n"
+    "                self.configs_timings = timings\n"
+    "            # Fallback: if cache read-back fails due to kernel hash mismatch,\n"
+    "            # use best_config directly.\n"
+    "            # TODO: remove when FlagGems fixes kernel hash stability in LibTuner.\n"
+    "            try:\n"
+    "                config = self.cache[key]\n"
+    "            except KeyError:\n"
+    "                config = best_config"
+)
 
 if old in src:
     libentry.write_text(src.replace(old, new, 1))
