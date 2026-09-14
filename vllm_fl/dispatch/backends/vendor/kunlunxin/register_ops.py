@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -87,7 +87,9 @@ def register_builtins(registry) -> None:
             op_name="fused_recurrent_gated_delta_rule_fwd",
             impl_id="vendor.kunlunxin",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.fused_recurrent_gated_delta_rule_fwd, is_avail),
+            fn=_bind_is_available(
+                backend.fused_recurrent_gated_delta_rule_fwd, is_avail
+            ),
             vendor="kunlunxin",
             priority=BackendPriority.VENDOR,
         ),

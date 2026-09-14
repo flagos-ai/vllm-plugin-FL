@@ -13,10 +13,7 @@ via the Kunlunxin patch system.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
-
 import xtorch_ops
 
 # for kunlunxin vendor
@@ -33,10 +30,10 @@ def _klx_fused_experts(
     activation: str = "silu",
     use_int8_w8a8: bool = False,
     use_int8_w4a8: bool = False,
-    w1_scale: Optional[torch.Tensor] = None,
-    w2_scale: Optional[torch.Tensor] = None,
-    w1_bias: Optional[torch.Tensor] = None,
-    w2_bias: Optional[torch.Tensor] = None,
+    w1_scale: torch.Tensor | None = None,
+    w2_scale: torch.Tensor | None = None,
+    w1_bias: torch.Tensor | None = None,
+    w2_bias: torch.Tensor | None = None,
 ) -> None:
     """
     Fused MoE expert computation using xtorch_ops (sorted path).
@@ -49,7 +46,9 @@ def _klx_fused_experts(
         w2_bias: Optional bias for down projection [E, hidden_dim]
     """
     if use_int8_w8a8 or use_int8_w4a8:
-        raise NotImplementedError("_klx_fused_experts is not supported for int8 w8a8 and w4a8.")
+        raise NotImplementedError(
+            "_klx_fused_experts is not supported for int8 w8a8 and w4a8."
+        )
 
     seq_num, hidden_dim = hidden_states.shape
     moe_topk = topk_ids.shape[1]
@@ -62,7 +61,10 @@ def _klx_fused_experts(
 
     # Step 1: Generate block statistics
     block_statistic = torch.zeros(
-        _KLX_MOE_BLOCK_NUM, expert_num, dtype=torch.int32, device=device,
+        _KLX_MOE_BLOCK_NUM,
+        expert_num,
+        dtype=torch.int32,
+        device=device,
     )
     xtorch_ops.gen_block_statistic(topk_ids, block_statistic)
 
@@ -70,17 +72,31 @@ def _klx_fused_experts(
     moe_expand = torch.empty(moe_input_num, hidden_dim, dtype=dtype, device=device)
     moe_index = torch.full((moe_input_num,), -1, dtype=torch.int32, device=device)
     expert_m = torch.empty(expert_num, dtype=torch.int32, device=device)
-    sorted_tokens_num_lod = torch.empty(expert_num + 1, dtype=torch.int32, device=device)
+    sorted_tokens_num_lod = torch.empty(
+        expert_num + 1, dtype=torch.int32, device=device
+    )
 
     xtorch_ops.moe_pre_sorted(
-        hidden_states, topk_ids, block_statistic,
-        moe_expand, moe_index, expert_m, sorted_tokens_num_lod
+        hidden_states,
+        topk_ids,
+        block_statistic,
+        moe_expand,
+        moe_index,
+        expert_m,
+        sorted_tokens_num_lod,
     )
 
     # Step 3: Inner FC (gate+up projection)
-    inner_fc_out = torch.empty(seq_num, moe_topk, double_ffn_hd, dtype=dtype, device=device)
+    inner_fc_out = torch.empty(
+        seq_num, moe_topk, double_ffn_hd, dtype=dtype, device=device
+    )
     xtorch_ops.moe_fc(
-        moe_expand, w1, sorted_tokens_num_lod, moe_index, moe_topk, inner_fc_out,
+        moe_expand,
+        w1,
+        sorted_tokens_num_lod,
+        moe_index,
+        moe_topk,
+        inner_fc_out,
         bias=w1_bias,
     )
     inner_fc_out = inner_fc_out.view(moe_input_num, double_ffn_hd)
@@ -114,9 +130,16 @@ def _klx_fused_experts(
         )
 
     # Step 5: Outer FC (down projection)
-    outer_fc_out = torch.empty(seq_num, moe_topk, hidden_dim, dtype=dtype, device=device)
+    outer_fc_out = torch.empty(
+        seq_num, moe_topk, hidden_dim, dtype=dtype, device=device
+    )
     xtorch_ops.moe_fc(
-        swiglu_out, w2, sorted_tokens_num_lod, moe_index, moe_topk, outer_fc_out,
+        swiglu_out,
+        w2,
+        sorted_tokens_num_lod,
+        moe_index,
+        moe_topk,
+        outer_fc_out,
         bias=w2_bias,
     )
     outer_fc_out = outer_fc_out.view(moe_input_num, hidden_dim)
@@ -128,7 +151,11 @@ def _klx_fused_experts(
     moe_index_2d = moe_index.view(seq_num, moe_topk)
     dequant_scale = torch.ones(seq_num, moe_topk, dtype=torch.float32, device=device)
     xtorch_ops.moe_post(
-        outer_fc_out, moe_index_2d, topk_weights, dequant_scale, output,
+        outer_fc_out,
+        moe_index_2d,
+        topk_weights,
+        dequant_scale,
+        output,
     )
 
 
@@ -147,16 +174,16 @@ def fused_experts_impl(
     use_int4_w4a16: bool = False,
     per_channel_quant: bool = False,
     global_num_experts: int = -1,
-    expert_map: Optional[torch.Tensor] = None,
-    w1_scale: Optional[torch.Tensor] = None,
-    w2_scale: Optional[torch.Tensor] = None,
-    w1_zp: Optional[torch.Tensor] = None,
-    w2_zp: Optional[torch.Tensor] = None,
-    a1_scale: Optional[torch.Tensor] = None,
-    a2_scale: Optional[torch.Tensor] = None,
-    block_shape: Optional[list[int]] = None,
-    w1_bias: Optional[torch.Tensor] = None,
-    w2_bias: Optional[torch.Tensor] = None,
+    expert_map: torch.Tensor | None = None,
+    w1_scale: torch.Tensor | None = None,
+    w2_scale: torch.Tensor | None = None,
+    w1_zp: torch.Tensor | None = None,
+    w2_zp: torch.Tensor | None = None,
+    a1_scale: torch.Tensor | None = None,
+    a2_scale: torch.Tensor | None = None,
+    block_shape: list[int] | None = None,
+    w1_bias: torch.Tensor | None = None,
+    w2_bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Kunlunxin fused experts implementation.
@@ -193,7 +220,6 @@ def fused_experts_impl(
             f"Supported activations: {SUPPORTED_ACTIVATIONS}"
         )
 
-    num_tokens = hidden_states.size(0)
     E = w1.size(0)
     if global_num_experts == -1:
         global_num_experts = E
@@ -202,10 +228,7 @@ def fused_experts_impl(
     if expert_map is not None:
         topk_ids = expert_map[topk_ids.long()].to(topk_ids.dtype)
 
-    if inplace:
-        output = hidden_states
-    else:
-        output = torch.zeros_like(hidden_states)
+    output = hidden_states if inplace else torch.zeros_like(hidden_states)
 
     _klx_fused_experts(
         hidden_states=hidden_states,

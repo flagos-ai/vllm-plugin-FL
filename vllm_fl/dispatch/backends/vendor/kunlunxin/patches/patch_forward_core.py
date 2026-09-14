@@ -22,6 +22,7 @@ vLLM 0.24.0 adaptations (FLA vendored + GDN package split):
 """
 
 import logging
+
 import torch
 
 logger = logging.getLogger(__name__)
@@ -31,15 +32,17 @@ def _kunlunxin_write_ssm_cache(ssm_state, last_recurrent_state, indices):
     from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
         KunlunxinPagedAttention,
     )
-    last_recurrent_state = (
-        last_recurrent_state.to(ssm_state.dtype)
-        .view(last_recurrent_state.shape[0], -1, last_recurrent_state.shape[-1])
+
+    last_recurrent_state = last_recurrent_state.to(ssm_state.dtype).view(
+        last_recurrent_state.shape[0], -1, last_recurrent_state.shape[-1]
     )
-    cast_ssm_state = ssm_state.view(
-        ssm_state.shape[0], 1, -1, ssm_state.shape[-1]
-    )
+    cast_ssm_state = ssm_state.view(ssm_state.shape[0], 1, -1, ssm_state.shape[-1])
     KunlunxinPagedAttention.reshape_and_cache_flash(
-        last_recurrent_state, None, cast_ssm_state, None, indices,
+        last_recurrent_state,
+        None,
+        cast_ssm_state,
+        None,
+        indices,
     )
 
 
@@ -52,16 +55,12 @@ def apply_ssm_patch():
     is_conv_state_dim_first = gdn_mod.is_conv_state_dim_first
     causal_conv1d_fn = gdn_mod.causal_conv1d_fn
     causal_conv1d_update = gdn_mod.causal_conv1d_update
-    fused_post_conv_prep = gdn_mod.fused_post_conv_prep
 
-    from vllm.third_party.flash_linear_attention.ops.fused_sigmoid_gating import (
-        fused_sigmoid_gating_delta_rule_update,
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.chunk import (
+        chunk_gated_delta_rule as klx_chunk_gated_delta_rule,
     )
     from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.fused_recurrent import (
         fused_recurrent_gated_delta_rule as klx_fused_recurrent,
-    )
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.chunk import (
-        chunk_gated_delta_rule as klx_chunk_gated_delta_rule,
     )
     from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_gdn_gating import (
         fused_gdn_gating_kunlunxin,
@@ -218,7 +217,11 @@ def apply_ssm_patch():
             g_non_spec, beta_non_spec = fused_gdn_gating_kunlunxin(
                 self.A_log, a_prefill, b_prefill, self.dt_bias
             )
-        elif attn_metadata.num_decodes > 0 and not split_non_spec and mixed_qkv_non_spec is not None:
+        elif (
+            attn_metadata.num_decodes > 0
+            and not split_non_spec
+            and mixed_qkv_non_spec is not None
+        ):
             # Decode path: just rearrange qkv (gating computed later in recurrent section)
             query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
                 mixed_qkv_non_spec
@@ -248,9 +251,7 @@ def apply_ssm_patch():
                 beta=beta_spec,
                 initial_state=ssm_state,
                 inplace_final_state=True,
-                cu_seqlens=spec_query_start_loc[
-                    : attn_metadata.num_spec_decodes + 1
-                ],
+                cu_seqlens=spec_query_start_loc[: attn_metadata.num_spec_decodes + 1],
                 ssm_state_indices=spec_state_indices_tensor,
                 num_accepted_tokens=num_accepted_tokens,
                 use_qk_l2norm_in_kernel=False,
@@ -283,9 +284,7 @@ def apply_ssm_patch():
                 beta=beta_dec,
                 initial_state=ssm_state,
                 inplace_final_state=True,
-                cu_seqlens=non_spec_query_start_loc[
-                    : attn_metadata.num_decodes + 1
-                ],
+                cu_seqlens=non_spec_query_start_loc[: attn_metadata.num_decodes + 1],
                 ssm_state_indices=non_spec_state_indices_tensor,
                 use_qk_l2norm_in_kernel=False,
             )
@@ -352,9 +351,7 @@ def apply_ssm_patch():
                 beta=beta_non_spec,
                 initial_state=ssm_state,
                 inplace_final_state=True,
-                cu_seqlens=non_spec_query_start_loc[
-                    : attn_metadata.num_decodes + 1
-                ],
+                cu_seqlens=non_spec_query_start_loc[: attn_metadata.num_decodes + 1],
                 ssm_state_indices=non_spec_state_indices_tensor,
                 use_qk_l2norm_in_kernel=False,
             )

@@ -24,12 +24,10 @@ being done in Python like other backends.
 from __future__ import annotations
 
 import warnings
-from typing import Optional
 
 import torch
-from einops import rearrange
-
 import xtorch_ops
+from einops import rearrange
 
 
 def chunk_gated_delta_rule_fwd(
@@ -41,7 +39,7 @@ def chunk_gated_delta_rule_fwd(
     scale: float,
     initial_state: torch.Tensor,
     output_final_state: bool,
-    cu_seqlens: Optional[torch.LongTensor] = None,
+    cu_seqlens: torch.LongTensor | None = None,
     use_qk_l2norm_in_kernel: bool = True,
 ) -> tuple:
     """
@@ -117,7 +115,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         scale: float,
         initial_state: torch.Tensor,
         output_final_state: bool,
-        cu_seqlens: Optional[torch.LongTensor] = None,
+        cu_seqlens: torch.LongTensor | None = None,
         use_qk_l2norm_in_kernel: bool = False,
     ):
         # When use_qk_l2norm_in_kernel=True, the native kernel handles L2-norm
@@ -154,9 +152,9 @@ def chunk_gated_delta_rule(
     scale: float = None,
     initial_state: torch.Tensor = None,
     output_final_state: bool = False,
-    cu_seqlens: Optional[torch.LongTensor] = None,
-    chunk_indices: Optional[torch.Tensor] = None,
-    chunk_offsets: Optional[torch.Tensor] = None,
+    cu_seqlens: torch.LongTensor | None = None,
+    chunk_indices: torch.Tensor | None = None,
+    chunk_offsets: torch.Tensor | None = None,
     head_first: bool = False,
     use_qk_l2norm_in_kernel: bool = False,
 ):

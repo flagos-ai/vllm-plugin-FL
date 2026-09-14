@@ -10,8 +10,6 @@ via torch_xmlir.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -22,14 +20,14 @@ class KunlunxinBackend(Backend):
     Kunlunxin backend for operator implementations.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "kunlunxin"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "kunlunxin"
 
     def is_available(self) -> bool:
@@ -37,6 +35,7 @@ class KunlunxinBackend(Backend):
         if KunlunxinBackend._available is None:
             try:
                 import torch_xmlir  # noqa: F401
+
                 # Kunlunxin hardware masquerades as CUDA device
                 if torch.cuda.is_available() and torch.cuda.device_count() > 0:
                     KunlunxinBackend._available = True
@@ -67,8 +66,8 @@ class KunlunxinBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 
@@ -139,8 +138,12 @@ class KunlunxinBackend(Backend):
         if use_mla:
             # TODO: Implement MLA with sparse attention support for Kunlunxin
             if use_sparse:
-                raise NotImplementedError("MLA with sparse attention is not implemented for Kunlunxin yet.")
-            raise NotImplementedError("MLA attention is not implemented for Kunlunxin yet.")
+                raise NotImplementedError(
+                    "MLA with sparse attention is not implemented for Kunlunxin yet."
+                )
+            raise NotImplementedError(
+                "MLA attention is not implemented for Kunlunxin yet."
+            )
         return "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention.KunlunxinAttentionBackend"
 
     # ==================== FLA Operator Implementations ====================
@@ -181,30 +184,35 @@ class KunlunxinBackend(Backend):
 
     def topk_softmax(
         self,
-        topk_weights: 'torch.Tensor',
-        topk_ids: 'torch.Tensor',
-        token_expert_indices: 'torch.Tensor',
-        gating_output: 'torch.Tensor',
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
         renormalize: bool,
     ) -> tuple:
         from .impl.fused_moe.experts_selector import vllm_topk_softmax
+
         return vllm_topk_softmax(
-            topk_weights, topk_ids, token_expert_indices,
-            gating_output, renormalize,
+            topk_weights,
+            topk_ids,
+            token_expert_indices,
+            gating_output,
+            renormalize,
         )
 
     def grouped_topk(
         self,
-        scores: 'torch.Tensor',
+        scores: torch.Tensor,
         n_group: int,
         topk_group: int,
         topk: int,
         renormalize: bool,
         routed_scaling_factor: float,
-        bias: 'torch.Tensor',
+        bias: torch.Tensor,
         scoring_func: int = 0,
     ) -> tuple:
         from .impl.fused_moe.experts_selector import grouped_topk
+
         return grouped_topk(
             scores,
             n_group,

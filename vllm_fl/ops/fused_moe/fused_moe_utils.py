@@ -1,35 +1,39 @@
-
-from enum import Enum
+import os
 from typing import Any
 
 import torch
 
 import vllm.envs as envs
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
-from vllm._aiter_ops import rocm_aiter_ops
-
 from vllm.logger import init_logger
+from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEConfig,
 )
-from vllm.platforms import current_platform
-from vllm.utils.flashinfer import has_flashinfer_cutlass_fused_moe
-from vllm.model_executor.layers.fused_moe.oracle.unquantized import UnquantizedMoeBackend, map_unquantized_backend, backend_to_kernel_cls
-from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 from vllm.model_executor.layers.fused_moe.experts.triton_moe import TritonExperts
 from vllm.model_executor.layers.fused_moe.fused_moe import try_get_optimal_moe_config
-from vllm.model_executor.layers.fused_moe.utils import _resize_cache, moe_kernel_quantize_input
-import os
+from vllm.model_executor.layers.fused_moe.oracle.unquantized import (
+    UnquantizedMoeBackend,
+    backend_to_kernel_cls,
+    map_unquantized_backend,
+)
+from vllm.model_executor.layers.fused_moe.utils import (
+    _resize_cache,
+    moe_kernel_quantize_input,
+)
 from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
     FlashinferMoeBackend,
 )
-from vllm.triton_utils import tl, triton
+from vllm.platforms import current_platform
+from vllm.triton_utils import tl
+
 from vllm_fl.dispatch import CachedOp
-from vllm_fl.ops.fused_moe.activation import apply_moe_activation
-from vllm_fl.utils import use_flaggems
+
 # Kunlunxin: always use TritonExpertsFL regardless of flaggems setting
 # (avoids _moe_C arg mismatch when flaggems is off)
 from vllm_fl.dispatch.config.utils import get_platform_name
+from vllm_fl.ops.fused_moe.activation import apply_moe_activation
+from vllm_fl.utils import use_flaggems
 
 _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
@@ -83,8 +87,10 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         ]
     return _AVAILABLE_BACKENDS
 
+
 ## Adopt from select_unquantized_moe_backend
-def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
+def select_unquantized_moe_backend_oot(
+    moe_config: FusedMoEConfig,
 ) -> tuple[UnquantizedMoeBackend, type[mk.FusedMoEExperts] | None]:
     """
     Select the primary Unquantized MoE backend.
@@ -178,9 +184,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
         elif envs.is_set("VLLM_FLASHINFER_MOE_BACKEND"):
             # If user is explicit about backend, validate it.
             # get_flashinfer_moe_backend() was removed in vllm 0.24.0; inline it.
-            fi_backend = FlashinferMoeBackend(
-                os.environ["VLLM_FLASHINFER_MOE_BACKEND"]
-            )
+            fi_backend = FlashinferMoeBackend(os.environ["VLLM_FLASHINFER_MOE_BACKEND"])
             if fi_backend == FlashinferMoeBackend.CUTLASS:
                 backend = UnquantizedMoeBackend.FLASHINFER_CUTLASS
             elif fi_backend == FlashinferMoeBackend.TENSORRT_LLM:
@@ -237,6 +241,7 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
         "No Unquantized MoE backend supports the deployment configuration."
     )
 
+
 def _prepare_expert_assignment(
     topk_ids: torch.Tensor,
     config: dict[str, Any],
@@ -284,6 +289,7 @@ def _prepare_expert_assignment(
         expert_map,
         ignore_invalid_experts=ignore_invalid_experts,
     )
+
 
 class TritonExpertsFL(TritonExperts):
     def apply(
@@ -340,30 +346,32 @@ class TritonExpertsFL(TritonExperts):
             if current_platform.is_cuda():
                 import flag_gems
 
-                output.copy_(flag_gems.fused_experts_impl(
-                    hidden_states,
-                    w1,
-                    w2,
-                    topk_weights,
-                    topk_ids,
-                    inplace=False,
-                    activation=activation.value,
-                    apply_router_weight_on_input=apply_router_weight_on_input,
-                    use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
-                    use_int8_w8a8=self.quant_config.use_int8_w8a8,
-                    use_int8_w8a16=self.quant_config.use_int8_w8a16,
-                    use_int4_w4a16=self.quant_config.use_int4_w4a16,
-                    per_channel_quant=self.per_act_token_quant,
-                    global_num_experts=global_num_experts,
-                    expert_map=expert_map,
-                    w1_scale=self.w1_scale,
-                    w2_scale=self.w2_scale,
-                    a1_scale=a1q_scale,
-                    a2_scale=a2_scale,
-                    block_shape=self.block_shape,
-                    w1_bias=self.w1_bias,
-                    w2_bias=self.w2_bias,
-                ))
+                output.copy_(
+                    flag_gems.fused_experts_impl(
+                        hidden_states,
+                        w1,
+                        w2,
+                        topk_weights,
+                        topk_ids,
+                        inplace=False,
+                        activation=activation.value,
+                        apply_router_weight_on_input=apply_router_weight_on_input,
+                        use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
+                        use_int8_w8a8=self.quant_config.use_int8_w8a8,
+                        use_int8_w8a16=self.quant_config.use_int8_w8a16,
+                        use_int4_w4a16=self.quant_config.use_int4_w4a16,
+                        per_channel_quant=self.per_act_token_quant,
+                        global_num_experts=global_num_experts,
+                        expert_map=expert_map,
+                        w1_scale=self.w1_scale,
+                        w2_scale=self.w2_scale,
+                        a1_scale=a1q_scale,
+                        a2_scale=a2_scale,
+                        block_shape=self.block_shape,
+                        w1_bias=self.w1_bias,
+                        w2_bias=self.w2_bias,
+                    )
+                )
                 return
 
         # LoRA path: step-by-step pipeline (call_op dispatch) so LoRA

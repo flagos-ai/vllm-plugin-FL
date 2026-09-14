@@ -29,6 +29,7 @@ def apply_kunlunxin_patches():
 
     # Disable Triton kernels incompatible with Kunlunxin XPU
     import os
+
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
     # RESTORED from old version: Critical Triton kernel compatibility patches
@@ -56,6 +57,7 @@ def patch_block_table_slot_mapping():
     """
     try:
         import torch
+
         from vllm.v1.worker.block_table import BlockTable
 
         PAD_SLOT_ID = -1
@@ -68,7 +70,7 @@ def patch_block_table_slot_mapping():
             total_cp_rank = self.pcp_rank * self.dcp_world_size + self.dcp_rank
 
             # Build req_indices: repeat_interleave on XPU, no CPU copy
-            counts = query_start_loc[1:num_reqs + 1] - query_start_loc[:num_reqs]
+            counts = query_start_loc[1 : num_reqs + 1] - query_start_loc[:num_reqs]
             req_indices = torch.repeat_interleave(
                 torch.arange(num_reqs, device=device), counts
             )
@@ -83,8 +85,10 @@ def patch_block_table_slot_mapping():
                 block_numbers = self.block_table.gpu.view(-1)[bt_indices]
                 virtual_block_offsets = positions % virtual_block_size
                 mask = (
-                    virtual_block_offsets // self.cp_kv_cache_interleave_size
-                    % total_cp_world_size == total_cp_rank
+                    virtual_block_offsets
+                    // self.cp_kv_cache_interleave_size
+                    % total_cp_world_size
+                    == total_cp_rank
                 )
                 block_offsets = (
                     virtual_block_offsets
@@ -94,8 +98,9 @@ def patch_block_table_slot_mapping():
                 )
                 slot_vals = block_numbers * self.block_size + block_offsets
                 self.slot_mapping.gpu[:num_tokens] = torch.where(
-                    mask, slot_vals,
-                    torch.full((), PAD_SLOT_ID, dtype=slot_vals.dtype, device=device)
+                    mask,
+                    slot_vals,
+                    torch.full((), PAD_SLOT_ID, dtype=slot_vals.dtype, device=device),
                 )
             else:
                 bt_indices = (
@@ -109,10 +114,14 @@ def patch_block_table_slot_mapping():
                 )
 
             # Pad remaining slots
-            self.slot_mapping.gpu[num_tokens:self.max_num_batched_tokens] = PAD_SLOT_ID
+            self.slot_mapping.gpu[num_tokens : self.max_num_batched_tokens] = (
+                PAD_SLOT_ID
+            )
 
         BlockTable.compute_slot_mapping = compute_slot_mapping_xpu
-        logger.info("Patched BlockTable.compute_slot_mapping to XPU torch path for Kunlunxin")
+        logger.info(
+            "Patched BlockTable.compute_slot_mapping to XPU torch path for Kunlunxin"
+        )
     except Exception as e:
         logger.warning("Failed to patch compute_slot_mapping: %s", e)
 
@@ -129,9 +138,10 @@ def patch_attention_backend_registry():
             AttentionBackendEnum,
             register_backend,
         )
+
         register_backend(
             AttentionBackendEnum.CUSTOM,
-            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention.KunlunxinAttentionBackend"
+            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention.KunlunxinAttentionBackend",
         )
         logger.info("Registered KunlunxinAttentionBackend as CUSTOM attention backend")
     except Exception as e:
@@ -151,7 +161,9 @@ def patch_topk_topp_sampler():
         from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p_pytorch
 
         sampler_mod.apply_top_k_top_p = apply_top_k_top_p_pytorch
-        logger.info("Patched apply_top_k_top_p to use PyTorch-native path for Kunlunxin")
+        logger.info(
+            "Patched apply_top_k_top_p to use PyTorch-native path for Kunlunxin"
+        )
     except Exception as e:
         logger.warning("Failed to patch top-k/top-p sampler for Kunlunxin: %s", e)
 
@@ -160,10 +172,10 @@ def patch_topk_topp_sampler():
 def patch_fused_moe():
     """Replace fused_experts_impl with Kunlunxin implementation."""
     try:
+        import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe import (
             fused_experts_impl as klx_fused_experts_impl,
         )
-        import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
 
         fused_moe_lib.fused_experts_impl = klx_fused_experts_impl
         logger.info("Patched fused_moe for Kunlunxin")
@@ -199,6 +211,7 @@ def patch_sampler_rng():
             sampled_tokens = _orig_random_sample(probs, generators, use_fp64_gumbel)
             try:
                 from vllm.distributed import get_tp_group
+
                 tp_group = get_tp_group()
                 if tp_group.world_size > 1:
                     tp_group.broadcast(sampled_tokens, src=0)
@@ -263,12 +276,15 @@ def patch_causal_conv1d():
 
         # 【修复】关键！patch gdn 模块 (v0.24.0: gdn/qwen_gdn_linear_attn)
         import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as _gdn_lib
+
         if hasattr(_gdn_lib, "causal_conv1d_fn"):
             _gdn_lib.causal_conv1d_fn = causal_conv1d_fn_adapter
         if hasattr(_gdn_lib, "causal_conv1d_update"):
             _gdn_lib.causal_conv1d_update = causal_conv1d_update_adapter
 
-        logger.info("Patched causal_conv1d ops for Kunlunxin (including qwen_gdn_linear_attn)")
+        logger.info(
+            "Patched causal_conv1d ops for Kunlunxin (including qwen_gdn_linear_attn)"
+        )
     except Exception as e:
         logger.warning("Failed to patch causal_conv1d ops: %s", e)
 
@@ -282,10 +298,10 @@ def patch_fla_ops():
     (flat package); all references below are re-targeted there.
     """
     try:
+        import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
         import vllm.third_party.flash_linear_attention.ops as _fla_ops_lib
         import vllm.third_party.flash_linear_attention.ops.chunk as _fla_chunk_lib
         import vllm.third_party.flash_linear_attention.ops.fused_recurrent as _fla_recurrent_lib
-        import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
 
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.chunk import (
             chunk_gated_delta_rule as klx_chunk_gated_delta_rule,
@@ -310,6 +326,7 @@ def patch_fla_ops():
         # in its namespace - only the packed_decode variant, which the env
         # kill VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE=0 keeps unreachable.)
         import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as _gdn_lib
+
         if hasattr(_gdn_lib, "fla_chunk_gated_delta_rule"):
             _gdn_lib.fla_chunk_gated_delta_rule = klx_chunk_gated_delta_rule
         if hasattr(_gdn_lib, "fused_recurrent_gated_delta_rule"):
@@ -324,8 +341,8 @@ def patch_fla_ops():
 def patch_fused_gdn_gating():
     """Replace the triton fused_gdn_gating kernel with Kunlunxin impl."""
     try:
-        import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
         import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as _gdn_lib
+        import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
 
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_gdn_gating import (
             fused_gdn_gating_kunlunxin,
@@ -345,7 +362,10 @@ def patch_ssm_cache_update():
     See patches/patch_forward_core.py for the implementation and diff markers.
     """
     try:
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_forward_core import apply_ssm_patch
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_forward_core import (
+            apply_ssm_patch,
+        )
+
         apply_ssm_patch()
         logger.info("Patched GatedDeltaNetAttention._forward_core for Kunlunxin")
     except Exception as e:
@@ -361,18 +381,32 @@ def patch_decode_attention():
     with is_prefix_cache=True provides correct results.
     """
     try:
-        import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
         import xtorch_ops
+
+        import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
 
         @staticmethod
         def patched_forward_decode(
-            query, key_cache, value_cache, block_tables,
-            seq_lens, seq_lens_host, max_seq_len, num_decode_tokens,
-            kv_cache_dtype, num_kv_heads, scale, alibi_slopes,
-            k_scale, v_scale, max_window_size=-1, output=None
+            query,
+            key_cache,
+            value_cache,
+            block_tables,
+            seq_lens,
+            seq_lens_host,
+            max_seq_len,
+            num_decode_tokens,
+            kv_cache_dtype,
+            num_kv_heads,
+            scale,
+            alibi_slopes,
+            k_scale,
+            v_scale,
+            max_window_size=-1,
+            output=None,
         ):
             """Use prefill_attention in prefix_cache mode for decode."""
             import torch
+
             if output is None:
                 output = torch.empty_like(query)
 
@@ -381,14 +415,14 @@ def patch_decode_attention():
 
             # Build query_start_loc: each decode token has query_len=1
             query_start_loc_host = torch.arange(
-                num_decode_tokens + 1, dtype=torch.int32, device='cpu'
+                num_decode_tokens + 1, dtype=torch.int32, device="cpu"
             )
             query_start_loc = query_start_loc_host.to(decode_query.device)
 
             # Build kv_prefix_start_loc from seq_lens
             sl = seq_lens_host[:num_decode_tokens].to(torch.int32)
             kv_prefix_start_loc_host = torch.zeros(
-                num_decode_tokens + 1, dtype=torch.int32, device='cpu'
+                num_decode_tokens + 1, dtype=torch.int32, device="cpu"
             )
             kv_prefix_start_loc_host[1:] = torch.cumsum(sl, dim=0)
             kv_prefix_start_loc = kv_prefix_start_loc_host.to(decode_query.device)

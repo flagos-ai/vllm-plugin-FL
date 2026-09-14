@@ -23,8 +23,6 @@ def silu_and_mul_kunlunxin(obj, x: torch.Tensor) -> torch.Tensor:
     import xtorch_ops
 
     d = x.shape[-1] // 2
-    out = torch.empty(
-        *x.shape[:-1], d, dtype=x.dtype, device=x.device
-    )
+    out = torch.empty(*x.shape[:-1], d, dtype=x.dtype, device=x.device)
     xtorch_ops.swiglu(x, out)
     return out

@@ -10,10 +10,7 @@ the unified select_experts entry point.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
-
 import xtorch_ops
 
 
@@ -26,11 +23,17 @@ def vllm_topk_softmax(
 ) -> tuple[torch.Tensor, ...]:
     if renormalize:
         xtorch_ops.moe_softmax_topk_norm(
-            gating_output, topk_weights, topk_indices, token_expert_indices,
+            gating_output,
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
         )
     else:
         xtorch_ops.moe_softmax_topk(
-            gating_output, topk_weights, topk_indices, token_expert_indices,
+            gating_output,
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
         )
     return topk_weights, topk_indices
 
@@ -40,19 +43,24 @@ def fused_topk(
     gating_output: torch.Tensor,
     topk: int,
     renormalize: bool,
-    indices_type: Optional[torch.dtype] = None,
+    indices_type: torch.dtype | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fused top-k selection with softmax."""
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
     M, _ = hidden_states.size()
 
-    topk_weights = torch.empty(M, topk, dtype=torch.float32, device=hidden_states.device)
+    topk_weights = torch.empty(
+        M, topk, dtype=torch.float32, device=hidden_states.device
+    )
     topk_ids = torch.empty(
-        M, topk,
+        M,
+        topk,
         dtype=torch.int32 if indices_type is None else indices_type,
         device=hidden_states.device,
     )
-    token_expert_indices = torch.empty(M, topk, dtype=torch.int32, device=hidden_states.device)
+    token_expert_indices = torch.empty(
+        M, topk, dtype=torch.int32, device=hidden_states.device
+    )
 
     topk_weights, topk_ids = vllm_topk_softmax(
         topk_weights, topk_ids, token_expert_indices, gating_output, renormalize
@@ -69,7 +77,9 @@ def fused_topk_bias(
 ):
     n_routed_experts = gating_output.shape[-1]
     scores = gating_output.softmax(dim=-1)
-    scores_for_choice = scores.view(-1, n_routed_experts) + e_score_correction_bias.unsqueeze(0)
+    scores_for_choice = scores.view(
+        -1, n_routed_experts
+    ) + e_score_correction_bias.unsqueeze(0)
     topk_indices = torch.topk(scores_for_choice, k=topk, dim=-1, sorted=False)[1]
     topk_weights = scores.gather(1, topk_indices)
     if renormalize:
@@ -120,8 +130,12 @@ def grouped_topk(
     topk_ids = torch.empty((seq_num, topk), dtype=torch.int32, device=scores.device)
 
     xtorch_ops.moe_group_topk(
-        scores_for_choice, n_group, topk_group,
-        topk_weights, topk_ids, None,
+        scores_for_choice,
+        n_group,
+        topk_group,
+        topk_weights,
+        topk_ids,
+        None,
     )
 
     # If bias was used for selection, gather original scores for weights

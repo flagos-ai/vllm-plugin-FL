@@ -12,12 +12,10 @@ Kunlunxin implementation of causal_conv1d operators.
 
 from __future__ import annotations
 
-from typing import Any, Optional
-
 import torch
-from vllm.v1.attention.backends.utils import PAD_SLOT_ID
-
 import xtorch_ops
+
+from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 
 
 def causal_conv1d_fn_kunlunxin(
@@ -72,7 +70,7 @@ def causal_conv1d_fn_kunlunxin(
         cache_indices,
         has_initial_state,
         activation in ["silu", "swish"],
-        False,          # is_ncw: x is (cu_seqlen, dim), conv_states is (N, state_len, dim)
+        False,  # is_ncw: x is (cu_seqlen, dim), conv_states is (N, state_len, dim)
         query_start_loc_cpu,
         pad_slot_id,
     )
@@ -88,7 +86,7 @@ def causal_conv1d_update_kunlunxin(
     activation: bool | str | None = None,
     conv_state_indices: torch.Tensor | None = None,
     cache_seqlens: torch.Tensor | None = None,
-    intermediate_conv_window: Optional[torch.Tensor] = None,
+    intermediate_conv_window: torch.Tensor | None = None,
     num_accepted_tokens: torch.Tensor | None = None,
     query_start_loc: torch.Tensor | None = None,
     max_query_len: int = -1,
@@ -143,10 +141,7 @@ def causal_conv1d_update_kunlunxin(
 
     # check layout
     unsqueeze = x.dim() == 2
-    if unsqueeze:
-        x = x.unsqueeze(1)
-    else:
-        x = x.transpose(1, 2)
+    x = x.unsqueeze(1) if unsqueeze else x.transpose(1, 2)
     x = x.contiguous()
 
     xtorch_ops.causal_conv1d_update(
@@ -158,14 +153,11 @@ def causal_conv1d_update_kunlunxin(
         cache_seqlens,
         conv_state_indices,
         intermediate_conv_window,
-        False,       # is_ncw
+        False,  # is_ncw
         pad_slot_id,
     )
 
     # reverse layout
-    if unsqueeze:
-        x = x.squeeze(1)
-    else:
-        x = x.transpose(1, 2)
+    x = x.squeeze(1) if unsqueeze else x.transpose(1, 2)
 
     return x

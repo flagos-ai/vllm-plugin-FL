@@ -166,8 +166,12 @@ def _patch_torch_accelerator():
 def _init_vendor_device():
     """Vendor-specific device initialization patches."""
     from vllm_fl.utils import DeviceInfo
+
     if DeviceInfo().vendor_name == "kunlunxin":
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import _patch_xpu_get_device
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
+            _patch_xpu_get_device,
+        )
+
         _patch_xpu_get_device()
 
 

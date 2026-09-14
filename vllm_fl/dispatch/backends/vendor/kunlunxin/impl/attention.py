@@ -17,30 +17,28 @@ KV cache layout HND by default: (2, num_blocks, num_kv_heads, block_size, head_s
 
 from __future__ import annotations
 
-import os
 import logging
 import math
+import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
 
+from vllm.config import VllmConfig
+from vllm.v1.attention.backend import (
+    AttentionLayer,
+    AttentionMetadataBuilder,
+    AttentionType,
+)
 from vllm.v1.attention.backends.utils import (
     AttentionBackend,
     AttentionImpl,
     CommonAttentionMetadata,
     split_decodes_and_prefills,
 )
-from vllm.v1.attention.backend import (
-    AttentionLayer,
-    AttentionType,
-    AttentionMetadataBuilder,
-)
-
 from vllm.v1.attention.ops.paged_attn import PagedAttention
 from vllm.v1.kv_cache_interface import AttentionSpec
-
-from vllm.config import VllmConfig
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
@@ -53,6 +51,7 @@ _KUNLUNXIN_OPS_AVAILABLE = False
 try:
     import torch_xmlir  # noqa: F401
     import xtorch_ops
+
     _KUNLUNXIN_OPS_AVAILABLE = True
 except ImportError:
     logger.debug(
@@ -69,6 +68,7 @@ def is_kunlunxin_ops_available() -> bool:
 @dataclass
 class KunlunxinMetadata:
     """Metadata for Kunlunxin attention."""
+
     # (batch_size,). The length of sequences (entire tokens seen so far) per
     # sequence.
     seq_lens_tensor: torch.Tensor | None
@@ -93,8 +93,7 @@ class KunlunxinMetadata:
     enable_kv_scales_calculation: bool
 
     # seq_lens stored as a tensor.
-    seq_lens_tensor: Optional[torch.Tensor]
-
+    seq_lens_tensor: torch.Tensor | None
 
     # Maximum sequence length among prefill batch. 0 if there are decoding
     # requests only.
@@ -108,62 +107,62 @@ class KunlunxinMetadata:
 
     # (batch_size,). The sequence length per sequence. Sequence length means
     # the computed tokens + new tokens None if it is a decoding.
-    seq_lens: Optional[List[int]] = None
-    seq_lens_tensor_host: Optional[torch.Tensor] = None
+    seq_lens: list[int] | None = None
+    seq_lens_tensor_host: torch.Tensor | None = None
     # (batch_size + 1,). The cumulative sequence lengths of the sequences in
     # the batch, used to index into sequence. E.g., if the sequence length is
     # [4, 6], it is [0, 4, 10].
-    seq_start_loc: Optional[torch.Tensor] = None
+    seq_start_loc: torch.Tensor | None = None
 
     # (batch_size,) A tensor of context lengths (tokens that are computed
     # so far).
-    context_lens_tensor: Optional[torch.Tensor] = None
+    context_lens_tensor: torch.Tensor | None = None
 
     # Maximum query length in the batch. None for decoding.
-    max_query_len: Optional[int] = None
+    max_query_len: int | None = None
 
     # Max number of key/value length in the batch, especially for prefix cache
-    max_kv_len: Optional[int] = None
+    max_kv_len: int | None = None
 
     # Max number of query tokens among request in the batch.
-    max_decode_query_len: Optional[int] = None
+    max_decode_query_len: int | None = None
 
     # (batch_size + 1,). The cumulative subquery lengths of the sequences in
     # the batch, used to index into subquery. E.g., if the subquery length
     # is [4, 6], it is [0, 4, 10].
-    query_start_loc: Optional[torch.Tensor] = None
-    query_start_loc_host: Optional[torch.Tensor] = None
+    query_start_loc: torch.Tensor | None = None
+    query_start_loc_host: torch.Tensor | None = None
     # serve only for prefix cache
-    kv_prefix_start_loc_host: Optional[torch.Tensor] = None
-    kv_prefix_start_loc: Optional[torch.Tensor] = None
+    kv_prefix_start_loc_host: torch.Tensor | None = None
+    kv_prefix_start_loc: torch.Tensor | None = None
 
     # Self-attention prefill/decode metadata cache
-    _cached_prefill_metadata: Optional["KunlunxinMetadata"] = None
-    _cached_decode_metadata: Optional["KunlunxinMetadata"] = None
+    _cached_prefill_metadata: KunlunxinMetadata | None = None
+    _cached_decode_metadata: KunlunxinMetadata | None = None
 
     # Begin encoder attn & enc/dec cross-attn fields...
 
     # Encoder sequence lengths representation
-    encoder_seq_lens: Optional[List[int]] = None
-    encoder_seq_lens_tensor: Optional[torch.Tensor] = None
+    encoder_seq_lens: list[int] | None = None
+    encoder_seq_lens_tensor: torch.Tensor | None = None
 
     # Maximum sequence length among encoder sequences
-    max_encoder_seq_len: Optional[int] = None
+    max_encoder_seq_len: int | None = None
 
     # Number of tokens input to encoder
-    num_encoder_tokens: Optional[int] = None
+    num_encoder_tokens: int | None = None
 
     # Cross-attention memory-mapping data structures: slot mapping
     # and block tables
-    cross_slot_mapping: Optional[torch.Tensor] = None
-    cross_block_tables: Optional[torch.Tensor] = None
+    cross_slot_mapping: torch.Tensor | None = None
+    cross_block_tables: torch.Tensor | None = None
 
     # Input positions for rotrary embeddings since for MLA the rotary
     # position embeddings are applied inside the attention backend
-    input_positions: Optional[torch.Tensor] = None
+    input_positions: torch.Tensor | None = None
 
     # for spec decode api
-    is_spec_decode: Optional[bool] = False
+    is_spec_decode: bool | None = False
 
     def __post_init__(self):
         # Set during the execution of the first attention op.
@@ -171,32 +170,38 @@ class KunlunxinMetadata:
         # when alibi slopes is used. It is because of the limitation
         # from xformer API.
         # will not appear in the __repr__ and __init__
-        self.attn_bias: Optional[List[AttentionBias]] = None
-        self.encoder_attn_bias: Optional[List[AttentionBias]] = None
-        self.cross_attn_bias: Optional[List[AttentionBias]] = None
+        # Upstream types these as xformers AttentionBias, which vLLM's V1 tree no
+        # longer ships; this backend never sets them to anything but None.
+        self.attn_bias: list[Any] | None = None
+        self.encoder_attn_bias: list[Any] | None = None
+        self.cross_attn_bias: list[Any] | None = None
 
     @property
     def is_all_encoder_attn_metadata_set(self):
-        '''
+        """
         All attention metadata required for encoder attention is set.
-        '''
-        return ((self.encoder_seq_lens is not None)
-                and (self.encoder_seq_lens_tensor is not None)
-                and (self.max_encoder_seq_len is not None))
+        """
+        return (
+            (self.encoder_seq_lens is not None)
+            and (self.encoder_seq_lens_tensor is not None)
+            and (self.max_encoder_seq_len is not None)
+        )
 
     @property
     def is_all_cross_attn_metadata_set(self):
-        '''
+        """
         All attention metadata required for enc/dec cross-attention is set.
 
         Superset of encoder attention required metadata.
-        '''
-        return (self.is_all_encoder_attn_metadata_set
-                and (self.cross_slot_mapping is not None)
-                and (self.cross_block_tables is not None))
+        """
+        return (
+            self.is_all_encoder_attn_metadata_set
+            and (self.cross_slot_mapping is not None)
+            and (self.cross_block_tables is not None)
+        )
 
     @property
-    def prefill_metadata(self) -> Optional["KunlunxinMetadata"]:
+    def prefill_metadata(self) -> KunlunxinMetadata | None:
         if self.num_prefills == 0:
             return None
 
@@ -205,33 +210,65 @@ class KunlunxinMetadata:
             # metadata structure
             return self._cached_prefill_metadata
 
-        assert ((self.seq_lens_tensor is not None)
-                or (self.encoder_seq_lens_tensor is not None))
+        assert (self.seq_lens_tensor is not None) or (
+            self.encoder_seq_lens_tensor is not None
+        )
 
         # Compute some attn_metadata fields which default to None
-        query_start_loc = (None if self.query_start_loc is None else
-                           self.query_start_loc[-(self.num_prefills + 1):] - self.query_start_loc[-(self.num_prefills + 1)])
+        query_start_loc = (
+            None
+            if self.query_start_loc is None
+            else self.query_start_loc[-(self.num_prefills + 1) :]
+            - self.query_start_loc[-(self.num_prefills + 1)]
+        )
         # flash attention needs both lod information on host and device
-        query_start_loc_host = (None if self.query_start_loc_host is None else
-                           self.query_start_loc_host[-(self.num_prefills + 1):] - self.query_start_loc_host[-(self.num_prefills + 1)])
+        query_start_loc_host = (
+            None
+            if self.query_start_loc_host is None
+            else self.query_start_loc_host[-(self.num_prefills + 1) :]
+            - self.query_start_loc_host[-(self.num_prefills + 1)]
+        )
 
-        kv_prefix_start_loc = (None if self.kv_prefix_start_loc is None else
-                    self.kv_prefix_start_loc[-(self.num_prefills + 1):] - self.kv_prefix_start_loc[-(self.num_prefills + 1)])
-        kv_prefix_start_loc_host = (None if self.kv_prefix_start_loc_host is None else
-            self.kv_prefix_start_loc_host[-(self.num_prefills + 1):] - self.kv_prefix_start_loc_host[-(self.num_prefills + 1)])
+        kv_prefix_start_loc = (
+            None
+            if self.kv_prefix_start_loc is None
+            else self.kv_prefix_start_loc[-(self.num_prefills + 1) :]
+            - self.kv_prefix_start_loc[-(self.num_prefills + 1)]
+        )
+        kv_prefix_start_loc_host = (
+            None
+            if self.kv_prefix_start_loc_host is None
+            else self.kv_prefix_start_loc_host[-(self.num_prefills + 1) :]
+            - self.kv_prefix_start_loc_host[-(self.num_prefills + 1)]
+        )
 
-        slot_mapping = (None if self.slot_mapping is None else
-                        self.slot_mapping[-self.num_prefill_tokens:])
+        slot_mapping = (
+            None
+            if self.slot_mapping is None
+            else self.slot_mapping[-self.num_prefill_tokens :]
+        )
 
-        seq_lens_tensor = (None if self.seq_lens_tensor is None else
-                           self.seq_lens_tensor[-self.num_prefills:])
-        context_lens_tensor = (None if self.context_lens_tensor is None else
-                               self.context_lens_tensor[-self.num_prefills:])
+        seq_lens_tensor = (
+            None
+            if self.seq_lens_tensor is None
+            else self.seq_lens_tensor[-self.num_prefills :]
+        )
+        context_lens_tensor = (
+            None
+            if self.context_lens_tensor is None
+            else self.context_lens_tensor[-self.num_prefills :]
+        )
 
-        block_tables = (None if self.block_tables is None else
-                        self.block_tables[-self.num_prefills:])
-        input_positions = (None if self.input_positions is None else
-                    self.input_positions[-self.num_prefills:])
+        block_tables = (
+            None
+            if self.block_tables is None
+            else self.block_tables[-self.num_prefills :]
+        )
+        input_positions = (
+            None
+            if self.input_positions is None
+            else self.input_positions[-self.num_prefills :]
+        )
 
         # Construct & cache prefill-phase attention metadata structure
         self._cached_prefill_metadata = KunlunxinMetadata(
@@ -260,11 +297,12 @@ class KunlunxinMetadata:
             max_encoder_seq_len=self.max_encoder_seq_len,
             cross_slot_mapping=self.cross_slot_mapping,
             cross_block_tables=self.cross_block_tables,
-            enable_kv_scales_calculation=False)
+            enable_kv_scales_calculation=False,
+        )
         return self._cached_prefill_metadata
 
     @property
-    def decode_metadata(self) -> Optional["KunlunxinMetadata"]:
+    def decode_metadata(self) -> KunlunxinMetadata | None:
         if self.num_decode_tokens == 0:
             return None
 
@@ -272,38 +310,63 @@ class KunlunxinMetadata:
             # Recover cached decode-phase attention
             # metadata structure
             return self._cached_decode_metadata
-        assert ((self.seq_lens_tensor is not None)
-                or (self.encoder_seq_lens_tensor is not None))
+        assert (self.seq_lens_tensor is not None) or (
+            self.encoder_seq_lens_tensor is not None
+        )
 
         if self.num_prefills != 0:
             # Compute some attn_metadata fields which default to None
-            slot_mapping = (None if self.slot_mapping is None else
-                        self.slot_mapping[:-self.num_prefill_tokens])
-            seq_lens_tensor = (None if self.seq_lens_tensor is None else
-                           self.seq_lens_tensor[:-self.num_prefills])
-            seq_lens_tensor_host = (None if self.seq_lens_tensor_host is None else
-                           self.seq_lens_tensor_host[:-self.num_prefills])
+            slot_mapping = (
+                None
+                if self.slot_mapping is None
+                else self.slot_mapping[: -self.num_prefill_tokens]
+            )
+            seq_lens_tensor = (
+                None
+                if self.seq_lens_tensor is None
+                else self.seq_lens_tensor[: -self.num_prefills]
+            )
+            seq_lens_tensor_host = (
+                None
+                if self.seq_lens_tensor_host is None
+                else self.seq_lens_tensor_host[: -self.num_prefills]
+            )
 
-            block_tables = (None if self.block_tables is None else
-                        self.block_tables[:-self.num_prefills])
-            query_start_loc = (None if self.query_start_loc is None else
-                               self.query_start_loc[:-self.num_prefills])
-            query_start_loc_host = (None if self.query_start_loc_host is None else
-                                    self.query_start_loc_host[:-self.num_prefills])
+            block_tables = (
+                None
+                if self.block_tables is None
+                else self.block_tables[: -self.num_prefills]
+            )
+            query_start_loc = (
+                None
+                if self.query_start_loc is None
+                else self.query_start_loc[: -self.num_prefills]
+            )
+            query_start_loc_host = (
+                None
+                if self.query_start_loc_host is None
+                else self.query_start_loc_host[: -self.num_prefills]
+            )
         else:
             # Compute some attn_metadata fields which default to None
-            slot_mapping = (None if self.slot_mapping is None else
-                        self.slot_mapping)
-            seq_lens_tensor = (None if self.seq_lens_tensor is None else
-                           self.seq_lens_tensor)
-            seq_lens_tensor_host = (None if self.seq_lens_tensor_host is None else
-                           self.seq_lens_tensor_host)
-            block_tables = (None if self.block_tables is None else
-                        self.block_tables)
-            query_start_loc = (None if self.query_start_loc is None else
-                               self.query_start_loc[:-self.num_prefills])
-            query_start_loc_host = (None if self.query_start_loc_host is None else
-                                    self.query_start_loc_host[:-self.num_prefills])
+            slot_mapping = None if self.slot_mapping is None else self.slot_mapping
+            seq_lens_tensor = (
+                None if self.seq_lens_tensor is None else self.seq_lens_tensor
+            )
+            seq_lens_tensor_host = (
+                None if self.seq_lens_tensor_host is None else self.seq_lens_tensor_host
+            )
+            block_tables = None if self.block_tables is None else self.block_tables
+            query_start_loc = (
+                None
+                if self.query_start_loc is None
+                else self.query_start_loc[: -self.num_prefills]
+            )
+            query_start_loc_host = (
+                None
+                if self.query_start_loc_host is None
+                else self.query_start_loc_host[: -self.num_prefills]
+            )
 
         # Construct & cache decode-phase attention metadata structure
         self._cached_decode_metadata = KunlunxinMetadata(
@@ -327,7 +390,8 @@ class KunlunxinMetadata:
             cross_slot_mapping=self.cross_slot_mapping,
             cross_block_tables=self.cross_block_tables,
             enable_kv_scales_calculation=False,
-            is_spec_decode=self.is_spec_decode)
+            is_spec_decode=self.is_spec_decode,
+        )
         return self._cached_decode_metadata
 
 
@@ -337,17 +401,23 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
     reorder_batch_threshold: ClassVar[int] = 1
     # _cudagraph_support removed: AttentionCGSupport not available in vllm 0.20.2
 
-    def __init__(self, kv_cache_spec: AttentionSpec,
-                 layer_names: list[str],
-                 vllm_config: VllmConfig,
-                 device: torch.device):
+    def __init__(
+        self,
+        kv_cache_spec: AttentionSpec,
+        layer_names: list[str],
+        vllm_config: VllmConfig,
+        device: torch.device,
+    ):
         self.device = device
         self.is_spec_decode = vllm_config.speculative_config is not None
         if self.is_spec_decode:
-            self.reorder_batch_threshold = 1 + vllm_config.speculative_config.num_speculative_tokens
+            self.reorder_batch_threshold = (
+                1 + vllm_config.speculative_config.num_speculative_tokens
+            )
 
-    def reorder_batch(self, input_batch: "InputBatch",
-                      scheduler_output: "SchedulerOutput") -> bool:
+    def reorder_batch(
+        self, input_batch: InputBatch, scheduler_output: SchedulerOutput
+    ) -> bool:
         decodes = []
         prefills = []
         num_decode_tokens = 0
@@ -370,8 +440,9 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
 
         for i in range(1, min(num_decodes, num_prefills) + 1):
             if decodes[num_decodes - i] >= num_decodes:
-                input_batch.swap_states(prefills[first_prefill],
-                                        decodes[num_decodes - i])
+                input_batch.swap_states(
+                    prefills[first_prefill], decodes[num_decodes - i]
+                )
                 first_prefill += 1
                 modified_batch = True
             else:
@@ -382,15 +453,14 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
         self._num_prefill_tokens = num_prefill_tokens
         return modified_batch
 
-
     def build(
-        self, common_prefix_len: int,
+        self,
+        common_prefix_len: int,
         common_attn_metadata: CommonAttentionMetadata,
-        fast_build: bool = False
+        fast_build: bool = False,
     ) -> KunlunxinMetadata:
         num_reqs = common_attn_metadata.num_reqs
         num_actual_tokens = common_attn_metadata.num_actual_tokens
-        max_query_len = common_attn_metadata.max_query_len
         block_table_tensor = common_attn_metadata.block_table_tensor
         slot_mapping = common_attn_metadata.slot_mapping
         seq_lens_cpu = common_attn_metadata.seq_lens_cpu
@@ -405,20 +475,22 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
         seq_lens_loc = seq_lens_loc_host.to(self.device, non_blocking=True)
         seq_lens_host = seq_lens_cpu
 
-        num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens = \
-            split_decodes_and_prefills(common_attn_metadata, decode_threshold=self.reorder_batch_threshold)
+        num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens = (
+            split_decodes_and_prefills(
+                common_attn_metadata, decode_threshold=self.reorder_batch_threshold
+            )
+        )
         num_scheduled_tokens = torch.diff(query_start_loc_host)
         tmp_decode_scheduled_tokens = num_scheduled_tokens[:num_decodes]
         if num_decode_tokens == 0:
             max_decode_seq_len = 0
         else:
             max_decode_seq_len = torch.max(tmp_decode_scheduled_tokens).item()
-        tmp_prefill_scheduled_tokens = num_scheduled_tokens[num_decodes: num_reqs]
+        tmp_prefill_scheduled_tokens = num_scheduled_tokens[num_decodes:num_reqs]
         if num_prefill_tokens == 0:
             max_prefill_seq_len = 0
         else:
             max_prefill_seq_len = torch.max(tmp_prefill_scheduled_tokens).item()
-
 
         attn_metadata = KunlunxinMetadata(
             num_actual_tokens=num_actual_tokens,
@@ -430,7 +502,9 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
             seq_lens_tensor=seq_lens,
             seq_lens_tensor_host=seq_lens_host,
             max_query_len=max_prefill_seq_len,
-            max_decode_query_len=(self.reorder_batch_threshold if self.is_spec_decode else None),
+            max_decode_query_len=(
+                self.reorder_batch_threshold if self.is_spec_decode else None
+            ),
             max_kv_len=max_kv_len,
             max_prefill_seq_len=max_prefill_seq_len,
             max_decode_seq_len=max_decode_seq_len,
@@ -447,18 +521,18 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
 
         return attn_metadata
 
-
     def build_for_cudagraph_capture(
-            self, common_attn_metadata: CommonAttentionMetadata):
+        self, common_attn_metadata: CommonAttentionMetadata
+    ):
         """
         This method builds the metadata for full cudagraph capture.
         Currently, only decode is supported for full cudagraphs with MHA.
         """
         m = common_attn_metadata
-        assert m.num_reqs <= (m.num_actual_tokens *
-                              self.reorder_batch_threshold), \
-            "MHA only supports decode-only full CUDAGraph capture. " \
+        assert m.num_reqs <= m.num_actual_tokens * self.reorder_batch_threshold, (
+            "MHA only supports decode-only full CUDAGraph capture. "
             "Make sure all cudagraph capture sizes <= max_num_seq."
+        )
 
         assert m.max_query_len <= self.reorder_batch_threshold  # decode only
 
@@ -474,6 +548,7 @@ class KunlunxinAttentionBackend(AttentionBackend):
 
     KV cache shape: (2, num_blocks, num_kv_heads, block_size, head_size), must be contiguous
     """
+
     # crucial to cuda graph
     accept_output_buffer: bool = True
 
@@ -484,19 +559,19 @@ class KunlunxinAttentionBackend(AttentionBackend):
         return "CUSTOM"
 
     @staticmethod
-    def get_impl_cls() -> Type["KunlunxinAttentionBackendImpl"]:
+    def get_impl_cls() -> type[KunlunxinAttentionBackendImpl]:
         return KunlunxinAttentionBackendImpl
 
     @staticmethod
-    def get_metadata_cls() -> Type["KunlunxinMetadata"]:
+    def get_metadata_cls() -> type[KunlunxinMetadata]:
         return KunlunxinMetadata
 
     @staticmethod
-    def get_builder_cls() -> Type["KunlunxinAttentionMetadataBuilder"]:
+    def get_builder_cls() -> type[KunlunxinAttentionMetadataBuilder]:
         return KunlunxinAttentionMetadataBuilder
 
     @classmethod
-    def get_supported_head_sizes(cls) -> List[int]:
+    def get_supported_head_sizes(cls) -> list[int]:
         # Note: 128 is best for performance
         return [32, 64, 80, 96, 112, 120, 128, 192, 256]
 
@@ -507,21 +582,21 @@ class KunlunxinAttentionBackend(AttentionBackend):
         num_kv_heads: int,
         head_size: int,
         cache_dtype_str: str = "auto",
-    ) -> Tuple[int, ...]:
+    ) -> tuple[int, ...]:
         # Kunlunxin uses NHD layout
         return (2, num_blocks, num_kv_heads, block_size, head_size)
 
     @staticmethod
     def swap_blocks(
-        src_kv_cache: List[torch.Tensor],
-        dst_kv_cache: List[torch.Tensor],
+        src_kv_cache: list[torch.Tensor],
+        dst_kv_cache: list[torch.Tensor],
         src_to_dst: torch.Tensor,
     ) -> None:
         raise NotImplementedError
 
     @staticmethod
     def copy_blocks(
-        kv_caches: List[torch.Tensor],
+        kv_caches: list[torch.Tensor],
         src_to_dists: torch.Tensor,
     ) -> None:
         raise NotImplementedError
@@ -533,7 +608,7 @@ class KunlunxinPagedAttention(PagedAttention):
         kv_cache: torch.Tensor,
         num_kv_heads: int,
         head_size: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         num_blocks = kv_cache.shape[1]
         key_cache = kv_cache[0]
         key_cache = key_cache.view(num_blocks, num_kv_heads, -1, head_size)
@@ -577,13 +652,14 @@ class KunlunxinPagedAttention(PagedAttention):
         v_max: torch.Tensor | None = None,
         quant_mode: int = 0,
         force_sdnn: bool = False,
-        BLHD_LAYOUT: bool = True) -> int:
+        BLHD_LAYOUT: bool = True,
+    ) -> int:
         """
         reshape and store key and value in cache_key, cache_value, respectively.
 
         Args:
             key (torch.Tensor): Shape [num_tokens, num_heads, head_size], dtype bf16/fp16/fp32.
-            value (torch.Tensor): Shape [num_tokens, num_heads, head_size], same dtype as key. 
+            value (torch.Tensor): Shape [num_tokens, num_heads, head_size], same dtype as key.
             Can be empty; quantization is not supported when value is empty.
             slot_mapping (torch.Tensor): Maps tokens to position indices in the cache.
             k_max (torch.Tensor, optional): Shape [num_heads] (quant_mode=0)
@@ -599,28 +675,28 @@ class KunlunxinPagedAttention(PagedAttention):
             key_cache (torch.Tensor): Output cache for k, shape [num_blocks, block_size,  num_heads, head_size],
                 same dtype as key or int8.
                 When key is bfloat16, key_cache can be float16.
-            value_cache (torch.Tensor): Output cache for v, shape [num_blocks, block_size,  num_heads, head_size], 
+            value_cache (torch.Tensor): Output cache for v, shape [num_blocks, block_size,  num_heads, head_size],
                 same dtype as key.
                 Can be empty; quantization is not supported when value is empty.
         """
         if key_cache.dtype is torch.int8 and force_sdnn:
             raise ValueError("reshape and cache flash use sdnn do not support quant")
 
-        if value is None or value_cache is None:
-            if key_cache.dtype is torch.int8:
-                raise ValueError("reshape and cache flash k only do not support quant")
+        if (value is None or value_cache is None) and key_cache.dtype is torch.int8:
+            raise ValueError("reshape and cache flash k only do not support quant")
 
         return xtorch_ops.reshape_and_cache_flash(
-                    key,
-                    value,
-                    key_cache,
-                    value_cache,
-                    slot_mapping,
-                    k_max=k_max,
-                    v_max=v_max,
-                    quant_mode=quant_mode,
-                    force_sdnn=force_sdnn,
-                    BLHD_LAYOUT=BLHD_LAYOUT)
+            key,
+            value,
+            key_cache,
+            value_cache,
+            slot_mapping,
+            k_max=k_max,
+            v_max=v_max,
+            quant_mode=quant_mode,
+            force_sdnn=force_sdnn,
+            BLHD_LAYOUT=BLHD_LAYOUT,
+        )
 
     def forward_decode(
         query: torch.Tensor,
@@ -634,11 +710,11 @@ class KunlunxinPagedAttention(PagedAttention):
         kv_cache_dtype: str,
         num_kv_heads: int,
         scale: float,
-        alibi_slopes: Optional[torch.Tensor],
+        alibi_slopes: torch.Tensor | None,
         k_scale: torch.Tensor,
         v_scale: torch.Tensor,
         max_window_size: int = -1,
-        output: Optional[torch.Tensor] = None
+        output: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if output is None:
             output = torch.empty_like(query)
@@ -659,6 +735,7 @@ class KunlunxinPagedAttention(PagedAttention):
         )
         return output
 
+
 class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
     """
     Kunlunxin attention implementation using xtorch_ops.
@@ -670,12 +747,12 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         head_size: int,
         scale: float,
         num_kv_heads: int,
-        alibi_slopes: Optional[List[float]],
-        sliding_window: Optional[int],
+        alibi_slopes: list[float] | None,
+        sliding_window: int | None,
         kv_cache_dtype: str,
-        logits_soft_cap: Optional[float] = None,
+        logits_soft_cap: float | None = None,
         attn_type: AttentionType = AttentionType.DECODER,
-        kv_sharing_target_layer_name: Optional[str] = None,
+        kv_sharing_target_layer_name: str | None = None,
         **kwargs,
     ) -> None:
         if not _KUNLUNXIN_OPS_AVAILABLE:
@@ -686,7 +763,8 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
 
         if logits_soft_cap is not None:
             raise ValueError(
-                "kunlunxinAttention does not support attention logits soft capping.")
+                "kunlunxinAttention does not support attention logits soft capping."
+            )
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
@@ -707,11 +785,10 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         if head_size not in suppored_head_sizes:
             raise ValueError(
                 f"Head size {head_size} is not supported by KunlunxinAttentionBackend. "
-                f"Supported head sizes are: {suppored_head_sizes}.")
+                f"Supported head sizes are: {suppored_head_sizes}."
+            )
 
-    def _get_window_size(
-        self, attn_type: AttentionType
-    ) -> Optional[Tuple[int, int]]:
+    def _get_window_size(self, attn_type: AttentionType) -> tuple[int, int] | None:
         if self.sliding_window is None or self.sliding_window <= 0:
             return None
         if attn_type in (AttentionType.ENCODER, AttentionType.ENCODER_ONLY):
@@ -722,16 +799,16 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         self,
         layer: AttentionLayer,
         query: torch.Tensor,
-        key: Optional[torch.Tensor],
-        value: Optional[torch.Tensor],
+        key: torch.Tensor | None,
+        value: torch.Tensor | None,
         kv_cache: torch.Tensor,
-        attn_metadata: Optional[KunlunxinMetadata],
-        k_scale: Optional[torch.Tensor] = None,
-        v_scale: Optional[torch.Tensor] = None,
+        attn_metadata: KunlunxinMetadata | None,
+        k_scale: torch.Tensor | None = None,
+        v_scale: torch.Tensor | None = None,
         attn_type: AttentionType = AttentionType.DECODER,
-        output: Optional[torch.Tensor] = None,
-        output_scale: Optional[torch.Tensor] = None,
-        output_block_scale: Optional[torch.Tensor] = None,
+        output: torch.Tensor | None = None,
+        output_scale: torch.Tensor | None = None,
+        output_block_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
         query = query.view(-1, self.num_heads, self.head_size)
         if output is None:
@@ -740,24 +817,36 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
             # Profiling run.
 
             # make fake-meta-data, and let attn run during warmup period. In order to avoid cuda-graph fail risk
-            fake_meta = KunlunxinMetadata(seq_lens_tensor=None,
-                                       max_decode_seq_len=1,
-                                       block_tables=None,
-                                       num_prefills=1,
-                                       num_prefill_tokens=1,
-                                       num_decode_tokens=1,
-                                       slot_mapping=None,
-                                       enable_kv_scales_calculation=False,
-                                       max_prefill_seq_len=1,
-                                       num_actual_tokens=1,
-                                       use_cuda_graph=False, # up params is useless to context_forward
-                                       max_query_len=query.shape[0],
-                                       max_kv_len=query.shape[0],
-                                       query_start_loc=torch.tensor((0, query.shape[0]), dtype=torch.int32, device=query.device),
-                                       query_start_loc_host=torch.tensor((0, query.shape[0]), dtype=torch.int32, device="cpu"),
-                                       kv_prefix_start_loc=torch.tensor([0, query.shape[0]], dtype=torch.int32, device=query.device),
-                                       kv_prefix_start_loc_host=torch.tensor([0, query.shape[0]], dtype=torch.int32, device="cpu"))
-            self.context_forward(query, key, value, output, fake_meta, attn_type=attn_type)
+            fake_meta = KunlunxinMetadata(
+                seq_lens_tensor=None,
+                max_decode_seq_len=1,
+                block_tables=None,
+                num_prefills=1,
+                num_prefill_tokens=1,
+                num_decode_tokens=1,
+                slot_mapping=None,
+                enable_kv_scales_calculation=False,
+                max_prefill_seq_len=1,
+                num_actual_tokens=1,
+                use_cuda_graph=False,  # up params is useless to context_forward
+                max_query_len=query.shape[0],
+                max_kv_len=query.shape[0],
+                query_start_loc=torch.tensor(
+                    (0, query.shape[0]), dtype=torch.int32, device=query.device
+                ),
+                query_start_loc_host=torch.tensor(
+                    (0, query.shape[0]), dtype=torch.int32, device="cpu"
+                ),
+                kv_prefix_start_loc=torch.tensor(
+                    [0, query.shape[0]], dtype=torch.int32, device=query.device
+                ),
+                kv_prefix_start_loc_host=torch.tensor(
+                    [0, query.shape[0]], dtype=torch.int32, device="cpu"
+                ),
+            )
+            self.context_forward(
+                query, key, value, output, fake_meta, attn_type=attn_type
+            )
 
             return output.view(-1, self.num_heads * self.head_size)
 
@@ -772,9 +861,11 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         # which KV cache memory-mapping & which
         # seqlen datastructures we utilize
         # Encoder and encoder-only attention do not use KV cache
-        if (attn_type != AttentionType.ENCODER and
-            attn_type != AttentionType.ENCODER_ONLY and
-            kv_cache.numel() > 0):
+        if (
+            attn_type != AttentionType.ENCODER
+            and attn_type != AttentionType.ENCODER_ONLY
+            and kv_cache.numel() > 0
+        ):
             # KV-cache during decoder-self- or
             # encoder-decoder-cross-attention, but not
             # during encoder attention.
@@ -807,14 +898,16 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                 key = key.contiguous()
                 value = value.contiguous()
                 KunlunxinPagedAttention.split_write_to_paged_cache(
-                                                key,
-                                                value,
-                                                kv_cache,
-                                                self.num_kv_heads,
-                                                self.head_size,
-                                                updated_slot_mapping,
-                                                self.kv_cache_dtype,
-                                                k_scale, v_scale)
+                    key,
+                    value,
+                    kv_cache,
+                    self.num_kv_heads,
+                    self.head_size,
+                    updated_slot_mapping,
+                    self.kv_cache_dtype,
+                    k_scale,
+                    v_scale,
+                )
                 key_cache, value_cache = KunlunxinPagedAttention.split_kv_cache(
                     kv_cache, self.num_kv_heads, self.head_size
                 )
@@ -832,24 +925,25 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                 attn_type=attn_type,
                 key_cache=None,
                 value_cache=None,
-                is_causal=False  # Bidirectional attention for encoder
+                is_causal=False,  # Bidirectional attention for encoder
             )
             return output.view(-1, self.num_heads * self.head_size)
 
         # Decoder self-attention supports chunked prefill.
-        assert attn_type == AttentionType.DECODER, \
+        assert attn_type == AttentionType.DECODER, (
             f"Unsupported attention type: {attn_type}"
+        )
         num_prefill_tokens = attn_metadata.num_prefill_tokens
         num_decode_tokens = attn_metadata.num_decode_tokens
         # Only enforce this shape-constraint for decoder
         # self-attention
         if prefill_meta := attn_metadata.prefill_metadata:
             # prefill
-            prefill_query = query[num_decode_tokens:attn_metadata.num_actual_tokens]
-            prefill_key = key[num_decode_tokens:attn_metadata.num_actual_tokens]
-            prefill_value = value[num_decode_tokens:attn_metadata.num_actual_tokens]
+            prefill_query = query[num_decode_tokens : attn_metadata.num_actual_tokens]
+            prefill_key = key[num_decode_tokens : attn_metadata.num_actual_tokens]
+            prefill_value = value[num_decode_tokens : attn_metadata.num_actual_tokens]
             assert prefill_query.shape[0] == num_prefill_tokens
-            prefill_out = output[num_decode_tokens:attn_metadata.num_actual_tokens]
+            prefill_out = output[num_decode_tokens : attn_metadata.num_actual_tokens]
             self.context_forward(
                 prefill_query,
                 prefill_key,
@@ -859,23 +953,21 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                 attn_type=attn_type,
                 key_cache=key_cache,
                 value_cache=value_cache,
-                is_causal=True
+                is_causal=True,
             )
 
         if num_decode_tokens != 0:
             decode_meta = attn_metadata.decode_metadata
             if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
                 # For hybrid Attention (Qwen3-Next, Qwen3.5)
-                tmp_block_tables = (
-                    decode_meta.block_tables * 2
-                )
+                tmp_block_tables = decode_meta.block_tables * 2
             else:
                 tmp_block_tables = decode_meta.block_tables
 
             if attn_metadata.decode_metadata.is_spec_decode:
                 # query_start_loc_host = decode_meta.query_start_loc_host.to(torch.int32)
                 # TODO: add MTP support
-                assert False, "speculative_attention_variable not implemented"
+                raise AssertionError("speculative_attention_variable not implemented")
 
             else:
                 max_window_size = -1
@@ -897,7 +989,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                     k_scale,
                     v_scale,
                     max_window_size=max_window_size,
-                    output=output
+                    output=output,
                 )
         # Reshape the output tensor.
         return output.view(-1, self.num_heads * self.head_size)
@@ -912,7 +1004,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         attn_type: AttentionType = AttentionType.DECODER,
         key_cache: torch.Tensor = None,
         value_cache: torch.Tensor = None,
-        is_causal=True
+        is_causal=True,
     ):
         if query is not None and not query.is_contiguous():
             query = query.contiguous()
@@ -931,10 +1023,9 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
 
         # prefix cache part
         if actual_query_start_loc_host[-1] != kv_prefix_start_loc_host[-1]:
-            max_kv_len = attn_metadata.max_kv_len
             if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
                 # For hybrid Attention (Qwen3-Next, Qwen3.5)
-                tmp_block_tables = (attn_metadata.block_tables * 2)
+                tmp_block_tables = attn_metadata.block_tables * 2
             else:
                 tmp_block_tables = attn_metadata.block_tables
             xtorch_ops.prefill_attention(
@@ -956,7 +1047,6 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
             )
         # no prefix cache part
         else:
-            max_kv_len = attn_metadata.max_query_len
             xtorch_ops.prefill_attention(
                 query,
                 key,

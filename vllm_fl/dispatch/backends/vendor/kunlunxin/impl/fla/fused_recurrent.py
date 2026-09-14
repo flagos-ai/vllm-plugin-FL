@@ -19,10 +19,7 @@ and the top-level entry (fused_recurrent_gated_delta_rule).
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
-
 import xtorch_ops
 
 
@@ -35,9 +32,9 @@ def fused_recurrent_gated_delta_rule_fwd(
     scale: float,
     initial_state: torch.Tensor,
     inplace_final_state: bool = True,
-    cu_seqlens: Optional[torch.LongTensor] = None,
-    ssm_state_indices: Optional[torch.Tensor] = None,
-    num_accepted_tokens: Optional[torch.Tensor] = None,
+    cu_seqlens: torch.LongTensor | None = None,
+    ssm_state_indices: torch.Tensor | None = None,
+    num_accepted_tokens: torch.Tensor | None = None,
     use_qk_l2norm_in_kernel: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -91,9 +88,9 @@ class FusedRecurrentFunction(torch.autograd.Function):
         scale: float,
         initial_state: torch.Tensor,
         inplace_final_state: bool = True,
-        cu_seqlens: Optional[torch.LongTensor] = None,
-        ssm_state_indices: Optional[torch.Tensor] = None,
-        num_accepted_tokens: Optional[torch.Tensor] = None,
+        cu_seqlens: torch.LongTensor | None = None,
+        ssm_state_indices: torch.Tensor | None = None,
+        num_accepted_tokens: torch.Tensor | None = None,
         use_qk_l2norm_in_kernel: bool = False,
     ):
         o, final_state = fused_recurrent_gated_delta_rule_fwd(
@@ -123,9 +120,9 @@ def fused_recurrent_gated_delta_rule(
     scale: float = None,
     initial_state: torch.Tensor = None,
     inplace_final_state: bool = True,
-    cu_seqlens: Optional[torch.LongTensor] = None,
-    ssm_state_indices: Optional[torch.Tensor] = None,
-    num_accepted_tokens: Optional[torch.Tensor] = None,
+    cu_seqlens: torch.LongTensor | None = None,
+    ssm_state_indices: torch.Tensor | None = None,
+    num_accepted_tokens: torch.Tensor | None = None,
     use_qk_l2norm_in_kernel: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     r"""

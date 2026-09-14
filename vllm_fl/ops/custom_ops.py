@@ -1,13 +1,13 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import logging
-from typing import Optional, List
 
 from vllm.model_executor.custom_op import CustomOp, PluggableLayer
-from .layernorm import *  # noqa F403 F401
+
 from .activation import *  # noqa F403 F401
-from .rotary_embedding import *  # noqa F403 F401
 from .fused_moe import *  # noqa F403 F401
+from .layernorm import *  # noqa F403 F401
+from .rotary_embedding import *  # noqa F403 F401
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ OOT_OPS = {
     # "unquantized_fused_moe_method": (UnquantizedFusedMoEMethodFL, "UnquantizedFusedMoEMethod"),
 }
 
+
 def _patch_unquantized_moe_oracle() -> None:
     """
     Monkey-patch the upstream select_unquantized_moe_backend so it does not
@@ -44,15 +45,18 @@ def _patch_unquantized_moe_oracle() -> None:
     would get (OOT, None), skip _setup_kernel, and crash at inference time.
     """
     import vllm.model_executor.layers.fused_moe.oracle.unquantized as _oracle_mod
+
     from vllm_fl.ops.fused_moe.fused_moe_utils import select_unquantized_moe_backend_oot
+
     _oracle_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
     # Also patch the import in unquantized_fused_moe_method module
     import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as _method_mod
+
     _method_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
     logger.info("Patched select_unquantized_moe_backend to bypass OOT short-circuit")
 
 
-def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
+def register_oot_ops(whitelist: list[str] | None = None) -> None:
     """
     Register OOT (out-of-tree) custom operators.
 
@@ -68,7 +72,12 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     the upstream select_unquantized_moe_backend oracle is monkey-patched
     so it picks native CUDA backends instead of returning (OOT, None).
     """
-    from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
+    from vllm_fl.utils import (
+        get_oot_blacklist,
+        get_oot_whitelist,
+        is_oot_enabled,
+        use_flaggems_op,
+    )
 
     # Check if OOT registration is enabled
     if not is_oot_enabled():
@@ -109,27 +118,40 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
         op_cls, registration_name = OOT_OPS[op_name]
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
         if issubclass(op_cls, PluggableLayer):
-            PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)
+            PluggableLayer.register_oot(
+                _decorated_layer_cls=op_cls, name=registration_name
+            )
         else:
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
         # Apply Ascend NPU monkey-patches if running on NPU.
         # These replace upstream module-level functions (e.g. in qwen3_next) with
         # Ascend implementations that bypass the CustomOp/dispatch path.
         from vllm.platforms import current_platform
+
         if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
+            from vllm_fl.dispatch.backends.vendor.ascend.patch import (
+                apply_ascend_patches,
+            )
+
             apply_ascend_patches()
 
         # Apply Sunrise/PTPU monkey-patches if running on PTPU.
         if current_platform.device_type == "ptpu":
-            from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
+            from vllm_fl.dispatch.backends.vendor.sunrise.patch import (
+                apply_sunrise_patches,
+            )
+
             apply_sunrise_patches()
 
     # Apply Kunlunxin monkey-patches if running on Kunlunxin hardware.
     # (kunlunxin's device_type is "cuda", so the vendor check is required.)
     from vllm.platforms import current_platform
+
     if current_platform.vendor_name == "kunlunxin":
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import apply_kunlunxin_patches
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
+            apply_kunlunxin_patches,
+        )
+
         apply_kunlunxin_patches()
 
     # --- FusedMoE monkey-patch (vllm >= 0.24.0) ---
@@ -144,7 +166,6 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
 def _patch_fused_moe_factory() -> None:
     """Replace the FusedMoE factory function with FusedMoEFL in all relevant
     vllm modules so that model code picks up the FL version automatically."""
-    import inspect
     import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
     import vllm.model_executor.layers.fused_moe.layer as _fused_moe_layer
 
@@ -154,5 +175,5 @@ def _patch_fused_moe_factory() -> None:
 
     # Patch at the module level so `from vllm...fused_moe import FusedMoE` picks it up.
     _fused_moe_layer.FusedMoE = FusedMoEFL  # noqa F405
-    _fused_moe_pkg.FusedMoE = FusedMoEFL   # noqa F405
+    _fused_moe_pkg.FusedMoE = FusedMoEFL  # noqa F405
     logger.info("Monkey-patched FusedMoE factory -> FusedMoEFL")

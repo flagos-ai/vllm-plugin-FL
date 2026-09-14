@@ -33,6 +33,7 @@ in ``sys.modules`` with correct values.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 _FLA_UTILS_MOD = "vllm.model_executor.layers.fla.ops.utils"
@@ -78,10 +79,8 @@ def ensure_fla_compat() -> None:
         torch.xpu.get_device_name = _safe_get_device_name
 
     # Step 2: force-import utils.py NOW (it loads safely with the wrapper)
-    try:
+    with contextlib.suppress(Exception):
         import vllm.model_executor.layers.fla.ops.utils  # noqa: F401
-    except Exception:
-        pass
 
     # Step 3: overwrite platform vars → device_platform = "nvidia"
     _fix_platform_vars()
@@ -99,12 +98,14 @@ def _patch_xpu_get_device():
     time) as a safe static check at this stage.
     """
     from vllm_fl.platform import PlatformFL
+
     if PlatformFL.vendor_name != "kunlunxin":
         return
     try:
         ensure_fla_compat()
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning(
             "Failed to apply XPU get_device_name patch: %s", e
         )
