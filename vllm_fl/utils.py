@@ -51,6 +51,11 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "thead": {"device_type": "cuda", "device_name": "thead"},
     # Registered backend: vendor/thead (tsingmicro)
     "tsingmicro": {"device_type": "tsingmicro", "device_name": "txda"},
+    # Registered backend: vendor/gcu (Enflame GCU / torch_gcu).
+    # FlagGems >= 5.4 reports vendor_name "enflame"; older images report
+    # "gcu" — keep both aliases.
+    "gcu": {"device_type": "gcu", "device_name": "gcu"},
+    "enflame": {"device_type": "gcu", "device_name": "gcu"},
 }
 
 # Keep the vLLM base-class no-op for platforms not validated by this change.
@@ -253,7 +258,16 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead"]
+        self.supported_device = [
+            "nvidia",
+            "ascend",
+            "metax",
+            "mthreads",
+            "sunrise",
+            "thead",
+            "gcu",
+            "enflame",
+        ]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
