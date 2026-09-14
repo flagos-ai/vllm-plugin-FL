@@ -10,6 +10,7 @@ stays self-contained and testable, mirroring the iluvatar vendor layout.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 logger = logging.getLogger(__name__)
@@ -40,13 +41,15 @@ def patch_triton_chained_or_for_cambricon() -> None:
 
     try:
         import triton as _triton
+
         _tv = tuple(int(x) for x in _triton.__version__.split(".")[:2])
         if _tv >= (3, 4):
             return
     except Exception as e:
         logger.warning(
             "patch_triton_chained_or_for_cambricon: cannot determine triton "
-            "version, applying patch defensively: %s", e
+            "version, applying patch defensively: %s",
+            e,
         )
 
     # Same failure class as metax (triton 3.0.0, recorded in
@@ -67,9 +70,9 @@ def patch_triton_chained_or_for_cambricon() -> None:
     _MARKER = "# _cambricon_chained_or_patched"
 
     # Replace: A or B or C  →  (A or B) or C
-    _OPERAND = r'(?:not\s+)?(?:\([^)]*\)|\w+)'
+    _OPERAND = r"(?:not\s+)?(?:\([^)]*\)|\w+)"
     pattern = re.compile(
-        r'(' + _OPERAND + r')\s+or\s+(' + _OPERAND + r')\s+or\s+(' + _OPERAND + r')'
+        r"(" + _OPERAND + r")\s+or\s+(" + _OPERAND + r")\s+or\s+(" + _OPERAND + r")"
     )
 
     def _rewrite(m: re.Match) -> str:
@@ -90,7 +93,8 @@ def patch_triton_chained_or_for_cambricon() -> None:
         except Exception as e:
             logger.warning(
                 "patch_triton_chained_or_for_cambricon: cannot read %s: %s",
-                fpath, e,
+                fpath,
+                e,
             )
             continue
 
@@ -107,22 +111,24 @@ def patch_triton_chained_or_for_cambricon() -> None:
         except Exception as e:
             logger.warning(
                 "patch_triton_chained_or_for_cambricon: cannot write %s: %s",
-                fpath, e,
+                fpath,
+                e,
             )
             continue
 
         # Clear pycache so Python and triton both see the patched source.
         pycache = fpath.parent / "__pycache__"
         if pycache.exists():
-            try:
+            # Failure to drop the cache is non-fatal; the patch still applies.
+            with contextlib.suppress(Exception):
                 shutil.rmtree(pycache)
-            except Exception:
-                pass  # non-fatal
 
         # Evict from sys.modules so this process reimports the patched source.
         sys.modules.pop(module_name, None)
 
         logger.info(
             "patch_triton_chained_or_for_cambricon: rewrote %d chained-or "
-            "expression(s) in %s", count, fpath,
+            "expression(s) in %s",
+            count,
+            fpath,
         )

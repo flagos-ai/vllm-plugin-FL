@@ -45,11 +45,10 @@ except ModuleNotFoundError as _exc:
     importlib.import_module("torch.distributed")._symmetric_memory = _symm_mem_stub
     del _symm_mem_stub, _types
 
-from . import version as version  # PyTorch-style: vllm_fl.version.git_version
-
 # --- torch 2.7.1+cpu (cambricon 4.4.3) compat shims ---------------------
-
 import torch
+
+from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 # torch-mlu registers `_C::get_mlu_view_from_cpu_tensor` as a
 # CompositeImplicitAutograd op that has no Python handle via torch.ops._C.
@@ -404,6 +403,7 @@ def register_model():
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
 
+
 # flag_gems 5.3.5 cambricon backend emits a task_type='block' triton launch
 # kwarg unsupported by triton 3.2.0+mlu1.7.2 (cambricon 4.4.3). Strip it from
 # JITFunction.run. torch_mlu must be imported first — its _inductor module
@@ -430,6 +430,7 @@ try:
     # constexpr gate that keeps the TD path dead on MLU, so the symbol must
     # merely exist — inject a stub (never invoked) on forks that lack it.
     import triton.language as _tl
+
     if not hasattr(_tl, "make_tensor_descriptor"):
         _tl.make_tensor_descriptor = lambda *args, **kwargs: None
 except ImportError:

@@ -473,6 +473,7 @@ class PlatformFL(Platform):
             from vllm_fl.dispatch.backends.vendor.cambricon.cambricon import (
                 patch_triton_chained_or_for_cambricon,
             )
+
             patch_triton_chained_or_for_cambricon()
 
     def supports_fp8(cls) -> bool:
