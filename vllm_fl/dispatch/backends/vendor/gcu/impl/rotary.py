@@ -22,10 +22,7 @@ def rotary_embedding_gcu(
         cos_selected = cos[position_ids]
         sin_selected = sin[position_ids]
 
-    if query.dim() == 4:
-        cos_selected = cos_selected.unsqueeze(1)
-        sin_selected = sin_selected.unsqueeze(1)
-    elif query.dim() == 3:
+    if query.dim() == 4 or query.dim() == 3:
         cos_selected = cos_selected.unsqueeze(1)
         sin_selected = sin_selected.unsqueeze(1)
 
@@ -42,6 +39,7 @@ def rotary_embedding_gcu(
         return torch.cat((-x2, x1), dim=-1)
 
     if rotary_interleaved:
+
         def rotate_interleaved(x):
             x1 = x[..., ::2]
             x2 = x[..., 1::2]

@@ -47,21 +47,19 @@ def apply_flash_attn_backend_gcu_patch() -> None:
         return
 
     try:
+        from flag_gems.fused import reshape_and_cache_flash
         from flash_attn.vllm_flash_attn import (
             flash_attn_varlen_func as _vendor_flash_attn_varlen_func,
             get_scheduler_metadata,
         )
-        from flag_gems.fused import reshape_and_cache_flash
     except ImportError as e:
         # Best-effort: vendor flash_attn or flag_gems missing -> leave vLLM as-is.
-        logger.warning(
-            "GCU: flash_attn backend patch skipped (missing dep: %s)", e
-        )
+        logger.warning("GCU: flash_attn backend patch skipped (missing dep: %s)", e)
         return
 
+    import functools
     import importlib
     import inspect
-    import functools
 
     # vLLM 0.24.0's native FLASH_ATTN prefill grew FA3/FA4-era kwargs
     # (dynamic_causal, mask_mod, aux_tensors, ...) that the enflame vendor
@@ -70,9 +68,7 @@ def apply_flash_attn_backend_gcu_patch() -> None:
     # TypeError: ... unexpected keyword argument '<kw>'. GCU only ever runs
     # plain FA2 causal attention, so forward only the kwargs the vendor
     # signature actually names (whitelist), dropping the 0.24-only ones.
-    _vendor_params = set(
-        inspect.signature(_vendor_flash_attn_varlen_func).parameters
-    )
+    _vendor_params = set(inspect.signature(_vendor_flash_attn_varlen_func).parameters)
 
     @functools.wraps(_vendor_flash_attn_varlen_func)
     def flash_attn_varlen_func(*args, **kwargs):

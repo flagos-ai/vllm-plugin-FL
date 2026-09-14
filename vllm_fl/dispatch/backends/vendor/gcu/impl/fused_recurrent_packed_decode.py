@@ -13,9 +13,8 @@ import logging
 
 import torch
 
-from vllm.triton_utils import tl, triton
-
 from vllm.model_executor.layers.fla.ops.op import exp
+from vllm.triton_utils import tl, triton
 
 logger = logging.getLogger(__name__)
 

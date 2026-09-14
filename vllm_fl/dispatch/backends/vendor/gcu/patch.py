@@ -4,11 +4,11 @@ import logging
 
 from .impl.bilinear_pos_embed import apply_bilinear_pos_embed_gcu_patch
 from .impl.chunk_delta_h import apply_chunk_delta_h_gcu_patch
+from .impl.flash_attn_backend import apply_flash_attn_backend_gcu_patch
 from .impl.fused_recurrent_packed_decode import (
     apply_fused_recurrent_packed_decode_gcu_patch,
 )
 from .impl.slot_mapping import apply_slot_mapping_gcu_patch
-from .impl.flash_attn_backend import apply_flash_attn_backend_gcu_patch
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
@@ -19,7 +19,7 @@ def apply_gcu_patches() -> None:
     global _patches_applied
     if _patches_applied:
         return
-    
+
     apply_bilinear_pos_embed_gcu_patch()
     apply_chunk_delta_h_gcu_patch()
     apply_fused_recurrent_packed_decode_gcu_patch()

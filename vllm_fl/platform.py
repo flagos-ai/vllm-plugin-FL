@@ -179,6 +179,7 @@ class PlatformFL(Platform):
         if cls.device_type == "gcu":
             try:
                 from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+
                 apply_gcu_patches()
             except Exception as e:
                 logger.warning(f"Failed to apply GCU patches: {e}")

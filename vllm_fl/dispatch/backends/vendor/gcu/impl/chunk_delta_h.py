@@ -13,14 +13,13 @@ import logging
 
 import torch
 
-from vllm.triton_utils import tl, triton
-
 from vllm.model_executor.layers.fla.ops.index import (
     prepare_chunk_indices,
     prepare_chunk_offsets,
 )
 from vllm.model_executor.layers.fla.ops.op import exp
 from vllm.model_executor.layers.fla.ops.utils import FLA_CHUNK_SIZE, use_cuda_graph
+from vllm.triton_utils import tl, triton
 
 logger = logging.getLogger(__name__)
 
@@ -403,16 +402,13 @@ def apply_chunk_delta_h_gcu_patch() -> None:
         chunk_delta_h.chunk_gated_delta_rule_fwd_kernel_h_blockdim64 = (
             chunk_gated_delta_rule_fwd_kernel_h_blockdim64_gcu
         )
-        chunk_delta_h.chunk_gated_delta_rule_fwd_h = (
-            chunk_gated_delta_rule_fwd_h_gcu
-        )
+        chunk_delta_h.chunk_gated_delta_rule_fwd_h = chunk_gated_delta_rule_fwd_h_gcu
         # chunk.py / kda.py bind chunk_gated_delta_rule_fwd_h at import time.
         chunk_mod.chunk_gated_delta_rule_fwd_h = chunk_gated_delta_rule_fwd_h_gcu
         kda_mod.chunk_gated_delta_rule_fwd_h = chunk_gated_delta_rule_fwd_h_gcu
         _patched = True
         logger.info(
-            "Patched chunk_gated_delta_rule_fwd_h for GCU "
-            "(grid.x <= %d, grid.y <= %d)",
+            "Patched chunk_gated_delta_rule_fwd_h for GCU (grid.x <= %d, grid.y <= %d)",
             GCU_MAX_GRID_X,
             GCU_MAX_GRID_YZ,
         )

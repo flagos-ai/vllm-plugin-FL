@@ -5,23 +5,25 @@ GCU backend implementation.
 """
 
 from __future__ import annotations
-from typing import Optional, Union
+
 import sys
+
 import torch
+
 from vllm_fl.dispatch.backends.base import Backend
 
 
 class GCUBackend(Backend):
     """GCU vendor backend (``torch.gcu`` / torch_gcu runtime)."""
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "gcu"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "gcu"
 
     def is_available(self) -> bool:
@@ -42,8 +44,8 @@ class GCUBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         from .impl.normalization import rms_norm_gcu
 
         return rms_norm_gcu(obj, x, residual)
@@ -88,11 +90,14 @@ class GCUBackend(Backend):
             # these ops + the FA2 version gate onto fa_utils, so the native
             # FLASH_ATTN backend runs the vendor compute + flag_gems KV write.
             import flash_attn.vllm_flash_attn as vendor_fa
+
             vendor_fa.flash_attn_varlen_func  # noqa: B018
         except Exception:
             # No vendor flash_attn: fall back to the plugin flag_gems attention
             # backend instead of asserting later.
-            return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+            return (
+                "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
+            )
 
         sys.modules["vllm.vllm_flash_attn"] = vendor_fa
 

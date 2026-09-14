@@ -113,9 +113,7 @@ def compute_slot_mapping_int32(
     )
 
     slot_ids = block_numbers * block_size + local_block_offsets
-    slot_ids = torch.where(
-        is_local, slot_ids, torch.full_like(slot_ids, PAD_SLOT_ID)
-    )
+    slot_ids = torch.where(is_local, slot_ids, torch.full_like(slot_ids, PAD_SLOT_ID))
     slot_mapping[:total_scheduled] = slot_ids.to(torch.int64)
     return slot_mapping
 
@@ -165,6 +163,4 @@ def apply_slot_mapping_gcu_patch() -> None:
             "(on-device int32; avoids int64 Triton kernel)."
         )
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning(
-            "Failed to patch compute_slot_mapping for GCU: %s", exc
-        )
+        logger.warning("Failed to patch compute_slot_mapping for GCU: %s", exc)
