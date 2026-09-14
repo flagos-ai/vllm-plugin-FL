@@ -43,6 +43,8 @@ container_volumes:
   - /data:/data
 
 # Container options (hardware-specific settings)
+# FlagTune has no H20 candidates for some Qwen3.6 matmul shapes yet. Keep
+# FlagGems enabled and fall back to its default Triton configs.
 container_options: >-
   --privileged
   --gpus all
@@ -52,4 +54,5 @@ container_options: >-
   --env VLLM_PLUGINS=fl
   --env USE_FLAGGEMS=1
   --env GEMS_VENDOR=nvidia
+  --env USE_FLAGTUNE=0
   --ulimit nofile=65535:65535
