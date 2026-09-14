@@ -138,6 +138,14 @@ def register_router():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
+    # Model and metadata registration must run in every spawned inspection and
+    # worker process. The hooks are idempotent and do not overwrite vLLM files.
+    from vllm_fl.patches.qwen3_8_flash_next import (
+        apply_qwen3_8_flash_next_patches,
+    )
+
+    apply_qwen3_8_flash_next_patches()
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
@@ -154,6 +162,14 @@ def register_model():
         #glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
+    # GLM-5-Next: route the sparse kpool indexer through FlagGems Triton.
+    # Must be here (not in register()) -- it imports vLLM model/layer modules.
+    try:
+        from vllm_fl.patches.glm5_next import apply_model_patches as _glm5_next
+        _glm5_next()
+    except Exception as e:
+        logger.error(f"Register Glm5Next patch error: {str(e)}")
+
 # Qwen3.5-MoE flat/text-only checkpoint support (model_type=qwen3_5_moe_text)
     try:
         from vllm_fl.patches.qwen3_5_moe_text import apply_model_patches as _qwen35_text

@@ -208,6 +208,17 @@ class WorkerFL(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
 
+        # vLLM gained a second (v2) model-runner implementation and now branches
+        # on this flag in shared code (kernel_warmup, gpu_worker paths).
+        # ModelRunnerFL is a v1 runner, so it is always False here. Read the
+        # config defensively so this also works on vLLM builds without the flag.
+        self.use_v2_model_runner = False
+        if getattr(vllm_config, "use_v2_model_runner", False):
+            logger.warning(
+                "vllm_config requests the v2 model runner, but ModelRunnerFL "
+                "implements the v1 interface; forcing use_v2_model_runner=False."
+            )
+
         # Buffers saved before sleep
         self._sleep_saved_buffers: dict[str, torch.Tensor] = {}
 
@@ -238,6 +249,25 @@ class WorkerFL(WorkerBase):
 
             # Get whitelist and blacklist from environment variables
             whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+
+            # Qwen3.8-Flash-Next/Qwen4Exp owns a multi-GiB transposed PLE
+            # cache. FlagGems index_select first makes that entire view
+            # contiguous, while native ATen touches only the requested rows.
+            # Merge the model-specific exclusion with the platform defaults;
+            # do not mutate global config or affect workers for other models.
+            from vllm_fl.patches.qwen3_8_flash_next import (
+                apply_native_index_select_policy,
+                needs_native_index_select,
+            )
+
+            whitelist, blacklist = apply_native_index_select_policy(
+                vllm_config, whitelist, blacklist
+            )
+            if not whitelist and needs_native_index_select(vllm_config):
+                logger.info(
+                    "[Qwen3.8-Flash-Next] Using native index_select for "
+                    "non-contiguous PLE/QSA state"
+                )
 
             # Only rank 0 records the oplist to avoid file truncation and
             # interleaved writes when tensor-parallel-size > 1.

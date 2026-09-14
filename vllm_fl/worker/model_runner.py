@@ -48,7 +48,10 @@ from vllm.distributed.parallel_state import (
     is_global_first_rank,
     prepare_communication_buffer_for_model,
 )
-from vllm.distributed.weight_transfer.base import SparseWeightPatch
+try:
+    from vllm.distributed.weight_transfer.sparse_nccl_engine import SparseWeightPatch
+except ImportError:  # vLLM 0.24 keeps it in the package base module
+    from vllm.distributed.weight_transfer.base import SparseWeightPatch
 from vllm.forward_context import (
     BatchDescriptor,
     set_forward_context,
@@ -60,6 +63,7 @@ from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.layers.fused_moe.routed_experts_capturer import (
     RoutedExpertsCapturer,
 )
+from vllm.model_executor.layers.mamba.abstract import MambaBase
 from vllm.model_executor.layers.mamba.ops.ssu_dispatch import (
     initialize_mamba_ssu_backend,
 )
@@ -156,6 +160,14 @@ from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.tracing import instrument
 from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.math_utils import cdiv, round_up
+
+try:
+    # vLLM 0.24 only: needed for the inline max_num_blocks_per_req formula
+    # below. 0.26 moved that computation into KVCacheSpec and dropped this
+    # module.
+    from vllm.v1.worker.cp_utils import get_total_cp_world_size
+except ImportError:
+    get_total_cp_world_size = None
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
 from vllm.utils.platform_utils import num_compute_units, is_pin_memory_available, num_compute_units
@@ -239,12 +251,14 @@ from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
 from vllm.v1.worker import mamba_utils
 from vllm.v1.worker.cp_utils import (
     check_attention_cp_compatibility,
-    get_total_cp_world_size,
 )
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
-from vllm.v1.worker.gpu.pool.late_interaction_runner import LateInteractionRunner
+try:
+    from vllm.v1.pool.late_interaction_runner import LateInteractionRunner
+except ImportError:  # vLLM 0.24 nests it under the GPU worker package
+    from vllm.v1.worker.gpu.pool.late_interaction_runner import LateInteractionRunner
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.utils.torch_utils import PIN_MEMORY
 
@@ -269,7 +283,16 @@ from vllm.v1.worker.utils import (
     sanity_check_mm_encoder_outputs,
 )
 
+try:
+    from vllm.v1.worker.utils import compressed_kernel_block_size
+except ImportError:
+    # vLLM 0.24 has no compressed-cache branch in create_metadata_builders:
+    # the allocator spec and the builder spec are always identical, so the
+    # storage block *is* the kernel page and no separate helper is needed.
+    compressed_kernel_block_size = None
+
 # FL-specific imports
+from vllm.compilation.cuda_graph import CUDAGraphWrapper
 from vllm_fl.compilation.graph import GraphWrapper
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.dispatch.io_dumper import (
@@ -516,8 +539,13 @@ class ModelRunnerFL(
         self.routed_experts_initialized = False
         self.max_model_len = model_config.max_model_len
 
-        # Always set to false after the first forward pass
-        self.calculate_kv_scales = self.cache_config.calculate_kv_scales
+        # Always set to false after the first forward pass.
+        # vLLM dropped CacheConfig.calculate_kv_scales after 0.24 (the runtime
+        # kv-scale calibration path was removed); default to False so the
+        # cudagraph-disabling branch below simply never fires.
+        self.calculate_kv_scales = getattr(
+            self.cache_config, "calculate_kv_scales", False
+        )
         self.dcp_world_size = self.parallel_config.decode_context_parallel_size
         self.dcp_rank = 0 if self.dcp_world_size <= 1 else get_dcp_group().rank_in_group
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
@@ -537,6 +565,25 @@ class ModelRunnerFL(
         self.inputs_embeds_size = model_config.get_inputs_embeds_size()
         # Only relevant for models using ALiBi (e.g, MPT)
         self.use_alibi = model_config.uses_alibi
+
+        # Qwen3.8-Flash-Next PLE consumes the raw token history preceding each
+        # scheduled chunk. Keep this in the plugin-owned v0.24 runner so the
+        # installed vLLM tree remains unmodified.
+        ple_layer_ids = getattr(model_config.hf_text_config, "ple_layer_ids", ())
+        self.uses_ngram_embedding = bool(ple_layer_ids)
+        if self.uses_ngram_embedding:
+            self.ngram_context_len = int(model_config.hf_text_config.ngram_size) - 1
+            self.ngram_eos_token_id = int(model_config.hf_text_config.eos_token_id)
+        else:
+            self.ngram_context_len = 0
+            self.ngram_eos_token_id = 0
+        if self.uses_ngram_embedding and self.ngram_context_len <= 0:
+            raise ValueError("N-gram embedding requires context length >= 1.")
+        if self.uses_ngram_embedding and len(get_pp_group().ranks) > 1:
+            raise RuntimeError(
+                "N-gram PLE embedding currently requires "
+                "pipeline_parallel_size=1."
+            )
 
         self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
@@ -712,8 +759,12 @@ class ModelRunnerFL(
         placeholder_block_size = (
             self.cache_config.block_size or CacheConfig.DEFAULT_BLOCK_SIZE
         )
+        placeholder_max_num_blocks = cdiv(
+            max(self.max_model_len, self.max_encoder_len), placeholder_block_size
+        )
         self._init_block_sizes = [placeholder_block_size]
         self._init_kernel_block_sizes = [placeholder_block_size]
+        self._init_max_num_blocks = [placeholder_max_num_blocks]
         self.input_batch = InputBatch(
             max_num_reqs=self.max_num_reqs,
             # We need to use the encoder length for encoder-decoder
@@ -724,6 +775,10 @@ class ModelRunnerFL(
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[placeholder_block_size],
             kernel_block_sizes=[placeholder_block_size],
+            # Required positional arg since vLLM moved block-table sizing into
+            # InputBatch; the placeholder is replaced in
+            # may_reinitialize_input_batch once the real kv cache config lands.
+            max_num_blocks_per_req=[placeholder_max_num_blocks],
             num_spec_tokens=self.num_spec_tokens,
             logitsprocs=build_logitsprocs(
                 self.vllm_config,
@@ -809,6 +864,12 @@ class ModelRunnerFL(
         self.inputs_embeds = self._make_buffer(
             self.max_num_tokens, self.inputs_embeds_size, dtype=self.dtype, numpy=False
         )
+        if self.uses_ngram_embedding:
+            self.ngram_context = self._make_buffer(
+                self.max_num_reqs,
+                self.ngram_context_len,
+                dtype=torch.int32,
+            )
         self.is_token_ids = self._make_buffer(self.max_num_tokens, dtype=torch.bool)
         self.discard_request_mask = self._make_buffer(
             self.max_num_reqs, dtype=torch.bool
@@ -3497,10 +3558,86 @@ class ModelRunnerFL(
         inputs_embeds = self.inputs_embeds.gpu[:num_tokens]
         return input_ids, inputs_embeds
 
+    def _prepare_ngram_context(
+        self,
+        num_reqs: int,
+        num_reqs_padded: int,
+    ) -> torch.Tensor:
+        """Build the left context for every real or CUDA-graph padding row."""
+        if not self.uses_ngram_embedding:
+            raise RuntimeError("N-gram context requested for non-ngram model.")
+        eos_token_id = int(self.ngram_eos_token_id)
+        if num_reqs_padded == 0 or self.ngram_context_len == 0:
+            return self.ngram_context.gpu[:num_reqs_padded]
+
+        context_cpu = self.ngram_context.np[:num_reqs_padded]
+        context_cpu.fill(eos_token_id)
+        num_computed = self.input_batch.num_computed_tokens_cpu
+        token_ids = self.input_batch.token_ids_cpu
+        is_token_ids = self.input_batch.is_token_ids
+
+        for req_idx in range(num_reqs):
+            end = int(num_computed[req_idx])
+            if end <= 0:
+                continue
+            start = max(0, end - self.ngram_context_len)
+            context_tokens = token_ids[req_idx, start:end]
+            if context_tokens.size == 0:
+                continue
+            if self.enable_prompt_embeds and not is_token_ids[
+                req_idx, start:end
+            ].all():
+                context_tokens = context_tokens.copy()
+                context_tokens[~is_token_ids[req_idx, start:end]] = eos_token_id
+            context_cpu[req_idx, -context_tokens.size :] = context_tokens
+
+        self.ngram_context.copy_to_gpu(num_reqs_padded)
+        return self.ngram_context.gpu[:num_reqs_padded]
+
+    def _maybe_add_ngram_kwargs(
+        self,
+        model_kwargs: dict[str, Any],
+        *,
+        num_reqs: int,
+        num_reqs_padded: int,
+        is_first_rank: bool,
+        is_encoder_decoder: bool,
+        use_dummy_context: bool,
+        query_start_loc: torch.Tensor | None = None,
+        num_scheduled_tokens: np.ndarray | None = None,
+    ) -> None:
+        if not self.uses_ngram_embedding or not is_first_rank or is_encoder_decoder:
+            return
+
+        eos_token_id = int(self.ngram_eos_token_id)
+        if query_start_loc is None:
+            if num_scheduled_tokens is None:
+                raise RuntimeError("query_start_loc is required for N-gram input.")
+            cu_num_tokens = np.cumsum(num_scheduled_tokens, dtype=np.int32)
+            last = int(cu_num_tokens[-1]) if num_reqs > 0 else 0
+            self.query_start_loc.np[0] = 0
+            if num_reqs > 0:
+                self.query_start_loc.np[1 : num_reqs + 1] = cu_num_tokens
+            self.query_start_loc.np[num_reqs + 1 :].fill(last)
+            self.query_start_loc.copy_to_gpu()
+            query_start_loc = self.query_start_loc.gpu[: num_reqs_padded + 1]
+        model_kwargs["query_start_loc"] = query_start_loc
+
+        if use_dummy_context:
+            self.ngram_context.np[:num_reqs_padded].fill(eos_token_id)
+            self.ngram_context.copy_to_gpu(num_reqs_padded)
+            model_kwargs["ngram_context"] = self.ngram_context.gpu[:num_reqs_padded]
+        else:
+            model_kwargs["ngram_context"] = self._prepare_ngram_context(
+                num_reqs, num_reqs_padded
+            )
+
     def _preprocess(
         self,
         scheduler_output: "SchedulerOutput",
         num_input_tokens: int,  # Padded
+        num_reqs: int,
+        num_reqs_padded: int,
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> tuple[
         torch.Tensor | None,
@@ -3604,6 +3741,26 @@ class ModelRunnerFL(
             input_ids = self.input_ids.gpu[:num_input_tokens]
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
+
+        if (
+            self.uses_ngram_embedding
+            and is_first_rank
+            and not is_encoder_decoder
+            and input_ids is None
+        ):
+            raise RuntimeError(
+                "N-gram PLE requires token ids on the first pipeline rank; "
+                "inputs_embeds-only batches are not supported."
+            )
+        self._maybe_add_ngram_kwargs(
+            model_kwargs,
+            num_reqs=num_reqs,
+            num_reqs_padded=num_reqs_padded,
+            is_first_rank=is_first_rank,
+            is_encoder_decoder=is_encoder_decoder,
+            use_dummy_context=False,
+            query_start_loc=self.query_start_loc.gpu[: num_reqs_padded + 1],
+        )
 
         if self.uses_mrope:
             positions = self.mrope_positions.gpu[:, :num_input_tokens]
@@ -4349,7 +4506,11 @@ class ModelRunnerFL(
                 model_kwargs,
                 ec_connector_output,
             ) = self._preprocess(
-                scheduler_output, num_tokens_padded, intermediate_tensors
+                scheduler_output,
+                num_tokens_padded,
+                num_reqs,
+                num_reqs_padded,
+                intermediate_tensors,
             )
 
         # Set cudagraph mode to none if calc_kv_scales is true.
@@ -5973,6 +6134,16 @@ class ModelRunnerFL(
                 input_ids = self.input_ids.gpu[:num_tokens_padded]
                 inputs_embeds = None
 
+            self._maybe_add_ngram_kwargs(
+                model_kwargs,
+                num_reqs=num_reqs,
+                num_reqs_padded=num_reqs_padded,
+                is_first_rank=get_pp_group().is_first_rank,
+                is_encoder_decoder=self.model_config.is_encoder_decoder,
+                use_dummy_context=True,
+                num_scheduled_tokens=num_scheduled_tokens,
+            )
+
             if self.uses_mrope:
                 positions = self.mrope_positions.gpu[:, :num_tokens_padded]
             elif self.uses_xdrope_dim > 0:
@@ -7041,23 +7212,40 @@ class ModelRunnerFL(
                 continue
             block_size = kv_cache_group.kv_cache_spec.block_size
             block_sizes.append(block_size)
-            max_num_blocks_per_req = cdiv(
-                max_model_len, block_size * get_total_cp_world_size()
-            )
-            if isinstance(kv_cache_group.kv_cache_spec, MambaSpec):
-                max_num_blocks_per_req = (
-                    max_num_blocks_per_req
-                    if self.cache_config.enable_prefix_caching
-                    else 1
-                ) + kv_cache_group.kv_cache_spec.num_speculative_blocks
+            # Ask the spec for its own block-table width.  vLLM moved this out
+            # of the runner into KVCacheSpec.max_num_blocks_per_req(); the old
+            # inline cdiv() formula silently mis-sizes specs that override it
+            # (KpoolTailSpec -> 1 for GLM-5-Next, MambaSpec, UniformSpec).
+            spec = kv_cache_group.kv_cache_spec
+            if hasattr(spec, "max_num_blocks_per_req"):
+                max_num_blocks_per_req = spec.max_num_blocks_per_req(
+                    self.vllm_config, max_model_len
+                )
+            else:
+                # vLLM 0.24 predates the method; reproduce the inline formula
+                # it used, including the MambaSpec special case (reference
+                # model_runner.py:7189-7197).
+                max_num_blocks_per_req = cdiv(
+                    max_model_len,
+                    block_size
+                    * (get_total_cp_world_size() if get_total_cp_world_size else 1),
+                )
+                if isinstance(spec, MambaSpec):
+                    max_num_blocks_per_req = (
+                        max_num_blocks_per_req
+                        if self.cache_config.enable_prefix_caching
+                        else 1
+                    ) + spec.num_speculative_blocks
             max_num_blocks.append(max_num_blocks_per_req)
 
         if (
             block_sizes != self._init_block_sizes
             or kernel_block_sizes != self._init_kernel_block_sizes
+            or max_num_blocks != self._init_max_num_blocks
         ):
             self._init_block_sizes = block_sizes
             self._init_kernel_block_sizes = kernel_block_sizes
+            self._init_max_num_blocks = max_num_blocks
             self.input_batch = InputBatch(
                 max_num_reqs=self.max_num_reqs,
                 max_model_len=max_model_len,
@@ -7181,15 +7369,35 @@ class ModelRunnerFL(
                     num_blocks = raw_tensor.numel() // kv_cache_spec.page_size_bytes
                 if isinstance(kv_cache_spec, AttentionSpec):
                     has_attn = True
-                    num_blocks_per_kv_block = (
-                        kv_cache_spec.block_size // kernel_block_size
-                    )
-                    kernel_num_blocks = num_blocks * num_blocks_per_kv_block
-
-                    # For MLA with compression, storage_block_size != block_size
+                    # Compressed MLA (storage_block_size != block_size, e.g. the
+                    # GLM-5-Next kpool indexer) is never split into attention
+                    # kernel blocks; it is split into its own pool pages. The
+                    # old code kept the attention-block multiplier *and* used
+                    # the full storage block as the page size, which double
+                    # counts: for kpool (block 128, kpool 4 -> storage 32) it
+                    # asked for a tensor several times the allocation and blew
+                    # up in `.view()`.
                     if kv_cache_spec.storage_block_size != kv_cache_spec.block_size:
-                        shape_block_size = kv_cache_spec.storage_block_size
+                        if compressed_kernel_block_size is not None:
+                            shape_block_size = compressed_kernel_block_size(
+                                kv_cache_spec
+                            )
+                            kernel_num_blocks = num_blocks * (
+                                kv_cache_spec.storage_block_size // shape_block_size
+                            )
+                        else:
+                            # vLLM 0.24: the storage block is the kernel page,
+                            # so the attention-block multiplier still applies
+                            # and no extra pool-page split happens.
+                            kernel_num_blocks = num_blocks * (
+                                kv_cache_spec.block_size // kernel_block_size
+                            )
+                            shape_block_size = kv_cache_spec.storage_block_size
                     else:
+                        num_blocks_per_kv_block = (
+                            kv_cache_spec.block_size // kernel_block_size
+                        )
+                        kernel_num_blocks = num_blocks * num_blocks_per_kv_block
                         shape_block_size = kernel_block_size
 
                     kv_cache_shape = attn_backend.get_kv_cache_shape(
@@ -7217,27 +7425,50 @@ class ModelRunnerFL(
                 elif isinstance(kv_cache_spec, MambaSpec):
                     has_mamba = True
                     raw_tensor = kv_cache_raw_tensors[layer_name]
-                    state_tensors = []
-                    storage_offset_bytes = 0
-                    for shape, dtype in zip(kv_cache_spec.shapes, kv_cache_spec.dtypes):
-                        dtype_size = get_dtype_size(dtype)
-                        num_element_per_page = (
-                            kv_cache_spec.page_size_bytes // dtype_size
-                        )
-                        target_shape = (num_blocks, *shape)
-                        stride = torch.empty(target_shape).stride()
-                        target_stride = (num_element_per_page, *stride[1:])
-                        assert storage_offset_bytes % dtype_size == 0
-                        tensor = torch.as_strided(
-                            raw_tensor.view(dtype),
-                            size=target_shape,
-                            stride=target_stride,
-                            storage_offset=storage_offset_bytes // dtype_size,
-                        )
-                        state_tensors.append(tensor)
-                        storage_offset_bytes += stride[0] * dtype_size
-
-                    kv_caches[layer_name] = state_tensors
+                    if hasattr(MambaBase, "bind_kv_cache"):
+                        page_size_bytes = kv_cache_spec.page_size_bytes
+                        # vLLM 0.26 moved the conv/ssm state split out of the
+                        # runner and into the layer: MambaBase.bind_kv_cache
+                        # expects a single contiguous
+                        # [num_blocks, 1, 1, page_size_bytes] int8 page view and
+                        # slices each block's bytes itself. Handing it the old
+                        # list of pre-strided state tensors made it call
+                        # .squeeze() on a list. Keeping one tensor per layer also
+                        # lets the KV connector register it without
+                        # special-casing Mamba.
+                        kv_caches[layer_name] = raw_tensor[
+                            : num_blocks * page_size_bytes
+                        ].view(num_blocks, 1, 1, page_size_bytes)
+                    else:
+                        # vLLM 0.24 has no MambaBase.bind_kv_cache; the runner
+                        # owns the split and each layer receives a list of
+                        # per-state tensors already shaped [num_blocks, *shape].
+                        # The GDN kernels rely on that leading block dim -- a
+                        # raw byte page reaches fused_recurrent as a 3D temporal
+                        # state and trips its 4D check.
+                        state_tensors = []
+                        storage_offset_bytes = 0
+                        for shape, dtype in zip(
+                            kv_cache_spec.shapes, kv_cache_spec.dtypes
+                        ):
+                            dtype_size = get_dtype_size(dtype)
+                            num_element_per_page = (
+                                kv_cache_spec.page_size_bytes // dtype_size
+                            )
+                            target_shape = (num_blocks, *shape)
+                            stride = torch.empty(target_shape).stride()
+                            target_stride = (num_element_per_page, *stride[1:])
+                            assert storage_offset_bytes % dtype_size == 0
+                            state_tensors.append(
+                                torch.as_strided(
+                                    raw_tensor.view(dtype),
+                                    size=target_shape,
+                                    stride=target_stride,
+                                    storage_offset=storage_offset_bytes // dtype_size,
+                                )
+                            )
+                            storage_offset_bytes += stride[0] * dtype_size
+                        kv_caches[layer_name] = state_tensors
                 else:
                     raise NotImplementedError
 
@@ -7327,12 +7558,27 @@ class ModelRunnerFL(
         num_attn_module = (
             2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
         )
-        bind_kv_cache(
+        # Resolve through the module rather than the value imported at the top
+        # of this file: vllm_fl.patches.glm5_next patches
+        # vllm.v1.worker.utils.bind_kv_cache to widen a platform gate, and this
+        # module is imported after that patch runs.
+        import vllm.v1.worker.utils as _vllm_worker_utils
+
+        _vllm_worker_utils.bind_kv_cache(
             kv_caches,
             self.compilation_config.static_forward_context,
             self.kv_caches,
             num_attn_module,
         )
+        # vLLM 0.24's helper assigns ``layer.kv_cache`` directly. QSA's raw
+        # side cache needs its bind hook to expose typed key/position views;
+        # newer vLLM calls this hook natively.
+        for layer_name, kv_cache in kv_caches.items():
+            layer = self.compilation_config.static_forward_context[layer_name]
+            if layer.__class__.__module__.endswith(
+                "qwen3_8_flash_next.common.qsa_cache"
+            ):
+                layer.bind_kv_cache(kv_cache)
         return kv_caches
 
     def maybe_add_kv_sharing_layers_to_kv_cache_groups(
@@ -7444,6 +7690,8 @@ class ModelRunnerFL(
         self.routed_experts_capturer = RoutedExpertsCapturer(
             max_num_batched_tokens=self.scheduler_config.max_num_batched_tokens,
             vllm_config=self.vllm_config,
+            # Newly required by vLLM after 0.24.
+            kv_cache_config=self.kv_cache_config,
         )
         self.routed_experts_attn_gid = self._get_attention_kv_cache_gid()
         self._bind_routed_experts_capturer(self.routed_experts_capturer)

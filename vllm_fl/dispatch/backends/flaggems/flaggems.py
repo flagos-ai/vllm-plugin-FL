@@ -161,11 +161,19 @@ class FlagGemsBackend(Backend):
                 "Falling back to vendor implementation."
             )
 
-        if use_mla:
-            raise NotImplementedError("NOT support mla now!")
-
-        if use_sparse:
+        if use_sparse and not use_mla:
             raise ValueError("use_sparse=True requires use_mla=True.")
+
+        if use_mla:
+            if use_sparse:
+                # DSA / kpool sparse MLA (GLM-5-Next, DeepSeek-V3.2). Every
+                # in-tree sparse-MLA backend needs a compiled extension we do
+                # not have; this one is FlagGems Triton throughout.
+                return (
+                    "vllm_fl.dispatch.backends.flaggems.impl.mla_sparse."
+                    "SparseMLAFLBackend"
+                )
+            return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
         # TODO: return "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
 
         return AttentionBackendEnum.TRITON_ATTN.get_path()

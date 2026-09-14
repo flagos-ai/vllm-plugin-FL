@@ -11,8 +11,19 @@ def apply_moe_activation(
     activation: MoEActivation,
     output: torch.Tensor,
     input: torch.Tensor,
+    clamp_limit: float | None = None,
 ) -> torch.Tensor:
-    """Apply MoE activation function."""
+    """Apply MoE activation function.
+
+    ``clamp_limit`` comes from ``FusedMoEQuantConfig.gemm1_clamp_limit``, which
+    upstream populates from the model's ``swiglu_limit``. GLM-5-Next sets
+    ``swiglu_limit=10.0`` and was TRAINED with that bound, so dropping it
+    silently changes every routed expert in all 42 sparse layers. Upstream
+    honours it in triton_moe.py:174-176; this plugin previously ignored the
+    parameter entirely, which is invisible under dummy weights (activations
+    stay well inside +-10 so the clamp never fires) but destroys semantics
+    with real weights.
+    """
     assert input.dim() == 2, "Input must be 2D"
     assert output.dim() == 2, "Output must be 2D"
     if activation.is_gated:
@@ -28,7 +39,26 @@ def apply_moe_activation(
 
     # Activations with gated multiplication (gate × activation(up))
     if activation == MoEActivation.SILU:
-        output.copy_(_silu_and_mul(None, input))
+        if clamp_limit is None:
+            output.copy_(_silu_and_mul(None, input))
+        else:
+            dim = input.shape[-1] // 2
+            limit = float(clamp_limit)
+            try:
+                from flag_gems.fused.silu_and_mul_with_clamp import (
+                    silu_and_mul_with_clamp_out,
+                )
+
+                silu_and_mul_with_clamp_out(
+                    input[..., :dim], input[..., dim:], output, limit
+                )
+            except (ImportError, OSError, NotImplementedError, RuntimeError):
+                # torch.ops._C.silu_and_mul_with_clamp is unavailable here
+                # (no vllm._C on this platform), so compose it in torch.
+                # Mirrors vLLM's _swiglu_limit_torch (utils.py:467).
+                gate = input[..., :dim].clamp(max=limit)
+                up = input[..., dim:].clamp(min=-limit, max=limit)
+                output.copy_(F.silu(gate.float()) * up.float())
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.SWIGLUOAI:

@@ -20,9 +20,15 @@ from vllm.model_executor.layers.fused_moe.experts.triton_moe import TritonExpert
 from vllm.model_executor.layers.fused_moe.fused_moe import try_get_optimal_moe_config
 from vllm.model_executor.layers.fused_moe.utils import _resize_cache, moe_kernel_quantize_input
 import os
-from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
-    FlashinferMoeBackend,
-)
+try:
+    from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
+        FlashinferMoeBackend,
+    )
+except ImportError:
+    # Removed from vLLM after 0.24.  Only referenced when the NVIDIA-only
+    # VLLM_USE_FLASHINFER_MOE_FP16 + VLLM_FLASHINFER_MOE_BACKEND env vars are
+    # both set, which never happens on non-CUDA platforms.
+    FlashinferMoeBackend = None
 from vllm.triton_utils import tl, triton
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
@@ -33,6 +39,17 @@ _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
 _moe_sum = CachedOp("moe_sum")
 
 logger = init_logger(__name__)
+
+
+def _kernel_cls_list(backend):
+    """Normalise backend_to_kernel_cls() to a list of candidate classes.
+
+    vLLM changed this to return a list (monolithic + modular variants) and
+    iterates it, taking the first whose is_supported_config() passes. Older
+    vLLM returned a single class. Accept both.
+    """
+    out = backend_to_kernel_cls(backend)
+    return out if isinstance(out, (list, tuple)) else [out]
 
 
 def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBackend]:
@@ -72,6 +89,15 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
     elif current_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
+    else:
+        # OOT platforms (PlatformFL on Hygon DCU) answer False to every
+        # is_rocm/is_cuda/is_xpu/is_cpu probe, so the chain above left
+        # _AVAILABLE_BACKENDS unbound -> UnboundLocalError. Triton is the
+        # portable choice and matches what MOE_BACKEND=triton asks for.
+        _AVAILABLE_BACKENDS = [
+            UnquantizedMoeBackend.TRITON,
+            UnquantizedMoeBackend.BATCHED_TRITON,
+        ]
     return _AVAILABLE_BACKENDS
 
 ## Adopt from select_unquantized_moe_backend
@@ -93,9 +119,9 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     if moe_config.is_lora_enabled:
-        return UnquantizedMoeBackend.TRITON, backend_to_kernel_cls(
+        return UnquantizedMoeBackend.TRITON, _kernel_cls_list(
             UnquantizedMoeBackend.TRITON
-        )
+        )[0]
 
     # NOTE: the kernels are selected in the following order.
     AVAILABLE_BACKENDS = _get_priority_backends(moe_config)
@@ -134,13 +160,14 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
         config: FusedMoEConfig,
         activation_format: mk.FusedMoEActivationFormat,
     ) -> tuple[UnquantizedMoeBackend, type[mk.FusedMoEExperts] | None]:
-        k_cls = backend_to_kernel_cls(backend)
-        supported, reason = k_cls.is_supported_config(
-            k_cls, config, None, None, activation_format
-        )
-        if supported:
-            logger.info_once(_make_log_backend(backend))
-            return backend, k_cls
+        reason = None
+        for k_cls in _kernel_cls_list(backend):
+            supported, reason = k_cls.is_supported_config(
+                k_cls, config, None, None, activation_format
+            )
+            if supported:
+                logger.info_once(_make_log_backend(backend))
+                return backend, k_cls
         raise ValueError(_make_log_unsupported(backend, reason))
 
     runner_backend = moe_config.moe_backend
@@ -181,7 +208,6 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
                     f"FlashInfer MOE backend {fi_backend} "
                     "does not support unquantized MoE."
                 )
-            k_cls = backend_to_kernel_cls(backend)
             return _return_or_raise(backend, moe_config, activation_format)
         else:
             # If the user is not explicit about the backend, try both.
@@ -189,15 +215,15 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
                 UnquantizedMoeBackend.FLASHINFER_TRTLLM,
                 UnquantizedMoeBackend.FLASHINFER_CUTLASS,
             ]:
-                k_cls = backend_to_kernel_cls(backend)
-                supported, reason = k_cls.is_supported_config(
-                    k_cls, moe_config, None, None, activation_format
-                )
-                if supported:
-                    logger.info_once(_make_log_backend(backend))
-                    return backend, k_cls
-                else:
-                    logger.debug_once(_make_log_unsupported(backend, reason))
+                for k_cls in _kernel_cls_list(backend):
+                    supported, reason = k_cls.is_supported_config(
+                        k_cls, moe_config, None, None, activation_format
+                    )
+                    if supported:
+                        logger.info_once(_make_log_backend(backend))
+                        return backend, k_cls
+                    else:
+                        logger.debug_once(_make_log_unsupported(backend, reason))
 
             raise NotImplementedError(
                 "Found VLLM_USE_FLASHINFER_MOE_FP16=1, but no "
@@ -214,15 +240,15 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
             return _return_or_raise(backend, moe_config, activation_format)
 
     for backend in AVAILABLE_BACKENDS:
-        k_cls = backend_to_kernel_cls(backend)
-        supported, reason = k_cls.is_supported_config(
-            k_cls, moe_config, None, None, activation_format
-        )
-        if supported:
-            logger.info_once(_make_log_backend(backend))
-            return backend, k_cls
+        for k_cls in _kernel_cls_list(backend):
+            supported, reason = k_cls.is_supported_config(
+                k_cls, moe_config, None, None, activation_format
+            )
+            if supported:
+                logger.info_once(_make_log_backend(backend))
+                return backend, k_cls
 
-        logger.debug_once(_make_log_unsupported(backend, reason))
+            logger.debug_once(_make_log_unsupported(backend, reason))
 
     raise NotImplementedError(
         "No Unquantized MoE backend supports the deployment configuration."
@@ -296,7 +322,15 @@ class TritonExpertsFL(TritonExperts):
         apply_router_weight_on_input: bool,
     ):
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        if self._lora_context is None and current_platform.is_cuda():
+        # FlagGems' fused_experts_impl takes only the activation enum and
+        # silently drops gemm1_clamp_limit, so it must not be used for a
+        # clamped-SwiGLU model. Fall through to the per-step pipeline,
+        # which applies the exact clamped activation below.
+        if (
+            self._lora_context is None
+            and current_platform.is_cuda()
+            and self.quant_config.gemm1_clamp_limit is None
+        ):
             import flag_gems
 
             output.copy_(flag_gems.fused_experts_impl(
@@ -450,7 +484,10 @@ class TritonExpertsFL(TritonExperts):
             )
 
         apply_moe_activation(
-            activation, intermediate_cache2, intermediate_cache1.view(-1, N)
+            activation,
+            intermediate_cache2,
+            intermediate_cache1.view(-1, N),
+            clamp_limit=self.quant_config.gemm1_clamp_limit,
         )
 
         a2q_scale: torch.Tensor | None = None

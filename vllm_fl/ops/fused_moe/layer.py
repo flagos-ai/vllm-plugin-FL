@@ -3,11 +3,14 @@
 
 import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
 
-# Save the original FusedMoE factory BEFORE any monkey-patching occurs.
-# custom_ops.py patches _fused_moe_pkg.FusedMoE = FusedMoEFL at runtime,
-# so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
-# infinitely.  Capturing it here breaks the cycle.
-_OrigFusedMoE = _fused_moe_pkg.FusedMoE
+# Save the original MoE factory BEFORE any monkey-patching occurs.
+# custom_ops.py patches the factory name to FusedMoEFL at runtime, so calling
+# it through the module inside FusedMoEFL would recurse infinitely.  Capturing
+# it here breaks the cycle.
+#
+# vLLM renamed the factory `FusedMoE` -> `FusedMoEFactory` after 0.24; accept
+# whichever this vLLM exposes so the plugin works on both.
+_OrigFusedMoE = getattr(_fused_moe_pkg, "FusedMoE", None) or _fused_moe_pkg.FusedMoEFactory
 from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (

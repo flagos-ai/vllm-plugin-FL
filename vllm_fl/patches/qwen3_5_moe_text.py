@@ -64,6 +64,7 @@ NOT define ``hf_to_vllm_mapper`` itself -- rather than on the shared
 the inherited attribute and leaves every other Qwen3-VL model untouched.
 """
 
+import dataclasses
 import logging
 
 logger = logging.getLogger(__name__)
@@ -159,8 +160,6 @@ def patch_qwen3_5_moe_weight_mapper():
         from vllm.model_executor.models.qwen3_5 import (
             Qwen3_5MoeForConditionalGeneration as _Cls,
         )
-        from vllm.model_executor.models.utils import WeightsMapper
-
         if getattr(_Cls, "_fl_patched_text_mapper", False):
             return
 
@@ -171,13 +170,12 @@ def patch_qwen3_5_moe_weight_mapper():
         prefix = dict(base.orig_to_new_prefix)
         prefix["model."] = "language_model.model."
 
-        _Cls.hf_to_vllm_mapper = WeightsMapper(
-            orig_to_new_renamings=list(base.orig_to_new_renamings),
-            orig_to_new_regex=dict(base.orig_to_new_regex),
-            orig_to_new_substr=dict(base.orig_to_new_substr),
-            orig_to_new_prefix=prefix,
-            orig_to_new_suffix=dict(base.orig_to_new_suffix),
-        )
+        # Copy via dataclasses.replace rather than re-listing every field:
+        # WeightsMapper's fields drift between vLLM versions (0.24's
+        # `orig_to_new_renamings` became `orig_to_new_renaming`, and
+        # `orig_to_new_stacked` was added).  Enumerating them by hand raised
+        # AttributeError here and silently left the mapper unpatched.
+        _Cls.hf_to_vllm_mapper = dataclasses.replace(base, orig_to_new_prefix=prefix)
         _Cls._fl_patched_text_mapper = True
         logger.info("FL: extended Qwen3.5-MoE weight mapper for flat layout")
     except Exception as e:  # pragma: no cover

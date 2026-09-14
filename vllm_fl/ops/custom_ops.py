@@ -141,11 +141,24 @@ def _patch_fused_moe_factory() -> None:
     import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
     import vllm.model_executor.layers.fused_moe.layer as _fused_moe_layer
 
-    if getattr(_fused_moe_layer, "FusedMoE", None) is FusedMoEFL:  # noqa F405
+    # vLLM renamed the factory `FusedMoE` -> `FusedMoEFactory` after 0.24.
+    # Patch every name this vLLM actually exposes; checking only the old name
+    # made the idempotency guard always miss (getattr returned None), so the
+    # patch was reapplied on every call.
+    _factory_names = [
+        n for n in ("FusedMoE", "FusedMoEFactory")
+        if hasattr(_fused_moe_layer, n) or hasattr(_fused_moe_pkg, n)
+    ]
+    if all(
+        getattr(_fused_moe_layer, n, None) is FusedMoEFL  # noqa F405
+        for n in _factory_names
+    ):
         # Already patched — idempotent.
         return
 
-    # Patch at the module level so `from vllm...fused_moe import FusedMoE` picks it up.
-    _fused_moe_layer.FusedMoE = FusedMoEFL  # noqa F405
-    _fused_moe_pkg.FusedMoE = FusedMoEFL   # noqa F405
+    # Patch at the module level so `from vllm...fused_moe import <factory>`
+    # picks it up.
+    for _n in _factory_names:
+        setattr(_fused_moe_layer, _n, FusedMoEFL)  # noqa F405
+        setattr(_fused_moe_pkg, _n, FusedMoEFL)   # noqa F405
     logger.info("Monkey-patched FusedMoE factory -> FusedMoEFL")
