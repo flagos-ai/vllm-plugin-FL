@@ -57,8 +57,11 @@ def _patch_int8_moe_quant_scheme():
 
     TritonExperts._supports_quant_scheme = _supports_quant_scheme
     TritonExperts._fl_int8_patch = True
-    logger.info("[vllm_fl] patched TritonExperts to accept int8 W8A8 MoE "
-                "on cuda-alike platform %s", current_platform.device_name)
+    logger.info(
+        "[vllm_fl] patched TritonExperts to accept int8 W8A8 MoE "
+        "on cuda-alike platform %s",
+        current_platform.device_name,
+    )
 
 
 def _patch_flashmla_ops():
@@ -77,8 +80,10 @@ def _patch_flashmla_ops():
     try:
         import flash_mla
     except ImportError:
-        logger.warning("[vllm_fl] flash_mla package not found; "
-                       "DeepSeek-V4 sparse attention will be unavailable")
+        logger.warning(
+            "[vllm_fl] flash_mla package not found; "
+            "DeepSeek-V4 sparse attention will be unavailable"
+        )
         return
 
     import vllm.v1.attention.ops.flashmla as fl_mod
@@ -160,8 +165,9 @@ def _patch_no_q_head_padding():
 
     DeepseekV4FlashMLAAttention.get_padded_num_q_heads = get_padded_num_q_heads
     DeepseekV4FlashMLAAttention._fl_no_head_pad_patch = True
-    logger.warning("[vllm_fl] Q head padding disabled on PPU "
-                   "(padded_heads = n_local_heads)")
+    logger.warning(
+        "[vllm_fl] Q head padding disabled on PPU (padded_heads = n_local_heads)"
+    )
 
 
 def _patch_int8_o_proj():
@@ -173,6 +179,7 @@ def _patch_int8_o_proj():
     original implementation.
     """
     import torch
+
     from vllm.models.deepseek_v4.nvidia.flashmla import (
         DeepseekV4FlashMLAAttention,
     )
@@ -191,8 +198,10 @@ def _patch_int8_o_proj():
 
     DeepseekV4FlashMLAAttention._o_proj = _o_proj
     DeepseekV4FlashMLAAttention._fl_o_proj_patch = True
-    logger.info("[vllm_fl] patched DeepseekV4FlashMLAAttention._o_proj "
-                "with INT8 fp32-einsum path")
+    logger.info(
+        "[vllm_fl] patched DeepseekV4FlashMLAAttention._o_proj "
+        "with INT8 fp32-einsum path"
+    )
 
 
 def _patch_topk_softplus_sqrt():
@@ -282,9 +291,7 @@ def _patch_sparse_indexer_ops():
     import flag_gems.fused as gf
 
     ops_module.indexer_k_quant_and_cache = gf.indexer_k_quant_and_cache
-    ops_module.cp_gather_indexer_k_quant_cache = (
-        gf.cp_gather_indexer_k_quant_cache
-    )
+    ops_module.cp_gather_indexer_k_quant_cache = gf.cp_gather_indexer_k_quant_cache
     ops_module.top_k_per_row_prefill = gf.top_k_per_row_prefill
     ops_module.top_k_per_row_decode = gf.top_k_per_row_decode
 
@@ -329,9 +336,10 @@ def _patch_sparse_indexer_forward():
         return
 
     # Import registers torch.ops.vllm.fl_ppu_sparse_attn_indexer.
-    import vllm_fl.ops.deepseek_v4_ppu_indexer  # noqa: F401
     from vllm.compilation.breakable_cudagraph import eager_break_during_capture
     from vllm.utils.torch_utils import _encode_layer_name
+
+    import vllm_fl.ops.deepseek_v4_ppu_indexer  # noqa: F401
 
     # Same contract as upstream sparse_attn_indexer's decorator: the body
     # has data-dependent shapes (workspace slicing, chunk loops), which must
@@ -381,8 +389,8 @@ def _patch_compressor_cache_insert():
     time in the non-NVIDIA branch, but also from-imports it, so patch both
     modules.
     """
-    import vllm.models.deepseek_v4.compressor as comp_mod
     import vllm.models.deepseek_v4.common.ops.fused_compress_quant_cache as fcq_mod
+    import vllm.models.deepseek_v4.compressor as comp_mod
 
     if getattr(fcq_mod, "_fl_thead_patch", False):
         return
@@ -464,8 +472,9 @@ def _patch_int8_weights_mapper():
         method = getattr(quant_config, "get_name", lambda: None)()
         if method == "compressed-tensors":
             self.hf_to_vllm_mapper = _make_int8_mapper()
-            logger.warning("[vllm_fl] int8 weights mapper installed "
-                           "(.scale -> .weight_scale)")
+            logger.warning(
+                "[vllm_fl] int8 weights mapper installed (.scale -> .weight_scale)"
+            )
 
     cls.__init__ = __init__
     nv_model._fl_mapper_patch = True
@@ -479,9 +488,9 @@ def _patch_disable_cutedsl():
     NVIDIA-only `quack` dependency and SM90+ codegen. Rebind the probe in
     every module that from-imported it so the triton fallbacks are taken.
     """
-    import vllm.utils.import_utils as iu
     import vllm.models.deepseek_v4.common.ops.cache_utils as cu
     import vllm.models.deepseek_v4.common.ops.fused_indexer_q as fiq
+    import vllm.utils.import_utils as iu
 
     if getattr(iu, "_fl_cutedsl_patch", False):
         return
@@ -493,8 +502,10 @@ def _patch_disable_cutedsl():
     cu.has_cutedsl = has_cutedsl
     fiq.has_cutedsl = has_cutedsl
     iu._fl_cutedsl_patch = True
-    logger.info("[vllm_fl] has_cutedsl forced False (quack/CuteDSL is "
-                "NVIDIA-only); triton fallbacks in effect")
+    logger.info(
+        "[vllm_fl] has_cutedsl forced False (quack/CuteDSL is "
+        "NVIDIA-only); triton fallbacks in effect"
+    )
 
 
 def _patch_dequant_gather():
@@ -543,8 +554,8 @@ def _patch_int8_moe_deepgemm_backend():
     ported PPUDeepGemmExperts first (same is_supported_config contract) and
     fall back to the original selection if it rejects the deployment.
     """
-    import vllm.model_executor.layers.fused_moe.oracle.int8 as oracle
     import vllm.model_executor.layers.fused_moe.modular_kernel as mk
+    import vllm.model_executor.layers.fused_moe.oracle.int8 as oracle
 
     if getattr(oracle, "_fl_deepgemm_patch", False):
         return
@@ -587,7 +598,8 @@ def _patch_int8_moe_deepgemm_backend():
                 return oracle.Int8MoeBackend.TRITON, PPUDeepGemmExperts
             logger.warning(
                 "[vllm_fl] PPUDeepGemmExperts rejected config (%s); "
-                "falling back to upstream selection", reason,
+                "falling back to upstream selection",
+                reason,
             )
         return orig_select(config, weight_key, activation_key, **kw)
 
@@ -623,8 +635,13 @@ def _patch_int8_moe_deepgemm_backend():
             # A/B escape hatch: keep upstream W8A16 fallback semantics that
             # TritonExperts expects.
             return orig_make_quant(
-                w1_scale, w2_scale, a1_scale, a2_scale,
-                w1_bias, w2_bias, per_act_token_quant,
+                w1_scale,
+                w2_scale,
+                a1_scale,
+                a2_scale,
+                w1_bias,
+                w2_bias,
+                per_act_token_quant,
             )
         return int8_w8a8_moe_quant_config(
             w1_scale=w1_scale,
@@ -651,9 +668,9 @@ def _patch_asymmetric_capture_sizes():
     across sizes (~1 MiB/graph). So: keep every capture size for FULL
     (kills decode padding waste) and thin PIECEWISE to a sparse subset.
     """
-    from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
+
     from vllm.config import CUDAGraphMode
-    import os
+    from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
     if getattr(CudagraphDispatcher, "_fl_asym_patch", False):
         return
@@ -679,7 +696,8 @@ def _patch_asymmetric_capture_sizes():
             logger.warning(
                 "[vllm_fl] thinned PIECEWISE cudagraph sizes: kept %d, "
                 "dropped %d (breakable-graph per-size memory cost)",
-                len(kept), dropped,
+                len(kept),
+                dropped,
             )
 
     CudagraphDispatcher.initialize_cudagraph_keys = initialize_cudagraph_keys
@@ -717,14 +735,14 @@ def _patch_torch_compile_model():
     # forward: dynamo refuses to trace importlib.util.find_spec, but a
     # cache-hit lru_cache call is constant-folded.
     try:
-        from vllm.utils.import_utils import has_deep_gemm, has_cutedsl
+        from vllm.utils.import_utils import has_cutedsl, has_deep_gemm
 
         has_deep_gemm()
         has_cutedsl()
         from vllm_fl.ops.ppu_deep_gemm import (
-            is_deep_gemm_supported,
             get_deep_gemm_best_configs,
             get_mk_alignment_for_contiguous_layout,
+            is_deep_gemm_supported,
         )
 
         is_deep_gemm_supported()
@@ -773,8 +791,9 @@ def _patch_torch_compile_model():
     # Route attention_impl through an opaque custom op (vendor-style
     # torch.ops.vllm.deepseek_v4_attention): dynamo cannot trace workspace
     # management / FlashMLA / indexer internals.
-    import vllm_fl.ops.deepseek_v4_attn_op  # noqa: F401 (registers the op)
     import vllm.models.deepseek_v4.attention as attn_mod
+
+    import vllm_fl.ops.deepseek_v4_attn_op  # noqa: F401 (registers the op)
 
     _orig_attn_forward = attn_mod.DeepseekV4Attention.forward
 
@@ -793,8 +812,15 @@ def _patch_torch_compile_model():
             qr, kv, self.q_norm.weight.data, self.kv_norm.weight.data, self.eps
         )
         torch.ops.vllm.fl_dsv4_attention(
-            hidden_states, qr, kv, kv_score, indexer_kv_score,
-            indexer_weights, positions, o_padded, self.prefix,
+            hidden_states,
+            qr,
+            kv,
+            kv_score,
+            indexer_kv_score,
+            indexer_weights,
+            positions,
+            o_padded,
+            self.prefix,
         )
         o = o_padded[:, : self.n_local_heads, :]
         return self._o_proj(o, positions)
@@ -805,10 +831,9 @@ def _patch_torch_compile_model():
     # DeepseekV4ForCausalLM binds the class attribute at definition time.
     nv_model.DeepseekV4ForCausalLM.model_cls = nv_model.DeepseekV4Model
     nv_model._fl_compile_patch = True
-    logger.warning("[vllm_fl] DeepseekV4Model wrapped with "
-                   "support_torch_compile (full-graph mode)")
-
-
+    logger.warning(
+        "[vllm_fl] DeepseekV4Model wrapped with support_torch_compile (full-graph mode)"
+    )
 
 
 def _patch_empty_int_zero():
@@ -819,7 +844,6 @@ def _patch_empty_int_zero():
 
     if empty_int_zero.register():
         logger.warning("[vllm_fl] aten::empty int-dtype zero-fill installed")
-
 
 
 def _patch_topk_indices_buffer_init():

@@ -171,9 +171,16 @@ def fused_inv_rope_float32(
     # Custom-op boundary keeps inductor from tracing into triton launch
     # (upstream gh-41106).
     return torch.ops.vllm.fl_fused_inv_rope_float32(
-        o, positions, cos_sin_cache,
-        heads_per_group, nope_dim, rope_dim // 2,
-        num_tokens, n_groups, d, head_dim,
+        o,
+        positions,
+        cos_sin_cache,
+        heads_per_group,
+        nope_dim,
+        rope_dim // 2,
+        num_tokens,
+        n_groups,
+        d,
+        head_dim,
     )
 
 
@@ -252,18 +259,16 @@ def _fl_int8_o_proj_core_impl(
             nope_dim=nope_dim,
             rope_dim=rope_dim,
         )
-        z[start:end].copy_(
-            torch.einsum("bhr,hdr->bhd", o_f, wo_a_f).to(torch.bfloat16)
-        )
+        z[start:end].copy_(torch.einsum("bhr,hdr->bhd", o_f, wo_a_f).to(torch.bfloat16))
 
 
 def _fl_int8_o_proj_gemm_impl(
-    z: torch.Tensor,          # [T, 1, o_lora] bf16 out
-    o: torch.Tensor,          # [T, H, head_dim] bf16 attention output
+    z: torch.Tensor,  # [T, 1, o_lora] bf16 out
+    o: torch.Tensor,  # [T, H, head_dim] bf16 attention output
     positions: torch.Tensor,
     cos_sin_cache: torch.Tensor,
-    w_q: torch.Tensor,        # [o_lora, R] int8 (checkpoint layout, R=H*head_dim)
-    w_s: torch.Tensor,        # [o_lora] fp32 per-channel scales
+    w_q: torch.Tensor,  # [o_lora, R] int8 (checkpoint layout, R=H*head_dim)
+    w_s: torch.Tensor,  # [o_lora] fp32 per-channel scales
     heads_per_group: int,
     nope_dim: int,
     rope_dim: int,
@@ -304,8 +309,15 @@ def _fl_int8_o_proj_gemm_impl(
 
 
 def _fl_int8_o_proj_gemm_fake(
-    z, o, positions, cos_sin_cache, w_q, w_s,
-    heads_per_group, nope_dim, rope_dim,
+    z,
+    o,
+    positions,
+    cos_sin_cache,
+    w_q,
+    w_s,
+    heads_per_group,
+    nope_dim,
+    rope_dim,
 ) -> None:
     return None
 
@@ -319,8 +331,15 @@ direct_register_custom_op(
 
 
 def _fl_int8_o_proj_core_fake(
-    z, o, positions, cos_sin_cache, wo_a_f, n_groups, heads_per_group,
-    nope_dim, rope_dim,
+    z,
+    o,
+    positions,
+    cos_sin_cache,
+    wo_a_f,
+    n_groups,
+    heads_per_group,
+    nope_dim,
+    rope_dim,
 ) -> None:
     return None
 

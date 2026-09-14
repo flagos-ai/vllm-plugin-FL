@@ -20,7 +20,6 @@ from vllm.model_executor.kernels.mhc.tilelang import (
 )
 from vllm.utils.torch_utils import direct_register_custom_op
 
-
 # --- mHC prenorm GEMM: route to PPU deep_gemm instead of tilelang -------------
 #
 # Upstream mhc_pre_tilelang / mhc_fused_post_pre_tilelang ALREADY have a
@@ -96,16 +95,35 @@ def _fl_mhc_pre(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     with _ppu_deepgemm_prenorm():
         out = mhc_pre_tilelang(
-            residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps,
-            hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat,
-            n_splits=n_splits, norm_weight=norm_weight, norm_eps=norm_eps,
+            residual,
+            fn,
+            hc_scale,
+            hc_base,
+            rms_eps,
+            hc_pre_eps,
+            hc_sinkhorn_eps,
+            hc_post_mult_value,
+            sinkhorn_repeat,
+            n_splits=n_splits,
+            norm_weight=norm_weight,
+            norm_eps=norm_eps,
         )
     return tuple(t.contiguous() for t in out)
 
 
 def _fl_mhc_pre_fake(
-    residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps, hc_sinkhorn_eps,
-    hc_post_mult_value, sinkhorn_repeat, n_splits, norm_weight, norm_eps,
+    residual,
+    fn,
+    hc_scale,
+    hc_base,
+    rms_eps,
+    hc_pre_eps,
+    hc_sinkhorn_eps,
+    hc_post_mult_value,
+    sinkhorn_repeat,
+    n_splits,
+    norm_weight,
+    norm_eps,
 ):
     hc_mult, hidden = residual.shape[-2], residual.shape[-1]
     lead = residual.shape[:-2]
@@ -150,18 +168,43 @@ def _fl_mhc_fused_post_pre(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     with _ppu_deepgemm_prenorm():
         out = mhc_fused_post_pre_tilelang(
-            x, residual, post_layer_mix, comb_res_mix, fn, hc_scale, hc_base,
-            rms_eps, hc_pre_eps, hc_sinkhorn_eps, hc_post_mult_value,
-            sinkhorn_repeat, n_splits=n_splits, tile_n=tile_n,
-            norm_weight=norm_weight, norm_eps=norm_eps,
+            x,
+            residual,
+            post_layer_mix,
+            comb_res_mix,
+            fn,
+            hc_scale,
+            hc_base,
+            rms_eps,
+            hc_pre_eps,
+            hc_sinkhorn_eps,
+            hc_post_mult_value,
+            sinkhorn_repeat,
+            n_splits=n_splits,
+            tile_n=tile_n,
+            norm_weight=norm_weight,
+            norm_eps=norm_eps,
         )
     return tuple(t.contiguous() for t in out)
 
 
 def _fl_mhc_fused_post_pre_fake(
-    x, residual, post_layer_mix, comb_res_mix, fn, hc_scale, hc_base,
-    rms_eps, hc_pre_eps, hc_sinkhorn_eps, hc_post_mult_value,
-    sinkhorn_repeat, n_splits, tile_n, norm_weight, norm_eps,
+    x,
+    residual,
+    post_layer_mix,
+    comb_res_mix,
+    fn,
+    hc_scale,
+    hc_base,
+    rms_eps,
+    hc_pre_eps,
+    hc_sinkhorn_eps,
+    hc_post_mult_value,
+    sinkhorn_repeat,
+    n_splits,
+    tile_n,
+    norm_weight,
+    norm_eps,
 ):
     hc_mult, hidden = residual.shape[-2], residual.shape[-1]
     lead = residual.shape[:-2]
@@ -206,9 +249,7 @@ def _fl_hc_head_fused(
 
 def _fl_hc_head_fused_fake(hs_flat, fn, hc_scale, hc_base, rms_eps, hc_eps):
     num_tokens, hc_mult, hidden = hs_flat.shape
-    return torch.empty(
-        num_tokens, hidden, dtype=torch.bfloat16, device=hs_flat.device
-    )
+    return torch.empty(num_tokens, hidden, dtype=torch.bfloat16, device=hs_flat.device)
 
 
 direct_register_custom_op(
@@ -224,13 +265,33 @@ def hc_head_fused_opaque(hs_flat, fn, hc_scale, hc_base, rms_eps, hc_eps):
     )
 
 
-def mhc_pre_opaque(residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps,
-                   hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat,
-                   n_splits=1, norm_weight=None, norm_eps=1e-6):
+def mhc_pre_opaque(
+    residual,
+    fn,
+    hc_scale,
+    hc_base,
+    rms_eps,
+    hc_pre_eps,
+    hc_sinkhorn_eps,
+    hc_post_mult_value,
+    sinkhorn_repeat,
+    n_splits=1,
+    norm_weight=None,
+    norm_eps=1e-6,
+):
     return torch.ops.vllm.fl_mhc_pre(
-        residual, fn, hc_scale, hc_base, rms_eps, hc_pre_eps,
-        hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat, n_splits,
-        norm_weight, norm_eps,
+        residual,
+        fn,
+        hc_scale,
+        hc_base,
+        rms_eps,
+        hc_pre_eps,
+        hc_sinkhorn_eps,
+        hc_post_mult_value,
+        sinkhorn_repeat,
+        n_splits,
+        norm_weight,
+        norm_eps,
     )
 
 
@@ -238,13 +299,39 @@ def mhc_post_opaque(x, residual, post_layer_mix, comb_res_mix):
     return torch.ops.vllm.fl_mhc_post(x, residual, post_layer_mix, comb_res_mix)
 
 
-def mhc_fused_post_pre_opaque(x, residual, post_layer_mix, comb_res_mix, fn,
-                              hc_scale, hc_base, rms_eps, hc_pre_eps,
-                              hc_sinkhorn_eps, hc_post_mult_value,
-                              sinkhorn_repeat, n_splits=1, tile_n=1,
-                              norm_weight=None, norm_eps=1e-6):
+def mhc_fused_post_pre_opaque(
+    x,
+    residual,
+    post_layer_mix,
+    comb_res_mix,
+    fn,
+    hc_scale,
+    hc_base,
+    rms_eps,
+    hc_pre_eps,
+    hc_sinkhorn_eps,
+    hc_post_mult_value,
+    sinkhorn_repeat,
+    n_splits=1,
+    tile_n=1,
+    norm_weight=None,
+    norm_eps=1e-6,
+):
     return torch.ops.vllm.fl_mhc_fused_post_pre(
-        x, residual, post_layer_mix, comb_res_mix, fn, hc_scale, hc_base,
-        rms_eps, hc_pre_eps, hc_sinkhorn_eps, hc_post_mult_value,
-        sinkhorn_repeat, n_splits, tile_n, norm_weight, norm_eps,
+        x,
+        residual,
+        post_layer_mix,
+        comb_res_mix,
+        fn,
+        hc_scale,
+        hc_base,
+        rms_eps,
+        hc_pre_eps,
+        hc_sinkhorn_eps,
+        hc_post_mult_value,
+        sinkhorn_repeat,
+        n_splits,
+        tile_n,
+        norm_weight,
+        norm_eps,
     )

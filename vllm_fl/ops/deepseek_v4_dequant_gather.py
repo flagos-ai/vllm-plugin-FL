@@ -44,7 +44,6 @@ def _decode_e4m3fn(u):
     return sign_f * mant_f * factor
 
 
-
 @triton.jit
 def _dequantize_and_gather_k_kernel_sm80(
     out_ptr,
@@ -167,7 +166,6 @@ def _dequantize_and_gather_k_cache_triton(
         fp8_max=FP8_MAX,
         n_quant_blocks=7,
     )
-
 
 
 def _dequant_gather_sm80_op(

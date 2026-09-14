@@ -13,35 +13,33 @@ int8_(paged_)mqa_logits entry points. Differences from the vendor source:
     top_k_per_row_decode covers the topk=512 case)
   - registered as torch.ops.vllm.fl_ppu_sparse_attn_indexer
 """
+
 import functools  # noqa: F401
 import importlib  # noqa: F401
 
 import torch
-
-import vllm.envs as envs  # noqa: F401
-from vllm.logger import init_logger
-from vllm.forward_context import get_forward_context
-from vllm.platforms import current_platform
-from vllm.v1.attention.backends.mla.indexer import (
-    DeepseekV32IndexerMetadata,
-)
-from vllm.v1.attention.ops.common import pack_seq_triton, unpack_seq_triton
-from vllm.v1.worker.workspace import current_workspace_manager
-from vllm.utils.torch_utils import (
-    LayerNameType,
-    _encode_layer_name,  # noqa: F401
-    _resolve_layer_name,
-    direct_register_custom_op,
-)
-
-from vllm import _custom_ops as ops
-
 from deep_gemm import (
     fp8_mqa_logits,
     fp8_paged_mqa_logits,
     int8_mqa_logits,
     int8_paged_mqa_logits,
 )
+
+import vllm.envs as envs  # noqa: F401
+from vllm import _custom_ops as ops
+from vllm.forward_context import get_forward_context
+from vllm.logger import init_logger
+from vllm.utils.torch_utils import (
+    LayerNameType,
+    _encode_layer_name,  # noqa: F401
+    _resolve_layer_name,
+    direct_register_custom_op,
+)
+from vllm.v1.attention.backends.mla.indexer import (
+    DeepseekV32IndexerMetadata,
+)
+from vllm.v1.attention.ops.common import pack_seq_triton, unpack_seq_triton
+from vllm.v1.worker.workspace import current_workspace_manager
 
 
 def is_deep_gemm_supported() -> bool:
@@ -118,7 +116,6 @@ def ppu_sparse_attn_indexer(
 ) -> torch.Tensor:
     # careful! this will be None in dummy run
     attn_metadata = get_forward_context().attn_metadata
-    fp8_dtype = current_platform.fp8_dtype()
     q_dtype = q_quant.dtype
     k_cache_prefix = _resolve_layer_name(k_cache_prefix)
 
@@ -222,11 +219,18 @@ def ppu_sparse_attn_indexer(
                         "k_quant shape=%s dtype=%s | k_scale shape=%s | "
                         "block_table shape=%s dtype=%s | cu_seq_lens shape=%s | "
                         "total_seq_lens=%s num_reqs=%s head_dim=%s",
-                        tuple(kv_cache.shape), tuple(kv_cache.stride()),
-                        kv_cache.dtype, tuple(k_quant.shape), k_quant.dtype,
-                        tuple(k_scale.shape), tuple(chunk.block_table.shape),
-                        chunk.block_table.dtype, tuple(chunk.cu_seq_lens.shape),
-                        chunk.total_seq_lens, chunk.num_reqs, head_dim,
+                        tuple(kv_cache.shape),
+                        tuple(kv_cache.stride()),
+                        kv_cache.dtype,
+                        tuple(k_quant.shape),
+                        k_quant.dtype,
+                        tuple(k_scale.shape),
+                        tuple(chunk.block_table.shape),
+                        chunk.block_table.dtype,
+                        tuple(chunk.cu_seq_lens.shape),
+                        chunk.total_seq_lens,
+                        chunk.num_reqs,
+                        head_dim,
                     )
                 ops.cp_gather_indexer_k_quant_cache(
                     kv_cache,
@@ -237,11 +241,10 @@ def ppu_sparse_attn_indexer(
                 )
 
             q_slice = q_quant[chunk.token_start : chunk.token_end]
-            q_scale_slice = (
-                q_scale[chunk.token_start : chunk.token_end]
-                if q_scale is not None
-                else None
-            )
+            # No q_scale slice is threaded through: the PPU int8/fp8 mqa_logits
+            # entry points take the quantized Q as a single tensor. Only the
+            # fp4 path wants the (values, scales) tuple form, and it raises
+            # below.
             # DeepGEMM scalar-type tags (zero-copy): MXFP4 values → int8
             # (kPackedFP4), scales → int32 squeezed to 1-D kv_sf / 2-D q_sf.
             if use_fp4_cache:
@@ -283,7 +286,9 @@ def ppu_sparse_attn_indexer(
                         clean_logits=False,
                     )
                 else:
-                    raise RuntimeError("PPU mqa_logtis only support int8 on btv1.0 and fp8 on >= btv1.5")
+                    raise RuntimeError(
+                        "PPU mqa_logtis only support int8 on btv1.0 and fp8 on >= btv1.5"
+                    )
             else:
                 raise RuntimeError("indexer need PPU deep gemm installed")
 
@@ -319,28 +324,21 @@ def ppu_sparse_attn_indexer(
             # uint8 tensors (values + ue8m0 scales) — use the dedicated uint8
             # packer with pad_byte=0 so padded slots dequantize to 0 and
             # can't produce NaN/Inf in the logits kernel.
+            # The padded Q scale is not carried forward: int8_paged_mqa_logits
+            # and fp8_paged_mqa_logits both take Q as a single tensor. Only the
+            # fp4 path needs the (values, scales) pair, and it raises below.
             if q_scale is not None:
                 padded_q_quant_decode_tokens = pack_seq_triton(
                     q_quant[:num_decode_tokens], decode_lens, pad_value=0
-                )
-                padded_q_scale = pack_seq_triton(
-                    q_scale[:num_decode_tokens], decode_lens, pad_value=0
                 )
             else:
                 padded_q_quant_decode_tokens = pack_seq_triton(
                     q_quant[:num_decode_tokens], decode_lens
                 )
-                padded_q_scale = None
         else:
             padded_q_quant_decode_tokens = q_quant[:num_decode_tokens].reshape(
                 decode_lens.shape[0], -1, *q_quant.shape[1:]
             )
-            if q_scale is not None:
-                padded_q_scale = q_scale[:num_decode_tokens].reshape(
-                    decode_lens.shape[0], -1, *q_scale.shape[1:]
-                )
-            else:
-                padded_q_scale = None
         # TODO: move and optimize below logic with triton kernels
         batch_size = padded_q_quant_decode_tokens.shape[0]
         next_n = padded_q_quant_decode_tokens.shape[1]
@@ -384,7 +382,9 @@ def ppu_sparse_attn_indexer(
                     clean_logits=False,
                 )
             else:
-                raise RuntimeError("PPU mqa_logtis only support int8 on btv1.0 and fp8 on >= btv1.5")
+                raise RuntimeError(
+                    "PPU mqa_logtis only support int8 on btv1.0 and fp8 on >= btv1.5"
+                )
         else:
             raise RuntimeError("indexer need ppu deep gemm installed")
         num_rows = logits.shape[0]
@@ -448,8 +448,6 @@ def ppu_sparse_attn_indexer_fake(
     use_fp4_cache: bool = False,
 ) -> torch.Tensor:
     return topk_indices_buffer
-
-
 
 
 direct_register_custom_op(

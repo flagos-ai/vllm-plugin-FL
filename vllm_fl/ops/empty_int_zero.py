@@ -21,7 +21,12 @@ import os
 import torch
 
 _ALL_INT_DTYPES = {
-    torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64, torch.bool,
+    torch.int8,
+    torch.uint8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.bool,
 }
 
 # Only these dtypes are used for indices/offsets, i.e. the ones that turn

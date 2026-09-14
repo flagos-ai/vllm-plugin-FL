@@ -404,6 +404,7 @@ def compress_norm_rope_store_triton_ppu(
     """PPU replacement for upstream compress_norm_rope_store_triton."""
     assert not use_fp4_cache, "MXFP4 KV cache is not supported on PPU"
     import os as _os
+
     if _os.environ.get("VLLM_FL_DEBUG_COMPRESS_INPUTS") == "1":
         _n_blocks = kv_cache.shape[0]
         _bt = block_table[:, :]
@@ -413,14 +414,19 @@ def compress_norm_rope_store_triton_ppu(
             "tok2req max=%s min=%s (max_reqs~%s) | positions max=%s min=%s | "
             "state_cache shape=%s",
             num_actual,
-            int(_bt.max()), int(_bt.min()), _n_blocks, tuple(block_table.shape),
-            int(slot_mapping.max()), int(slot_mapping.min()),
+            int(_bt.max()),
+            int(_bt.min()),
+            _n_blocks,
+            tuple(block_table.shape),
+            int(slot_mapping.max()),
+            int(slot_mapping.min()),
             int(k_cache_metadata.slot_mapping.max()),
             int(k_cache_metadata.slot_mapping.min()),
             int(token_to_req_indices[:num_actual].max()),
             int(token_to_req_indices[:num_actual].min()),
             block_table.shape[0],
-            int(positions[:num_actual].max()), int(positions[:num_actual].min()),
+            int(positions[:num_actual].max()),
+            int(positions[:num_actual].min()),
             tuple(state_cache.shape),
         )
     if head_dim == 512:

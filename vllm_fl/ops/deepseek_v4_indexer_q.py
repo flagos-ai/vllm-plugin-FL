@@ -30,9 +30,7 @@ def _get_cos_sin(
     block = tl.arange(0, HALF_ROT_DIM)
     cos = tl.load(cos_sin_cache_ptr + pos * cos_sin_cache_stride + block)
     cos = cos.to(tl.float32)
-    sin = tl.load(
-        cos_sin_cache_ptr + pos * cos_sin_cache_stride + block + HALF_ROT_DIM
-    )
+    sin = tl.load(cos_sin_cache_ptr + pos * cos_sin_cache_stride + block + HALF_ROT_DIM)
     sin = sin.to(tl.float32)
     return cos, sin
 

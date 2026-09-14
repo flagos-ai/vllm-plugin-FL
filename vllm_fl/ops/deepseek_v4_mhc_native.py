@@ -23,7 +23,7 @@ def _rmsnorm_nw(x: torch.Tensor, eps: float) -> torch.Tensor:
 
 def _mhc_mixes(
     residual_flat: torch.Tensor,  # [T, hc_mult, H] bf16
-    fn: torch.Tensor,             # [hc_mult3, hc_mult*H] fp32
+    fn: torch.Tensor,  # [hc_mult3, hc_mult*H] fp32
     hc_scale: torch.Tensor,
     hc_base: torch.Tensor,
     rms_eps: float,
@@ -62,14 +62,12 @@ def _mhc_mixes(
 
 
 def _layer_input(
-    pre_mix: torch.Tensor,          # [T, hc_mult] fp32
-    residual_flat: torch.Tensor,    # [T, hc_mult, H]
+    pre_mix: torch.Tensor,  # [T, hc_mult] fp32
+    residual_flat: torch.Tensor,  # [T, hc_mult, H]
     norm_weight: torch.Tensor | None,
     norm_eps: float,
 ) -> torch.Tensor:
-    li = torch.sum(
-        pre_mix.unsqueeze(-1) * residual_flat.to(torch.float32), dim=1
-    )
+    li = torch.sum(pre_mix.unsqueeze(-1) * residual_flat.to(torch.float32), dim=1)
     if norm_weight is not None:
         # Match the tilelang big_fuse rounding order exactly: the rsqrt is
         # computed from the fp32 accumulation, but the value it scales has
@@ -98,8 +96,15 @@ def mhc_pre_native(
     outer = residual.shape[:-2]
     residual_flat = residual.reshape(-1, hc_mult, hidden_size)
     pre_mix, post_mix, comb_mix = _mhc_mixes(
-        residual_flat, fn, hc_scale, hc_base, rms_eps,
-        hc_pre_eps, hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat,
+        residual_flat,
+        fn,
+        hc_scale,
+        hc_base,
+        rms_eps,
+        hc_pre_eps,
+        hc_sinkhorn_eps,
+        hc_post_mult_value,
+        sinkhorn_repeat,
     )
     layer_input = _layer_input(pre_mix, residual_flat, norm_weight, norm_eps)
     return (
@@ -144,16 +149,24 @@ def mhc_fused_post_pre_native(
 ):
     residual_cur = mhc_post_native(x, residual, post_layer_mix, comb_res_mix)
     post_mix, comb_mix, layer_input = mhc_pre_native(
-        residual_cur, fn, hc_scale, hc_base, rms_eps, hc_pre_eps,
-        hc_sinkhorn_eps, hc_post_mult_value, sinkhorn_repeat,
-        norm_weight=norm_weight, norm_eps=norm_eps,
+        residual_cur,
+        fn,
+        hc_scale,
+        hc_base,
+        rms_eps,
+        hc_pre_eps,
+        hc_sinkhorn_eps,
+        hc_post_mult_value,
+        sinkhorn_repeat,
+        norm_weight=norm_weight,
+        norm_eps=norm_eps,
     )
     return residual_cur, post_mix, comb_mix, layer_input
 
 
 def hc_head_fused_native(
-    hs_flat: torch.Tensor,   # [T, hc_mult, H] bf16
-    fn: torch.Tensor,        # [hc_mult, hc_mult*H] fp32
+    hs_flat: torch.Tensor,  # [T, hc_mult, H] bf16
+    fn: torch.Tensor,  # [hc_mult, hc_mult*H] fp32
     hc_scale: torch.Tensor,
     hc_base: torch.Tensor,
     rms_eps: float,
@@ -163,7 +176,5 @@ def hc_head_fused_native(
     x_normed = _rmsnorm_nw(x_flat, rms_eps)
     mixes = torch.nn.functional.linear(x_normed, fn)
     pre = torch.sigmoid(mixes * hc_scale + hc_base) + hc_eps
-    out = torch.sum(
-        pre.unsqueeze(-1) * hs_flat.to(torch.float32), dim=-2
-    )
+    out = torch.sum(pre.unsqueeze(-1) * hs_flat.to(torch.float32), dim=-2)
     return out.to(torch.bfloat16)
