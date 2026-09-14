@@ -1,6 +1,7 @@
 """Ported verbatim from the T-Head vendor fork: vllm/utils/ppu_deep_gemm.py.
 Only change: VLLM_PPU_DENSE_BACKEND env accessed via getattr (absent upstream).
 """
+
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Compatibility wrapper for DeepGEMM API changes.
@@ -27,7 +28,6 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
 from vllm.platforms import current_platform
 from vllm.utils.import_utils import has_deep_gemm
 from vllm.utils.math_utils import cdiv
-
 
 best_configs = None
 MAX_DECODE_BS = 1025
@@ -154,6 +154,7 @@ def get_deep_gemm_config(M, N, K, num_groups):
     else:
         return None
 
+
 class DeepGemmQuantScaleFMT(Enum):
     # Float32 scales in Float32 tensor
     FLOAT32 = 0
@@ -201,7 +202,7 @@ def is_deep_gemm_supported() -> bool:
     Currently, only Hopper and Blackwell GPUs are supported.
     """
     # PlatformFL has no is_ppu(); thead vendor == PPU hardware.
-    is_supported_arch = getattr(current_platform, 'vendor_name', None) == 'thead'
+    is_supported_arch = getattr(current_platform, "vendor_name", None) == "thead"
     return envs.VLLM_USE_DEEP_GEMM and has_deep_gemm() and is_supported_arch
 
 
@@ -210,9 +211,7 @@ def is_deep_gemm_e8m0_used() -> bool:
     """Return `True` if vLLM is configured to use DeepGEMM "
     "E8M0 scale on a Hopper or Blackwell-class GPU.
     """
-    logger.info_once(
-        "PPU DeepGEMM do not support E8M0", scope="local"
-    )
+    logger.info_once("PPU DeepGEMM do not support E8M0", scope="local")
     return False
 
 
@@ -222,6 +221,7 @@ def _missing(*_: Any, **__: Any) -> NoReturn:
         "PPU DeepGEMM backend is not available or outdated. Please install or "
         "update the `deep_gemm` to a newer version."
     )
+
 
 # dense gemm and gourp gemm
 _fp8_gemm_nt_impl: Callable[..., Any] | None = None
@@ -339,9 +339,7 @@ def _lazy_init() -> None:
     _bf16_grouped_masked_impl = getattr(
         _dg, "m_grouped_gemm_bf16_bf16_bf16_nt_masked", None
     )
-    _fp4_grouped_nopad_impl = getattr(
-        _dg, "m_grouped_gemm_fp4_fp4_bf16_nt_nopad", None
-    )
+    _fp4_grouped_nopad_impl = getattr(_dg, "m_grouped_gemm_fp4_fp4_bf16_nt_nopad", None)
     _fp4_grouped_masked_impl = getattr(
         _dg, "m_grouped_gemm_fp4_fp4_bf16_nt_masked", None
     )
@@ -407,11 +405,13 @@ def int8_gemm_nt(*args, **kwargs):
         return _missing(*args, **kwargs)
     return _int8_gemm_nt_impl(*args, **kwargs)
 
+
 def fp8_einsum(*args, **kwargs):
     _lazy_init()
     if _fp8_einsum_impl is None:
         return _missing(*args, **kwargs)
     return _fp8_einsum_impl(*args, **kwargs)
+
 
 def m_grouped_int8_gemm_nt_nopad(*args, **kwargs):
     _lazy_init()
@@ -744,8 +744,10 @@ def should_use_deepgemm_for_fp8_linear(
     weight_shape: tuple[int, int],
     supports_deep_gemm: bool | None = None,
 ):
-    if (getattr(envs, 'VLLM_PPU_DENSE_BACKEND', None)
-        and getattr(envs, 'VLLM_PPU_DENSE_BACKEND', None) != "deepgemm"):
+    if (
+        getattr(envs, "VLLM_PPU_DENSE_BACKEND", None)
+        and getattr(envs, "VLLM_PPU_DENSE_BACKEND", None) != "deepgemm"
+    ):
         return False
 
     if supports_deep_gemm is None:

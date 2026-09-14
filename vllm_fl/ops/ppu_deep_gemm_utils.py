@@ -2,6 +2,7 @@
 vllm/model_executor/layers/fused_moe/ppu_deep_gemm_utils.py.
 Only change: ppu_deep_gemm import path -> vllm_fl.ops.ppu_deep_gemm.
 """
+
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
@@ -11,14 +12,14 @@ and updated to fit vllm needs and terminology.
 
 import torch
 
-import vllm.envs as envs
-from vllm.logger import init_logger
-from vllm import _custom_ops as ops
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
+from vllm import _custom_ops as ops
+from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.utils import count_expert_num_tokens
 from vllm.triton_utils import tl, triton
-from vllm_fl.ops.ppu_deep_gemm import get_mk_alignment_for_contiguous_layout
 from vllm.utils.math_utils import round_up
+
+from vllm_fl.ops.ppu_deep_gemm import get_mk_alignment_for_contiguous_layout
 
 logger = init_logger(__name__)
 
@@ -336,7 +337,9 @@ def _fwd_kernel_ep_scatter_2_optimal(
                 # is the outer dimension (M), so scale_offsets must be
                 # multiplied by stride1.
                 to_copy_scale = tl.load(
-                    recv_x_scale + token_id * recv_x_scale_stride0 + scale_offsets * recv_x_scale_stride1,
+                    recv_x_scale
+                    + token_id * recv_x_scale_stride0
+                    + scale_offsets * recv_x_scale_stride1,
                     mask=copy_mask,
                 )
                 output_scale_offsets = (
@@ -418,7 +421,6 @@ def ep_scatter(
             output_tensor_scale,
             (recv_x_scale is not None),
         )
-
 
     grid = lambda meta: (recv_x.shape[0],)
 
@@ -663,7 +665,7 @@ def deepgemm_moe_permute(
     H = aq.size(1)
     device = aq.device
 
-    is_mxfp4 = (aq.dtype == torch.uint8)
+    is_mxfp4 = aq.dtype == torch.uint8
     block_m, block_k = get_mk_alignment_for_contiguous_layout(
         is_blockwise=is_block_wise_quant, is_mxfp4=is_mxfp4
     )

@@ -15,14 +15,6 @@ from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEParallelConfig,
     FusedMoEQuantConfig,
 )
-from vllm_fl.ops.ppu_deep_gemm_utils import (
-    compute_aligned_M,
-    deepgemm_moe_permute,
-    deepgemm_unpermute_and_reduce,
-)
-from vllm.model_executor.layers.quantization.utils.int8_utils import (
-    per_token_quant_int8,
-)
 from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
     TopKWeightAndReduceNoOP,
 )
@@ -33,48 +25,60 @@ from vllm.model_executor.layers.fused_moe.utils import (
 from vllm.model_executor.layers.quantization.utils.fp8_utils import (
     per_token_group_quant_fp8,
     per_token_group_quant_fp8_packed_for_deepgemm,
-    silu_mul_per_token_group_quant_fp8_colmajor,
 )
+from vllm.model_executor.layers.quantization.utils.int8_utils import (
+    per_token_quant_int8,
+)
+
+from vllm_fl.ops.ppu_deep_gemm_utils import (
+    compute_aligned_M,
+    deepgemm_moe_permute,
+    deepgemm_unpermute_and_reduce,
+)
+
 try:
     from vllm.model_executor.layers.quantization.utils.ppu_mxfp4_utils import (
         downcast_to_mxfp4,
     )
 except ImportError:  # vendor-only module; only the MXFP4 experts need it
     downcast_to_mxfp4 = None
+import vllm.envs as envs
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     QuantKey,
     kFp8Dynamic128Sym,
-    kFp8Static128BlockSym,
     kFp8DynamicTokenSym,
+    kFp8Static128BlockSym,
     kFp8StaticChannelSym,
     kInt8DynamicTokenSym,
     kInt8StaticChannelSym,
     kMxfp4Dynamic,
     kMxfp4Static,
 )
+from vllm.platforms import current_platform
+from vllm.utils.import_utils import has_deep_gemm
+
 from vllm_fl.ops.ppu_deep_gemm import (
     DeepGemmQuantScaleFMT,
+    get_deep_gemm_config,
     get_mk_alignment_for_contiguous_layout,
     is_deep_gemm_supported,
-    get_deep_gemm_config,
-    m_grouped_fp8_gemm_nt_nopad,
-    m_grouped_int8_gemm_nt_nopad,
     m_grouped_bf16_gemm_nt_nopad,
     m_grouped_fp4_gemm_nt_nopad,
+    m_grouped_fp8_gemm_nt_nopad,
+    m_grouped_int8_gemm_nt_nopad,
 )
-from vllm.utils.import_utils import has_deep_gemm
-from vllm.platforms import current_platform
-import vllm.envs as envs
 
 logger = init_logger(__name__)
 
 
 # Add for nvtx profiling
-NVTX_PROFILE = getattr(envs, 'VLLM_PPU_NVTX_PROFILE', False)
+NVTX_PROFILE = getattr(envs, "VLLM_PPU_NVTX_PROFILE", False)
 if NVTX_PROFILE:
     try:
-        from torch.cuda.nvtx import range_pop as th_nvtx_range_pop
-        from torch.cuda.nvtx import range_push as th_nvtx_range_push
+        from torch.cuda.nvtx import (
+            range_pop as th_nvtx_range_pop,
+            range_push as th_nvtx_range_push,
+        )
     except ImportError:
         NVTX_PROFILE = False
 
@@ -104,12 +108,10 @@ def _valid_deep_gemm(
         logger.debug_once("DeepGemm disabled: deep_gemm not available.")
         return False
 
-    M = hidden_states.size(0)
     _, K, N = w2.size()
 
-    if (current_platform.is_device_capability((8,0))) and (
-        w1.dtype in [torch.float8_e4m3fn]
-        or w2.dtype in [torch.float8_e4m3fn]
+    if (current_platform.is_device_capability((8, 0))) and (
+        w1.dtype in [torch.float8_e4m3fn] or w2.dtype in [torch.float8_e4m3fn]
     ):
         logger.debug_once(
             "DeepGemm disabled: invalid weight dtype(s). w1.dtype: %s, w2.dtype: %s on sm80",
@@ -118,12 +120,21 @@ def _valid_deep_gemm(
         )
         return False
 
-
-    if (w1.dtype
-        not in [torch.float32, torch.float16, torch.bfloat16, torch.int8, torch.uint8, torch.float8_e4m3fn]
-        or w2.dtype
-        not in [torch.float32, torch.float16, torch.bfloat16, torch.int8, torch.uint8, torch.float8_e4m3fn]
-    ):
+    if w1.dtype not in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+        torch.int8,
+        torch.uint8,
+        torch.float8_e4m3fn,
+    ] or w2.dtype not in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+        torch.int8,
+        torch.uint8,
+        torch.float8_e4m3fn,
+    ]:
         logger.debug_once(
             "DeepGemm disabled: invalid weight dtype(s). w1.dtype: %s, w2.dtype: %s",
             w1.dtype,
@@ -159,7 +170,9 @@ class PPUDeepGemmExperts(mk.FusedMoEExpertsModular):
         if self.block_wise:
             assert (
                 quant_config.block_shape[1]
-                == get_mk_alignment_for_contiguous_layout(is_blockwise=self.block_wise)[1]
+                == get_mk_alignment_for_contiguous_layout(is_blockwise=self.block_wise)[
+                    1
+                ]
             )
 
         self.gemm1_clamp_limit = quant_config.gemm1_clamp_limit
@@ -218,7 +231,9 @@ class PPUDeepGemmExperts(mk.FusedMoEExpertsModular):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         activation: MoEActivation,
     ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
-        block_m = get_mk_alignment_for_contiguous_layout(is_blockwise=self.block_wise)[0]
+        block_m = get_mk_alignment_for_contiguous_layout(is_blockwise=self.block_wise)[
+            0
+        ]
         M_sum = compute_aligned_M(
             M, topk, local_num_experts, block_m, expert_tokens_meta
         )
@@ -279,9 +294,7 @@ class PPUDeepGemmExperts(mk.FusedMoEExpertsModular):
             # Assign act path
             self.activation(activation, act_out, input)
         if output.dtype == torch.float8_e4m3fn:
-            block_k = (
-                self.block_shape[1] if self.block_shape else activation_out_dim
-            )
+            block_k = self.block_shape[1] if self.block_shape else activation_out_dim
             return per_token_group_quant_fp8(
                 act_out, block_k, column_major_scales=True, out_q=output
             )
@@ -330,13 +343,13 @@ class PPUDeepGemmExperts(mk.FusedMoEExpertsModular):
             M=topk_ids.size(0),
             num_topk=topk_ids.size(1),
             local_num_experts=local_num_experts,
-            alignment=get_mk_alignment_for_contiguous_layout(is_blockwise=self.block_wise)[0],
+            alignment=get_mk_alignment_for_contiguous_layout(
+                is_blockwise=self.block_wise
+            )[0],
             expert_tokens_meta=expert_tokens_meta,
         )
 
-        a1q_perm = _resize_cache(
-            workspace13.view(dtype=quant_dtype), (M_sum, K)
-        )
+        a1q_perm = _resize_cache(workspace13.view(dtype=quant_dtype), (M_sum, K))
         is_block_wise_quant = is_channel_wise_quant = False
         if self.quant_config.use_fp8_w8a8 or self.quant_config.use_int8_w8a8:
             is_block_wise_quant = self.block_shape is not None
@@ -360,7 +373,7 @@ class PPUDeepGemmExperts(mk.FusedMoEExpertsModular):
         nvtx_pushed = False
         if NVTX_PROFILE:
             if (
-                getattr(envs, 'VLLM_PPU_NVTX_DUMP_TOPK', False)
+                getattr(envs, "VLLM_PPU_NVTX_DUMP_TOPK", False)
                 and not torch.cuda.is_current_stream_capturing()
             ):
                 num_activated_experts = (expert_num_tokens > 0).sum().item()
@@ -438,9 +451,7 @@ class PPUDeepGemmExperts(mk.FusedMoEExpertsModular):
                 best_config,
             )
         else:
-            m_grouped_bf16_gemm_nt_nopad(
-                a1q, w1, mm1_out, expert_ids, experts_for_rows
-            )
+            m_grouped_bf16_gemm_nt_nopad(a1q, w1, mm1_out, expert_ids, experts_for_rows)
             activation_out_dim = self.adjust_N_for_activation(N, activation)
             quant_out = _resize_cache(workspace13, (M_sum, activation_out_dim))
             a2q, a2q_scale = self._act_mul_quant(
@@ -448,9 +459,7 @@ class PPUDeepGemmExperts(mk.FusedMoEExpertsModular):
             )
 
             mm2_out = _resize_cache(workspace2, (M_sum, K))
-            m_grouped_bf16_gemm_nt_nopad(
-                a2q, w2, mm2_out, expert_ids, experts_for_rows
-            )
+            m_grouped_bf16_gemm_nt_nopad(a2q, w2, mm2_out, expert_ids, experts_for_rows)
 
         if apply_router_weight_on_input:
             assert topk_weights is not None
@@ -509,7 +518,11 @@ class PPUDeepGemmExpertsMXFP4(mk.FusedMoEExpertsModular):
 
     @staticmethod
     def _supports_activation(activation: MoEActivation) -> bool:
-        return activation in [MoEActivation.SILU, MoEActivation.SWIGLUSTEP, MoEActivation.SWIGLUOAI]
+        return activation in [
+            MoEActivation.SILU,
+            MoEActivation.SWIGLUSTEP,
+            MoEActivation.SWIGLUOAI,
+        ]
 
     @staticmethod
     def _supports_parallel_config(moe_parallel_config: FusedMoEParallelConfig) -> bool:
@@ -550,12 +563,9 @@ class PPUDeepGemmExpertsMXFP4(mk.FusedMoEExpertsModular):
     def _act_mul_quant(
         self, input: torch.Tensor, output: torch.Tensor, activation: MoEActivation
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        scale_fmt = DeepGemmQuantScaleFMT.from_oracle()
 
         M_sum, N = input.size()
         activation_out_dim = self.adjust_N_for_activation(N, activation)
-
-        block_k = self.block_shape[1] if self.block_shape else activation_out_dim
 
         act_out = torch.empty(
             (M_sum, activation_out_dim), dtype=input.dtype, device=input.device
@@ -604,9 +614,7 @@ class PPUDeepGemmExpertsMXFP4(mk.FusedMoEExpertsModular):
             expert_tokens_meta=expert_tokens_meta,
         )
 
-        a1q_perm = _resize_cache(
-            workspace13.view(dtype=quant_dtype), (M_sum, K)
-        )
+        a1q_perm = _resize_cache(workspace13.view(dtype=quant_dtype), (M_sum, K))
         is_block_wise_quant = is_channel_wise_quant = False
         is_block_wise_quant = self.block_shape is not None
         is_channel_wise_quant = not is_block_wise_quant
@@ -629,7 +637,7 @@ class PPUDeepGemmExpertsMXFP4(mk.FusedMoEExpertsModular):
         nvtx_pushed = False
         if NVTX_PROFILE:
             if (
-                getattr(envs, 'VLLM_PPU_NVTX_DUMP_TOPK', False)
+                getattr(envs, "VLLM_PPU_NVTX_DUMP_TOPK", False)
                 and not torch.cuda.is_current_stream_capturing()
             ):
                 num_activated_experts = (expert_num_tokens > 0).sum().item()
