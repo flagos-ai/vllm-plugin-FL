@@ -10,6 +10,38 @@ import torch
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
+import flag_gems
+from flag_gems import (
+    grouped_topk as _grouped_topk,
+    invoke_fused_moe_triton_kernel as _invoke_fused_moe_triton_kernel,
+    moe_align_block_size_triton as _moe_align_block_size_triton,
+    moe_sum as _moe_sum,
+    topk_softmax as _topk_softmax,
+    topk_softplus_sqrt as _topk_softplus_sqrt,
+)
+from flag_gems.pt2.fused_moe import (
+    moe_sum as _pt2_moe_sum,
+    topk_softmax as _pt2_topk_softmax,
+)
+from flag_gems.pt2.moe_routing import (
+    grouped_topk as _pt2_grouped_topk,
+    topk_softplus_sqrt as _pt2_topk_softplus_sqrt,
+    uses_common_moe_routing_kernels as _uses_common_moe_routing_kernels,
+)
+
+
+# These contracts capture the common/NVIDIA kernel objects.  Other vendors
+# may replace either public FlagGems export, so retain their original path
+# until an equivalent vendor-specific PT2 contract is validated.
+_USE_TRANSPARENT_MOE_PRIMITIVES = flag_gems.vendor_name == "nvidia"
+_USE_TRANSPARENT_MOE_ROUTING = (
+    flag_gems.vendor_name == "nvidia"
+    and _uses_common_moe_routing_kernels(
+        _grouped_topk,
+        _topk_softplus_sqrt,
+    )
+)
+
 
 def moe_align_block_size_flaggems(
     topk_ids: torch.Tensor,
@@ -19,8 +51,6 @@ def moe_align_block_size_flaggems(
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    from flag_gems import moe_align_block_size_triton
-
     max_num_tokens_padded = topk_ids.numel() + num_experts * (block_size - 1)
     if pad_sorted_ids:
         max_num_tokens_padded = round_up(max_num_tokens_padded, block_size)
@@ -39,7 +69,7 @@ def moe_align_block_size_flaggems(
     # TODO(lms): ignore_invalid_experts not effective now
     # moe_align_block_size has optimize version to filtered out
     # all invalid experts directly when counting the number of experts
-    moe_align_block_size_triton(
+    _moe_align_block_size_triton(
         topk_ids,
         num_experts,
         block_size,
@@ -56,39 +86,27 @@ def moe_align_block_size_flaggems(
 def topk_softmax_flaggems(
     topk_weights, topk_indices, token_expert_indices, gating_output, renormalize=False
 ):
-    from flag_gems import topk_softmax
-
-    try:
-        topk_softmax(
+    # The FlagGems API accepts ``renormalize`` directly, so no exception-driven
+    # signature probe is used here: a frozen compiled path cannot switch
+    # implementations after an exception, and Dynamo cannot soundly trace a
+    # try/retry control flow.  Eager and compiled execution call the same
+    # kernel with the same arguments.
+    if _USE_TRANSPARENT_MOE_PRIMITIVES:
+        _pt2_topk_softmax(
             topk_weights,
             topk_indices,
             token_expert_indices,
             gating_output,
             renormalize,
         )
-    except:
-        topk_softmax(topk_weights, topk_indices, token_expert_indices, gating_output)
-        if renormalize:
-            topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-    return topk_weights, topk_indices
-
-def topk_softmax_flaggems(
-    topk_weights, topk_indices, token_expert_indices, gating_output, renormalize=False
-):
-    from flag_gems import topk_softmax
-
-    try:
-        topk_softmax(
+    else:
+        _topk_softmax(
             topk_weights,
             topk_indices,
             token_expert_indices,
             gating_output,
             renormalize,
         )
-    except:
-        topk_softmax(topk_weights, topk_indices, token_expert_indices, gating_output)
-        if renormalize:
-            topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
     return topk_weights, topk_indices
 
 
@@ -146,15 +164,32 @@ def fused_topk_bias_flaggems(
         return topk_weights, topk_ids
 
     elif scoring_func == "sqrtsoftplus":
-        from flag_gems import topk_softplus_sqrt
-
         topk_weights, topk_ids, token_expert_indices = _alloc_topk_buffers()
 
-        topk_softplus_sqrt(
-            topk_weights, topk_ids, token_expert_indices,
-            gating_output, renormalize, routed_scaling_factor,
-            e_score_correction_bias, input_tokens, hash_indices_table,
-        )
+        if _USE_TRANSPARENT_MOE_ROUTING:
+            _pt2_topk_softplus_sqrt(
+                topk_weights,
+                topk_ids,
+                token_expert_indices,
+                gating_output,
+                renormalize,
+                routed_scaling_factor,
+                e_score_correction_bias,
+                input_tokens,
+                hash_indices_table,
+            )
+        else:
+            _topk_softplus_sqrt(
+                topk_weights,
+                topk_ids,
+                token_expert_indices,
+                gating_output,
+                renormalize,
+                routed_scaling_factor,
+                e_score_correction_bias,
+                input_tokens,
+                hash_indices_table,
+            )
         return topk_weights, topk_ids
 
     elif scoring_func == "sigmoid":
@@ -174,7 +209,12 @@ def fused_topk_bias_flaggems(
         else:
             topk_indices = torch.topk(scores_for_choice, k=topk, dim=-1)[1]
 
-        topk_weights = scores.gather(1, topk_indices).to(torch.float32)
+        # ``gather`` requires int64 indices even though the routing ABI also
+        # permits int32 hash tables (DeepSeekV4 non-Mega uses int32).  Preserve
+        # the table/output dtype while using the required ATen gather dtype.
+        topk_weights = scores.gather(1, topk_indices.to(torch.int64)).to(
+            torch.float32
+        )
         if renormalize:
             topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
         if routed_scaling_factor != 1.0:
@@ -207,9 +247,7 @@ def invoke_fused_moe_triton_kernel_flaggems(
     block_shape=None,
     B_bias=None,
 ):
-    from flag_gems import invoke_fused_moe_triton_kernel
-
-    invoke_fused_moe_triton_kernel(
+    _invoke_fused_moe_triton_kernel(
         A,
         B,
         C,
@@ -243,9 +281,12 @@ def grouped_topk_flaggems(
     bias,
     scoring_func=0,
 ):
-    from flag_gems import grouped_topk
-
-    return grouped_topk(
+    grouped_topk_impl = (
+        _pt2_grouped_topk
+        if _USE_TRANSPARENT_MOE_ROUTING
+        else _grouped_topk
+    )
+    return grouped_topk_impl(
         scores,
         n_group,
         topk_group,
@@ -258,6 +299,7 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    from flag_gems import moe_sum
-
-    moe_sum(inp, out)
+    if _USE_TRANSPARENT_MOE_PRIMITIVES:
+        _pt2_moe_sum(inp, out)
+    else:
+        _moe_sum(inp, out)

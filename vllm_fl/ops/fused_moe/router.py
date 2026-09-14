@@ -16,7 +16,6 @@ from vllm.model_executor.layers.fused_moe.router.grouped_topk_router import (
 )
 from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
     FusedTopKBiasRouter,
-    fused_topk_bias
 )
 from vllm_fl.dispatch import CachedOp
 
@@ -182,7 +181,11 @@ class GroupedTopKRouterFL(GroupedTopKRouter):
 
         if not valid_grouping():
             if self.e_score_correction_bias is not None:
-                topk_weights, topk_ids = fused_topk_bias(
+                # Keep the invalid-group fallback inside the same frozen FL
+                # dispatch contract instead of bypassing CachedOp through the
+                # upstream vLLM helper.  Scaling remains below and is applied
+                # exactly once, matching the pre-existing branch semantics.
+                topk_weights, topk_ids = _fused_topk_bias(
                     hidden_states=hidden_states,
                     gating_output=router_logits,
                     e_score_correction_bias=self.e_score_correction_bias.data,
@@ -249,6 +252,8 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
             topk=self.top_k,
             renormalize=self.renormalize,
             indices_type=indices_type,
+            input_tokens=input_ids,
+            hash_indices_table=self._hash_indices_table,
             routed_scaling_factor=self.routed_scaling_factor,
         )
 

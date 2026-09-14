@@ -48,6 +48,25 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .flaggems import FlagGemsBackend
+    # Import compiler-visible implementations while dispatch is still in its
+    # initialization phase.  Registering a torch.library op during Dynamo
+    # tracing would itself be Python control flow and is intentionally banned.
+    from .impl.activation import (
+        gelu_and_mul_flaggems,
+        silu_and_mul_flaggems,
+        silu_and_mul_with_clamp_flaggems,
+    )
+    from .impl.fused_moe import (
+        fused_topk_bias_flaggems,
+        grouped_topk_flaggems,
+        invoke_fused_moe_triton_kernel_flaggems,
+        moe_align_block_size_flaggems,
+        moe_sum_flaggems,
+        topk_softmax_flaggems,
+    )
+    from .impl.normalization import rms_norm_flaggems
+    from .impl.rotary import rotary_embedding_flaggems
+    from .impl.router_gemm import router_gemm_bf16_fp32_flaggems
 
     backend = FlagGemsBackend()
     is_avail = backend.is_available
@@ -63,7 +82,7 @@ def register_builtins(registry) -> None:
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(
-                backend.router_gemm_bf16_fp32,
+                router_gemm_bf16_fp32_flaggems,
                 _has_flaggems_op("router_gemm"),
             ),
             vendor=None,
@@ -74,7 +93,7 @@ def register_builtins(registry) -> None:
             op_name="silu_and_mul",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            fn=_bind_is_available(silu_and_mul_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -82,7 +101,7 @@ def register_builtins(registry) -> None:
             op_name="gelu_and_mul",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.gelu_and_mul, is_avail),
+            fn=_bind_is_available(gelu_and_mul_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -90,7 +109,7 @@ def register_builtins(registry) -> None:
             op_name="silu_and_mul_with_clamp",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.silu_and_mul_with_clamp, is_avail),
+            fn=_bind_is_available(silu_and_mul_with_clamp_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -99,7 +118,7 @@ def register_builtins(registry) -> None:
             op_name="rms_norm",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
+            fn=_bind_is_available(rms_norm_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -108,7 +127,7 @@ def register_builtins(registry) -> None:
             op_name="rotary_embedding",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            fn=_bind_is_available(rotary_embedding_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -126,7 +145,7 @@ def register_builtins(registry) -> None:
             op_name="fused_topk_bias",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.fused_topk_bias, is_avail),
+            fn=_bind_is_available(fused_topk_bias_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -135,7 +154,7 @@ def register_builtins(registry) -> None:
             op_name="moe_align_block_size",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            fn=_bind_is_available(moe_align_block_size_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -144,7 +163,7 @@ def register_builtins(registry) -> None:
             op_name="moe_sum",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.moe_sum, is_avail),
+            fn=_bind_is_available(moe_sum_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -153,7 +172,7 @@ def register_builtins(registry) -> None:
             op_name="topk_softmax",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.topk_softmax, is_avail),
+            fn=_bind_is_available(topk_softmax_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -162,7 +181,9 @@ def register_builtins(registry) -> None:
             op_name="invoke_fused_moe_triton_kernel",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
+            fn=_bind_is_available(
+                invoke_fused_moe_triton_kernel_flaggems, is_avail
+            ),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -171,7 +192,7 @@ def register_builtins(registry) -> None:
             op_name="grouped_topk",
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.grouped_topk, is_avail),
+            fn=_bind_is_available(grouped_topk_flaggems, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
@@ -352,22 +373,15 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
-        OpImpl(
-            op_name="gather_bf16_kv_from_pages",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.gather_bf16_kv_from_pages, is_avail),
-            vendor=None,
-            priority=BackendPriority.DEFAULT,
-        ),
-        OpImpl(
-            op_name="bf16_mqa_logits",
-            impl_id="default.flagos",
-            kind=BackendImplKind.DEFAULT,
-            fn=_bind_is_available(backend.bf16_mqa_logits, is_avail),
-            vendor=None,
-            priority=BackendPriority.DEFAULT,
-        ),
+        # ``gather_bf16_kv_from_pages`` and ``bf16_mqa_logits`` deliberately
+        # have no default.flagos registration.  Their FlagGems backend methods
+        # are interface placeholders which raise NotImplementedError.  Eager
+        # dispatch previously hid this by catching
+        # the exception and falling back to vendor.cuda; frozen dispatch has no
+        # exception-driven fallback in its hot path, so advertising either
+        # placeholder as available would permanently select a function that
+        # cannot run.  Keep these operations vendor-only until FlagGems ships
+        # real implementations and their PT2 contracts are validated.
     ]
 
     filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]

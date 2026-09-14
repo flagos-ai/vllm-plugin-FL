@@ -32,6 +32,14 @@ def register_builtins(registry) -> None:
         registry: Registry to register into
     """
     from .cuda import CudaBackend
+    # MHC is called directly from compiled model code.  Import and bind these
+    # leaf functions during dispatch initialization so the frozen call path
+    # contains no lazy import or backend-method control flow.
+    from .impl.mhc import (
+        hc_head_fused_kernel_cuda,
+        mhc_post_cuda,
+        mhc_pre_cuda,
+    )
 
     backend = CudaBackend()
     is_avail = backend.is_available
@@ -161,7 +169,7 @@ def register_builtins(registry) -> None:
             op_name="mhc_pre",
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.mhc_pre, is_avail),
+            fn=_bind_is_available(mhc_pre_cuda, is_avail),
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
@@ -170,7 +178,7 @@ def register_builtins(registry) -> None:
             op_name="mhc_post",
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.mhc_post, is_avail),
+            fn=_bind_is_available(mhc_post_cuda, is_avail),
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
@@ -179,7 +187,7 @@ def register_builtins(registry) -> None:
             op_name="hc_head_fused_kernel",
             impl_id="vendor.cuda",
             kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.hc_head_fused_kernel, is_avail),
+            fn=_bind_is_available(hc_head_fused_kernel_cuda, is_avail),
             vendor="cuda",
             priority=BackendPriority.VENDOR,
         ),
