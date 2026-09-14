@@ -2,14 +2,13 @@
 # 2026 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from vllm.v1.attention.backends.fa_utils import logger
 from vllm.platforms import current_platform
-
+from vllm.v1.attention.backends.fa_utils import logger
 
 if current_platform.is_out_of_tree():
-    from vllm import _custom_ops as ops
-    from vllm.logger import init_logger as _init_logger
     from flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache  # noqa: F401
+
+    from vllm.logger import init_logger as _init_logger
 
     _logger = _init_logger(__name__)
 

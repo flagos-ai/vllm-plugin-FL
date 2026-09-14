@@ -27,8 +27,8 @@ try:
 except ModuleNotFoundError:
     # vLLM 0.24+: moved under the mamba/gdn/ package.
     from vllm.model_executor.layers.mamba.gdn.base import GatedDeltaNetAttention
-from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
 from vllm.config import VllmConfig
+from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
 
 
 @GatedDeltaNetAttention.register_oot

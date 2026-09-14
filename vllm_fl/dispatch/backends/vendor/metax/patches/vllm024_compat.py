@@ -149,7 +149,9 @@ def _patch_penalties_kernel() -> None:
         if use_rep_penalty:
             packed_block = block_idx * BLOCK_SIZE // 32 + tl.arange(0, BLOCK_SIZE // 32)
             packed_mask = tl.load(
-                prompt_bin_mask_ptr + req_state_idx * prompt_bin_mask_stride + packed_block,
+                prompt_bin_mask_ptr
+                + req_state_idx * prompt_bin_mask_stride
+                + packed_block,
                 mask=packed_block < tl.cdiv(vocab_size, 32),
                 other=0,
             )
@@ -201,11 +203,13 @@ def _patch_get_top_k_top_p() -> None:
             device = expanded_idx_mapping.device
             top_k = (
                 self.top_k.gpu[expanded_idx_mapping.cpu()].to(device)
-                if do_top_k else None
+                if do_top_k
+                else None
             )
             top_p = (
                 self.top_p.gpu[expanded_idx_mapping.cpu()].to(device)
-                if do_top_p else None
+                if do_top_p
+                else None
             )
         else:
             top_k = self.top_k.gpu[expanded_idx_mapping] if do_top_k else None
