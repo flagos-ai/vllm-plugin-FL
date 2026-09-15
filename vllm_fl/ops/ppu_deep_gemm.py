@@ -34,6 +34,12 @@ MAX_DECODE_BS = 1025
 CANDIDATE_Ms = [1, 2, 4, 8] + list(range(16, MAX_DECODE_BS, 16))
 
 
+def _config_time(entry):
+    """Measured time for a tuned entry; unmeasured entries sort last."""
+    t = entry.get("time_ms")
+    return t if isinstance(t, (int, float)) else float("inf")
+
+
 @functools.cache
 def get_deep_gemm_best_configs():
     config_dir = os.path.join(
@@ -41,9 +47,13 @@ def get_deep_gemm_best_configs():
     )
     if not os.path.exists(config_dir):
         return None
-    configs = os.listdir(config_dir)
+    # sorted(): os.listdir() order is filesystem-dependent, so without it the
+    # winner of a duplicate key would vary from machine to machine.
+    configs = sorted(os.listdir(config_dir))
 
     config_dict_in_all = dict()
+    # key -> filename that supplied the currently kept entry; for warnings only.
+    config_src = dict()
 
     # Escape hatch / A-B knob: VLLM_FL_DEEPGEMM_CONFIGS=0 reproduces the old
     # behaviour where no tuned config was ever found, without editing code.
@@ -77,19 +87,36 @@ def get_deep_gemm_best_configs():
         logger.info_once(f"ppu deepgemm loading device_name_signature {config}")
 
         config_file_path = os.path.join(config_dir, config)
-        config_dict = dict()
+        entries = []
 
         try:
             with open(config_file_path) as f:
-                config_dict = json.load(f)
-            config_dict = dict(
-                [((x["M"], x["N"], x["K"], x["num_groups"]), x) for x in config_dict]
-            )
+                entries = json.load(f)
         except FileNotFoundError:
             logger.warning_once(f"Empty config found in {config_file_path}.")
 
-        if config_dict:
-            config_dict_in_all.update(config_dict)
+        # A tuned key can be declared more than once, both across files and
+        # *within* one file. Keep the faster entry instead of letting whichever
+        # happens to be parsed last silently win, and say so.
+        for x in entries:
+            key = (x["M"], x["N"], x["K"], x["num_groups"])
+            old = config_dict_in_all.get(key)
+            if old is None:
+                config_dict_in_all[key] = x
+                config_src[key] = config
+                continue
+            # min() keeps its first argument on ties, so an exact tie resolves to
+            # the first-declared entry, which sorted() above makes deterministic.
+            keep = min(old, x, key=_config_time)
+            logger.warning_once(
+                f"ppu deepgemm duplicate tuned key {key}: "
+                f"{config_src[key]} (time_ms={_config_time(old):.3f}) vs "
+                f"{config} (time_ms={_config_time(x):.3f}); "
+                f"keeping the faster one (time_ms={_config_time(keep):.3f})"
+            )
+            config_dict_in_all[key] = keep
+            if keep is x:
+                config_src[key] = config
 
     if not config_dict_in_all:
         logger.warning_once("No ppu deep gemm config found")
