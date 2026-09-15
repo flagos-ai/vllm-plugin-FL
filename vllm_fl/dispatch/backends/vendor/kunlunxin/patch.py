@@ -294,14 +294,16 @@ def patch_fla_ops():
     """Replace chunk_gated_delta_rule and fused_recurrent_gated_delta_rule
     with Kunlunxin top-level implementations.
 
-    v0.24.0: FLA is vendored at vllm.third_party.flash_linear_attention.ops
-    (flat package); all references below are re-targeted there.
+    v0.24.0 vendors FLA at ``vllm.model_executor.layers.fla.ops``; the old
+    ``vllm.third_party.flash_linear_attention`` package does not exist, so
+    importing from it aborted this whole patch and left the Triton kernels in
+    place.  ``qwen3_next`` no longer binds the chunk entry either - it is
+    consumed through ``qwen_gdn_linear_attn`` instead.
     """
     try:
-        import vllm.model_executor.models.qwen3_next as _qwen3_next_lib
-        import vllm.third_party.flash_linear_attention.ops as _fla_ops_lib
-        import vllm.third_party.flash_linear_attention.ops.chunk as _fla_chunk_lib
-        import vllm.third_party.flash_linear_attention.ops.fused_recurrent as _fla_recurrent_lib
+        import vllm.model_executor.layers.fla.ops as _fla_ops_lib
+        import vllm.model_executor.layers.fla.ops.chunk as _fla_chunk_lib
+        import vllm.model_executor.layers.fla.ops.fused_recurrent as _fla_recurrent_lib
 
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.chunk import (
             chunk_gated_delta_rule as klx_chunk_gated_delta_rule,
@@ -313,18 +315,17 @@ def patch_fla_ops():
         # Patch top-level chunk_gated_delta_rule
         _fla_ops_lib.chunk_gated_delta_rule = klx_chunk_gated_delta_rule
         _fla_chunk_lib.chunk_gated_delta_rule = klx_chunk_gated_delta_rule
-        _qwen3_next_lib.chunk_gated_delta_rule = klx_chunk_gated_delta_rule
 
         # Patch top-level fused_recurrent_gated_delta_rule
         _fla_ops_lib.fused_recurrent_gated_delta_rule = klx_fused_recurrent
         _fla_recurrent_lib.fused_recurrent_gated_delta_rule = klx_fused_recurrent
-        _qwen3_next_lib.fused_recurrent_gated_delta_rule = klx_fused_recurrent
 
-        # Patch on qwen_gdn_linear_attn if imported there
-        # (v0.24.0: qwen module binds chunk_gated_delta_rule as
-        # fla_chunk_gated_delta_rule; fused_recurrent_gated_delta_rule is NOT
-        # in its namespace - only the packed_decode variant, which the env
-        # kill VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE=0 keeps unreachable.)
+        # ChunkGatedDeltaRule.forward_native resolves fla_chunk_gated_delta_rule
+        # from the qwen module's globals at call time, so rebinding the module
+        # attribute is what actually redirects the prefill chunk path.
+        # fused_recurrent_gated_delta_rule is NOT in that namespace - only the
+        # packed_decode variant, which the env kill
+        # VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE=0 keeps unreachable.
         import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as _gdn_lib
 
         if hasattr(_gdn_lib, "fla_chunk_gated_delta_rule"):
