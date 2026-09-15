@@ -16,9 +16,17 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
   done
 fi
 
-# vLLM, FlagGems, FlagTree, and test dependencies are provided by the CI image.
+# vLLM, FlagGems, and test dependencies are provided by the CI image.
 # Only install the checked-out plugin source for this workflow run.
 pip install --no-build-isolation --no-deps -e .
+
+# Install FlagTree (Triton backend for T-Head PPU).
+# See https://github.com/flagos-ai/FlagTree/wiki/User-manual-for-ppu
+FLAGTREE_VERSION="${FLAGTREE_VERSION:-0.6.1+ppu3.6}"
+FLAGOS_INDEX_URL="${FLAGOS_INDEX_URL:-https://resource.flagos.net/repository/flagos-pypi-hosted/simple}"
+pip install --no-cache-dir \
+    --index-url "${FLAGOS_INDEX_URL}" \
+    "flagtree===${FLAGTREE_VERSION}"
 
 python - <<'PY'
 import flag_gems
