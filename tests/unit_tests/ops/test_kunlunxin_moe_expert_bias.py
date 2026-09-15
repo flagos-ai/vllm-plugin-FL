@@ -8,6 +8,7 @@ shape or dtype assertion can see it. The down-projection identity below is
 exact, so it pins the values rather than only their presence.
 """
 
+from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,7 +39,10 @@ def _setup():
     w2 = torch.randn(E, H, I, dtype=DTYPE, device=DEVICE) * 0.05
     topk_weights = torch.rand(T, TOPK, dtype=torch.float32, device=DEVICE)
     topk_weights = (topk_weights / topk_weights.sum(-1, keepdim=True)).to(DTYPE)
-    topk_ids = torch.stack([torch.randperm(E, device=DEVICE)[:TOPK] for _ in range(T)])
+    # int32, as fused_topk hands them to fused_experts_impl.
+    topk_ids = torch.stack(
+        [torch.randperm(E, device=DEVICE)[:TOPK] for _ in range(T)]
+    ).to(torch.int32)
     return hidden_states, w1, w2, topk_weights, topk_ids
 
 
@@ -61,14 +65,19 @@ def _run(hidden_states, w1, w2, topk_weights, topk_ids, **biases):
 
 @requires_kunlunxin
 def test_w2_bias_shifts_output_by_router_weighted_bias():
-    """The down-projection bias sits outside the activation, so its effect is exact."""
+    """The down-projection bias sits outside the activation, so its effect is exact.
+
+    moe_fc takes one feature-dim vector shared by all experts, and moe_post
+    scales each expert's row by its router weight -- the weights are normalized,
+    so they sum to one and the whole output shifts by exactly that vector.
+    """
     hidden_states, w1, w2, topk_weights, topk_ids = _setup()
-    w2_bias = torch.randn(E, H, dtype=DTYPE, device=DEVICE) * 0.5
+    w2_bias = torch.randn(H, dtype=DTYPE, device=DEVICE) * 0.5
 
     without = _run(hidden_states, w1, w2, topk_weights, topk_ids)
     biased = _run(hidden_states, w1, w2, topk_weights, topk_ids, w2_bias=w2_bias)
 
-    expected = (topk_weights.float().unsqueeze(-1) * w2_bias.float()[topk_ids]).sum(1)
+    expected = w2_bias.float().expand_as(without)
     observed = biased.float() - without.float()
 
     assert torch.allclose(observed, expected, atol=5e-2, rtol=5e-2)
@@ -86,14 +95,45 @@ def test_w1_bias_is_consumed():
         w2,
         topk_weights,
         topk_ids,
-        w1_bias=torch.zeros(E, 2 * I, dtype=DTYPE, device=DEVICE),
+        w1_bias=torch.zeros(2 * I, dtype=DTYPE, device=DEVICE),
     )
     assert torch.allclose(baseline.float(), zero_bias.float(), atol=1e-3)
 
-    w1_bias = torch.randn(E, 2 * I, dtype=DTYPE, device=DEVICE) * 0.5
+    w1_bias = torch.randn(2 * I, dtype=DTYPE, device=DEVICE) * 0.5
     biased = _run(hidden_states, w1, w2, topk_weights, topk_ids, w1_bias=w1_bias)
 
     assert not torch.allclose(baseline.float(), biased.float(), atol=1e-2)
+
+
+@requires_kunlunxin
+@pytest.mark.parametrize("name", ["w1_bias", "w2_bias"])
+def test_per_expert_bias_table_is_rejected(name):
+    """An [E, D] table is read as its first row by moe_fc -- reject rather than misapply.
+
+    vLLM models expert biases as per-expert tables (``w13_bias`` sliced by expert
+    id), but the xtorch_ops operand is one feature-dim vector for all experts.
+    Forwarding the table would apply expert 0's bias to every expert, silently.
+    """
+    hidden_states, w1, w2, topk_weights, topk_ids = _setup()
+    shape = (E, 2 * I) if name == "w1_bias" else (E, H)
+    table = torch.zeros(*shape, dtype=DTYPE, device=DEVICE)
+
+    with pytest.raises(NotImplementedError, match=name):
+        _run(hidden_states, w1, w2, topk_weights, topk_ids, **{name: table})
+
+
+def _experts_with(**attrs):
+    """A TritonExpertsFL built without __init__, with its config attrs overridden.
+
+    Those attrs are read-only properties on FusedMoEExperts (they read the
+    quant config), so they can only be replaced on the class, not the instance.
+    """
+    from vllm_fl.ops.fused_moe import fused_moe_utils
+
+    stack = ExitStack()
+    for name, value in attrs.items():
+        stack.enter_context(patch.object(fused_moe_utils.TritonExpertsFL, name, value))
+    return stack
 
 
 @pytest.mark.parametrize(
@@ -103,14 +143,12 @@ def test_apply_forwards_expert_biases_to_the_kunlunxin_kernel(w1_bias, w2_bias):
     """Hardware-free: the fast path must hand both biases to fused_experts_impl."""
     from vllm_fl.ops.fused_moe import fused_moe_utils
 
+    w1_bias_t = torch.zeros(2 * I) if w1_bias else None
+    w2_bias_t = torch.zeros(H) if w2_bias else None
+
     experts = object.__new__(fused_moe_utils.TritonExpertsFL)
     experts._lora_context = None
     experts.quant_config = MagicMock()
-    experts.per_act_token_quant = False
-    experts.w1_scale = experts.w2_scale = None
-    experts.block_shape = None
-    experts.w1_bias = torch.zeros(E, 2 * I) if w1_bias else None
-    experts.w2_bias = torch.zeros(E, H) if w2_bias else None
 
     hidden_states = torch.zeros(T, H)
     output = torch.zeros(T, H)
@@ -118,6 +156,14 @@ def test_apply_forwards_expert_biases_to_the_kunlunxin_kernel(w1_bias, w2_bias):
     spy = MagicMock(return_value=sentinel)
 
     with (
+        _experts_with(
+            per_act_token_quant=False,
+            w1_scale=None,
+            w2_scale=None,
+            block_shape=None,
+            w1_bias=w1_bias_t,
+            w2_bias=w2_bias_t,
+        ),
         patch.object(fused_moe_utils, "get_platform_name", return_value="kunlunxin"),
         patch("vllm_fl.ops.fused_moe.fused_moe.fused_experts_impl", spy),
     ):
@@ -139,5 +185,5 @@ def test_apply_forwards_expert_biases_to_the_kunlunxin_kernel(w1_bias, w2_bias):
             apply_router_weight_on_input=False,
         )
 
-    assert spy.call_args.kwargs["w1_bias"] is experts.w1_bias
-    assert spy.call_args.kwargs["w2_bias"] is experts.w2_bias
+    assert spy.call_args.kwargs["w1_bias"] is w1_bias_t
+    assert spy.call_args.kwargs["w2_bias"] is w2_bias_t

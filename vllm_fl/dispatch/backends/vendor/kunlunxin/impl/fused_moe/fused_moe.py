@@ -42,8 +42,8 @@ def _klx_fused_experts(
 
     Args:
         activation: Activation function type. Supported: "silu", "gelu", "relu"
-        w1_bias: Optional bias for gate+up projection [E, 2*ffn_hd]
-        w2_bias: Optional bias for down projection [E, hidden_dim]
+        w1_bias: Optional fp32 bias shared by all experts, shape [2*ffn_hd]
+        w2_bias: Optional fp32 bias shared by all experts, shape [hidden_dim]
     """
     if use_int8_w8a8 or use_int8_w4a8:
         raise NotImplementedError(
@@ -201,8 +201,8 @@ def fused_experts_impl(
     Args:
         activation: Activation function. Supported: "silu", "gelu", "relu", "gelu_no_mul", "silu_no_mul"
         apply_router_weight_on_input: If True, apply router weights on input (NOT SUPPORTED)
-        w1_bias: Optional bias for gate+up projection
-        w2_bias: Optional bias for down projection
+        w1_bias: Optional fp32 bias shared by all experts, shape [2*ffn_hd]
+        w2_bias: Optional fp32 bias shared by all experts, shape [hidden_dim]
     """
     # Stage 1: Explicit rejections for unsupported features
 
@@ -226,6 +226,18 @@ def fused_experts_impl(
             f"Kunlunxin fused_experts does not support activation '{activation}'. "
             f"Supported activations: {SUPPORTED_ACTIVATIONS}"
         )
+
+    # 1.4: Reject per-expert bias tables. xtorch_ops.moe_fc documents its bias
+    # operand as a single feature-dim vector: an [E, D] table is read as its
+    # first D elements and applied to every expert, which would silently
+    # mis-weight the experts instead of failing.
+    for bias_name, bias in (("w1_bias", w1_bias), ("w2_bias", w2_bias)):
+        if bias is not None and bias.dim() != 1:
+            raise NotImplementedError(
+                f"Kunlunxin fused_experts does not support per-expert {bias_name} "
+                f"(got shape {tuple(bias.shape)}); the bias operand of "
+                f"xtorch_ops.moe_fc is a single feature-dim vector shared by all experts."
+            )
 
     E = w1.size(0)
     if global_num_experts == -1:

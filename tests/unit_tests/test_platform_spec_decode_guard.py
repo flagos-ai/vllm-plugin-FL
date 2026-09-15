@@ -74,7 +74,7 @@ def test_kernel_boundary_rejects_accepted_tokens():
     so the two cannot drift into a silent wrong answer.
     """
     from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.causal_conv1d import (
-        causal_conv1d_update,
+        causal_conv1d_update_kunlunxin as causal_conv1d_update,
     )
 
     device = torch.device("cuda")
