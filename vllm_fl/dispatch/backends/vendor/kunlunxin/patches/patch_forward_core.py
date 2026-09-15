@@ -46,6 +46,21 @@ def _kunlunxin_write_ssm_cache(ssm_state, last_recurrent_state, indices):
     )
 
 
+def _kunlunxin_decode_gating(a, b, A_log, dt_bias):
+    """Recompute the decode gating in PyTorch; returns (g, beta).
+
+    g = -exp(A_log) * softplus(a + dt_bias) stays float32 because the recurrent
+    kernel consumes it in float32. beta is computed in float32 too -- the
+    sigmoid saturates in fp16/bf16 -- but cast back to b's dtype, which the
+    kernel requires of the delta-rule beta.
+    """
+    g = (
+        -torch.exp(A_log.float()) * torch.nn.functional.softplus((a + dt_bias).float())
+    ).unsqueeze(0)
+    beta = torch.sigmoid(b.float()).to(b.dtype).unsqueeze(0)
+    return g, beta
+
+
 def apply_ssm_patch():
     import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as gdn_mod
     from vllm.forward_context import get_forward_context
@@ -265,11 +280,9 @@ def apply_ssm_patch():
             # fused_sigmoid_gating_delta_rule_update is not registered for XPU, cannot use
             a_dec = a[:num_decode_tokens]
             b_dec = b[:num_decode_tokens]
-            # g = -exp(A_log) * softplus(a + dt_bias), shape [num_tokens, HV] -> [1, num_tokens, HV]
-            x = (a_dec + self.dt_bias).float()
-            sp = torch.nn.functional.softplus(x)
-            g_dec = (-torch.exp(self.A_log.float()) * sp).unsqueeze(0)
-            beta_dec = torch.sigmoid(b_dec.float()).to(torch.bfloat16).unsqueeze(0)
+            g_dec, beta_dec = _kunlunxin_decode_gating(
+                a_dec, b_dec, self.A_log, self.dt_bias
+            )
             query_dec, key_dec, value_dec = self.rearrange_mixed_qkv(
                 mixed_qkv_non_spec[:num_decode_tokens]
             )
@@ -335,11 +348,9 @@ def apply_ssm_patch():
             else:
                 a_dec = a
                 b_dec = b
-            # g = -exp(A_log) * softplus(a + dt_bias), shape [num_tokens, HV] -> [1, num_tokens, HV]
-            x = (a_dec + self.dt_bias).float()
-            sp = torch.nn.functional.softplus(x)
-            g_non_spec = (-torch.exp(self.A_log.float()) * sp).unsqueeze(0)
-            beta_non_spec = torch.sigmoid(b_dec.float()).to(torch.bfloat16).unsqueeze(0)
+            g_non_spec, beta_non_spec = _kunlunxin_decode_gating(
+                a_dec, b_dec, self.A_log, self.dt_bias
+            )
             # Manual L2 norm
             query_non_spec = torch.nn.functional.normalize(query_non_spec, p=2, dim=-1)
             key_non_spec = torch.nn.functional.normalize(key_non_spec, p=2, dim=-1)

@@ -205,6 +205,20 @@ class PlatformFL(Platform):
 
             refresh_block_size(vllm_config)
 
+        if (
+            cls.vendor_name == "kunlunxin"
+            and vllm_config.speculative_config is not None
+        ):
+            # The native xtorch_ops.causal_conv1d_update kernel has no
+            # num_accepted_tokens support, and the GDN conv stage is on the
+            # critical path of every spec-decode step. Fail at config time
+            # instead of raising NotImplementedError on the first request.
+            raise ValueError(
+                "Speculative decoding is not supported on Kunlunxin: the native "
+                "causal_conv1d_update kernel cannot roll the conv state back to "
+                "the accepted tokens."
+            )
+
         # TODO(lucas): handle this more gracefully
         # Note: model_config may be None during testing
         # Note: block_size is initialized in

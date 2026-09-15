@@ -56,6 +56,39 @@ def _patch_unquantized_moe_oracle() -> None:
     logger.info("Patched select_unquantized_moe_backend to bypass OOT short-circuit")
 
 
+def _apply_vendor_patches() -> None:
+    """Apply vendor monkey-patches that rewrite upstream vllm functions.
+
+    Independent of OOT registration: these patch in-tree code paths, so they
+    must take effect even when OOT is disabled (PREFER_ENABLED=0, or a
+    whitelist that excludes every op). Each applier is idempotent.
+    """
+    from vllm.platforms import current_platform
+
+    if current_platform.vendor_name == "kunlunxin":
+        # kunlunxin's device_type is "cuda", so the vendor name is what
+        # distinguishes it here.
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
+            apply_kunlunxin_patches,
+        )
+
+        apply_kunlunxin_patches()
+
+    if current_platform.device_type == "npu":
+        from vllm_fl.dispatch.backends.vendor.ascend.patch import (
+            apply_ascend_patches,
+        )
+
+        apply_ascend_patches()
+
+    if current_platform.device_type == "ptpu":
+        from vllm_fl.dispatch.backends.vendor.sunrise.patch import (
+            apply_sunrise_patches,
+        )
+
+        apply_sunrise_patches()
+
+
 def register_oot_ops(whitelist: list[str] | None = None) -> None:
     """
     Register OOT (out-of-tree) custom operators.
@@ -79,9 +112,15 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         use_flaggems_op,
     )
 
+    # Vendor patches replace upstream functions that the in-tree (non-OOT)
+    # path also uses, so they run before the OOT gate below.
+    _apply_vendor_patches()
+
     # Check if OOT registration is enabled
     if not is_oot_enabled():
         # Patch the upstream oracle so in-tree FusedMoE works on this platform.
+        # FusedMoEFL is deliberately not installed here: with OOT disabled the
+        # in-tree implementation is what is meant to run.
         _patch_unquantized_moe_oracle()
         return
 
@@ -123,36 +162,6 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
             )
         else:
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
-        # Apply Ascend NPU monkey-patches if running on NPU.
-        # These replace upstream module-level functions (e.g. in qwen3_next) with
-        # Ascend implementations that bypass the CustomOp/dispatch path.
-        from vllm.platforms import current_platform
-
-        if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.patch import (
-                apply_ascend_patches,
-            )
-
-            apply_ascend_patches()
-
-        # Apply Sunrise/PTPU monkey-patches if running on PTPU.
-        if current_platform.device_type == "ptpu":
-            from vllm_fl.dispatch.backends.vendor.sunrise.patch import (
-                apply_sunrise_patches,
-            )
-
-            apply_sunrise_patches()
-
-    # Apply Kunlunxin monkey-patches if running on Kunlunxin hardware.
-    # (kunlunxin's device_type is "cuda", so the vendor check is required.)
-    from vllm.platforms import current_platform
-
-    if current_platform.vendor_name == "kunlunxin":
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
-            apply_kunlunxin_patches,
-        )
-
-        apply_kunlunxin_patches()
 
     # --- FusedMoE monkey-patch (vllm >= 0.24.0) ---
     # FusedMoE is a factory function in vllm 0.24.0+, not a PluggableLayer

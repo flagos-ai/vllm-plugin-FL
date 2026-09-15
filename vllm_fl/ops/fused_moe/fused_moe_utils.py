@@ -338,6 +338,8 @@ class TritonExpertsFL(TritonExperts):
                         a1_scale=a1q_scale,
                         a2_scale=a2_scale,
                         block_shape=self.block_shape,
+                        w1_bias=self.w1_bias,
+                        w2_bias=self.w2_bias,
                     )
                 )
                 return
