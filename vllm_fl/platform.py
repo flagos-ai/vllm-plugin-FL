@@ -49,9 +49,9 @@ dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
     "musa": "mccl",
-    # Cambricon's MCCL; without the entry the lookup falls back to "nccl",
+    # Cambricon's CNCL; without the entry the lookup falls back to "nccl",
     # which torch_mlu's ProcessGroup does not implement.
-    "mlu": "mccl",
+    "mlu": "cncl",
 }
 
 
