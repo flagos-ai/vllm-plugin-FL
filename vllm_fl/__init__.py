@@ -120,7 +120,14 @@ def _patch_torch_accelerator():
     Bind the torch.cuda equivalents; current_accelerator() == "cuda" on
     metax. The mtgpu allocator reports 0/empty stats, which vllm tolerates.
     """
+    import flag_gems
     import torch
+
+    # MACA is the only vendor whose torch fork is missing this API; binding
+    # torch.cuda functions onto another vendor's accelerator would mask a real
+    # gap there.
+    if flag_gems.vendor_name != "metax":
+        return
 
     if not hasattr(torch, "accelerator"):
         return
