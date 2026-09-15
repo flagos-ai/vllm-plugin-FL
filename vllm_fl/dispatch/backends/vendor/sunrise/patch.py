@@ -34,14 +34,19 @@ def patch_flagcx_stream_adapter():
         if getattr(current_platform, "device_type", None) != "ptpu":
             return
 
-        flagcx_path = os.getenv("FLAGCX_PATH")
-        if flagcx_path and os.path.isdir(flagcx_path) and flagcx_path not in sys.path:
-            sys.path.append(flagcx_path)
-
         # Installed package first; the source tree only carries the wrapper.
         try:
             flagcx_wrapper = importlib.import_module("flagcx.api")
         except ImportError:
+            # FLAGCX_PATH stays supported for a source tree, where the wrapper
+            # is only importable as plugin.interservice.flagcx_wrapper.
+            flagcx_path = os.getenv("FLAGCX_PATH")
+            if (
+                flagcx_path
+                and os.path.isdir(flagcx_path)
+                and flagcx_path not in sys.path
+            ):
+                sys.path.append(flagcx_path)
             flagcx_wrapper = importlib.import_module(
                 "plugin.interservice.flagcx_wrapper"
             )

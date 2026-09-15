@@ -69,22 +69,23 @@ if TYPE_CHECKING:
     from vllm.v1.kv_cache_interface import KVCacheConfig
     from vllm.v1.request import Request
 
-_flagcx_path = os.getenv("FLAGCX_PATH")
-if _flagcx_path and os.path.isdir(_flagcx_path) and _flagcx_path not in sys.path:
-    sys.path.append(_flagcx_path)
-
 try:
     # The ctypes facade ships inside the installed package as flagcx.api; the
     # source tree only carries it as plugin.interservice.flagcx_wrapper.
     from flagcx.api import FLAGCXLibrary
 except (ImportError, ModuleNotFoundError):
+    # FLAGCX_PATH stays supported for a source tree, where the wrapper is only
+    # importable as plugin.interservice.flagcx_wrapper. The library itself is
+    # still resolved from the path by FLAGCXLibrary.
+    _flagcx_path = os.getenv("FLAGCX_PATH")
+    if _flagcx_path and os.path.isdir(_flagcx_path) and _flagcx_path not in sys.path:
+        sys.path.append(_flagcx_path)
     try:
         from plugin.interservice.flagcx_wrapper import FLAGCXLibrary
     except ImportError as e:
         raise ImportError(
             "Cannot import the FlagCX library. Install the flagcx package, or "
-            "set FLAGCX_PATH to the FlagCX repo root (containing "
-            "plugin/interservice/flagcx_wrapper.py)."
+            "set FLAGCX_PATH to a FlagCX source tree."
         ) from e
 
 EngineId = str
@@ -589,10 +590,9 @@ class FlagCXConnectorWorker:
         self.hostname = get_ip()
 
         # ---- FlagCX library ----
-        # FLAGCXLibrary resolves the .so itself (FLAGCX_PATH, the installed
-        # package's lib/, a source build tree, then ldconfig); FLAGCX_LIB_PATH
-        # overrides that resolution.
-        self.flagcx = FLAGCXLibrary(os.getenv("FLAGCX_LIB_PATH"))
+        # FLAGCXLibrary resolves the .so itself: FLAGCX_PATH, the installed
+        # package's lib/, a source build tree, then ldconfig.
+        self.flagcx = FLAGCXLibrary()
         self.kv_cache_device: torch.device | None = None
 
         # ---- P2P engine (one-sided RDMA + RPC control plane) ----

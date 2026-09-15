@@ -18,10 +18,6 @@ from vllm.utils.torch_utils import current_stream
 import os
 import sys
 
-_flagcx_path = os.getenv('FLAGCX_PATH')
-if _flagcx_path and os.path.isdir(_flagcx_path):
-    sys.path.append(_flagcx_path)
-
 try:
     # These names are defined in flagcx.api; the package root only re-exports
     # the compiled bindings, so importing from the root would not provide them.
@@ -35,6 +31,12 @@ try:
     )
     _flagcx_available = True
 except (ImportError, ModuleNotFoundError):
+    # FLAGCX_PATH stays supported for a source tree, where the wrapper is only
+    # importable as plugin.interservice.flagcx_wrapper. The library itself is
+    # still resolved from the path by FLAGCXLibrary.
+    _flagcx_path = os.getenv("FLAGCX_PATH")
+    if _flagcx_path and os.path.isdir(_flagcx_path):
+        sys.path.append(_flagcx_path)
     try:
         from plugin.interservice.flagcx_wrapper import (
             FLAGCXLibrary,
@@ -92,9 +94,8 @@ class PyFlagcxCommunicator:
             self.disabled = True
             return
         try:
-            ### TODO(lms): simplify it
-            # FLAGCXLibrary resolves the .so on its own: FLAGCX_PATH, the
-            # installed package's lib/, a source build tree, then ldconfig.
+            # FLAGCXLibrary resolves the .so itself: FLAGCX_PATH, the installed
+            # package's lib/, a source build tree, then ldconfig.
             self.flagcx = FLAGCXLibrary(library_path)
         except Exception:
             # disable because of missing NCCL library

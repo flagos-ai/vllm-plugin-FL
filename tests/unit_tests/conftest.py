@@ -25,12 +25,22 @@ def has_cuda():
 
 
 def has_flagcx():
-    """Check if flagcx is available."""
+    """Check if flagcx is available: the installed package, or a source tree
+    named by FLAGCX_PATH."""
+    try:
+        import flagcx.api  # noqa: F401
+
+        return True
+    except ImportError:
+        pass
+
     flagcx_path = os.getenv("FLAGCX_PATH")
     if not flagcx_path:
         return False
-    lib_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
-    return os.path.exists(lib_path)
+    for rel in ("lib/libflagcx.so", "build/lib/libflagcx.so"):
+        if os.path.exists(os.path.join(flagcx_path, rel)):
+            return True
+    return False
 
 
 def has_vllm_profiler():

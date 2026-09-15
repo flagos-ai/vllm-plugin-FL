@@ -3,7 +3,7 @@
 """
 Tests for flagcx communicator module.
 
-Note: Tests require FLAGCX_PATH environment variable and the flagcx Python bindings.
+Note: Tests require the flagcx package (or a source tree named by FLAGCX_PATH).
 Tests are skipped if flagcx is not available.
 
 Integration tests for actual distributed operations should be in functional_tests/.
@@ -15,26 +15,28 @@ import pytest
 
 
 def has_flagcx():
-    """Check if flagcx is available (both library and Python bindings)."""
-    flagcx_path = os.getenv("FLAGCX_PATH")
-    if not flagcx_path:
-        return False
-    lib_path = os.path.join(flagcx_path, "build/lib/libflagcx.so")
-    if not os.path.exists(lib_path):
-        return False
-    # Also check Python bindings
+    """Check if flagcx is available (both library and Python bindings): the
+    installed package, or a source tree named by FLAGCX_PATH."""
     try:
-        from plugin.interservice.flagcx_wrapper import flagcxDataTypeEnum  # noqa: F401
+        import flagcx.api  # noqa: F401
 
         return True
     except ImportError:
+        pass
+
+    flagcx_path = os.getenv("FLAGCX_PATH")
+    if not flagcx_path:
         return False
+    for rel in ("lib/libflagcx.so", "build/lib/libflagcx.so"):
+        if os.path.exists(os.path.join(flagcx_path, rel)):
+            return True
+    return False
 
 
 # Mark all tests in this module as requiring flagcx
 pytestmark = pytest.mark.skipif(
     not has_flagcx(),
-    reason="FLAGCX_PATH not set, flagcx library not found, or Python bindings unavailable",
+    reason="flagcx package not installed and no FlagCX library found",
 )
 
 

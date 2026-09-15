@@ -25,27 +25,18 @@ This guide walks through setting up disaggregated prefill-decode serving with th
 - vLLM (v1 architecture) installed
 - Python 3.10+
 
-## 1. Build FlagCX
+## 1. Install FlagCX
 
 On **both** Prefill and Decode nodes:
 
 ```bash
-git clone https://github.com/FlagOpen/FlagCX.git
-cd FlagCX
-
-# Build with NVIDIA backend
-make USE_NVIDIA=1 -j$(nproc)
-
-# Verify the shared library is built
-ls build/lib/libflagcx.so
+pip install flagcx
 ```
 
-Set environment variables (add to your shell profile or export before running):
-
-```bash
-export FLAGCX_PATH=/path/to/FlagCX
-# FLAGCX_LIB_PATH is optional; defaults to ${FLAGCX_PATH}/build/lib/libflagcx.so
-```
+The wheel carries both the Python API and `libflagcx.so`, so no environment
+variable is needed. To run against a local source build instead, set
+`FLAGCX_PATH` to the FlagCX repo root; it is honoured for backend selection and
+for locating the library.
 
 ## 2. Install vllm-plugin-FL
 
@@ -72,7 +63,6 @@ export NCCL_IB_GID_INDEX=3
 
 # ---- FlagCX settings ----
 export FLAGCX_USE_HETERO_COMM=1
-export FLAGCX_PATH=/path/to/FlagCX
 
 # ---- vLLM settings ----
 export VLLM_RPC_TIMEOUT=600000
@@ -109,7 +99,6 @@ export NCCL_IB_GID_INDEX=3
 
 # ---- FlagCX settings ----
 export FLAGCX_USE_HETERO_COMM=1
-export FLAGCX_PATH=/path/to/FlagCX
 
 # ---- vLLM settings ----
 export VLLM_RPC_TIMEOUT=600000
