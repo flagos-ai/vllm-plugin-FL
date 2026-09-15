@@ -19,6 +19,9 @@ vLLM 0.24.0 adaptations (FLA vendored + GDN package split):
 - Mixed non-spec decode+prefill batches: decodes are peeled off the front
   of the batch into the recurrent kernel and the prefill tail runs through
   the chunk kernel, then outputs are stitched decode-first (split_non_spec).
+  The peeled front has to hand the recurrent kernel one ssm state slot per
+  decode *token*; the batch-wide slot tensor covers the prefill tail too and
+  is rejected by the varlen kernel.
 """
 
 import logging
@@ -46,17 +49,22 @@ def _kunlunxin_write_ssm_cache(ssm_state, last_recurrent_state, indices):
     )
 
 
-def _kunlunxin_decode_gating(a, b, A_log, dt_bias):
+def _kunlunxin_decode_gating(a, b, A_log, dt_bias, state_dtype):
     """Recompute the decode gating in PyTorch; returns (g, beta).
 
-    g = -exp(A_log) * softplus(a + dt_bias) stays float32 because the recurrent
-    kernel consumes it in float32. beta is computed in float32 too -- the
-    sigmoid saturates in fp16/bf16 -- but cast back to b's dtype, which the
-    kernel requires of the delta-rule beta.
+    g = -exp(A_log) * softplus(a + dt_bias) is accumulated in float32 (the
+    softplus saturates otherwise), then cast to the dtype the recurrent kernel
+    will accept alongside the ssm cache: float32 when the cache is float32,
+    the model dtype otherwise. The kernel takes a narrower g than the cache,
+    but never a wider one, so the cast has to follow the cache rather than the
+    activations. beta is computed in float32 for the same reason and cast back
+    to b's dtype, which the kernel requires of the delta-rule beta.
     """
     g = (
         -torch.exp(A_log.float()) * torch.nn.functional.softplus((a + dt_bias).float())
     ).unsqueeze(0)
+    g_dtype = torch.float32 if state_dtype == torch.float32 else b.dtype
+    g = g.to(g_dtype)
     beta = torch.sigmoid(b.float()).to(b.dtype).unsqueeze(0)
     return g, beta
 
@@ -199,8 +207,8 @@ def apply_ssm_patch():
         # Rearrange spec qkv
         query_spec, key_spec, value_spec = self.rearrange_mixed_qkv(mixed_qkv_spec)
 
-        # For non-spec: use fused_post_conv_prep for prefill (computes g/beta + l2norm)
-        # For decode: use rearrange + fused_gdn_gating (avoids Triton fused_sigmoid kernel)
+        # klx: bypass fused_post_conv_prep Triton kernel (broken on XPU) --
+        # rearrange, gate and l2norm in PyTorch for prefill and decode alike.
         if attn_metadata.num_prefills > 0 and mixed_qkv_non_spec is not None:
             if spec_sequence_masks is not None:
                 a_non_spec = a.index_select(0, non_spec_token_indx)
@@ -209,8 +217,7 @@ def apply_ssm_patch():
                 a_non_spec = a
                 b_non_spec = b
 
-            # klx: bypass fused_post_conv_prep Triton kernel (broken on XPU)
-            # Do rearrange + gating + l2norm in PyTorch
+            # klx: arrange the prefill tail and gate it in PyTorch.
             if split_non_spec:
                 # Only the prefill tail runs through the chunk kernel; the
                 # decode front slice is peeled for the recurrent kernel below.
@@ -281,7 +288,7 @@ def apply_ssm_patch():
             a_dec = a[:num_decode_tokens]
             b_dec = b[:num_decode_tokens]
             g_dec, beta_dec = _kunlunxin_decode_gating(
-                a_dec, b_dec, self.A_log, self.dt_bias
+                a_dec, b_dec, self.A_log, self.dt_bias, ssm_state.dtype
             )
             query_dec, key_dec, value_dec = self.rearrange_mixed_qkv(
                 mixed_qkv_non_spec[:num_decode_tokens]
@@ -289,6 +296,11 @@ def apply_ssm_patch():
             # Manual L2 norm
             query_dec = torch.nn.functional.normalize(query_dec, p=2, dim=-1)
             key_dec = torch.nn.functional.normalize(key_dec, p=2, dim=-1)
+            # The varlen kernel wants one state slot per *token* (it rejects
+            # any other length), and the decodes are the front slice of the
+            # non-spec batch -- passing the whole batch's slots, as the
+            # prefill-tail bookkeeping would, is what it refuses.
+            decode_state_indices = non_spec_state_indices_tensor[:num_decode_tokens]
             core_attn_out_decode, _ = klx_fused_recurrent(
                 q=query_dec,
                 k=key_dec,
@@ -298,7 +310,7 @@ def apply_ssm_patch():
                 initial_state=ssm_state,
                 inplace_final_state=True,
                 cu_seqlens=non_spec_query_start_loc[: attn_metadata.num_decodes + 1],
-                ssm_state_indices=non_spec_state_indices_tensor,
+                ssm_state_indices=decode_state_indices,
                 use_qk_l2norm_in_kernel=False,
             )
         else:
@@ -349,7 +361,7 @@ def apply_ssm_patch():
                 a_dec = a
                 b_dec = b
             g_non_spec, beta_non_spec = _kunlunxin_decode_gating(
-                a_dec, b_dec, self.A_log, self.dt_bias
+                a_dec, b_dec, self.A_log, self.dt_bias, ssm_state.dtype
             )
             # Manual L2 norm
             query_non_spec = torch.nn.functional.normalize(query_non_spec, p=2, dim=-1)
@@ -384,5 +396,23 @@ def apply_ssm_patch():
         else:
             core_attn_out[:num_actual_tokens] = core_attn_out_non_spec.squeeze(0)
 
+    # Warmup exists to populate the chunk prefill's Triton autotuner cache
+    # before the KV cache takes the memory (see the base docstring). Both halves
+    # of that are moot here: the dummy inputs are built with
+    # fused_post_conv_prep, the same kernel the prefill branch above bypasses
+    # because it does not compile on XPU, and once patch_fla_ops() has pointed
+    # the chunk entry at the xtorch_ops implementation there is no Triton
+    # autotuner left to warm. Fall back to upstream when that redirect did not
+    # land, so a failed patch stays visible here instead of surfacing later as
+    # an OOM on the first real prefill.
+    upstream_warmup = cls._warmup_prefill_kernels
+
+    def _warmup_prefill_kernels_kunlunxin(self, qkv_or_qkvz, v_dim):
+        if gdn_mod.fla_chunk_gated_delta_rule is klx_chunk_gated_delta_rule:
+            self._prefill_kernels_warmed_up = True
+            return
+        return upstream_warmup(self, qkv_or_qkvz, v_dim)
+
+    cls._warmup_prefill_kernels = _warmup_prefill_kernels_kunlunxin
     cls._forward_core = _forward_core_kunlunxin
     logger.info("Patched GatedDeltaNetAttention._forward_core for Kunlunxin")
