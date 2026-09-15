@@ -123,6 +123,26 @@ def _accelerator_synchronize() -> None:
         torch.accelerator.synchronize()
 
 
+def _accelerator_empty_cache() -> None:
+    """Empty the current device's cache, with MUSA and MLU compatibility.
+
+    ``torch.accelerator`` only grew ``empty_cache`` in torch 2.9, and the torch
+    builds that lack it are exactly the vendor ones where ``torch.cuda`` is a
+    stub — so the fallback goes to the platform's own device module instead,
+    which would otherwise silently release nothing on cambricon (2.7.1+cpu).
+    """
+    if current_platform.device_type == "musa":
+        import torch_musa
+
+        torch_musa.empty_cache()
+    elif current_platform.device_type == "mlu":
+        torch.mlu.empty_cache()
+    elif hasattr(torch.accelerator, "empty_cache"):
+        torch.accelerator.empty_cache()
+    else:
+        current_platform.torch_device_fn.empty_cache()
+
+
 if current_platform.dist_backend == "flagcx" or current_platform.device_type == "musa":
 
     @contextmanager
@@ -6512,14 +6532,7 @@ class ModelRunnerFL(
                     layer.impl._v_scale_cache = None
 
         gc.collect()
-        if hasattr(torch.accelerator, "empty_cache"):
-            torch.accelerator.empty_cache()
-        elif hasattr(torch, "musa"):
-            torch.musa.empty_cache()
-        elif hasattr(torch, "cuda"):
-            torch.cuda.empty_cache()
-        else:
-            raise RuntimeError("No active accelerator device found to empty cache.")
+        _accelerator_empty_cache()
 
         logger.debug("Cleaned up profiling KV cache and CUDA graphs")
 
@@ -6615,7 +6628,7 @@ class ModelRunnerFL(
             set_cudagraph_capturing_enabled(True)
             with self._freeze_gc(), graph_capture(device=self.device):
                 _accelerator_synchronize()
-                torch.accelerator.empty_cache()
+                _accelerator_empty_cache()
 
                 for mode, descs in capture_descs:
                     profile_descs = descs[:2]
@@ -6720,7 +6733,7 @@ class ModelRunnerFL(
         set_cudagraph_capturing_enabled(True)
         with self._freeze_gc(), graph_capture(device=self.device):
             _accelerator_synchronize()
-            torch.accelerator.empty_cache()
+            _accelerator_empty_cache()
             start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
             for (
@@ -6749,7 +6762,7 @@ class ModelRunnerFL(
         set_cudagraph_capturing_enabled(False)
 
         _accelerator_synchronize()
-        torch.accelerator.empty_cache()
+        _accelerator_empty_cache()
 
         # Lock workspace to prevent resizing during execution.
         # Max workspace sizes should have been captured during warmup/profiling.
