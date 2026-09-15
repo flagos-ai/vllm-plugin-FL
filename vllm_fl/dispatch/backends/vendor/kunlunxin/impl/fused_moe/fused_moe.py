@@ -59,6 +59,13 @@ def _klx_fused_experts(
     device = hidden_states.device
     dtype = hidden_states.dtype
 
+    # xtorch_ops.moe_fc builds its bias operand as fp32 regardless of the
+    # activation dtype, so a model-dtype bias is rejected by the kernel.
+    if w1_bias is not None:
+        w1_bias = w1_bias.float()
+    if w2_bias is not None:
+        w2_bias = w2_bias.float()
+
     # Step 1: Generate block statistics
     block_statistic = torch.zeros(
         _KLX_MOE_BLOCK_NUM,
