@@ -50,28 +50,64 @@ except Exception:
 # flag_gems 5.3.5 populates current_work_registrar.torch_ops_map via
 # torch.library.get_kernel(), which only exists in torch 2.8+. torch 2.7.1+cpu
 # (cambricon 4.4.3) lacks it, so the map stays empty and the generated copy_
-# pre/post hooks raise KeyError: 'aten::copy_'. Provide a torch 2.7.1-compatible
-# get_kernel that redispatches to the native (CompositeExplicitAutograd) kernel.
-if not hasattr(torch.library, "get_kernel"):
+# pre/post hooks raise KeyError: 'aten::copy_'.
+#
+# This is an adapter for that one call, not an implementation of the public API:
+# 2.7.1 also lacks the _dispatch_get_computed_kernel_for_dispatch_key binding the
+# real get_kernel is built on, so the kernel for the requested dispatch key cannot
+# be computed here at all. It answers with the op's CompositeExplicitAutograd
+# implementation instead, and rejects every request it cannot answer that way.
+#
+# torch_mlu gates the install: only flag_gems' cambricon branch calls the API
+# (runtime/op_registrar.py register_impl), and a wrong-semantics stand-in for
+# torch.library must not be visible to unrelated callers elsewhere in the
+# process. On every other vendor torch.library is left untouched.
+def _torch_mlu_available() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("torch_mlu") is not None
+
+
+if not hasattr(torch.library, "get_kernel") and _torch_mlu_available():
     _FALLBACK_KEYSET = torch._C.DispatchKeySet(
         torch._C.DispatchKey.CompositeExplicitAutograd
     )
 
     class _RedispatchKernel:
-        def __init__(self, qualified_name):
-            self._qualified_name = qualified_name
+        def __init__(self, op_name):
+            self._op_name = op_name
 
         def call_boxed(self, keyset, *args, **kwargs):
-            namespace, name = self._qualified_name.split("::")
-            op = getattr(getattr(torch.ops, namespace), name)
-            return op.default.redispatch(_FALLBACK_KEYSET, *args, **kwargs)
+            # keyset is ignored on purpose: flag_gems' generated copy_ hooks pass
+            # the same PrivateUse1 keyset its own override is registered under, so
+            # honouring it would re-enter the kernel it is trying to save from.
+            namespace, _, overload_path = self._op_name.partition("::")
+            name, _, overload = overload_path.partition(".")
+            packet = getattr(getattr(torch.ops, namespace), name)
+            op = getattr(packet, overload) if overload else packet.default
+            return op.redispatch(_FALLBACK_KEYSET, *args, **kwargs)
 
-    def _get_kernel(name_or_op, dispatch_key):
-        if isinstance(name_or_op, str):
-            qualified_name = name_or_op
-        else:
-            qualified_name = name_or_op._qualified_op_name
-        return _RedispatchKernel(qualified_name)
+    def _get_kernel(op, dispatch_key):
+        # Argument handling mirrors torch.library.get_kernel, so a caller passing
+        # something this cannot serve gets an error rather than a kernel computed
+        # for a different key.
+        if isinstance(op, torch._ops.OpOverload):
+            op = op._name
+        elif not isinstance(op, str):
+            raise ValueError(f"get_kernel({op}): got unexpected type for op: {type(op)}")
+
+        if isinstance(dispatch_key, str):
+            try:
+                dispatch_key = torch._C.DispatchKey.__members__[dispatch_key]
+            except KeyError:
+                raise ValueError(f"Invalid dispatch key: {dispatch_key}") from None
+        if dispatch_key is not torch._C.DispatchKey.PrivateUse1:
+            raise ValueError(
+                f"get_kernel({op}, {dispatch_key}): torch {torch.__version__} has no "
+                "_dispatch_get_computed_kernel_for_dispatch_key, so only the "
+                "PrivateUse1 key flag_gems registers at can be served"
+            )
+        return _RedispatchKernel(op)
 
     torch.library.get_kernel = _get_kernel
 
