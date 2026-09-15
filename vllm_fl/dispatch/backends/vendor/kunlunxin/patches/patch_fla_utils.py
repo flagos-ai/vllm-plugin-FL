@@ -80,6 +80,9 @@ def ensure_fla_compat() -> None:
 
     # Step 2: force-import utils.py NOW (it loads safely with the wrapper)
     with contextlib.suppress(Exception):
+        # A failure here is not fatal: _fix_platform_vars() below still corrects the
+        # module if something else imported it first. The import is only a best-effort
+        # attempt to load it while the get_device_name wrapper is already in place.
         import vllm.model_executor.layers.fla.ops.utils  # noqa: F401
 
     # Step 3: overwrite platform vars → device_platform = "nvidia"

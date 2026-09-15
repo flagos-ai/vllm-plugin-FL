@@ -642,6 +642,8 @@ class KunlunxinPagedAttention(PagedAttention):
             slot_mapping.flatten(),
         )
 
+    # No `self`: only ever called as KunlunxinPagedAttention.reshape_and_cache_flash(...).
+    @staticmethod
     def reshape_and_cache_flash(
         key: torch.Tensor,
         value: torch.Tensor,
@@ -698,6 +700,8 @@ class KunlunxinPagedAttention(PagedAttention):
             BLHD_LAYOUT=BLHD_LAYOUT,
         )
 
+    # No `self`: only ever called as KunlunxinPagedAttention.forward_decode(...).
+    @staticmethod
     def forward_decode(
         query: torch.Tensor,
         key_cache: torch.Tensor,
