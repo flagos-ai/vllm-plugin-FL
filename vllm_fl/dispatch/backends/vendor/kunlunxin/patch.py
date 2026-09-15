@@ -32,6 +32,15 @@ def apply_kunlunxin_patches():
 
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
+    # The device is CUDA-compat here (torch reports device_type "cuda"), so
+    # vLLM's find_nccl_library() resolves libnccl.so.2 and the communicator
+    # builds a real ctypes PyNcclCommunicator, whose ncclCommInitRank aborts
+    # with "NCCL error: unhandled cuda error" at TP>=2. libbkcl.so exports no
+    # nccl* symbols, so it cannot be aliased in; XCCL/BKCL drives the
+    # collectives, and this switch turns off only the PyNccl secondary path
+    # (vLLM's own, and a no-op at TP=1).
+    os.environ.setdefault("VLLM_DISABLE_PYNCCL", "1")
+
     # RESTORED from old version: Critical Triton kernel compatibility patches
     patch_block_table_slot_mapping()
     patch_attention_backend_registry()
