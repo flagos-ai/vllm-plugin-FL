@@ -43,6 +43,11 @@ class FlagGemsBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def mla_prefill(self, **kwargs):
+        from .impl.mla_prefill import mla_prefill_flaggems
+
+        return mla_prefill_flaggems(**kwargs)
+
     def dynamic_per_token_quant_int8(
         self,
         x: torch.Tensor,
@@ -58,6 +63,21 @@ class FlagGemsBackend(Backend):
         from .impl.quantization import dynamic_per_token_quant_int8_flaggems_triton
 
         return dynamic_per_token_quant_int8_flaggems_triton(x)
+
+    def bf16_indexer_cache_write(
+        self,
+        keys: torch.Tensor,
+        cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+    ) -> None:
+        from .impl.bf16_indexer import bf16_indexer_cache_write_flaggems
+
+        bf16_indexer_cache_write_flaggems(keys, cache, slot_mapping)
+
+    def bf16_indexer_decode(self, *args, **kwargs) -> None:
+        from .impl.bf16_indexer import bf16_indexer_decode_flaggems
+
+        bf16_indexer_decode_flaggems(*args, **kwargs)
 
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
@@ -163,18 +183,22 @@ class FlagGemsBackend(Backend):
         """
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
-        # TritonAttentionBackend requires CUDA, check if available
+        if use_mla:
+            if use_sparse:
+                return "vllm_fl.dispatch.backends.flaggems.impl.mla_sparse.MLASparseFLBackend"
+            return "vllm_fl.dispatch.backends.flaggems.impl.mla.MLAFLBackend"
+
+        if use_sparse:
+            raise ValueError("use_sparse=True requires use_mla=True.")
+
+        # The generic Triton attention backend below is CUDA-specific. MLA
+        # paths above are implemented through FlagGems and remain available on
+        # every accelerator supported by that library.
         if not torch.cuda.is_available():
             raise RuntimeError(
                 "TritonAttentionBackend requires CUDA but CUDA is not available. "
                 "Falling back to vendor implementation."
             )
-
-        if use_mla:
-            raise NotImplementedError("NOT support mla now!")
-
-        if use_sparse:
-            raise ValueError("use_sparse=True requires use_mla=True.")
 
         use_flaggems_attn = os.environ.get(
             "VLLM_FL_USE_FLAGGEMS_ATTN", "0"
