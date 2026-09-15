@@ -23,7 +23,9 @@ if _flagcx_path and os.path.isdir(_flagcx_path):
     sys.path.append(_flagcx_path)
 
 try:
-    from plugin.interservice.flagcx_wrapper import (
+    # These names are defined in flagcx.api; the package root only re-exports
+    # the compiled bindings, so importing from the root would not provide them.
+    from flagcx.api import (
         FLAGCXLibrary,
         buffer_type,
         flagcxComm_t,
@@ -33,13 +35,24 @@ try:
     )
     _flagcx_available = True
 except (ImportError, ModuleNotFoundError):
-    _flagcx_available = False
-    FLAGCXLibrary = None
-    buffer_type = None
-    flagcxComm_t = None
-    flagcxDataTypeEnum = None
-    flagcxUniqueId = None
-    flagcxRedOpTypeEnum = None
+    try:
+        from plugin.interservice.flagcx_wrapper import (
+            FLAGCXLibrary,
+            buffer_type,
+            flagcxComm_t,
+            flagcxDataTypeEnum,
+            flagcxUniqueId,
+            flagcxRedOpTypeEnum,
+        )
+        _flagcx_available = True
+    except (ImportError, ModuleNotFoundError):
+        _flagcx_available = False
+        FLAGCXLibrary = None
+        buffer_type = None
+        flagcxComm_t = None
+        flagcxDataTypeEnum = None
+        flagcxUniqueId = None
+        flagcxRedOpTypeEnum = None
 
 class PyFlagcxCommunicator:
     def __init__(
@@ -80,12 +93,9 @@ class PyFlagcxCommunicator:
             return
         try:
             ### TODO(lms): simplify it
-            if library_path is None:
-                flagcx_path = os.getenv('FLAGCX_PATH')
-                library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
-                self.flagcx = FLAGCXLibrary(library_path)
-            else:
-                self.flagcx = FLAGCXLibrary(library_path)
+            # FLAGCXLibrary resolves the .so on its own: FLAGCX_PATH, the
+            # installed package's lib/, a source build tree, then ldconfig.
+            self.flagcx = FLAGCXLibrary(library_path)
         except Exception:
             # disable because of missing NCCL library
             # e.g. in a non-GPU environment

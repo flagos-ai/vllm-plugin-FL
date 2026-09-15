@@ -38,7 +38,13 @@ def patch_flagcx_stream_adapter():
         if flagcx_path and os.path.isdir(flagcx_path) and flagcx_path not in sys.path:
             sys.path.append(flagcx_path)
 
-        flagcx_wrapper = importlib.import_module("plugin.interservice.flagcx_wrapper")
+        # Installed package first; the source tree only carries the wrapper.
+        try:
+            flagcx_wrapper = importlib.import_module("flagcx.api")
+        except ImportError:
+            flagcx_wrapper = importlib.import_module(
+                "plugin.interservice.flagcx_wrapper"
+            )
         FLAGCXLibrary = flagcx_wrapper.FLAGCXLibrary
         flagcxStream_t = flagcx_wrapper.flagcxStream_t
 
