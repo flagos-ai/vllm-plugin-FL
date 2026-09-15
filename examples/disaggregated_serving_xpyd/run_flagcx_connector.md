@@ -27,14 +27,19 @@ This guide walks through setting up disaggregated prefill-decode serving with th
 
 ## 1. Install FlagCX
 
-On **both** Prefill and Decode nodes:
+On **both** Prefill and Decode nodes. FlagCX is not on PyPI: the wheel is built
+per vendor and published to that vendor's own FlagOS index, so the index has to
+be named for the install to resolve:
 
 ```bash
-pip install flagcx
+VENDOR=https://resource.flagos.net/repository/flagos-pypi-<vendor>/simple
+pip install --index-url "$VENDOR" flagcx
 ```
 
-The wheel carries both the Python API and `libflagcx.so`, so no environment
-variable is needed. To run against a local source build instead, set
+`<vendor>` is the FlagOS vendor name the wheel was built for. Each index carries
+only that vendor's builds, and not every vendor has published one yet. The
+installed wheel provides both the Python API and `libflagcx.so`, so no
+environment variable is needed. To run against a local source build instead, set
 `FLAGCX_PATH` to the FlagCX repo root; it is honoured for backend selection and
 for locating the library.
 
