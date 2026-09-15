@@ -80,7 +80,7 @@ RUN git clone https://github.com/FlagOpen/FlagGems.git /workspace/FlagGems \
 
 # Install FlagTree (Triton backend for T-Head PPU).
 # See https://github.com/flagos-ai/FlagTree/wiki/User-manual-for-ppu
-ARG FLAGTREE_VERSION=0.6.1+ppu3.6
+ARG FLAGTREE_VERSION=0.6.2a2+ppu3.6
 ARG FLAGOS_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-hosted/simple
 
 RUN pip install --no-cache-dir \

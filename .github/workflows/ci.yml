@@ -177,7 +177,7 @@ jobs:
     secrets: inherit
 
  # ============================================================
-  # Job 4g: THead platform testing
+  # Job 4h: THead platform testing
   # ============================================================
   test-thead:
     needs: discover
