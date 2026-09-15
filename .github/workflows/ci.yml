@@ -175,3 +175,14 @@ jobs:
     with:
       platform: kunlunxin
     secrets: inherit
+
+ # ============================================================
+  # Job 4g: THead platform testing
+  # ============================================================
+  test-thead:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: thead
+    secrets: inherit
