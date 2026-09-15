@@ -49,6 +49,9 @@ dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
     "musa": "mccl",
+    # Cambricon's MCCL; without the entry the lookup falls back to "nccl",
+    # which torch_mlu's ProcessGroup does not implement.
+    "mlu": "mccl",
 }
 
 
@@ -411,6 +414,7 @@ class PlatformFL(Platform):
             "iluvatar",
             "thead",
             "kunlunxin",
+            "cambricon",
         ]
 
     @classmethod
@@ -448,7 +452,13 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
-        return cls.vendor_name != "hygon" and cls.dist_backend != "flagcx"
+        # vLLM's custom all-reduce is a CUDA IPC kernel; MLU has no counterpart,
+        # and vllm/config/parallel.py turns the feature off for the whole engine
+        # when this returns False (so MLU never enters that path unasked).
+        return (
+            cls.vendor_name not in ("hygon", "cambricon")
+            and cls.dist_backend != "flagcx"
+        )
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
@@ -527,8 +537,10 @@ class PlatformFL(Platform):
         # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
             return None
-        # Non-CUDA devices (e.g. txda/tsingmicro) have no CUDA-style capability
-        if cls.device_type == "txda":
+        # Non-CUDA devices (e.g. mlu/txda) have no CUDA-style capability; the
+        # CUDA-alike fallback below would otherwise report a bogus compute
+        # capability that attention-backend selection reads as sm80+.
+        if cls.device_type in ("mlu", "txda"):
             return None
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
