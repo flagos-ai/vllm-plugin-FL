@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
 
-from vllm.config import VllmConfig
+from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.v1.attention.backend import (
     AttentionLayer,
     AttentionMetadataBuilder,
@@ -63,6 +63,47 @@ except ImportError:
 def is_kunlunxin_ops_available() -> bool:
     """Check if Kunlunxin ops are available."""
     return _KUNLUNXIN_OPS_AVAILABLE
+
+
+_USE_RESHAPE_AND_CACHE_FLASH_ENV = "USE_RESHAPE_AND_CACHE_FLASH"
+_reshape_and_cache_flash: bool | None = None
+
+
+def resolve_reshape_and_cache_flash() -> bool:
+    """Pick which paged-KV convention the attention layers must use.
+
+    The two xtorch_ops write kernels address the paged cache differently, and the
+    kernel is not a free choice: vLLM raises the attention block size to the mamba
+    page size on hybrid models, only there does the flash kernel's addressing line
+    up with the block tables the scheduler hands us.  Keying this off the
+    environment made the flag a global, and the two geometries need opposite
+    values -- dense models stay coherent with the plain kernel and go off the
+    rails with the flash one, hybrid models do the reverse.  So derive it from the
+    model, with the env var kept as an override for vendor CI, which exports it
+    unconditionally (`.github/scripts/kunlunxin/setup.sh` treats it as required).
+
+    Resolved once per process: the answer is a property of the loaded model.
+    """
+    global _reshape_and_cache_flash
+    override = os.environ.get(_USE_RESHAPE_AND_CACHE_FLASH_ENV)
+    if override is not None:
+        return override == "1"
+    if _reshape_and_cache_flash is None:
+        try:
+            model_config = get_current_vllm_config().model_config
+        except Exception:
+            # Outside an engine (unit tests, offline tooling): keep the historical
+            # default rather than caching a guess.
+            return False
+        _reshape_and_cache_flash = model_config.is_hybrid
+        logger.info(
+            "Kunlunxin paged-KV convention: %s (is_hybrid=%s)",
+            "reshape_and_cache_flash"
+            if _reshape_and_cache_flash
+            else "reshape_and_cache",
+            model_config.is_hybrid,
+        )
+    return _reshape_and_cache_flash
 
 
 @dataclass
@@ -784,6 +825,8 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
+        self.use_reshape_and_cache_flash = resolve_reshape_and_cache_flash()
+
         # 0.13.0 get_supported_head_size is not avaiable any more
         suppored_head_sizes = KunlunxinAttentionBackend.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
@@ -884,7 +927,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory
             # profiling run.
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
+            if self.use_reshape_and_cache_flash:
                 key_cache, value_cache = KunlunxinPagedAttention.split_kv_cache(
                     kv_cache, self.num_kv_heads, self.head_size
                 )
@@ -962,7 +1005,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
 
         if num_decode_tokens != 0:
             decode_meta = attn_metadata.decode_metadata
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
+            if self.use_reshape_and_cache_flash:
                 # For hybrid Attention (Qwen3-Next, Qwen3.5)
                 tmp_block_tables = decode_meta.block_tables * 2
             else:
@@ -1027,7 +1070,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
 
         # prefix cache part
         if actual_query_start_loc_host[-1] != kv_prefix_start_loc_host[-1]:
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
+            if self.use_reshape_and_cache_flash:
                 # For hybrid Attention (Qwen3-Next, Qwen3.5)
                 tmp_block_tables = attn_metadata.block_tables * 2
             else:
