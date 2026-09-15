@@ -91,7 +91,15 @@ def _fused_dsv4_qnorm_rope_kv_quant_insert_impl(
 
     num_tokens, num_heads, head_dim = q_in.shape
     if q_head_padded == num_heads:
-        q = q_in.contiguous()
+        # clone(), not contiguous(): the FlagGems kernel normalizes/ropes its
+        # first argument IN PLACE, and contiguous() returns self for an already
+        # contiguous tensor, so that would write through to the caller's q_in.
+        # The schema declares `Tensor q_in` (no `!`, unlike `Tensor! k_cache`),
+        # so mutating it breaks the declared contract and would mislead
+        # functionalization under torch.compile. This is the default PPU path
+        # (q_head_padded == num_heads always holds there), and the clone costs
+        # less than the torch.zeros + partial copy the other branch already pays.
+        q = q_in.clone(memory_format=torch.contiguous_format)
         real_heads = -1
     else:
         # zeros (not empty): must not depend on any implicit zero-fill from

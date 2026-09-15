@@ -980,8 +980,13 @@ def _patch_metadata_pinned_arange():
                     and input.numel() > 0
                 ):
                     n = input.numel()
-                    # Pure decode: one token per request.
-                    if int(repeats.sum()) == n:
+                    # Pure decode: one token per request. Test every element,
+                    # not the sum: sum == n also accepts vectors that are not
+                    # all-ones ([2, 0], [0, 2], [3, 0, 0], ...), for which the
+                    # identity below is wrong -- repeat_interleave(arange(2),
+                    # [2, 0]) is [0, 0], not [0, 1]. The torch.equal() guard
+                    # further down only checks `input`, so it cannot catch this.
+                    if bool(torch.all(repeats == 1)):
                         cached = _fl_cached_pinned_arange(
                             self, n, input.dtype, self._fl_pin_max
                         )
