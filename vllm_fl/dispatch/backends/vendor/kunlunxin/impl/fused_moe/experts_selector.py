@@ -21,19 +21,25 @@ def vllm_topk_softmax(
     gating_output: torch.Tensor,
     renormalize: bool,
 ) -> tuple[torch.Tensor, ...]:
+    # The fourth xtorch argument is a per-block expert histogram shaped
+    # [block_num, n_experts], not vLLM's token_expert_indices [M, topk]; the
+    # kernel rejects the call outright ("moe_softmax_topk_norm_fusion failed")
+    # for any tensor of the wrong shape, so the documented `None` (skip the
+    # histogram) is passed instead. vLLM 0.24.0's routers discard
+    # token_expert_indices anyway, so nothing downstream reads it.
     if renormalize:
         xtorch_ops.moe_softmax_topk_norm(
             gating_output,
             topk_weights,
             topk_indices,
-            token_expert_indices,
+            None,
         )
     else:
         xtorch_ops.moe_softmax_topk(
             gating_output,
             topk_weights,
             topk_indices,
-            token_expert_indices,
+            None,
         )
     return topk_weights, topk_indices
 
