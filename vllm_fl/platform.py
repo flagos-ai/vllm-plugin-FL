@@ -32,7 +32,12 @@ else:
     VllmConfig = None
     CacheDType = None
 
-from vllm_fl.utils import DeviceInfo, get_device_name, get_device_type
+from vllm_fl.utils import (
+    DeviceInfo,
+    get_device_name,
+    get_device_type,
+    is_mlu_legacy_toolchain,
+)
 
 logger = init_logger(__name__)
 
@@ -46,6 +51,7 @@ dist_backend_dict = {
     "cuda": "nccl",
     "gcu": "eccl",
     "musa": "mccl",
+    "mlu": "cncl",
 }
 
 def _resolve_flagcx_backend() -> bool:
@@ -259,6 +265,39 @@ class PlatformFL(Platform):
                 compilation_config.mode = CompilationMode.NONE
                 compilation_config.cudagraph_mode = CUDAGraphMode.NONE
 
+        # Cambricon MLU: graph capture is not wired end-to-end. Graph.graph()
+        # does pick torch.mlu.MLUGraph, but nothing on the attention side can
+        # support it: the flag_gems attention backend refuses unless
+        # torch.cuda.is_available(), and no backend reachable on MLU advertises
+        # AttentionCGSupport. vLLM resolves the mode against that support in
+        # resolve_cudagraph_mode_and_sizes() and raises ValueError for any full
+        # mode, before any capture is attempted. Pin NONE here rather than let
+        # the mode be resolved later. Not keyed on the neuware version: the
+        # blocker is the attention backend, not the toolchain.
+        if cls.device_type == "mlu":
+            if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+                logger.info(
+                    "Disabling CUDAGraphs for Cambricon MLU: no MLU attention "
+                    "backend advertises AttentionCGSupport."
+                )
+                compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+
+            # 4.4.3 has to go all the way to NONE: the model is Dynamo-traced
+            # during profile_run, and there torch_mlu raises `Unsupported:
+            # non-function or method super` on the GDN path, so pinning
+            # cudagraph_mode alone still leaves startup broken.
+            from vllm.config import CompilationMode
+
+            if (
+                is_mlu_legacy_toolchain()
+                and compilation_config.mode != CompilationMode.NONE
+            ):
+                logger.warning(
+                    "Disabling torch.compile for Cambricon MLU on neuware "
+                    "4.4.3: torch_mlu's Dynamo cannot trace the compiled model."
+                )
+                compilation_config.mode = CompilationMode.NONE
+
         # Ascend NPU: force float32 SSM state cache for GDN linear attention.
         # The pure-PyTorch recurrence accumulates state in float32 but writes
         # back to initial_state.dtype each step. If the cache is bf16, the
@@ -392,6 +431,15 @@ class PlatformFL(Platform):
         if cls.dist_backend == "flagcx":
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
+        if cls.vendor_name == "cambricon":
+            # CudaCommunicator's allreduce paths (PyNcclCommunicator, the
+            # cuda_communicator custom-allreduce buffers) talk to torch.cuda and
+            # to the CUDA PyNccl extension; MLU has neither, and torch_mlu
+            # exposes no PyNccl-compatible counterpart. DeviceCommunicatorBase
+            # runs every collective through the torch.distributed group, which
+            # is cncl here.
+            logger.info("Using DeviceCommunicatorBase for communication.")
+            return "vllm.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"  # noqa
         else:
             logger.info("Using CudaCommunicator for communication.")
             return "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
@@ -456,7 +504,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
-        if cls.vendor_name == "hygon":
+        if cls.vendor_name in ("hygon", "cambricon"):
             return False
         if cls.dist_backend == "flagcx":
             return False

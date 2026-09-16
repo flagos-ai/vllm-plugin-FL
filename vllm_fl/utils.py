@@ -89,6 +89,23 @@ def get_device_name(vendor_name: str) -> str:
     return _get_vendor_device_field(vendor_name, "device_name")
 
 
+def is_mlu_legacy_toolchain() -> bool:
+    """Whether the process runs the cambricon neuware 4.4.3 toolchain.
+
+    neuware 4.4.3 ships triton 3.2.0+mlu1.7.2, the 1.x MLU fork; neuware 4.7.2
+    ships 3.4.0+mlu2.1.1. The cambricon workarounds that key on it (the
+    task_type strip, the compilation downgrade) describe limitations of the
+    1.x fork and of torch 2.7.1+cpu, and must not fire on 4.7.2.
+    """
+    try:
+        import triton
+    except ImportError:
+        return False
+    version = getattr(triton, "__version__", "")
+    local = version.split("+", 1)[1] if "+" in version else ""
+    return local.startswith("mlu1.")
+
+
 def use_flaggems(default: bool = True) -> bool:
     if os.environ.get("VLLM_FL_PREFER_ENABLED", "True").lower() not in ("true", "1"):
         return False

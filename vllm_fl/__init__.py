@@ -307,13 +307,19 @@ def register_model():
 # kwarg unsupported by triton 3.2.0+mlu1.7.2 (cambricon 4.4.3). Strip it from
 # JITFunction.run. torch_mlu must be imported first — its _inductor module
 # imports triton.Config during triton init, so patching triton earlier raises a
-# circular-import error. Guarded on torch_mlu importability (cambricon only).
+# circular-import error. Guarded on the 4.4.3 triton fork: triton 3.4.0+mlu2.1.1
+# (4.7.2) accepts task_type and uses it for kernel scheduling, so stripping it
+# there would silently change how those kernels are launched.
 try:
     import torch_mlu  # noqa: F401
     import triton.runtime.jit as _tr_jit
 
+    from vllm_fl.utils import is_mlu_legacy_toolchain as _is_mlu_legacy_toolchain
+
     _orig_run = _tr_jit.JITFunction.run
-    if not getattr(_orig_run, "_flagos_task_type_patched", False):
+    if _is_mlu_legacy_toolchain() and not getattr(
+        _orig_run, "_flagos_task_type_patched", False
+    ):
 
         def _run_no_task_type(self, *args, **kwargs):
             kwargs.pop("task_type", None)

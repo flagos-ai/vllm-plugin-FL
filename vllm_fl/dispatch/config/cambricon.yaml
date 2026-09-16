@@ -33,6 +33,22 @@ flagos_blacklist:
   # transitional. End-to-end cold-start verified 2026-09-05 (c1–c7 chain).
   - copy_
 
+  # flag_gems `native_layer_norm` runs on cambricon through the GENERIC wrapper
+  # (src/flag_gems/ops/native_layer_norm.py): _FULL_CONFIG maps the aten op to
+  # it, and the cambricon backend registers only layer_norm/layer_norm_backward
+  # (_cambricon/ops/__init__.py), never native_layer_norm, so there is no
+  # cambricon-local override to take the call. The wrapper then dispatches into
+  # cambricon's layer_norm, whose contract differs from aten's in two ways: it
+  # returns mean/rstd in `get_accumulator_dtype(input.dtype)` rather than input
+  # dtype, and it receives the wrapper's stats_shape
+  # (input.shape[:-len(normalized_shape)] + (1,) * len(normalized_shape)), a
+  # broadcast shape the `layer_norm_kernel_middle_n` path (which takes a 1-D M)
+  # does not fit. Fall back to torch_mlu. The flag_gems-side fix adds a
+  # cambricon-local native_layer_norm wrapper, but it is unreleased (PR #5456 is
+  # not an ancestor of any tag; configs.yaml pins flaggems 5.3.5), so keep this
+  # entry until it ships.
+  - native_layer_norm
+
   # NOTE: `empty` used to be blacklisted here (flag_gems grid 607744 > 65535
   # MLU Triton grid limit for the Qwen3 vocab embedding). The fix landed in
   # flag_gems 5.3.4 (_cambricon/ops/empty.py: grid capped at TOTAL_CORE_NUM +
