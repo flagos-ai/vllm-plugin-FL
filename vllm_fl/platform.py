@@ -239,7 +239,20 @@ class PlatformFL(Platform):
                 "still contain CUDA-only assumptions."
             )
         parallel_config = vllm_config.parallel_config
+        if cls.device_type == "npu" and model_config is not None:
+            from vllm_fl.patches.ascend_glm_dsa import (
+                prepare_glm_dsa_dense_fallback,
+            )
 
+            if prepare_glm_dsa_dense_fallback(model_config):
+                logger.warning_once(
+                    "Ascend uses dense attention for GLM DSA because sparse MLA "
+                    "is not available; max_model_len is limited to index_topk."
+                )
+                # VllmConfig validates parallelism before the platform hook.
+                # Revalidate after changing MLA/KV-head semantics so DCP and TP
+                # constraints are checked against the dense architecture.
+                model_config.verify_with_parallel_config(parallel_config)
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         scheduler_config = vllm_config.scheduler_config

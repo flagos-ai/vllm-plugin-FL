@@ -308,3 +308,7 @@ def register_model():
             "DeepseekV4ForCausalLM",
             "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM",
         )
+        ModelRegistry.register_model(
+            "GlmMoeDsaForCausalLM",
+            "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
+        )
