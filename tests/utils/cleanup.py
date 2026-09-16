@@ -40,6 +40,11 @@ def device_cleanup(platform: str, wait: float = 3.0) -> None:
     """
     _kill_stale_processes()
 
+    # On PPU, driver crashes can leave processes holding device handles that
+    # pgrep-based cleanup misses. fuser on the device files catches them.
+    if platform == "thead":
+        _kill_stale_ppu_processes()
+
     # Clear framework cache to reclaim memory held by the PyTorch allocator
     cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
     cache_fn()
@@ -87,6 +92,42 @@ def _kill_stale_processes() -> None:
         except FileNotFoundError:
             # pgrep not available
             pass
+
+
+def _kill_stale_ppu_processes() -> None:
+    """Kill processes holding T-Head PPU device handles via fuser.
+
+    PPU driver crashes (e.g. Hggc failure) can leave worker processes in
+    uninterruptible sleep. Pattern-based pgrep may miss them. fuser on the
+    PPU device files gives a definitive list of processes with open handles.
+    """
+    import glob
+
+    ppu_devs = sorted(glob.glob("/dev/alixpu_ppu*"))
+    if not ppu_devs:
+        return
+
+    pids: set[str] = set()
+    for dev in ppu_devs:
+        try:
+            result = subprocess.run(
+                ["fuser", dev],
+                capture_output=True,
+                text=True,
+            )
+            for pid in result.stdout.split():
+                pid = pid.strip()
+                if pid and pid != str(os.getpid()):
+                    pids.add(pid)
+        except FileNotFoundError:
+            # fuser not available — fall back to pattern-based kill only
+            return
+
+    if pids:
+        print(f"[cleanup] Killing stale PPU processes (fuser): {sorted(pids)}")
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid), signal.SIGKILL)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +201,30 @@ def _log_memory_hygon() -> None:
         pass
 
 
+def _log_memory_thead() -> None:
+    """Log T-Head PPU memory state via ppu-smi (symlinked as nvidia-smi)."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,memory.used,memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            print("[cleanup] PPU memory (MiB):")
+            for line in result.stdout.strip().split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) == 4:
+                    idx, used, free, total = parts
+                    print(f"  PPU {idx}: {used}/{total} MiB used, {free} MiB free")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
 def _log_memory_noop() -> None:
     """No-op memory log for unknown platforms."""
     pass
@@ -170,6 +235,7 @@ _PLATFORM_MEMORY_LOG: dict[str, Callable[[], None]] = {
     "cuda": _log_memory_cuda,
     "ascend": _log_memory_ascend,
     "hygon": _log_memory_hygon,
+    "thead": _log_memory_thead,
 }
 
 
@@ -212,8 +278,9 @@ def _mem_info_noop() -> list[tuple[int, int]]:
 _PLATFORM_MEMORY_INFO: dict[str, Callable[[], list[tuple[int, int]]]] = {
     "cuda": _mem_info_cuda,
     "ascend": _mem_info_ascend,
-    # Hygon DCUs are exposed to PyTorch as CUDA devices, so torch.cuda APIs work.
+    # Hygon DCUs and T-Head PPUs are exposed to PyTorch as CUDA devices.
     "hygon": _mem_info_cuda,
+    "thead": _mem_info_cuda,
 }
 
 
@@ -248,8 +315,9 @@ def _cache_clear_noop() -> None:
 _PLATFORM_CACHE_CLEAR: dict[str, Callable[[], None]] = {
     "cuda": _cache_clear_cuda,
     "ascend": _cache_clear_ascend,
-    # Hygon DCUs are exposed to PyTorch as CUDA devices, so torch.cuda APIs work.
+    # Hygon DCUs and T-Head PPUs are exposed to PyTorch as CUDA devices.
     "hygon": _cache_clear_cuda,
+    "thead": _cache_clear_cuda,
 }
 
 
@@ -292,6 +360,8 @@ def wait_for_memory(
 
         # Kill stale vllm processes from previous e2e tests
         _kill_stale_processes()
+        if platform == "thead":
+            _kill_stale_ppu_processes()
         # Clear framework cache
         cache_fn()
         # Brief pause for resources to be released
