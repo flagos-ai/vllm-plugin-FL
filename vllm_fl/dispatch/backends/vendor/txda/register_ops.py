@@ -29,7 +29,7 @@ def _bind_is_available(fn, is_available_fn):
 
 def register_builtins(registry) -> None:
     """
-    Register all METAX (VENDOR) operator implementations.
+    Register all Txda (VENDOR) operator implementations.
 
     Args:
         registry: Registry to register into

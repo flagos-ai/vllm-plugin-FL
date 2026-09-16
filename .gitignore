@@ -14,4 +14,3 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
-vllm_fl/.DS_Store
