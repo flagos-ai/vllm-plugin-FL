@@ -31,9 +31,11 @@ device_overrides:
   zw810e:
     cases:
       - qwen3_6/27b_tp4_eager
+      - qwen3_6/27b_tp4_graph
       - qwen3_6/35b_a3b_tp4_eager
+      - qwen3_6/35b_a3b_tp4_graph
     llm:
-      gpu_memory_utilization: 0.90
+      gpu_memory_utilization: 0.85
       trust_remote_code: true
     serve:
       startup_retries: 300
