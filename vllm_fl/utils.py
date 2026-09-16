@@ -96,12 +96,23 @@ def is_mlu_legacy_toolchain() -> bool:
     ships 3.4.0+mlu2.1.1. The cambricon workarounds that key on it (the
     task_type strip, the compilation downgrade) describe limitations of the
     1.x fork and of torch 2.7.1+cpu, and must not fire on 4.7.2.
+
+    The local part is only in the distribution metadata: the vendor repack
+    leaves triton/__init__.py's __version__ at the bare upstream number
+    ('3.2.0' on 4.4.3), so reading triton.__version__ never matches.
     """
+    version = ""
     try:
-        import triton
-    except ImportError:
-        return False
-    version = getattr(triton, "__version__", "")
+        from importlib.metadata import version as _dist_version
+
+        version = _dist_version("triton")
+    except Exception:
+        try:
+            import triton
+
+            version = getattr(triton, "__version__", "")
+        except Exception:
+            return False
     local = version.split("+", 1)[1] if "+" in version else ""
     return local.startswith("mlu1.")
 
