@@ -58,5 +58,9 @@ flagos_blacklist:
   # Gemma3n AltUp divides a CUDA tensor by a CPU scalar tensor; FlagGems passes
   # the CPU pointer to Triton and fails at runtime.
   - true_divide
+  # Qwen3.6 multimodal batches use scatter_ to place image features into the
+  # token batch. FlagGems 5.3.5 can cross-wire those rows under concurrency,
+  # producing outputs from another request or repeated punctuation on A800.
+  - scatter_
 # No NVIDIA OOT implementation is disabled without a reproduced model failure.
 oot_blacklist: []

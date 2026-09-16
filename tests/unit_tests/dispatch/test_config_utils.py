@@ -27,6 +27,7 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
         "_scaled_dot_product_attention_math",
         "maximum",
         "true_divide",
+        "scatter_",
     ]
     assert config["oot_blacklist"] == []
 
