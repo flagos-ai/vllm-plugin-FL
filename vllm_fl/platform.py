@@ -187,6 +187,17 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
+        if cls.device_type == "gcu":
+            # Cannot run from the plugin's register(): that happens while
+            # vllm.config is still half-imported, and patching ApplyRotaryEmb
+            # pulls in vllm.model_executor.custom_op -> vllm.config. The first
+            # import_kernels() call is at model load, well past that point.
+            # Left unguarded on purpose: a failure here means the GCU flash_attn
+            # alias is missing, and that should read as itself rather than as a
+            # triton_gcu ImportError further along in rotary embedding.
+            from vllm_fl import _patch_rotary_flash_attn_import
+            _patch_rotary_flash_attn_import()
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""

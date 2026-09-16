@@ -181,7 +181,9 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         apply_sunrise_patches()
 
     # Apply GCU monkey-patches (Triton grid limits, etc.).
-    if getattr(current_platform, "vendor_name", None) == "gcu":
+    # device_type, not vendor_name: the Enflame backend reports its vendor as
+    # "enflame" and its device as "gcu", so a vendor_name test never fires here.
+    if current_platform.device_type == "gcu":
         from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
         apply_gcu_patches()
 
