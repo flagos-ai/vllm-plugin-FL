@@ -24,19 +24,25 @@ del _torch
 # torch builds < 2.8 (iluvatar corex on 2.7.x) die with ImportError before
 # engine start. vllm's later uses of the module are lazy, so an empty
 # pre-registered stub suffices to get past the import gate.
-import torch.distributed as _torch_distributed
-
-if not hasattr(_torch_distributed, "_symmetric_memory"):
+# Probe by importing it: importlib pulls the submodule in, whereas
+# hasattr() on the parent reads False until something else imports it, and
+# a stub registered on that reading would shadow the real module.
+try:
+    importlib.import_module("torch.distributed._symmetric_memory")
+except ModuleNotFoundError as _exc:
+    # A stub is only right when the module itself is absent; a missing
+    # dependency of the real module has to keep raising.
+    if _exc.name != "torch.distributed._symmetric_memory":
+        raise
     import types as _types
 
     _symm_mem_stub = _types.ModuleType("torch.distributed._symmetric_memory")
     sys.modules["torch.distributed._symmetric_memory"] = _symm_mem_stub
-    # `import torch.distributed._symmetric_memory` resolves via sys.modules
-    # without setting the parent attribute; mirror it so attribute access
-    # and from-imports see the module too.
-    _torch_distributed._symmetric_memory = _symm_mem_stub
+    # Importing a real submodule also sets the parent attribute; a hand-made
+    # sys.modules entry does not, so mirror it for attribute access and
+    # from-imports.
+    importlib.import_module("torch.distributed")._symmetric_memory = _symm_mem_stub
     del _symm_mem_stub, _types
-del _torch_distributed
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 from vllm_fl.utils import get_op_config as _get_op_config
