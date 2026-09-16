@@ -9,6 +9,7 @@ from .impl.fused_recurrent_packed_decode import (
     apply_fused_recurrent_packed_decode_gcu_patch,
 )
 from .impl.slot_mapping import apply_slot_mapping_gcu_patch
+from .sampler import apply_random_sample_gcu_patch
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
@@ -25,6 +26,7 @@ def apply_gcu_patches() -> None:
     apply_fused_recurrent_packed_decode_gcu_patch()
     apply_slot_mapping_gcu_patch()
     apply_flash_attn_backend_gcu_patch()
+    apply_random_sample_gcu_patch()
     _patches_applied = True
 
 

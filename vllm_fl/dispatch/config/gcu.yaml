@@ -13,9 +13,10 @@ op_backends:
     - flagos
     - vendor:gcu
     - reference
+  # No vendor rung: the GCU silu_and_mul was a byte-identical copy of the
+  # reference one, so it only shadowed it.
   silu_and_mul:
     - flagos
-    - vendor:gcu
     - reference
   rotary_embedding:
     - flagos

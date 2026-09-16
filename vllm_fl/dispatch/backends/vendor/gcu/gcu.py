@@ -35,11 +35,6 @@ class GCUBackend(Backend):
                 GCUBackend._available = False
         return GCUBackend._available
 
-    def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
-        from .impl.activation import silu_and_mul_gcu
-
-        return silu_and_mul_gcu(obj, x)
-
     def rms_norm(
         self,
         obj,

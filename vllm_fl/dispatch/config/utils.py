@@ -35,7 +35,7 @@ from typing import Any
 
 import yaml
 
-from vllm_fl.utils import VENDOR_DEVICE_MAP
+from vllm_fl.utils import VENDOR_DEVICE_MAP, get_device_name
 
 # Directory containing config files (config/)
 _CONFIG_DIR = Path(__file__).parent
@@ -115,16 +115,15 @@ def get_config_path(platform: str | None = None) -> Path | None:
     # after their device family rather than their vendor_name (e.g. enflame's
     # config is gcu.yaml, mthreads' is musa.yaml).  Without this the config
     # (op_backends AND flagos_blacklist) silently fails to load.
-    try:
-        from vllm_fl.utils import get_device_name
-
+    # Guarded by membership because get_device_name raises on a vendor that is
+    # not in the map -- and get_platform_name() can yield names that are not
+    # vendor names ("cuda", "unknown").
+    if platform in VENDOR_DEVICE_MAP:
         device_name = get_device_name(platform)
-        if device_name and device_name != platform:
+        if device_name != platform:
             alias_file = _CONFIG_DIR / f"{device_name}.yaml"
             if alias_file.exists():
                 return alias_file
-    except Exception:
-        pass
 
     return None
 

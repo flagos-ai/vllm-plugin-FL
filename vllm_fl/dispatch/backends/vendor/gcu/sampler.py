@@ -33,5 +33,10 @@ def _random_sample_gcu(
     return topk_topp_sampler.sample_with_exponential_noise(probs, q)
 
 
-# Replace random_sample so the per-request-generator branch is never taken.
-topk_topp_sampler.random_sample = _random_sample_gcu
+def apply_random_sample_gcu_patch() -> None:
+    """Replace random_sample so the per-request-generator branch is never taken."""
+    gcu = getattr(torch, "gcu", None)
+    if gcu is None or not gcu.is_available():
+        return
+
+    topk_topp_sampler.random_sample = _random_sample_gcu

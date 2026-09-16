@@ -47,14 +47,6 @@ def register_builtins(registry) -> None:
             priority=BackendPriority.VENDOR,
         ),
         OpImpl(
-            op_name="silu_and_mul",
-            impl_id="vendor.gcu",
-            kind=BackendImplKind.VENDOR,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
-            vendor="gcu",
-            priority=BackendPriority.VENDOR,
-        ),
-        OpImpl(
             op_name="rms_norm",
             impl_id="vendor.gcu",
             kind=BackendImplKind.VENDOR,
