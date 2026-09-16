@@ -53,6 +53,7 @@ device_overrides:
       - qwen3_6/35b_a3b_tp2_eager
     llm:
       max_model_len: 4096
+      max_num_batched_tokens: 4096
       gpu_memory_utilization: 0.8
       trust_remote_code: true
       disable_custom_all_reduce: false

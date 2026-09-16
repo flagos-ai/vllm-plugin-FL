@@ -136,3 +136,18 @@ def test_load_without_matching_device_case_override_uses_base_config(
 
     assert cfg.engine["tensor_parallel_size"] == 2
     assert cfg.engine["gpu_memory_utilization"] == 0.95
+
+
+def test_ascend_910c_caps_offline_profile_batch():
+    cfg = ModelConfig.load(
+        "qwen3_6",
+        "35b_a3b_tp2_eager",
+        platform="ascend",
+        device="910c",
+    )
+
+    assert cfg.engine_kwargs()["max_num_batched_tokens"] == 4096
+    assert (
+        cfg.serve_args()[cfg.serve_args().index("--max-num-batched-tokens") + 1]
+        == "4096"
+    )
