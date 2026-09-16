@@ -1,10 +1,17 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 import inspect
+import os
 from types import SimpleNamespace
 
 import pytest
 import torch
+
+_test_platform = os.environ.get("FL_TEST_PLATFORM")
+if _test_platform and _test_platform != "ascend":
+    pytest.skip(
+        "Ascend-specific unit tests only run on Ascend", allow_module_level=True
+    )
 
 from vllm.model_executor.parameter import ModelWeightParameter
 

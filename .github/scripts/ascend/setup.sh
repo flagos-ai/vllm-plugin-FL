@@ -6,6 +6,11 @@ set -euo pipefail
 git config --global --add safe.directory "$(pwd)"
 
 pip install --upgrade pip "setuptools>=77.0.3,<80"
+python -m pip install --no-cache-dir \
+    pytest-cov \
+    pytest-json-report \
+    pytest-metadata \
+    pytest-timeout
 pip install \
     --no-build-isolation \
     --no-deps \
