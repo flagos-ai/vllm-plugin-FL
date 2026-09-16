@@ -111,6 +111,29 @@ if not hasattr(torch.library, "get_kernel") and _torch_mlu_available():
 
     torch.library.get_kernel = _get_kernel
 
+# torch 2.7.1+cpu also lacks five torch.accelerator members vLLM 0.20.2 calls on
+# the engine-init path: empty_cache() and device_index() during the GDN prefill
+# warmup (model_executor/layers/mamba/gdn_linear_attn.py, fla/ops/utils.py), and
+# memory_stats()/memory_reserved()/reset_peak_memory_stats() in the snapshot
+# mem_utils.memory_profiling takes around profile_run (v1/worker/gpu_worker.py).
+# Without them the worker dies with AttributeError before the API server starts.
+# torch.mlu carries the equivalents; musa/metax/sunrise and the NPU path already
+# redirect to their own device module the same way, so only the gating differs:
+# installed only where torch_mlu is importable, like the adapter above.
+if _torch_mlu_available():
+    import torch_mlu  # noqa: F401  (registers torch.mlu)
+    import torch.accelerator as _torch_accelerator
+
+    for _member, _mlu_member in (
+        ("empty_cache", "empty_cache"),
+        ("device_index", "device"),
+        ("memory_stats", "memory_stats"),
+        ("memory_reserved", "memory_reserved"),
+        ("reset_peak_memory_stats", "reset_peak_memory_stats"),
+    ):
+        if not hasattr(_torch_accelerator, _member):
+            setattr(_torch_accelerator, _member, getattr(torch.mlu, _mlu_member))
+
 from vllm_fl.utils import get_op_config as _get_op_config
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
