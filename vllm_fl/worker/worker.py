@@ -108,6 +108,13 @@ def _num_workspace_lanes(vllm_config: VllmConfig, use_v2_model_runner: bool) -> 
     )
 
 
+def _normalize_process_group_backend(backend: str) -> str:
+    """Return the torch.distributed backend for the active platform."""
+    if current_platform.device_type == "ptpu" and backend in {"flagcx", "nccl"}:
+        return "pccl"
+    return backend
+
+
 if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
@@ -1650,7 +1657,7 @@ def init_worker_distributed_environment(
         rank,
         init_method,
         local_rank,
-        backend,
+        _normalize_process_group_backend(backend),
         timeout,
     )
 
