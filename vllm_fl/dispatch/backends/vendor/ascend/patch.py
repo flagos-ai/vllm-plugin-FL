@@ -245,6 +245,8 @@ def patch_fla_ops():
             from vllm_fl.dispatch.backends.vendor.ascend.impl.fla import chunk as _ascend_chunk
             _ascend_chunk.chunk_gated_delta_rule_fwd = chunk_gated_delta_rule_fwd_proper
         except ImportError:
+            # Optional: the vendored FLA chunk module is absent on builds that
+            # do not ship the GDN path; the vllm-local binding above is enough.
             pass
 
         # Patch the gdn_linear_attn module's local name binding
@@ -310,7 +312,6 @@ def patch_gdn_triton_ops():
             This is used for the DECODE path (T=1 typically).
             """
             B, T, H, K_dim = q.shape
-            V_dim = v.shape[-1]
             HV = v.shape[2]
             groups = HV // H
 
@@ -534,6 +535,8 @@ def patch_gdn_triton_ops():
             )
             _ascend_l2norm.l2norm_fwd = l2norm_fwd_torch
         except ImportError:
+            # Optional: same as above, the vllm-local l2norm binding is the
+            # one the GDN layers actually resolve.
             pass
 
         logger.info(

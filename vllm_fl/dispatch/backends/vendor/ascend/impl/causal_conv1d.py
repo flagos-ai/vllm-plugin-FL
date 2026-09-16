@@ -749,12 +749,10 @@ def causal_conv1d_update_ref(
     if query_start_loc is not None:
         # varlen mode
         batch = conv_state_indices.size(0)
-        dim = x.size(1)
     else:
-        batch, dim, seqlen = x.shape
+        batch, _, seqlen = x.shape
 
     _, width = weight.shape
-    state_len = width - 1
 
     out = torch.empty_like(x)
 

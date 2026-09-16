@@ -364,5 +364,3 @@ def _invoke_fused_moe_loop(
             out = out * w.to(out.dtype)
 
         c_flat[valid_ids] = out.to(c_flat.dtype)
-
-    del expert_indices
