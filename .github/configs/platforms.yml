@@ -21,17 +21,17 @@
 
 platforms:
   cuda:
-    enabled: false
+    enabled: true
   ascend:
     enabled: false
   hygon:
-    enabled: false
+    enabled: true
   metax:
-    enabled: false
+    enabled: true
   musa:
     enabled: false
   enflame:
-    enabled: false
+    enabled: true
   kunlunxin:
     enabled: false
   thead:
