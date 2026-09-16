@@ -274,6 +274,17 @@ class PlatformFL(Platform):
                     "to avoid recurrence precision loss in GDN decode."
                 )
 
+        if cls.device_type == "mlu":
+            # vLLM turns on inductor horizontal fusion by default on torch>=2.9.
+            # torch_mlu's benchmark_combo_kernel then compiles and immediately
+            # launches the fused kernel, which the MLU triton driver rejects with
+            # `Triton Error [MLU: 100006]: "Input argument is invalid"`; the
+            # InductorError escapes and takes the EngineCore down at startup.
+            # MLU590 does not gain anything from combo kernels here.
+            compilation_config.inductor_compile_config.update(
+                {"combo_kernels": False, "benchmark_combo_kernel": False}
+            )
+
         if (
             cls.device_type == "musa"
             and compilation_config.cudagraph_mode.has_full_cudagraphs()

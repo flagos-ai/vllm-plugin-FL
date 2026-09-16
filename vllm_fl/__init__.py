@@ -74,6 +74,7 @@ try:
 
     _export_utils._materialize_cpp_cia_ops = _tolerant_materialize_cpp_cia_ops
 except Exception:
+    # Vulkan/MUSA builds without the cpp CIA shim: nothing to wrap.
     pass
 
 # flag_gems 5.3.5 populates current_work_registrar.torch_ops_map via
@@ -434,4 +435,5 @@ try:
     if not hasattr(_tl, "make_tensor_descriptor"):
         _tl.make_tensor_descriptor = lambda *args, **kwargs: None
 except ImportError:
+    # No triton in this environment: there is no TD symbol to stub.
     pass
