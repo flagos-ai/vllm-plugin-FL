@@ -164,6 +164,10 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
 
         num_reqs = cu_seqlens_q.shape[0] - 1
         window_left = self.sliding_window[0]  # -1 means no sliding window
+        # The inherited metadata carries causality (default True); it is False
+        # for the decoder half of an encoder-decoder model, which the parent
+        # backend advertises support for.
+        causal = attn_metadata.causal
         # .item() on txda raises "txMemcpyAsync(...) = Invalid parameters" -- the
         # 0-dim scalar read path is broken, while tolist() (0-dim included) and
         # .cpu() work. Read both row vectors once and index on the host instead.
@@ -196,7 +200,7 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
             )[:seq_len]
             q = query[qs:qe]
 
-            out_i = self._sdpa(q, k, v, seq_len, window_left)
+            out_i = self._sdpa(q, k, v, seq_len, window_left, causal)
             # output is [num_tokens, num_heads, head_size]; out_i matches directly.
             output[qs:qe] = out_i
 
@@ -222,6 +226,7 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
         v: torch.Tensor,
         seq_len: int,
         window_left: int,
+        causal: bool,
     ) -> torch.Tensor:
         """SDPA for one request.
 
@@ -239,32 +244,58 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
             kk = kk.repeat_interleave(self.num_queries_per_kv, dim=1)
             vv = vv.repeat_interleave(self.num_queries_per_kv, dim=1)
 
-        # Mask: key position j is visible to query row i iff
-        # j <= q_start + i, plus the sliding-window left bound.
-        causal = False
+        # Mask: key position j is visible to query row i iff it lies at or
+        # before the query (causal) and no more than window_left tokens behind
+        # it. Each bound is dropped where it hides nothing, which keeps the
+        # common cases on SDPA's unmasked path.
+        is_causal = False
         attn_mask = None
-        if q_len == 1:
-            # Decode: the single new token attends all keys; no mask needed.
-            pass
-        elif q_start == 0 and window_left < 0:
-            causal = True  # Full prefill: plain causal.
-        else:
-            rows = torch.arange(q_len, device=q.device).unsqueeze(1)
-            cols = torch.arange(seq_len, device=q.device).unsqueeze(0)
-            visible = cols <= (q_start + rows)
-            if window_left >= 0:
-                visible &= cols >= (q_start + rows - window_left)
-            attn_mask = visible
+        if window_left < 0:
+            # Only causality can hide a key, and a single query token sits at
+            # the end of the sequence, where causality hides nothing.
+            if causal and q_len > 1:
+                if q_start == 0:
+                    is_causal = True  # Full prefill: plain causal.
+                else:
+                    attn_mask = self._visible_mask(
+                        q_len, seq_len, q_start, causal, window_left, q.device
+                    )
+        # The window hides a key unless the entire sequence fits inside it,
+        # which only a single query token near the sequence start achieves.
+        elif q_len > 1 or causal or q_start > window_left:
+            attn_mask = self._visible_mask(
+                q_len, seq_len, q_start, causal, window_left, q.device
+            )
 
         out = torch.nn.functional.scaled_dot_product_attention(
             q,
             kk,
             vv,
             attn_mask=attn_mask,
-            is_causal=causal,
+            is_causal=is_causal,
             scale=self.scale,
         )
         return out.permute(0, 2, 1, 3)  # [1, q_len, H, D]
+
+    @staticmethod
+    def _visible_mask(
+        q_len: int,
+        seq_len: int,
+        q_start: int,
+        causal: bool,
+        window_left: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Boolean [q_len, seq_len] visibility mask for one request."""
+        rows = torch.arange(q_len, device=device).unsqueeze(1)
+        cols = torch.arange(seq_len, device=device).unsqueeze(0)
+        visible = None
+        if causal:
+            visible = cols <= (q_start + rows)
+        if window_left >= 0:
+            lower = cols >= (q_start + rows - window_left)
+            visible = lower if visible is None else visible & lower
+        return visible
 
     def _forward_encoder(
         self,
