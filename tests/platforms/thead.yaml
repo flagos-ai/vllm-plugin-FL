@@ -53,7 +53,6 @@ zw810e:
         qwen3_6: ["27b_tp4_eager", "35b_a3b_tp4_graph"]
       serving:
         qwen3_6:
-          - "27b_tp4_graph"
           - "35b_a3b_tp4_eager"
     timeouts:
       e2e:
