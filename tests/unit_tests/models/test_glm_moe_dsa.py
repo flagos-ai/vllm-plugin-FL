@@ -136,14 +136,17 @@ def test_dense_hf_config_restores_original_when_model_construction_fails():
     hf_config.index_topk = 256
     model_config = SimpleNamespace(hf_config=hf_config, hf_text_config=hf_config)
 
-    with (
-        pytest.raises(RuntimeError, match="construction failed"),
-        ascend_glm_dsa.use_glm_dsa_dense_hf_config(model_config),
-    ):
-        assert not hasattr(model_config.hf_config, "index_topk")
-        assert hf_config.index_topk == 256
-        raise RuntimeError("construction failed")
+    construction_failed = False
+    try:
+        with ascend_glm_dsa.use_glm_dsa_dense_hf_config(model_config):
+            assert not hasattr(model_config.hf_config, "index_topk")
+            assert hf_config.index_topk == 256
+            raise RuntimeError("construction failed")
+    except RuntimeError as error:
+        assert str(error) == "construction failed"
+        construction_failed = True
 
+    assert construction_failed
     assert model_config.hf_config is hf_config
     assert model_config.hf_text_config is hf_config
     assert hf_config.index_topk == 256
