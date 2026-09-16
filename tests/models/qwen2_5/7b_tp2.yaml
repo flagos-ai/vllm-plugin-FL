@@ -1,0 +1,28 @@
+# Qwen2.5-7B model configuration (TP=2)
+llm:
+  model: "/mnt/share/models/Qwen2.5-7B"
+  tensor_parallel_size: 2
+  max_model_len: 2048
+  gpu_memory_utilization: 0.85
+  trust_remote_code: true
+  enforce_eager: true
+
+generate:
+  prompts:
+    - "Hello, my name is"
+    - "The capital of France is"
+  sampling:
+    max_tokens: 32
+    temperature: 0.0
+
+serve:
+  served_model_name: "qwen"
+  endpoints: ["chat"]
+  stream: true
+  max_tokens: 128
+  chat_messages:
+    - role: "user"
+      content: "Give me a short introduction to large language models."
+  sampling:
+    temperature: 0.0
+    top_p: 1.0
