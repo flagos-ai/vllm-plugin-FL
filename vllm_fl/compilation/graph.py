@@ -49,14 +49,17 @@ class Graph:
         graph = torch.musa.MUSAGraph
     elif current_platform.device_type == "ptpu":
         graph = torch.ptpu.PTPUGraph
-    elif current_platform.device_type == "txda":
+    elif current_platform.device_type in ("txda", "gcu"):
+        # Neither platform has graph mode enabled (see
+        # PlatformFL.support_static_graph_mode), so this only has to keep the
+        # class body importable — model_runner imports GraphWrapper
+        # unconditionally. None says so; naming a graph class here would
+        # claim a capture path neither backend has been verified on.
         graph = None
     elif current_platform.device_type == "mlu":
         # Cambricon runs eager-only (see PlatformFL.support_static_graph_mode):
         # torch.mlu.MLUGraph capture OOMs at the model's cudagraph budget.
         graph = None
-    elif current_platform.device_type == "gcu":
-        graph = torch.gcu.GCUGraph
     else:
         raise NotImplementedError("not support graph")
 

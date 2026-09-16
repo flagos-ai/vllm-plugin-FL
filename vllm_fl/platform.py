@@ -52,6 +52,7 @@ dist_backend_dict = {
     # Cambricon's CNCL; without the entry the lookup falls back to "nccl",
     # which torch_mlu's ProcessGroup does not implement.
     "mlu": "cncl",
+    "gcu": "eccl",
 }
 
 
