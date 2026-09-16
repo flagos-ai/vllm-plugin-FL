@@ -275,12 +275,45 @@ def _mem_info_noop() -> list[tuple[int, int]]:
     return []
 
 
+def _mem_info_thead() -> list[tuple[int, int]]:
+    """Return [(free_bytes, total_bytes), ...] for each T-Head PPU.
+
+    Uses ppu-smi (symlinked as nvidia-smi) rather than torch.cuda.mem_get_info
+    because the PPU CUDA-compat layer only reports the current process's
+    allocations. ppu-smi queries the device driver directly and sees memory
+    held by ALL processes, which is what we need for the memory guard.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        entries = []
+        for line in result.stdout.strip().split("\n"):
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 2:
+                free_mb, total_mb = int(parts[0]), int(parts[1])
+                entries.append((free_mb * 1024 * 1024, total_mb * 1024 * 1024))
+        return entries
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        return []
+
+
 _PLATFORM_MEMORY_INFO: dict[str, Callable[[], list[tuple[int, int]]]] = {
     "cuda": _mem_info_cuda,
     "ascend": _mem_info_ascend,
-    # Hygon DCUs and T-Head PPUs are exposed to PyTorch as CUDA devices.
+    # Hygon DCUs are exposed to PyTorch as CUDA devices.
     "hygon": _mem_info_cuda,
-    "thead": _mem_info_cuda,
+    # T-Head PPU: use ppu-smi for device-wide visibility across all processes.
+    "thead": _mem_info_thead,
 }
 
 
