@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 def test_ascend_does_not_request_cuda_memory_pool(monkeypatch, tag):
     from types import SimpleNamespace
 
-    import vllm_fl.worker.worker as worker_module
+    from vllm_fl.worker import worker as worker_module
 
     monkeypatch.setattr(
         worker_module, "current_platform", SimpleNamespace(device_type="npu")
@@ -38,6 +38,16 @@ def test_ascend_does_not_request_cuda_memory_pool(monkeypatch, tag):
     worker = worker_module.WorkerFL.__new__(worker_module.WorkerFL)
     with worker._maybe_get_memory_pool_context(tag):
         pass
+
+
+def test_sunrise_process_group_uses_pccl(monkeypatch):
+    from vllm_fl.worker import worker as worker_module
+
+    monkeypatch.setattr(worker_module.current_platform, "device_type", "ptpu")
+
+    assert worker_module._normalize_process_group_backend("flagcx") == "pccl"
+    assert worker_module._normalize_process_group_backend("nccl") == "pccl"
+    assert worker_module._normalize_process_group_backend("gloo") == "gloo"
 
 
 def test_worker_keeps_target_lifecycle_contract():
