@@ -20,7 +20,10 @@ def _needs_pytorch_sampler() -> bool:
     try:
         import triton
     except Exception:
-        return True  # unverifiable → keep the safe pytorch fallback
+        # An unimportable triton cannot be the 3.1 fork this gate looks for,
+        # and vllm's own apply_top_k_top_p already falls back to the pytorch
+        # implementation when triton is missing — there is nothing to patch.
+        return False
     return str(getattr(triton, "__version__", "")).startswith("3.1")
 
 
