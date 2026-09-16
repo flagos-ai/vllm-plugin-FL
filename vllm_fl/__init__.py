@@ -17,22 +17,30 @@ else:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
-# torch.distributed._symmetric_memory exists only in PyTorch 2.8+.
-# vllm.distributed.parallel_state imports it at module level, so vendor
-# torch builds < 2.8 (iluvatar corex on 2.7.x) die with ImportError before
-# engine start. vllm's later uses of the module are lazy, so an empty
-# pre-registered stub suffices to get past the import gate.
-import torch.distributed as _torch_distributed
-if not hasattr(_torch_distributed, "_symmetric_memory"):
+# vllm.distributed.parallel_state imports torch.distributed._symmetric_memory
+# at module level, so a vendor torch build without that submodule dies with
+# ImportError before engine start. Both vllm call sites are bare imports that
+# never touch the module's contents, so an empty stub is enough to get past them.
+# Probe by importing: torch never imports this private submodule itself, so a
+# hasattr check cannot tell "not installed" from "not imported yet", and
+# stubbing the latter shadows the real module for every later from-import.
+import importlib as _importlib
+
+try:
+    _importlib.import_module("torch.distributed._symmetric_memory")
+except Exception:
     import types as _types
+
     _symm_mem_stub = _types.ModuleType("torch.distributed._symmetric_memory")
     sys.modules["torch.distributed._symmetric_memory"] = _symm_mem_stub
-    # `import torch.distributed._symmetric_memory` resolves via sys.modules
-    # without setting the parent attribute; mirror it so attribute access
-    # and from-imports see the module too.
+    # `import a.b.c` resolves via sys.modules without setting the parent
+    # attribute; mirror it so attribute access sees the module too.
+    import torch.distributed as _torch_distributed
+
     _torch_distributed._symmetric_memory = _symm_mem_stub
-    del _symm_mem_stub, _types
-del _torch_distributed
+    del _symm_mem_stub, _types, _torch_distributed
+
+del _importlib
 
 # --- torch 2.7.1+cpu (cambricon 4.4.3) compat shims ---------------------
 
