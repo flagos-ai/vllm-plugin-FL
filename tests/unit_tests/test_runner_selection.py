@@ -53,6 +53,53 @@ def test_ascend_rejects_non_eager_execution(monkeypatch):
         PlatformFL.check_and_update_config(config)
 
 
+def test_ascend_revalidates_parallelism_after_glm_dense_fallback(monkeypatch):
+    from types import SimpleNamespace
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    hf_config = SimpleNamespace(
+        model_type="glm_moe_dsa",
+        index_topk=128,
+        qk_nope_head_dim=192,
+        qk_rope_head_dim=64,
+        num_attention_heads=64,
+    )
+    arch_config = SimpleNamespace(
+        is_deepseek_mla=True,
+        head_size=576,
+        total_num_kv_heads=1,
+    )
+
+    class ModelConfig:
+        def __init__(self):
+            self.enforce_eager = True
+            self.hf_text_config = hf_config
+            self.max_model_len = 128
+            self.model_arch_config = arch_config
+
+        @property
+        def use_mla(self):
+            return self.model_arch_config.is_deepseek_mla
+
+        def verify_with_parallel_config(self, parallel_config):
+            assert parallel_config.decode_context_parallel_size == 2
+            assert self.use_mla is False
+            assert self.model_arch_config.head_size == 256
+            assert self.model_arch_config.total_num_kv_heads == 64
+            raise RuntimeError("dense parallelism revalidated")
+
+    config = SimpleNamespace(
+        use_v2_model_runner=False,
+        model_config=ModelConfig(),
+        parallel_config=SimpleNamespace(decode_context_parallel_size=2),
+    )
+
+    with pytest.raises(RuntimeError, match="dense parallelism revalidated"):
+        PlatformFL.check_and_update_config(config)
+
+
 def test_ascend_does_not_advertise_static_graph_support(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
