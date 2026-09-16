@@ -22,6 +22,16 @@ flagos_blacklist:
   # (not in its catch list), killing the EngineCore. Fall back to torch_mlu.
   - index
 
+  # flag_gems `native_layer_norm` dies at kernel launch on the cambricon
+  # backend: its tuned config (_cambricon/tune_configs.yaml,
+  # layer_norm_persistent) passes META.BLOCK_ROW_SIZE, but the forward kernel
+  # (ops/layernorm.py, layer_norm_persistent_kernel) takes TILE_N --
+  # BLOCK_ROW_SIZE only belongs to the two backward kernels. Triton 3.4
+  # (neuware 4.7.2) rejects the unknown kwarg with a KeyError at launch, which
+  # kills the EngineCore; the forward `layer_norm` op itself is fine, so only
+  # the aten-level entry is blacklisted. Fall back to torch_mlu.
+  - native_layer_norm
+
   # NOTE: `empty` used to be blacklisted here (flag_gems grid 607744 > 65535
   # MLU Triton grid limit for the Qwen3 vocab embedding). The fix landed in
   # flag_gems 5.3.4 (_cambricon/ops/empty.py: grid capped at TOTAL_CORE_NUM +
