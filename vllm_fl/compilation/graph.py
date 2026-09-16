@@ -52,7 +52,9 @@ class Graph:
     elif current_platform.device_type == "txda":
         graph = None
     elif current_platform.device_type == "mlu":
-        graph = torch.mlu.MLUGraph
+        # Cambricon runs eager-only (see PlatformFL.support_static_graph_mode):
+        # torch.mlu.MLUGraph capture OOMs at the model's cudagraph budget.
+        graph = None
     else:
         raise NotImplementedError("not support graph")
 

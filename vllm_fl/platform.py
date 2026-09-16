@@ -405,6 +405,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
+        # Cambricon is eager-only: on MLU590 the inductor combo-kernel path
+        # (torch_mlu benchmark_combo_kernel, enabled by default on torch>=2.9)
+        # dies at kernel launch with `Triton Error [MLU: 100006]`, and with
+        # combo kernels off, MLUGraph capture runs past the cudagraph memory
+        # budget (77.08 GiB allocated of 78.86 GiB) at PIECEWISE capture 5/51.
+        # Returning False makes vLLM force cudagraph_mode to NONE.
         return cls.vendor_name in [
             "nvidia",
             "ascend",
@@ -414,7 +420,6 @@ class PlatformFL(Platform):
             "iluvatar",
             "thead",
             "kunlunxin",
-            "cambricon",
         ]
 
     @classmethod
