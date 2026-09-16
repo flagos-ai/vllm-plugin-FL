@@ -212,12 +212,10 @@ class GraphWrapper:
                     set_graph_pool_id(current_platform.graph_pool_handle())
 
                 # Sync offloader's copy stream before capture if available.
-                try:
+                with suppress(ImportError, RuntimeError):
                     from vllm.model_executor.offloader.base import get_offloader
 
                     get_offloader().sync_prev_onload()
-                except (ImportError, RuntimeError):
-                    pass
 
                 # FL-specific: use platform-agnostic graph capture while
                 # preserving the explicit stream used by vLLM v0.28.0.
@@ -254,12 +252,10 @@ class GraphWrapper:
             )
 
         # Sync offloader before replay if available
-        try:
+        with suppress(ImportError, RuntimeError):
             from vllm.model_executor.offloader.base import get_offloader
 
             get_offloader().sync_prev_onload()
-        except (ImportError, RuntimeError):
-            pass
 
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()

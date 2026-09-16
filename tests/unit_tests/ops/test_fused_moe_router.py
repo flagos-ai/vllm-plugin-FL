@@ -54,11 +54,11 @@ def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch)
 
 
 def test_sqrtsoftplus_fallback_matches_dsv4_formula():
-    from vllm_fl.ops.fused_moe.router import _sqrtsoftplus_topk
+    import vllm_fl.ops.fused_moe.router as router_mod
 
     logits = torch.tensor([[0.0, 1.0, -1.0, 3.0]], dtype=torch.float32)
     bias = torch.tensor([0.4, 0.0, 0.8, -0.2], dtype=torch.float32)
-    weights, ids = _sqrtsoftplus_topk(
+    weights, ids = router_mod._sqrtsoftplus_topk(
         gating_output=logits,
         e_score_correction_bias=bias,
         topk=2,
@@ -78,9 +78,9 @@ def test_sqrtsoftplus_fallback_matches_dsv4_formula():
 
 
 def test_sqrtsoftplus_fallback_honors_hash_table():
-    from vllm_fl.ops.fused_moe.router import _sqrtsoftplus_topk
+    import vllm_fl.ops.fused_moe.router as router_mod
 
-    weights, ids = _sqrtsoftplus_topk(
+    weights, ids = router_mod._sqrtsoftplus_topk(
         gating_output=torch.tensor([[0.0, 1.0, 2.0]], dtype=torch.float32),
         e_score_correction_bias=torch.zeros(3),
         topk=2,
