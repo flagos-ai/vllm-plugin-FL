@@ -21,7 +21,7 @@ tested versions.
 | FlagGems | `5.3.5+g34c6d2ce4` at commit `34c6d2ce416d32a98f1dd2bb6e4cfb67c59342d9` |
 
 The NVIDIA dispatch policy is loaded automatically from
-[`vllm_fl/dispatch/config/nvidia.yaml`](../vllm_fl/dispatch/config/nvidia.yaml).
+[`vllm_fl/dispatch/config/nvidia.yaml`](../../vllm_fl/dispatch/config/nvidia.yaml).
 Keep that file and the plugin source from the same revision. Its blacklist is
 part of the validated configuration and must not be replaced with an ad-hoc
 whitelist.
@@ -279,4 +279,4 @@ supported.
   failure.
 - **A model-specific operator fails:** retain the checked-in NVIDIA blacklist,
   reproduce the failure against native PyTorch/vLLM, and only then update
-  [`nvidia.yaml`](../vllm_fl/dispatch/config/nvidia.yaml).
+  [`nvidia.yaml`](../../vllm_fl/dispatch/config/nvidia.yaml).
