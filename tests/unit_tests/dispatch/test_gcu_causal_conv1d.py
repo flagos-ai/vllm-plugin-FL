@@ -1,6 +1,13 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
+import os
 from types import SimpleNamespace
+
+import pytest
+
+_test_platform = os.environ.get("FL_TEST_PLATFORM")
+if _test_platform and _test_platform != "enflame":
+    pytest.skip("GCU-specific unit tests only run on Enflame", allow_module_level=True)
 
 from vllm_fl.dispatch.backends.vendor.gcu.impl import causal_conv1d
 from vllm_fl.patches.triton_kernel import KernelLaunchMetaProxy
