@@ -6,7 +6,12 @@ Tests for worker module.
 Note: These tests require vllm >= 0.13.0 with profiler support.
 """
 
+from contextlib import nullcontext
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
+import torch
 
 
 def has_vllm_profiler():
@@ -24,6 +29,115 @@ pytestmark = pytest.mark.skipif(
     not has_vllm_profiler(),
     reason="vllm.profiler.wrapper not available (requires vllm >= 0.13.0)",
 )
+
+
+@pytest.mark.parametrize("world_size", [2, 4])
+def test_musa_workers_bind_config_before_patching_and_loading(monkeypatch, world_size):
+    pytest.importorskip("torch_musa")
+
+    import vllm_fl.worker.model_runner as runner_module
+    import vllm_fl.worker.worker as worker_module
+    from vllm_fl.patches import moe_sum
+
+    events = []
+    platform = SimpleNamespace(
+        device_type="musa",
+        dist_backend="mccl",
+        logical_device_id_to_visible_device_id=lambda rank: rank,
+        set_device=lambda device: events.append(("set_device", device)),
+        check_if_supports_dtype=lambda dtype: None,
+        empty_cache=lambda: None,
+    )
+    monkeypatch.setattr(worker_module, "current_platform", platform)
+    monkeypatch.setattr(
+        worker_module,
+        "init_worker_distributed_environment",
+        lambda *args: events.append(("dist", args[1])),
+    )
+    monkeypatch.setattr(worker_module, "set_random_seed", lambda seed: None)
+    monkeypatch.setattr(worker_module.gc, "collect", lambda: None)
+    monkeypatch.setattr(
+        worker_module,
+        "MemorySnapshot",
+        lambda: SimpleNamespace(total_memory=100, free_memory=100),
+    )
+    monkeypatch.setattr(worker_module, "init_workspace_manager", lambda *args: None)
+    monkeypatch.setattr(
+        worker_module, "set_current_vllm_config", lambda config: nullcontext()
+    )
+    monkeypatch.setattr(worker_module, "report_usage_stats", lambda config: None)
+    monkeypatch.setattr(
+        moe_sum,
+        "patch_vllm_moe_sum",
+        lambda: events.append(("patch", None)),
+    )
+
+    for rank in range(world_size):
+        events.clear()
+        runner = MagicMock()
+        expected_device = torch.device(f"musa:{rank}")
+        runner.model.named_parameters.return_value = [
+            ("weight", SimpleNamespace(device=expected_device))
+        ]
+        runner.load_model.side_effect = lambda **kwargs: events.append(("load", None))
+        monkeypatch.setattr(
+            runner_module, "ModelRunnerFL", lambda *args, runner=runner: runner
+        )
+        parallel = SimpleNamespace(
+            distributed_executor_backend="ray",
+            assigned_physical_gpu_ids=None,
+            enable_dbo=False,
+        )
+        config = SimpleNamespace(
+            parallel_config=parallel,
+            device_config=SimpleNamespace(device=torch.device("musa:0")),
+        )
+        worker = SimpleNamespace(
+            vllm_config=config,
+            device_config=config.device_config,
+            parallel_config=parallel,
+            model_config=SimpleNamespace(dtype=torch.float16, seed=1),
+            cache_config=SimpleNamespace(gpu_memory_utilization=0.5),
+            local_rank=rank,
+            rank=rank,
+            distributed_init_method="test",
+        )
+
+        worker_module.WorkerFL.init_device(worker)
+        worker_module.WorkerFL.load_model(worker)
+
+        assert worker.device == expected_device
+        assert worker.device_config.device == expected_device
+        assert [name for name, _ in events] == ["set_device", "dist", "patch", "load"]
+        runner.load_model.assert_called_once_with(load_dummy_weights=False)
+
+
+def test_musa_worker_rejects_parameters_on_another_rank(monkeypatch):
+    pytest.importorskip("torch_musa")
+
+    import vllm_fl.worker.worker as worker_module
+    from vllm_fl.patches import moe_sum
+
+    runner = MagicMock()
+    runner.model.named_parameters.return_value = [
+        ("weight", SimpleNamespace(device=torch.device("musa:0")))
+    ]
+    worker = SimpleNamespace(
+        vllm_config=SimpleNamespace(),
+        model_runner=runner,
+        device=torch.device("musa:1"),
+        rank=1,
+    )
+    monkeypatch.setattr(
+        worker_module, "current_platform", SimpleNamespace(device_type="musa")
+    )
+    monkeypatch.setattr(
+        worker_module, "set_current_vllm_config", lambda config: nullcontext()
+    )
+    monkeypatch.setattr(moe_sum, "patch_vllm_moe_sum", lambda: None)
+
+    with pytest.raises(RuntimeError, match="expected model parameters on musa:1"):
+        worker_module.WorkerFL.load_model(worker)
 
 
 class TestMemorySnapshot:
