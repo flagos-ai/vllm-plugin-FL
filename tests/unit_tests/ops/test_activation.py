@@ -16,11 +16,11 @@ def test_upstream_factory_forwards_compile_native_false(monkeypatch):
     from vllm.model_executor.custom_op import CustomOp, op_registry_oot
     from vllm.model_executor.layers.activation import get_act_and_mul_fn
 
-    from vllm_fl.ops.activation import SiluAndMulFL
+    import vllm_fl.ops.activation as activation
 
     config = VllmConfig()
     config.compilation_config.custom_ops = ["none"]
-    monkeypatch.setitem(op_registry_oot, "SiluAndMul", SiluAndMulFL)
+    monkeypatch.setitem(op_registry_oot, "SiluAndMul", activation.SiluAndMulFL)
 
     with (
         set_current_vllm_config(config),
@@ -33,7 +33,7 @@ def test_upstream_factory_forwards_compile_native_false(monkeypatch):
     ):
         layer = get_act_and_mul_fn("silu", compile_native=False)
 
-    assert type(layer) is SiluAndMulFL
+    assert type(layer) is activation.SiluAndMulFL
     assert maybe_compile.call_args.kwargs["enable"] is False
 
 
@@ -66,10 +66,10 @@ class TestSiluAndMulFL:
 
     def test_forward_oot_dispatches_correctly(self, mock_parent_init, mock_cached_op):
         """Test forward_oot calls dispatch system with correct op name and input."""
-        from vllm_fl.ops.activation import SiluAndMulFL
+        import vllm_fl.ops.activation as activation
 
         mock_cached_op.return_value = torch.randn(2, 4)
-        layer = SiluAndMulFL()
+        layer = activation.SiluAndMulFL()
         x = torch.randn(2, 8)
 
         result = layer.forward_oot(x)
