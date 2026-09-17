@@ -48,13 +48,15 @@ Build the image from the repository root:
 docker/build.sh \
   --platform ascend \
   --target ci \
-  --image-name harbor.baai.ac.cn/flagscale/vllm-plugin-fl
+  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
 ```
 
-Build and publish `ascend-vllm0.28.0-a3-ci` before dispatching manual CI.
-The configuration names this target image; changing the configuration does
-not publish it. `.github/scripts/ascend/setup.sh` checks the runtime versions
-and rejects an old image instead of silently testing vLLM 0.20.2.
+The shared CI currently uses the published
+`ascend-vllm0.28.0-a3-ci-20260911` image. Build and publish a replacement tag
+before updating `ci_image` in `.github/configs/ascend.yml`; changing the
+configuration does not publish it. `.github/scripts/ascend/setup.sh` checks
+the runtime versions and rejects an old image instead of silently testing
+vLLM 0.20.2.
 
 Install the plugin checkout without replacing the prepared dependencies:
 
@@ -184,9 +186,9 @@ Full-model vLLM compilation and graph capture are unsupported and rejected
 explicitly; the raw `torch.npu.NPUGraph` checks above do not exercise that
 model path. Video and performance benchmarks remain unvalidated. The hybrid attention bridge
 currently makes contiguous cache inputs for native attention kernels;
-performance tuning is still needed. A clean Docker build was attempted with
-the correct context and host networking, but 910C_174 could not resolve
-`pypi.org`; image publication and the manual CI job therefore remain pending.
+performance tuning is still needed. The packaged A3 image is published as
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260911`
+and is selected by the shared CI platform configuration.
 
 ## Model provisioning
 
@@ -209,6 +211,5 @@ The workflow validates the selected model paths with the shared
 
 To avoid occupying a scarce NPU runner during development, validate changes
 on the host with the same image, setup script, and `tests/run.py` command
-first. When host validation passes, dispatch the `CI` workflow and select
-`ascend` for the platform input. Ascend remains excluded from the automatic PR
-platform registry.
+first. Ascend is enabled in the automatic PR platform registry. The same `CI`
+workflow also supports manual dispatch with `ascend` selected as the platform.
