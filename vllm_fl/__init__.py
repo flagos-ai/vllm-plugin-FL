@@ -1,65 +1,48 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import importlib
+import importlib.util
 import logging
 import os
 import sys
 
 
-def _patch_flag_gems_triton_import_compat():
-    """Allow newer FlagGems to load with the Kunlunxin Triton runtime.
+_RUNTIME_VENDOR_ENV_VARS = (
+    "VLLM_FL_PLATFORM",
+    "GEMS_VENDOR",
+    "VLLM_VENDOR",
+)
 
-    FlagGems 5.4 registers ``_dirichlet_grad`` at import time and asks Triton
-    to resolve ``tl.map_elementwise`` while computing the JIT cache key.  The
-    Kunlunxin Triton runtime does not expose that builtin.  vLLM does not use
-    this operator and the Kunlunxin dispatch config blacklists it, so provide
-    only an import-time sentinel.  If it is ever invoked, fail explicitly
-    instead of silently producing an incorrect result.
+
+def _get_explicit_runtime_vendor() -> str | None:
+    """Return the highest-priority explicit vendor without importing runtimes."""
+    for name in _RUNTIME_VENDOR_ENV_VARS:
+        value = os.environ.get(name, "").strip().lower()
+        if value:
+            return value
+    return None
+
+
+def _init_early_vendor_compat() -> bool:
+    """Apply import-time compatibility only for a possible Kunlunxin runtime.
+
+    This runs before :mod:`vllm_fl.utils`, whose FlagGems import requires the
+    Kunlunxin Triton compatibility shim.  Explicit non-Kunlunxin environments
+    must remain untouched.  When no vendor is specified, use the Kunlunxin
+    runtime package as a side-effect-free fallback signal.
     """
-    try:
-        import triton
-        import triton.language as tl
-    except ImportError:
-        return
-    if not hasattr(tl, "map_elementwise"):
-        def _unsupported_map_elementwise(*args, **kwargs):
-            raise NotImplementedError(
-                "triton.language.map_elementwise is unavailable on Kunlunxin; "
-                "the FlagGems _dirichlet_grad operator must remain blacklisted"
-            )
+    vendor = _get_explicit_runtime_vendor()
+    if vendor is not None and vendor != "kunlunxin":
+        return False
+    if vendor is None and importlib.util.find_spec("torch_xmlir") is None:
+        return False
 
-        _unsupported_map_elementwise.__name__ = "map_elementwise"
-        _unsupported_map_elementwise.__module__ = "triton.language"
-        _unsupported_map_elementwise.__triton_builtin__ = True
-        tl.map_elementwise = _unsupported_map_elementwise
-
-    try:
-        importlib.import_module("triton.knobs")
-    except ModuleNotFoundError as exc:
-        if exc.name != "triton.knobs":
-            raise
-        import types
-
-        knobs = types.ModuleType("triton.knobs")
-        knobs.autotuning = types.SimpleNamespace(adjust_block_size=True)
-        sys.modules[knobs.__name__] = knobs
-        triton.knobs = knobs
+    compat = importlib.import_module("vllm_fl.patches.kunlunxin.import_compat")
+    compat.apply_import_compat()
+    return True
 
 
-_patch_flag_gems_triton_import_compat()
-
-# torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
-# vllm.ir.tolerances references it at module level, so we inject a sentinel
-# before any vllm.ir import can happen.
-if "torch" in sys.modules:
-    _torch = sys.modules["torch"]
-    if not hasattr(_torch, "float4_e2m1fn_x2"):
-        _torch.float4_e2m1fn_x2 = _torch.uint8
-else:
-    import torch as _torch
-    if not hasattr(_torch, "float4_e2m1fn_x2"):
-        _torch.float4_e2m1fn_x2 = _torch.uint8
-del _torch
+_init_early_vendor_compat()
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 from vllm_fl.utils import get_op_config as _get_op_config
