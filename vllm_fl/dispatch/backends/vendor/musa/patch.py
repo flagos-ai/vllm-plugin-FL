@@ -460,19 +460,11 @@ def patch_triton_mtgpu_alias_for_musa():
 
 
 def patch_device_config_for_musa():
-    """Patch vllm DeviceConfig so that device_type='musa' is accepted.
+    """Keep DeviceConfig's MUSA device independent of the frontend's rank.
 
-    vllm 0.24.0's ``DeviceConfig.__post_init__`` calls
-    ``torch.device(self.device_type)`` which raises
-    ``RuntimeError: Device string must not be empty`` when device_type is
-    ``'musa'`` because plain ``torch.device('musa')`` is invalid without an
-    index — ``torch.device('musa:0')`` works after torch_musa is imported.
-
-    We monkey-patch ``__post_init__`` to intercept the ``'musa'`` case and
-    substitute ``torch.device('musa:0')`` before the original logic runs.
-
-    TODO: remove once vllm DeviceConfig handles non-CUDA device strings
-    natively, or torch_musa registers 'musa' as a valid bare device string.
+    The loader enters this device as a context when constructing parameters.
+    An indexed device here would put every TP worker's weights on rank zero.
+    Workers replace it with their explicit rank-local device after set_device.
     """
     try:
         import torch
@@ -485,18 +477,15 @@ def patch_device_config_for_musa():
         _orig_post_init = _dc_mod.DeviceConfig.__post_init__
 
         def _patched_post_init(self):
-            # Intercept before torch.device("musa") is called (invalid).
             if getattr(self, "device", None) == "musa":
                 self.device_type = "musa"
-                self.device = torch.device("musa:0")
+                self.device = torch.device("musa")
                 return
             _orig_post_init(self)
 
         _dc_mod.DeviceConfig.__post_init__ = _patched_post_init
         _dc_mod.DeviceConfig._musa_post_init_patched = True
-        logger.info(
-            "Patched DeviceConfig.__post_init__ for MUSA "
-            "(torch.device('musa:0') workaround)")
+        logger.info("Patched DeviceConfig.__post_init__ for index-free MUSA device")
     except Exception as exc:
         logger.warning(
             "patch_device_config_for_musa failed: %s", exc)
