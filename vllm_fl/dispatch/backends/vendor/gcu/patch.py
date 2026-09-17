@@ -12,6 +12,8 @@ from .impl.chunk_delta_h import apply_chunk_delta_h_gcu_patch
 from .impl.fused_recurrent_packed_decode import (
     apply_fused_recurrent_packed_decode_gcu_patch,
 )
+from .impl.mrope import apply_mrope_gcu_patch
+from .impl.normalization import apply_rms_norm_gcu_patch
 from .impl.moe_align_block_size import apply_moe_align_block_size_gcu_patch
 from .impl.moe_sum import apply_moe_sum_gcu_patch
 from .impl.per_token_group_quant_fp8 import (
@@ -114,6 +116,8 @@ def apply_gcu_patches() -> None:
     apply_chunk_delta_h_gcu_patch()
     apply_fused_recurrent_packed_decode_gcu_patch()
     apply_moe_activation_gcu_patch()
+    apply_rms_norm_gcu_patch()
+    apply_mrope_gcu_patch()
     apply_moe_align_block_size_gcu_patch()
     apply_moe_sum_gcu_patch()
     apply_per_token_group_quant_fp8_gcu_patch()
