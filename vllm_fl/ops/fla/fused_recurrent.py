@@ -9,7 +9,7 @@ from vllm_fl.utils import use_flaggems_op
 if use_flaggems_op("fused_recurrent_gated_delta_rule_fwd"):
     from flag_gems.fused.FLA import fused_recurrent_gated_delta_rule_fwd
 else:
-    from vllm.model_executor.layers.fla.ops.fused_recurrent import (
+    from vllm.third_party.flash_linear_attention.ops.fused_recurrent import (
         fused_recurrent_gated_delta_rule_fwd,
     )
 

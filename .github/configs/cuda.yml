@@ -18,7 +18,7 @@
 platform: cuda
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-cuda-ci
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
 
 # Runner labels for this hardware (self-hosted)
 runner_labels:
@@ -43,10 +43,16 @@ container_volumes:
   - /data:/data
 
 # Container options (hardware-specific settings)
+# FlagTune has no H20 candidates for some Qwen3.6 matmul shapes yet. Keep
+# FlagGems enabled and fall back to its default Triton configs.
 container_options: >-
   --privileged
   --gpus all
   --ipc=host
   --hostname vllm-plugin-fl
   --user root
+  --env VLLM_PLUGINS=fl
+  --env USE_FLAGGEMS=1
+  --env GEMS_VENDOR=nvidia
+  --env USE_FLAGTUNE=0
   --ulimit nofile=65535:65535

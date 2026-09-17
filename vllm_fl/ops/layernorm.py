@@ -26,5 +26,12 @@ class RMSNormFL(RMSNorm):
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         return _rms_norm(self, x, residual)
 
+    def forward_cuda(
+        self,
+        x: torch.Tensor,
+        residual: Optional[torch.Tensor] = None,
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        return self.forward_oot(x, residual)
+
 
 __all__ = ["RMSNormFL"]

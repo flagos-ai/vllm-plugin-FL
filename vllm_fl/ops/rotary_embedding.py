@@ -17,10 +17,16 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         base: float,
         is_neox_style: bool,
         dtype: torch.dtype,
+        init_cache: bool = True,
     ) -> None:
         super().__init__(
-            head_size, rotary_dim, max_position_embeddings, base,
-            is_neox_style, dtype
+            head_size,
+            rotary_dim,
+            max_position_embeddings,
+            base,
+            is_neox_style,
+            dtype,
+            init_cache,
         )
 
     def forward_oot(
@@ -29,6 +35,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query: torch.Tensor,
         key: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # The FL rotary backends require both query and key.  vLLM 0.28 also
+        # calls RotaryEmbedding with key=None for cross-layer KV sharing, so
+        # preserve the upstream native path for that supported input.
+        if key is None:
+            return super().forward_native(positions, query, key)
+
         self.cos_sin_cache: torch.Tensor = self.cos_sin_cache.to(positions.device)
         positions = positions.flatten()
         num_tokens = positions.shape[0]
@@ -65,6 +77,14 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             key = k_embed.reshape(key_shape)
 
         return query, key
+
+    def forward_cuda(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        return self.forward_oot(positions, query, key)
 
 
 __all__ = ["RotaryEmbeddingFL"]

@@ -13,10 +13,14 @@ import torch
 class TestRMSNormFL:
     """Test RMSNormFL class behavior."""
 
-    def __init__(self):
+    @pytest.fixture(autouse=True)
+    def current_vllm_config(self):
         from vllm.config import VllmConfig, set_current_vllm_config
 
-        set_current_vllm_config(VllmConfig())
+        config = VllmConfig()
+        config.compilation_config.custom_ops = ["all"]
+        with set_current_vllm_config(config):
+            yield
 
     @pytest.fixture
     def mock_cached_op(self):
@@ -73,3 +77,25 @@ class TestRMSNormFL:
         assert call_args[0][0] is layer  # self
         assert torch.equal(call_args[0][1], x)
         assert torch.equal(call_args[0][2], residual)
+
+    def test_cuda_layer_call_dispatches_to_cached_op(self, mock_cached_op):
+        """The normal ``layer(...)`` path must use FL dispatch on CUDA."""
+        from vllm.platforms import current_platform
+
+        from vllm_fl.ops.layernorm import RMSNormFL
+
+        if not current_platform.is_cuda():
+            pytest.skip("CUDA dispatch test requires the NVIDIA test environment")
+
+        hidden_size = 128
+        expected = torch.randn(2, hidden_size)
+        mock_cached_op.return_value = expected
+
+        layer = RMSNormFL(hidden_size=hidden_size)
+        x = torch.randn(2, hidden_size)
+
+        assert layer._forward_method.__func__ is RMSNormFL.forward_cuda
+        result = layer(x)
+
+        mock_cached_op.assert_called_once_with(layer, x, None)
+        assert result is expected

@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
 from types import SimpleNamespace
 
 import vllm.platforms as platforms
@@ -36,7 +35,7 @@ def _install_with_fake_modules(monkeypatch, upstream_selector, upstream_builder)
     return oracle, scheme
 
 
-def test_w8a8_moe_builder_preserves_dynamic_per_token_config(monkeypatch):
+def test_w8a8_moe_installer_preserves_upstream_config_builder(monkeypatch):
     def upstream_selector(*args, **kwargs):
         return "upstream"
 
@@ -50,41 +49,7 @@ def test_w8a8_moe_builder_preserves_dynamic_per_token_config(monkeypatch):
     )
     assert moe_adapter.install_fl_w8a8_moe_selector()
     assert oracle.select_int8_moe_backend is scheme.select_int8_moe_backend
-
-    config_module = SimpleNamespace(
-        int8_w8a8_moe_quant_config=lambda **kwargs: kwargs,
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "vllm.model_executor.layers.fused_moe.config",
-        config_module,
-    )
-    dynamic_config = scheme.make_int8_moe_quant_config(
-        w1_scale="w1",
-        w2_scale="w2",
-        a1_scale=None,
-        a2_scale=None,
-        w1_bias="b1",
-        w2_bias="b2",
-        per_act_token_quant=True,
-    )
-    assert dynamic_config == {
-        "w1_scale": "w1",
-        "w2_scale": "w2",
-        "a1_scale": None,
-        "a2_scale": None,
-        "w1_bias": "b1",
-        "w2_bias": "b2",
-        "per_act_token_quant": True,
-    }
-    assert (
-        scheme.make_int8_moe_quant_config(
-            w1_scale="w1",
-            w2_scale="w2",
-            per_act_token_quant=False,
-        )
-        == "upstream-config"
-    )
+    assert scheme.make_int8_moe_quant_config is upstream_builder
 
 
 def test_w8a8_moe_selector_uses_fl_experts_on_non_nvidia_oot(monkeypatch):

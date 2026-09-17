@@ -68,13 +68,9 @@ def topk_softmax_cuda(
 
 
 def moe_sum_cuda(inp, out):
-    from vllm._custom_ops import moe_sum as vllm_moe_sum
+    from vllm._custom_ops import moe_sum
 
-    # The general-plugin adapter routes vllm._custom_ops.moe_sum back through
-    # OpManager. Unwrap it here so selecting/falling back to vendor.cuda does
-    # not recursively re-enter dispatch.
-    native_moe_sum = getattr(vllm_moe_sum, "_vllm_fl_original", vllm_moe_sum)
-    native_moe_sum(inp, out)
+    moe_sum(inp, out)
 
 
 def grouped_topk_cuda(

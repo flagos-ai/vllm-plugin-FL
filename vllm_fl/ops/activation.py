@@ -9,11 +9,14 @@ _gelu_and_mul = CachedOp("gelu_and_mul")
 
 
 class SiluAndMulFL(SiluAndMul):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *, compile_native: bool = True):
+        super().__init__(compile_native=compile_native)
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
         return _silu_and_mul(self, x)
+
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        return self.forward_oot(x)
 
 
 class GeluAndMulFL(GeluAndMul):
@@ -22,6 +25,9 @@ class GeluAndMulFL(GeluAndMul):
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
         return _gelu_and_mul(self, x)
+
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        return self.forward_oot(x)
 
 
 __all__ = ["SiluAndMulFL", "GeluAndMulFL"]
