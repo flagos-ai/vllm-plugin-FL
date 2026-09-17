@@ -12,9 +12,12 @@ from typing import Optional, Union
 
 import torch
 
+from vllm.logger import init_logger
 from vllm_fl.dispatch.backends.base import Backend
 
 from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
+
+logger = init_logger(__name__)
 
 
 # Register attention backends for MACA
@@ -153,9 +156,16 @@ class MacaBackend(Backend):
         register_attention_backends()
 
         if use_mla:
-            if use_sparse:
-                return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
-            return AttentionBackendEnum.FLASHMLA.get_path()
+            logger.info("attention backend metax-vendor dispatch skipped: "
+                        "MLA not supported, falling back to reference (TritonMLA)")
+            raise NotImplementedError(
+                "MetaX vendor backend does not support MLA yet, "
+                "falling back to reference (TritonMLA)."
+            )
+            # --- original metax MLA logic (commented out) ---
+            # if use_sparse:
+            #     return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
+            # return AttentionBackendEnum.FLASHMLA.get_path()
 
         # Default to FLASH_ATTN
         return AttentionBackendEnum.FLASH_ATTN.get_path()
