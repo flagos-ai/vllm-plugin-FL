@@ -45,9 +45,14 @@ def grouped_experts(
         return hidden_states.new_empty((0, w2.shape[1]))
     local_ids = topk_ids.long()
     if expert_map is not None:
+        mapped = torch.index_select(
+            expert_map,
+            0,
+            local_ids.clamp(min=0).flatten(),
+        ).view_as(local_ids)
         local_ids = torch.where(
             local_ids >= 0,
-            expert_map[local_ids.clamp(min=0)],
+            mapped,
             -1,
         )
     local_ids = local_ids.flatten()
