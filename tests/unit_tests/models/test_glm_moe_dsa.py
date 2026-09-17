@@ -193,3 +193,44 @@ def test_glm_wrapper_hides_index_topk_only_while_upstream_builds(monkeypatch):
     assert model_config.hf_text_config is hf_config
     assert hf_config.index_topk == 256
     assert GlmConfig.index_topk == 1024
+
+
+def test_glm_wrapper_skips_only_top_level_modelslim_rotation_weight(monkeypatch):
+    rotation = object()
+    embedding = object()
+    nested_rotation = object()
+    similarly_named = object()
+    unknown_rotation_parameter = object()
+    captured_weights = []
+
+    def fake_upstream_load_weights(self, weights):
+        del self
+        captured_weights.extend(weights)
+        return {"model.embed_tokens.weight"}
+
+    monkeypatch.setattr(
+        VllmGlmMoeDsaForCausalLM,
+        "load_weights",
+        fake_upstream_load_weights,
+    )
+    model = object.__new__(glm_moe_dsa.GlmMoeDsaForCausalLM)
+
+    loaded = model.load_weights(
+        iter(
+            [
+                ("rot.weight", rotation),
+                ("model.embed_tokens.weight", embedding),
+                ("model.layers.78.rot.weight", nested_rotation),
+                ("my_rot.weight", similarly_named),
+                ("rot.bias", unknown_rotation_parameter),
+            ]
+        )
+    )
+
+    assert loaded == {"model.embed_tokens.weight"}
+    assert captured_weights == [
+        ("model.embed_tokens.weight", embedding),
+        ("model.layers.78.rot.weight", nested_rotation),
+        ("my_rot.weight", similarly_named),
+        ("rot.bias", unknown_rotation_parameter),
+    ]
