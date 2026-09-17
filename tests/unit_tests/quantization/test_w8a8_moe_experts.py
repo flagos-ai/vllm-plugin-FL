@@ -168,6 +168,17 @@ def test_small_batch_uses_native_w8a8_fallback(monkeypatch):
     assert torch.count_nonzero(arguments["output"]) > 0
 
 
+def test_local_expert_ids_flattens_lookup_and_preserves_nonlocal_routes():
+    topk_ids = torch.tensor([[2, -1], [0, 1]], dtype=torch.int32)
+    expert_map = torch.tensor([1, -1, 0], dtype=torch.int64)
+
+    local_ids = moe_experts._local_expert_ids(topk_ids, expert_map)
+
+    assert local_ids.shape == topk_ids.shape
+    assert local_ids.dtype == torch.int64
+    assert torch.equal(local_ids, torch.tensor([[0, -1], [1, -1]]))
+
+
 @pytest.mark.parametrize("apply_router_weight_on_input", [False, True])
 def test_ascend_grouped_w8a8_matches_reference(
     monkeypatch,

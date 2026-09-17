@@ -61,7 +61,7 @@ def _native_w8a8_fused_experts(
     """Small-batch W8A8 MoE fallback using torch/torch_npu operations."""
     # The modular prepare stage has already applied input-side router weights.
     output = torch.zeros_like(hidden_states)
-    local_ids = expert_map[topk_ids.long()] if expert_map is not None else topk_ids
+    local_ids = _local_expert_ids(topk_ids, expert_map)
 
     for slot in range(topk_ids.shape[1]):
         slot_ids = local_ids[:, slot].long()
@@ -102,6 +102,21 @@ def _is_ascend_npu_tensor(value: torch.Tensor) -> bool:
     return value.device.type == "npu"
 
 
+def _local_expert_ids(
+    topk_ids: torch.Tensor,
+    expert_map: torch.Tensor | None,
+) -> torch.Tensor:
+    local_ids = topk_ids.long()
+    if expert_map is None:
+        return local_ids
+    mapped = torch.index_select(
+        expert_map,
+        0,
+        local_ids.clamp(min=0).flatten(),
+    ).view_as(local_ids)
+    return torch.where(local_ids >= 0, mapped, -1)
+
+
 def _ascend_w8a8_grouped_experts(
     hidden_states: torch.Tensor,
     w1: torch.Tensor,
@@ -132,14 +147,7 @@ def _ascend_w8a8_grouped_experts(
     if tokens == 0:
         return hidden_states.new_empty((0, w2.shape[1]))
 
-    local_ids = topk_ids.long()
-    if expert_map is not None:
-        local_ids = torch.where(
-            local_ids >= 0,
-            expert_map[local_ids.clamp(min=0)],
-            -1,
-        )
-    local_ids = local_ids.flatten()
+    local_ids = _local_expert_ids(topk_ids, expert_map).flatten()
     routed_rows = torch.where((local_ids >= 0) & (local_ids < w1.shape[0]))[0]
     routed = hidden_states.new_zeros((tokens * top_k, w2.shape[1]))
     if routed_rows.numel() == 0:
