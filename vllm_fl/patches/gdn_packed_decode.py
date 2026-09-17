@@ -11,16 +11,14 @@ import importlib
 import inspect
 import logging
 
-from vllm.model_executor.layers.fla.ops.op import exp
+from vllm.third_party.flash_linear_attention.ops.op import exp
 from vllm.triton_utils import tl, triton
 
 logger = logging.getLogger(__name__)
 
-_TARGET_MODULE = "vllm.model_executor.layers.fla.ops.fused_recurrent"
+_TARGET_MODULE = "vllm.third_party.flash_linear_attention.ops.fused_recurrent"
 _TARGET_NAME = "fused_recurrent_gated_delta_rule_packed_decode_kernel"
-_VULNERABLE_BETA_EXPRESSION = (
-    "tl.sigmoid(b_val).to(b.dtype.element_ty).to(tl.float32)"
-)
+_VULNERABLE_BETA_EXPRESSION = "tl.sigmoid(b_val).to(b.dtype.element_ty).to(tl.float32)"
 
 
 @triton.jit
@@ -49,9 +47,13 @@ def _fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta(
     BV: tl.constexpr,
     SOFTPLUS_THRESHOLD: tl.constexpr,
     USE_QK_L2NORM_IN_KERNEL: tl.constexpr,
+    SPLIT_BATCH_HEAD_GRID: tl.constexpr,
 ):
-    i_v, i_nh = tl.program_id(0), tl.program_id(1)
-    i_n, i_hv = i_nh // HV, i_nh % HV
+    if SPLIT_BATCH_HEAD_GRID:
+        i_v, i_hv, i_n = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+    else:
+        i_v, i_nh = tl.program_id(0), tl.program_id(1)
+        i_n, i_hv = i_nh // HV, i_nh % HV
     i_h = i_hv // (HV // H)
 
     o_k = tl.arange(0, BK)
@@ -63,6 +65,7 @@ def _fused_recurrent_gated_delta_rule_packed_decode_kernel_fp32_beta(
     state_idx = tl.load(ssm_state_indices + i_n * stride_indices_seq).to(tl.int64)
     p_o = o + (i_n * HV + i_hv) * V + o_v
 
+    # Skip if state index is invalid (NULL_BLOCK_ID=0)
     if state_idx <= 0:
         zero = tl.zeros([BV], dtype=tl.float32).to(p_o.dtype.element_ty)
         tl.store(p_o, zero, mask=mask_v)

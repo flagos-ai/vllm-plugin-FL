@@ -10,14 +10,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Route vLLM 0.24 W8A8 INT8 MoE by hardware backend."""
+"""Route vLLM 0.28 W8A8 INT8 MoE by hardware backend."""
 
 from importlib import import_module
 
 from vllm.logger import init_logger
 
 _ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe_v024"
-_CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config_v024"
 _ORACLE_MODULE = "vllm.model_executor.layers.fused_moe.oracle.int8"
 _SCHEME_MODULE = (
     "vllm.model_executor.layers.quantization.compressed_tensors."
@@ -33,53 +32,6 @@ def install_fl_w8a8_moe_selector() -> bool:
     """Prefer FlagGems W8A8 MoE and retain the native NVIDIA fallback."""
     oracle_module = import_module(_ORACLE_MODULE)
     scheme_module = import_module(_SCHEME_MODULE)
-
-    # vLLM 0.24 treats absent checkpoint activation scales as W8A16 before
-    # consulting per_act_token_quant. Dynamic-token W8A8 intentionally stores
-    # no activation scales, so retain the scheme's explicit signal.
-    current_builder = scheme_module.make_int8_moe_quant_config
-    if not getattr(current_builder, _CONFIG_BUILDER_MARKER, False):
-
-        def make_int8_moe_quant_config_fl(
-            w1_scale,
-            w2_scale,
-            a1_scale=None,
-            a2_scale=None,
-            w1_bias=None,
-            w2_bias=None,
-            per_act_token_quant=False,
-        ):
-            if not per_act_token_quant:
-                return current_builder(
-                    w1_scale=w1_scale,
-                    w2_scale=w2_scale,
-                    a1_scale=a1_scale,
-                    a2_scale=a2_scale,
-                    w1_bias=w1_bias,
-                    w2_bias=w2_bias,
-                    per_act_token_quant=False,
-                )
-
-            from vllm.model_executor.layers.fused_moe.config import (
-                int8_w8a8_moe_quant_config,
-            )
-
-            return int8_w8a8_moe_quant_config(
-                w1_scale=w1_scale,
-                w2_scale=w2_scale,
-                a1_scale=a1_scale,
-                a2_scale=a2_scale,
-                w1_bias=w1_bias,
-                w2_bias=w2_bias,
-                per_act_token_quant=True,
-            )
-
-        setattr(
-            make_int8_moe_quant_config_fl,
-            _CONFIG_BUILDER_MARKER,
-            True,
-        )
-        scheme_module.make_int8_moe_quant_config = make_int8_moe_quant_config_fl
 
     current_selector = oracle_module.select_int8_moe_backend
     if getattr(current_selector, _ADAPTER_MARKER, False):

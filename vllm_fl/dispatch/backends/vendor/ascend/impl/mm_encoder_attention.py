@@ -21,42 +21,15 @@ import einops
 import torch
 import torch.nn.functional as F
 import torch_npu
+
 from vllm.model_executor.layers.attention.mm_encoder_attention import MMEncoderAttention
-from vllm.config import MultiModalConfig
 
 MIN_PAD_SIZE = 64  # min_size to pad weight
 MAX_PAD_SIZE = 128  # max_size to pad weight
 
 
 class AscendMMEncoderAttention(MMEncoderAttention):
-
-    def __init__(
-        self,
-        num_heads: int,
-        head_size: int,
-        scale: float | None = None,
-        num_kv_heads: int | None = None,
-        prefix: str = "",
-        multimodal_config: MultiModalConfig | None = None,
-    ) -> None:
-        """
-        Args:
-            num_heads: number of attention heads per partition.
-            head_size: hidden_size per attention head.
-            scale: scale factor.
-            num_kv_heads: number of kv heads.
-            prefix: This has no effect, it is only here to make it easier to
-                    swap between Attention and MMEncoderAttention.
-            multimodal_config: configs for multi-modal.
-        """
-        super().__init__(
-            num_heads=num_heads,
-            head_size=head_size,
-            scale=scale,
-            num_kv_heads=num_kv_heads,
-            prefix=prefix,
-            multimodal_config=multimodal_config,
-        )
+    # Inherit vLLM 0.28's constructor; it reads multimodal config from context.
 
     def reshape_qkv_to_3d(
         self,
@@ -83,29 +56,28 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         return query, key, value
 
     def forward_oot(
-            self,
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            cu_seqlens: torch.Tensor | None = None,
-            max_seqlen: torch.Tensor
-        | None = None,  # Only used for Flash Attention
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        cu_seqlens: torch.Tensor | None = None,
+        max_seqlen: torch.Tensor | None = None,  # Only used for Flash Attention
+        sequence_lengths: torch.Tensor | None = None,  # FlashInfer only
     ):
         bsz, q_len = query.size()[:2]
         kv_len = key.size(1)
         is_reshaped = query.dim() == 4
 
         if cu_seqlens is None:
-            cu_seqlens = torch.arange(0, (bsz + 1) * q_len,
-                                      step=q_len,
-                                      dtype=torch.int32,
-                                      device="cpu")
+            cu_seqlens = torch.arange(
+                0, (bsz + 1) * q_len, step=q_len, dtype=torch.int32, device="cpu"
+            )
         cu_seqlens = torch.diff(cu_seqlens).to("cpu")
 
         # q, k, v: [b, s, head, head_dim] -> [b * s, head, head_dim]
         q, k, v = self.reshape_qkv_to_3d(query, key, value, bsz, q_len, kv_len)
 
-        enable_pad = (self.head_size > MIN_PAD_SIZE and self.head_size < MAX_PAD_SIZE)
+        enable_pad = self.head_size > MIN_PAD_SIZE and self.head_size < MAX_PAD_SIZE
 
         if enable_pad:
             origin_shape = q.shape[-1]
@@ -123,9 +95,9 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             key=k,
             value=v,
             seq_len=cu_seqlens,
-            scale_value=self.head_size**-0.5,
+            scale_value=self.scale,
             num_heads=self.num_heads,
-            num_kv_heads=self.num_kv_heads,
+            num_kv_heads=self.num_heads,  # reshape_qkv_to_3d expands GQA heads
             out=context_layer,
         )
 
@@ -133,11 +105,11 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             context_layer = context_layer[..., :origin_shape]
 
         if is_reshaped:
-            context_layer = einops.rearrange(context_layer,
-                                             "(b s) h d -> b s h d",
-                                             b=bsz).contiguous()
+            context_layer = einops.rearrange(
+                context_layer, "(b s) h d -> b s h d", b=bsz
+            ).contiguous()
         else:
-            context_layer = einops.rearrange(context_layer,
-                                             "(b s) h d -> b s (h d)",
-                                             b=bsz).contiguous()
+            context_layer = einops.rearrange(
+                context_layer, "(b s) h d -> b s (h d)", b=bsz
+            ).contiguous()
         return context_layer

@@ -16,7 +16,7 @@ name: Code Scan
 
 on:
   pull_request:
-    branches: [main, devops]
+    branches: [main, devops, 0.4.0-dev]
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - "**.md"

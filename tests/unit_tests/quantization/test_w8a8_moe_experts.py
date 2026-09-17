@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -123,6 +124,7 @@ def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch)
         "_flaggems_fused_experts_impl",
         fake_fused_experts_impl,
     )
+    monkeypatch.setattr(moe_experts, "_NATIVE_MOE_MAX_TOKENS", 0)
     quant_config = _quant_config()
     instance = SimpleNamespace(quant_config=quant_config)
     arguments = _apply_arguments()
@@ -147,6 +149,267 @@ def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch)
         arguments["output"],
         torch.full_like(arguments["output"], 3),
     )
+
+
+def test_small_batch_uses_native_w8a8_fallback(monkeypatch):
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("small batch must bypass FlagGems Triton"),
+    )
+    arguments = _apply_arguments()
+    moe_experts.FlagGemsW8A8Experts.apply(
+        SimpleNamespace(quant_config=_quant_config(), _lora_context=None),
+        **arguments,
+    )
+
+    assert arguments["output"].shape == arguments["hidden_states"].shape
+    assert torch.isfinite(arguments["output"]).all()
+    assert torch.count_nonzero(arguments["output"]) > 0
+
+
+def test_local_expert_ids_flattens_lookup_and_preserves_nonlocal_routes():
+    topk_ids = torch.tensor([[2, -1], [0, 1]], dtype=torch.int32)
+    expert_map = torch.tensor([1, -1, 0], dtype=torch.int64)
+
+    local_ids = moe_experts._local_expert_ids(topk_ids, expert_map)
+
+    assert local_ids.shape == topk_ids.shape
+    assert local_ids.dtype == torch.int64
+    assert torch.equal(local_ids, torch.tensor([[0, -1], [1, -1]]))
+
+
+@pytest.mark.parametrize("apply_router_weight_on_input", [False, True])
+def test_ascend_grouped_w8a8_matches_reference(
+    monkeypatch,
+    apply_router_weight_on_input,
+):
+    calls = []
+
+    def fake_dynamic_quant(value):
+        scale = value.float().abs().amax(dim=-1) / 127.0
+        safe_scale = torch.where(scale > 0, scale, torch.ones_like(scale))
+        quantized = torch.round(value.float() / safe_scale[:, None]).to(torch.int8)
+        return quantized, scale
+
+    def fake_grouped_matmul(
+        *,
+        x,
+        weight,
+        bias,
+        scale,
+        per_token_scale,
+        group_list,
+        output_dtype,
+        split_item,
+        group_type,
+        group_list_type,
+        **kwargs,
+    ):
+        del kwargs
+        counts = group_list.cpu()
+        expert_ids = torch.repeat_interleave(torch.arange(len(counts)), counts)
+        rows = []
+        for row, expert_id in enumerate(expert_ids.tolist()):
+            accumulator = x[0][row].float() @ weight[0][expert_id].float()
+            if bias is not None:
+                accumulator = accumulator + bias[0][expert_id].float()
+            rows.append(
+                accumulator
+                * scale[0][expert_id].float()
+                * per_token_scale[0][row].float()
+            )
+        calls.append(
+            {
+                "weight_shape": tuple(weight[0].shape),
+                "scale_shape": tuple(scale[0].shape),
+                "scale_dtype": scale[0].dtype,
+                "counts": counts.tolist(),
+                "split_item": split_item,
+                "group_type": group_type,
+                "group_list_type": group_list_type,
+                "per_token_scale_shape": tuple(per_token_scale[0].shape),
+            }
+        )
+        return [torch.stack(rows).to(output_dtype)]
+
+    fake_torch_npu = SimpleNamespace(
+        npu_dynamic_quant=fake_dynamic_quant,
+        npu_grouped_matmul=fake_grouped_matmul,
+        npu_swiglu=lambda value, dim=-1: (
+            torch.nn.functional.silu(value.chunk(2, dim=dim)[0])
+            * value.chunk(2, dim=dim)[1]
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "torch_npu", fake_torch_npu)
+
+    hidden_states = torch.tensor(
+        [[0.5, -1.0, 0.25, 0.75], [-0.5, 0.5, 1.0, -0.25]],
+        dtype=torch.bfloat16,
+    )
+    w1 = torch.tensor(
+        [
+            [[1, 0, -1, 2]] * 8,
+            [[-1, 2, 0, 1]] * 8,
+        ],
+        dtype=torch.int8,
+    )
+    w2 = torch.tensor(
+        [
+            [[1, -1, 2, 0]] * 4,
+            [[2, 0, -1, 1]] * 4,
+        ],
+        dtype=torch.int8,
+    )
+    if apply_router_weight_on_input:
+        topk_ids = torch.tensor([[0], [1]], dtype=torch.int64)
+        topk_weights = torch.tensor([[0.75], [0.6]])
+        # vLLM's modular prepare stage applies input-side router weights.
+        hidden_states = hidden_states * topk_weights.to(hidden_states.dtype)
+    else:
+        topk_ids = torch.tensor([[0, 1], [1, 0]], dtype=torch.int64)
+        topk_weights = torch.tensor([[0.75, 0.25], [0.6, 0.4]])
+    w1_scale = torch.full((2, 8, 1), 0.125, dtype=torch.float32)
+    w2_scale = torch.full((2, 4, 1), 0.25, dtype=torch.float32)
+
+    actual = moe_experts._ascend_w8a8_grouped_experts(
+        hidden_states,
+        w1,
+        w2,
+        topk_weights,
+        topk_ids,
+        w1_scale,
+        w2_scale,
+        None,
+        None,
+        None,
+        apply_router_weight_on_input,
+    )
+    expected = moe_experts._native_w8a8_fused_experts(
+        hidden_states,
+        w1,
+        w2,
+        topk_weights,
+        topk_ids,
+        w1_scale,
+        w2_scale,
+        None,
+        None,
+        None,
+        apply_router_weight_on_input,
+    )
+
+    torch.testing.assert_close(actual.float(), expected.float(), rtol=0.05, atol=0.05)
+    expected_counts = torch.bincount(topk_ids.flatten(), minlength=2).tolist()
+    routed_rows = topk_ids.numel()
+    assert calls == [
+        {
+            "weight_shape": (2, 4, 8),
+            "scale_shape": (2, 8),
+            "scale_dtype": torch.bfloat16,
+            "counts": expected_counts,
+            "split_item": 2,
+            "group_type": 0,
+            "group_list_type": 1,
+            "per_token_scale_shape": (routed_rows,),
+        },
+        {
+            "weight_shape": (2, 4, 4),
+            "scale_shape": (2, 4),
+            "scale_dtype": torch.bfloat16,
+            "counts": expected_counts,
+            "split_item": 2,
+            "group_type": 0,
+            "group_list_type": 1,
+            "per_token_scale_shape": (routed_rows,),
+        },
+    ]
+
+
+def test_ascend_grouped_w8a8_skips_nonlocal_routes(monkeypatch):
+    fail = lambda *args, **kwargs: pytest.fail("empty local routes must skip NPU ops")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_npu",
+        SimpleNamespace(
+            npu_dynamic_quant=fail,
+            npu_grouped_matmul=fail,
+            npu_swiglu=fail,
+        ),
+    )
+    arguments = _apply_arguments()
+
+    result = moe_experts._ascend_w8a8_grouped_experts(
+        arguments["hidden_states"],
+        arguments["w1"],
+        arguments["w2"],
+        arguments["topk_weights"],
+        arguments["topk_ids"],
+        _quant_config().w1_scale,
+        _quant_config().w2_scale,
+        None,
+        None,
+        torch.full((2,), -1, dtype=torch.int64),
+        False,
+    )
+
+    assert torch.equal(result, torch.zeros_like(arguments["hidden_states"]))
+
+
+def test_npu_w8a8_experts_bypass_flaggems_triton(monkeypatch):
+    monkeypatch.setattr(moe_experts, "_is_ascend_npu_tensor", lambda value: True)
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("Ascend must bypass FlagGems Triton MoE"),
+    )
+    monkeypatch.setattr(
+        moe_experts,
+        "_native_w8a8_fused_experts",
+        lambda **kwargs: pytest.fail("Ascend must use native grouped INT8 MoE"),
+    )
+    monkeypatch.setattr(
+        moe_experts,
+        "_ascend_w8a8_grouped_experts",
+        lambda **kwargs: torch.full_like(kwargs["hidden_states"], 4),
+    )
+    arguments = _apply_arguments()
+
+    moe_experts.FlagGemsW8A8Experts.apply(
+        SimpleNamespace(quant_config=_quant_config(), _lora_context=None),
+        **arguments,
+    )
+
+    assert torch.equal(arguments["output"], torch.full_like(arguments["output"], 4))
+
+
+def test_npu_w8a8_experts_keep_float_bias_on_reference_path(monkeypatch):
+    monkeypatch.setattr(moe_experts, "_is_ascend_npu_tensor", lambda value: True)
+    monkeypatch.setattr(
+        moe_experts,
+        "_ascend_w8a8_grouped_experts",
+        lambda **kwargs: pytest.fail("quantized GMM requires int32 bias"),
+    )
+    monkeypatch.setattr(
+        moe_experts,
+        "_flaggems_fused_experts_impl",
+        lambda **kwargs: pytest.fail("Ascend must bypass FlagGems Triton MoE"),
+    )
+    monkeypatch.setattr(
+        moe_experts,
+        "_native_w8a8_fused_experts",
+        lambda **kwargs: torch.full_like(kwargs["hidden_states"], 5),
+    )
+    quant_config = _quant_config()
+    quant_config.w1_bias = torch.zeros((2, 8), dtype=torch.float32)
+    arguments = _apply_arguments()
+
+    moe_experts.FlagGemsW8A8Experts.apply(
+        SimpleNamespace(quant_config=quant_config, _lora_context=None),
+        **arguments,
+    )
+
+    assert torch.equal(arguments["output"], torch.full_like(arguments["output"], 5))
 
 
 def test_functional_experts_rejects_prequantized_input(monkeypatch):

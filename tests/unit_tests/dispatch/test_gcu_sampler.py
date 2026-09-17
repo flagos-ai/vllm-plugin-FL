@@ -1,9 +1,15 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
+import os
 import sys
 from types import SimpleNamespace
 
+import pytest
 import torch
+
+_test_platform = os.environ.get("FL_TEST_PLATFORM")
+if _test_platform and _test_platform != "enflame":
+    pytest.skip("GCU-specific unit tests only run on Enflame", allow_module_level=True)
 
 from vllm.v1.sample.ops import topk_topp_sampler
 
