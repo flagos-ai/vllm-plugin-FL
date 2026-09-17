@@ -6,8 +6,33 @@ import os
 import sys
 
 
+def _get_explicit_vendor_for_triton_compat():
+    """Read an early vendor selection without importing vLLM or FlagGems."""
+    platform = os.environ.get("VLLM_FL_PLATFORM", "").strip().lower()
+    # ``cuda`` is a device type shared by NVIDIA and Kunlunxin, so it cannot
+    # decide whether the Kunlunxin compatibility patch is needed.
+    if platform and platform not in {"auto", "cuda"}:
+        return platform
+
+    for env_name in ("VLLM_VENDOR", "GEMS_VENDOR"):
+        vendor = os.environ.get(env_name, "").strip().lower()
+        if vendor:
+            return vendor
+    return None
+
+
+def _should_patch_flag_gems_triton_import_compat():
+    """Keep auto detection, but respect an explicitly selected vendor."""
+    vendor = _get_explicit_vendor_for_triton_compat()
+    return vendor is None or vendor == "kunlunxin"
+
+
 def _patch_flag_gems_triton_import_compat():
     """Allow newer FlagGems to load with the Kunlunxin Triton runtime.
+
+    The hook runs before vLLM platform registration, so it must only use
+    environment variables for early vendor selection.  When no vendor is
+    explicit, retain the existing probe for Kunlunxin auto detection.
 
     FlagGems 5.4 registers ``_dirichlet_grad`` at import time and asks Triton
     to resolve ``tl.map_elementwise`` while computing the JIT cache key.  The
@@ -16,6 +41,9 @@ def _patch_flag_gems_triton_import_compat():
     only an import-time sentinel.  If it is ever invoked, fail explicitly
     instead of silently producing an incorrect result.
     """
+    if not _should_patch_flag_gems_triton_import_compat():
+        return
+
     try:
         import triton
         import triton.language as tl
