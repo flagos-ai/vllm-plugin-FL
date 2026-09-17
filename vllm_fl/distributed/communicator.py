@@ -1,16 +1,24 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/distributed/device_communicators/cuda_communicator.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/distributed/device_communicators/cuda_communicator.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
+
 import torch
-import torch.distributed as dist
-from torch.distributed import ProcessGroup, ReduceOp
-from vllm.distributed.device_communicators.base_device_communicator import \
-    DeviceCommunicatorBase
+from torch.distributed import ProcessGroup
+
+from vllm.distributed.device_communicators.base_device_communicator import (
+    DeviceCommunicatorBase,
+)
+from vllm.distributed.utils import StatelessProcessGroup
+from vllm.logger import init_logger
+
 from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
+
+logger = init_logger(__name__)
+
 
 class CommunicatorFL(DeviceCommunicatorBase):
     def __init__(
@@ -19,8 +27,24 @@ class CommunicatorFL(DeviceCommunicatorBase):
         device: torch.device | None = None,
         device_group: ProcessGroup | None = None,
         unique_name: str = "",
+        global_ranks: list[int] | None = None,
+        global_world_size: int | None = None,
+        tcp_store_group: StatelessProcessGroup | None = None,
+        use_all2all: bool = False,
     ):
-        super().__init__(cpu_group, device, device_group, unique_name)
+        # Call the common base directly. NVIDIA adds a CudaCommunicator-compatible
+        # bridge for vLLM graph capture, but must not initialize PyNCCL as well as
+        # FlagCX through cooperative multiple inheritance.
+        DeviceCommunicatorBase.__init__(
+            self,
+            cpu_group,
+            device,
+            device_group,
+            unique_name,
+            global_ranks,
+            global_world_size,
+            use_all2all=use_all2all,
+        )
         self.pyflagcx_comm: Optional[PyFlagcxCommunicator] = None
         if self.world_size > 1:
             self.pyflagcx_comm = PyFlagcxCommunicator(
@@ -29,10 +53,92 @@ class CommunicatorFL(DeviceCommunicatorBase):
             )
 
         if self.use_all2all:
-            from .all2all import NaiveAll2AllManager
-            ### naive all2all is device communicator all2all
-            self.all2all_manager = NaiveAll2AllManager(self.cpu_group)
-            logger.info("Using naive all2all manager.")
+            self._init_all2all_manager(tcp_store_group)
+
+    def _init_all2all_manager(
+        self, tcp_store_group: StatelessProcessGroup | None
+    ) -> None:
+        """Initialize the vLLM 0.28 manager selected by ParallelConfig."""
+        if self.all2all_backend in ("naive", "allgather_reducescatter"):
+            from vllm.distributed.device_communicators.all2all import (
+                AgRsAll2AllManager,
+            )
+
+            self.all2all_manager = AgRsAll2AllManager(self.cpu_group, tcp_store_group)
+        elif self.all2all_backend == "deepep_high_throughput":
+            from vllm.distributed.device_communicators.all2all import (
+                DeepEPHTAll2AllManager,
+            )
+
+            self.all2all_manager = DeepEPHTAll2AllManager(
+                self.cpu_group, tcp_store_group
+            )
+        elif self.all2all_backend == "deepep_low_latency":
+            from vllm.distributed.device_communicators.all2all import (
+                DeepEPLLAll2AllManager,
+            )
+
+            self.all2all_manager = DeepEPLLAll2AllManager(
+                self.cpu_group, tcp_store_group
+            )
+        elif self.all2all_backend in (
+            "mori_high_throughput",
+            "mori_low_latency",
+        ):
+            from vllm.distributed.device_communicators.all2all import (
+                MoriAll2AllManager,
+            )
+
+            self.all2all_manager = MoriAll2AllManager(
+                self.cpu_group, self.all2all_backend
+            )
+        elif self.all2all_backend == "deepep_v2":
+            from vllm.distributed.device_communicators.all2all import (
+                DeepEPV2All2AllManager,
+            )
+
+            self.all2all_manager = DeepEPV2All2AllManager(
+                self.cpu_group,
+                tcp_store_group,
+                device_group=self.device_group,
+            )
+        elif self.all2all_backend == "nixl_ep":
+            from vllm.distributed.device_communicators.all2all import (
+                NixlEPAll2AllManager,
+            )
+
+            self.all2all_manager = NixlEPAll2AllManager(self.cpu_group, tcp_store_group)
+        elif self.all2all_backend in (
+            "flashinfer_all2allv",
+            "flashinfer_nvlink_two_sided",
+        ):
+            if self.all2all_backend == "flashinfer_all2allv":
+                logger.warning_once(
+                    "'flashinfer_all2allv' is deprecated and has been renamed "
+                    "to 'flashinfer_nvlink_two_sided'. It will be removed in "
+                    "a future release."
+                )
+            from vllm.distributed.device_communicators.all2all import (
+                FlashInferNVLinkTwoSidedManager,
+            )
+
+            self.all2all_manager = FlashInferNVLinkTwoSidedManager(
+                self.cpu_group, tcp_store_group
+            )
+        elif self.all2all_backend == "flashinfer_nvlink_one_sided":
+            from vllm.distributed.device_communicators.all2all import (
+                FlashInferNVLinkOneSidedManager,
+            )
+
+            self.all2all_manager = FlashInferNVLinkOneSidedManager(self.cpu_group)
+        else:
+            raise ValueError(f"Unknown all2all backend: {self.all2all_backend}")
+
+        logger.info_once(
+            "Using %s all2all manager.",
+            self.all2all_manager.__class__.__name__,
+            scope="global",
+        )
 
     def all_reduce(self, input_):
         assert self.pyflagcx_comm is not None
@@ -45,6 +151,30 @@ class CommunicatorFL(DeviceCommunicatorBase):
             out = input_.clone()
             torch.distributed.all_reduce(out, group=self.device_group)
         return out
+
+    def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        if self.world_size == 1:
+            return input_
+        if dim < 0:
+            dim += input_.dim()
+
+        pyflagcx_comm = self.pyflagcx_comm
+        if pyflagcx_comm is None or pyflagcx_comm.disabled:
+            return DeviceCommunicatorBase.all_gather(self, input_, dim)
+
+        input_size = input_.size()
+        output_size = (input_size[0] * self.world_size,) + input_size[1:]
+        output_tensor = torch.empty(
+            output_size, dtype=input_.dtype, device=input_.device
+        )
+        pyflagcx_comm.all_gather(output_tensor, input_.contiguous())
+        output_tensor = output_tensor.reshape((self.world_size,) + input_size)
+        output_tensor = output_tensor.movedim(0, dim)
+        return output_tensor.reshape(
+            input_size[:dim]
+            + (self.world_size * input_size[dim],)
+            + input_size[dim + 1 :]
+        )
 
     def reduce_scatter(self, input_: torch.Tensor, dim: int = -1):
         world_size = self.world_size
@@ -136,12 +266,30 @@ class CommunicatorFL(DeviceCommunicatorBase):
             torch.distributed.recv(tensor, self.ranks[src], self.device_group)
         return tensor
 
+    def broadcast(self, tensor: torch.Tensor, src: int = 0) -> torch.Tensor:
+        if self.world_size == 1:
+            return tensor
+
+        pyflagcx_comm = self.pyflagcx_comm
+        if pyflagcx_comm is not None and not pyflagcx_comm.disabled:
+            pyflagcx_comm.broadcast(tensor, src)
+            return tensor
+        return DeviceCommunicatorBase.broadcast(self, tensor, src)
+
     def destroy(self):
         if self.pyflagcx_comm is not None:
             self.pyflagcx_comm = None
         if self.all2all_manager is not None:
             self.all2all_manager.destroy()
             self.all2all_manager = None
+
+    def checkpoint_prepare(self) -> None:
+        if self.all2all_manager is not None:
+            self.all2all_manager.checkpoint_prepare()
+
+    def checkpoint_restore(self) -> None:
+        if self.all2all_manager is not None:
+            self.all2all_manager.checkpoint_restore()
 
     def all_gatherv(self,
                     input_: Union[torch.Tensor, list[torch.Tensor]],
@@ -189,21 +337,40 @@ class CommunicatorFL(DeviceCommunicatorBase):
 
         return output_list
 
-    def dispatch(
+    def dispatch_router_logits(
         self,
         hidden_states: torch.Tensor,
         router_logits: torch.Tensor,
-        is_sequence_parallel: bool = False
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        is_sequence_parallel: bool = False,
+        extra_tensors: list[torch.Tensor] | None = None,
+    ):
         assert self.all2all_manager is not None
-        hidden_states, router_logits = self.all2all_manager.dispatch(
-            hidden_states, router_logits, is_sequence_parallel)
-        return hidden_states, router_logits
+        return self.all2all_manager.dispatch_router_logits(
+            hidden_states,
+            router_logits,
+            is_sequence_parallel,
+            extra_tensors,
+        )
 
-    def combine(self,
-                hidden_states: torch.Tensor,
-                is_sequence_parallel: bool = False) -> torch.Tensor:
+    def dispatch(
+        self,
+        hidden_states: torch.Tensor,
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+        is_sequence_parallel: bool = False,
+        extra_tensors: list[torch.Tensor] | None = None,
+    ):
         assert self.all2all_manager is not None
-        hidden_states = self.all2all_manager.combine(hidden_states,
-                                                     is_sequence_parallel)
-        return hidden_states
+        return self.all2all_manager.dispatch(
+            hidden_states,
+            topk_weights,
+            topk_ids,
+            is_sequence_parallel,
+            extra_tensors,
+        )
+
+    def combine(
+        self, hidden_states: torch.Tensor, is_sequence_parallel: bool = False
+    ) -> torch.Tensor:
+        assert self.all2all_manager is not None
+        return self.all2all_manager.combine(hidden_states, is_sequence_parallel)

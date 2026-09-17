@@ -9,8 +9,8 @@ _gelu_and_mul = CachedOp("gelu_and_mul")
 
 
 class SiluAndMulFL(SiluAndMul):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *, compile_native: bool = True):
+        super().__init__(compile_native=compile_native)
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
         return _silu_and_mul(self, x)

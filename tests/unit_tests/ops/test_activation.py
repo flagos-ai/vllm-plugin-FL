@@ -10,6 +10,33 @@ import pytest
 import torch
 
 
+def test_upstream_factory_forwards_compile_native_false(monkeypatch):
+    """OOT replacement must preserve the vLLM 0.28 factory contract."""
+    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.model_executor.custom_op import CustomOp, op_registry_oot
+    from vllm.model_executor.layers.activation import get_act_and_mul_fn
+
+    from vllm_fl.ops.activation import SiluAndMulFL
+
+    config = VllmConfig()
+    config.compilation_config.custom_ops = ["none"]
+    monkeypatch.setitem(op_registry_oot, "SiluAndMul", SiluAndMulFL)
+
+    with (
+        set_current_vllm_config(config),
+        patch.object(
+            CustomOp,
+            "maybe_compile",
+            autospec=True,
+            side_effect=lambda _self, fn, *, enable: fn,
+        ) as maybe_compile,
+    ):
+        layer = get_act_and_mul_fn("silu", compile_native=False)
+
+    assert type(layer) is SiluAndMulFL
+    assert maybe_compile.call_args.kwargs["enable"] is False
+
+
 @pytest.fixture
 def cuda_vllm_config():
     from vllm.config import VllmConfig, set_current_vllm_config

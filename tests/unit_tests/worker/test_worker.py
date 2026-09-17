@@ -180,7 +180,7 @@ def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
         assert parallel_config.disable_custom_all_reduce is True
         assert (
             NvidiaPlatformFL.get_device_communicator_cls()
-            == "vllm_fl.distributed.communicator.CommunicatorFL"
+            == "vllm_fl.distributed.nvidia_communicator.NvidiaCommunicatorFL"
         )
         assert NvidiaPlatformFL.use_custom_allreduce() is False
 

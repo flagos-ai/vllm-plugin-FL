@@ -41,7 +41,9 @@ class NvidiaPlatformFL(CudaPlatform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls._refresh_dist_backend():
-            return "vllm_fl.distributed.communicator.CommunicatorFL"
+            return (
+                "vllm_fl.distributed.nvidia_communicator.NvidiaCommunicatorFL"
+            )
         return super().get_device_communicator_cls()
 
     @classmethod
