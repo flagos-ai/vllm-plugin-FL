@@ -130,7 +130,7 @@ def register_quant_linear():
     # vllm.model_executor.kernels.linear triggers cutlass_scaled_mm_supports_fp8
     # at module level, which requires torch.ops._C — not available on these
     # platforms.
-    if current_platform.device_type in {"musa", "txda", "gcu"}:
+    if current_platform.device_type in {"musa", "txda"}:
         return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
     add_oot_quant_kernel()

@@ -98,7 +98,7 @@ class PlatformFL(Platform):
             return True
         if self.vendor_name == "hygon":
             return False
-        if self.vendor_name == "gcu":
+        if self.vendor_name == "enflame":
             return True
         return self.device_type == "cuda"
 
@@ -315,8 +315,24 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
 
-        if cls.vendor_name == "gcu":
+        if cls.vendor_name == "enflame":
+            from vllm.config import CompilationMode
             parallel_config.disable_custom_all_reduce = True
+            if compilation_config.mode != CompilationMode.NONE:
+                logger.warning(f'Override CompilationMode from {compilation_config.mode} to {CompilationMode.NONE}!')
+                compilation_config.mode = CompilationMode.NONE
+            # mode=NONE 不能带 piecewise cudagraph（vllm/config/vllm.py:1209 会 assert）。
+            # 平台钩子跑在 vllm.py:974 的自动兼容降级之后，这里必须自己把
+            # cudagraph_mode 收敛到不含 piecewise 的 FULL，保留整图捕获。
+            if (
+                compilation_config.cudagraph_mode is not None
+                and compilation_config.cudagraph_mode.requires_piecewise_compilation()
+            ):
+                logger.warning(
+                    f'Override cudagraph_mode from {compilation_config.cudagraph_mode} '
+                    f'to {CUDAGraphMode.FULL} (piecewise cudagraph requires VLLM_COMPILE)'
+                )
+                compilation_config.cudagraph_mode = CUDAGraphMode.FULL
 
     @classmethod
     def get_attn_backend_cls(
@@ -413,13 +429,24 @@ class PlatformFL(Platform):
             "mthreads",
             "iluvatar",
             "thead",
-            "gcu",
             "enflame",
             "kunlunxin",
             "sunrise"
         }:
             return True
         return False
+
+    @classmethod
+    def get_compile_backend(cls) -> str:
+        """Return the inductor adaptor class path for the current device."""
+        if cls.vendor_name == "enflame":
+            import vllm.envs as vllm_envs
+            if vllm_envs.VLLM_USE_STANDALONE_COMPILE:
+                return (
+                    "vllm_fl.dispatch.backends.vendor.gcu.compilation.gcu_compiler.GCUInductorStandaloneAdaptor"
+                )
+            return "vllm_fl.dispatch.backends.vendor.gcu.compilation.gcu_compiler.GCUInductorAdaptor"
+        return super().get_compile_backend()
 
     @classmethod
     def insert_blocks_to_device(
@@ -477,7 +504,7 @@ class PlatformFL(Platform):
         if cls.vendor_name == "mthreads":
             return True
 
-        if cls.vendor_name == "gcu":
+        if cls.vendor_name == "enflame":
             cc = cls.get_device_capability()
             return cc is not None and cc.major >= 4
 
