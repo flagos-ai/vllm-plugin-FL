@@ -14,11 +14,8 @@ def _get_explicit_vendor_for_triton_compat():
     if platform and platform not in {"auto", "cuda"}:
         return platform
 
-    for env_name in ("VLLM_VENDOR", "GEMS_VENDOR"):
-        vendor = os.environ.get(env_name, "").strip().lower()
-        if vendor:
-            return vendor
-    return None
+    vendor = os.environ.get("GEMS_VENDOR", "").strip().lower()
+    return vendor or None
 
 
 def _should_patch_flag_gems_triton_import_compat():

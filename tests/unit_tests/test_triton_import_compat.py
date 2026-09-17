@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import vllm_fl
 
-_VENDOR_ENV_VARS = ("VLLM_FL_PLATFORM", "VLLM_VENDOR", "GEMS_VENDOR")
+_VENDOR_ENV_VARS = ("VLLM_FL_PLATFORM", "GEMS_VENDOR")
 
 
 @contextmanager
@@ -43,18 +43,13 @@ class TestFlagGemsTritonImportCompat(unittest.TestCase):
             ):
                 vllm_fl._patch_flag_gems_triton_import_compat()
 
-    def test_explicit_vendor_hints_skip_non_kunlunxin_platforms(self):
-        for env_name in ("VLLM_VENDOR", "GEMS_VENDOR"):
-            with (
-                self.subTest(env_name=env_name),
-                _vendor_env(**{env_name: "ascend"}),
-            ):
-                self.assertFalse(vllm_fl._should_patch_flag_gems_triton_import_compat())
+    def test_explicit_gems_vendor_skips_non_kunlunxin_platforms(self):
+        with _vendor_env(GEMS_VENDOR="ascend"):
+            self.assertFalse(vllm_fl._should_patch_flag_gems_triton_import_compat())
 
-    def test_explicit_platform_has_precedence_over_vendor_hints(self):
+    def test_explicit_platform_has_precedence_over_vendor_hint(self):
         with _vendor_env(
             VLLM_FL_PLATFORM="ascend",
-            VLLM_VENDOR="kunlunxin",
             GEMS_VENDOR="kunlunxin",
         ):
             self.assertFalse(vllm_fl._should_patch_flag_gems_triton_import_compat())
