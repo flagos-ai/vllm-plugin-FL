@@ -59,6 +59,7 @@ def _native_w8a8_fused_experts(
     apply_router_weight_on_input: bool,
 ) -> torch.Tensor:
     """Small-batch W8A8 MoE fallback using torch/torch_npu operations."""
+    # The modular prepare stage has already applied input-side router weights.
     output = torch.zeros_like(hidden_states)
     local_ids = expert_map[topk_ids.long()] if expert_map is not None else topk_ids
 
@@ -71,8 +72,6 @@ def _native_w8a8_fused_experts(
             token_mask = slot_ids == expert_id
             inputs = hidden_states[token_mask]
             route_weights = topk_weights[token_mask, slot].to(inputs.dtype)
-            if apply_router_weight_on_input:
-                inputs = inputs * route_weights.unsqueeze(-1)
 
             inputs = _dynamic_int8_qdq(inputs)
             gate_up_weight = w1[expert_id].to(inputs.dtype) * w1_scale[
@@ -97,6 +96,91 @@ def _native_w8a8_fused_experts(
             output[token_mask] += expert_output
 
     return output
+
+
+def _is_ascend_npu_tensor(value: torch.Tensor) -> bool:
+    return value.device.type == "npu"
+
+
+def _ascend_w8a8_grouped_experts(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    w1_scale: torch.Tensor,
+    w2_scale: torch.Tensor,
+    w1_bias: torch.Tensor | None,
+    w2_bias: torch.Tensor | None,
+    expert_map: torch.Tensor | None,
+    apply_router_weight_on_input: bool,
+) -> torch.Tensor:
+    """Run dynamic W8A8 experts with native Ascend grouped matmuls."""
+    import torch_npu
+
+    if hidden_states.dtype == torch.bfloat16:
+        scale_dtype = torch.bfloat16
+    elif hidden_states.dtype == torch.float16:
+        scale_dtype = torch.float32
+    else:
+        raise TypeError(
+            "Ascend grouped W8A8 experts require bfloat16 or float16 inputs, "
+            f"got {hidden_states.dtype}"
+        )
+
+    tokens, top_k = topk_ids.shape
+    if tokens == 0:
+        return hidden_states.new_empty((0, w2.shape[1]))
+
+    local_ids = topk_ids.long()
+    if expert_map is not None:
+        local_ids = torch.where(
+            local_ids >= 0,
+            expert_map[local_ids.clamp(min=0)],
+            -1,
+        )
+    local_ids = local_ids.flatten()
+    routed_rows = torch.where((local_ids >= 0) & (local_ids < w1.shape[0]))[0]
+    routed = hidden_states.new_zeros((tokens * top_k, w2.shape[1]))
+    if routed_rows.numel() == 0:
+        return routed.view(tokens, top_k, w2.shape[1]).sum(dim=1)
+
+    expert_ids, order = torch.sort(local_ids[routed_rows])
+    routed_rows = routed_rows[order]
+    counts = torch.bincount(expert_ids.long(), minlength=w1.shape[0]).to(torch.int64)
+    # The modular prepare stage has already applied input-side router weights.
+    expanded = hidden_states[routed_rows // top_k].contiguous()
+    route_weights = topk_weights.flatten()[routed_rows].to(hidden_states.dtype)
+
+    def quantized_grouped_matmul(
+        value: torch.Tensor,
+        weight: torch.Tensor,
+        weight_scale: torch.Tensor,
+        bias: torch.Tensor | None,
+    ) -> torch.Tensor:
+        quantized, per_token_scale = torch_npu.npu_dynamic_quant(value)
+        return torch_npu.npu_grouped_matmul(
+            x=[quantized],
+            weight=[weight.transpose(1, 2)],
+            bias=None if bias is None else [bias],
+            scale=[weight_scale.squeeze(-1).to(scale_dtype)],
+            per_token_scale=[per_token_scale],
+            group_list=counts,
+            split_item=2,
+            group_type=0,
+            group_list_type=1,
+            output_dtype=hidden_states.dtype,
+        )[0]
+
+    gate_up = quantized_grouped_matmul(expanded, w1, w1_scale, w1_bias)
+    activated = torch_npu.npu_swiglu(gate_up, dim=-1)
+    expert_output = quantized_grouped_matmul(activated, w2, w2_scale, w2_bias)
+    if not apply_router_weight_on_input:
+        expert_output = (
+            expert_output.float() * route_weights.float().unsqueeze(-1)
+        ).to(hidden_states.dtype)
+    routed[routed_rows] = expert_output
+    return routed.view(tokens, top_k, w2.shape[1]).sum(dim=1)
 
 
 def _validate_w8a8_contract(
@@ -314,7 +398,30 @@ class FlagGemsW8A8Experts(TritonExperts):
             quant_config.w2_bias,
         )
 
-        if hidden_states.shape[0] <= _NATIVE_MOE_MAX_TOKENS:
+        ascend_biases_supported = all(
+            bias is None or bias.dtype == torch.int32
+            for bias in (quant_config.w1_bias, quant_config.w2_bias)
+        )
+        if _is_ascend_npu_tensor(hidden_states) and ascend_biases_supported:
+            # FlagTree cannot lower FlagGems' fused MoE kernel for GLM prefill
+            # batches on 910C. Keep the dynamic INT8 path in native CANN ops.
+            result = _ascend_w8a8_grouped_experts(
+                hidden_states=hidden_states,
+                w1=w1,
+                w2=w2,
+                topk_weights=topk_weights,
+                topk_ids=topk_ids,
+                w1_scale=quant_config.w1_scale,
+                w2_scale=quant_config.w2_scale,
+                w1_bias=quant_config.w1_bias,
+                w2_bias=quant_config.w2_bias,
+                expert_map=expert_map,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+            )
+        elif (
+            _is_ascend_npu_tensor(hidden_states)
+            or hidden_states.shape[0] <= _NATIVE_MOE_MAX_TOKENS
+        ):
             result = _native_w8a8_fused_experts(
                 hidden_states=hidden_states,
                 w1=w1,
