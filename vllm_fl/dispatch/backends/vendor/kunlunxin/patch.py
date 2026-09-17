@@ -390,6 +390,9 @@ def patch_decode_attention():
             if max_window_size > 0:
                 window_left = max_window_size
                 window_right = 0
+
+            # prefill_attention expects the *adjusted* scale (1.0),
+            # not the raw 1/sqrt(head_size) scale used by decode_paged_attention
             alpha = scale * (float(decode_query.shape[2]) ** 0.5)
             xtorch_ops.prefill_attention(
                 decode_query,

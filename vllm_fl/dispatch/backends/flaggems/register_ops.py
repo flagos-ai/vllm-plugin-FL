@@ -121,6 +121,20 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        # reshape_and_cache_flash (KV cache write, flash layout).
+        # Needed on empty vllm wheels (VLLM_TARGET_DEVICE=empty) that ship no
+        # compiled _C_cache_ops kernel; flag_gems provides a pure-Triton impl.
+        OpImpl(
+            op_name="reshape_and_cache_flash",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                backend.reshape_and_cache_flash,
+                _has_flaggems_op("reshape_and_cache_flash"),
+            ),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # fused topk bias
         OpImpl(
             op_name="fused_topk_bias",

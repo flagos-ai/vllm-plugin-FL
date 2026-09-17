@@ -106,10 +106,12 @@ from vllm.platforms import current_platform
 
 
 def _accelerator_synchronize() -> None:
-    """Synchronize the current device, with MUSA compatibility."""
+    """Synchronize the current device, with MUSA and MLU compatibility."""
     if current_platform.device_type == "musa":
         import torch_musa
         torch_musa.synchronize()
+    elif current_platform.device_type == "mlu":
+        torch.mlu.synchronize()
     else:
         torch.accelerator.synchronize()
 

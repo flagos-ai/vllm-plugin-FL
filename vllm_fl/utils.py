@@ -53,6 +53,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "tsingmicro": {"device_type": "txda", "device_name": "txda"},
     # Registered backend: vendor/kunlunxin
     "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
+    # Cambricon MLU (torch_mlu); ops dispatched via flag_gems
+    "cambricon": {"device_type": "mlu", "device_name": "mlu"},
 }
 
 
@@ -85,6 +87,34 @@ def get_device_type(vendor_name: str) -> str:
 def get_device_name(vendor_name: str) -> str:
     """Return the configured device_name for the given vendor."""
     return _get_vendor_device_field(vendor_name, "device_name")
+
+
+def is_mlu_legacy_toolchain() -> bool:
+    """Whether the process runs the cambricon neuware 4.4.3 toolchain.
+
+    neuware 4.4.3 ships triton 3.2.0+mlu1.7.2, the 1.x MLU fork; neuware 4.7.2
+    ships 3.4.0+mlu2.1.1. The cambricon workarounds that key on it (the
+    task_type strip, the compilation downgrade) describe limitations of the
+    1.x fork and of torch 2.7.1+cpu, and must not fire on 4.7.2.
+
+    The local part is only in the distribution metadata: the vendor repack
+    leaves triton/__init__.py's __version__ at the bare upstream number
+    ('3.2.0' on 4.4.3), so reading triton.__version__ never matches.
+    """
+    version = ""
+    try:
+        from importlib.metadata import version as _dist_version
+
+        version = _dist_version("triton")
+    except Exception:
+        try:
+            import triton
+
+            version = getattr(triton, "__version__", "")
+        except Exception:
+            return False
+    local = version.split("+", 1)[1] if "+" in version else ""
+    return local.startswith("mlu1.")
 
 
 def use_flaggems(default: bool = True) -> bool:
