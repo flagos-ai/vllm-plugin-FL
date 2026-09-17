@@ -52,11 +52,15 @@ docker/build.sh \
 ```
 
 The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260911` image. Build and publish a replacement tag
+`ascend-vllm0.28.0-a3-ci-20260917` image. Build and publish a replacement tag
 before updating `ci_image` in `.github/configs/ascend.yml`; changing the
 configuration does not publish it. `.github/scripts/ascend/setup.sh` checks
 the runtime versions and rejects an old image instead of silently testing
 vLLM 0.20.2.
+
+The published tag also contains a non-editable vLLM-Plugin-FL wheel in
+site-packages for direct use. The shared CI still overlays the pull-request
+checkout with an editable install so that each run tests the submitted source.
 
 Install the plugin checkout without replacing the prepared dependencies:
 
@@ -143,10 +147,9 @@ unvalidated.
 
 DeepSeek-V4-Flash ModelSlim checkpoints use the plugin's
 `fl_modelslim_w8a8` quantization config. On 910C, the adapter uses BF16
-short-window attention and a native torch_npu W8A8 MoE path for small
-prefill/decode batches. The validated configuration uses TP8, one output
-projection group per rank, and a maximum sequence length equal to the model's
-128-token sliding window:
+short-window attention and a native torch_npu W8A8 MoE path. The validated
+configuration uses TP8, one output projection group per rank, and a maximum
+sequence length equal to the model's 128-token sliding window:
 
 ```bash
 vllm serve /models/DeepSeek-V4-Flash-w8a8-mtp \
@@ -179,6 +182,7 @@ with the versions above and the default Ascend operator policy:
 | Qwen3.6-35B-A3B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, blue rectangle; text color described ambiguously as white or pale yellow |
 | Qwen3.6-35B-A3B OpenAI API | TP2, BF16, eager, text and generated image | `/v1/models`, Paris, Hello VLM and blue rectangle passed |
 | DeepSeek-V4-Flash W8A8 | TP8, BF16 KV cache, eager, 128 tokens, ModelSlim dynamic INT8 | Loaded 70/70 shards; `The capital of France is` completed as `Paris. The capital` |
+| GLM-5.2 W8A8 | TP16, BF16, eager, 128 tokens, ModelSlim dynamic INT8 | Loaded 182/182 shards; native grouped W8A8 MoE completed short and 27-token prompts |
 | Unit regression | Entire `tests/unit_tests` suite | 561 passed; 9 platform-specific tests skipped |
 | Functional device checks | Ascend ops, HCCL helpers and raw `torch.npu.NPUGraph` primitives | All selected tests passed |
 
@@ -187,7 +191,7 @@ explicitly; the raw `torch.npu.NPUGraph` checks above do not exercise that
 model path. Video and performance benchmarks remain unvalidated. The hybrid attention bridge
 currently makes contiguous cache inputs for native attention kernels;
 performance tuning is still needed. The packaged A3 image is published as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260911`
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260917`
 and is selected by the shared CI platform configuration.
 
 ## Model provisioning
