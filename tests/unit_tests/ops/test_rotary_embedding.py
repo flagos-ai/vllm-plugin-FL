@@ -10,6 +10,20 @@ import pytest
 import torch
 
 
+@pytest.fixture
+def cuda_vllm_config():
+    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.platforms import current_platform
+
+    if not current_platform.is_cuda():
+        pytest.skip("CUDA dispatch test requires the NVIDIA test environment")
+
+    config = VllmConfig()
+    config.compilation_config.custom_ops = ["all"]
+    with set_current_vllm_config(config):
+        yield
+
+
 class TestRotaryEmbeddingFL:
     """Test RotaryEmbeddingFL class behavior."""
 
@@ -58,3 +72,34 @@ class TestRotaryEmbeddingFL:
         mock_cached_op.assert_called_once()
         call_args = mock_cached_op.call_args
         assert call_args[0][0] is layer
+
+    def test_cuda_layer_call_dispatches_to_cached_op(
+        self,
+        cuda_vllm_config,
+        mock_cached_op,
+    ):
+        """The normal ``layer(...)`` path must use FL dispatch on CUDA."""
+        from vllm_fl.ops.rotary_embedding import RotaryEmbeddingFL
+
+        layer = RotaryEmbeddingFL(
+            head_size=8,
+            rotary_dim=8,
+            max_position_embeddings=16,
+            base=10000.0,
+            is_neox_style=True,
+            dtype=torch.float32,
+        )
+        positions = torch.tensor([0, 1])
+        query = torch.randn(2, 1, 8)
+        key = torch.randn(2, 1, 8)
+        expected_query = torch.randn_like(query)
+        expected_key = torch.randn_like(key)
+        mock_cached_op.return_value = (expected_query, expected_key)
+
+        assert layer._forward_method.__func__ is RotaryEmbeddingFL.forward_cuda
+        result_query, result_key = layer(positions, query, key)
+
+        mock_cached_op.assert_called_once()
+        assert mock_cached_op.call_args.args[0] is layer
+        assert torch.equal(result_query, expected_query)
+        assert torch.equal(result_key, expected_key)

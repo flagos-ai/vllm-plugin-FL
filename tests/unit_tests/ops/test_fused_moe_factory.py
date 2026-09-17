@@ -4,26 +4,48 @@
 
 from types import SimpleNamespace
 
+import pytest
 
-def test_fl_triton_experts_respects_fused_moe_blacklist(monkeypatch):
+
+@pytest.mark.parametrize(
+    (
+        "is_cuda",
+        "is_out_of_tree",
+        "is_cpu",
+        "flag_gems_enabled",
+        "blacklist",
+        "expected",
+    ),
+    [
+        (True, False, False, True, [], True),
+        (False, True, False, True, [], True),
+        (False, True, True, True, [], False),
+        (False, False, False, True, [], False),
+        (True, False, False, False, [], False),
+        (True, False, False, True, ["fused_moe"], False),
+    ],
+)
+def test_fl_triton_experts_policy(
+    monkeypatch,
+    is_cuda,
+    is_out_of_tree,
+    is_cpu,
+    flag_gems_enabled,
+    blacklist,
+    expected,
+):
     import vllm_fl.ops.fused_moe.fused_moe_utils as moe_utils
 
     platform = SimpleNamespace(
-        is_out_of_tree=lambda: True,
-        is_cpu=lambda: False,
+        is_cuda=lambda: is_cuda,
+        is_out_of_tree=lambda: is_out_of_tree,
+        is_cpu=lambda: is_cpu,
     )
     monkeypatch.setattr(moe_utils, "current_platform", platform)
-    monkeypatch.setattr(moe_utils, "use_flaggems", lambda: True)
+    monkeypatch.setattr(moe_utils, "use_flaggems", lambda: flag_gems_enabled)
+    monkeypatch.setattr(moe_utils, "get_oot_blacklist", lambda: blacklist)
 
-    monkeypatch.setattr(moe_utils, "get_oot_blacklist", lambda: [])
-    assert moe_utils._should_use_fl_triton_experts()
-
-    monkeypatch.setattr(
-        moe_utils,
-        "get_oot_blacklist",
-        lambda: ["fused_moe"],
-    )
-    assert not moe_utils._should_use_fl_triton_experts()
+    assert moe_utils._should_use_fl_triton_experts() is expected
 
 
 def test_factory_reads_quant_method_from_routed_experts(monkeypatch):

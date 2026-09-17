@@ -39,7 +39,7 @@ logger = init_logger(__name__)
 def _should_use_fl_triton_experts() -> bool:
     """Return whether the FL FlagGems MoE backend is enabled by policy."""
     return (
-        current_platform.is_out_of_tree()
+        (current_platform.is_cuda() or current_platform.is_out_of_tree())
         and not current_platform.is_cpu()
         and use_flaggems()
         and "fused_moe" not in (get_oot_blacklist() or [])

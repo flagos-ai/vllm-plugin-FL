@@ -20,11 +20,35 @@ class NvidiaPlatformFL(CudaPlatform):
     # MLA decode. FL is an operator/runtime plugin on top of native CUDA.
     _enum = PlatformEnum.CUDA
     vendor_name = "nvidia"
+    dist_backend = (
+        "flagcx" if "FLAGCX_PATH" in os.environ else CudaPlatform.dist_backend
+    )
+
+    @classmethod
+    def _refresh_dist_backend(cls) -> bool:
+        use_flagcx = "FLAGCX_PATH" in os.environ
+        cls.dist_backend = "flagcx" if use_flagcx else CudaPlatform.dist_backend
+        return use_flagcx
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        use_flagcx = cls._refresh_dist_backend()
         super().check_and_update_config(vllm_config)
+        if use_flagcx:
+            vllm_config.parallel_config.disable_custom_all_reduce = True
         vllm_config.parallel_config.worker_cls = "vllm_fl.worker.worker.NvidiaWorkerFL"
+
+    @classmethod
+    def get_device_communicator_cls(cls) -> str:
+        if cls._refresh_dist_backend():
+            return "vllm_fl.distributed.communicator.CommunicatorFL"
+        return super().get_device_communicator_cls()
+
+    @classmethod
+    def use_custom_allreduce(cls) -> bool:
+        if cls._refresh_dist_backend():
+            return False
+        return super().use_custom_allreduce()
 
     @classmethod
     def get_attn_backend_cls(

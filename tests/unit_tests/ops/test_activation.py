@@ -10,6 +10,20 @@ import pytest
 import torch
 
 
+@pytest.fixture
+def cuda_vllm_config():
+    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.platforms import current_platform
+
+    if not current_platform.is_cuda():
+        pytest.skip("CUDA dispatch test requires the NVIDIA test environment")
+
+    config = VllmConfig()
+    config.compilation_config.custom_ops = ["all"]
+    with set_current_vllm_config(config):
+        yield
+
+
 class TestSiluAndMulFL:
     """Test SiluAndMulFL class behavior."""
 
@@ -35,3 +49,33 @@ class TestSiluAndMulFL:
 
         mock_cached_op.assert_called_once_with(layer, x)
         assert result.shape == (2, 4)
+
+
+@pytest.mark.parametrize(
+    ("layer_name", "cached_op_name", "kwargs"),
+    [
+        ("SiluAndMulFL", "_silu_and_mul", {}),
+        ("GeluAndMulFL", "_gelu_and_mul", {"approximate": "tanh"}),
+    ],
+)
+def test_cuda_layer_call_dispatches_to_cached_op(
+    cuda_vllm_config,
+    layer_name,
+    cached_op_name,
+    kwargs,
+):
+    """The normal ``layer(...)`` path must use FL dispatch on CUDA."""
+    import vllm_fl.ops.activation as activation
+
+    layer_cls = getattr(activation, layer_name)
+    expected = torch.randn(2, 4)
+    x = torch.randn(2, 8)
+
+    with patch.object(activation, cached_op_name, return_value=expected) as cached_op:
+        layer = layer_cls(**kwargs)
+
+        assert layer._forward_method.__func__ is layer_cls.forward_cuda
+        result = layer(x)
+
+    cached_op.assert_called_once_with(layer, x)
+    assert result is expected

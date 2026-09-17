@@ -94,7 +94,7 @@ def test_nvidia_platform_keeps_native_cuda_semantics():
     assert not platform.is_out_of_tree()
 
 
-def test_nvidia_platform_selects_target_version_worker_wrapper():
+def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -102,13 +102,88 @@ def test_nvidia_platform_selects_target_version_worker_wrapper():
 
     from vllm_fl.nvidia_platform import NvidiaPlatformFL
 
-    parallel_config = SimpleNamespace(worker_cls=None)
+    parallel_config = SimpleNamespace(
+        worker_cls=None,
+        disable_custom_all_reduce=True,
+    )
     vllm_config = SimpleNamespace(parallel_config=parallel_config)
 
-    with patch.object(CudaPlatform, "check_and_update_config") as native_update:
-        NvidiaPlatformFL.check_and_update_config(vllm_config)
+    with monkeypatch.context() as state:
+        state.setattr(NvidiaPlatformFL, "dist_backend", NvidiaPlatformFL.dist_backend)
+        state.delenv("FLAGCX_PATH", raising=False)
+        with patch.object(CudaPlatform, "check_and_update_config") as native_update:
+            NvidiaPlatformFL.check_and_update_config(vllm_config)
+
+        assert NvidiaPlatformFL.dist_backend == CudaPlatform.dist_backend
 
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.NvidiaWorkerFL"
+    assert parallel_config.disable_custom_all_reduce is True
+    native_update.assert_called_once_with(vllm_config)
+
+
+def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
+    from unittest.mock import patch
+
+    from vllm.platforms.cuda import CudaPlatform
+
+    from vllm_fl.nvidia_platform import NvidiaPlatformFL
+
+    with monkeypatch.context() as state:
+        state.setattr(NvidiaPlatformFL, "dist_backend", NvidiaPlatformFL.dist_backend)
+        state.delenv("FLAGCX_PATH", raising=False)
+        with (
+            patch.object(
+                CudaPlatform,
+                "get_device_communicator_cls",
+                return_value="native.cuda.Communicator",
+            ) as native_communicator,
+            patch.object(
+                CudaPlatform,
+                "use_custom_allreduce",
+                return_value=True,
+            ) as native_custom_allreduce,
+        ):
+            communicator = NvidiaPlatformFL.get_device_communicator_cls()
+            use_custom_allreduce = NvidiaPlatformFL.use_custom_allreduce()
+
+        assert NvidiaPlatformFL.dist_backend == CudaPlatform.dist_backend
+
+    assert communicator == "native.cuda.Communicator"
+    assert use_custom_allreduce is True
+    native_communicator.assert_called_once_with()
+    native_custom_allreduce.assert_called_once_with()
+
+
+def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from vllm.platforms.cuda import CudaPlatform
+
+    from vllm_fl.nvidia_platform import NvidiaPlatformFL
+
+    parallel_config = SimpleNamespace(
+        worker_cls=None,
+        disable_custom_all_reduce=False,
+    )
+    vllm_config = SimpleNamespace(parallel_config=parallel_config)
+
+    # Importing the platform before changing the environment mirrors unit tests
+    # that dynamically select FlagCX in an already-running Python process.
+    with monkeypatch.context() as state:
+        state.setattr(NvidiaPlatformFL, "dist_backend", NvidiaPlatformFL.dist_backend)
+        state.setenv("FLAGCX_PATH", "/opt/flagcx")
+        with patch.object(CudaPlatform, "check_and_update_config") as native_update:
+            NvidiaPlatformFL.check_and_update_config(vllm_config)
+
+        assert NvidiaPlatformFL.dist_backend == "flagcx"
+        assert parallel_config.disable_custom_all_reduce is True
+        assert (
+            NvidiaPlatformFL.get_device_communicator_cls()
+            == "vllm_fl.distributed.communicator.CommunicatorFL"
+        )
+        assert NvidiaPlatformFL.use_custom_allreduce() is False
+
     native_update.assert_called_once_with(vllm_config)
 
 

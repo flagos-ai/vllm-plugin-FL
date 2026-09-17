@@ -15,6 +15,9 @@ class SiluAndMulFL(SiluAndMul):
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
         return _silu_and_mul(self, x)
 
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        return self.forward_oot(x)
+
 
 class GeluAndMulFL(GeluAndMul):
     def __init__(self, approximate: str = "none"):
@@ -22,6 +25,9 @@ class GeluAndMulFL(GeluAndMul):
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
         return _gelu_and_mul(self, x)
+
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        return self.forward_oot(x)
 
 
 __all__ = ["SiluAndMulFL", "GeluAndMulFL"]
