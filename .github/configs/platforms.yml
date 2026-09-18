@@ -29,7 +29,7 @@ platforms:
   metax:
     enabled: true
   musa:
-    enabled: false
+    enabled: true
   enflame:
     enabled: true
   kunlunxin:

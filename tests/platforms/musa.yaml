@@ -22,9 +22,11 @@ device_overrides:
   s5000:
     cases:
       - qwen3_6/27b_tp4_eager
+      - qwen3_6/27b_tp4_graph
       - qwen3_6/35b_a3b_tp4_eager
+      - qwen3_6/35b_a3b_tp4_graph
     llm:
-      gpu_memory_utilization: 0.90
+      gpu_memory_utilization: 0.80
       trust_remote_code: true
 
 env_defaults:
@@ -38,9 +40,19 @@ s5000:
   tests:
     e2e:
       inference:
-        qwen3_6: ["27b_tp4_eager"]
+        qwen3: ["06b_tp1_eager", "06b_tp1_graph"]
+        qwen3_6:
+          - "27b_tp4_eager"
+          - "35b_a3b_tp4_graph"
       serving:
-        qwen3_6: ["35b_a3b_tp4_eager"]
+        qwen3: ["06b_tp1_graph"]
+        qwen3_6:
+          - "27b_tp4_graph"
+          - "35b_a3b_tp4_eager"
+    timeouts:
+      e2e:
+        inference: 180
+        serving: 180
     functional:
       include: "*"
       exclude: []

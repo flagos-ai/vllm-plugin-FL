@@ -1,5 +1,7 @@
 from types import ModuleType
 
+import torch
+
 from vllm_fl.patches import moe_sum
 
 
@@ -71,3 +73,25 @@ def test_moe_sum_patch_respects_flaggems_disable(monkeypatch):
 
     assert moe_sum.patch_vllm_moe_sum(ops) is False
     assert ops.moe_sum is original
+
+
+def test_upstream_moe_sum_entrypoint_uses_worker_adapter(monkeypatch):
+    import vllm._custom_ops as ops
+
+    calls = []
+
+    def dispatch(input, output):
+        calls.append("dispatch")
+        output.copy_(input.sum(dim=1))
+
+    monkeypatch.setattr(ops, "moe_sum", lambda input, output: None)
+    monkeypatch.setattr(moe_sum, "use_flaggems_op", lambda op_name: True)
+    monkeypatch.setattr(moe_sum, "_dispatch_moe_sum", dispatch)
+
+    assert moe_sum.patch_vllm_moe_sum() is True
+    input = torch.ones(2, 3, 4)
+    output = torch.empty(2, 4)
+    ops.moe_sum(input, output)
+
+    assert calls == ["dispatch"]
+    torch.testing.assert_close(output, torch.full((2, 4), 3.0))

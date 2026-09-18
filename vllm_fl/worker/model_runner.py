@@ -290,6 +290,10 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
+# A single MUSA context fails near 2048 simultaneously live native graphs.
+# Leave some headroom for graph resources created outside GraphWrapper.
+_MUSA_MAX_LIVE_GRAPHS = 2000
+
 AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
 # list when ubatching is enabled
 PerLayerAttnMetadata: TypeAlias = list[AttnMetadataDict] | AttnMetadataDict
@@ -6689,6 +6693,8 @@ class ModelRunnerFL(
             )
             return 0
 
+        self._limit_musa_piecewise_capture_sizes()
+
         # Initialize encoder CUDA graph manager if enabled.
         self._maybe_init_encoder_cudagraph_manager()
 
@@ -6748,6 +6754,66 @@ class ModelRunnerFL(
 
         )
         return cuda_graph_size
+
+    def _limit_musa_piecewise_capture_sizes(self) -> None:
+        if (
+            current_platform.device_type != "musa"
+            or self.parallel_config.tensor_parallel_size <= 1
+            or not self.compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+        ):
+            return
+
+        capture_sizes = self.compilation_config.cudagraph_capture_sizes
+        if not capture_sizes:
+            return
+
+        wrapper_count = sum(
+            wrapper.runtime_mode == CUDAGraphMode.PIECEWISE
+            for wrapper in list(GraphWrapper._all_instances)
+        )
+        if wrapper_count == 0:
+            return
+
+        capture_descs = self.cudagraph_dispatcher.get_capture_descs()
+        descriptor_count = sum(
+            len(descs)
+            for mode, descs in capture_descs
+            if mode == CUDAGraphMode.PIECEWISE
+        )
+        descriptors_per_size = max(
+            1, (descriptor_count + len(capture_sizes) - 1) // len(capture_sizes)
+        )
+        max_capture_sizes = max(
+            1,
+            _MUSA_MAX_LIVE_GRAPHS
+            // (wrapper_count * descriptors_per_size),
+        )
+        if len(capture_sizes) <= max_capture_sizes:
+            return
+
+        original_size_count = len(capture_sizes)
+        limited_sizes = sorted(capture_sizes)[:max_capture_sizes]
+        self.compilation_config.cudagraph_capture_sizes = limited_sizes
+        self.compilation_config.max_cudagraph_capture_size = limited_sizes[-1]
+
+        dispatcher = self.cudagraph_dispatcher
+        resolved_mode = dispatcher.cudagraph_mode
+        for key_set in dispatcher.cudagraph_keys.values():
+            key_set.clear()
+        dispatcher.keys_initialized = False
+        dispatcher.initialize_cudagraph_keys(
+            resolved_mode, self.uniform_decode_query_len
+        )
+        logger.warning(
+            "MUSA: Reduced PIECEWISE graph capture sizes from %d to %d "
+            "(%d wrappers, %d descriptors per size) to stay below the "
+            "%d-live-graph runtime limit.",
+            original_size_count,
+            len(limited_sizes),
+            wrapper_count,
+            descriptors_per_size,
+            _MUSA_MAX_LIVE_GRAPHS,
+        )
 
     def _warmup_and_capture(
         self,
