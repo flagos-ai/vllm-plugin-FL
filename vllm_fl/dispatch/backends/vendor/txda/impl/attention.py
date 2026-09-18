@@ -13,7 +13,6 @@ works under both the flagtree and triton compilers.
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 import torch
@@ -23,9 +22,6 @@ from vllm_fl.dispatch.backends.flaggems.impl.attention import (
     AttentionFLBackend,
     AttentionFLImpl,
 )
-
-_DEBUG = os.environ.get("FL_DEBUG_TXDA_ATTN") == "1"
-_PRINTED = [0]
 
 
 class TxdaSDPAAttentionBackend(AttentionFLBackend):
@@ -84,18 +80,6 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
         valid = slot_mapping >= 0
         key_cache[block_ids[valid], offsets[valid]] = key[valid]
         value_cache[block_ids[valid], offsets[valid]] = value[valid]
-
-        if _DEBUG and _PRINTED[0] < 400:
-            _PRINTED[0] += 1
-            print(
-                f"[txda-debug] kv_update#{_PRINTED[0]} n={key.shape[0]} "
-                f"k0={key[0].reshape(-1)[:4].tolist()} "
-                f"v0={value[0].reshape(-1)[:4].tolist()} "
-                f"slot0={slot_mapping[0].item()} slotN={slot_mapping[-1].item()} "
-                f"bids0={block_ids[:4].tolist()} offs0={offsets[:4].tolist()} "
-                f"block_size={block_size}",
-                flush=True,
-            )
 
     def forward(
         self,
@@ -166,19 +150,6 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
             out_i = self._sdpa(q, k, v, seq_len, window_left)
             # output is [num_tokens, num_heads, head_size]; out_i matches directly.
             output[qs:qe] = out_i
-
-            if _DEBUG and i == 0 and _PRINTED[0] < 400:
-                _PRINTED[0] += 1
-                print(
-                    f"[txda-debug] fwd#{_PRINTED[0]} layer={getattr(layer, 'name', '?')} "
-                    f"n={num_actual_tokens} cu_q={cu_seqlens_q.tolist()} "
-                    f"seq_lens={seq_lens.tolist()} reqs={num_reqs} "
-                    f"bt0={blocks[:4]} seq_len={seq_len} q_len={q_len} "
-                    f"k_rb0={k[0].reshape(-1)[:4].tolist()} "
-                    f"q0={q[0].reshape(-1)[:4].tolist()} "
-                    f"out0={out_i[0].reshape(-1)[:4].tolist()}",
-                    flush=True,
-                )
 
         return output
 
