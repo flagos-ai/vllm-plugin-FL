@@ -14,6 +14,7 @@ import torch
 # vLLM wheels. Keep the attempts independent: official vLLM 0.24 wheels have
 # only the stable-ABI module, so failure of the legacy import must not skip it.
 import importlib
+import importlib.util
 for _extension in ("vllm._C", "vllm._C_stable_libtorch"):
     try:
         importlib.import_module(_extension)
@@ -53,6 +54,17 @@ dist_backend_dict = {
 }
 
 
+def _flagcx_backend_enabled() -> bool:
+    # FlagCX is selected by either install shape: the distribution is
+    # importable, or FLAGCX_PATH points at a source tree (tests, kunlunxin CI).
+    if os.environ.get("FLAGCX_PATH"):
+        return True
+    try:
+        return importlib.util.find_spec("flagcx") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
@@ -70,7 +82,7 @@ class PlatformFL(Platform):
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     dist_backend: str = (
-        "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
+        "flagcx" if _flagcx_backend_enabled() else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
     # translated into the ordinal visible to this process. Leaving the
