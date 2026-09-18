@@ -63,7 +63,28 @@ op_backends:
 # FlagOS operator blacklist
 # Iluvatar is CUDA-compatible, so most FlagGems ops should work
 # Blacklist only ops that are known to have issues
-flagos_blacklist: []
+flagos_blacklist:
+  # flag_gems GEMM family (linear/mm/addmm/bmm) compiled by flagtree is
+  # launch-to-launch nondeterministic (~1-2 bf16 ulp) inside the live vllm
+  # engine, so temp=0 decode flips at near-tie argmax bands on BOTH corex
+  # stacks under the F path (4.4.0: 8-18/30 distinct; 4.5.0: 9-13/30). Root
+  # cause: vllm_fl runs flag_gems.enable(), which overrides aten::linear et al.
+  # to the flag_gems triton linear_kernel; the same kernel is bitwise
+  # deterministic (== native) when compiled by vendor corex triton. Blacklist
+  # the whole GEMM family (not just linear — native linear lowers to addmm,
+  # which would still be overridden) so GEMMs fall back to the native corex
+  # ixblas kernels: 30/30 deterministic AND faster (+14% tok/s vs flag_gems
+  # linear, measured 2026-09-07 corex4.4.0). silu_and_mul stays flagos — with
+  # GEMMs native it no longer flips. Upstream repro (flag_gems linear_kernel
+  # under flagtree) handed to flagtree/flag_gems.
+  - linear
+  - mm
+  - mm.out
+  - addmm
+  - addmm_
+  - addmm.out
+  - bmm
+  - bmm.out
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.
