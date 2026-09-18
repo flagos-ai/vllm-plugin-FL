@@ -488,9 +488,24 @@ class TritonExpertsFL(TritonExperts):
                 top_k_num=top_k_num,
             )
 
-        apply_moe_activation(
-            activation, intermediate_cache2, intermediate_cache1.view(-1, N)
-        )
+        if (
+            getattr(current_platform, "vendor_name", None) == "metax"
+            and activation == MoEActivation.SWIGLUOAI_UNINTERLEAVE
+        ):
+            from vllm_fl.ops.minimax_m3.layers import swiglu
+
+            assert self.gemm1_clamp_limit is not None
+            swiglu(
+                intermediate_cache1.view(-1, N),
+                self.gemm1_clamp_limit,
+                self.gemm1_alpha,
+                self.gemm1_beta,
+                out=intermediate_cache2,
+            )
+        else:
+            apply_moe_activation(
+                activation, intermediate_cache2, intermediate_cache1.view(-1, N)
+            )
 
         a2q_scale: torch.Tensor | None = None
 

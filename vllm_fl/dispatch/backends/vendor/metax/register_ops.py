@@ -94,3 +94,8 @@ def register_builtins(registry) -> None:
     ]
 
     registry.register_many(impls)
+
+    # M3 numerical fallbacks stay behind the MetaX backend discovery guard.
+    from vllm_fl.ops.minimax_m3.ops import register as register_minimax_m3
+
+    register_minimax_m3(registry)
