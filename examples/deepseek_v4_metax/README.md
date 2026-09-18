@@ -50,6 +50,7 @@ Set the native top-k exclusions before plugin/FlagGems initialization:
 
 ```bash
 export USE_FLAGGEMS=1
+export VLLM_PLUGINS=fl
 export VLLM_FL_DSV4_METAX_OPTIMIZATIONS=1
 export VLLM_FL_FLAGOS_BLACKLIST=topk,masked_fill,masked_fill_
 export VLLM_FL_DSV4_METAX_VERIFY_M4=1
