@@ -27,10 +27,14 @@ platforms:
   hygon:
     enabled: true
   metax:
-    enabled: false
+    enabled: true
   musa:
     enabled: true
   enflame:
-    enabled: false
+    enabled: true
   kunlunxin:
+    enabled: false
+  thead:
+    enabled: true
+  iluvatar:
     enabled: false

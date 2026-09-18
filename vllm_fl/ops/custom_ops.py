@@ -125,6 +125,20 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
             from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
             apply_sunrise_patches()
 
+        # Apply GCU monkey-patches (Triton grid limits, etc.).
+        if getattr(current_platform, "vendor_name", None) in ("gcu", "enflame"):
+            from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+            apply_gcu_patches()
+    # Kunlunxin patches must run even when no OOT operator was selected.
+    from vllm_fl.dispatch.config.utils import get_platform_name
+
+    if get_platform_name() == "kunlunxin":
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
+            apply_kunlunxin_patches,
+        )
+
+        apply_kunlunxin_patches()
+
     # --- FusedMoE monkey-patch (vllm >= 0.24.0) ---
     # FusedMoE is a factory function in vllm 0.24.0+, not a PluggableLayer
     # subclass, so it cannot be registered via CustomOp/PluggableLayer.register_oot.

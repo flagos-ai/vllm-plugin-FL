@@ -38,4 +38,3 @@ container_options: >-
   --device /dev/mxcd:/dev/mxcd:rwm
   --env GEMS_VENDOR=metax
   --env VLLM_PLUGINS=fl
-  --env MACA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7

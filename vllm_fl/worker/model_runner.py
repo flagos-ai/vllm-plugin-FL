@@ -5528,7 +5528,7 @@ class ModelRunnerFL(
             logger.warning_once(
                 "Reloading with `is_checkpoint_format=True` requires that "
                 "weights be in kernel format and already sharded",
-                
+
             )
             loaded_weights = set()
             for name, loaded_weight in weights_iterator:
@@ -5542,7 +5542,7 @@ class ModelRunnerFL(
         logger.info_once(
             "Reloading and processing weights took %.2f seconds",
             diff_seconds,
-            
+
         )
         if self.model_config.quantization is None and loaded_weights is not None:
             weights_not_loaded = weights_to_load - loaded_weights
@@ -6170,6 +6170,16 @@ class ModelRunnerFL(
             bad_words_token_ids={},
             logitsprocs=LogitsProcessors(),
         )
+
+        # FlagGems 5.4's Kunlunxin radix-sort kernel can raise an XPU kernel
+        # exception for the large synthetic top-k workload used only by this
+        # memory profile.  Exercise the real logits and greedy sampler path
+        # here; non-greedy requests still use the normal runtime metadata.
+        from vllm_fl.platform import PlatformFL
+
+        if PlatformFL.vendor_name == "kunlunxin":
+            dummy_metadata = replace(dummy_metadata, all_greedy=True)
+
         try:
             sampler_output = self.sampler(
                 logits=logits, sampling_metadata=dummy_metadata
@@ -6741,7 +6751,7 @@ class ModelRunnerFL(
             "Graph capturing finished in %.0f secs, took %.2f GiB",
             elapsed_time,
             cuda_graph_size / (1 << 30),
-            
+
         )
         return cuda_graph_size
 
@@ -7456,7 +7466,7 @@ class ModelRunnerFL(
         self,
         kv_cache_config: KVCacheConfig,
         is_profiling: bool = False,
-    ) -> None:        
+    ) -> None:
         """
         Initialize KV cache based on `kv_cache_config`.
         Args:

@@ -52,5 +52,7 @@ flagos_blacklist:
   - copy_
   - to_copy
   - index
+  - cat
+  - unfold
 # OOT (Out-of-Tree) operator blacklist
 # oot_blacklist: []
