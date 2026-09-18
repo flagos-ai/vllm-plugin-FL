@@ -30,6 +30,8 @@ _fused_topk_bias = CachedOp("fused_topk_bias")
 _mhc_pre = CachedOp("mhc_pre")
 _mhc_post = CachedOp("mhc_post")
 _hc_head_fused_kernel = CachedOp("hc_head_fused_kernel")
+from vllm_fl.ops.deepseek_v4_metax.config import enabled as _metax_optimized
+
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
     ColumnParallelLinear,
@@ -1244,6 +1246,8 @@ class DeepseekV4Attention(nn.Module):
                 from vllm_fl.ops.deepseek_v4_attention_bf16 import (
                     DeepseekV4Indexer as indexer_cls,
                 )
+            elif is_metax_w8a8(vllm_config) and _metax_optimized():
+                from vllm_fl.ops.deepseek_v4_metax.attention import DeepseekV4Indexer as indexer_cls
             else:
                 indexer_cls = DeepseekV4IndexerFP8
             self.indexer = indexer_cls(
@@ -1281,6 +1285,10 @@ class DeepseekV4Attention(nn.Module):
         if use_bf16_attention:
             from vllm_fl.ops.deepseek_v4_attention_bf16 import (
                 DeepseekV4MultiHeadLatentAttentionBF16Wrapper as attention_wrapper_cls,
+            )
+        elif is_metax_w8a8(vllm_config) and _metax_optimized():
+            from vllm_fl.ops.deepseek_v4_metax.attention import (
+                DeepseekV4MultiHeadLatentAttentionFLWrapper as attention_wrapper_cls,
             )
         else:
             attention_wrapper_cls = DeepseekV4MultiHeadLatentAttentionWrapper
@@ -1331,6 +1339,10 @@ class DeepseekV4DecoderLayer(nn.Module):
         if not use_metax_int8:
             import vllm.model_executor.layers.mhc  # noqa: F401
 
+        self._hc_pre_impl = _mhc_pre
+        if use_metax_int8 and _metax_optimized():
+            from vllm_fl.ops.deepseek_v4_metax.mhc import mhc_pre
+            self._hc_pre_impl = mhc_pre
         self.prefix = prefix
         if use_metax_graph:
             vllm_config.compilation_config.static_forward_context[prefix] = self
@@ -1404,7 +1416,7 @@ class DeepseekV4DecoderLayer(nn.Module):
         hc_scale: torch.Tensor,
         hc_base: torch.Tensor,
     ):
-        post_mix, res_mix, layer_input = _mhc_pre(
+        post_mix, res_mix, layer_input = self._hc_pre_impl(
             residual=x,
             fn=hc_fn,
             hc_scale=hc_scale,
@@ -1861,6 +1873,11 @@ class DeepseekV4ForCausalLM(nn.Module):
         self.config = config
         expert_dtype = getattr(config, "expert_dtype", "fp4")
         use_metax_int8 = is_metax_w8a8(vllm_config)
+        if _metax_optimized():
+            if not use_metax_int8:
+                raise ValueError("DSV4 MetaX optimizations require symmetric W8A8 INT8")
+            from vllm_fl.ops.deepseek_v4_metax.config import configure
+            configure(vllm_config, current_platform.vendor_name)
         if use_metax_int8:
             from vllm_fl.dispatch.backends.vendor.metax.impl.deepseek_v4_swa import (
                 apply_metax_swa_patch,

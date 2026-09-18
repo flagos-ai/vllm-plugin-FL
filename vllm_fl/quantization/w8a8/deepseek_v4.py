@@ -56,6 +56,19 @@ class MetaXTritonW8A8Experts(TritonW8A8Experts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ) -> None:
+        from vllm_fl.ops.deepseek_v4_metax.config import enabled
+
+        if enabled():
+            from vllm_fl.ops.deepseek_v4_metax.mctlass_moe import fused_experts
+            result = fused_experts(
+                hidden_states, w1, w2, topk_weights, topk_ids,
+                activation=activation,
+                apply_router_weight_on_input=apply_router_weight_on_input,
+                expert_map=expert_map, quant_config=self.quant_config,
+            )
+            output.copy_(result)
+            return
+
         from vllm_fl.ops.fused_moe.fused_moe import fused_experts_impl
 
         result = fused_experts_impl(

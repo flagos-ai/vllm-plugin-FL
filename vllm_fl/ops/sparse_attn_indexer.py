@@ -5,14 +5,12 @@
 import torch
 
 import vllm.envs as envs
-from vllm._aiter_ops import rocm_aiter_ops
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.utils.deep_gemm import (
     fp8_fp4_mqa_logits,
     fp8_fp4_paged_mqa_logits,
-    has_deep_gemm,
 )
 from vllm.utils.torch_utils import (
     LayerNameType,
