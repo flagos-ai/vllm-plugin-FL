@@ -218,8 +218,14 @@ def use_flaggems_op(op_name: str, default: bool = True) -> bool:
     # Get whitelist/blacklist with proper priority
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
-    # If whitelist is set, only allow ops in whitelist
+    # If whitelist is set, only allow ops in whitelist.  Validate it against the
+    # active model plan so the registry filter and the runtime enable step use
+    # the same source of truth (a plan-required op excluded from an explicit
+    # whitelist is a startup error, not a silently missing implementation).
     if whitelist is not None:
+        from vllm_fl.activation import validate_flaggems_whitelist
+
+        validate_flaggems_whitelist(whitelist)
         return op_name in whitelist
 
     # If blacklist is set (from env or config), deny ops in blacklist
@@ -379,6 +385,40 @@ def get_oot_blacklist() -> Optional[list[str]]:
         pass
 
     return None
+
+
+def has_native_triton_moe() -> bool:
+    """Whether the runtime exposes vLLM's native Triton MoE path.
+
+    Probes the vLLM native CUDA ABI and DeepGEMM.  This is a capability check
+    independent of any model or provider, used to choose between the native
+    Triton experts and the FlagGems per-step fallback when a MoE clamp must be
+    preserved.
+    """
+    import importlib
+
+    try:
+        from vllm.platforms import current_platform
+    except Exception:  # pragma: no cover - vLLM must be importable
+        return False
+    if not current_platform.is_cuda():
+        return False
+
+    for name in ("vllm._C", "vllm._C_stable_libtorch"):
+        try:
+            importlib.import_module(name)
+        except (ImportError, OSError, RuntimeError):
+            continue
+        break
+    else:
+        return False
+
+    try:
+        from vllm.utils.deep_gemm import has_deep_gemm
+
+        return bool(has_deep_gemm())
+    except (ImportError, AttributeError, OSError, RuntimeError):
+        return False
 
 
 def is_oot_enabled() -> bool:
