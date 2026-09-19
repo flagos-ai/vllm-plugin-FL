@@ -31,6 +31,13 @@ runner_labels:
 
 # Device-specific runner labels override the platform defaults for E2E jobs.
 device_runner_labels:
+  # HY4 requires a dedicated 16-GPU runner; never schedule it on gpu-8.
+  h100:
+    - self-hosted
+    - Linux
+    - X64
+    - nvidia
+    - gpu-16
   h20:
     - vllm-plugin-ci-h20
 
