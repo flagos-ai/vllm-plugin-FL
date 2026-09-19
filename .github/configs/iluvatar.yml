@@ -1,0 +1,42 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Iluvatar BI-V150 hardware configuration.
+platform: iluvatar
+
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-iluvatar-ci
+
+runner_labels:
+  - iluvatar-cicd-vllm-plugin
+
+# Keep the validated host model directory available at the paths shared by the
+# existing Qwen3.6 cases.
+container_volumes:
+  - /dev:/dev
+  - /lib/modules:/lib/modules
+  - /usr/local/corex-4.5.0/lib64/libcuda.so.1:/usr/local/corex/lib64/libcuda.so.1
+  - /usr/local/corex-4.5.0/lib64/libixml.so:/usr/local/corex/lib64/libixml.so
+  - /mnt/share/user_homes/models:/data/models/Qwen
+
+container_options: >-
+  --hostname vllm-plugin-fl
+  --privileged
+  --ipc=host
+  --shm-size=64g
+  --env GEMS_VENDOR=iluvatar
+  --env VLLM_PLUGINS=fl
+  --env CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  --env VLLM_ENGINE_ITERATION_TIMEOUT_S=72000
+  --env VLLM_RPC_TIMEOUT=72000000
+  --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=7200

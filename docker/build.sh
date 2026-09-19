@@ -49,6 +49,11 @@ ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-
 ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.9.10}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
 ENFLAME_VLLM_VERSION="${ENFLAME_VLLM_VERSION:-0.24.0}"
+ILUVATAR_BASE_IMAGE="${ILUVATAR_BASE_IMAGE:-harbor.baai.ac.cn/plugin/iluvatar-corex4.5.0-flagtree0.6.0-triton3.6.0-cxnone-vllm_fl0.24.0:20260909}"
+ILUVATAR_DRIVER_VERSION="${ILUVATAR_DRIVER_VERSION:-4.5.0}"
+ILUVATAR_PYTHON_VERSION="${ILUVATAR_PYTHON_VERSION:-3.12}"
+ILUVATAR_TORCH_VERSION="${ILUVATAR_TORCH_VERSION:-2.10.0}"
+ILUVATAR_VLLM_VERSION="${ILUVATAR_VLLM_VERSION:-0.24.0}"
 KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/plugin/xvllm-ubuntu2204-py310-torch29-0200:v20.0.10.0}"
 KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.0.21.43}"
 KUNLUNXIN_PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION:-3.10}"
@@ -163,7 +168,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, iluvatar, kunlunxin (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -204,6 +209,12 @@ VERSIONS (override via environment variables):
     ENFLAME_DRIVER_VERSION Driver version used in generated image tag (default: ${ENFLAME_DRIVER_VERSION})
     ENFLAME_PYTHON_VERSION Python version in the base image (default: ${ENFLAME_PYTHON_VERSION})
     ENFLAME_VLLM_VERSION   vLLM version in the base image (default: ${ENFLAME_VLLM_VERSION})
+  Iluvatar:
+    ILUVATAR_BASE_IMAGE     Base image (default: ${ILUVATAR_BASE_IMAGE})
+    ILUVATAR_DRIVER_VERSION Driver version used in generated image tag (default: ${ILUVATAR_DRIVER_VERSION})
+    ILUVATAR_PYTHON_VERSION Python version in the base image (default: ${ILUVATAR_PYTHON_VERSION})
+    ILUVATAR_TORCH_VERSION  PyTorch version in the base image (default: ${ILUVATAR_TORCH_VERSION})
+    ILUVATAR_VLLM_VERSION   vLLM empty-mode version (default: ${ILUVATAR_VLLM_VERSION})
   Kunlunxin:
     KUNLUNXIN_BASE_IMAGE     Base image (default: ${KUNLUNXIN_BASE_IMAGE})
     KUNLUNXIN_DRIVER_VERSION Driver version used in generated image tag (default: ${KUNLUNXIN_DRIVER_VERSION})
@@ -389,6 +400,21 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-ci"
     fi
+elif [[ "${PLATFORM}" == "iluvatar" ]]; then
+    PYTHON_VERSION="${ILUVATAR_PYTHON_VERSION}"
+    VLLM_VERSION="${ILUVATAR_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
+    BUILD_ARGS+=(
+        --build-arg "ILUVATAR_BASE_IMAGE=${ILUVATAR_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${ILUVATAR_VLLM_VERSION}"
+        --build-arg "TORCH_VERSION=${ILUVATAR_TORCH_VERSION}"
+        --build-arg "DRIVER_VERSION=${ILUVATAR_DRIVER_VERSION}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${ILUVATAR_VLLM_VERSION}-iluvatar-ci"
+    fi
 elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION}"
     VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION}"
@@ -409,7 +435,7 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
         IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
     fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', or 'kunlunxin'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', 'iluvatar', or 'kunlunxin'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -442,6 +468,11 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
     msg "  Driver:         ${ENFLAME_DRIVER_VERSION}"
     msg "  Enflame Python: ${ENFLAME_PYTHON_VERSION}"
     msg "  Base image:     ${ENFLAME_BASE_IMAGE}"
+elif [[ "${PLATFORM}" == "iluvatar" ]]; then
+    msg "  Driver:         ${ILUVATAR_DRIVER_VERSION}"
+    msg "  Iluvatar Python: ${ILUVATAR_PYTHON_VERSION}"
+    msg "  Iluvatar PyTorch: ${ILUVATAR_TORCH_VERSION}"
+    msg "  Base image:     ${ILUVATAR_BASE_IMAGE}"
 elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  Driver:         ${KUNLUNXIN_DRIVER_VERSION}"
     msg "  Kunlunxin base: ${KUNLUNXIN_BASE_IMAGE}"

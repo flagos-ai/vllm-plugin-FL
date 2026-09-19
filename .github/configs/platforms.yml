@@ -32,9 +32,9 @@ platforms:
     enabled: false
   enflame:
     enabled: true
+  iluvatar:
+    enabled: true
   kunlunxin:
     enabled: false
   thead:
     enabled: true
-  iluvatar:
-    enabled: false

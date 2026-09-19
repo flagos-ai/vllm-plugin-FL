@@ -185,4 +185,13 @@ jobs:
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: thead
+  # ============================================================
+  # Job 4h: Iluvatar platform testing
+  # ============================================================
+  test-iluvatar:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: iluvatar
     secrets: inherit
