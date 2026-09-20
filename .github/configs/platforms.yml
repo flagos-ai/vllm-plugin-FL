@@ -18,23 +18,82 @@
 # (e.g., "cuda" -> cuda.yml, "ascend" -> ascend.yml).
 #
 # Set `enabled: false` to skip a platform without removing its config file.
+#
+# trigger_paths: PR diff-based platform routing. If a changed file matches any
+# path in trigger_paths, this platform is included in PR CI. If the changed
+# file matches global_trigger_paths, ALL enabled platforms are included.
+# Leave trigger_paths empty ([]) to always include a platform when enabled.
+
+# Paths that trigger ALL enabled platforms when changed.
+global_trigger_paths:
+  - vllm_fl/attention/
+  - vllm_fl/compilation/
+  - vllm_fl/distributed/
+  - vllm_fl/models/
+  - vllm_fl/ops/
+  - vllm_fl/patches/
+  - vllm_fl/quantization/
+  - vllm_fl/worker/
+  - vllm_fl/utils.py
+  - vllm_fl/envs.py
+  - vllm_fl/platform.py
+  - vllm_fl/version.py
+  - tests/unit_tests/
+  - tests/functional_tests/
+  - tests/utils/
+  - tests/run.py
+  - tests/conftest.py
+  - .github/scripts/
+  - .github/configs/
+  - pyproject.toml
+  - setup.py
+  - setup.cfg
 
 platforms:
   cuda:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/nvidia.yaml
+      - vllm_fl/dispatch/config/nvidia_hopper.yaml
+      - tests/platforms/cuda.yaml
+      - tests/models/
   ascend:
     enabled: false
+    trigger_paths:
+      - vllm_fl/dispatch/config/ascend.yaml
+      - tests/platforms/ascend.yaml
   hygon:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/ptg.yaml
+      - tests/platforms/hygon.yaml
   metax:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/metax.yaml
+      - tests/platforms/metax.yaml
   musa:
     enabled: false
+    trigger_paths:
+      - vllm_fl/dispatch/config/musa.yaml
+      - tests/platforms/musa.yaml
   enflame:
     enabled: true
-  iluvatar:
-    enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/enflame.yaml
+      - tests/platforms/enflame.yaml
   kunlunxin:
     enabled: false
+    trigger_paths:
+      - vllm_fl/dispatch/config/kunlunxin.yaml
+      - tests/platforms/kunlunxin.yaml
   thead:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/thead.yaml
+      - tests/platforms/thead.yaml
+  iluvatar:
+    enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/iluvatar.yaml
+      - tests/platforms/iluvatar.yaml

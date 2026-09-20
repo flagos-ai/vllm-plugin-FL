@@ -1,0 +1,57 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Slash Command Dispatcher
+#
+# Parses PR comments for slash commands and dispatches them as
+# repository_dispatch events to the corresponding handler workflows.
+#
+# Supported commands:
+#   /rerun   — Re-run failed CI jobs (PR author or write+)
+#   /cancel  — Cancel in-progress CI runs (PR author or write+)
+#   /nightly — Trigger nightly CI on this PR's branch (triage+)
+#   /weekly  — Trigger weekly CI on this PR's branch (triage+)
+#
+# Uses peter-evans/slash-command-dispatch for parsing.
+# Individual handler workflows perform their own permission checks.
+name: Slash Command Dispatch
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: peter-evans/slash-command-dispatch@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          reaction-token: ${{ secrets.GITHUB_TOKEN }}
+          commands: |
+            rerun
+            cancel
+            nightly
+            weekly
+          permission: none
+          issue-type: pull-request
+          repository: ${{ github.repository }}
+          dispatch-type: repository

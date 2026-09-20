@@ -5,14 +5,25 @@
 
 Priority:
   1. If .github/configs/platforms.yml exists, read it and return only
-     platforms with ``enabled: true``.
+     platforms with ``enabled: true``, filtered by diff-based routing
+     when ``--changed-files`` is provided.
   2. Otherwise, fall back to auto-scanning .github/configs/*.yml,
      excluding ``template`` and ``platforms`` (the registry file itself).
+
+Diff-based routing logic (when --changed-files is given):
+  - If any changed file matches ``global_trigger_paths`` → return all enabled
+    platforms (full run).
+  - Otherwise, return only platforms whose ``trigger_paths`` match at least
+    one changed file.
+  - If no platform matches → return empty list (only lint+build will run).
+  - Platforms with empty ``trigger_paths`` are always included when enabled.
 
 Usage (in a workflow step)::
 
     - id: detect
-      run: python3 .github/scripts/detect_platforms.py
+      run: |
+        python3 .github/scripts/detect_platforms.py \\
+          --changed-files /tmp/changed_files.txt
 
 Sets the GitHub Actions output ``platforms`` to a JSON array of platform
 names, e.g. ``["cuda", "ascend"]``.
@@ -20,6 +31,7 @@ names, e.g. ``["cuda", "ascend"]``.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -34,9 +46,10 @@ REGISTRY_FILE = CONFIGS_DIR / "platforms.yml"
 AUTO_SCAN_EXCLUDE = {"template", "platforms"}
 
 
-def from_registry() -> list[str] | None:
-    """Read platforms.yml and return enabled platform names, or None if
-    the file does not exist."""
+def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
+    """Read platforms.yml and return enabled platform names, filtered by
+    diff-based routing when changed_files is provided. Returns None if the
+    file does not exist."""
     if not REGISTRY_FILE.exists():
         return None
 
@@ -55,12 +68,59 @@ def from_registry() -> list[str] | None:
         print("::warning::platforms.yml 'platforms' is not a mapping", file=sys.stderr)
         return []
 
-    enabled = [
-        name
+    enabled = {
+        name: cfg
         for name, cfg in platforms.items()
         if isinstance(cfg, dict) and cfg.get("enabled", False)
-    ]
-    return enabled
+    }
+
+    if not enabled:
+        return []
+
+    # No diff filtering → return all enabled platforms (nightly/weekly mode)
+    if changed_files is None:
+        return list(enabled.keys())
+
+    # Diff-based routing
+    global_paths: list[str] = data.get("global_trigger_paths", [])
+
+    # Check if any changed file hits a global path → full run
+    for f in changed_files:
+        for gp in global_paths:
+            if f.startswith(gp):
+                print(
+                    f"[detect] '{f}' matches global path '{gp}' → all platforms",
+                    file=sys.stderr,
+                )
+                return list(enabled.keys())
+
+    # Per-platform matching
+    triggered: list[str] = []
+    for name, cfg in enabled.items():
+        trigger_paths: list[str] = cfg.get("trigger_paths", [])
+
+        # Empty trigger_paths → always include when enabled
+        if not trigger_paths:
+            triggered.append(name)
+            continue
+
+        matched = False
+        for f in changed_files:
+            for tp in trigger_paths:
+                if f.startswith(tp) or f == tp:
+                    print(
+                        f"[detect] '{f}' matches '{tp}' → include platform '{name}'",
+                        file=sys.stderr,
+                    )
+                    matched = True
+                    break
+            if matched:
+                break
+
+        if matched:
+            triggered.append(name)
+
+    return triggered
 
 
 def from_auto_scan() -> list[str]:
@@ -74,6 +134,16 @@ def from_auto_scan() -> list[str]:
     )
 
 
+def load_changed_files(path: str) -> list[str] | None:
+    """Read a newline-delimited file of changed paths. Returns None if empty."""
+    p = Path(path)
+    if not p.exists():
+        print(f"::warning::changed-files path not found: {path}", file=sys.stderr)
+        return None
+    lines = [line.strip() for line in p.read_text().splitlines() if line.strip()]
+    return lines or None
+
+
 def set_output(name: str, value: str) -> None:
     """Write a key=value pair to $GITHUB_OUTPUT (or print for local runs)."""
     github_output = os.environ.get("GITHUB_OUTPUT")
@@ -84,8 +154,28 @@ def set_output(name: str, value: str) -> None:
         print(f"{name}={value}")
 
 
-def main() -> int:
-    platforms = from_registry()
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Detect CI platforms")
+    parser.add_argument(
+        "--changed-files",
+        metavar="PATH",
+        help="Newline-delimited file of changed paths for diff-based routing",
+    )
+    args = parser.parse_args(argv)
+
+    changed: list[str] | None = None
+    if args.changed_files:
+        changed = load_changed_files(args.changed_files)
+        if changed is not None:
+            print(f"[detect] Changed files ({len(changed)}):", file=sys.stderr)
+            for f in changed[:20]:
+                print(f"  {f}", file=sys.stderr)
+            if len(changed) > 20:
+                print(f"  ... and {len(changed) - 20} more", file=sys.stderr)
+        else:
+            print("[detect] No changed files → full run", file=sys.stderr)
+
+    platforms = from_registry(changed)
 
     if platforms is not None:
         source = "platforms.yml"
