@@ -113,3 +113,13 @@ h20:
         qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
       serving:
         qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+
+# HY4 is too large for the default 8-GPU CUDA runner.
+h100:
+  name: h100
+  tests:
+    e2e:
+      inference:
+        hy4: [fp8_tp16]
+      serving:
+        hy4: [fp8_tp16]
