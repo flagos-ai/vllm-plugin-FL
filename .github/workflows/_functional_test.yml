@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Reusable functional test workflow — fast, component-level GPU tests.
+# Reusable functional test workflow.
 #
-# Runs ops correctness, compilation (graph capture), and distributed tests.
-# These tests do NOT require model files and finish in seconds to minutes.
-# Called by _platform_test.yml for each entry in the functional test matrix.
+# Runs unit tests (pure-logic, no GPU required) followed by functional tests
+# (component-level GPU tests: ops, compilation, distributed) in a single job.
+# Combining them avoids a second container startup and keeps total time short.
+# Called by _platform_test.yml for the functional stage.
 
 name: Functional Test
 
@@ -49,7 +50,7 @@ on:
         description: "Timeout for the job in minutes"
         required: false
         type: number
-        default: 15
+        default: 30
 
 jobs:
   functional-test:
@@ -80,6 +81,12 @@ jobs:
 
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
+
+      - name: Run unit tests
+        run: |
+          python tests/run.py \
+            --platform ${{ inputs.platform }} \
+            --scope unit
 
       - name: Run functional tests
         run: |

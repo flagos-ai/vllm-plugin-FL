@@ -1,0 +1,200 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nightly CI — full regression across all enabled platforms.
+#
+# Runs daily at 02:00 Beijing time (UTC 18:00 previous day).
+# Also triggered manually via workflow_dispatch or the /nightly slash command.
+#
+# Test scope (ci_stage=nightly):
+#   functional  — unit + functional tests (GPU)
+#   e2e         — main model test cases (inference + serving)
+#   benchmark   — throughput / latency / serve entrypoints
+#
+# To run for a single platform: pass platforms="cuda" in workflow_dispatch.
+# The /nightly command passes platform and branch as inputs automatically.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 18 * * *'    # UTC 18:00 = Beijing 02:00 next day
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Comma-separated platform names to test (empty = all enabled)"
+        required: false
+        default: ""
+      branch:
+        description: "Branch to test"
+        required: false
+        default: "main"
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================
+  # Discover: detect all enabled platforms (no diff filtering)
+  # ============================================================
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      platforms: ${{ steps.detect.outputs.platforms }}
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - id: detect
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          python3 .github/scripts/detect_platforms.py
+          if [ -n "$INPUT_PLATFORMS" ]; then
+            python3 - <<'PYEOF'
+          import json, os
+          requested = [p.strip() for p in os.environ["INPUT_PLATFORMS"].split(",") if p.strip()]
+          # Re-run detect to get full enabled list, then filter
+          import subprocess, sys
+          result = subprocess.run(
+              [sys.executable, ".github/scripts/detect_platforms.py"],
+              capture_output=True, text=True
+          )
+          for line in result.stdout.splitlines():
+              if line.startswith("platforms="):
+                  all_platforms = json.loads(line[len("platforms="):])
+                  break
+          else:
+              all_platforms = []
+          filtered = [p for p in requested if p in all_platforms]
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          value = json.dumps(filtered)
+          if github_output:
+              with open(github_output, "a") as f:
+                  f.write(f"platforms<<EOF\n{value}\nEOF\n")
+          else:
+              print(f"platforms={value}")
+          PYEOF
+          fi
+
+  # ============================================================
+  # Platform tests — one job per enabled platform
+  # ============================================================
+  test-cuda:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: cuda
+      ci_stage: nightly
+    secrets: inherit
+
+  test-ascend:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: ascend
+      ci_stage: nightly
+    secrets: inherit
+
+  test-hygon:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: hygon
+      ci_stage: nightly
+    secrets: inherit
+
+  test-metax:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: metax
+      ci_stage: nightly
+    secrets: inherit
+
+  test-musa:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: musa
+      ci_stage: nightly
+    secrets: inherit
+
+  test-enflame:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: enflame
+      ci_stage: nightly
+    secrets: inherit
+
+  test-kunlunxin:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: kunlunxin
+      ci_stage: nightly
+    secrets: inherit
+
+  test-thead:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: thead
+      ci_stage: nightly
+    secrets: inherit
+
+  test-iluvatar:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: iluvatar
+      ci_stage: nightly
+    secrets: inherit
