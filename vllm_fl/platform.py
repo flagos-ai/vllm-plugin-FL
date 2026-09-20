@@ -34,6 +34,7 @@ else:
     CacheDType = None
 
 from vllm_fl.utils import (
+    SPLITTING_OPS,
     DeviceInfo,
     get_device_control_env_var,
     get_device_name,
@@ -51,22 +52,6 @@ dist_backend_dict = {
     "musa": "mccl",
     "gcu": "eccl",
 }
-
-
-# torch_musa/MCCL does not support running collectives while a MUSA stream is
-# being captured. Keep both the vLLM wrappers and the functional collectives
-# they decompose into as eager splitting subgraphs, so PIECEWISE graphs can
-# still capture the computation between TP collectives.
-_MUSA_COLLECTIVE_SPLITTING_OPS = (
-    "vllm::all_reduce",
-    "vllm::all_gather",
-    "vllm::reduce_scatter",
-    "vllm::patched_fused_scaled_matmul_reduce_scatter",
-    "_c10d_functional::all_reduce",
-    "_c10d_functional::all_gather_into_tensor",
-    "_c10d_functional::reduce_scatter_tensor",
-    "_c10d_functional::wait_tensor",
-)
 
 
 def _configure_musa_tp_piecewise_graph(
@@ -95,13 +80,13 @@ def _configure_musa_tp_piecewise_graph(
 
     # This normally runs immediately after Platform.check_and_update_config.
     # Initialize vLLM's default attention/KV-cache splitting ops first so
-    # adding MUSA-specific ops does not replace those defaults.
+    # adding device-specific ops does not replace those defaults.
     compilation_config.set_splitting_ops_for_v1(
         all2all_backend=all2all_backend,
         data_parallel_size=data_parallel_size,
     )
     assert compilation_config.splitting_ops is not None
-    for op in _MUSA_COLLECTIVE_SPLITTING_OPS:
+    for op in SPLITTING_OPS.get("musa", ()):
         if op not in compilation_config.splitting_ops:
             compilation_config.splitting_ops.append(op)
 

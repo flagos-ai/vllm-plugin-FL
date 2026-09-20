@@ -60,6 +60,22 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
 }
 
+# Extra graph-partition boundaries required by a device runtime. vLLM's
+# default attention/KV-cache splitting ops are still installed first.
+SPLITTING_OPS: dict[str, tuple[str, ...]] = {
+    # MCCL collectives cannot run while a MUSA stream is being captured.
+    "musa": (
+        "vllm::all_reduce",
+        "vllm::all_gather",
+        "vllm::reduce_scatter",
+        "vllm::patched_fused_scaled_matmul_reduce_scatter",
+        "_c10d_functional::all_reduce",
+        "_c10d_functional::all_gather_into_tensor",
+        "_c10d_functional::reduce_scatter_tensor",
+        "_c10d_functional::wait_tensor",
+    ),
+}
+
 # Keep the vLLM base-class no-op for platforms not validated by this change.
 # Operators can opt a platform in without a code change via the override below.
 _DEVICE_CONTROL_ENV_VAR_PLACEHOLDER = "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER"

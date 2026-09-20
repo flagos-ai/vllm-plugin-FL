@@ -19,10 +19,8 @@ from torch import distributed as torch_distributed
 
 from vllm.config import CompilationConfig, CompilationMode, CUDAGraphMode
 
-from vllm_fl.platform import (
-    _MUSA_COLLECTIVE_SPLITTING_OPS,
-    _configure_musa_tp_piecewise_graph,
-)
+from vllm_fl.platform import _configure_musa_tp_piecewise_graph
+from vllm_fl.utils import SPLITTING_OPS
 
 
 def test_musa_tp_collectives_are_piecewise_splitting_ops(monkeypatch):
@@ -39,7 +37,7 @@ def test_musa_tp_collectives_are_piecewise_splitting_ops(monkeypatch):
     )
 
     assert config.splitting_ops is not None
-    assert set(_MUSA_COLLECTIVE_SPLITTING_OPS).issubset(config.splitting_ops)
+    assert set(SPLITTING_OPS["musa"]).issubset(config.splitting_ops)
     assert set(config._attention_ops).issubset(config.splitting_ops)
     assert config.cudagraph_copy_inputs is False
     assert config.inductor_compile_config["triton.autotune_pointwise"] is False
@@ -50,7 +48,7 @@ def test_musa_collective_splitting_op_matches_c10d_packet_name():
     assert torch_distributed.is_available()
     wait_tensor = torch.ops._c10d_functional.wait_tensor.default
 
-    assert wait_tensor.name() in _MUSA_COLLECTIVE_SPLITTING_OPS
+    assert wait_tensor.name() in SPLITTING_OPS["musa"]
 
 
 def test_musa_tp_collective_splitting_ops_are_not_duplicated(monkeypatch):
