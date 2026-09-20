@@ -12,7 +12,6 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEConfig,
 )
-from vllm.platforms import current_platform
 from vllm.utils.flashinfer import has_flashinfer_cutlass_fused_moe
 from vllm.model_executor.layers.fused_moe.oracle.unquantized import UnquantizedMoeBackend, map_unquantized_backend, backend_to_kernel_cls
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
@@ -26,13 +25,20 @@ from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
 from vllm.triton_utils import tl, triton
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
-from vllm_fl.utils import use_flaggems
+from vllm_fl.utils import has_native_triton_moe, use_flaggems
 
 _moe_align_block_size = CachedOp("moe_align_block_size")
 _invoke_fused_moe_triton_kernel = CachedOp("invoke_fused_moe_triton_kernel")
 _moe_sum = CachedOp("moe_sum")
 
 logger = init_logger(__name__)
+
+
+def _get_current_platform():
+    """Resolve the platform after OOT plugin activation, not at import time."""
+    from vllm.platforms import current_platform
+
+    return current_platform
 
 
 def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBackend]:
@@ -48,13 +54,15 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
     ) -> None:
         backends.append(backends.pop(backends.index(backend)))
 
-    if current_platform.is_rocm():
+    runtime_platform = _get_current_platform()
+
+    if runtime_platform.is_rocm():
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.AITER,
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
         ]
-    elif current_platform.is_cuda():
+    elif runtime_platform.is_cuda():
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.FLASHINFER_TRTLLM,
             UnquantizedMoeBackend.FLASHINFER_CUTLASS,
@@ -68,10 +76,15 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
         if moe_config.moe_parallel_config.dp_size > 1:
             _move_to_back(_AVAILABLE_BACKENDS, UnquantizedMoeBackend.FLASHINFER_CUTLASS)
 
-    elif current_platform.is_xpu():
+    elif runtime_platform.is_xpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.XPU]
-    elif current_platform.is_cpu():
+    elif runtime_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
+    else:
+        _AVAILABLE_BACKENDS = [
+            UnquantizedMoeBackend.TRITON,
+            UnquantizedMoeBackend.BATCHED_TRITON,
+        ]
     return _AVAILABLE_BACKENDS
 
 ## Adopt from select_unquantized_moe_backend
@@ -82,14 +95,16 @@ def select_unquantized_moe_backend_oot(moe_config: FusedMoEConfig,
     Note: Shape-specific fallbacks may still occur at runtime.
     """
 
-    if current_platform.is_cpu():
+    runtime_platform = _get_current_platform()
+
+    if runtime_platform.is_cpu():
         # TODO: migrate to MK structure.
         return UnquantizedMoeBackend.CPU, None
 
-    if current_platform.is_tpu():
+    if runtime_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
 
-    if current_platform.is_out_of_tree() and use_flaggems():
+    if runtime_platform.is_out_of_tree() and use_flaggems():
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     if moe_config.is_lora_enabled:
@@ -295,12 +310,46 @@ class TritonExpertsFL(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ):
+        # FlagGems' fused_experts_impl only accepts the activation enum/string
+        # and therefore drops FusedMoEQuantConfig's gemm1_clamp_limit.  The
+        # decision is made from the MoE semantics (the clamp requirement) and
+        # the bound implementation's capability, not from any model or provider
+        # identity: a clamped model must never take a path that ignores the
+        # clamp, while an ordinary unclamped MoE keeps the fused fast path.
+        # vLLM's native Triton experts preserve the clamp, so bounded MoE stays
+        # on them when that ABI is available; other runtimes use the per-step
+        # FlagGems GEMMs plus the exact clamped activation below.
+        runtime_platform = _get_current_platform()
+        if (
+            self.quant_config.gemm1_clamp_limit is not None
+            and runtime_platform.is_cuda()
+            and has_native_triton_moe()
+        ):
+            return super().apply(
+                output,
+                hidden_states,
+                w1,
+                w2,
+                topk_weights,
+                topk_ids,
+                activation,
+                global_num_experts,
+                expert_map,
+                a1q_scale,
+                a2_scale,
+                workspace13,
+                workspace2,
+                expert_tokens_meta,
+                apply_router_weight_on_input,
+            )
+
         # vLLM 0.24 routes unquantized MoE through this modular Experts API.
         # Reuse the Kunlunxin implementation migrated from the known-good
         # plugin instead of entering the generic Triton two-GEMM pipeline.
         if (
             self._lora_context is None
-            and getattr(current_platform, "vendor_name", None) == "kunlunxin"
+            and self.quant_config.gemm1_clamp_limit is None
+            and getattr(runtime_platform, "vendor_name", None) == "kunlunxin"
         ):
             from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe import (
                 fused_experts_impl as klx_fused_experts_impl,
@@ -334,8 +383,16 @@ class TritonExpertsFL(TritonExperts):
             )
             return
 
+
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        if self._lora_context is None and current_platform.is_cuda():
+        if (
+            self._lora_context is None
+            and runtime_platform.is_cuda()
+            and (
+                self.quant_config.gemm1_clamp_limit is None
+                or has_native_triton_moe()
+            )
+        ):
             import flag_gems
 
             output.copy_(flag_gems.fused_experts_impl(
@@ -489,7 +546,10 @@ class TritonExpertsFL(TritonExperts):
             )
 
         apply_moe_activation(
-            activation, intermediate_cache2, intermediate_cache1.view(-1, N)
+            activation,
+            intermediate_cache2,
+            intermediate_cache1.view(-1, N),
+            clamp_limit=self.quant_config.gemm1_clamp_limit,
         )
 
         a2q_scale: torch.Tensor | None = None

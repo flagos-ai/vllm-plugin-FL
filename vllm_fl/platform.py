@@ -276,6 +276,14 @@ class PlatformFL(Platform):
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
 
+        # Final, model-scoped config validation on the resolved values (e.g. the
+        # late asynchronous-scheduling guard).  This never mutates dispatch
+        # state or touches CUDA.
+        from vllm_fl.runtime.model_policy import validate_model_config
+
+        validate_model_config(vllm_config)
+
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -289,7 +297,32 @@ class PlatformFL(Platform):
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
 
-        backend_path = call_op("attention_backend", use_mla=use_mla, use_sparse=use_sparse)
+        # A runtime plan may carry a static backend path for models whose
+        # choice does not depend on the selector context.  ``None`` (the
+        # default) falls through to the activation plan / generic dispatch.
+        from vllm_fl.runtime.model_policy import get_active_runtime_plan
+
+        runtime_plan = get_active_runtime_plan()
+        if runtime_plan is not None and runtime_plan.attention_backend:
+            return runtime_plan.attention_backend
+
+        # A model activation plan may override the attention backend (for
+        # example GLM5's portable MLA path).  Only a plan activated for the
+        # model being loaded is consulted, so a process-level GLM provider
+        # variable no longer rewrites the generic path of other MLA models.
+        from vllm_fl.activation import get_active_plan
+
+        plan = get_active_plan()
+        if use_mla and plan is not None and plan.attention_backend is not None:
+            override = plan.attention_backend(
+                use_mla=use_mla, use_sparse=use_sparse
+            )
+            if override:
+                return override
+
+        backend_path = call_op(
+            "attention_backend", use_mla=use_mla, use_sparse=use_sparse
+        )
 
         logger.info_once(
             "Using attention backend via dispatch (use_mla=%s, use_sparse=%s): %s",
