@@ -151,6 +151,15 @@ class TestReport:
         print(f"Total: {self.total}  Passed: {self.passed}  Failed: {self.failed}")
         print(f"Duration: {self.duration:.1f}s")
 
+        # Per-case timing table for cases that took long enough to be worth showing.
+        slow = [r for r in self.results if r.duration >= 30]
+        if slow:
+            slow.sort(key=lambda r: r.duration, reverse=True)
+            print("\nTest timing:")
+            for r in slow:
+                status = "PASS" if r.passed else "FAIL"
+                print(f"  {r.name:<44} {r.duration:>6.0f}s  {status}")
+
         if self.failed > 0:
             print("\nFailed tests:")
             for r in self.results:

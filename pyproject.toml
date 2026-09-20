@@ -48,6 +48,7 @@ test = [
     "pytest-cov",
     "pytest-timeout",
     "pytest-json-report",
+    "pytest-xdist>=3.0.0",
     "numpy",
     "requests",
     "openai",

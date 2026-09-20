@@ -13,6 +13,7 @@ git config --global --add safe.directory "$(pwd)"
 # and cannot be parsed by CMake's CUDA compiler detection.  Install the
 # Python package without requesting the optional native extension build.
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import flag_gems
