@@ -12,15 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# CI Workflow for VLLM Plugin FL
-# This workflow defines the CI process for the VLLM Plugin FL project.
-# It includes linting and platform-specific testing stages.
+# PR CI Workflow
+#
+# Three-stage design:
+#   lint + build  — always run, no hardware required
+#   functional    — unit + functional (GPU), requires ci-functional/ci-e2e/ci-full label
+#   e2e smoke     — lightweight E2E (text + multimodal), requires ci-e2e/ci-full label
+#
+# Platform routing: diff-based — only platforms whose trigger_paths match the
+# PR diff are tested. Changes to shared code (vllm_fl/core, tests/unit_tests,
+# .github/scripts, etc.) trigger all enabled platforms.
+#
+# ci-gate is the single Required Status Check configured in branch protection.
+# It aggregates lint, build, and all platform test results. Skipped platform
+# tests (no matching runner, no label) count as passing.
 name: CI
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths-ignore:
       - "**.md"
       - "docs/**"
@@ -38,10 +49,8 @@ concurrency:
 jobs:
   # ============================================================
   # Job 1: Lint (ruff check, ruff format, typos)
-  # Runs on every push/PR. Fast, no special requirements.
   # ============================================================
   lint:
-    # Skip: fork-internal PRs, draft PRs, PRs with WIP/wip in title
     if: |
       github.event_name != 'pull_request' ||
       (
@@ -54,14 +63,13 @@ jobs:
 
   # ============================================================
   # Job 2: Build & install check
-  # Verify the package can be built and installed cleanly.
   # ============================================================
   build:
     needs: lint
     uses: ./.github/workflows/_build_wheel.yml
 
   # ============================================================
-  # Job 3: Discover which platforms to test
+  # Job 3: Discover which platforms to test (diff-based routing)
   # ============================================================
   discover:
     needs: build
@@ -74,6 +82,7 @@ jobs:
         id: checkout1
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           sparse-checkout: |
             .github/configs
             .github/scripts
@@ -83,6 +92,7 @@ jobs:
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           sparse-checkout: |
             .github/configs
             .github/scripts
@@ -91,107 +101,252 @@ jobs:
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           sparse-checkout: |
             .github/configs
             .github/scripts
       - name: Install PyYAML
         run: pip install pyyaml
+      - name: Get changed files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only \
+              ${{ github.event.pull_request.base.sha }}...${{ github.sha }} \
+              > /tmp/changed_files.txt
+            echo "file=/tmp/changed_files.txt" >> "$GITHUB_OUTPUT"
+            echo "Changed files:"
+            cat /tmp/changed_files.txt
+          else
+            echo "file=" >> "$GITHUB_OUTPUT"
+            echo "workflow_dispatch — no diff filtering"
+          fi
       - id: detect
-        run: python3 .github/scripts/detect_platforms.py
+        run: |
+          CHANGED_ARG=""
+          if [ -n "${{ steps.changed.outputs.file }}" ]; then
+            CHANGED_ARG="--changed-files ${{ steps.changed.outputs.file }}"
+          fi
+          python3 .github/scripts/detect_platforms.py $CHANGED_ARG
 
   # ============================================================
-  # Job 4a: CUDA platform testing
+  # Job 4a–4h: Platform tests (PR stage)
+  # Require ci-functional, ci-e2e, or ci-full label to run.
+  # Skipped jobs (no label or no matching runner) do not fail ci-gate.
   # ============================================================
   test-cuda:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'cuda') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: cuda
+      ci_stage: pr
     secrets: inherit
 
-  # ============================================================
-  # Job 4b: Ascend platform testing
-  # ============================================================
   test-ascend:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'ascend') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: ascend
+      ci_stage: pr
     secrets: inherit
 
-  # ============================================================
-  # Job 4c: Hygon platform testing
-  # ============================================================
   test-hygon:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'hygon') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: hygon
+      ci_stage: pr
     secrets: inherit
 
-  # ============================================================
-  # Job 4d: MetaX platform testing
-  # ============================================================
   test-metax:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'metax') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: metax
+      ci_stage: pr
     secrets: inherit
 
-  # ============================================================
-  # Job 4e: MUSA platform testing
-  # ============================================================
   test-musa:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'musa') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: musa
+      ci_stage: pr
     secrets: inherit
 
-  # ============================================================
-  # Job 4f: Enflame platform testing
-  # ============================================================
   test-enflame:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'enflame') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: enflame
+      ci_stage: pr
     secrets: inherit
 
-  # ============================================================
-  # Job 4g: Kunlunxin platform testing
-  # ============================================================
   test-kunlunxin:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: kunlunxin
+      ci_stage: pr
     secrets: inherit
 
- # ============================================================
-  # Job 4h: THead platform testing
-  # ============================================================
   test-thead:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'thead') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: thead
-  # ============================================================
-  # Job 4h: Iluvatar platform testing
-  # ============================================================
+      ci_stage: pr
+    secrets: inherit
+
   test-iluvatar:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
+    if: |
+      contains(fromJson(needs.discover.outputs.platforms), 'iluvatar') &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
+        contains(github.event.pull_request.labels.*.name, 'ci-full')
+      )
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: iluvatar
+      ci_stage: pr
     secrets: inherit
+
+  # ============================================================
+  # ci-gate — single Required Status Check for branch protection.
+  #
+  # Rules:
+  #   lint, build          : must be 'success'
+  #   platform test jobs   : 'success' or 'skipped' → pass
+  #                          'failure' or 'cancelled' → fail
+  # ============================================================
+  ci-gate:
+    name: ci-gate
+    needs:
+      - lint
+      - build
+      - test-cuda
+      - test-ascend
+      - test-hygon
+      - test-metax
+      - test-musa
+      - test-enflame
+      - test-kunlunxin
+      - test-thead
+      - test-iluvatar
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check gate
+        env:
+          LINT_RESULT:       ${{ needs.lint.result }}
+          BUILD_RESULT:      ${{ needs.build.result }}
+          CUDA_RESULT:       ${{ needs.test-cuda.result }}
+          ASCEND_RESULT:     ${{ needs.test-ascend.result }}
+          HYGON_RESULT:      ${{ needs.test-hygon.result }}
+          METAX_RESULT:      ${{ needs.test-metax.result }}
+          MUSA_RESULT:       ${{ needs.test-musa.result }}
+          ENFLAME_RESULT:    ${{ needs.test-enflame.result }}
+          KUNLUNXIN_RESULT:  ${{ needs.test-kunlunxin.result }}
+          THEAD_RESULT:      ${{ needs.test-thead.result }}
+          ILUVATAR_RESULT:   ${{ needs.test-iluvatar.result }}
+        run: |
+          set -euo pipefail
+
+          fail=0
+
+          check_required() {
+            local name="$1" result="$2"
+            if [ "$result" != "success" ]; then
+              echo "::error::$name must succeed but got: $result"
+              fail=1
+            fi
+          }
+
+          check_optional() {
+            local name="$1" result="$2"
+            case "$result" in
+              success|skipped) ;;
+              *)
+                echo "::error::$name failed with: $result"
+                fail=1
+                ;;
+            esac
+          }
+
+          check_required "lint"  "$LINT_RESULT"
+          check_required "build" "$BUILD_RESULT"
+
+          check_optional "test-cuda"      "$CUDA_RESULT"
+          check_optional "test-ascend"    "$ASCEND_RESULT"
+          check_optional "test-hygon"     "$HYGON_RESULT"
+          check_optional "test-metax"     "$METAX_RESULT"
+          check_optional "test-musa"      "$MUSA_RESULT"
+          check_optional "test-enflame"   "$ENFLAME_RESULT"
+          check_optional "test-kunlunxin" "$KUNLUNXIN_RESULT"
+          check_optional "test-thead"     "$THEAD_RESULT"
+          check_optional "test-iluvatar"  "$ILUVATAR_RESULT"
+
+          if [ $fail -ne 0 ]; then
+            echo "ci-gate: FAILED"
+            exit 1
+          fi
+          echo "ci-gate: PASSED"

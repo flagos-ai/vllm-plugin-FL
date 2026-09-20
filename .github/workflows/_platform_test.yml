@@ -13,26 +13,24 @@
 # limitations under the License.
 
 
-# Per-platform test workflow, invoked by ci.yml via workflow_call (one job per platform).
+# Per-platform test workflow, invoked by ci.yml / nightly.yml / weekly.yml
+# via workflow_call (one invocation per platform).
+#
+# ci_stage controls which tests run:
+#   pr      — functional (unit+functional merged) + e2e smoke cases
+#   nightly — functional + e2e main cases + benchmark
+#   weekly  — functional + e2e full cases + benchmark
 #
 # Main steps:
 # 1. setup:      Load platform config and generate test matrices
-# 2. unit:       Run unit tests with platform-specific include/exclude patterns
-# 3. functional: Run component-level GPU tests (ops, compilation, distributed) — fast
-# 4. e2e:        Run end-to-end model tests (inference, serving) — slow, needs model files
-#
-# Users can modify test settings in tests/platforms/*.yaml:
-# - e2e: Add/remove model test cases in the support lists
-# - functional: Adjust include/exclude patterns for component tests
-# - unit: Add/remove paths in include and exclude lists
-# - tolerance: Adjust numerical comparison tolerance for result validation
-# - unsupported_features: Exclude test cases matching specific feature tags
+# 2. functional: Run unit + functional tests (ops, compilation, distributed)
+# 3. e2e:        Run end-to-end model tests (pr=smoke, nightly/weekly=full)
+# 4. benchmark:  Validate vllm bench entrypoints (nightly/weekly only)
 #
 # Notes:
-# - This workflow only defines the orchestration; actual test logic lives in
-#   _unit_test.yml, _functional_test.yml, and _e2e_test.yml.
-# - The discover job in ci.yml auto-scans tests/platforms/*.yaml to determine
-#   which platforms to test, then invokes this workflow for each one.
+# - The discover job in ci.yml auto-scans enabled platforms and applies
+#   diff-based routing before invoking this workflow.
+# - For nightly/weekly all enabled platforms are always tested.
 name: Platform Test
 
 on:
@@ -41,6 +39,11 @@ on:
       platform:
         required: true
         type: string
+      ci_stage:
+        description: "CI stage: pr / nightly / weekly"
+        required: false
+        type: string
+        default: "nightly"
     secrets:
       FEISHU_APP_ID:
         required: false
@@ -77,43 +80,16 @@ jobs:
           fetch-depth: 0
       - id: load
         run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
-      - id: changes
-        name: Detect changed files (PR only)
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.sha }} > /tmp/changed_files.txt
-            echo "file=/tmp/changed_files.txt" >> "$GITHUB_OUTPUT"
-            echo "Changed files:"
-            cat /tmp/changed_files.txt
-          else
-            echo "file=" >> "$GITHUB_OUTPUT"
-            echo "Push event — no filtering"
-          fi
       - id: matrix
         run: |
-          CHANGED_ARG=""
-          if [ -n "${{ steps.changes.outputs.file }}" ]; then
-            CHANGED_ARG="--changed-files ${{ steps.changes.outputs.file }}"
-          fi
           python .github/scripts/generate_matrix.py \
             --platform ${{ inputs.platform }} \
-            $CHANGED_ARG
+            --ci-stage ${{ inputs.ci_stage }}
 
-  unit:
-    needs: setup
-    uses: ./.github/workflows/_unit_test.yml
-    with:
-      platform: ${{ inputs.platform }}
-      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
-      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
-      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-
-  # Fast component-level GPU tests (ops, compilation, distributed).
-  # Runs all tests under tests/functional_tests/ in one job. No model files needed.
-  # Runs once per platform (not per device) — functional tests are device-agnostic.
+  # Unit + functional tests in one job (GPU runner required).
+  # Unit tests (pure-logic) run first, then component-level GPU tests.
   functional:
-    needs: [setup, unit]
+    needs: setup
     uses: ./.github/workflows/_functional_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -122,10 +98,9 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
 
-
-  # Slow end-to-end model tests (inference, serving).
-  # Grouped by (task, device) — all model/case combos for the same task
-  # run inside a single job to avoid repeated container startup.
+  # End-to-end model tests.
+  # pr stage: smoke cases (text + multimodal, one device).
+  # nightly/weekly stage: main/full cases, all devices.
   e2e:
     needs: [setup, functional]
     if: needs.setup.outputs.e2e_matrix != '[]'
@@ -145,9 +120,10 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
-  # Validates vllm bench throughput/latency/serve entrypoints.
+  # Benchmark validation — nightly and weekly only.
   benchmark:
     needs: [setup, e2e]
+    if: inputs.ci_stage == 'nightly' || inputs.ci_stage == 'weekly'
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -157,24 +133,22 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
 
-  # ============================================================
-  # Feishu notification — per-platform status
-  # ============================================================
+  # Feishu notification — per-platform status (nightly/weekly only).
+  # PR CI uses the top-level ci-gate + notify-feishu.yml (workflow_run trigger).
   notify:
-    needs: [unit, functional, e2e, benchmark]
-    if: always()
+    needs: [functional, e2e, benchmark]
+    if: always() && (inputs.ci_stage == 'nightly' || inputs.ci_stage == 'weekly')
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}
       status: >-
-        ${{ (needs.unit.result == 'success' &&
-             needs.functional.result == 'success' &&
+        ${{ (needs.functional.result == 'success' &&
              (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
              (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped'))
             && 'success'
-            || (needs.unit.result == 'cancelled' ||
-                needs.functional.result == 'cancelled' ||
+            || (needs.functional.result == 'cancelled' ||
                 needs.e2e.result == 'cancelled' ||
                 needs.benchmark.result == 'cancelled')
                && 'cancelled'
                || 'failure' }}
+    secrets: inherit

@@ -49,6 +49,9 @@ zw810e:
   name: "zw810e"
   tests:
     e2e:
+      smoke:
+        inference:
+          qwen3_6: ["27b_tp4_eager"]
       inference:
         qwen3_6: ["27b_tp4_eager", "35b_a3b_tp4_graph"]
       serving:

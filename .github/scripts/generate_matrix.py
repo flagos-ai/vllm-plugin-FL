@@ -10,12 +10,25 @@ so that downstream GitHub Actions jobs can use ``fromJson()`` to fan out.
 Usage (in a workflow step)::
 
     - id: matrix
-      run: python .github/scripts/generate_matrix.py --platform ${{ inputs.platform }}
+      run: |
+        python .github/scripts/generate_matrix.py \\
+          --platform ${{ inputs.platform }} \\
+          --ci-stage pr     # or nightly / weekly
 
 Outputs:
     functional — JSON array of ``{device, timeout}`` objects (one per device, runs all functional tests).
     e2e        — JSON array of ``{task, device, timeout}`` objects grouped by (task, device).
     unit       — JSON array of ``{device, include, exclude}`` objects.
+
+CI stage semantics
+------------------
+pr
+    E2E uses the ``smoke`` sub-key of each device's ``tests.e2e`` block.
+    Smoke cases are a small subset (text + multimodal) declared by each
+    platform YAML.  Skips platforms/devices with no ``smoke`` defined.
+
+nightly / weekly (default)
+    E2E uses the full ``inference`` / ``serving`` keys as before.
 """
 
 from __future__ import annotations
@@ -85,6 +98,7 @@ def build_e2e_matrix(
     config: dict,
     devices: list[str],
     unsupported: list[str],
+    ci_stage: str = "nightly",
 ) -> list[dict]:
     """End-to-end model tests (inference, serving).
 
@@ -92,6 +106,9 @@ def build_e2e_matrix(
     ``(task, device)`` so that all model/case combos for the same task
     run inside a single job, avoiding repeated container startup and
     project installation.
+
+    In ``pr`` stage, reads the ``smoke`` sub-key of each device's
+    ``tests.e2e`` block instead of the full ``inference``/``serving`` keys.
     """
     # Collect per-(task, device) groups
     groups: dict[tuple[str, str], list[dict]] = {}
@@ -99,7 +116,17 @@ def build_e2e_matrix(
         section = config[device]
         e2e = section.get("tests", {}).get("e2e", {})
 
-        for task_key, models in e2e.items():
+        if ci_stage == "pr":
+            # PR smoke mode: read smoke.inference / smoke.serving
+            smoke = e2e.get("smoke", {})
+            if not smoke:
+                continue
+            task_models_iter = smoke.items()
+        else:
+            # Nightly/weekly: use all keys except 'smoke'
+            task_models_iter = {k: v for k, v in e2e.items() if k != "smoke"}.items()
+
+        for task_key, models in task_models_iter:
             if not isinstance(models, dict):
                 continue
             task_dir = resolve_task_dir(task_key)
@@ -303,6 +330,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Platform name (must match tests/platforms/<platform>.yaml)",
     )
     parser.add_argument(
+        "--ci-stage",
+        default="nightly",
+        choices=["pr", "nightly", "weekly"],
+        help="CI stage: 'pr' uses smoke cases, 'nightly'/'weekly' use full cases.",
+    )
+    parser.add_argument(
         "--changed-files",
         default=None,
         help="Path to a newline-delimited file listing changed paths. "
@@ -345,11 +378,14 @@ def main(argv: list[str] | None = None) -> int:
     if not devices:
         print(f"::warning::No device sections found in {args.platform}.yaml")
 
-    e2e_matrix = build_e2e_matrix(config, devices, unsupported)
+    ci_stage = args.ci_stage
+    e2e_matrix = build_e2e_matrix(config, devices, unsupported, ci_stage=ci_stage)
     unit_matrix = build_unit_matrix(config, devices)
 
-    # Apply PR smart-skip filtering when changed files are provided
-    if args.changed_files:
+    # Apply PR smart-skip filtering when changed files are provided.
+    # Only meaningful for nightly/weekly full runs; in pr stage the smoke list
+    # is already narrow, so we skip the filter to avoid hiding smoke cases.
+    if args.changed_files and ci_stage != "pr":
         changed = load_changed_files(args.changed_files)
         if changed:
             e2e_matrix = filter_e2e_by_changes(e2e_matrix, changed)
@@ -362,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Human-readable summary for CI logs
     print(f"Platform:    {args.platform}")
+    print(f"Stage:       {ci_stage}")
     print(f"Devices:     {devices}")
     print(f"E2E:         {len(e2e_matrix)} job(s)")
     for entry in e2e_matrix:
