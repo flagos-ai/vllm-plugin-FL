@@ -194,6 +194,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        # Signal handling and process ownership are common to all chips. Apply
+        # the version-scoped local multiprocessing fix before EngineCore starts.
+        from vllm_fl.patches.worker_shutdown import patch_worker_shutdown
+
+        patch_worker_shutdown()
+
         if cls.device_type == "ptpu":
             import vllm_fl.dispatch.backends.vendor.sunrise  # noqa: F401
 
