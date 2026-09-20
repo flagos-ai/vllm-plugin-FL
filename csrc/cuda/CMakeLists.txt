@@ -7,6 +7,7 @@
 # in HIP/ROCm CUDA-like PyTorch environments where nvcc is unavailable.
 
 set(VLLM_FL_CUDA_SRCS
+    async_output_completion.cpp
     weak_ref_tensor.cpp
     torch_bindings.cpp
 )
@@ -19,7 +20,7 @@ target_include_directories(_C PRIVATE
     ${TORCH_INCLUDE_DIRS}
 )
 
-target_link_libraries(_C PRIVATE ${TORCH_LIBRARIES})
+target_link_libraries(_C PRIVATE ${TORCH_LIBRARIES} ${CMAKE_DL_LIBS})
 
 target_compile_options(_C PRIVATE -O3)
 
