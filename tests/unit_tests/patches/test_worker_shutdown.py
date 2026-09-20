@@ -15,6 +15,7 @@
 """CPU process regressions; these run in every platform's unit-test job."""
 
 import ast
+import contextlib
 import logging
 import multiprocessing
 import os
@@ -24,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -222,6 +224,238 @@ def _original_entrypoint(namespace):
     module = ast.Module(body=[function], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(source), "exec"), namespace)
     return namespace["run_engine_core"]
+
+
+@pytest.mark.parametrize("stage", ["before-executor", "after-executor"])
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt, SystemExit])
+def test_failed_engine_initialization_preserves_error_and_handlers(
+    monkeypatch, stage, error_type
+):
+    failure = error_type("initialization failed")
+    handlers = {signal.SIGTERM: object(), signal.SIGINT: object()}
+    original_handlers = handlers.copy()
+    cleanup = []
+
+    def set_signal(signum, handler):
+        previous = handlers[signum]
+        handlers[signum] = handler
+        return previous
+
+    monkeypatch.setattr(shutdown.signal, "signal", set_signal)
+
+    class Executor:
+        def shutdown(self):
+            assert set(handlers.values()) == {signal.SIG_IGN}
+            cleanup.append(True)
+
+    class Engine:
+        def __init__(self):
+            if stage == "before-executor":
+                raise failure
+            self.model_executor = Executor()
+            raise failure
+
+        def shutdown(self):
+            raise AssertionError("partial engine shutdown accesses missing fields")
+
+    original_init = Engine.__init__
+    with pytest.raises(error_type) as caught:
+        shutdown._initialize_engine_core(Engine)
+    assert caught.value is failure
+    assert handlers == original_handlers
+    assert cleanup == ([True] if stage == "after-executor" else [])
+    assert Engine.__init__ is original_init
+
+
+def test_failed_initialization_cleanup_error_does_not_mask_original(monkeypatch):
+    original = RuntimeError("graph capture failed")
+    cleanup_error = ValueError("cleanup also failed")
+    handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
+    errors = []
+
+    def record_error(message):
+        errors.append((message, sys.exc_info()[1]))
+
+    monkeypatch.setattr(shutdown.logger, "exception", record_error)
+
+    class Executor:
+        def shutdown(self):
+            raise cleanup_error
+
+    class Engine:
+        def __init__(self):
+            self.model_executor = Executor()
+            raise original
+
+    original_init = Engine.__init__
+    with pytest.raises(RuntimeError) as caught:
+        shutdown._initialize_engine_core(Engine)
+    assert caught.value is original
+    assert errors == [
+        ("Failed to clean up partially initialized engine", cleanup_error)
+    ]
+    assert {s: signal.getsignal(s) for s in handlers} == handlers
+    assert Engine.__init__ is original_init
+
+
+def test_successful_engine_initialization_is_unchanged():
+    class Executor:
+        def shutdown(self):
+            raise AssertionError("successful construction must not shut down")
+
+    class Engine:
+        def __init__(self, value, *, engine_index):
+            self.model_executor = Executor()
+            self.value = value
+            self.engine_index = engine_index
+
+    original_init = Engine.__init__
+    engine = shutdown._initialize_engine_core(Engine, "sentinel", engine_index=3)
+    assert type(engine) is Engine
+    assert engine.value == "sentinel"
+    assert engine.engine_index == 3
+    assert Engine.__init__ is original_init
+
+
+def _failed_initialization_child(connection, patched):
+    """Reproduce startup failure with real daemon workers and exit finalizers."""
+    os.setsid()
+    shutdown.WORKER_GRACE_TIMEOUT_S = 0.05
+    shutdown.WORKER_TERMINATE_TIMEOUT_S = 0.05
+    shutdown.WORKER_KILL_TIMEOUT_S = 2.0
+    context = multiprocessing.get_context("fork")
+
+    class Executor:
+        _ensure_worker_termination = staticmethod(lambda processes: None)
+
+        def __init__(self):
+            self._init_executor()
+
+        def _init_executor(self):
+            # Match upstream's bound-method finalizer and daemon worker owner.
+            self._finalizer = weakref.finalize(self, self.shutdown)
+            self.shutting_down = False
+            parent, child = context.Pipe()
+            self.worker = context.Process(
+                target=_stubborn_worker, args=(child,), daemon=True
+            )
+            self.worker.start()
+            child.close()
+            assert parent.poll(5)
+            assert parent.recv() == "ready"
+            self.worker_connection = parent
+            connection.send(("worker", self.worker.pid))
+
+        def shutdown(self):
+            if not self.shutting_down:
+                self.shutting_down = True
+                if patched:
+                    connection.send("cleanup")
+                    assert connection.poll(5), "cleanup barrier was not released"
+                    assert connection.recv() == "finish"
+                self._ensure_worker_termination([self.worker])
+                assert self.worker.exitcode == -signal.SIGKILL
+                assert not psutil.pid_exists(self.worker.pid)
+                self.worker_connection.close()
+
+    class Engine:
+        def __init__(self, *args, **kwargs):
+            self.model_executor = Executor()
+            raise RuntimeError("synthetic graph initialization failure")
+
+        def shutdown(self):
+            raise AssertionError("partial EngineCore.shutdown must not run")
+
+    core = SimpleNamespace(
+        EngineCoreProc=Engine,
+        maybe_register_config_serialize_by_value=lambda: None,
+        set_process_title=lambda title: None,
+        maybe_init_worker_tracer=lambda *args: None,
+        decorate_logs=lambda: None,
+        logger=logging.getLogger("failed-initialization-test"),
+    )
+    modules = {
+        "vllm.v1.engine.core": core,
+        "vllm.v1.executor.multiproc_executor": SimpleNamespace(
+            MultiprocExecutor=Executor
+        ),
+    }
+    shutdown.import_module = modules.__getitem__
+    if not patched:
+        # The previous backport could only clean up fully constructed engines.
+        shutdown._initialize_engine_core = lambda cls, *a, **kw: cls(*a, **kw)
+    try:
+        shutdown.run_engine_core(vllm_config=_config(), executor_class=Executor)
+    except RuntimeError as exc:
+        connection.send(("error", str(exc)))
+        raise
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux process signal semantics")
+@pytest.mark.parametrize(
+    ("patched", "signum"),
+    [(False, None), (True, signal.SIGINT), (True, signal.SIGTERM)],
+    ids=["previous-backport", "group-sigint", "sigterm"],
+)
+def test_initialization_failure_reclaims_workers_before_process_exit(patched, signum):
+    context = multiprocessing.get_context("fork")
+    parent, child = context.Pipe()
+    process = context.Process(
+        target=_failed_initialization_child, args=(child, patched)
+    )
+    other_parent, other_child = context.Pipe()
+    unrelated = context.Process(target=_stubborn_worker, args=(other_child,))
+    worker_pid = None
+    worker_process = None
+    process.start()
+    child.close()
+    unrelated.start()
+    other_child.close()
+    try:
+        assert other_parent.poll(5)
+        assert other_parent.recv() == "ready"
+        assert parent.poll(10)
+        event, worker_pid = parent.recv()
+        assert event == "worker"
+        worker_process = psutil.Process(worker_pid)
+        worker_process.create_time()
+        if patched:
+            assert parent.poll(5)
+            assert parent.recv() == "cleanup"
+            for _ in range(2):
+                if signum == signal.SIGINT:
+                    os.killpg(process.pid, signum)
+                else:
+                    os.kill(process.pid, signum)
+            parent.send("finish")
+        assert parent.poll(5)
+        assert parent.recv() == ("error", "synthetic graph initialization failure")
+        if patched:
+            process.join(5)
+            assert process.exitcode == 1, "original initialization failure was lost"
+            assert not psutil.pid_exists(worker_pid), "owned worker was not reaped"
+        else:
+            # multiprocessing's automatic daemon termination has no KILL/reap
+            # deadline; the bound-method weakref finalizer cannot rescue it.
+            process.join(0.2)
+            assert process.is_alive(), "previous startup-cleanup gap was not reproduced"
+            assert psutil.pid_exists(worker_pid)
+        assert unrelated.is_alive(), "cleanup touched another engine's process"
+    finally:
+        # Kill only the worker reported by this test, while its owner can reap it.
+        if worker_process is not None:
+            with contextlib.suppress(psutil.NoSuchProcess):
+                worker_process.kill()
+        process.join(5)
+        if process.is_alive():
+            process.kill()
+            process.join(5)
+        unrelated.kill()
+        unrelated.join(5)
+        process.close()
+        unrelated.close()
+        parent.close()
+        other_parent.close()
 
 
 def _signal_child(connection, patched, phase):

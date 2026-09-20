@@ -18,6 +18,8 @@ Keep EngineCore alive while its own workers are being reclaimed. The upstream
 entry point restores default signal handlers *before* cleanup, so a second
 SIGINT/SIGTERM can interrupt that cleanup. Its default parent timeout is also
 shorter than the worker termination sequence. Neither behavior is chip-specific.
+Explicitly reclaim an already-created executor when engine construction fails,
+before multiprocessing's automatic daemon-worker joins can hang process exit.
 
 This is a version-scoped backport, not a replacement for device-specific resource
 cleanup. Ray, multi-node execution and request-drain timeout semantics are left
@@ -181,6 +183,48 @@ def _is_local_multiproc(vllm_config: Any, executor_class: Any) -> bool:
     )
 
 
+def _initialize_engine_core(engine_cls: type, *args, **kwargs):
+    """Reclaim an executor whose engine fails after creating its workers.
+
+    Called only inside the scoped local-MP child. EngineCore construction can
+    fail during KV-cache initialization or graph capture, before assignment in
+    run_engine_core and before scheduler/structured-output fields exist. Its
+    executor's bound-method weakref finalizer is not a substitute for explicit
+    cleanup: multiprocessing may first terminate and indefinitely join workers.
+    """
+    original_init = engine_cls.__init__
+
+    @wraps(original_init)
+    def patched_engine_init(self, *args, **kwargs):
+        try:
+            original_init(self, *args, **kwargs)
+        except BaseException:
+            executor = getattr(self, "model_executor", None)
+            if executor is not None:
+                previous_handlers = {}
+                try:
+                    for signum in (signal.SIGTERM, signal.SIGINT):
+                        previous_handlers[signum] = signal.signal(
+                            signum, signal.SIG_IGN
+                        )
+                    executor.shutdown()
+                except BaseException:
+                    # Preserve the constructor's original error, including
+                    # cancellation, even if cleanup itself also fails.
+                    logger.exception("Failed to clean up partially initialized engine")
+                finally:
+                    for signum, handler in previous_handlers.items():
+                        signal.signal(signum, handler)
+            raise
+
+    engine_cls.__init__ = patched_engine_init
+    try:
+        return engine_cls(*args, **kwargs)
+    finally:
+        # Keep the wrapper local to this construction attempt, including failure.
+        engine_cls.__init__ = original_init
+
+
 def run_engine_core(*args, dp_rank: int = 0, local_dp_rank: int = 0, **kwargs):
     """vLLM 0.20.2 entry point with cleanup protected from repeated signals.
 
@@ -235,7 +279,9 @@ def run_engine_core(*args, dp_rank: int = 0, local_dp_rank: int = 0, **kwargs):
             parallel_config.data_parallel_size = 1
             parallel_config.data_parallel_size_local = 1
             parallel_config.data_parallel_rank = 0
-            engine_core = core.EngineCoreProc(*args, engine_index=dp_rank, **kwargs)
+            engine_core = _initialize_engine_core(
+                core.EngineCoreProc, *args, engine_index=dp_rank, **kwargs
+            )
 
         assert engine_core is not None
 
