@@ -6,6 +6,9 @@ Shared vLLM server lifecycle helper for serving E2E tests.
 Provides ``VllmServer`` — a context manager that starts a vLLM serve
 process, waits for readiness, and tears it down on exit.
 
+Set ``VLLM_TEST_LOG_DIR`` to retain every server log in an artifact directory,
+including logs from successful tests. Otherwise, successful logs are temporary.
+
 Usage in test fixtures::
 
     @pytest.fixture(scope="module")
@@ -89,11 +92,17 @@ class VllmServer:
         print(f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size})")
         print(f"[Setup] Command: {' '.join(cmd)}")
 
+        log_dir = os.environ.get("VLLM_TEST_LOG_DIR") or None
+        self._keep_log = log_dir is not None
+        if log_dir is not None:
+            os.makedirs(log_dir, exist_ok=True)
         self._log_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
             prefix=f"vllm_{model_short}_",
             suffix=".log",
             delete=False,
+            dir=log_dir,
         )
+        print(f"[Setup] Server log: {self._log_file.name}")
         self._process = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
