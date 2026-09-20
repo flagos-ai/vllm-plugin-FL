@@ -73,6 +73,8 @@ def _patch_flag_gems_triton_import_compat():
 
 _patch_flag_gems_triton_import_compat()
 
+=======
+>>>>>>> 36be9e3 (support flagtree)
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.
