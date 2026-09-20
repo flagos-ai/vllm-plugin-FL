@@ -2,9 +2,11 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from vllm.config import CUDAGraphMode
+from vllm.platforms import current_platform
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
 from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
@@ -18,6 +20,11 @@ from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
     patch_decode_attention,
     patch_eager_all_gather,
     patch_graph_all_reduce,
+)
+
+pytestmark = pytest.mark.skipif(
+    getattr(current_platform, "vendor_name", None) != "kunlunxin",
+    reason="Kunlunxin-specific CUDA graph tests",
 )
 
 
@@ -489,7 +496,8 @@ def test_piecewise_capture_keeps_direct_flagcx_all_reduce(monkeypatch):
     input_ = torch.tensor([1.0, 3.0])
     output = CommunicatorFL.all_reduce(SimpleNamespace(), input_)
 
-    assert eager_calls == [input_]
+    assert len(eager_calls) == 1
+    assert torch.equal(eager_calls[0], input_)
     assert process_group_calls == []
     assert torch.equal(output, torch.tensor([11.0, 13.0]))
 
@@ -510,7 +518,8 @@ def test_eager_all_reduce_keeps_direct_flagcx_path(monkeypatch):
     input_ = torch.tensor([1.0, 3.0])
     output = CommunicatorFL.all_reduce(SimpleNamespace(), input_)
 
-    assert eager_calls == [input_]
+    assert len(eager_calls) == 1
+    assert torch.equal(eager_calls[0], input_)
     assert torch.equal(output, torch.tensor([11.0, 13.0]))
 
 
@@ -572,5 +581,8 @@ def test_capture_all_gather_keeps_process_group_path(monkeypatch):
     )
     output = CommunicatorFL.all_gather(communicator, input_, dim=0)
 
-    assert process_group_calls == [(input_, 0)]
+    assert len(process_group_calls) == 1
+    gathered_input, gathered_dim = process_group_calls[0]
+    assert torch.equal(gathered_input, input_)
+    assert gathered_dim == 0
     assert torch.equal(output, torch.tensor([101.0, 103.0]))
