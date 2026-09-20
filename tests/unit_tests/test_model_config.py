@@ -136,3 +136,30 @@ def test_load_without_matching_device_case_override_uses_base_config(
 
     assert cfg.engine["tensor_parallel_size"] == 2
     assert cfg.engine["gpu_memory_utilization"] == 0.95
+
+
+def test_hygon_shutdown_graph_case_matches_issue_531():
+    case = "35b_a3b_tp2_shutdown_graph"
+    platform = platform_config.PlatformConfig.load("hygon", "bw1000")
+    assert {"task": "serving", "model": "qwen3_6", "case": case} in (
+        platform.get_e2e_tests().get_cases(task="serving", model="qwen3_6")
+    )
+
+    cfg = ModelConfig.load("qwen3_6", case, platform="hygon", device="bw1000")
+    existing = ModelConfig.load(
+        "qwen3_6", "35b_a3b_tp2_eager", platform="hygon", device="bw1000"
+    )
+    assert cfg.model == existing.model
+    assert cfg.engine["tensor_parallel_size"] == 2
+    assert cfg.engine["max_model_len"] == 262144
+    assert cfg.engine["gpu_memory_utilization"] == 0.9
+    assert cfg.engine["enforce_eager"] is False
+    assert cfg.serve.extra_engine.get("enforce_eager", False) is False
+    assert cfg.serve.startup_retries == 180
+
+    args = cfg.serve_args(**cfg.serve.extra_engine) + cfg.serve.extra_args
+    assert "--enforce-eager" not in args
+    assert "--no-enable-log-requests" in args
+    assert "--no-enable-prefix-caching" in args
+    assert args[args.index("--max-model-len") + 1] == "262144"
+    assert "--disable-custom-all-reduce" not in args
