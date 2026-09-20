@@ -26,7 +26,6 @@ from vllm.forward_context import (
 )
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
-from vllm.utils.torch_utils import current_stream
 
 logger = init_logger(__name__)
 
@@ -253,7 +252,6 @@ class GraphWrapper:
             with current_platform.torch_device_fn.graph(
                 graph,
                 pool=self.graph_pool,
-                stream=current_stream(),
             ):
                 # `output` is managed by pytorch's cudagraph pool
                 output = self.runnable(*args, **kwargs)
