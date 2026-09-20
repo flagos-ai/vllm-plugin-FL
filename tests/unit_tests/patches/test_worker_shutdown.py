@@ -443,8 +443,10 @@ def test_serving_helper_fails_before_its_own_recovery_cleanup():
         sys.executable,
         "-u",
         "-c",
-        "import signal,time; signal.signal(signal.SIGINT, signal.SIG_IGN); "
-        "print('ready'); time.sleep(60)",
+        (
+            "import signal,time; signal.signal(signal.SIGINT, signal.SIG_IGN); "
+            "print('ready'); time.sleep(60)"
+        ),
     ]
     processes = []
     try:
