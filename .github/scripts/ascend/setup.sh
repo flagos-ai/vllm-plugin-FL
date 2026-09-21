@@ -5,12 +5,6 @@ set -euo pipefail
 
 git config --global --add safe.directory "$(pwd)"
 
-pip install --upgrade pip "setuptools>=77.0.3,<80"
-python -m pip install --no-cache-dir \
-    pytest-cov \
-    pytest-json-report \
-    pytest-metadata \
-    pytest-timeout
 pip install \
     --no-build-isolation \
     --no-deps \
@@ -27,6 +21,12 @@ for package, expected_version in {
     "torch-npu": "2.10.0",
     "flagtree": "0.6.2a1+ascend3.5",
     "cann-shmem": "1.6.0",
+    "pytest": "8.3.2",
+    "coverage": "7.16.1",
+    "pytest-cov": "7.1.0",
+    "pytest-json-report": "1.5.0",
+    "pytest-metadata": "3.1.1",
+    "pytest-timeout": "2.4.0",
 }.items():
     actual = version(package)
     if actual != expected_version:
