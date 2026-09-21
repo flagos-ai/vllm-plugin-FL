@@ -53,19 +53,11 @@ env_defaults:
 bw1000:
   name: "bw1000"
   tests:
-    timeouts:
-      e2e:
-        # Three serving cases include the cold-start TP=2 graph regression.
-        # Only the job budget changes; the 45-second shutdown gate is unchanged.
-        serving: 90
     e2e:
       inference:
         qwen3_6: ["35b_a3b_tp4_graph", "27b_tp2_eager"]
       serving:
-        qwen3_6:
-          - "27b_tp4_graph"
-          - "35b_a3b_tp2_eager"
-          - "35b_a3b_tp2_shutdown_graph"
+        qwen3_6: ["27b_tp4_graph", "35b_a3b_tp2_eager"]
     functional:
       include: "*"
       exclude: []

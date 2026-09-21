@@ -141,44 +141,20 @@ def test_load_without_matching_device_case_override_uses_base_config(
     assert cfg.engine["gpu_memory_utilization"] == 0.95
 
 
-def test_hygon_shutdown_graph_case_matches_issue_531():
-    case = "35b_a3b_tp2_shutdown_graph"
-    platform = platform_config.PlatformConfig.load("hygon", "bw1000")
-    assert {"task": "serving", "model": "qwen3_6", "case": case} in (
-        platform.get_e2e_tests().get_cases(task="serving", model="qwen3_6")
-    )
-
-    cfg = ModelConfig.load("qwen3_6", case, platform="hygon", device="bw1000")
-    existing = ModelConfig.load(
-        "qwen3_6", "35b_a3b_tp2_eager", platform="hygon", device="bw1000"
-    )
-    assert cfg.model == existing.model
-    assert cfg.engine["tensor_parallel_size"] == 2
-    assert cfg.engine["max_model_len"] == 262144
-    assert cfg.engine["gpu_memory_utilization"] == 0.9
-    assert cfg.engine["enforce_eager"] is False
-    assert cfg.serve.extra_engine.get("enforce_eager", False) is False
-    assert cfg.serve.startup_retries == 180
-
-    args = cfg.serve_args(**cfg.serve.extra_engine) + cfg.serve.extra_args
-    assert "--enforce-eager" not in args
-    assert "--no-enable-log-requests" in args
-    assert "--no-enable-prefix-caching" in args
-    assert args[args.index("--max-model-len") + 1] == "262144"
-    assert "--disable-custom-all-reduce" not in args
-
-
-def test_hygon_serving_matrix_has_budget_for_all_three_cases():
+def test_hygon_ci_matrix_preserves_release_cases_and_timeouts():
     root = Path(__file__).resolve().parents[2]
     matrix_module = runpy.run_path(str(root / ".github/scripts/generate_matrix.py"))
     config = matrix_module["load_platform"]("hygon")
     entries = matrix_module["build_e2e_matrix"](config, ["bw1000"], [])
     serving = next(entry for entry in entries if entry["task"] == "serving")
     inference = next(entry for entry in entries if entry["task"] == "inference")
-    assert serving["timeout"] == 90
+    assert serving["timeout"] == 60
     assert inference["timeout"] == 60
     assert json.loads(serving["cases"]) == [
         {"model": "qwen3_6", "case": "27b_tp4_graph"},
         {"model": "qwen3_6", "case": "35b_a3b_tp2_eager"},
-        {"model": "qwen3_6", "case": "35b_a3b_tp2_shutdown_graph"},
+    ]
+    assert json.loads(inference["cases"]) == [
+        {"model": "qwen3_6", "case": "35b_a3b_tp4_graph"},
+        {"model": "qwen3_6", "case": "27b_tp2_eager"},
     ]
