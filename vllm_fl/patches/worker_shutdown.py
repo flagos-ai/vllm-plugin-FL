@@ -66,9 +66,11 @@ def get_engine_process_shutdown_timeout(
 
     In vLLM 0.20.2 the parent's positive process timeout also enforces the request
     drain deadline. Extending it would change request-drain behavior. Preserve that
-    deadline, as well as callers that pass ``None``.
+    deadline. A process timeout of ``None`` is an omitted budget (used by standard
+    serving teardown), which upstream normalizes to five seconds, not an unlimited
+    request drain. Extend it only when the configured request timeout is zero.
     """
-    if request_timeout == 0 and process_timeout == 0:
+    if request_timeout == 0 and process_timeout in (0, None):
         return ENGINE_PROCESS_SHUTDOWN_TIMEOUT_S
     return process_timeout
 
