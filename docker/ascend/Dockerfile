@@ -68,9 +68,10 @@ WORKDIR /workspace
 FROM base AS dev
 
 RUN python -m pip install --no-cache-dir \
-        pytest \
-        pytest-cov \
-        pytest-json-report \
+        pytest==8.3.2 \
+        coverage==7.16.1 \
+        pytest-cov==7.1.0 \
+        pytest-json-report==1.5.0 \
         ruff \
         pre-commit
 
@@ -78,8 +79,8 @@ RUN python -m pip install --no-cache-dir \
 FROM dev AS ci
 
 RUN python -m pip install --no-cache-dir \
-        pytest-timeout \
-        pytest-metadata \
+        pytest-timeout==2.4.0 \
+        pytest-metadata==3.1.1 \
         numpy==1.26.4 \
         requests \
         openai \

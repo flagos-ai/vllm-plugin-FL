@@ -52,11 +52,15 @@ docker/build.sh \
 ```
 
 The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260917` image. Build and publish a replacement tag
+`ascend-vllm0.28.0-a3-ci-20260922` image. Build and publish a replacement tag
 before updating `ci_image` in `.github/configs/ascend.yml`; changing the
 configuration does not publish it. `.github/scripts/ascend/setup.sh` checks
 the runtime versions and rejects an old image instead of silently testing
 vLLM 0.20.2.
+
+The CI image also pins the pytest plugins used by the shared workflows. The
+setup script performs only the editable plugin overlay and version checks, so
+test startup does not depend on PyPI availability on the NPU runner.
 
 The published tag also contains a non-editable vLLM-Plugin-FL wheel in
 site-packages for direct use. The shared CI still overlays the pull-request
@@ -191,7 +195,7 @@ explicitly; the raw `torch.npu.NPUGraph` checks above do not exercise that
 model path. Video and performance benchmarks remain unvalidated. The hybrid attention bridge
 currently makes contiguous cache inputs for native attention kernels;
 performance tuning is still needed. The packaged A3 image is published as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260917`
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922`
 and is selected by the shared CI platform configuration.
 
 ## Model provisioning
