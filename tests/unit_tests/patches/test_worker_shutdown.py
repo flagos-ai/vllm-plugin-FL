@@ -89,7 +89,17 @@ def fake_modules(monkeypatch):
 
 @pytest.mark.parametrize(
     ("request_timeout", "process_timeout", "expected"),
-    [(0, 0, 15.0), (0, None, None), (0, 7, 7), (7, None, None), (7, 0, 0)],
+    [
+        (0, 0, 15.0),
+        (0, None, 15.0),
+        (0, 7, 7),
+        (7, None, None),
+        (7, 0, 0),
+        (7, 7, 7),
+        (None, None, None),
+        (None, 0, 0),
+        (None, 7, 7),
+    ],
 )
 def test_timeout_semantics(request_timeout, process_timeout, expected):
     assert (
@@ -143,7 +153,17 @@ def test_ci_vllm_version_is_covered(fake_modules):
 
 @pytest.mark.parametrize(
     ("request_timeout", "process_timeout", "expected"),
-    [(0, 0, 15.0), (0, None, None), (0, 23, 23), (12, 0, 0), (12, None, None)],
+    [
+        (0, 0, 15.0),
+        (0, None, 15.0),
+        (0, 23, 23),
+        (12, 0, 0),
+        (12, None, None),
+        (12, 23, 23),
+        (None, None, None),
+        (None, 0, 0),
+        (None, 23, 23),
+    ],
 )
 def test_manager_preserves_request_drain_semantics(
     fake_modules, request_timeout, process_timeout, expected
@@ -163,10 +183,29 @@ def test_manager_preserves_request_drain_semantics(
     assert manager.shutdown_calls == [expected]
 
 
+@pytest.mark.parametrize("explicit_none", [False, True], ids=["omitted", "none"])
+def test_local_manager_default_timeout_allows_worker_cleanup(
+    fake_modules, explicit_none
+):
+    modules = fake_modules
+    shutdown.patch_worker_shutdown(modules.utils, modules.core, vllm_version="0.20.2")
+    manager = modules.utils.CoreEngineProcManager(
+        1, 0, 0, _config(), True, "unused", modules.executor.MultiprocExecutor
+    )
+    if explicit_none:
+        manager.shutdown(timeout=None)
+    else:
+        manager.shutdown()
+    assert manager.shutdown_calls == [15.0]
+
+
 @pytest.mark.parametrize(
     ("dp", "nodes", "is_mp"), [(2, 1, True), (1, 2, True), (1, 1, False)]
 )
-def test_manager_does_not_change_other_executors(fake_modules, dp, nodes, is_mp):
+@pytest.mark.parametrize("process_timeout", [0, None])
+def test_manager_does_not_change_other_executors(
+    fake_modules, dp, nodes, is_mp, process_timeout
+):
     modules = fake_modules
     shutdown.patch_worker_shutdown(modules.utils, modules.core, vllm_version="0.20.2")
     executor = modules.executor.MultiprocExecutor if is_mp else object
@@ -179,8 +218,8 @@ def test_manager_does_not_change_other_executors(fake_modules, dp, nodes, is_mp)
         address="unused",
         executor_class=executor,
     )
-    manager.shutdown(timeout=0)
-    assert manager.shutdown_calls == [0]
+    manager.shutdown(timeout=process_timeout)
+    assert manager.shutdown_calls == [process_timeout]
 
 
 def test_other_executor_entrypoint_delegates(fake_modules):
@@ -224,6 +263,117 @@ def _original_entrypoint(namespace):
     module = ast.Module(body=[function], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(source), "exec"), namespace)
     return namespace["run_engine_core"]
+
+
+def _original_process_shutdown(namespace):
+    """Load the installed parent's real None-to-five-second shutdown policy."""
+    import vllm
+
+    source = Path(vllm.__file__).parent / "v1" / "utils.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "shutdown"
+    )
+    module = ast.Module(body=[function], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(source), "exec"), namespace)
+    return namespace["shutdown"]
+
+
+@pytest.mark.parametrize("patched", [False, True], ids=["upstream", "patched"])
+@pytest.mark.parametrize("explicit_none", [False, True], ids=["omitted", "none"])
+def test_parent_default_timeout_covers_worker_cleanup_budget(
+    fake_modules, patched, explicit_none
+):
+    # The fake EngineCore follows the reaper's full 4 + 4 + 2 second schedule.
+    # Its parent's actual upstream shutdown function advances only a fake clock,
+    # so the regression is deterministic and never sleeps or kills a real PID.
+    clock = SimpleNamespace(now=0.0)
+    grace_end = shutdown.WORKER_GRACE_TIMEOUT_S
+    terminate_end = grace_end + shutdown.WORKER_TERMINATE_TIMEOUT_S
+    cleanup_end = terminate_end + shutdown.WORKER_KILL_TIMEOUT_S
+    assert cleanup_end == 10.0
+    phases = [
+        (grace_end, "grace"),
+        (terminate_end, "terminate"),
+        (cleanup_end, "kill-and-reap"),
+    ]
+
+    class EngineProcess:
+        pid = 12345
+        alive = True
+        cleanup_complete = False
+
+        def __init__(self):
+            self.terminate_calls = 0
+            self.joins = []
+            self.completed_phases = []
+
+        def is_alive(self):
+            return self.alive
+
+        def terminate(self):
+            self.terminate_calls += 1
+
+        def join(self, timeout):
+            assert self.terminate_calls == 1
+            self.joins.append(timeout)
+            clock.now = min(clock.now + timeout, cleanup_end)
+            self.completed_phases = [name for end, name in phases if end <= clock.now]
+            if clock.now == cleanup_end:
+                self.cleanup_complete = True
+                self.alive = False
+
+    process = EngineProcess()
+    killed_trees = []
+
+    def kill_process_tree(pid):
+        assert pid == process.pid
+        assert not process.cleanup_complete
+        killed_trees.append((pid, clock.now))
+        process.alive = False
+
+    upstream_shutdown = _original_process_shutdown(
+        {
+            "BaseProcess": multiprocessing.process.BaseProcess,
+            "time": SimpleNamespace(monotonic=lambda: clock.now),
+            "kill_process_tree": kill_process_tree,
+        }
+    )
+
+    class Manager:
+        def __init__(self, *args, **kwargs):
+            self.shutdown_calls = []
+
+        def shutdown(self, timeout=None):
+            self.shutdown_calls.append(timeout)
+            upstream_shutdown([process], timeout=timeout)
+
+    modules = fake_modules
+    modules.utils.CoreEngineProcManager = Manager
+    if patched:
+        shutdown.patch_worker_shutdown(
+            modules.utils, modules.core, vllm_version="0.20.2"
+        )
+    manager = modules.utils.CoreEngineProcManager(
+        1, 0, 0, _config(), True, "unused", modules.executor.MultiprocExecutor
+    )
+    if explicit_none:
+        manager.shutdown(timeout=None)
+    else:
+        manager.shutdown()
+
+    assert manager.shutdown_calls == ([15.0] if patched else [None])
+    assert process.terminate_calls == 1
+    assert process.joins == ([15.0] if patched else [5.0])
+    assert clock.now == (10.0 if patched else 5.0)
+    assert process.cleanup_complete is patched
+    assert process.completed_phases == (
+        ["grace", "terminate", "kill-and-reap"] if patched else ["grace"]
+    )
+    assert killed_trees == ([] if patched else [(process.pid, 5.0)])
+    assert not process.is_alive()
 
 
 @pytest.mark.parametrize("stage", ["before-executor", "after-executor"])
