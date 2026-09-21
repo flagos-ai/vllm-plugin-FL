@@ -138,8 +138,23 @@ def _patch_flash_attn_import():
         sys.modules["vllm.vllm_flash_attn"] = stub
 
 
+def _is_metax_backend() -> bool:
+    """True when vLLM resolved the MetaX (maca) platform."""
+    from vllm_fl.ops._C_ops_registry import _is_metax_backend as _impl
+
+    return _impl()
+
+
 def _patch_custom_ops():
     """Register fallback schemas when neither vLLM extension ABI is present."""
+    # On MetaX the maca mcoplib._C already registered every _C operator.
+    # Importing vLLM's own vllm._C .so on top of it raises a
+    # duplicate-registration c10::Error, so skip the probe entirely.
+    if _is_metax_backend():
+        logger.debug(
+            "[vllm_fl] MetaX backend owns torch.ops._C; skipping vllm._C import"
+        )
+        return
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
             importlib.import_module(module_name)
@@ -170,6 +185,19 @@ def _init_vendor_device():
 
 def register():
     """Register the FL platform."""
+    # MetaX (maca) ships its own vLLM platform plugin (vllm_metax) and vLLM
+    # 0.28 rejects more than one platform plugin
+    # (RuntimeError: Only one platform plugin can be activated, but got
+    # ['metax', 'fl']).  On that backend FL must not claim the platform slot:
+    # the general plugin (vllm_fl:register_model) keeps FL's model and kernel
+    # registrations.
+    if _is_metax_backend():
+        logger.info(
+            "[vllm_fl] MetaX backend -> vLLM metax platform; "
+            "FL platform registration skipped"
+        )
+        return None
+
     _init_vendor_device()
 
     # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
