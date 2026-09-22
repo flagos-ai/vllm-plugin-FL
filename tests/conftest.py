@@ -15,9 +15,14 @@ It provides:
 
 import os
 import tempfile
+import warnings
 
 import pytest
 import torch
+
+# Suppress pkg_resources deprecation warning emitted by hypothesis entry_points
+# before pytest's own filterwarnings takes effect.
+warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")
 
 from tests.utils.device_utils import (
     get_backend,
