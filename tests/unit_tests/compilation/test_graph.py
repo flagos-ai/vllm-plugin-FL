@@ -4,6 +4,7 @@
 Tests for compilation graph module.
 """
 
+from importlib import import_module
 from unittest.mock import MagicMock
 
 
@@ -12,7 +13,7 @@ def test_npu_weak_refs_are_recursive(monkeypatch):
 
     from vllm.sequence import IntermediateTensors
 
-    import vllm_fl.compilation.graph as graph_module
+    graph_module = import_module("vllm_fl.compilation.graph")
 
     weak_refs = {}
 
@@ -49,7 +50,7 @@ def test_npu_weak_ref_keeps_cpu_tensors(monkeypatch):
 
     import torch
 
-    import vllm_fl.compilation.graph as graph_module
+    graph_module = import_module("vllm_fl.compilation.graph")
 
     def reject_cpu_tensor(_tensor):
         raise AssertionError("torch_npu weak refs must only receive NPU tensors")
@@ -70,7 +71,7 @@ def test_npu_weak_ref_keeps_cpu_tensors(monkeypatch):
 def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
     from types import SimpleNamespace
 
-    import vllm_fl.compilation.graph as graph_module
+    graph_module = import_module("vllm_fl.compilation.graph")
 
     active_stream = object()
     stale_vllm_stream = MagicMock(return_value=object())
@@ -89,7 +90,7 @@ def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
 
 
 def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
-    import vllm_fl.compilation.graph as graph_module
+    graph_module = import_module("vllm_fl.compilation.graph")
 
     expected_stream = object()
     vllm_current_stream = MagicMock(return_value=expected_stream)

@@ -8,6 +8,7 @@ dispatch module's __init__.py, ensuring the full dispatch pipeline
 works correctly from call_op -> manager -> registry -> implementation.
 """
 
+import importlib
 import os
 import weakref
 from types import SimpleNamespace
@@ -109,7 +110,7 @@ class TestCallOp:
         torch.testing.assert_close(actual, torch.sin(torch.ones(2)) + 1)
 
     def test_warmup_discovers_cached_ops_before_snapshot(self, monkeypatch):
-        import vllm_fl.dispatch as dispatch
+        dispatch = importlib.import_module("vllm_fl.dispatch")
 
         cached_ops = weakref.WeakSet()
         discovered = []
@@ -133,7 +134,7 @@ class TestCallOp:
     def test_cached_op_registry_does_not_retain_instances(self, monkeypatch):
         import gc
 
-        import vllm_fl.dispatch as dispatch
+        dispatch = importlib.import_module("vllm_fl.dispatch")
 
         cached_ops = weakref.WeakSet()
         monkeypatch.setattr(dispatch, "_CACHED_OPS", cached_ops)
@@ -148,7 +149,7 @@ class TestCallOp:
         assert len(cached_ops) == 0
 
     def test_warmup_propagates_manager_initialization_failure(self, monkeypatch):
-        import vllm_fl.dispatch as dispatch
+        dispatch = importlib.import_module("vllm_fl.dispatch")
 
         cached_ops = weakref.WeakSet()
         manager = SimpleNamespace()
