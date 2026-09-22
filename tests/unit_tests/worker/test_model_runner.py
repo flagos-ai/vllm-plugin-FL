@@ -11,6 +11,7 @@ This module follows a layered testing strategy:
 Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
+from importlib import import_module
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -43,7 +44,7 @@ def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context
     from contextlib import nullcontext
     from types import SimpleNamespace
 
-    import vllm_fl.worker.model_runner as model_runner
+    model_runner = import_module("vllm_fl.worker.model_runner")
 
     capture_stream = MagicMock()
     current_stream = object()
