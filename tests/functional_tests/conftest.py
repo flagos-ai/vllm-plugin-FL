@@ -111,13 +111,18 @@ def pytest_sessionfinish(session, exitstatus):
 
     # Skip os._exit on the xdist controller: it still needs to aggregate results
     # and write reports after all workers finish.
-    worker_input = getattr(session.config, "workerinput", None)
-    is_xdist_worker = worker_input is not None
-    is_xdist_controller = (
-        not is_xdist_worker
-        and getattr(session.config, "workeroutput", None) is None
-        and hasattr(session.config, "_workeroutputs")
-    )
+    #
+    # xdist.is_xdist_controller() is the stable public API (xdist >= 0.26).
+    # Avoid hasattr(config, "_workeroutputs") which is a private attribute that
+    # disappeared in xdist 3.x and caused the controller to call os._exit()
+    # prematurely, swallowing all failure output from workers.
+    try:
+        from xdist import is_xdist_controller
 
-    if not is_xdist_controller:
+        _is_controller = is_xdist_controller(session.config)
+    except ImportError:
+        # xdist not installed — running serially, never skip os._exit
+        _is_controller = False
+
+    if not _is_controller:
         os._exit(int(exitstatus))
