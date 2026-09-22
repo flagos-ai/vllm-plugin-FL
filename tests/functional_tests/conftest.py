@@ -109,20 +109,25 @@ def pytest_sessionfinish(session, exitstatus):
             if isinstance(read_thread, threading.Thread) and read_thread.is_alive():
                 read_thread.join(timeout=3.0)
 
-    # Skip os._exit on the xdist controller: it still needs to aggregate results
-    # and write reports after all workers finish.
+    # os._exit() is only safe when running serially (no xdist).
     #
-    # xdist.is_xdist_controller() is the stable public API (xdist >= 0.26).
-    # Avoid hasattr(config, "_workeroutputs") which is a private attribute that
-    # disappeared in xdist 3.x and caused the controller to call os._exit()
-    # prematurely, swallowing all failure output from workers.
+    # With xdist:
+    #  - Workers must NOT call os._exit(): the connection to the controller
+    #    closes abruptly, which xdist interprets as a crash and spawns a
+    #    replacement worker, triggering a cascade of "node down: Not properly
+    #    terminated" messages until the 64-replacement limit is hit.
+    #  - The controller must NOT call os._exit() either: it still needs to
+    #    aggregate results and write JSON/JUnit reports after all workers finish.
+    #
+    # Without xdist (serial run on Ascend), os._exit() prevents the NPU GC
+    # destructor crash that otherwise segfaults the interpreter on shutdown.
     try:
-        from xdist import is_xdist_controller
+        from xdist import is_xdist_controller, is_xdist_worker
 
-        _is_controller = is_xdist_controller(session)
+        _is_xdist = is_xdist_worker(session) or is_xdist_controller(session)
     except ImportError:
-        # xdist not installed — running serially, never skip os._exit
-        _is_controller = False
+        # xdist not installed — running serially
+        _is_xdist = False
 
-    if not _is_controller:
+    if not _is_xdist:
         os._exit(int(exitstatus))
