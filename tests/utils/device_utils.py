@@ -17,6 +17,31 @@ import torch
 
 _BACKEND = os.environ.get("FL_BACKEND", "").lower()
 
+# Maps FL_TEST_PLATFORM → the env var used to restrict device visibility.
+# Each xdist worker sets this to its own device index so tests stay isolated.
+_PLATFORM_VISIBLE_DEVICE_ENV: dict[str, str] = {
+    "cuda": "CUDA_VISIBLE_DEVICES",
+    "iluvatar": "CUDA_VISIBLE_DEVICES",  # CoreX exposes torch.cuda; COREX_VISIBLE_DEVICES is unused in CI
+    "hygon": "CUDA_VISIBLE_DEVICES",
+    "kunlunxin": "CUDA_VISIBLE_DEVICES",
+    "thead": "CUDA_VISIBLE_DEVICES",
+    "metax": "MACA_VISIBLE_DEVICES",
+    "ascend": "ASCEND_RT_VISIBLE_DEVICES",
+    "enflame": "TOPS_VISIBLE_DEVICES",
+    "musa": "MTHREADS_VISIBLE_DEVICES",
+}
+
+
+def get_visible_device_env_var() -> str:
+    """Return the env var that pins device visibility for this platform."""
+    platform = os.environ.get("FL_TEST_PLATFORM", "").lower()
+    if platform in _PLATFORM_VISIBLE_DEVICE_ENV:
+        return _PLATFORM_VISIBLE_DEVICE_ENV[platform]
+    # Fallback: infer from backend
+    if get_backend() == "ascend":
+        return "ASCEND_RT_VISIBLE_DEVICES"
+    return "CUDA_VISIBLE_DEVICES"
+
 
 def get_backend() -> str:
     """Detect current backend from env or hardware.

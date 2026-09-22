@@ -131,7 +131,9 @@ jobs:
 
   # ============================================================
   # Job 4a–4h: Platform tests (PR stage)
-  # Require ci-functional, ci-e2e, or ci-full label to run.
+  # Require ci-functional, ci-e2e, or ci-full label to run on PRs.
+  # workflow_dispatch bypasses the label check so manual runs always
+  # execute all enabled platforms.
   # Skipped jobs (no label or no matching runner) do not fail ci-gate.
   # ============================================================
   test-cuda:
@@ -139,6 +141,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'cuda') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -154,6 +157,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'ascend') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -169,6 +173,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'hygon') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -184,6 +189,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'metax') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -199,6 +205,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'musa') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -214,6 +221,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'enflame') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -229,6 +237,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -244,6 +253,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'thead') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
@@ -259,6 +269,7 @@ jobs:
     if: |
       contains(fromJson(needs.discover.outputs.platforms), 'iluvatar') &&
       (
+        github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
         contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
         contains(github.event.pull_request.labels.*.name, 'ci-full')
