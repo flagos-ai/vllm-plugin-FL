@@ -229,7 +229,6 @@ def _causal_conv1d_update_kernel_npu_tiled(
     w_base = w_ptr + idx_feats * stride_w_dim
     # define to avoid "undefined" in branches
     w_col0 = tl.zeros((BLOCK_N,), dtype=tl.float32)
-    w_col1 = tl.zeros((BLOCK_N,), dtype=tl.float32)
     w_col2 = tl.zeros((BLOCK_N,), dtype=tl.float32)
     w_col3 = tl.zeros((BLOCK_N,), dtype=tl.float32)
     w_col4 = tl.zeros((BLOCK_N,), dtype=tl.float32)
@@ -242,6 +241,8 @@ def _causal_conv1d_update_kernel_npu_tiled(
         w_col1 = tl.load(w_base + 1 * stride_w_width, mask=mask_w, other=0.0).to(
             tl.float32
         )
+    else:
+        w_col1 = tl.zeros((BLOCK_N,), dtype=tl.float32)
     if KERNEL_WIDTH >= 3:
         w_col2 = tl.load(w_base + 2 * stride_w_width, mask=mask_w, other=0.0).to(
             tl.float32
