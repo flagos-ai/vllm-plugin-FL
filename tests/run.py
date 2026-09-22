@@ -705,7 +705,18 @@ class TestRunner:
 
     def _build_pytest_cmd(self, tc: TestCase) -> list[str]:
         """Build the full pytest command for a test case."""
-        cmd = [sys.executable, "-m", "pytest", tc.pytest_path]
+        cmd = [
+            sys.executable,
+            # Suppress warnings that fire before conftest.py is loaded (e.g.
+            # pytest assertion rewriter using deprecated ast.Str on Python 3.12).
+            "-W",
+            "ignore::DeprecationWarning:_pytest",
+            "-W",
+            "ignore::DeprecationWarning:ast",
+            "-m",
+            "pytest",
+            tc.pytest_path,
+        ]
 
         # Inject platform/device as pytest options
         cmd.extend(
