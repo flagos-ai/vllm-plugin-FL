@@ -301,6 +301,31 @@ class PlatformFL(Platform):
             )
 
         if (
+            cls.device_type == "gcu"
+            and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        ):
+            # The GCU combo-kernel codegen can emit a fused kernel whose
+            # first pid branch references an undefined loop var
+            # ("NameError: xloop is not defined"), killing EngineCore init
+            # on the first graph-mode compile. vLLM pre-fills
+            # combo_kernels/benchmark_combo_kernel=True inside
+            # CompilationConfig.__post_init__ (config/compilation.py,
+            # torch>=2.9, non-CPU), i.e. BEFORE any platform hook, so the
+            # override must be a direct assignment — setdefault is a no-op.
+            # A second, independent GCU backend bug (vendor
+            # GCUTritonConfigGenerator.persistent_reduction_configs()
+            # signature mismatch, raised at kernel-module import) has no
+            # Inductor-knob dodge and stays open with the vendor.
+            compilation_config.inductor_compile_config["combo_kernels"] = False
+            compilation_config.inductor_compile_config[
+                "benchmark_combo_kernel"
+            ] = False
+            logger.info(
+                "GCU: Disabled Inductor combo kernels (combo codegen "
+                "unsupported by the GCU inductor backend)."
+            )
+
+        if (
             parallel_config.all2all_backend == "deepep_high_throughput"
             and parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
