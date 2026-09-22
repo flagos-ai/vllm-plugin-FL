@@ -28,13 +28,24 @@ del _torch
 # Probe by importing it: importlib pulls the submodule in, whereas
 # hasattr() on the parent reads False until something else imports it, and
 # a stub registered on that reading would shadow the real module.
+#
+# Unavailable comes in two shapes, and both need the stub: the package is
+# absent (ModuleNotFoundError, cambricon 4.4.3), or present but its own
+# __init__ wants a torch 2.8 symbol (ImportError, iluvatar corex 4.4.0, #27).
+# A ModuleNotFoundError naming anything else is a missing dependency of the
+# real module, so it keeps raising.
 try:
     importlib.import_module("torch.distributed._symmetric_memory")
 except ModuleNotFoundError as _exc:
-    # A stub is only right when the module itself is absent; a missing
-    # dependency of the real module has to keep raising.
     if _exc.name != "torch.distributed._symmetric_memory":
         raise
+    _symm_mem_available = False
+except ImportError:
+    _symm_mem_available = False
+else:
+    _symm_mem_available = True
+
+if not _symm_mem_available:
     import types as _types
 
     _symm_mem_stub = _types.ModuleType("torch.distributed._symmetric_memory")
@@ -44,6 +55,7 @@ except ModuleNotFoundError as _exc:
     # from-imports.
     importlib.import_module("torch.distributed")._symmetric_memory = _symm_mem_stub
     del _symm_mem_stub, _types
+del _symm_mem_available
 
 # --- torch 2.7.1+cpu (cambricon 4.4.3) compat shims ---------------------
 import torch
