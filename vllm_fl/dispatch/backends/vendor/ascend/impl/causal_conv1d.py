@@ -227,37 +227,35 @@ def _causal_conv1d_update_kernel_npu_tiled(
 
     # preload weights once per program (shared by B_TILE sequences)
     w_base = w_ptr + idx_feats * stride_w_dim
-    # define to avoid "undefined" in branches
-    w_col0 = tl.zeros((BLOCK_N,), dtype=tl.float32)
+    # Load every supported column once. The constexpr width mask preserves the
+    # zero value for columns outside the active kernel without branch-local
+    # redefinitions that obscure the data flow for static analysis.
+    w_col0 = tl.load(w_base, mask=mask_w, other=0.0).to(tl.float32)
     w_col1 = tl.load(
         w_base + stride_w_width,
         mask=mask_w & (KERNEL_WIDTH >= 2),
         other=0.0,
     ).to(tl.float32)
-    w_col2 = tl.zeros((BLOCK_N,), dtype=tl.float32)
-    w_col3 = tl.zeros((BLOCK_N,), dtype=tl.float32)
-    w_col4 = tl.zeros((BLOCK_N,), dtype=tl.float32)
-    w_col5 = tl.zeros((BLOCK_N,), dtype=tl.float32)
-    if KERNEL_WIDTH >= 1:
-        w_col0 = tl.load(w_base + 0 * stride_w_width, mask=mask_w, other=0.0).to(
-            tl.float32
-        )
-    if KERNEL_WIDTH >= 3:
-        w_col2 = tl.load(w_base + 2 * stride_w_width, mask=mask_w, other=0.0).to(
-            tl.float32
-        )
-    if KERNEL_WIDTH >= 4:
-        w_col3 = tl.load(w_base + 3 * stride_w_width, mask=mask_w, other=0.0).to(
-            tl.float32
-        )
-    if KERNEL_WIDTH >= 5:
-        w_col4 = tl.load(w_base + 4 * stride_w_width, mask=mask_w, other=0.0).to(
-            tl.float32
-        )
-    if KERNEL_WIDTH >= 6:
-        w_col5 = tl.load(w_base + 5 * stride_w_width, mask=mask_w, other=0.0).to(
-            tl.float32
-        )
+    w_col2 = tl.load(
+        w_base + 2 * stride_w_width,
+        mask=mask_w & (KERNEL_WIDTH >= 3),
+        other=0.0,
+    ).to(tl.float32)
+    w_col3 = tl.load(
+        w_base + 3 * stride_w_width,
+        mask=mask_w & (KERNEL_WIDTH >= 4),
+        other=0.0,
+    ).to(tl.float32)
+    w_col4 = tl.load(
+        w_base + 4 * stride_w_width,
+        mask=mask_w & (KERNEL_WIDTH >= 5),
+        other=0.0,
+    ).to(tl.float32)
+    w_col5 = tl.load(
+        w_base + 5 * stride_w_width,
+        mask=mask_w & (KERNEL_WIDTH >= 6),
+        other=0.0,
+    ).to(tl.float32)
 
     # bias vector once per program
     if HAS_BIAS:
