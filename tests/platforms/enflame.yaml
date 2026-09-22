@@ -53,16 +53,16 @@ env_defaults:
 s60:
   name: "s60"
   tests:
-    # Graph-mode cases (06b_tp1_graph / 27b_tp2_graph / 35b_a3b_tp2_graph)
-    # are held back until the GCU inductor backend fixes its config
-    # generator signature: see the tracking issue referenced in the PR.
     e2e:
       inference:
-        qwen3: ["06b_tp1_eager"]
+        qwen3: ["06b_tp1_eager", "06b_tp1_graph"]
         qwen3_6:
           - "27b_tp2_eager"
+          - "35b_a3b_tp2_graph"
       serving:
+        qwen3: ["06b_tp1_graph"]
         qwen3_6:
+          - "27b_tp2_graph"
           - "35b_a3b_tp2_eager"
     timeouts:
       e2e:

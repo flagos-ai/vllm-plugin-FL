@@ -312,17 +312,29 @@ class PlatformFL(Platform):
             # CompilationConfig.__post_init__ (config/compilation.py,
             # torch>=2.9, non-CPU), i.e. BEFORE any platform hook, so the
             # override must be a direct assignment — setdefault is a no-op.
-            # A second, independent GCU backend bug (vendor
-            # GCUTritonConfigGenerator.persistent_reduction_configs()
-            # signature mismatch, raised at kernel-module import) has no
-            # Inductor-knob dodge and stays open with the vendor.
             compilation_config.inductor_compile_config["combo_kernels"] = False
             compilation_config.inductor_compile_config[
                 "benchmark_combo_kernel"
             ] = False
+            # A second GCU backend bug (#557): the vendor-registered
+            # GCUTritonConfigGenerator.persistent_reduction_configs()
+            # signature predates this torch, and torch calls it
+            # unconditionally when a persistent-reduction kernel module is
+            # imported. Steering the scheduler away from persistent
+            # reductions (plain reduction kernels are fine on GCU) routes
+            # around the broken factory entirely. The flag is a module-level
+            # constant read from the environment when torch._inductor.config
+            # is first imported, so set BOTH the attribute (covers processes
+            # where inductor is already imported) and the env var (covers
+            # processes that import it later).
+            os.environ.setdefault("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "0")
+            import torch._inductor.config as _inductor_config
+
+            _inductor_config.triton.persistent_reductions = False
             logger.info(
-                "GCU: Disabled Inductor combo kernels (combo codegen "
-                "unsupported by the GCU inductor backend)."
+                "GCU: Disabled Inductor combo kernels and persistent "
+                "reductions (unsupported by the GCU inductor backend, "
+                "#557 workaround)."
             )
 
         if (
