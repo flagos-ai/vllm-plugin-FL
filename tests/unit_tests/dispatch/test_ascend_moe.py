@@ -19,7 +19,42 @@ from vllm.model_executor.layers.fused_moe.prepare_finalize.no_dp_ep import (
 )
 
 from vllm_fl.ops.fused_moe.fused_moe_utils import TritonExpertsFL
+from vllm_fl.ops.fused_moe.router import fused_topk
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("tokens", [48, 49, 65])
+def test_ascend_topk_softmax_renormalization(tokens):
+    generator = torch.Generator().manual_seed(91)
+    experts, top_k = 256, 8
+    logits = torch.randn(tokens, experts, generator=generator, dtype=torch.bfloat16)
+    hidden_states = torch.empty(tokens, 1, dtype=torch.bfloat16, device="npu")
+    _, blacklist = get_flag_gems_whitelist_blacklist()
+
+    with torch.inference_mode(), flag_gems.use_gems(exclude=blacklist):
+        weights, ids, _ = fused_topk(
+            hidden_states,
+            logits.npu(),
+            top_k,
+            renormalize=True,
+        )
+
+    ids_cpu = ids.cpu().long()
+    scores = torch.softmax(logits.float(), dim=-1)
+    selected_scores = scores.gather(1, ids_cpu)
+    expected_weights = selected_scores / selected_scores.sum(dim=-1, keepdim=True)
+    expected_top_scores = scores.topk(top_k, dim=-1).values
+
+    assert torch.isfinite(weights).all()
+    assert (ids_cpu >= 0).all() and (ids_cpu < experts).all()
+    torch.testing.assert_close(
+        selected_scores.sort(dim=-1).values,
+        expected_top_scores.sort(dim=-1).values,
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    torch.testing.assert_close(weights.cpu(), expected_weights, rtol=1e-5, atol=1e-6)
 
 
 @pytest.mark.gpu

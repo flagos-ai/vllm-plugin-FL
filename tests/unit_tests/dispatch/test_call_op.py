@@ -9,15 +9,19 @@ works correctly from call_op -> manager -> registry -> implementation.
 """
 
 import os
+import weakref
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import torch
 
 from vllm_fl.dispatch import (
     PREFER_REFERENCE,
     PREFER_VENDOR,
     BackendImplKind,
     BackendPriority,
+    CachedOp,
     OpImpl,
     SelectionPolicy,
     call_op,
@@ -26,6 +30,7 @@ from vllm_fl.dispatch import (
     reset_global_policy,
     resolve_op,
     set_global_policy,
+    warmup_cached_ops,
     with_preference,
 )
 
@@ -76,6 +81,86 @@ class TestCallOp:
 
         with pytest.raises(RuntimeError, match="No available implementation"):
             call_op("nonexistent_op", 1)
+
+    def test_cached_op_resolves_before_fullgraph_dynamo_trace(self):
+        manager = get_default_manager()
+        manager._state.initialized = True
+        manager._state.init_pid = os.getpid()
+        manager.registry.register_impl(
+            OpImpl(
+                op_name="compile_test_op",
+                impl_id="reference.compile_test",
+                kind=BackendImplKind.REFERENCE,
+                fn=torch.sin,
+            )
+        )
+
+        cached_op = CachedOp("compile_test_op")
+        warmup_cached_ops(manager)
+        assert cached_op._impl is not None
+
+        compiled = torch.compile(
+            lambda x: cached_op(x) + 1,
+            backend="eager",
+            fullgraph=True,
+        )
+        actual = compiled(torch.ones(2))
+
+        torch.testing.assert_close(actual, torch.sin(torch.ones(2)) + 1)
+
+    def test_warmup_discovers_cached_ops_before_snapshot(self, monkeypatch):
+        import vllm_fl.dispatch as dispatch
+
+        cached_ops = weakref.WeakSet()
+        discovered = []
+        manager = SimpleNamespace(policy_epoch=7)
+
+        def ensure_initialized():
+            discovered.append(CachedOp("discovered_during_initialization"))
+
+        manager.ensure_initialized = ensure_initialized
+        manager._resolve_impl = lambda op_name: SimpleNamespace(
+            op_name=op_name,
+            impl_id="reference.discovered",
+        )
+        manager._record_first_use = lambda op_name, impl: None
+        monkeypatch.setattr(dispatch, "_CACHED_OPS", cached_ops)
+
+        warmup_cached_ops(manager)
+
+        assert discovered[0]._impl.impl_id == "reference.discovered"
+
+    def test_cached_op_registry_does_not_retain_instances(self, monkeypatch):
+        import gc
+
+        import vllm_fl.dispatch as dispatch
+
+        cached_ops = weakref.WeakSet()
+        monkeypatch.setattr(dispatch, "_CACHED_OPS", cached_ops)
+        cached_op = CachedOp("temporary")
+        cached_op_ref = weakref.ref(cached_op)
+        assert len(cached_ops) == 1
+
+        del cached_op
+        gc.collect()
+
+        assert cached_op_ref() is None
+        assert len(cached_ops) == 0
+
+    def test_warmup_propagates_manager_initialization_failure(self, monkeypatch):
+        import vllm_fl.dispatch as dispatch
+
+        cached_ops = weakref.WeakSet()
+        manager = SimpleNamespace()
+
+        def fail_initialization():
+            raise RuntimeError("discovery failed")
+
+        manager.ensure_initialized = fail_initialization
+        monkeypatch.setattr(dispatch, "_CACHED_OPS", cached_ops)
+
+        with pytest.raises(RuntimeError, match="discovery failed"):
+            warmup_cached_ops(manager)
 
     def test_call_op_uses_default_manager(self):
         manager = get_default_manager()

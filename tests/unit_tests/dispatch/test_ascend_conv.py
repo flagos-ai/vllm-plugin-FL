@@ -300,11 +300,17 @@ def test_conv_prefill_preserves_padded_slots_and_upstream_warmup():
 
 
 @pytest.mark.gpu
-def test_conv_prefill_layout_matches_gdn_fused_post_conv():
+@pytest.mark.parametrize(
+    "tokens,key_heads,value_heads",
+    [(25, 8, 24), (65, 16, 32)],
+)
+def test_conv_prefill_layout_matches_gdn_fused_post_conv(
+    tokens, key_heads, value_heads
+):
     from vllm.model_executor.layers.mamba.gdn import qwen_gdn_linear_attn as gdn
 
     generator = torch.Generator().manual_seed(47)
-    tokens, key_heads, value_heads, head_dim = 25, 8, 24, 128
+    head_dim = 128
     channels = (2 * key_heads + value_heads) * head_dim
     x = torch.randn(tokens, channels, generator=generator).to(torch.bfloat16).npu()
     weight = (

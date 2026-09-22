@@ -26,6 +26,8 @@ from vllm.model_executor.layers.attention.mm_encoder_attention import MMEncoderA
 
 MIN_PAD_SIZE = 64  # min_size to pad weight
 MAX_PAD_SIZE = 128  # max_size to pad weight
+SWA_INT_MAX = 2147483647
+FIA_BLOCK_SIZE = 128
 
 
 class AscendMMEncoderAttention(MMEncoderAttention):
@@ -72,7 +74,9 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             cu_seqlens = torch.arange(
                 0, (bsz + 1) * q_len, step=q_len, dtype=torch.int32, device="cpu"
             )
-        cu_seqlens = torch.diff(cu_seqlens).to("cpu")
+        # FIA's TND layout expects cumulative sequence endpoints, matching the
+        # cu_seqlens contract used by vLLM's multimodal encoders.
+        actual_seq_lengths = cu_seqlens[1:].to("cpu").tolist()
 
         # q, k, v: [b, s, head, head_dim] -> [b * s, head, head_dim]
         q, k, v = self.reshape_qkv_to_3d(query, key, value, bsz, q_len, kv_len)
@@ -87,18 +91,26 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             k = F.pad(k, (0, pad_len), mode="constant", value=0)
             v = F.pad(v, (0, pad_len), mode="constant", value=0)
 
-        context_layer = torch.empty_like(q)
-
-        # operator requires pta version >= 2.5.1
-        torch_npu._npu_flash_attention_unpad(
+        # Use the current Ascend vision-attention path. In particular, this
+        # avoids the legacy unpad kernel's silent corruption with larger
+        # packed multi-image batches on 910C.
+        context_layer, _ = torch_npu.npu_fused_infer_attention_score(
             query=q,
-            key=k,
-            value=v,
-            seq_len=cu_seqlens,
-            scale_value=self.scale,
+            key=k.contiguous(),
+            value=v.contiguous(),
+            atten_mask=None,
+            block_table=None,
+            input_layout="TND",
+            block_size=FIA_BLOCK_SIZE,
+            actual_seq_lengths=actual_seq_lengths,
+            actual_seq_lengths_kv=actual_seq_lengths,
             num_heads=self.num_heads,
-            num_kv_heads=self.num_heads,  # reshape_qkv_to_3d expands GQA heads
-            out=context_layer,
+            # reshape_qkv_to_3d expands GQA heads before the operator call.
+            num_key_value_heads=self.num_heads,
+            scale=self.scale,
+            sparse_mode=0,
+            pre_tokens=SWA_INT_MAX,
+            next_tokens=SWA_INT_MAX,
         )
 
         if enable_pad:

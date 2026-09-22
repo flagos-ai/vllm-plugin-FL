@@ -1,14 +1,14 @@
 # Adaptation Gate Cases
 
-| Model | mode |single long text case | single long image case| text cases | image cases |mixed text and image cases | total cases
+| Model | mode | long text requests | long image requests | concurrent text requests | concurrent image requests | mixed requests | total requests
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `Qwen3.6-27B` | eager  | 1 | 1 | 8 | 8 | 4+4 | 26 |
 | `Qwen3.6-27B` | graph  | 1 | 1 | 8 | 8 | 4+4 | 26 |
 | `Qwen3.6-35B-A3B` | eager | 1 | 1 | 8 | 8 |  4+4 | 26 |
 | `Qwen3.6-35B-A3B` | graph | 1 | 1 | 8 | 8 |  4+4 | 26 |
 
-The matrix counts pytest scenarios; each concurrent scenario sends eight
-requests.
+Each mode contains five pytest scenarios and sends 26 requests in total. The
+table counts requests; each concurrent scenario sends eight requests.
 
 This directory is a small manual gate for accelerator adaptation and vLLM
 plugin upgrades. It tests two Qwen models in eager and graph modes.
@@ -63,6 +63,17 @@ MODEL_PATH=/models/Qwen3.6-27B PORT=8001 ./run_serve_graph.sh
 MODEL_PATH=/models/Qwen3.6-27B PORT=8001 ./run_test.sh
 ```
 
+The graph launcher defaults to capture sizes `1,2,4,8`. This keeps the manual
+gate bounded on accelerators with limited graph runtime resources while still
+exercising graph capture and replay. Override the complete vLLM compilation
+configuration when a platform needs a different matrix:
+
+```bash
+MODEL_PATH=/models/Qwen3.6-27B PORT=8001 \
+    COMPILATION_CONFIG='{"cudagraph_capture_sizes":[1,2,4,8,16]}' \
+    ./run_serve_graph.sh
+```
+
 `run_test.sh` executes all of these commands even if an earlier file fails:
 
 ```bash
@@ -86,8 +97,9 @@ The serve scripts require `MODEL_PATH` and `PORT`. Their served model name uses
 `SERVED_MODEL_NAME` when set and otherwise falls back to `MODEL_PATH`.
 `run_test.sh` requires `PORT` plus either `SERVED_MODEL_NAME` or `MODEL_PATH`.
 Useful environment overrides are `TENSOR_PARALLEL_SIZE`, `MAX_MODEL_LEN`, and
-`SERVER_PID_FILE`. `run_test.sh` also supports `BASE_URL`, `SERVICE_TIMEOUT`,
-`REQUEST_TIMEOUT`, `SERVER_PID_FILE`, and `RESULTS_DIR`.
+`SERVER_PID_FILE`. `run_serve_graph.sh` also supports `COMPILATION_CONFIG`.
+`run_test.sh` supports `BASE_URL`, `SERVICE_TIMEOUT`, `REQUEST_TIMEOUT`,
+`SERVER_PID_FILE`, and `RESULTS_DIR`.
 
 You may use a custom command instead of `run_serve.sh`. It must expose an
 OpenAI-compatible endpoint, serve the model as `qwen`, and allow local images
