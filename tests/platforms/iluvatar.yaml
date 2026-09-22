@@ -38,10 +38,15 @@ bi-v150:
   name: "bi-v150"
   tests:
     e2e:
-      inference:
-        qwen2_5: ["7b_tp1", "7b_tp2"]
-      serving:
-        qwen2_5: ["7b_tp2"]
+      nightly:
+        inference:
+          qwen3_6: ["27b_tp4_eager"]
+        serving:
+          qwen3_6: ["35b_a3b_tp4_eager"]
+    timeouts:
+      e2e:
+        inference: 180
+        serving: 180
     functional:
       include: "*"
       exclude: []
