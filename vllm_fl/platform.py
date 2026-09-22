@@ -331,10 +331,27 @@ class PlatformFL(Platform):
             import torch._inductor.config as _inductor_config
 
             _inductor_config.triton.persistent_reductions = False
+            # Third GCU layer (same #557 family): with the two above in
+            # place, graph-mode compile advances to the compile-time
+            # autotune block and dies compiling a candidate kernel in the
+            # vendor MLIR pipeline ("Failed to run autotuning code block:
+            # Pipeline run failed: PassManager execution failed", inner
+            # error swallowed by torch_gcu's patched_compile_to_module).
+            # Turn off compile-time candidate benchmarking and fall back to
+            # a single static config for pointwise kernels (the same knob
+            # family MUSA uses) so no candidate enumeration runs at codegen
+            # time. Compile options below override the vendor's global
+            # config attributes during torch.compile.
+            compilation_config.inductor_compile_config.setdefault(
+                "triton.autotune_at_compile_time", False
+            )
+            compilation_config.inductor_compile_config.setdefault(
+                "triton.autotune_pointwise", False
+            )
             logger.info(
-                "GCU: Disabled Inductor combo kernels and persistent "
-                "reductions (unsupported by the GCU inductor backend, "
-                "#557 workaround)."
+                "GCU: Disabled Inductor combo kernels, persistent "
+                "reductions, and compile-time autotuning (unsupported by "
+                "the GCU inductor backend, #557 workaround)."
             )
 
         if (
