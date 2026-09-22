@@ -651,6 +651,8 @@ class TestDumpTorchFunctionMode:
         b = torch.randn(3, 4)
         torch.matmul(a, b)
 
+        io_dumper._wait_and_flush()
+
         # Check that files were created under torch.matmul directory
         step_dir = os.path.join(dump_dir, "rank_0000", "step_0000")
         assert os.path.isdir(step_dir)
