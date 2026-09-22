@@ -1,18 +1,23 @@
-"""Plugin-free repro of the GCU inductor config-generator signature bug (#557).
+"""Plugin-free GCU inductor repros (#557): evidence + workaround candidate.
 
-Runs a torch-only persistent-reduction compile in a subprocess that never
-imports vllm or vllm_fl, so the plugin is physically excluded from the
-failing path. On the S60 stack the subprocess is expected to die with:
+Both probes run torch-only subprocesses (no vllm/vllm_fl import), so the
+plugin is structurally excluded from whatever happens.
 
-    TypeError: GCUTritonConfigGenerator.persistent_reduction_configs()
-    takes from 2 to 4 positional arguments but 5 were given
+test_gcu_default_compile_hits_vendor_signature_error documents the bug:
+while #557 is open the default compile dies with the vendor
+GCUTritonConfigGenerator.persistent_reduction_configs() TypeError. The
+assertion is inverted on purpose — it PASSES while the bug reproduces,
+and fails (alerting us) once the vendor backend is fixed.
 
-The test asserts the *fixed* state (subprocess succeeds). While #557 is
-open it xfails on GCU; an XPASS either means the vendor backend was fixed
-(re-enabling the graph cases) or that none of the probes selected a
-persistent-reduction kernel — check the #557 log before concluding.
+test_gcu_persistent_reductions_disabled_compiles probes the workaround
+candidate: TORCHINDUCTOR_PERSISTENT_REDUCTIONS=0 makes the scheduler
+avoid persistent-reduction kernels (torch/_inductor/config.py reads it,
+ir.py should_use_persistent_reduction consults it), so the crashing
+persistent_reduction() factory is never called. If this probe passes,
+graph-mode cases can be re-enabled with that knob set for GCU.
 """
 
+import os
 import subprocess
 import sys
 
@@ -27,7 +32,6 @@ import torch.nn.functional as F
 
 x = torch.randn(1024, 64, device="gcu")
 
-# Three persistent-reduction-prone probes; any of them compiling is enough.
 f1 = torch.compile(lambda t: F.rms_norm(t * 2.0, [t.shape[-1]]))
 f1(x)
 f2 = torch.compile(lambda t: (t * 2.0).sum(-1))
@@ -44,29 +48,40 @@ def _gcu_available() -> bool:
     return hasattr(torch, "gcu") and torch.gcu.is_available()
 
 
+def _run_probe(extra_env: dict[str, str] | None = None):
+    env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [sys.executable, "-c", _SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=env,
+    )
+
+
 @pytest.mark.skipif(
     not _gcu_available(), reason="GCU vendor-signature experiment (#557)"
 )
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "#557: torch_gcu's GCUTritonConfigGenerator.persistent_reduction_configs "
-        "signature predates this torch; kernel-module import fails before the "
-        "plugin is ever loaded"
-    ),
-)
-def test_gcu_plugin_free_persistent_reduction_compiles():
-    # The subprocess inherits this process's stderr so the raw vendor
-    # traceback lands in the CI log verbatim — pytest cannot capture and
-    # swallow it under the xfail marker.
-    proc = subprocess.run(
-        [sys.executable, "-c", _SCRIPT],
-        stdout=subprocess.PIPE,
-        text=True,
-        timeout=600,
+def test_gcu_default_compile_hits_vendor_signature_error():
+    proc = _run_probe()
+    assert proc.returncode != 0, (
+        "default plugin-free compile SUCCEEDED on GCU — #557 looks fixed "
+        "or this probe no longer selects a persistent-reduction kernel; "
+        f"stdout={proc.stdout[-500:]}"
     )
+    assert "GCUTritonConfigGenerator.persistent_reduction_configs" in (proc.stderr), (
+        "plugin-free compile died of something other than the known #557 "
+        f"vendor error — investigate:\n{proc.stderr[-2000:]}"
+    )
+
+
+@pytest.mark.skipif(not _gcu_available(), reason="GCU workaround probe (#557)")
+def test_gcu_persistent_reductions_disabled_compiles():
+    proc = _run_probe({"TORCHINDUCTOR_PERSISTENT_REDUCTIONS": "0"})
     assert proc.returncode == 0, (
-        "plugin-free torch.compile failed on GCU "
-        "(expected while #557 is open)"
+        "workaround candidate TORCHINDUCTOR_PERSISTENT_REDUCTIONS=0 did "
+        f"not unblock the plugin-free compile:\n{proc.stderr[-2000:]}"
     )
     assert "PLUGIN_FREE_COMPILE_OK" in proc.stdout
