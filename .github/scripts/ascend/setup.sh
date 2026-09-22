@@ -10,6 +10,7 @@ pip install \
     --no-build-isolation \
     --no-deps \
     -e .
+pip install "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import numpy

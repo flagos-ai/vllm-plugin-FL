@@ -19,6 +19,7 @@ fi
 # vLLM, FlagGems, and test dependencies are provided by the CI image.
 # Only install the checked-out plugin source for this workflow run.
 pip install --no-build-isolation --no-deps -e .
+pip install "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import flag_gems

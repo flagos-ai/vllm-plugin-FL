@@ -26,7 +26,11 @@ import time
 from collections.abc import Callable
 
 
-def device_cleanup(platform: str, wait: float = 3.0) -> None:
+def device_cleanup(
+    platform: str,
+    wait: float = 3.0,
+    slots: list[int] | None = None,
+) -> None:
     """Run platform-specific cleanup between E2E test cases.
 
     1. Kill stale vllm/model-serving processes
@@ -37,13 +41,17 @@ def device_cleanup(platform: str, wait: float = 3.0) -> None:
     Args:
         platform: Platform name (e.g. ``"cuda"``, ``"ascend"``, ``"hygon"``).
         wait: Seconds to wait after killing processes before logging memory.
+        slots: Device slot indices this case owns. When provided, kill is
+            restricted to processes whose VISIBLE_DEVICES env matches these
+            slots, preventing accidental kill of concurrently running cases.
+            ``None`` (serial path) retains the original global-kill behaviour.
     """
-    _kill_stale_processes()
+    _kill_stale_processes(slots=slots)
 
     # On PPU, driver crashes can leave processes holding device handles that
     # pgrep-based cleanup misses. fuser on the device files catches them.
     if platform == "thead":
-        _kill_stale_ppu_processes()
+        _kill_stale_ppu_processes(slots=slots)
 
     # Clear framework cache to reclaim memory held by the PyTorch allocator
     cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
@@ -71,9 +79,56 @@ _STALE_PATTERNS = [
     "VLLM::EngineCore",
 ]
 
+# All env vars that different platforms use to restrict device visibility.
+_VISIBLE_DEVICE_VARS = [
+    "CUDA_VISIBLE_DEVICES",  # cuda, hygon, kunlunxin, thead, iluvatar
+    "ASCEND_RT_VISIBLE_DEVICES",  # ascend
+    "MACA_VISIBLE_DEVICES",  # metax
+    "TOPS_VISIBLE_DEVICES",  # enflame
+    "MTHREADS_VISIBLE_DEVICES",  # musa
+]
 
-def _kill_stale_processes() -> None:
-    """Kill any leftover vllm serving or inference worker processes."""
+
+def _pid_owns_slots(pid: str, slots: list[int]) -> bool:
+    """Return True if process *pid* was started with VISIBLE_DEVICES that
+    overlaps *slots*.
+
+    Reads ``/proc/{pid}/environ`` (Linux-only) to inspect the process's
+    original environment.  Returns False if the file is unreadable (process
+    already gone or permission denied) — caller treats unreadable as
+    "do not kill" to avoid accidental kills.
+    """
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            env_raw = f.read()
+        env = dict(
+            e.split("=", 1)
+            for e in env_raw.decode(errors="replace").split("\0")
+            if "=" in e
+        )
+        slot_set = set(slots)
+        for var in _VISIBLE_DEVICE_VARS:
+            val = env.get(var, "")
+            if not val:
+                continue
+            pid_slots = {
+                int(x) for x in val.split(",") if x.strip().lstrip("-").isdigit()
+            }
+            if pid_slots & slot_set:
+                return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
+def _kill_stale_processes(slots: list[int] | None = None) -> None:
+    """Kill any leftover vllm serving or inference worker processes.
+
+    Args:
+        slots: When provided, only kill processes whose VISIBLE_DEVICES env
+            overlaps *slots*.  ``None`` kills all matching processes (serial
+            path — original behaviour).
+    """
     for pattern in _STALE_PATTERNS:
         try:
             result = subprocess.run(
@@ -83,6 +138,9 @@ def _kill_stale_processes() -> None:
             )
             pids = result.stdout.strip().split("\n")
             pids = [p for p in pids if p and p != str(os.getpid())]
+
+            if slots is not None:
+                pids = [p for p in pids if _pid_owns_slots(p, slots)]
 
             if pids:
                 print(f"[cleanup] Killing stale processes matching '{pattern}': {pids}")
@@ -94,12 +152,16 @@ def _kill_stale_processes() -> None:
             pass
 
 
-def _kill_stale_ppu_processes() -> None:
+def _kill_stale_ppu_processes(slots: list[int] | None = None) -> None:
     """Kill processes holding T-Head PPU device handles via fuser.
 
     PPU driver crashes (e.g. Hggc failure) can leave worker processes in
     uninterruptible sleep. Pattern-based pgrep may miss them. fuser on the
     PPU device files gives a definitive list of processes with open handles.
+
+    Args:
+        slots: When provided, only kill processes whose VISIBLE_DEVICES env
+            overlaps *slots*.  ``None`` kills all matching processes.
     """
     import glob
 
@@ -122,6 +184,9 @@ def _kill_stale_ppu_processes() -> None:
         except FileNotFoundError:
             # fuser not available — fall back to pattern-based kill only
             return
+
+    if slots is not None:
+        pids = {p for p in pids if _pid_owns_slots(p, slots)}
 
     if pids:
         print(f"[cleanup] Killing stale PPU processes (fuser): {sorted(pids)}")
@@ -370,6 +435,7 @@ def wait_for_memory(
     gpu_memory_utilization: float = 0.9,
     timeout: int = 1800,
     interval: int = 30,
+    device_indices: list[int] | None = None,
 ) -> tuple[bool, str]:
     """Wait until devices have enough free memory for the given utilization.
 
@@ -378,12 +444,17 @@ def wait_for_memory(
         gpu_memory_utilization: Fraction of total memory the model needs.
         timeout: Maximum seconds to wait (default 30 min).
         interval: Seconds between polls.
+        device_indices: When provided, only check and kill for these device
+            indices.  Used in parallel e2e runs so each case only inspects
+            its own allocated slots and does not interfere with other cases.
+            ``None`` checks all devices (serial path).
 
     Returns:
         ``(True, info)`` if memory is available, ``(False, info)`` on timeout.
     """
     mem_fn = _PLATFORM_MEMORY_INFO.get(platform, _mem_info_noop)
     cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
+    kill_slots = device_indices  # same list used for both kill and mem filter
 
     deadline = time.time() + timeout
     attempt = 0
@@ -391,10 +462,12 @@ def wait_for_memory(
     while True:
         attempt += 1
 
-        # Kill stale vllm processes from previous e2e tests
-        _kill_stale_processes()
+        # Kill stale vllm processes from previous e2e tests.
+        # In parallel mode, restrict to slots owned by this case so we
+        # don't accidentally kill workers belonging to other running cases.
+        _kill_stale_processes(slots=kill_slots)
         if platform == "thead":
-            _kill_stale_ppu_processes()
+            _kill_stale_ppu_processes(slots=kill_slots)
         # Clear framework cache
         cache_fn()
         # Brief pause for resources to be released
@@ -403,6 +476,12 @@ def wait_for_memory(
         mem_info = mem_fn()
         if not mem_info:
             return (True, "no devices detected, skipping memory check")
+
+        # In parallel mode restrict the check to the assigned device slots.
+        if device_indices is not None:
+            mem_info = [mem_info[i] for i in device_indices if i < len(mem_info)]
+            if not mem_info:
+                return (True, "assigned device indices out of range, skipping check")
 
         # Check each device
         all_ok = True
@@ -414,8 +493,9 @@ def wait_for_memory(
             required_mb = required / (1024 * 1024)
             ok = free >= required
             status = "OK" if ok else "WAIT"
+            dev_label = device_indices[i] if device_indices else i
             lines.append(
-                f"  Device {i}: {free_mb:.0f}/{total_mb:.0f} MiB free, "
+                f"  Device {dev_label}: {free_mb:.0f}/{total_mb:.0f} MiB free, "
                 f"need {required_mb:.0f} MiB ({gpu_memory_utilization:.0%}) [{status}]"
             )
             if not ok:
