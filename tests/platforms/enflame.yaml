@@ -33,7 +33,9 @@ device_overrides:
   s60:
     cases:
       - qwen3_6/27b_tp2_eager
+      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_graph
     llm:
       gpu_memory_utilization: 0.90
       disable_custom_all_reduce: false
@@ -51,11 +53,21 @@ env_defaults:
 s60:
   name: "s60"
   tests:
+    # Graph-mode cases (06b_tp1_graph / 27b_tp2_graph / 35b_a3b_tp2_graph)
+    # are held back until the GCU inductor backend fixes its config
+    # generator signature: see the tracking issue referenced in the PR.
     e2e:
       inference:
-        qwen3_6: ["27b_tp2_eager"]
+        qwen3: ["06b_tp1_eager"]
+        qwen3_6:
+          - "27b_tp2_eager"
       serving:
-        qwen3_6: ["35b_a3b_tp2_eager"]
+        qwen3_6:
+          - "35b_a3b_tp2_eager"
+    timeouts:
+      e2e:
+        inference: 180
+        serving: 180
     functional:
       include: "*"
       exclude: []
