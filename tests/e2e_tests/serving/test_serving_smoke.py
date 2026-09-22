@@ -56,7 +56,11 @@ if not os.path.exists(_CFG.model):
 
 @pytest.fixture(scope="module")
 def server():
-    """Start vLLM server with model config and optional serve overrides."""
+    """Validate serving and process-group Ctrl+C for every platform/model case.
+
+    VllmServer's teardown fails on live owned processes before the test runner's
+    recovery cleanup runs. Reuse this model load instead of tripling CI cost.
+    """
     serve = _CFG.serve
 
     # Build extra_args from engine config + serve-specific overrides
