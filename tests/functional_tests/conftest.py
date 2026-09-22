@@ -119,7 +119,7 @@ def pytest_sessionfinish(session, exitstatus):
     try:
         from xdist import is_xdist_controller
 
-        _is_controller = is_xdist_controller(session.config)
+        _is_controller = is_xdist_controller(session)
     except ImportError:
         # xdist not installed — running serially, never skip os._exit
         _is_controller = False
