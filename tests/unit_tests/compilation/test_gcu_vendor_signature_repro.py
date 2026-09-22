@@ -56,15 +56,17 @@ def _gcu_available() -> bool:
     ),
 )
 def test_gcu_plugin_free_persistent_reduction_compiles():
+    # The subprocess inherits this process's stderr so the raw vendor
+    # traceback lands in the CI log verbatim — pytest cannot capture and
+    # swallow it under the xfail marker.
     proc = subprocess.run(
         [sys.executable, "-c", _SCRIPT],
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
         timeout=600,
     )
     assert proc.returncode == 0, (
         "plugin-free torch.compile failed on GCU "
-        "(expected while #557 is open):\n"
-        f"{proc.stderr[-2000:]}"
+        "(expected while #557 is open)"
     )
     assert "PLUGIN_FREE_COMPILE_OK" in proc.stdout
