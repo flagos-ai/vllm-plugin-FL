@@ -707,12 +707,14 @@ class TestRunner:
         """Build the full pytest command for a test case."""
         cmd = [
             sys.executable,
-            # Suppress warnings that fire before conftest.py is loaded (e.g.
-            # pytest assertion rewriter using deprecated ast.Str on Python 3.12).
+            # Suppress DeprecationWarnings that fire before conftest.py is
+            # loaded (pytest assertion rewriter using deprecated ast.Str on
+            # Python 3.12). The module= filter in -W uses regex matching on
+            # the __name__ of the warning's origin module, but rewriter
+            # warnings come from frozen importlib frames where the module name
+            # is not "_pytest", so a broad DeprecationWarning filter is needed.
             "-W",
-            "ignore::DeprecationWarning:_pytest",
-            "-W",
-            "ignore::DeprecationWarning:ast",
+            "ignore::DeprecationWarning",
             "-m",
             "pytest",
             tc.pytest_path,
