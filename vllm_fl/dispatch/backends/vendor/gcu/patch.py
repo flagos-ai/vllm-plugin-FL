@@ -26,6 +26,14 @@ def apply_gcu_patches() -> None:
     from vllm_fl.patches.exponential_compat import apply_exponential_compat
 
     apply_exponential_compat()
+    # #557 layer 4: torch_gcu emits autotune candidates with kwargs the
+    # inductor kernel signatures do not define (SPLIT_K); drop them before
+    # the runtime autotuner sees the list.
+    from vllm_fl.dispatch.backends.vendor.gcu.patches.autotune_config_filter import (
+        apply_autotune_config_filter_for_gcu,
+    )
+
+    apply_autotune_config_filter_for_gcu()
     apply_bilinear_pos_embed_gcu_patch()
     apply_causal_conv1d_gcu_patch()
     apply_chunk_delta_h_gcu_patch()
