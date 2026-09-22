@@ -273,19 +273,29 @@ def _accelerator_synchronize() -> None:
         torch.accelerator.synchronize()
 
 
-if current_platform.dist_backend == "flagcx" or current_platform.device_type == "musa":
-
-    @contextmanager
-    def graph_capture(device: torch.device):
+@contextmanager
+def _device_graph_capture(
+    device: torch.device,
+    graph_capture_context: GraphCaptureContext | None = None,
+):
+    """Enter graph capture using the active accelerator's stream API."""
+    if graph_capture_context is None:
         graph_capture_context = GraphCaptureContext(
             current_platform.torch_device_fn.Stream(device=device)
         )
-        stream = graph_capture_context.stream
-        curr_stream = current_platform.torch_device_fn.current_stream()
-        if curr_stream != stream:
-            stream.wait_stream(curr_stream)
-        with current_platform.torch_device_fn.stream(stream), nullcontext():
-            yield graph_capture_context
+    stream = graph_capture_context.stream
+    curr_stream = current_platform.torch_device_fn.current_stream()
+    if curr_stream != stream:
+        stream.wait_stream(curr_stream)
+    with current_platform.torch_device_fn.stream(stream), nullcontext():
+        yield graph_capture_context
+
+
+if current_platform.dist_backend == "flagcx" or current_platform.device_type in (
+    "musa",
+    "npu",
+):
+    graph_capture = _device_graph_capture
 
 else:
     from vllm.distributed.parallel_state import graph_capture
@@ -5614,6 +5624,17 @@ class ModelRunnerFL(
             and self.eplb_state.is_async
         ):
             self.eplb_state.start_async_loop()
+
+        if (
+            current_platform.device_type == "npu"
+            and self.compilation_config.mode != CompilationMode.NONE
+        ):
+            # Dispatch operators are lazily resolved behind a process-safe
+            # RLock. Resolve imported CachedOps before Dynamo starts tracing,
+            # because fullgraph compilation cannot enter that context manager.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops()
 
         if (
             self.vllm_config.compilation_config.mode

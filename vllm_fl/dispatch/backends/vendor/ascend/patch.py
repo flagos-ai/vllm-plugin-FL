@@ -2,8 +2,6 @@
 
 import logging
 
-import vllm
-
 logger = logging.getLogger(__name__)
 _patches_applied = False
 
@@ -19,6 +17,7 @@ def apply_ascend_patches():
     patch_triton_compile_hooks()
     patch_topk_topp_sampler()
     # Patch modules for Ascend platform
+    patch_mamba_batch_memcpy()
     patch_causal_conv1d()
     patch_fla_ops()
     patch_op_cls()
@@ -39,12 +38,48 @@ def patch_topk_topp_sampler():
         logger.warning("Failed to patch the top-k/top-p sampler: %s", exc)
 
 
-def patch_mamba_config():
-    """Patch HybridAttentionMambaModelConfig for Ascend."""
-    from .patches.patch_mamba_config import verify_and_update_config
+def patch_mamba_batch_memcpy():
+    """Replace vLLM's Mamba state copy with the Ascend-safe Triton kernel."""
+    try:
+        import torch
 
-    vllm.model_executor.models.config.HybridAttentionMambaModelConfig.verify_and_update_config = verify_and_update_config
-    logger.info("Patched HybridAttentionMambaModelConfig for Ascend")
+        from vllm.v1.worker import mamba_utils
+
+        from .impl.batch_memcpy import batch_memcpy, batch_memcpy_kernel
+
+        mamba_utils.batch_memcpy_kernel = batch_memcpy_kernel
+        mamba_utils.batch_memcpy = batch_memcpy
+
+        create = mamba_utils.MambaCopyBuffers.create
+        create_func = getattr(create, "__func__", create)
+        if not getattr(create_func, "_vllm_fl_ascend_patched", False):
+            original_create = create
+
+            @classmethod
+            def _patched_create(
+                cls,
+                max_num_reqs,
+                kv_cache_config,
+                copy_funcs,
+                make_buffer,
+            ):
+                def _make_buffer(*args, **kwargs):
+                    if kwargs.get("dtype") == torch.uint64:
+                        kwargs["dtype"] = torch.int64
+                    return make_buffer(*args, **kwargs)
+
+                return original_create(
+                    max_num_reqs,
+                    kv_cache_config,
+                    copy_funcs,
+                    _make_buffer,
+                )
+
+            _patched_create.__func__._vllm_fl_ascend_patched = True
+            mamba_utils.MambaCopyBuffers.create = _patched_create
+        logger.info("Patched Mamba batch_memcpy for Ascend")
+    except Exception as exc:
+        logger.warning("Failed to patch Mamba batch_memcpy: %s", exc)
 
 
 def patch_causal_conv1d():
@@ -105,7 +140,7 @@ def patch_op_cls():
     """Register NPU embedding and padded native vision attention.
 
     The vision implementation pads head dimensions such as Qwen's 72 to
-    128 for _npu_flash_attention_unpad and retains the original scale.
+    128 for fused infer attention and retains the original scale.
     """
     try:
         from vllm.model_executor.custom_op import CustomOp
@@ -119,7 +154,7 @@ def patch_op_cls():
         }
         for name, op_cls in REGISTERED_ASCEND_OPS.items():
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=name)
-        logger.info("Patched MMEncoderAttention for NPU (padded native attention)")
+        logger.info("Patched MMEncoderAttention for NPU (padded FIA)")
     except Exception as e:
         logger.warning("Failed to patch MMEncoderAttention: %s", e)
 
@@ -133,6 +168,13 @@ def refresh_block_size(vllm_config, block_size=128):
     model_config = vllm_config.model_config
 
     if not cache_config:
+        return
+
+    # vLLM 0.28 aligns hybrid attention/Mamba page sizes in
+    # Platform.update_block_size_for_backend, after the attention backend is
+    # known. Do not replace that upstream-aligned value with the generic NPU
+    # block size.
+    if model_config is not None and getattr(model_config, "is_hybrid", False):
         return
 
     if cache_config.block_size is None:
