@@ -17,14 +17,14 @@
 # via workflow_call (one invocation per platform).
 #
 # ci_stage controls which tests run:
-#   pr      — functional (unit+functional merged) + e2e smoke cases
+#   pr      — functional (unit+functional merged) + e2e pr subset cases
 #   nightly — functional + e2e main cases + benchmark
 #   weekly  — functional + e2e full cases + benchmark
 #
 # Main steps:
 # 1. setup:      Load platform config and generate test matrices
 # 2. functional: Run unit + functional tests (ops, compilation, distributed)
-# 3. e2e:        Run end-to-end model tests (pr=smoke, nightly/weekly=full)
+# 3. e2e:        Run end-to-end model tests (pr=pr subset, nightly/weekly=full)
 # 4. benchmark:  Validate vllm bench entrypoints (nightly/weekly only)
 #
 # Notes:
@@ -99,7 +99,7 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
 
   # End-to-end model tests.
-  # pr stage: smoke cases (text + multimodal, one device).
+  # pr stage: pr subset cases (text + multimodal, one device).
   # nightly/weekly stage: main/full cases, all devices.
   e2e:
     needs: [setup, functional]

@@ -52,15 +52,16 @@ c550:
   name: "c550"
   tests:
     e2e:
-      smoke:
+      pr:
         inference:
           qwen3_6: ["27b_tp4_eager"]
-      inference:
-        qwen3_6: ["27b_tp4_eager", "35b_a3b_tp4_graph"]
-      serving:
-        qwen3_6:
-          - "35b_a3b_tp4_eager"
-          - "27b_tp4_graph"
+      nightly:
+        inference:
+          qwen3_6: ["27b_tp4_eager", "35b_a3b_tp4_graph"]
+        serving:
+          qwen3_6:
+            - "35b_a3b_tp4_eager"
+            - "27b_tp4_graph"
     timeouts:
       e2e:
         serving: 180
@@ -73,4 +74,4 @@ c550:
     benchmark:
       enabled: true
       config_path: "tests/benchmarks/configs/smoke_metax.yaml"
-      smoke: ["serve"]
+      types: ["serve"]

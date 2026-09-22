@@ -89,16 +89,17 @@ a100:
   tests:
     e2e:
       # Add or remove test cases per model
-      smoke:
+      pr:
         inference:
           qwen3: ["4b_tp2"]
           minicpm: ["o45_tp4"]
-      inference:
-        qwen3: ["4b_tp2", "next_tp8"]
-        qwen3_5: ["35b_tp4"]
-        minicpm: ["o45_tp4"]
-      serving:
-        qwen3: ["next_tp8"]
+      nightly:
+        inference:
+          qwen3: ["4b_tp2", "next_tp8"]
+          qwen3_5: ["35b_tp4"]
+          minicpm: ["o45_tp4"]
+        serving:
+          qwen3: ["next_tp8"]
     functional:
       include: "*"
       exclude: []
@@ -113,11 +114,12 @@ h20:
   name: "h20"
   tests:
     e2e:
-      smoke:
+      pr:
         inference:
           qwen3: ["4b_tp2"]
           minicpm: ["o45_tp4"]
-      inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
-      serving:
-        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+      nightly:
+        inference:
+          qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+        serving:
+          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]

@@ -23,12 +23,13 @@ Outputs:
 CI stage semantics
 ------------------
 pr
-    E2E uses the ``smoke`` sub-key of each device's ``tests.e2e`` block.
-    Smoke cases are a small subset (text + multimodal) declared by each
-    platform YAML.  Skips platforms/devices with no ``smoke`` defined.
+    E2E uses the ``pr`` sub-key of each device's ``tests.e2e`` block.
+    PR cases are a small subset declared by each platform YAML.
+    Skips platforms/devices with no ``pr`` key defined.
 
 nightly / weekly (default)
-    E2E uses the full ``inference`` / ``serving`` keys as before.
+    E2E uses the ``nightly`` key.  ``weekly`` falls back to ``nightly``
+    if no ``weekly`` key is defined in the YAML.
 """
 
 from __future__ import annotations
@@ -107,8 +108,9 @@ def build_e2e_matrix(
     run inside a single job, avoiding repeated container startup and
     project installation.
 
-    In ``pr`` stage, reads the ``smoke`` sub-key of each device's
-    ``tests.e2e`` block instead of the full ``inference``/``serving`` keys.
+    The ``e2e`` block in each device's YAML is keyed by CI stage
+    (``pr`` / ``nightly`` / ``weekly``).  In ``weekly`` stage, falls back
+    to ``nightly`` if no ``weekly`` key is defined.
     """
     # Collect per-(task, device) groups
     groups: dict[tuple[str, str], list[dict]] = {}
@@ -117,14 +119,15 @@ def build_e2e_matrix(
         e2e = section.get("tests", {}).get("e2e", {})
 
         if ci_stage == "pr":
-            # PR smoke mode: read smoke.inference / smoke.serving
-            smoke = e2e.get("smoke", {})
-            if not smoke:
+            # PR stage: read the 'pr' sub-key
+            stage_block = e2e.get("pr", {})
+            if not stage_block:
                 continue
-            task_models_iter = smoke.items()
+            task_models_iter = stage_block.items()
         else:
-            # Nightly/weekly: use all keys except 'smoke'
-            task_models_iter = {k: v for k, v in e2e.items() if k != "smoke"}.items()
+            # nightly/weekly: read the matching stage key; weekly falls back to nightly
+            stage_block = e2e.get(ci_stage) or e2e.get("nightly", {})
+            task_models_iter = stage_block.items()
 
         for task_key, models in task_models_iter:
             if not isinstance(models, dict):
@@ -333,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
         "--ci-stage",
         default="nightly",
         choices=["pr", "nightly", "weekly"],
-        help="CI stage: 'pr' uses smoke cases, 'nightly'/'weekly' use full cases.",
+        help="CI stage: 'pr' uses the pr subset, 'nightly'/'weekly' use full cases.",
     )
     parser.add_argument(
         "--changed-files",
@@ -383,8 +386,8 @@ def main(argv: list[str] | None = None) -> int:
     unit_matrix = build_unit_matrix(config, devices)
 
     # Apply PR smart-skip filtering when changed files are provided.
-    # Only meaningful for nightly/weekly full runs; in pr stage the smoke list
-    # is already narrow, so we skip the filter to avoid hiding smoke cases.
+    # Only meaningful for nightly/weekly full runs; in pr stage the pr subset
+    # is already narrow, so we skip the filter to avoid hiding pr cases.
     if args.changed_files and ci_stage != "pr":
         changed = load_changed_files(args.changed_files)
         if changed:
