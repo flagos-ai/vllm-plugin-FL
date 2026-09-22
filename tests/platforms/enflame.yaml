@@ -42,12 +42,12 @@ s60:
     e2e:
       inference:
         qwen3:
-        - 06b_tp1_graph
-      serving:
-        qwen3:
-        - 06b_tp1_graph
+        - 06b_tp1_eager
         qwen3_6:
-        - 27b_tp2_graph
+        - 27b_tp2_eager
+      serving:
+        qwen3_6:
+        - 35b_a3b_tp2_eager
     timeouts:
       e2e:
         inference: 180
@@ -59,6 +59,6 @@ s60:
       include: '*'
       exclude: []
     benchmark:
-      enabled: false
+      enabled: true
       smoke:
       - serve
