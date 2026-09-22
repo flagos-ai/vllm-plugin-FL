@@ -84,18 +84,27 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64_gcu(
         return
     i_v = flat_pid % n_v_blocks
     i_n, i_h = i_nh // H, i_nh % H
+    # Cumulative offsets (bos = token offset, boh = chunk offset) are widened
+    # to int64: the per-tensor byte offsets below are (bos|boh)*H*V*K, which
+    # exceed 2^31 for large-batch / long-context prefill and would silently
+    # wrap under int32, misdirecting the h/v/k/w stores (state corruption that
+    # compounds across a long eval run).  GCU honours int64 *addressing*
+    # regardless of TORCH_GCU_ENABLE_INT64_AND_UINT64.
     if IS_VARLEN:
         bos, eos = (
-            tl.load(cu_seqlens + i_n).to(tl.int32),
-            tl.load(cu_seqlens + i_n + 1).to(tl.int32),
+            tl.load(cu_seqlens + i_n).to(tl.int64),
+            tl.load(cu_seqlens + i_n + 1).to(tl.int64),
         )
-        T = eos - bos
+        # T is a per-sequence length (small) and is used as a make_block_ptr
+        # *shape*, which Triton requires to be 32-bit; keep it int32 while the
+        # cumulative offsets (bos/boh) stay int64 for safe addressing.
+        T = (eos - bos).to(tl.int32)
         NT = tl.cdiv(T, BT)
-        boh = tl.load(chunk_offsets + i_n).to(tl.int32)
+        boh = tl.load(chunk_offsets + i_n).to(tl.int64)
     else:
-        bos, eos = i_n * T, i_n * T + T
+        bos, eos = i_n.to(tl.int64) * T, i_n.to(tl.int64) * T + T
         NT = tl.cdiv(T, BT)
-        boh = i_n * NT
+        boh = i_n.to(tl.int64) * NT
 
     b_h1 = tl.zeros([BV, 64], dtype=tl.float32)
     if K > 64:
@@ -105,20 +114,20 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64_gcu(
     if K > 192:
         b_h4 = tl.zeros([BV, 64], dtype=tl.float32)
 
-    h += ((boh * H + i_h) * V * K).to(tl.int32)
-    v += ((bos * H + i_h) * V).to(tl.int32)
-    k += ((bos * Hg + i_h // (H // Hg)) * K).to(tl.int32)
-    w += ((bos * H + i_h) * K).to(tl.int32)
+    h += ((boh * H + i_h) * V * K).to(tl.int64)
+    v += ((bos * H + i_h) * V).to(tl.int64)
+    k += ((bos * Hg + i_h // (H // Hg)) * K).to(tl.int64)
+    w += ((bos * H + i_h) * K).to(tl.int64)
     if SAVE_NEW_VALUE:
-        v_new += ((bos * H + i_h) * V).to(tl.int32)
+        v_new += ((bos * H + i_h) * V).to(tl.int64)
     stride_v = H * V
     stride_h = H * V * K
     stride_k = Hg * K
     stride_w = H * K
     if USE_INITIAL_STATE:
-        h0 = h0 + i_nh * V * K
+        h0 = h0 + i_nh.to(tl.int64) * V * K
     if STORE_FINAL_STATE:
-        ht = ht + i_nh * V * K
+        ht = ht + i_nh.to(tl.int64) * V * K
 
     if USE_INITIAL_STATE:
         p_h0_1 = tl.make_block_ptr(h0, (V, K), (K, 1), (i_v * BV, 0), (BV, 64), (1, 0))
