@@ -10,7 +10,51 @@ Note: Common fixtures (device, has_accelerator, markers) are inherited
 from the root tests/conftest.py. Only functional-specific fixtures belong here.
 """
 
+import os
+
 import pytest
+
+from tests.utils.device_utils import get_visible_device_env_var
+
+# ---------------------------------------------------------------------------
+# xdist: assign one physical device per worker (controller side)
+# ---------------------------------------------------------------------------
+
+
+def pytest_configure_node(node):
+    """Assign a physical device index to each xdist worker.
+
+    Called on the controller process once per worker before it starts.
+    The worker index (0, 1, 2, ...) maps directly to a device index so that
+    each worker process sees only one accelerator via the platform's
+    VISIBLE_DEVICES env var.
+    """
+    # node.workerinput is a dict forwarded to the worker's pytest_configure.
+    worker_id = node.workerinput.get("workerid", "gw0")
+    try:
+        index = int(worker_id.replace("gw", ""))
+    except ValueError:
+        index = 0
+    node.workerinput["fl_device_index"] = str(index)
+
+
+def pytest_configure(config):
+    """Worker side: apply the device pinning injected by pytest_configure_node."""
+    worker_input = getattr(config, "workerinput", None)
+    if worker_input is None:
+        return
+    index = worker_input.get("fl_device_index")
+    if index is None:
+        return
+    env_var = get_visible_device_env_var()
+    os.environ[env_var] = index
+    worker_id = worker_input.get("workerid", "?")
+    print(f"\n[functional] {worker_id}: {env_var}={index}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Crash-safe teardown (Ascend NPU GC workaround)
+# ---------------------------------------------------------------------------
 
 
 @pytest.hookimpl(trylast=True)
@@ -28,9 +72,12 @@ def pytest_sessionfinish(session, exitstatus):
     Secondary fix: also drains any residual inductor SubprocPool whose
     _read_thread would segfault when the subprocess pipe breaks on NPU teardown.
     Primary guard for that is TORCHINDUCTOR_COMPILE_THREADS=1 in ascend.yaml.
+
+    xdist note: worker processes also run this hook. os._exit() is safe here
+    because xdist workers communicate results via a socket before sessionfinish,
+    so all data has already been sent to the controller by this point.
     """
     import contextlib
-    import os
     import threading
 
     # --- drain residual inductor subprocess pool (if any) ---
@@ -62,5 +109,15 @@ def pytest_sessionfinish(session, exitstatus):
             if isinstance(read_thread, threading.Thread) and read_thread.is_alive():
                 read_thread.join(timeout=3.0)
 
-    # --- bypass Python GC to avoid NPU destructor memory corruption ---
-    os._exit(int(exitstatus))
+    # Skip os._exit on the xdist controller: it still needs to aggregate results
+    # and write reports after all workers finish.
+    worker_input = getattr(session.config, "workerinput", None)
+    is_xdist_worker = worker_input is not None
+    is_xdist_controller = (
+        not is_xdist_worker
+        and getattr(session.config, "workeroutput", None) is None
+        and hasattr(session.config, "_workeroutputs")
+    )
+
+    if not is_xdist_controller:
+        os._exit(int(exitstatus))
