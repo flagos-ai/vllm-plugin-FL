@@ -71,11 +71,18 @@ my_device:
   name: "my_device"
   tests:
     e2e:
-      # E2E tests (inference/serving) — require model files, slow
-      inference:
-        qwen3: ["4b_tp2"]
-      serving:
-        qwen2_5: ["0.5b"]
+      # E2E tests are grouped by CI stage (pr / nightly / weekly).
+      # pr:      fast subset run on every pull request
+      # nightly: full regression (inference + serving)
+      # weekly:  extended cases (optional, falls back to nightly if omitted)
+      pr:
+        inference:
+          qwen3: ["4b_tp2"]
+      nightly:
+        inference:
+          qwen3: ["4b_tp2"]
+        serving:
+          qwen2_5: ["0.5b"]
     functional:
       # Component tests (ops/compilation/distributed) — run all by default
       include: "*"

@@ -100,6 +100,7 @@ class TestRunner:
         platform: str,
         device: str | None = None,
         scope: str = "all",
+        stage: str = "nightly",
         task: str | None = None,
         model: str | None = None,
         case: str | None = None,
@@ -111,6 +112,7 @@ class TestRunner:
     ):
         self.config = PlatformConfig.load(platform, device)
         self.scope = scope
+        self.stage = stage
         self.task = task
         self.model = model
         self.case = case
@@ -273,7 +275,7 @@ class TestRunner:
         - ``unit``: unit tests
         - ``functional``: component-level GPU tests (ops, compilation, distributed)
         - ``e2e``: end-to-end model tests (inference, serving)
-        - ``benchmark``: benchmark smoke tests
+        - ``benchmark``: benchmark tests selected by platform YAML
         - ``all``: all of the above
         """
         cases: list[TestCase] = []
@@ -354,7 +356,7 @@ class TestRunner:
             base_dir: Root directory (e.g. ``tests/e2e_tests``).
         """
         func = self.config.get_e2e_tests()
-        raw_cases = func.get_cases(task=self.task, model=self.model)
+        raw_cases = func.get_cases(stage=self.stage, task=self.task, model=self.model)
 
         # Filter by case name if specified
         if self.case:
@@ -501,15 +503,15 @@ class TestRunner:
         benchmark = self.config.get_benchmark_tests()
         if not benchmark.get("enabled", False):
             return []
-        selected_smoke = benchmark.get("smoke", [])
+        selected_types = benchmark.get("types", [])
 
-        if not selected_smoke:
+        if not selected_types:
             return []
 
-        if isinstance(selected_smoke, str):
-            selected_types = {selected_smoke}
+        if isinstance(selected_types, str):
+            selected_types = {selected_types}
         else:
-            selected_types = set(selected_smoke)
+            selected_types = set(selected_types)
 
         config_path = Path(
             benchmark.get(
@@ -767,6 +769,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "distributed), e2e (inference/serving), benchmark, or all (default: all)",
     )
     parser.add_argument(
+        "--stage",
+        choices=["pr", "nightly", "weekly"],
+        default="nightly",
+        help="CI stage for e2e test selection: pr (pr subset), nightly (full), "
+        "weekly (extended, falls back to nightly if not defined) (default: nightly)",
+    )
+    parser.add_argument(
         "--task",
         default=None,
         help="Functional test task filter (e.g., inference, serve)",
@@ -817,6 +826,7 @@ def main(argv: list[str] | None = None) -> int:
         platform=args.platform,
         device=args.device,
         scope=args.scope,
+        stage=args.stage,
         task=args.task,
         model=args.model,
         case=args.case,

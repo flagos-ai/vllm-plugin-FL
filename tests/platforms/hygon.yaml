@@ -54,13 +54,14 @@ bw1000:
   name: "bw1000"
   tests:
     e2e:
-      smoke:
+      pr:
         inference:
           qwen3_6: ["27b_tp2_eager"]
-      inference:
-        qwen3_6: ["35b_a3b_tp4_graph", "27b_tp2_eager"]
-      serving:
-        qwen3_6: ["27b_tp4_graph", "35b_a3b_tp2_eager"]
+      nightly:
+        inference:
+          qwen3_6: ["35b_a3b_tp4_graph", "27b_tp2_eager"]
+        serving:
+          qwen3_6: ["27b_tp4_graph", "35b_a3b_tp2_eager"]
     functional:
       include: "*"
       exclude: []
@@ -69,4 +70,4 @@ bw1000:
       exclude: []
     benchmark:
       enabled: true
-      smoke: ["serve"]
+      types: ["serve"]
