@@ -242,7 +242,7 @@ class TestRunner:
                 if result.stdout:
                     for line in result.stdout.splitlines():
                         print(f"[{tc.name}] {line}", flush=True)
-                device_cleanup(self.config.platform)
+                device_cleanup(self.config.platform, slots=slots)
             finally:
                 scheduler.release(slots)
                 print(
@@ -640,7 +640,23 @@ class TestRunner:
                 platform=self.config.platform,
                 device=self.config.device,
             ).engine.get("gpu_memory_utilization", 0.9)
-            ok, info = wait_for_memory(self.config.platform, gpu_util)
+            # Extract device indices from VISIBLE_DEVICES override so the
+            # memory check only inspects this case's assigned slots and does
+            # not block on memory held by other concurrently running cases.
+            device_indices: list[int] | None = None
+            if extra_env_override:
+                for val in extra_env_override.values():
+                    parsed = [
+                        int(x)
+                        for x in val.split(",")
+                        if x.strip().lstrip("-").isdigit()
+                    ]
+                    if parsed:
+                        device_indices = parsed
+                        break
+            ok, info = wait_for_memory(
+                self.config.platform, gpu_util, device_indices=device_indices
+            )
             if not ok:
                 print("[run] FAILED: timed out waiting for device memory")
                 return TestResult(

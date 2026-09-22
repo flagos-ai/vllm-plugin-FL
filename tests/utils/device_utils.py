@@ -21,7 +21,7 @@ _BACKEND = os.environ.get("FL_BACKEND", "").lower()
 # Each xdist worker sets this to its own device index so tests stay isolated.
 _PLATFORM_VISIBLE_DEVICE_ENV: dict[str, str] = {
     "cuda": "CUDA_VISIBLE_DEVICES",
-    "iluvatar": "COREX_VISIBLE_DEVICES",
+    "iluvatar": "CUDA_VISIBLE_DEVICES",  # CoreX exposes torch.cuda; COREX_VISIBLE_DEVICES is unused in CI
     "hygon": "CUDA_VISIBLE_DEVICES",
     "kunlunxin": "CUDA_VISIBLE_DEVICES",
     "thead": "CUDA_VISIBLE_DEVICES",
