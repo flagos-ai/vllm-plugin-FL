@@ -299,7 +299,10 @@ class TestRunner:
 
         # Use explicit CPU count so the log shows the exact parallelism level.
         # os.cpu_count() can return None on exotic systems; fallback to 1.
-        cpu_workers = os.cpu_count() or 1
+        # Cap at 16: unit tests are short and pure-CPU; beyond 16 workers the
+        # per-process import overhead (torch, vllm_fl) outweighs the parallelism
+        # benefit and can cause memory pressure on large CI machines.
+        cpu_workers = min(os.cpu_count() or 1, 16)
 
         extra_args = [
             "--tb=short",
