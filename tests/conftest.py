@@ -29,6 +29,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="_pytest")
 # Suppress RuntimeWarning from unittest on Python 3.12+:
 # "TestResult has no addDuration method" — harmless compatibility shim noise.
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="unittest")
+# Suppress enflame GCU ImportWarning about torch.cuda.* monkey-patching.
+warnings.filterwarnings("ignore", category=ImportWarning, module="torch_gcu")
 
 from tests.utils.device_utils import (
     get_backend,

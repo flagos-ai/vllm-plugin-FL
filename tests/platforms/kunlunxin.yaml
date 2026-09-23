@@ -102,6 +102,11 @@ p800:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      types:
-        - serve
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

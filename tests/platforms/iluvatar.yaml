@@ -73,4 +73,7 @@ bi_v150:
     unit:
       include: "*"
     benchmark:
-      enabled: false
+      pr:
+        enabled: false
+      nightly:
+        enabled: false

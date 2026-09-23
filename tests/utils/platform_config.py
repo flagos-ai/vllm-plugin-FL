@@ -349,10 +349,15 @@ class PlatformConfig:
         e2e_raw = dt.get("tests", {}).get("e2e", {})
         return E2eTestConfig(tests=e2e_raw)
 
-    def get_benchmark_tests(self) -> dict[str, Any]:
-        """Return benchmark test configuration for the active device."""
+    def get_benchmark_tests(self, stage: str = "nightly") -> dict[str, Any]:
+        """Return benchmark test configuration for the active device and CI stage."""
         dt = self.device_tests.get(self.device, {})
-        return dt.get("tests", {}).get("benchmark", {})
+        benchmark = dt.get("tests", {}).get("benchmark", {})
+        # New-style: keyed by stage (pr / nightly / weekly)
+        if "pr" in benchmark or "nightly" in benchmark:
+            return benchmark.get(stage) or benchmark.get("nightly", {})
+        # Legacy flat format — return as-is for backwards compatibility
+        return benchmark
 
     def get_functional_filter(self) -> TestFilter:
         """Return functional test include/exclude for the active device."""

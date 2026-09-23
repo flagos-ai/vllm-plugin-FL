@@ -120,10 +120,11 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
-  # Benchmark validation — nightly and weekly only.
+  # Benchmark validation — runs for all stages; actual test selection
+  # is controlled by the platform YAML (benchmark.pr / benchmark.nightly).
   benchmark:
     needs: [setup, e2e]
-    if: inputs.ci_stage == 'nightly' || inputs.ci_stage == 'weekly'
+    if: always() && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -132,12 +133,12 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
+      ci_stage: ${{ inputs.ci_stage }}
 
-  # Feishu notification — per-platform status (nightly/weekly only).
-  # PR CI uses the top-level ci-gate + notify-feishu.yml (workflow_run trigger).
+  # Feishu notification — per-platform status, all stages.
   notify:
     needs: [functional, e2e, benchmark]
-    if: always() && (inputs.ci_stage == 'nightly' || inputs.ci_stage == 'weekly')
+    if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}

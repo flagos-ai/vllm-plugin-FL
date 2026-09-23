@@ -95,3 +95,8 @@ my_device:
       include: "*"
       # Exclude patterns: empty list or list paths to exclude
       exclude: []
+    benchmark:
+      pr:
+        enabled: false
+      nightly:
+        enabled: false
