@@ -114,11 +114,16 @@ a100:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      smoke:
-        - throughput
-        - latency
-        - serve
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - throughput
+          - latency
+          - serve
 
 h20:
   name: "h20"

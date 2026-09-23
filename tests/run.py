@@ -500,7 +500,7 @@ class TestRunner:
 
     def _discover_benchmark_tests(self) -> list[TestCase]:
         """Benchmark smoke tests selected by platform YAML."""
-        benchmark = self.config.get_benchmark_tests()
+        benchmark = self.config.get_benchmark_tests(self.stage)
         if not benchmark.get("enabled", False):
             return []
         selected_types = benchmark.get("types", [])

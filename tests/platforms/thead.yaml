@@ -72,5 +72,7 @@ zw810e:
       include: "*"
       exclude: []
     benchmark:
-      enabled: false
-      smoke: []
+      pr:
+        enabled: false
+      nightly:
+        enabled: false

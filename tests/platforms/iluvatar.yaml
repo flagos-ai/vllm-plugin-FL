@@ -60,4 +60,8 @@ bi-v150:
       exclude: []
     unit:
       include: "*"
-      exclude: []
+    benchmark:
+      pr:
+        enabled: false
+      nightly:
+        enabled: false
