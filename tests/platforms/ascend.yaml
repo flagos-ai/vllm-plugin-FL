@@ -86,12 +86,18 @@ env_defaults: {}
       # Add or remove test cases per model
       pr:
         inference:
-          qwen3_6: ["27b_tp2_eager"]
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
       nightly:
         inference:
-          qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_graph
         serving:
-          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+          qwen3_6:
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
@@ -105,4 +111,5 @@ env_defaults: {}
       exclude: []
     benchmark:
       enabled: true
-      types: ["serve"]
+      types:
+        - serve

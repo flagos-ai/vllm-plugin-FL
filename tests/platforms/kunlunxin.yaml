@@ -78,15 +78,20 @@ p800:
   name: "p800"
   tests:
     e2e:
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_graph
       nightly:
         inference:
           qwen3_6:
-            - "27b_tp4_eager"
-            - "35b_a3b_tp4_graph"
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_graph
         serving:
           qwen3_6:
-            - "27b_tp4_graph"
-            - "35b_a3b_tp4_eager"
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
     timeouts:
       e2e:
         inference: 180
@@ -101,4 +106,5 @@ p800:
         - dispatch/test_flaggems_quantization.py
     benchmark:
       enabled: true
-      types: ["serve"]
+      types:
+        - serve

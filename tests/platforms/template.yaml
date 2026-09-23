@@ -77,12 +77,15 @@ my_device:
       # weekly:  extended cases (optional, falls back to nightly if omitted)
       pr:
         inference:
-          qwen3: ["4b_tp2"]
+          qwen3:
+            - 4b_tp2
       nightly:
         inference:
-          qwen3: ["4b_tp2"]
+          qwen3:
+            - 4b_tp2
         serving:
-          qwen2_5: ["0.5b"]
+          qwen2_5:
+            - 0.5b
     functional:
       # Component tests (ops/compilation/distributed) — run all by default
       include: "*"
