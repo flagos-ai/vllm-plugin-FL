@@ -50,6 +50,11 @@ on:
         required: false
         type: number
         default: 30
+      ci_stage:
+        description: "CI stage: pr / nightly / weekly"
+        required: false
+        type: string
+        default: "nightly"
 
 jobs:
   benchmark-test:
@@ -85,7 +90,8 @@ jobs:
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
-            --scope benchmark
+            --scope benchmark \
+            --stage ${{ inputs.ci_stage }}
 
       - name: Upload test results
         if: always()

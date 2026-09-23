@@ -105,6 +105,11 @@ p800:
       exclude:
         - dispatch/test_flaggems_quantization.py
     benchmark:
-      enabled: true
-      types:
-        - serve
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve
