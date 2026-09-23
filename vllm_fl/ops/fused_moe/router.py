@@ -29,8 +29,8 @@ _topk_softmax = CachedOp("topk_softmax")
 _grouped_topk = CachedOp("grouped_topk")
 
 
-def _has_dsv4_topk_op() -> bool:
-    return hasattr(torch.ops._moe_C, "topk_softplus_sqrt")
+def _is_ascend_npu_tensor(value: torch.Tensor) -> bool:
+    return value.device.type == "npu"
 
 
 def _sqrtsoftplus_topk(
@@ -301,7 +301,7 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
             if self.e_score_correction_bias is not None
             else None
         )
-        if self.scoring_func == "sqrtsoftplus" and not _has_dsv4_topk_op():
+        if self.scoring_func == "sqrtsoftplus" and _is_ascend_npu_tensor(router_logits):
             topk_weights, topk_ids = _sqrtsoftplus_topk(
                 gating_output=router_logits,
                 e_score_correction_bias=correction_bias,

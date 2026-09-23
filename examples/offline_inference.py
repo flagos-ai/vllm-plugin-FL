@@ -6,6 +6,8 @@
 
 import os
 
+import torch
+
 from vllm import LLM, SamplingParams
 
 # Check Platform
@@ -29,7 +31,7 @@ if __name__ == "__main__":
     llm = LLM(
         model="Qwen/Qwen3-4B",
         max_num_batched_tokens=16384,
-        max_num_seqs=4,
+        max_num_seqs=4 if current_platform.device_type == "npu" else 2048,
         enforce_eager=current_platform.device_type == "npu",
     )
 
@@ -42,6 +44,9 @@ if __name__ == "__main__":
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
     del llm
-    current_platform.empty_cache()
+    if current_platform.device_type == "npu":
+        current_platform.empty_cache()
+    else:
+        torch.cuda.empty_cache()
 
     print("\n Reasoning complete, resources cleared.")

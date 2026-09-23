@@ -52,7 +52,7 @@ docker/build.sh \
 ```
 
 The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260922-r2-routerfix` image. Build and publish a
+`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` image. Build and publish a
 replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
 changing the configuration does not publish it.
 `.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an
@@ -62,9 +62,11 @@ The CI image also pins the pytest plugins used by the shared workflows. The
 setup script performs only the editable plugin overlay and version checks, so
 test startup does not depend on PyPI availability on the NPU runner.
 
-The published tag also contains a non-editable vLLM-Plugin-FL wheel in
-site-packages for direct use. The shared CI still overlays the pull-request
-checkout with an editable install so that each run tests the submitted source.
+The Dockerfile prepares the runtime and test dependencies, but does not install
+this repository's wheel. For a self-contained image, install the plugin
+non-editably from a checkout and publish the resulting image separately. The
+shared CI overlays the pull-request checkout with an editable install so that
+each run tests the submitted source.
 
 Install the plugin checkout without replacing the prepared dependencies:
 
@@ -190,12 +192,14 @@ with the versions above and the default Ascend operator policy:
 | Unit regression | Entire `tests/unit_tests` suite | 561 passed; 9 platform-specific tests skipped |
 | Functional device checks | Ascend ops, HCCL helpers and raw `torch.npu.NPUGraph` primitives | All selected tests passed |
 
-Full-model vLLM compilation and graph capture are unsupported and rejected
-explicitly; the raw `torch.npu.NPUGraph` checks above do not exercise that
-model path. Video and performance benchmarks remain unvalidated. The hybrid attention bridge
-currently makes contiguous cache inputs for native attention kernels;
-performance tuning is still needed. The packaged A3 image is published as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r2-routerfix`
+Qwen3.6-27B passed a manual full-model graph capture and replay test. Graph
+mode remains experimental: Qwen3.6-35B-A3B graph testing was skipped, and the
+raw `torch.npu.NPUGraph` checks above cover only the primitive. Video processing
+has not been validated. The shared CI benchmark passed, though broader
+performance tuning remains. The hybrid attention bridge currently makes
+contiguous cache inputs for native attention kernels. The packaged A3 image is
+published as
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean`
 and is selected by the shared CI platform configuration.
 
 ## Model provisioning
@@ -219,5 +223,5 @@ The workflow validates the selected model paths with the shared
 
 To avoid occupying a scarce NPU runner during development, validate changes
 on the host with the same image, setup script, and `tests/run.py` command
-first. Ascend is enabled in the automatic PR platform registry. The same `CI`
-workflow also supports manual dispatch with `ascend` selected as the platform.
+first. Ascend is enabled in the automatic PR platform registry. Manual runs of
+the same `CI` workflow also use that registry to select enabled platforms.

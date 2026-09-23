@@ -26,8 +26,6 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
     fused_experts as _vllm_fused_experts,
 )
 
-_NATIVE_MOE_MAX_TOKENS = 16
-
 
 def _flaggems_fused_experts_impl(**kwargs) -> torch.Tensor:
     """Resolve FlagGems lazily after the platform runtime is initialized."""
@@ -426,10 +424,7 @@ class FlagGemsW8A8Experts(TritonExperts):
                 expert_map=expert_map,
                 apply_router_weight_on_input=apply_router_weight_on_input,
             )
-        elif (
-            _is_ascend_npu_tensor(hidden_states)
-            or hidden_states.shape[0] <= _NATIVE_MOE_MAX_TOKENS
-        ):
+        elif _is_ascend_npu_tensor(hidden_states):
             result = _native_w8a8_fused_experts(
                 hidden_states=hidden_states,
                 w1=w1,

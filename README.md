@@ -208,7 +208,7 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 2. Enable eager execution
 
-    Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
+    Eager execution is the recommended setting for Ascend. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line. Graph mode is still experimental; see the tested cases in the [Ascend image guide](./docker/ascend/README.md).
 
 
 ### Run a Task
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     llm = LLM(
         model="Qwen/Qwen3-4B",
         max_num_batched_tokens=16384,
-        max_num_seqs=4,
+        max_num_seqs=4 if current_platform.device_type == "npu" else 2048,
         enforce_eager=current_platform.device_type == "npu",
     )
     # Generate texts from the prompts.

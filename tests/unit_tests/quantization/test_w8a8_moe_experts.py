@@ -112,7 +112,7 @@ def test_vllm_functional_experts_call_only_native_vllm(monkeypatch):
     )
 
 
-def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch):
+def test_non_npu_small_batch_calls_flaggems_with_exact_w8a8_contract(monkeypatch):
     calls = []
 
     def fake_fused_experts_impl(**kwargs):
@@ -124,7 +124,6 @@ def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch)
         "_flaggems_fused_experts_impl",
         fake_fused_experts_impl,
     )
-    monkeypatch.setattr(moe_experts, "_NATIVE_MOE_MAX_TOKENS", 0)
     quant_config = _quant_config()
     instance = SimpleNamespace(quant_config=quant_config)
     arguments = _apply_arguments()
@@ -151,15 +150,18 @@ def test_functional_experts_calls_flaggems_with_exact_w8a8_contract(monkeypatch)
     )
 
 
-def test_small_batch_uses_native_w8a8_fallback(monkeypatch):
+def test_ascend_with_unsupported_bias_uses_native_w8a8_fallback(monkeypatch):
+    monkeypatch.setattr(moe_experts, "_is_ascend_npu_tensor", lambda value: True)
     monkeypatch.setattr(
         moe_experts,
         "_flaggems_fused_experts_impl",
-        lambda **kwargs: pytest.fail("small batch must bypass FlagGems Triton"),
+        lambda **kwargs: pytest.fail("Ascend must bypass FlagGems Triton"),
     )
     arguments = _apply_arguments()
+    quant_config = _quant_config()
+    quant_config.w1_bias = torch.zeros((2, 8), dtype=torch.float32)
     moe_experts.FlagGemsW8A8Experts.apply(
-        SimpleNamespace(quant_config=_quant_config(), _lora_context=None),
+        SimpleNamespace(quant_config=quant_config, _lora_context=None),
         **arguments,
     )
 

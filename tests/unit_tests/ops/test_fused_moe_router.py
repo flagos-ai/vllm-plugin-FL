@@ -18,7 +18,6 @@ def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch)
         return routed_weights.clone(), routed_ids.clone()
 
     monkeypatch.setattr(router_mod, "fused_topk_bias", fake_fused_topk_bias)
-    monkeypatch.setattr(router_mod, "_has_dsv4_topk_op", lambda: True)
 
     hash_table = torch.tensor([[2, 4]], dtype=torch.int32)
     input_ids = torch.tensor([0], dtype=torch.int32)
@@ -75,6 +74,38 @@ def test_sqrtsoftplus_fallback_matches_dsv4_formula():
     expected_weights = expected_weights / expected_weights.sum(-1, keepdim=True) * 0.5
     assert torch.equal(ids, expected_ids)
     assert torch.allclose(weights, expected_weights)
+
+
+def test_ascend_sqrtsoftplus_uses_torch_even_when_cuda_op_is_present(monkeypatch):
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    monkeypatch.setattr(router_mod, "_is_ascend_npu_tensor", lambda value: True)
+    monkeypatch.setattr(
+        router_mod,
+        "fused_topk_bias",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("Ascend must not call the CUDA router")
+        ),
+    )
+    router = SimpleNamespace(
+        e_score_correction_bias=None,
+        top_k=1,
+        renormalize=True,
+        scoring_func="sqrtsoftplus",
+        routed_scaling_factor=1.0,
+        _hash_indices_table=None,
+        num_fused_shared_experts=0,
+    )
+
+    weights, ids = router_mod.FusedTopKBiasRouterFL._compute_routing(
+        router,
+        torch.zeros((1, 4)),
+        torch.tensor([[0.0, 2.0]], dtype=torch.float32),
+        torch.int32,
+    )
+
+    assert torch.equal(ids, torch.tensor([[1]], dtype=torch.int32))
+    assert torch.equal(weights, torch.ones((1, 1), dtype=torch.float32))
 
 
 def test_sqrtsoftplus_fallback_honors_hash_table():

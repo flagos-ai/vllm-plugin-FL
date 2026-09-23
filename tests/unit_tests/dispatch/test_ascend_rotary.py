@@ -73,10 +73,13 @@ def _expected_rotary(value, cos, sin, positions, interleaved):
     return value * selected_cos + rotated * selected_sin
 
 
-def _install_fake_flaggems(monkeypatch, apply_rotary, common_rotary):
+def _install_fake_flaggems(
+    monkeypatch, apply_rotary, common_rotary, vendor_name="ascend"
+):
     flag_gems = ModuleType("flag_gems")
     flag_gems.__path__ = []
     flag_gems.apply_rotary_pos_emb = apply_rotary
+    flag_gems.vendor_name = vendor_name
 
     config = ModuleType("flag_gems.config")
     config.use_c_extension = False
@@ -149,6 +152,21 @@ def test_reference_interleaved_rotary_repeats_adjacent_cache_values():
         reference_rotary.rotary_embedding_torch(
             None, query, key, cos, sin, positions.float(), inplace=False
         )
+
+
+def test_reference_rotary_keeps_existing_out_of_place_contract():
+    query, key, cos, sin, positions = _rotary_inputs()
+    original_query = query.clone()
+    original_key = key.clone()
+
+    result_query, result_key = reference_rotary.rotary_embedding_torch(
+        None, query, key, cos, sin, positions, inplace=True
+    )
+
+    assert result_query is not query
+    assert result_key is not key
+    torch.testing.assert_close(query, original_query)
+    torch.testing.assert_close(key, original_key)
 
 
 def test_ascend_fp32_rotary_fallback_preserves_inplace_contract(monkeypatch):
@@ -357,3 +375,27 @@ def test_flaggems_six_argument_rotary_preserves_inplace_contract(monkeypatch):
         SimpleNamespace(), base_query, base_key, cos, sin, positions, inplace=False
     )
     assert len(calls) == 3
+
+
+def test_six_argument_rotary_compatibility_is_ascend_only(monkeypatch):
+    def six_argument_rotary(query, key, cos, sin, positions, interleaved):
+        raise AssertionError("non-Ascend backend must use the common wrapper")
+
+    calls = []
+
+    def common_rotary(*args, **kwargs):
+        calls.append((args, kwargs))
+        return args[0], args[1]
+
+    _install_fake_flaggems(
+        monkeypatch, six_argument_rotary, common_rotary, vendor_name="musa"
+    )
+    query, key, cos, sin, positions = _rotary_inputs()
+
+    result_query, result_key = flaggems_rotary.rotary_embedding_flaggems(
+        SimpleNamespace(), query, key, cos, sin, positions, inplace=False
+    )
+
+    assert result_query is query
+    assert result_key is key
+    assert len(calls) == 1

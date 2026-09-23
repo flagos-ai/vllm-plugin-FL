@@ -63,17 +63,6 @@ MODEL_PATH=/models/Qwen3.6-27B PORT=8001 ./run_serve_graph.sh
 MODEL_PATH=/models/Qwen3.6-27B PORT=8001 ./run_test.sh
 ```
 
-The graph launcher defaults to capture sizes `1,2,4,8`. This keeps the manual
-gate bounded on accelerators with limited graph runtime resources while still
-exercising graph capture and replay. Override the complete vLLM compilation
-configuration when a platform needs a different matrix:
-
-```bash
-MODEL_PATH=/models/Qwen3.6-27B PORT=8001 \
-    COMPILATION_CONFIG='{"cudagraph_capture_sizes":[1,2,4,8,16]}' \
-    ./run_serve_graph.sh
-```
-
 `run_test.sh` executes all of these commands even if an earlier file fails:
 
 ```bash
@@ -97,9 +86,8 @@ The serve scripts require `MODEL_PATH` and `PORT`. Their served model name uses
 `SERVED_MODEL_NAME` when set and otherwise falls back to `MODEL_PATH`.
 `run_test.sh` requires `PORT` plus either `SERVED_MODEL_NAME` or `MODEL_PATH`.
 Useful environment overrides are `TENSOR_PARALLEL_SIZE`, `MAX_MODEL_LEN`, and
-`SERVER_PID_FILE`. `run_serve_graph.sh` also supports `COMPILATION_CONFIG`.
-`run_test.sh` supports `BASE_URL`, `SERVICE_TIMEOUT`, `REQUEST_TIMEOUT`,
-`SERVER_PID_FILE`, and `RESULTS_DIR`.
+`SERVER_PID_FILE`. `run_test.sh` also supports `BASE_URL`, `SERVICE_TIMEOUT`,
+`REQUEST_TIMEOUT`, `SERVER_PID_FILE`, and `RESULTS_DIR`.
 
 You may use a custom command instead of `run_serve.sh`. It must expose an
 OpenAI-compatible endpoint, serve the model as `qwen`, and allow local images

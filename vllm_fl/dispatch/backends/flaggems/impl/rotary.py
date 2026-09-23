@@ -54,8 +54,10 @@ def rotary_embedding_flaggems(
     # exposes a six-argument apply_rotary_pos_emb without ``inplace``.  The
     # common Gems wrapper assumes the seven-argument API when the C extension
     # is disabled, so call the backend implementation directly in that case.
-    if not use_c_extension and not _supports_inplace_argument(
-        flag_gems.apply_rotary_pos_emb
+    if (
+        getattr(flag_gems, "vendor_name", None) == "ascend"
+        and not use_c_extension
+        and not _supports_inplace_argument(flag_gems.apply_rotary_pos_emb)
     ):
         q_embed, k_embed = flag_gems.apply_rotary_pos_emb(
             query,
