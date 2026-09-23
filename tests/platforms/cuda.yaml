@@ -91,15 +91,22 @@ a100:
       # Add or remove test cases per model
       pr:
         inference:
-          qwen3: ["4b_tp2"]
-          minicpm: ["o45_tp4"]
+          qwen3:
+            - 35b_tp4
+          minicpm:
+            - o45_tp4
       nightly:
         inference:
-          qwen3: ["4b_tp2", "next_tp8"]
-          qwen3_5: ["35b_tp4"]
-          minicpm: ["o45_tp4"]
+          qwen3:
+            - 4b_tp2
+            - next_tp4
+          qwen3_5:
+            - 35b_tp4
+          minicpm:
+            - o45_tp4
         serving:
-          qwen3: ["next_tp8"]
+          qwen3:
+            - next_tp4
     functional:
       include: "*"
       exclude: []
@@ -108,7 +115,10 @@ a100:
       exclude: []
     benchmark:
       enabled: true
-      smoke: ["throughput", "latency", "serve"]
+      smoke:
+        - throughput
+        - latency
+        - serve
 
 h20:
   name: "h20"
@@ -116,10 +126,15 @@ h20:
     e2e:
       pr:
         inference:
-          qwen3: ["4b_tp2"]
-          minicpm: ["o45_tp4"]
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_graph
       nightly:
         inference:
-          qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_graph
         serving:
-          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+          qwen3_6:
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager

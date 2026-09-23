@@ -37,6 +37,11 @@ s5000:
   name: "s5000"
   tests:
     e2e:
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
       nightly:
         inference:
           qwen3:
@@ -63,4 +68,5 @@ s5000:
       exclude: []
     benchmark:
       enabled: true
-      types: ["serve"]
+      types:
+        - serve
