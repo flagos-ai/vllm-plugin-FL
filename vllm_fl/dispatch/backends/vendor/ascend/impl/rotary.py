@@ -82,7 +82,7 @@ def rotary_embedding_ascend(
             rotary_embedding_torch,
         )
 
-        return rotary_embedding_torch(
+        q_embed, k_embed = rotary_embedding_torch(
             obj,
             query,
             key,
@@ -90,8 +90,13 @@ def rotary_embedding_ascend(
             sin,
             position_ids,
             rotary_interleaved,
-            inplace,
+            inplace=False,
         )
+        if inplace:
+            query.copy_(q_embed)
+            key.copy_(k_embed)
+            return query, key
+        return q_embed, k_embed
 
     import torch_npu
 

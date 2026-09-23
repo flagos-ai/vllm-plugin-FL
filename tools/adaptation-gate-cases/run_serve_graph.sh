@@ -26,7 +26,6 @@ if [[ ! "$port" =~ ^[0-9]+$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
     exit 2
 fi
 served_model_name=${SERVED_MODEL_NAME:-$model_path}
-compilation_config=${COMPILATION_CONFIG:-'{"cudagraph_capture_sizes":[1,2,4,8]}'}
 if [[ -z ${VLLM_PLUGINS+x} ]]; then
     export VLLM_PLUGINS=fl
 fi
@@ -39,5 +38,4 @@ exec vllm serve "$model_path" \
     --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-2}" \
     --max-model-len "${MAX_MODEL_LEN:-32768}" \
     --allowed-local-media-path "$script_dir/images" \
-    --trust-remote-code \
-    --compilation-config "$compilation_config"
+    --trust-remote-code

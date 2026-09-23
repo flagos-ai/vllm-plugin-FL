@@ -30,7 +30,7 @@ def rotary_embedding_torch(
         sin: Sine cache [max_seq_len, rotary_dim] where rotary_dim = head_dim or head_dim // 2
         position_ids: Position indices [batch, seq_len] or [seq_len]
         rotary_interleaved: Whether to use interleaved rotary
-        inplace: Whether to modify tensors in-place
+        inplace: Whether to modify tensors in-place (ignored in reference impl)
 
     Returns:
         Tuple of (embedded_query, embedded_key)
@@ -132,10 +132,5 @@ def rotary_embedding_torch(
         # Standard rotary (neox style)
         q_embed = (query * cos_selected) + (rotate_half(query) * sin_selected)
         k_embed = (key * cos_selected) + (rotate_half(key) * sin_selected)
-
-    if inplace:
-        query.copy_(q_embed)
-        key.copy_(k_embed)
-        return query, key
 
     return q_embed, k_embed
