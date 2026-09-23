@@ -82,6 +82,11 @@ unsupported_features: []
 env_defaults:
   CUDA_DEVICE_MAX_CONNECTIONS: "1"
   NCCL_ALGO: "Ring"
+  # H20 (Hopper) NVLS communicator init crashes with "NCCL error: unhandled
+  # cuda error" at ncclCommInitRank on the CI node since 09-21 while the same
+  # code/image/digest passed on 09-17; #484's manual H20 validation ran with
+  # NVLS disabled.  A100/A800 cannot use NVLS, so this is a no-op there.
+  NCCL_NVLS_ENABLE: "0"
 
 # ---- Device-specific test configurations ------------------------------------
 a100:
