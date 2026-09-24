@@ -1,0 +1,2566 @@
+{
+  "protocol": "64 same-shape warmup requests, three 128-request c64 rounds; average rounds 2/3; repeat complete groups when three-round drift exceeds 5%",
+  "builds": {
+    "common": {
+      "commit": "78786cebce23a3de6b62f69a7ee27c14698860a8",
+      "archive": "common_source_main442.tar.gz",
+      "archive_sha256": "ccf379dab89450ff589b33dbba447b0310d665438991a40153ffcd5ec9fe6754",
+      "wheel": "vllm_plugin_fl-0.3.0rc2.post1+g78786cebc-py3-none-any.whl",
+      "wheel_sha256": "497dd8435a70fb732c4a35bf86c9d50445340b1778944424a8369ae7031d6e9c"
+    },
+    "model": {
+      "commit": "084aff6023435320a52195aa7df23aae28ee275a",
+      "archive": "model_source_r3.tar.gz",
+      "archive_sha256": "f4eefa876e06cd914dbaaa004bdf062a5d952811b9a1889eb53fc6cc2b7209e5",
+      "wheel": "vllm_plugin_fl-0.3.0rc2.post1+g084aff602-py3-none-any.whl",
+      "wheel_sha256": "45d57962a58fab07a5612de4f075fa78cb8c86b8c54ab221ffafc0df18093d59"
+    },
+    "fusion": {
+      "commit": "7e5dc29f690c7a442aa020df164df47a7ff03948",
+      "archive": "fusion_source_r3.tar.gz",
+      "archive_sha256": "25b306b72c1a6fe4d81748411c4b94821d5653f6faa1d1f4db4e76dd2909efbc",
+      "wheel": "vllm_plugin_fl-0.3.0rc2.post1+g7e5dc29f6-py3-none-any.whl",
+      "wheel_sha256": "541dac31c8ea25d9148be2670be2ae388b1517b8c555cde7498cd652eb6fde41"
+    }
+  },
+  "baseline_4k": {
+    "rounds": [
+      {
+        "round": 1,
+        "artifact": "baseline/4k/perf_repeat1/benchmark/formal1.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 54.211632444988936,
+        "total_input_tokens": 524288,
+        "total_output_tokens": 131072,
+        "request_throughput": 2.361116871547588,
+        "output_throughput": 2417.78367646473,
+        "total_token_throughput": 12088.91838232365,
+        "mean_ttft_ms": 3252.4850643530954,
+        "p99_ttft_ms": 8235.74468054343,
+        "mean_tpot_ms": 23.257598741340367,
+        "p99_tpot_ms": 25.797468591026252,
+        "mean_itl_ms": 23.257598858975463,
+        "p99_itl_ms": 271.81515405885875,
+        "max_itl_ms": 531.2286452390254,
+        "token_intervals_over_one_second": 0
+      },
+      {
+        "round": 2,
+        "artifact": "baseline/4k/perf_repeat1/benchmark/formal2.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 54.16064607584849,
+        "total_input_tokens": 524288,
+        "total_output_tokens": 131072,
+        "request_throughput": 2.3633396067828336,
+        "output_throughput": 2420.0597573456216,
+        "total_token_throughput": 12100.298786728108,
+        "mean_ttft_ms": 3252.49622082265,
+        "p99_ttft_ms": 8236.711218971759,
+        "mean_tpot_ms": 23.233598826921025,
+        "p99_tpot_ms": 25.878063996608315,
+        "mean_itl_ms": 23.23359894919339,
+        "p99_itl_ms": 259.58970278501505,
+        "max_itl_ms": 530.8180372230709,
+        "token_intervals_over_one_second": 0
+      },
+      {
+        "round": 3,
+        "artifact": "baseline/4k/perf_repeat1/benchmark/formal3.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 54.1821043076925,
+        "total_input_tokens": 524288,
+        "total_output_tokens": 131072,
+        "request_throughput": 2.362403631891189,
+        "output_throughput": 2419.1013190565777,
+        "total_token_throughput": 12095.506595282888,
+        "mean_ttft_ms": 3251.7339926380373,
+        "p99_ttft_ms": 8234.32236221619,
+        "mean_tpot_ms": 23.244617063874642,
+        "p99_tpot_ms": 25.86040782740382,
+        "mean_itl_ms": 23.244617195556675,
+        "p99_itl_ms": 267.49961962457746,
+        "max_itl_ms": 529.0423049591482,
+        "token_intervals_over_one_second": 0
+      }
+    ],
+    "selected_complete_group": 1,
+    "all_groups": [
+      {
+        "directory": "/evidence/baseline/4k/perf",
+        "drift_percent": 38.33888431653328
+      },
+      {
+        "directory": "/evidence/baseline/4k/perf_repeat1",
+        "drift_percent": 0.09409252619674907
+      }
+    ],
+    "accepted_mean_rounds_2_3": {
+      "completed": 128,
+      "failed": 0,
+      "duration": 54.171375191770494,
+      "total_input_tokens": 524288,
+      "total_output_tokens": 131072,
+      "request_throughput": 2.362871619337011,
+      "output_throughput": 2419.5805382010994,
+      "total_token_throughput": 12097.902691005498,
+      "mean_ttft_ms": 3252.1151067303435,
+      "p99_ttft_ms": 8235.516790593974,
+      "mean_tpot_ms": 23.239107945397834,
+      "p99_tpot_ms": 25.86923591200607,
+      "mean_itl_ms": 23.239108072375032,
+      "p99_itl_ms": 263.5446612047963,
+      "max_itl_ms": 529.9301710911095,
+      "token_intervals_over_one_second": 0
+    },
+    "three_round_mean_output_throughput": 2418.9815842889766,
+    "three_round_drift_percent": 0.09409252619674907,
+    "launch": {
+      "ARTIFACT_ROOT": "/evidence/baseline/4k/perf",
+      "PORT": "18057",
+      "INPUT_LEN": "4096",
+      "MAX_MODEL_LEN": "5120",
+      "MAX_NUM_SEQS": "64",
+      "MAX_NUM_BATCHED_TOKENS": "16384",
+      "GPU_MEMORY_UTILIZATION": "0.85",
+      "VLLM_FL_COMMON_ATTENTION_METADATA": "1",
+      "SCHEDULING_FLAG": "--async-scheduling",
+      "PLUGIN_IMAGE_ID": "sha256:b7faa60041af787c35de236685120fb072697a6547fa4ef5877095f7f1519d87"
+    },
+    "retained_groups": [
+      {
+        "group": 0,
+        "selected": false,
+        "drift_percent": 38.33888431653328,
+        "rounds": [
+          {
+            "round": 1,
+            "output_throughput": 2003.7302963177626,
+            "mean_tpot_ms": 27.957048466958874,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 6044.576033949852,
+            "token_intervals_over_one_second": 165
+          },
+          {
+            "round": 2,
+            "output_throughput": 1651.8855820404738,
+            "mean_tpot_ms": 33.93072360549984,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 7794.844954274595,
+            "token_intervals_over_one_second": 371
+          },
+          {
+            "round": 3,
+            "output_throughput": 2429.5467334444647,
+            "mean_tpot_ms": 23.122913784108416,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 533.0858319066465,
+            "token_intervals_over_one_second": 0
+          }
+        ]
+      },
+      {
+        "group": 1,
+        "selected": true,
+        "drift_percent": 0.09409252619674907,
+        "rounds": [
+          {
+            "round": 1,
+            "output_throughput": 2417.78367646473,
+            "mean_tpot_ms": 23.257598741340367,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 531.2286452390254,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 2,
+            "output_throughput": 2420.0597573456216,
+            "mean_tpot_ms": 23.233598826921025,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 530.8180372230709,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 3,
+            "output_throughput": 2419.1013190565777,
+            "mean_tpot_ms": 23.244617063874642,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 529.0423049591482,
+            "token_intervals_over_one_second": 0
+          }
+        ]
+      }
+    ],
+    "formal_telemetry": {
+      "gpu_sample_count": 592,
+      "gpu_ranges": {
+        "temperature.gpu": {
+          "min": 32.0,
+          "max": 54.0,
+          "median": 45.0
+        },
+        "clocks.current.sm": {
+          "min": 1830.0,
+          "max": 1830.0,
+          "median": 1830.0
+        },
+        "clocks.current.memory": {
+          "min": 2619.0,
+          "max": 2619.0,
+          "median": 2619.0
+        },
+        "power.draw": {
+          "min": 114.06,
+          "max": 592.2,
+          "median": 383.235
+        },
+        "memory.used": {
+          "min": 71837.0,
+          "max": 71845.0,
+          "median": 71841.0
+        },
+        "utilization.gpu": {
+          "min": 0.0,
+          "max": 100.0,
+          "median": 100.0
+        }
+      },
+      "throttle_flag_sample_counts": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_thermal_slowdown": 0,
+        "clocks_event_reasons.hw_power_brake_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0
+      },
+      "server_metric_maxima": null
+    },
+    "plan_cache_gate": {
+      "errors": [],
+      "expected_ranks": 8,
+      "matched_line_count": 8,
+      "records": [
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 591,
+          "misses": 1295,
+          "rank": 0,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 592,
+          "misses": 1295,
+          "rank": 1,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 589,
+          "misses": 1295,
+          "rank": 2,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 588,
+          "misses": 1295,
+          "rank": 3,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 587,
+          "misses": 1295,
+          "rank": 4,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 586,
+          "misses": 1295,
+          "rank": 5,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 590,
+          "misses": 1295,
+          "rank": 6,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 593,
+          "misses": 1295,
+          "rank": 7,
+          "size": 1295
+        }
+      ],
+      "server_log_sha256": "64a6902e6509599047bd8b3d95cdfa6887c9df1b9a2455448b74e3d70dd2dcd6",
+      "status": "pass"
+    }
+  },
+  "candidate_1k": {
+    "rounds": [
+      {
+        "round": 1,
+        "artifact": "candidate_fixed/1k/perf_repeat2/benchmark/formal1.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 38.51596698816866,
+        "total_input_tokens": 131072,
+        "total_output_tokens": 131072,
+        "request_throughput": 3.3232970637688797,
+        "output_throughput": 3403.056193299333,
+        "total_token_throughput": 6806.112386598666,
+        "mean_ttft_ms": 1321.3338380701316,
+        "p99_ttft_ms": 2046.003236300312,
+        "mean_tpot_ms": 17.519474439949832,
+        "p99_tpot_ms": 18.398954592238226,
+        "mean_itl_ms": 17.51947454021651,
+        "p99_itl_ms": 17.820417857728895,
+        "max_itl_ms": 481.39665089547634,
+        "token_intervals_over_one_second": 0
+      },
+      {
+        "round": 2,
+        "artifact": "candidate_fixed/1k/perf_repeat2/benchmark/formal2.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 38.50117480708286,
+        "total_input_tokens": 131072,
+        "total_output_tokens": 131072,
+        "request_throughput": 3.3245738770665385,
+        "output_throughput": 3404.3636501161354,
+        "total_token_throughput": 6808.727300232271,
+        "mean_ttft_ms": 1333.7381305791496,
+        "p99_ttft_ms": 2067.224470959045,
+        "mean_tpot_ms": 17.500057620588002,
+        "p99_tpot_ms": 18.38887953037853,
+        "mean_itl_ms": 17.50005772426507,
+        "p99_itl_ms": 17.907806048169732,
+        "max_itl_ms": 489.64709928259254,
+        "token_intervals_over_one_second": 0
+      },
+      {
+        "round": 3,
+        "artifact": "candidate_fixed/1k/perf_repeat2/benchmark/formal3.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 38.570382395759225,
+        "total_input_tokens": 131072,
+        "total_output_tokens": 131072,
+        "request_throughput": 3.3186085293796173,
+        "output_throughput": 3398.255134084728,
+        "total_token_throughput": 6796.510268169456,
+        "mean_ttft_ms": 1324.336706307804,
+        "p99_ttft_ms": 2052.787069249898,
+        "mean_tpot_ms": 17.543690986330756,
+        "p99_tpot_ms": 18.442254226999808,
+        "mean_itl_ms": 17.543691108204825,
+        "p99_itl_ms": 18.027025242336094,
+        "max_itl_ms": 482.4382271617651,
+        "token_intervals_over_one_second": 0
+      }
+    ],
+    "selected_complete_group": 2,
+    "all_groups": [
+      {
+        "directory": "/evidence/candidate_fixed/1k/perf",
+        "drift_percent": 21.56282060880963
+      },
+      {
+        "directory": "/evidence/candidate_fixed/1k/perf_repeat1",
+        "drift_percent": 17.898635356096577
+      },
+      {
+        "directory": "/evidence/candidate_fixed/1k/perf_repeat2",
+        "drift_percent": 0.17956233306100045
+      }
+    ],
+    "accepted_mean_rounds_2_3": {
+      "completed": 128,
+      "failed": 0,
+      "duration": 38.53577860142104,
+      "total_input_tokens": 131072,
+      "total_output_tokens": 131072,
+      "request_throughput": 3.321591203223078,
+      "output_throughput": 3401.309392100432,
+      "total_token_throughput": 6802.618784200864,
+      "mean_ttft_ms": 1329.0374184434768,
+      "p99_ttft_ms": 2060.0057701044716,
+      "mean_tpot_ms": 17.521874303459377,
+      "p99_tpot_ms": 18.41556687868917,
+      "mean_itl_ms": 17.521874416234947,
+      "p99_itl_ms": 17.967415645252913,
+      "max_itl_ms": 486.0426632221788,
+      "token_intervals_over_one_second": 0
+    },
+    "three_round_mean_output_throughput": 3401.891659166732,
+    "three_round_drift_percent": 0.17956233306100045,
+    "launch": {
+      "PORT": "18057",
+      "INPUT_LEN": "1024",
+      "ARTIFACT_ROOT": "/evidence/candidate_fixed/1k/perf",
+      "MAX_MODEL_LEN": "2048",
+      "MAX_NUM_SEQS": "64",
+      "MAX_NUM_BATCHED_TOKENS": "16384",
+      "GPU_MEMORY_UTILIZATION": "0.85",
+      "VLLM_FL_COMMON_ATTENTION_METADATA": "1",
+      "SCHEDULING_FLAG": "--async-scheduling",
+      "PLUGIN_IMAGE_ID": "sha256:b7faa60041af787c35de236685120fb072697a6547fa4ef5877095f7f1519d87"
+    },
+    "retained_groups": [
+      {
+        "group": 0,
+        "selected": false,
+        "drift_percent": 21.56282060880963,
+        "rounds": [
+          {
+            "round": 1,
+            "output_throughput": 2714.030221925374,
+            "mean_tpot_ms": 20.41415726032178,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 4106.273797806352,
+            "token_intervals_over_one_second": 143
+          },
+          {
+            "round": 2,
+            "output_throughput": 3395.9954493013424,
+            "mean_tpot_ms": 17.553872742301614,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 483.97479206323624,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 3,
+            "output_throughput": 3397.3855650666214,
+            "mean_tpot_ms": 17.4956091396546,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 482.18463780358434,
+            "token_intervals_over_one_second": 0
+          }
+        ]
+      },
+      {
+        "group": 1,
+        "selected": false,
+        "drift_percent": 17.898635356096577,
+        "rounds": [
+          {
+            "round": 1,
+            "output_throughput": 3404.728311141003,
+            "mean_tpot_ms": 17.508499530559227,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 482.67024382948875,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 2,
+            "output_throughput": 3398.6490938569327,
+            "mean_tpot_ms": 17.524711278842368,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 483.987701125443,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 3,
+            "output_throughput": 2829.981704616597,
+            "mean_tpot_ms": 20.45204819862632,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 3417.460475116968,
+            "token_intervals_over_one_second": 158
+          }
+        ]
+      },
+      {
+        "group": 2,
+        "selected": true,
+        "drift_percent": 0.17956233306100045,
+        "rounds": [
+          {
+            "round": 1,
+            "output_throughput": 3403.056193299333,
+            "mean_tpot_ms": 17.519474439949832,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 481.39665089547634,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 2,
+            "output_throughput": 3404.3636501161354,
+            "mean_tpot_ms": 17.500057620588002,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 489.64709928259254,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 3,
+            "output_throughput": 3398.255134084728,
+            "mean_tpot_ms": 17.543690986330756,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 482.4382271617651,
+            "token_intervals_over_one_second": 0
+          }
+        ]
+      }
+    ],
+    "formal_telemetry": {
+      "gpu_sample_count": 416,
+      "gpu_ranges": {
+        "temperature.gpu": {
+          "min": 33.0,
+          "max": 52.0,
+          "median": 44.0
+        },
+        "clocks.current.sm": {
+          "min": 1830.0,
+          "max": 1830.0,
+          "median": 1830.0
+        },
+        "clocks.current.memory": {
+          "min": 2619.0,
+          "max": 2619.0,
+          "median": 2619.0
+        },
+        "power.draw": {
+          "min": 137.57,
+          "max": 622.05,
+          "median": 400.6
+        },
+        "memory.used": {
+          "min": 71999.0,
+          "max": 72005.0,
+          "median": 72001.0
+        },
+        "utilization.gpu": {
+          "min": 25.0,
+          "max": 100.0,
+          "median": 100.0
+        }
+      },
+      "throttle_flag_sample_counts": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_thermal_slowdown": 0,
+        "clocks_event_reasons.hw_power_brake_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0
+      },
+      "server_metric_maxima": {
+        "vllm:num_requests_running": 64.0,
+        "vllm:num_requests_waiting": 15.0,
+        "vllm:num_requests_waiting_by_reason": 15.0,
+        "vllm:kv_cache_usage_perc": 0.20243003293850748,
+        "vllm:prefix_cache_queries_total": 0,
+        "vllm:prefix_cache_hits_total": 0,
+        "vllm:num_preemptions_total": 0
+      }
+    },
+    "plan_cache_gate": {
+      "errors": [],
+      "expected_ranks": 8,
+      "matched_line_count": 8,
+      "records": [
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 595,
+          "misses": 1185,
+          "rank": 0,
+          "size": 1185
+        },
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 594,
+          "misses": 1185,
+          "rank": 1,
+          "size": 1185
+        },
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 588,
+          "misses": 1185,
+          "rank": 2,
+          "size": 1185
+        },
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 591,
+          "misses": 1185,
+          "rank": 3,
+          "size": 1185
+        },
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 593,
+          "misses": 1185,
+          "rank": 4,
+          "size": 1185
+        },
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 590,
+          "misses": 1185,
+          "rank": 5,
+          "size": 1185
+        },
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 592,
+          "misses": 1185,
+          "rank": 6,
+          "size": 1185
+        },
+        {
+          "bypasses": 315,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9427,
+          "hits": 19505,
+          "installed": true,
+          "line": 589,
+          "misses": 1185,
+          "rank": 7,
+          "size": 1185
+        }
+      ],
+      "server_log_sha256": "9a6f6205ee3b2a3c454233a3ee3d6cc5756ec69e4caeafc07c54d84567d3fce6",
+      "status": "pass"
+    },
+    "correctness": {
+      "isolation_requests": 384,
+      "marker_input_tokens": 1024,
+      "all_markers_isolated": true,
+      "serial_requests": 8,
+      "serial_generated_tokens": 512,
+      "serial_tokens_and_top5_exact": true
+    },
+    "serial_precheck": {
+      "serial_requests": 8,
+      "generated_tokens_per_request": 512,
+      "tokens_and_full_top5_logprobs_exact": true
+    },
+    "source_identity": {
+      "cuda": {
+        "available": true,
+        "device_count": 8,
+        "device_names": [
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3"
+        ]
+      },
+      "environment": {
+        "FLAGGEMS_ATEN_PLAN_CACHE": "0",
+        "FLAGGEMS_ATEN_PLAN_CACHE_SIZE": "128",
+        "PYTHONPATH": "/opt/installed-fusion:/evidence/dependencies/FlagGems_fixed/src",
+        "QWEN4_HC_BACKEND": "fallback",
+        "QWEN4_QSA_FUSED_COMPRESS": "1",
+        "QWEN4_QSA_MQA_DOT": "1",
+        "QWEN4_QSA_SPLIT_REQUIRE": "1",
+        "QWEN4_QSA_SPLIT_TOPK": "8",
+        "USE_FLAGGEMS": "1",
+        "VLLM_FL_FLAGGEMS_ATEN_PLAN_CACHE": "1",
+        "VLLM_FL_FLAGGEMS_ATEN_PLAN_CACHE_REPORT": "1",
+        "VLLM_FL_FLAGGEMS_ATEN_PLAN_CACHE_REQUIRE": "1",
+        "VLLM_FL_FLAGOS_BLACKLIST": "index_put_,index_put,_index_put_impl_,nonzero,copy_,to_copy,index,index_select,conv1d,_conv_depthwise2d,conv2d,pad,constant_pad_nd,mul",
+        "VLLM_FL_GDN_STRICT_PATCH": "1",
+        "VLLM_FL_OOT_ENABLED": "1",
+        "VLLM_FL_PACKED_BLOCK_TABLE_ARENA": "1",
+        "VLLM_FL_PACKED_BLOCK_TABLE_REQUIRE": "1",
+        "VLLM_FL_PREFER": "flagos",
+        "VLLM_PLUGINS": "fl"
+      },
+      "errors": [],
+      "model": {
+        "files": [
+          {
+            "path": "/models/Qwen3.8-Flash-Next/config.json",
+            "sha256": "889658f2508e8c61d409b02e70e0d78d8d4452ec65aaafbe129805d213d2e74b",
+            "size": 4745
+          }
+        ],
+        "root": "/models/Qwen3.8-Flash-Next",
+        "tree": {
+          "exists": true,
+          "file_count": 145,
+          "relative_size_manifest_sha256": "be7b683b37a49d6c00ab0629d41c66a82c0d09ccc1e099996dfa0f1ffdd3d335",
+          "total_bytes": 360023295178
+        }
+      },
+      "packages": {
+        "flag_gems": {
+          "aten_plan_cache_stats": true,
+          "enable_aten_plan_cache": true,
+          "path": "/evidence/dependencies/FlagGems_fixed/src/flag_gems/__init__.py",
+          "stats_before_bridge": {
+            "bypasses": 0,
+            "enabled": false,
+            "evictions": 0,
+            "hit_rate": 0.0,
+            "hits": 0,
+            "installed": false,
+            "last_hits": 0,
+            "lru_hits": 0,
+            "misses": 0,
+            "per_operator": {},
+            "size": 0
+          },
+          "version": "5.3.3.dev15+gf471641e5.pkgfix1"
+        },
+        "torch": {
+          "path": "/usr/local/lib/python3.12/dist-packages/torch/__init__.py",
+          "version": "2.11.0+cu129"
+        },
+        "vllm": {
+          "path": "/usr/local/lib/python3.12/dist-packages/vllm/__init__.py",
+          "version": "0.24.0"
+        },
+        "vllm_fl": {
+          "path": "/opt/installed-fusion/vllm_fl/__init__.py",
+          "version": null
+        }
+      },
+      "source": {
+        "file_sha256": {
+          "flaggems_init": "9f487a0890ec12beb18b40d55a9fe26387417bbb505a1af29c716f118b26af2d",
+          "flaggems_plan_cache": "d9afa71ffb3aada02b82468569d9e02c07b5981a83066fab56f82bd2f3390921",
+          "plugin_plan_cache_bridge": "7eb9528f2565573af7b34f50a431f3dbe680f66fb144c52f8131b34eca9ceeca"
+        },
+        "flaggems_root": "/evidence/dependencies/FlagGems_fixed",
+        "flaggems_runtime_files_verified": 2583,
+        "flaggems_selected_files_sha256": {
+          "src/flag_gems/__init__.py": "9f487a0890ec12beb18b40d55a9fe26387417bbb505a1af29c716f118b26af2d",
+          "src/flag_gems/fused/fused_moe.py": "2f8d8cda969a206c7f3e80a3f5dfa5f3dc9d28b048bd96edba457108cac29acc",
+          "src/flag_gems/utils/aten_plan_cache.py": "d9afa71ffb3aada02b82468569d9e02c07b5981a83066fab56f82bd2f3390921"
+        },
+        "flaggems_tree": {
+          "exists": true,
+          "file_count": 2583,
+          "relative_size_manifest_sha256": "55d0919e1a22f8ce43fa0f5f6b7d2fdeeacc5445d5c1e6b2b09d968d4ef9167e",
+          "total_bytes": 20478813
+        },
+        "plugin_root": "/opt/installed-fusion",
+        "plugin_selected_files_sha256": {
+          "vllm_fl/models/qwen3_8_flash_next/common/hyperconnection.py": "c31a96a642def9a2c210c0abe99dddb3c78668d764897a06a3d01dd569467276",
+          "vllm_fl/models/qwen3_8_flash_next/gpu/ops/qsa.py": "68bf468c1e8ad529a4772be13fbd04ce356b1e681e908ed535f95143dc0c9f48",
+          "vllm_fl/models/qwen3_8_flash_next/gpu/qsa.py": "65961d8159b4b7534dcdc694d3040b8b7ec2353d578073825a5ac0a41a5eef51",
+          "vllm_fl/patches/flaggems_aten_plan_cache.py": "7eb9528f2565573af7b34f50a431f3dbe680f66fb144c52f8131b34eca9ceeca",
+          "vllm_fl/patches/qwen3_8_flash_next.py": "c2808d11adb743804498c435681305092b00d98d6130fa1975ad2ca371ff4964",
+          "vllm_fl/worker/model_runner.py": "ce44b8c72b233e5a6b5c9e293571bfc939f0a291c98003216109aeb3895d8726",
+          "vllm_fl/worker/worker.py": "f6d179d9344f1946c12cd42ee64e297048b490e6e3333de754677beaf4eadec0"
+        },
+        "plugin_tree": {
+          "exists": true,
+          "file_count": 295,
+          "relative_size_manifest_sha256": "927352d44f840647a2108e5dbbb79acb1f03751d78dbd6527030a29ea0e5dbe3",
+          "total_bytes": 2568577
+        }
+      },
+      "status": "pass"
+    }
+  },
+  "candidate_4k": {
+    "rounds": [
+      {
+        "round": 1,
+        "artifact": "candidate_fixed/4k/perf/benchmark/formal1.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 54.023789026774466,
+        "total_input_tokens": 524288,
+        "total_output_tokens": 131072,
+        "request_throughput": 2.369326593078515,
+        "output_throughput": 2426.190431312399,
+        "total_token_throughput": 12130.952156561996,
+        "mean_ttft_ms": 3281.4344599355536,
+        "p99_ttft_ms": 8262.904761279933,
+        "mean_tpot_ms": 23.138233219351594,
+        "p99_tpot_ms": 25.78412029538522,
+        "mean_itl_ms": 23.13823335131812,
+        "p99_itl_ms": 315.7040611235425,
+        "max_itl_ms": 541.7135837487876,
+        "token_intervals_over_one_second": 0
+      },
+      {
+        "round": 2,
+        "artifact": "candidate_fixed/4k/perf/benchmark/formal2.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 53.98393440665677,
+        "total_input_tokens": 524288,
+        "total_output_tokens": 131072,
+        "request_throughput": 2.3710757914713287,
+        "output_throughput": 2427.9816104666406,
+        "total_token_throughput": 12139.908052333203,
+        "mean_ttft_ms": 3264.965532354836,
+        "p99_ttft_ms": 8275.559988855384,
+        "mean_tpot_ms": 23.1339990681224,
+        "p99_tpot_ms": 25.73960773612692,
+        "mean_itl_ms": 23.13399920337484,
+        "p99_itl_ms": 250.39057983551172,
+        "max_itl_ms": 534.1194998472929,
+        "token_intervals_over_one_second": 0
+      },
+      {
+        "round": 3,
+        "artifact": "candidate_fixed/4k/perf/benchmark/formal3.json",
+        "completed": 128,
+        "failed": 0,
+        "duration": 54.069540231022984,
+        "total_input_tokens": 524288,
+        "total_output_tokens": 131072,
+        "request_throughput": 2.367321775866676,
+        "output_throughput": 2424.137498487476,
+        "total_token_throughput": 12120.68749243738,
+        "mean_ttft_ms": 3287.985883674992,
+        "p99_ttft_ms": 8320.081890751608,
+        "mean_tpot_ms": 23.153826147983747,
+        "p99_tpot_ms": 25.802836734300822,
+        "mean_itl_ms": 23.153826321372733,
+        "p99_itl_ms": 249.68842028640208,
+        "max_itl_ms": 540.1341519318521,
+        "token_intervals_over_one_second": 0
+      }
+    ],
+    "selected_complete_group": 0,
+    "all_groups": [
+      {
+        "directory": "/evidence/candidate_fixed/4k/perf",
+        "drift_percent": 0.15844800051017804
+      }
+    ],
+    "accepted_mean_rounds_2_3": {
+      "completed": 128,
+      "failed": 0,
+      "duration": 54.02673731883988,
+      "total_input_tokens": 524288,
+      "total_output_tokens": 131072,
+      "request_throughput": 2.3691987836690025,
+      "output_throughput": 2426.0595544770586,
+      "total_token_throughput": 12130.297772385293,
+      "mean_ttft_ms": 3276.475708014914,
+      "p99_ttft_ms": 8297.820939803496,
+      "mean_tpot_ms": 23.14391260805307,
+      "p99_tpot_ms": 25.77122223521387,
+      "mean_itl_ms": 23.143912762373787,
+      "p99_itl_ms": 250.0395000609569,
+      "max_itl_ms": 537.1268258895725,
+      "token_intervals_over_one_second": 0
+    },
+    "three_round_mean_output_throughput": 2426.1031800888386,
+    "three_round_drift_percent": 0.15844800051017804,
+    "launch": {
+      "PORT": "18057",
+      "INPUT_LEN": "4096",
+      "ARTIFACT_ROOT": "/evidence/candidate_fixed/4k/perf",
+      "MAX_MODEL_LEN": "5120",
+      "MAX_NUM_SEQS": "64",
+      "MAX_NUM_BATCHED_TOKENS": "16384",
+      "GPU_MEMORY_UTILIZATION": "0.85",
+      "VLLM_FL_COMMON_ATTENTION_METADATA": "1",
+      "SCHEDULING_FLAG": "--async-scheduling",
+      "PLUGIN_IMAGE_ID": "sha256:b7faa60041af787c35de236685120fb072697a6547fa4ef5877095f7f1519d87"
+    },
+    "retained_groups": [
+      {
+        "group": 0,
+        "selected": true,
+        "drift_percent": 0.15844800051017804,
+        "rounds": [
+          {
+            "round": 1,
+            "output_throughput": 2426.190431312399,
+            "mean_tpot_ms": 23.138233219351594,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 541.7135837487876,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 2,
+            "output_throughput": 2427.9816104666406,
+            "mean_tpot_ms": 23.1339990681224,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 534.1194998472929,
+            "token_intervals_over_one_second": 0
+          },
+          {
+            "round": 3,
+            "output_throughput": 2424.137498487476,
+            "mean_tpot_ms": 23.153826147983747,
+            "completed": 128,
+            "failed": 0,
+            "max_itl_ms": 540.1341519318521,
+            "token_intervals_over_one_second": 0
+          }
+        ]
+      }
+    ],
+    "formal_telemetry": {
+      "gpu_sample_count": 584,
+      "gpu_ranges": {
+        "temperature.gpu": {
+          "min": 32.0,
+          "max": 55.0,
+          "median": 45.0
+        },
+        "clocks.current.sm": {
+          "min": 1830.0,
+          "max": 1830.0,
+          "median": 1830.0
+        },
+        "clocks.current.memory": {
+          "min": 2619.0,
+          "max": 2619.0,
+          "median": 2619.0
+        },
+        "power.draw": {
+          "min": 117.39,
+          "max": 632.91,
+          "median": 396.895
+        },
+        "memory.used": {
+          "min": 71869.0,
+          "max": 71871.0,
+          "median": 71869.0
+        },
+        "utilization.gpu": {
+          "min": 0.0,
+          "max": 100.0,
+          "median": 100.0
+        }
+      },
+      "throttle_flag_sample_counts": {
+        "clocks_event_reasons.hw_thermal_slowdown": 0,
+        "clocks_event_reasons.sw_thermal_slowdown": 0,
+        "clocks_event_reasons.hw_power_brake_slowdown": 0,
+        "clocks_event_reasons.sw_power_cap": 0
+      },
+      "server_metric_maxima": {
+        "vllm:num_requests_running": 64.0,
+        "vllm:num_requests_waiting": 51.0,
+        "vllm:num_requests_waiting_by_reason": 51.0,
+        "vllm:kv_cache_usage_perc": 0.3533519553072626,
+        "vllm:prefix_cache_queries_total": 0,
+        "vllm:prefix_cache_hits_total": 0,
+        "vllm:num_preemptions_total": 0
+      }
+    },
+    "plan_cache_gate": {
+      "errors": [],
+      "expected_ranks": 8,
+      "matched_line_count": 8,
+      "records": [
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 583,
+          "misses": 1295,
+          "rank": 0,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 580,
+          "misses": 1295,
+          "rank": 1,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 581,
+          "misses": 1295,
+          "rank": 2,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 579,
+          "misses": 1295,
+          "rank": 3,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 576,
+          "misses": 1295,
+          "rank": 4,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 577,
+          "misses": 1295,
+          "rank": 5,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 582,
+          "misses": 1295,
+          "rank": 6,
+          "size": 1295
+        },
+        {
+          "bypasses": 627,
+          "enabled": true,
+          "evictions": 0,
+          "hit_rate": 0.9419,
+          "hits": 21010,
+          "installed": true,
+          "line": 578,
+          "misses": 1295,
+          "rank": 7,
+          "size": 1295
+        }
+      ],
+      "server_log_sha256": "af804a04291af3931dcca15f97d5be0836f58a13a5801410e355b4bc48ee462d",
+      "status": "pass"
+    },
+    "correctness": {
+      "isolation_requests": 384,
+      "marker_input_tokens": 4096,
+      "all_markers_isolated": true,
+      "serial_requests": 8,
+      "serial_generated_tokens": 512,
+      "serial_tokens_and_top5_exact": true
+    },
+    "serial_precheck": {
+      "serial_requests": 8,
+      "generated_tokens_per_request": 512,
+      "tokens_and_full_top5_logprobs_exact": true
+    },
+    "source_identity": {
+      "cuda": {
+        "available": true,
+        "device_count": 8,
+        "device_names": [
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 80GB HBM3"
+        ]
+      },
+      "environment": {
+        "FLAGGEMS_ATEN_PLAN_CACHE": "0",
+        "FLAGGEMS_ATEN_PLAN_CACHE_SIZE": "128",
+        "PYTHONPATH": "/opt/installed-fusion:/evidence/dependencies/FlagGems_fixed/src",
+        "QWEN4_HC_BACKEND": "fallback",
+        "QWEN4_QSA_FUSED_COMPRESS": "1",
+        "QWEN4_QSA_MQA_DOT": "1",
+        "QWEN4_QSA_SPLIT_REQUIRE": "1",
+        "QWEN4_QSA_SPLIT_TOPK": "8",
+        "USE_FLAGGEMS": "1",
+        "VLLM_FL_FLAGGEMS_ATEN_PLAN_CACHE": "1",
+        "VLLM_FL_FLAGGEMS_ATEN_PLAN_CACHE_REPORT": "1",
+        "VLLM_FL_FLAGGEMS_ATEN_PLAN_CACHE_REQUIRE": "1",
+        "VLLM_FL_FLAGOS_BLACKLIST": "index_put_,index_put,_index_put_impl_,nonzero,copy_,to_copy,index,index_select,conv1d,_conv_depthwise2d,conv2d,pad,constant_pad_nd,mul",
+        "VLLM_FL_GDN_STRICT_PATCH": "1",
+        "VLLM_FL_OOT_ENABLED": "1",
+        "VLLM_FL_PACKED_BLOCK_TABLE_ARENA": "1",
+        "VLLM_FL_PACKED_BLOCK_TABLE_REQUIRE": "1",
+        "VLLM_FL_PREFER": "flagos",
+        "VLLM_PLUGINS": "fl"
+      },
+      "errors": [],
+      "model": {
+        "files": [
+          {
+            "path": "/models/Qwen3.8-Flash-Next/config.json",
+            "sha256": "889658f2508e8c61d409b02e70e0d78d8d4452ec65aaafbe129805d213d2e74b",
+            "size": 4745
+          }
+        ],
+        "root": "/models/Qwen3.8-Flash-Next",
+        "tree": {
+          "exists": true,
+          "file_count": 145,
+          "relative_size_manifest_sha256": "be7b683b37a49d6c00ab0629d41c66a82c0d09ccc1e099996dfa0f1ffdd3d335",
+          "total_bytes": 360023295178
+        }
+      },
+      "packages": {
+        "flag_gems": {
+          "aten_plan_cache_stats": true,
+          "enable_aten_plan_cache": true,
+          "path": "/evidence/dependencies/FlagGems_fixed/src/flag_gems/__init__.py",
+          "stats_before_bridge": {
+            "bypasses": 0,
+            "enabled": false,
+            "evictions": 0,
+            "hit_rate": 0.0,
+            "hits": 0,
+            "installed": false,
+            "last_hits": 0,
+            "lru_hits": 0,
+            "misses": 0,
+            "per_operator": {},
+            "size": 0
+          },
+          "version": "5.3.3.dev15+gf471641e5.pkgfix1"
+        },
+        "torch": {
+          "path": "/usr/local/lib/python3.12/dist-packages/torch/__init__.py",
+          "version": "2.11.0+cu129"
+        },
+        "vllm": {
+          "path": "/usr/local/lib/python3.12/dist-packages/vllm/__init__.py",
+          "version": "0.24.0"
+        },
+        "vllm_fl": {
+          "path": "/opt/installed-fusion/vllm_fl/__init__.py",
+          "version": null
+        }
+      },
+      "source": {
+        "file_sha256": {
+          "flaggems_init": "9f487a0890ec12beb18b40d55a9fe26387417bbb505a1af29c716f118b26af2d",
+          "flaggems_plan_cache": "d9afa71ffb3aada02b82468569d9e02c07b5981a83066fab56f82bd2f3390921",
+          "plugin_plan_cache_bridge": "7eb9528f2565573af7b34f50a431f3dbe680f66fb144c52f8131b34eca9ceeca"
+        },
+        "flaggems_root": "/evidence/dependencies/FlagGems_fixed",
+        "flaggems_runtime_files_verified": 2583,
+        "flaggems_selected_files_sha256": {
+          "src/flag_gems/__init__.py": "9f487a0890ec12beb18b40d55a9fe26387417bbb505a1af29c716f118b26af2d",
+          "src/flag_gems/fused/fused_moe.py": "2f8d8cda969a206c7f3e80a3f5dfa5f3dc9d28b048bd96edba457108cac29acc",
+          "src/flag_gems/utils/aten_plan_cache.py": "d9afa71ffb3aada02b82468569d9e02c07b5981a83066fab56f82bd2f3390921"
+        },
+        "flaggems_tree": {
+          "exists": true,
+          "file_count": 2583,
+          "relative_size_manifest_sha256": "55d0919e1a22f8ce43fa0f5f6b7d2fdeeacc5445d5c1e6b2b09d968d4ef9167e",
+          "total_bytes": 20478813
+        },
+        "plugin_root": "/opt/installed-fusion",
+        "plugin_selected_files_sha256": {
+          "vllm_fl/models/qwen3_8_flash_next/common/hyperconnection.py": "c31a96a642def9a2c210c0abe99dddb3c78668d764897a06a3d01dd569467276",
+          "vllm_fl/models/qwen3_8_flash_next/gpu/ops/qsa.py": "68bf468c1e8ad529a4772be13fbd04ce356b1e681e908ed535f95143dc0c9f48",
+          "vllm_fl/models/qwen3_8_flash_next/gpu/qsa.py": "65961d8159b4b7534dcdc694d3040b8b7ec2353d578073825a5ac0a41a5eef51",
+          "vllm_fl/patches/flaggems_aten_plan_cache.py": "7eb9528f2565573af7b34f50a431f3dbe680f66fb144c52f8131b34eca9ceeca",
+          "vllm_fl/patches/qwen3_8_flash_next.py": "c2808d11adb743804498c435681305092b00d98d6130fa1975ad2ca371ff4964",
+          "vllm_fl/worker/model_runner.py": "ce44b8c72b233e5a6b5c9e293571bfc939f0a291c98003216109aeb3895d8726",
+          "vllm_fl/worker/worker.py": "f6d179d9344f1946c12cd42ee64e297048b490e6e3333de754677beaf4eadec0"
+        },
+        "plugin_tree": {
+          "exists": true,
+          "file_count": 295,
+          "relative_size_manifest_sha256": "927352d44f840647a2108e5dbbb79acb1f03751d78dbd6527030a29ea0e5dbe3",
+          "total_bytes": 2568577
+        }
+      },
+      "status": "pass"
+    }
+  },
+  "previous_stack_4k_throughput_change_percent": 0.2677743589711623,
+  "installed_tests": {
+    "common": {
+      "tests": 91,
+      "runtime_files_verified": 248,
+      "supplemental_probe_tests": 3,
+      "unique_selected_tests": 92
+    },
+    "model": {
+      "tests": 335,
+      "runtime_files_verified": 284
+    },
+    "fusion": {
+      "tests": 335,
+      "runtime_files_verified": 284
+    }
+  },
+  "dependency_fix": {
+    "upstream_base": "12400270ab731b833891ac7a400eac8c2cd320df",
+    "fix_commit": "e341d3cc95c5c15150622a38b8b151ab59311096",
+    "base_package_version": "5.3.3.dev15+gf471641e5.pkgfix1",
+    "upstream_module_equals_pinned_module": true,
+    "base_module_sha256": "a780da6348ba611640b546b47c60b79baa1312094386ce8f49d99d0d8e4750af",
+    "fixed_module_sha256": "2f8d8cda969a206c7f3e80a3f5dfa5f3dc9d28b048bd96edba457108cac29acc",
+    "manifest_sha256": "f4f44aaf8c94d6b1793b284be1605fca581659eea994d3867930468013bd1572",
+    "runtime_files": 2583,
+    "changed_runtime_files": [
+      "flag_gems/fused/fused_moe.py"
+    ],
+    "tests": 12,
+    "unpatched_parent_regression": "fails repeated output test as expected",
+    "note": "The installed package version describes the pinned base. Serving mounts that exact source snapshot with only this module patched; it does not upgrade other FlagGems files to upstream master.",
+    "pull_request": "https://github.com/flagos-ai/FlagGems/pull/6492",
+    "test_scope_commit": "484c948fcad57dd0bb42eab359f94ce6b68d77c8",
+    "final_test": {
+      "accepted": true,
+      "returncode": 0,
+      "utc": "2026-09-20T06:46:18.224953+00:00",
+      "test_source_sha256": "8e6a64354616a7b6b12f6050f8d15b7a9d8ca1561ca01ac2496bf4364baea797"
+    },
+    "root_cause_evidence": {
+      "model_comparisons": 32,
+      "all_first_moe_inputs_exact": true,
+      "all_first_moe_outputs_different": true,
+      "operator_cases": [
+        {
+          "rows": 1024,
+          "mode": "atomic",
+          "exact_repeats": 8,
+          "total_repeats": 8,
+          "max_abs_delta": 0.0
+        },
+        {
+          "rows": 1024,
+          "mode": "fixed_order",
+          "exact_repeats": 8,
+          "total_repeats": 8,
+          "max_abs_delta": 0.0
+        },
+        {
+          "rows": 4096,
+          "mode": "atomic",
+          "exact_repeats": 0,
+          "total_repeats": 8,
+          "max_abs_delta": 0.01171875
+        },
+        {
+          "rows": 4096,
+          "mode": "fixed_order",
+          "exact_repeats": 8,
+          "total_repeats": 8,
+          "max_abs_delta": 0.0
+        }
+      ],
+      "patched_model_serial_precheck": {
+        "serial_requests": 8,
+        "generated_tokens_per_request": 512,
+        "tokens_and_full_top5_logprobs_exact": true
+      }
+    }
+  },
+  "public_runtime_binding": {
+    "upstream_main": "71f61488c5bd62855eac147d3dbad11af331b97b",
+    "pr442_final_head": "30356926f2a86eff681591e3bf9cec67c951acdb",
+    "model": {
+      "source_commit": "634ce59178b6753b71b10536b9ff66c33eb4c249",
+      "measured_build": {
+        "commit": "7e5dc29f690c7a442aa020df164df47a7ff03948",
+        "archive": "fusion_source_r3.tar.gz",
+        "archive_sha256": "25b306b72c1a6fe4d81748411c4b94821d5653f6faa1d1f4db4e76dd2909efbc",
+        "wheel": "vllm_plugin_fl-0.3.0rc2.post1+g7e5dc29f6-py3-none-any.whl",
+        "wheel_sha256": "541dac31c8ea25d9148be2670be2ae388b1517b8c555cde7498cd652eb6fde41"
+      },
+      "excluded_generated_version_file": "vllm_fl/_version.py",
+      "verified_files": {
+        "vllm_fl/__init__.py": "5a0aef38fafe99ec6abb74864e5f958d7ce2514baa7257a9955673d4ef5236fc",
+        "vllm_fl/envs.py": "ecae13cf9bb3cbc83c0c411bd15420031a543743a94b0fe1d41dd959c803222f",
+        "vllm_fl/flaggems_policy.py": "67a4385cd2c86d9446df8f9e4d3f73f2ae4472dfc08018fc4d69c20dcc4b7950",
+        "vllm_fl/flaggems_runtime.py": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67",
+        "vllm_fl/platform.py": "9f9ec0040ca321d90917c303a8dced4203186b497c2152b58524f7be48aa7356",
+        "vllm_fl/utils.py": "eaccff2bba37491c01a34b33f627881cbb00556dc3b4bb3911ecc3b9add5ecdb",
+        "vllm_fl/version.py": "93ee21c8d963f3eaeb43d733816092436017d97da7135e51f8c20b212ee1ff43",
+        "vllm_fl/attention/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/attention/utils.py": "7c2f45101065c23a50f73bbc2ccd496892498b71013396b242670a1a2a13698e",
+        "vllm_fl/compat/__init__.py": "6d8a23b7e5358da8164a70447e7842aaf71b91648c17367b82dfa60f3afbc549",
+        "vllm_fl/compat/vllm024/__init__.py": "5171859cd9bbf21123fa914b1ae63c9bbb1703961d2f5c903a41ed6e1213c243",
+        "vllm_fl/compat/vllm024/kv_cache.py": "10dcc3cc188e577daa6f46bc18d0f103177ba730eb811ed9b312dd0b6ee5b992",
+        "vllm_fl/compilation/__init__.py": "3087c9e52b4dce64bef9852cfdb31bea44fe28eb7b8a49453d69174ebcdfdda0",
+        "vllm_fl/compilation/break_graph.py": "acd5bce2b209a7eeafd2356c3670be209051ee8b955542fb170708f01e6d62e9",
+        "vllm_fl/compilation/graph.py": "41cf1b5b4cd0286767c91dc3c2aae30801d9e531fd12a06c6dfcdc326b0acc0d",
+        "vllm_fl/configs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/configs/glm_moe_dsa.py": "d2b0e471d275157e2a92aa6fde6700333e97c3fafe8fe6d94c51a0b26e826e95",
+        "vllm_fl/configs/moe/E=256,N=512,device_name=nvidia,model=Qwen3.6-35B-A3B-H100.json": "97ccbad3a1933385e777d0817618edecbb80ff528b412e353c89c728d7d90193",
+        "vllm_fl/configs/moe/E=256,N=512,device_name=nvidia.json": "97ccbad3a1933385e777d0817618edecbb80ff528b412e353c89c728d7d90193",
+        "vllm_fl/dispatch/README.md": "a5288af54f6da9408042c997f6e2ba1b2d2c84137f3d9062ecf61bc67f5d3bf8",
+        "vllm_fl/dispatch/__init__.py": "2cb8eb13cfb6370d95e2486df037dd06f20773e128b65d35650ba122b32afb34",
+        "vllm_fl/dispatch/builtin_ops.py": "56c0d4770adbbae9b23d77bb08c594ee1e839e1df5d363529845781c746c2ec5",
+        "vllm_fl/dispatch/discovery.py": "cb1021d19df9a8e9de1d26255a6841572048ae665f00307e709689cdc9cab0a4",
+        "vllm_fl/dispatch/io_common.py": "6d8b4adf9ad75a5b79569e4ccc132c1ee69fd525198b3c4e25e2d6de6f3fff55",
+        "vllm_fl/dispatch/io_dumper.py": "a2f9bd9a619eaa6fe6514d873099889c5c08a4f750c049c779c6102305e5c05f",
+        "vllm_fl/dispatch/logger_manager.py": "77fbc785436d2ebe4ef385775208d4eea5eaa0727d1b4828fc80fd54e2e0f1a8",
+        "vllm_fl/dispatch/manager.py": "2884b063a0a4d2890eb63ac32fa929b62ce79af0d701860d1ecc8d126ad9e64c",
+        "vllm_fl/dispatch/ops.py": "d7a4964f20c2045231b0a0b8a90642e19445e231a9aadda7a93ab4a458dcdfdd",
+        "vllm_fl/dispatch/policy.py": "b604ed0af1aed35090b64bb7543c1f33480fa9042cad2e4e389d20feba47a2e6",
+        "vllm_fl/dispatch/registry.py": "938ec89eb5e9079cad4e6eaf68f55f8cba3df74fc1bc6eb028157718f07964aa",
+        "vllm_fl/dispatch/types.py": "65a5d50f9a3ff49466498706e514dfff1d7ff787ca9ba203b4e1a7bd4cebe1f9",
+        "vllm_fl/dispatch/backends/__init__.py": "738a1362638407815f075933eb72006a084065f92ea050f429753779d045ea38",
+        "vllm_fl/dispatch/backends/base.py": "129ebaa3119861dc4cab872de13d5a5fe409226d7d0bc3abc03b418e5f5ebf7a",
+        "vllm_fl/dispatch/backends/flaggems/__init__.py": "cdb25535c7557ad332d03060db63ff84e74f00af24789d33f96aa119c33a3296",
+        "vllm_fl/dispatch/backends/flaggems/flaggems.py": "2da56c92c7e5bf2e1ad4fd33ea803eb3072fc4d43d10c2c0d5d2d8680ea2171d",
+        "vllm_fl/dispatch/backends/flaggems/register_ops.py": "04024d8d4cdd6d2718e633d0f3095cd47fbe11606656e8ea516f10f9ffe21099",
+        "vllm_fl/dispatch/backends/flaggems/impl/__init__.py": "aa85b122306e39c240fd253acc7bc516ea99fffe6e5683ae8ec636fd0e855a86",
+        "vllm_fl/dispatch/backends/flaggems/impl/activation.py": "16a44da4f847e7e169a859f1090f3302a53e6d9aafade0e5cdeff0a8cc891dda",
+        "vllm_fl/dispatch/backends/flaggems/impl/attention.py": "1de63fa6d09c2424f6cd855f954f842f577dd4a33f5fd51765204291ad13b145",
+        "vllm_fl/dispatch/backends/flaggems/impl/custom_attention.py": "09fbd0636f502d9fbca9a3ac34039c81a4b25445ec40f5adade6b6b7b47fca07",
+        "vllm_fl/dispatch/backends/flaggems/impl/fused_moe.py": "a0654e0007b4c88386cff78863cc3ce293c6f2b6578e50823d0c90bad2d92ca5",
+        "vllm_fl/dispatch/backends/flaggems/impl/mla.py": "d9abad157b7a87808f344877af6a6b3c7b1c0996c01591896bbc0ab847619874",
+        "vllm_fl/dispatch/backends/flaggems/impl/normalization.py": "be65216d0989a072a79b80e9aade3e45bc84210c76b0714fa92d4a686261d5ac",
+        "vllm_fl/dispatch/backends/flaggems/impl/quantization.py": "c1ed13815decf39ad3a0c0313686f6857d464ba715e21d3264fd52acc512ec32",
+        "vllm_fl/dispatch/backends/flaggems/impl/rotary.py": "d5ec25896b70a54b10034bb0742fddf82f6f58c828bb41cdaede112070c3bba7",
+        "vllm_fl/dispatch/backends/reference/__init__.py": "9be93fc75eb2c570ba5198118313d4fcbd22f5ee0a6d3360806ea84f031dc17c",
+        "vllm_fl/dispatch/backends/reference/reference.py": "ad81525c1715272e5d52411a165be436f8866baa2a5626f640d0b26677aa4bf1",
+        "vllm_fl/dispatch/backends/reference/register_ops.py": "1ce9b9c5d5dccf4953511b5aae61e4b43ee035435f91d87db0481d63f1e2384d",
+        "vllm_fl/dispatch/backends/reference/impl/__init__.py": "abc03cf2bdc498982f8b7602e77719fecb3ee791455cbf56bc583aaab7020606",
+        "vllm_fl/dispatch/backends/reference/impl/activation.py": "e4e4c84ff2f622806e6331f68cf3cabc78aef72bc81060cbdae45a81b2fb6c1e",
+        "vllm_fl/dispatch/backends/reference/impl/normalization.py": "264e2c6802ea66abcd484a69319350320e020f36c8b93a00a8898551ea256da3",
+        "vllm_fl/dispatch/backends/reference/impl/quantization.py": "c6e382d2ed22f39cd8a424b9de4f087b8944e9517ae19adf6a511cd52534ff73",
+        "vllm_fl/dispatch/backends/reference/impl/rotary.py": "692d19e186c332457bbed1597881b26eb1bffea8bc558a40628a7105679e53f0",
+        "vllm_fl/dispatch/backends/vendor/__init__.py": "156978d4ea442a60be878f32c9e35ded64f87ff6f8caf7de1ecbadcc59d4051d",
+        "vllm_fl/dispatch/backends/vendor/ascend/__init__.py": "646a571ee7d692b0d20e6e0b14593020a42a3d815815bc221974d3e1b86fc5b8",
+        "vllm_fl/dispatch/backends/vendor/ascend/ascend.py": "f4e8f7ee7fcea27f8e01a7d387f1136f39393bc18fed74d2f94d3068017f21f4",
+        "vllm_fl/dispatch/backends/vendor/ascend/patch.py": "753624cacbd0e0e8db786cb6b11b4ac8256372be4d924747bcac21fcb9a9cf98",
+        "vllm_fl/dispatch/backends/vendor/ascend/register_ops.py": "1d6f8991b17685f9b2848f28d90cd1f6c964e3188d146fa2f5351d732e11fcde",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/__init__.py": "d10d497f73002d7a3bfe378453f59d48e0bf8de7ef3999738a3f7400a092b5fc",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/activation.py": "b715b842ba725bdc7aa1a90a8887d9d42ee4a351eec4a8bad2baa2caae83f6e5",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/attention.py": "c108427041e698b39bff809af3947d443cdfd8084f061a9d8534d8b76322e0ed",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/attention_mask.py": "a6819debd213dd0911f5abf19ae7ae36ffadf3790ba5c27a5a55e39c2e82724a",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/causal_conv1d.py": "9b81c766c3505b539dca51638d98573ba8885a8be3583cbc3042a002e8b701c5",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fused_gdn_gating.py": "2303d531396eff403cbdb753e17da8ffeceead48a13f0c2cffe309b441d55a12",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fused_moe.py": "58ff43d0e9bd163e64841d9bbafc2df7d48b010a099c6e917e9658738aba2c8c",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/mm_encoder_attention.py": "25c8d939647b62e6477390224bc8c18602c4e09b5bd08fdece0d374a529854f9",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/normalization.py": "07dbe7cea4b8e7638901071350bc88ddf274b84638f56e10d8ed89b660ed84cc",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/rotary.py": "a16d5fae1e6a6ac3594cd62b789f70b8a679338aa5d539feb37323aa460265cf",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/triton_utils.py": "9cbb62c9edc9e09f03a16f6282291362b30f2aa936caf3e63eb891a66a1dbae3",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/vocab_parallel_embedding.py": "5d61780a86bd7ce24f8d5c4044ea727049d79ae15611ddcf21789de59b975259",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/__init__.py": "c1bb8c39705dd5ace49ac104092247bda53b13da2b6f52fbf2cd2d0f7b7cf9ce",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/chunk.py": "4b76f3f72552affa4589beecdec50c133d73d473d13326d0bb958d7f5062e0d2",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/l2norm.py": "cdc1e989c922c5aac1a8b6c60b5761dd7c37a660a5906877d6627c5e4e51f6d2",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/utils.py": "ed130b13a194bf2b2ec6f7be29f82862f5d07314c6718de23aa68fc6095db32b",
+        "vllm_fl/dispatch/backends/vendor/ascend/patches/patch_mamba_config.py": "4dea22566e1020e80af1b40a48d41892ebe69d68271026ed28517734ff6de1e4",
+        "vllm_fl/dispatch/backends/vendor/ascend/patches/patch_multimodal_merge.py": "4ce53ac0533bd7bf37fcff7d322b94ffdc300731c21de298094a5c9e2e45e333",
+        "vllm_fl/dispatch/backends/vendor/cuda/__init__.py": "389b55823ef6c4fb2224fa9d95da1f65c83a8ac5e477dd69d464899d44994e9d",
+        "vllm_fl/dispatch/backends/vendor/cuda/cuda.py": "264abf13705daef8714c6b5e3f9c326811eb369b0cd7bac9299cac4afebe83d1",
+        "vllm_fl/dispatch/backends/vendor/cuda/register_ops.py": "3361013005b2a997bf24ee11674279a94cb734b776370da359f82b6ec784267e",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/__init__.py": "12835766b26f81e55a1f77cec726ee498264bad3733c2866f3ad171bdb6ca5b0",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/activation.py": "c7dc7aefe5ce66334feca25b2b5465b0eed06983578984f407800a48c003a109",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/fused_moe.py": "b34dc676c3f08534ec543d584d0e5324b91a37c86ec5b5ecfa5930720a902e03",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/normalization.py": "2174ad46766ed9fe37b6c518f9bd8b97adbb43455dc3a728407d3a3021884c6e",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/rotary.py": "2290b8a784496ef5c6b7798ee2bbd3e051b4caf5b8e4bbb8cc91e41908a3acb4",
+        "vllm_fl/dispatch/backends/vendor/gcu/__init__.py": "21e193178fcd9d971a4836742a3794a225f5ca2bab8b4d5dc0adb9869cb3c5f3",
+        "vllm_fl/dispatch/backends/vendor/gcu/gcu.py": "f6f668358b2f1e30a434434fcec969de538b6b8ff6bde01ff5667e7ac6b6b087",
+        "vllm_fl/dispatch/backends/vendor/gcu/patch.py": "02a1017238675a5f77fe460aca2ae74a68598b05a19e69ea1632665d7f26212d",
+        "vllm_fl/dispatch/backends/vendor/gcu/register_ops.py": "54bb7156b1ae1e2e97133ce205888781f3a3fbafe58b530e9d917851614017c2",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/activation.py": "ec4a9ba09e4e0f05ab49c61e714afc641db724c1a5f96b75208c42519010fb1a",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/attention.py": "090ed7dc085a963a858ac0496fffe3a5b401f5184d75cdb8c16ecdb2dc4a1a57",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/bilinear_pos_embed.py": "7481faa7ec57a95351e4c649387860f55f241c6413535092f050903defe0b697",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/causal_conv1d.py": "1ac0fdb919fc978f36c2eefab45c1d8a10f9386d017afc6fc882f862db45f9cb",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/chunk_delta_h.py": "f0f9de5ea3f1d6f2cc47d91fee49da51bb26a4be46f6a4f4b0d2193375e075db",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/fused_recurrent_packed_decode.py": "736505647537b7ab8ea406e49558163f8fc91e48acf021fe9ecf755d9e8e557a",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/normalization.py": "8a198fe8a5c3de62cae00212ea4f0df4f193db1ea141dc7c6ce55a47d3fcd0dc",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/reshape_and_cache.py": "a10c23578d15ee4ad736356e82428318513a90dbba1f3198f2da4fb1bc83dcf6",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/rotary.py": "acb9597da8b21f8a43e5260522c7dc7002abdb3fec110dcf668643c2137c179c",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/sampler.py": "2656b43e08504d8d39ca512cb0177c81fa4e42104e153a2bab1fe4c47ab1cede",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/__init__.py": "a12dab62174445e8fd1475b755e81cd69b240553f7d4e80533363694e1c6659f",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/iluvatar.py": "f146b713929cf7570d5f5f39206494bc3e1c33450b566da87f28ffb508524692",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/register_ops.py": "84bfd8a6fe84a0c7b4bbf6ed3d426768e11dea950defc821c5db2b4168f8c5a3",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/__init__.py": "53ddfb534138f5749c79da2af74db17f1c18322e4fa14c238bab42fcc3eebc60",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/activation.py": "dfe5e32d6bd2e59d3dbc123a4a9222695e930466fca85b0b12168417765e38da",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/normalization.py": "7ce47a046c20b77b37632cbbca118fcc745b1e09cffe89037271c3b4af661132",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/rotary.py": "fba661c630b794d3c63d208a44d51a4bd3eb49b27006771a35b3f605f5ce0663",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/__init__.py": "1835d587cfce43430fbd17961171af14ffd6805ca286c5425c42958047f9042d",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/kunlunxin.py": "df532ee950c531c159b76d6d13ec5579541e9e3b3e13bdcbcd932d437ca0a38a",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patch.py": "99e9076b045fdbc8ce8c0a973360a9ee3d0b0812231865741cf3f4015bb8bfb1",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/register_ops.py": "bb9f3d45601f4c4a4979881fa64e59006a25c6de4370868b998bab5d8b2e4c30",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/__init__.py": "80aeed5552c44b9dba1a61eee7b487ceaab2f85c24faefc255d46e24121952d5",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/activation.py": "8dd59a1d02d1eeb94935307a86c3b4c59fd854cca4d75144ce9ce6f412487a61",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/attention.py": "55dd488fc7e120225d9e622921599a38d5b71443ed0c03a84abf4ed71582638e",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/causal_conv1d.py": "e9079a56c599ac58f4a1cf9b3af31d1320f61811db28ddb8d43a4bb329248a45",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_gdn_gating.py": "ed4b6c69ad39e5fbadb75240f5c218098031acc8e14c8a072ec8b05cbf8ebfb3",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/normalization.py": "d85f9c04ee88273ba293002be70315b893429db23d7f5633ba42484860df319f",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/rotary.py": "6454527450ac5c17a9e6fbe15d909010ba7af2fbc9453f726e7ec5f894414fa4",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fla/__init__.py": "211da5c168c8cf85dbd5312408edfb1e3476f6cee0219953f210bdcc3cc21b7b",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fla/chunk.py": "569b751142b94ff7c890d09a193551f3e2e6fda585b838b4215c27416512e9a3",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fla/fused_recurrent.py": "6619b17a7499451aab938a8f9aa9d051cd5a6f59cfcd319ec5c57fa065f4d91a",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_moe/__init__.py": "4545512a615f279029156d2bf1693de8ea3709ea3609e3584d9acab90392fc09",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_moe/experts_selector.py": "c587f0372333e64ff8e0ed1b0198474bee2890b99c652e8a90382a0161c9229f",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_moe/fused_moe.py": "5f56666466d9779e3943ac75b3329ecbe06544c24c5aa4fe22f3cf33412c7f48",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patches/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patches/patch_fla_utils.py": "821523ea45c2bb01cf1bb9bdea8842b0118517e9e0e21062024f6328a0f5f2b9",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patches/patch_forward_core.py": "e91c7fdfe6724f90e553d3d900a1f9e2a920df31d0b7c4c83811e49b7c5ecb84",
+        "vllm_fl/dispatch/backends/vendor/metax/__init__.py": "7ea87fac36eba887f769473dba6ec5df20d677790bb822822f21fbdf74f6570f",
+        "vllm_fl/dispatch/backends/vendor/metax/metax.py": "840454b4c085f8d30e09c9789ceb774be40d38221c01e60712538cd3bc71a1b1",
+        "vllm_fl/dispatch/backends/vendor/metax/register_ops.py": "53ec84f9e95128a878ccfa418339f45b94d1ad78b8651ac705b306ec0aba7abf",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/__init__.py": "ebd65a10d2f48ea4bb51556e41fc278a1c675446ac0e3afea4ff49b7d8ccda7e",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/activation.py": "71469cccecae895899babaab2a66276aa27b34ae3daa68f368bb328da949876e",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/fused_moe.py": "8539acfdc2aea05f9e009ed283d488b54f7263727698dc69196212e6a1763908",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/layernorm.py": "47859a2d9e135f565bedc3f7ae1b0bfccd1a7b64b248821de875e6ed562b0dfa",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/rotary_embedding.py": "adb286691bee515ce569b72b66b46f129d77e0dbe9590f6d1f74e61364331e99",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/flash_attn.py": "f81fa552667b3ed98d1cf141d2dee33ba10476cda9a997744495bdbc36289ef2",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/mla/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/mla/common.py": "816ad0933edf180d1c3551cd73fb6597dbaabd0c88d775f64ba489649f066486",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/mla/flashmla.py": "cd8142a81ac9ac72e106255fd7d7b41efa2422fdccc849f27472ca5f1d8fa586",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/flashmla.py": "cbcabc8e7216bd15fd8a77e1fbc5fbaa1a15ae178f389e01631a6ff54562c37c",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/merge_attn_states.py": "b81e000ab3c49060077fc6f9e73aa930dc0abbf74488566b3080baa9985f121b",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/triton_decode_attention.py": "758e1fcf2a1d2355c282ee81a0d359c03095bc89d3a5567af3e364f567515754",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/triton_unified_attention.py": "a45d06a7e001ddcb6e9f52ef539c94010e4874b0ce22013fe59e95d7eb6338c3",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/vit_attn_wrappers.py": "b8eabff2d884f04fa14b62e017072b9620ffcfe671c20557e688967ac3276908",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/utils/fa_utils.py": "049218963f0ac80bccf3e7a1b5dd2a618f046775dc1f88f32047b5d0b4989bd2",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/__init__.py": "a15c3286023d159b6217c938995ba0ed13292df9a4f6604f0783153743661e60",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/accelerator_compat.py": "895b6674d4333e63a5f730b6770a47ea4d28951a3befcee56b18992904586a7b",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/chunk_delta_h.py": "08c8a117bdd384f98b02de89e42059fc4008180f2b6c84ee69239166fe1ab8b1",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/cuda_wrapper.py": "49e0cb5f259d9dd576447c2121416ac65b3d3614016f97d67ecf4179d63b1f93",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/fix_standalone_compile.py": "e3f5f15b365079177c2a0eb73f1369c6f6752f5c10b95bebb35231434aa7e5cf",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/functorch_config_patch.py": "ddd398331336afbd2a20de66afe00faa9439fb370e93be2b27b47f3313564d9b",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/gdn_linear_attn.py": "eb8561cbecdb61e6f18ca4cec6fec626712d0ecdacdfb4880024d6ad57656473",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/pynccl_wrapper.py": "977a9c37e7bd1335301eda53dbe031f24c04d8e952a9917535bffb82e41d4491",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/topk_topp_sampler.py": "30535591ccd3e909371d0f921bb71fe94774dd8a10f53fa8f745df21629a57f5",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/utils_patch.py": "1edfac73938b8e27c6554836d0f253bcd026e72f15dc5fcf48e1f02d082345d9",
+        "vllm_fl/dispatch/backends/vendor/musa/__init__.py": "f2b99b250f48e34238f2e7ba54e013ffa6bb34859759ac87c0c3d05167ee344f",
+        "vllm_fl/dispatch/backends/vendor/musa/musa.py": "7f823b7205961fa9612daba8ad29be71cc63051e6405405a731a3a845f2a0e4d",
+        "vllm_fl/dispatch/backends/vendor/musa/patch.py": "d499b2bab59776b117f3fd4320fc8628e8f054803936995dbb9dd23e017560d9",
+        "vllm_fl/dispatch/backends/vendor/musa/register_ops.py": "ee12f194d5bc9c4cec5051fba5cbfe496bbdda049ea4be8074bdf67e8e1bc95a",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/__init__.py": "079ec46a4f8e653f00ca58965c99fe723e26233121b501f0ca2ec7fb29e166b5",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/activation.py": "fe592aed37cb91db8efde245ca460b2caa230c2c67fee9310aa4b20b4a9c62d1",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/normalization.py": "f1fe23db24c01d4151bbc6c1f9f0cc09cf59a48e8273248a1bb184c0d557ddc0",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/rotary.py": "0440e45eefbd6f2ea0c6a4f3a8bea5eb77a2a59a5898afdfabeee48da3688fd6",
+        "vllm_fl/dispatch/backends/vendor/sunrise/__init__.py": "6f11110c223ef06d1fc8afe6ece4e86716483e4595011a19c0374cea798679cb",
+        "vllm_fl/dispatch/backends/vendor/sunrise/patch.py": "5357cec7e63118d60d5d8501b78511325f2d770ca883b5a133b439d2b0b57da1",
+        "vllm_fl/dispatch/backends/vendor/sunrise/register_ops.py": "7be6461acbb78d5ce093b2ec84a0e0d219d70494c32fbca5961189d459b1e710",
+        "vllm_fl/dispatch/backends/vendor/sunrise/sunrise.py": "f3f436ba087b8a962f0c1f3789cf190f29ea58b64e0502af1b600efd9e597116",
+        "vllm_fl/dispatch/backends/vendor/sunrise/impl/__init__.py": "a391374e13bf1d4fd8581bef721e3b0b86558febd2f0c155792dfda282178d13",
+        "vllm_fl/dispatch/backends/vendor/sunrise/impl/attention.py": "2b612ff61ebc2328c92b1ad0210420c8093fcca14737422ca8b728b13b1d80d6",
+        "vllm_fl/dispatch/backends/vendor/sunrise/impl/vocab_parallel_embedding.py": "a9398d7265453f8e8e7235777bb5eee2d977acf199b5f638eda6604e61646ae9",
+        "vllm_fl/dispatch/backends/vendor/template/__init__.py": "314614ab2a1787ff77ea51237c265eb96b055bb421ea2d0c1d4e91414593fcab",
+        "vllm_fl/dispatch/backends/vendor/template/register_ops.py": "bc2ccbc86721fcf892af6fe391e8e4161a9b77e0077ce160f638d979e56c2ebd",
+        "vllm_fl/dispatch/backends/vendor/template/template.py": "1a526a4dc790cd5255f8c87699e258b1c9c802e66302d0f8b1c3119bcf51a1c6",
+        "vllm_fl/dispatch/backends/vendor/template/impl/__init__.py": "a391374e13bf1d4fd8581bef721e3b0b86558febd2f0c155792dfda282178d13",
+        "vllm_fl/dispatch/backends/vendor/thead/__init__.py": "3a21abfcef3cdff7272319667d8997658d0eaa22732c5c55f6d9777d269de305",
+        "vllm_fl/dispatch/backends/vendor/thead/register_ops.py": "04e4f81b81e9c15d08bb24314a61f73d56bbab894b8335f6ef00bbe278ece277",
+        "vllm_fl/dispatch/backends/vendor/thead/thead.py": "f4d2e89cb449c24b2291a4bbd128c2126a0b8c383b397db0044a56ddb97d3ec5",
+        "vllm_fl/dispatch/backends/vendor/thead/impl/__init__.py": "f5ce1f3f6a8b4ac659e1dbfa084f9257bf6054a4e719fbffc128b6511b1625bd",
+        "vllm_fl/dispatch/backends/vendor/thead/impl/attention.py": "7eefc5b5cc7269bb5c5c83b2578b33172da5351ce10c22501b468d646df1d278",
+        "vllm_fl/dispatch/backends/vendor/txda/__init__.py": "562e2819426bb4d63f8fe14a85e941d8afbf0caa0c30e2c643d399e19ffa774c",
+        "vllm_fl/dispatch/backends/vendor/txda/register_ops.py": "5c7ac3674069ca81d2163f761dbc2faaaddfd44f25ee57d50516d7d437c8bdbb",
+        "vllm_fl/dispatch/backends/vendor/txda/txda.py": "d915ac05670448837d8761eabfae2efcedc847177e496c0ddd839d83cd3589ab",
+        "vllm_fl/dispatch/backends/vendor/txda/impl/__init__.py": "151b17dac241c9ddafefaa8a7a78774b22dc1edc0e649d03a06c483b2f297b39",
+        "vllm_fl/dispatch/backends/vendor/txda/impl/patchs/__init__.py": "7d324dc1a7e4b22cbbf2c668b8988d4f5ba34db74cc28b07d4647c9089c2eea0",
+        "vllm_fl/dispatch/backends/vendor/txda/impl/patchs/apply_repetition_penalties.py": "38db9f679e9c78a8d03e9ea21dde237798034f7f7e76139e7678c59d4c8e7cba",
+        "vllm_fl/dispatch/config/__init__.py": "2493096111a4a51548ae9d1c7f3fae7e89ecdf16c226f0dcaef37759d067bc90",
+        "vllm_fl/dispatch/config/ascend.yaml": "bb8a872f4872603f8e98ac3750a214a269803725a95df384c5b1dce743f4df5d",
+        "vllm_fl/dispatch/config/enflame.yaml": "ca75937996ed8b7e32f8d317a603b87662a44b939f60d720261b20a82caca290",
+        "vllm_fl/dispatch/config/hygon.yaml": "6044a3435e2f4c13c45005c8cf3aa6ab65086b920b276043aa5858dab63f58d0",
+        "vllm_fl/dispatch/config/iluvatar.yaml": "e37660b6cd5b8dbe0b927e03c9f3bc4e130e42ed643d099eb20981b9afdf95a7",
+        "vllm_fl/dispatch/config/kunlunxin.yaml": "6116dda9dce0fcabbbf766495bec635bc055b5899d4e8a9bbf2d1b49caebcb3a",
+        "vllm_fl/dispatch/config/metax.yaml": "c76fbcc4cca4ae81bf7a8311af7106de801e1d7495c8502803f9074fa540c0b0",
+        "vllm_fl/dispatch/config/musa.yaml": "140234de19c5084a8f1547dfe622829eb23b1f728f6fdc6eda4a750676081ec2",
+        "vllm_fl/dispatch/config/nvidia.yaml": "3c9a8e51b4b382077ab674f2b2a4622a28a9b123b51a9907b71a4e29b105cec0",
+        "vllm_fl/dispatch/config/nvidia_hopper.yaml": "7820cdfd45c3843da3fc14f7dc71d0cbb23fb7d0fcecf10dd5af8fd790cde681",
+        "vllm_fl/dispatch/config/ptg.yaml": "a2ac6c4cbb524f7cfba295f34c52e6b62518bbcf2d2188c4557670e0825f195e",
+        "vllm_fl/dispatch/config/sunrise.yaml": "fd1e5688932d1aaafd692c8c33353a522ca9e8319d669ddfea97b2dabbe3e03a",
+        "vllm_fl/dispatch/config/thead.yaml": "a60a6ae8f9a79ced2b3820088e4b2b874c68db833deb81a3a703c3520ad0a965",
+        "vllm_fl/dispatch/config/utils.py": "0e251942dd870949d0e5860f60801714b790620c2ccf3247da2a62a21135f174",
+        "vllm_fl/distributed/__init__.py": "5c777d99665a8489d556dd609debc9f2408f8f890ddd13a20267aeec319436f0",
+        "vllm_fl/distributed/communicator.py": "be975195eac982eda9c6ac6d15a0b9bbc9c94abd72d5ec6d4b2fe08d5bed36df",
+        "vllm_fl/distributed/device_communicators/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/distributed/device_communicators/flagcx.py": "3458d285ad922d9197899c178965d6d8685f2bf5eb8adda6aea9f8b30a7d68a8",
+        "vllm_fl/distributed/kv_transfer/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/distributed/kv_transfer/flagcx_connector.py": "15a03a419ead1f79d6b10834018bad981f8d8ed10c88d9a5e591dae40aa7cf7f",
+        "vllm_fl/distributed/kv_transfer/flagcx_stats.py": "aad0f8097d2c444d27e7ec37f4f57edf9be8809c6ac7ccd36119b2478d192676",
+        "vllm_fl/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/models/qwen3_5.py": "a258cf04619b5b03ed8ee467620ec73683c1382a36b4a77f737393f2fe8954b0",
+        "vllm_fl/models/qwen3_8_flash_next/__init__.py": "c09ddc8bc039637c032dfb04f438cc6318b7d5ff071bcaaabc8d6e5377e1d9c2",
+        "vllm_fl/models/qwen3_8_flash_next/config.py": "d659dc4b98e85f7d5fad6d401247dff65e5a55548f96ccf54bfc0936e85d5fbc",
+        "vllm_fl/models/qwen3_8_flash_next/common/__init__.py": "8961382c5f3f53754fd7a9c645835204723ac0247b4c56997f4675e09fafc152",
+        "vllm_fl/models/qwen3_8_flash_next/common/hyperconnection.py": "c31a96a642def9a2c210c0abe99dddb3c78668d764897a06a3d01dd569467276",
+        "vllm_fl/models/qwen3_8_flash_next/common/ple.py": "ab0d4075367c4a8526eed2bdbfe1c5ea3e8accfda84d5f50b8263b771f5613aa",
+        "vllm_fl/models/qwen3_8_flash_next/common/qsa_cache.py": "c496c9c9fb98ad38fc0a77f51f16f045640c4f4d1a888e32e78015656aea3600",
+        "vllm_fl/models/qwen3_8_flash_next/common/short_conv_attn.py": "985fd9f320eff615f2bc4b4d5576cd7f301a751380709979a251f92101bda14d",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/__init__.py": "9895c286337c4b964686fb688fc7d25d4f63f4198edd6f9e8fd5af3ff42adecc",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/indexer_qsa.py": "aa7825e1de63861c6e86c704837127df8cc3d15690786486a402bdaef43826f0",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/model.py": "daffd5bc2d0ba72af1885b37246379d403e479008e320712f8b721231274983b",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/model_state.py": "6821c5c1281e5dd0f9cea332052286287b4b0ef8f66f746286787e61444ab650",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/mtp.py": "a96cb8e2a47b2a14d216a0c5de3ad0a29fc21f0caaf9ecd8c975e67ccd8b0cd1",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/nvidia_fast_paths.py": "98f8e268dc434825c795ddfa18bf84ce062b06ec11f3e9d838dba4ee2a23779a",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/ple_layer.py": "0b5375a0d4eace709663b8f3b5c0955c4a26cd2045e39d2f7ebb3cdef103c3c3",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/qsa.py": "65961d8159b4b7534dcdc694d3040b8b7ec2353d578073825a5ac0a41a5eef51",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/ops/__init__.py": "5f1b529e5c093c02249789ddcf07444f3ca78619d9692f8dcb56295713f56ebe",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/ops/hyperconnection.py": "63783d6a72a6b44710c267269f9bd87de6390f6d2dc30093994e9c8baaccc917",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/ops/ple_fusion.py": "3a373ed93de8accd26088479015b9ceba905aef4641a00e8e763185d4bbe0251",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/ops/ple_state.py": "5ff4cff6791b74d3bb33c60d83404d022bc345b23991a6d1d7ba8254faa40d23",
+        "vllm_fl/models/qwen3_8_flash_next/gpu/ops/qsa.py": "68bf468c1e8ad529a4772be13fbd04ce356b1e681e908ed535f95143dc0c9f48",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/PROVENANCE.md": "e8b24edcedeefb899aafe7ff34e6b7a6b67eb1fcb843315f3b2e6dd3363b974f",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/__init__.py": "a6a8464170a320dfa7ce6c2575e217cc3ba82c908525dbe4cc00e87f0b8c04ab",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/official/__init__.py": "d37836e82ef700e93f1020364bf7f149abcc3820fb03a0cd1205765ac9c35b54",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/official/hc.py": "f558029d79d38ea927b7f3e7750f7ffa72566ec60f1f4b68752e5c93c274d262",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/official/qsa.py": "0ee6a09e8045847e3764af68769f97cbb59924bca6281f20385a2b4d62f0ca61",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/official/qsa_pre_indexer.py": "3e2bce15ebc1d7685f17010ae1b88344769bfc95b121c0674f0f14a2143a8912",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/vllm024/__init__.py": "1db664afb12d5bb23da3db054c49066cb5073d20e2ba1af037c71bd0b8317ce3",
+        "vllm_fl/models/qwen3_8_flash_next/vendor/vllm024/dispatch.py": "d79dc68a5d57a3089a10cf349f297a11f24b572f564739379cb8c0e756339034",
+        "vllm_fl/ops/_C_ops_registry.py": "050fc6b04fc00abc66826adfb63c8c7fb768c0a3981c17109d451d8738c0b8ad",
+        "vllm_fl/ops/_C_ops_schemas.py": "6e19065c98f222e7ed9cf03fb21463d5213411a5741397d8ad56d900595cedc4",
+        "vllm_fl/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/ops/activation.py": "6b592e60857bed4643c56b5845e67f4aaa3a677748e019d52290e84748e861bf",
+        "vllm_fl/ops/custom_ops.py": "4a0466386fef5cacf04381d8c9341e29330df4e6e199a9f193216c816d4a43c8",
+        "vllm_fl/ops/layernorm.py": "59f00c37920a79af6033daa4f99f9869a60095e8c7622a990ed6f1f5ec728bee",
+        "vllm_fl/ops/rotary_embedding.py": "52b54b1494acc08188d8b6f9fd66547382ab5cafb789f7c9befb29e173a7f6fe",
+        "vllm_fl/ops/fla/__init__.py": "49f1402e0eed75fdab38d1b89b87fb18db6bce73148061d1817977e1f45980c5",
+        "vllm_fl/ops/fla/chunk.py": "2f79c57acb01c3f5a6a2c3f8130c0cd89d385927f1d1de08735cf04ddcca068c",
+        "vllm_fl/ops/fla/fused_recurrent.py": "835813cdcef12ae27c7727e9c2a4c8eba7797f0932da8e5b1bf13925c95820f0",
+        "vllm_fl/ops/fla/utils.py": "45cddad43341fedbc993d9d4ef8e097cbac03070b487648b7069c28435302583",
+        "vllm_fl/ops/fused_moe/__init__.py": "2758b27f332840b93227b85d2948130608a6ab07fc830be437eb55cd9a6a15be",
+        "vllm_fl/ops/fused_moe/activation.py": "3412e47bc57702c40d4cfe99cfb54d65733ef1b2f80ac8d44b3c465959e6523e",
+        "vllm_fl/ops/fused_moe/fused_moe.py": "8749de1a11952718ef6562ef84e05531547af891bec9a0c89406f74f4f610b26",
+        "vllm_fl/ops/fused_moe/fused_moe_utils.py": "7612627daab8d0197d99279b64a3c186491de22d5da43e7a3bfa25c0bb6971cb",
+        "vllm_fl/ops/fused_moe/layer.py": "a0e75e048fd1cc91beba45e2f6b5a696f85ef2c5e37c2b110a435c4587fe813f",
+        "vllm_fl/ops/fused_moe/router.py": "7d32bf00d6bcee6e453c59d9bd22ec10b0f6ee28e023853fc5c76e3d8c7a2d48",
+        "vllm_fl/patches/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/patches/arm_cpu_gdn.py": "447184c92ac131fcf44968459509eca57d4956907fe6fe67141a0d761bd2648d",
+        "vllm_fl/patches/exponential_compat.py": "92462ce5856be0bd3e35074926f7dd0b03056daf76eff1305e8b4241d97bd17b",
+        "vllm_fl/patches/flaggems_aten_plan_cache.py": "7eb9528f2565573af7b34f50a431f3dbe680f66fb144c52f8131b34eca9ceeca",
+        "vllm_fl/patches/flaggems_mm_shape_aware.py": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86",
+        "vllm_fl/patches/gdn_packed_decode.py": "0fc612f1e4e5b7d60245805ca4ddfd61e2d92fdd71ed9a9eb320cc428a77b828",
+        "vllm_fl/patches/glm_moe_dsa.py": "059187203b42bfb8c63768f1134ef784776e62b11360be525dff5e50d2b8aa7a",
+        "vllm_fl/patches/moe_sum.py": "535439bb2e9bf3278a74a421647743b9fa61657b80ad402e82b9c27e77ff3f9f",
+        "vllm_fl/patches/qwen3_5_text.py": "296a62a23a192a784d748169cf62ef1afe381408488e4ea08df95c03feb921e7",
+        "vllm_fl/patches/qwen3_8_flash_next.py": "c2808d11adb743804498c435681305092b00d98d6130fa1975ad2ca371ff4964",
+        "vllm_fl/patches/triton_kernel.py": "d643039fbb6055822cafb53280c5acd08d0dfa5ac8962e3aefc280a23af0440b",
+        "vllm_fl/quantization/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/quantization/arm_cpu_w4a8.py": "15179bb58fea0746a90b9b1affd1041e0d5b654bdb2ec80d932ee38db3b5aa32",
+        "vllm_fl/quantization/quant_linear.py": "6f218503a4f5945460555c4d178935bbee9f168cec394794847b12629df33589",
+        "vllm_fl/quantization/w8a8/__init__.py": "4d3cf63a2d5f0ff510d84e32886773197252c887b163535e6d8d2c764394dba1",
+        "vllm_fl/quantization/w8a8/int8_mode.py": "9cc58168cf51ba5f24952b7fec6bb3f3a3d1810aba1f29134e938510ec689f30",
+        "vllm_fl/quantization/w8a8/linear.py": "62bc7ff5447ba88385229a679e843df99398b3f7e8073732968d0ad7985be718",
+        "vllm_fl/quantization/w8a8/moe.py": "232831e4542bf390ba6af9fd9fb85129807e2f1b667bb8fb3e8d712eeb8c4ec2",
+        "vllm_fl/quantization/w8a8/moe_experts.py": "1fa04bf21ded5e75ca55db97130947dcdea459596727a5a701c885141e9a37e5",
+        "vllm_fl/quantization/w8a8/packed.py": "48c8b1f7c6536d39f99fe7533153e8af74494232a196b91d150d018b7359f2f2",
+        "vllm_fl/quantization/w8a8/reference.py": "4791b99dcdb69bd6ea6f4ff17002783484c465fc9113224dd43fac7cdb94a3fe",
+        "vllm_fl/worker/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/worker/common_attention_metadata.py": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18",
+        "vllm_fl/worker/model_runner.py": "ce44b8c72b233e5a6b5c9e293571bfc939f0a291c98003216109aeb3895d8726",
+        "vllm_fl/worker/packed_block_table.py": "f24ee0de27f6eac8342528cd50557926d09af34fc890ce5ba6ce83b2fb62d4cd",
+        "vllm_fl/worker/ple_token_history.py": "ebda95e1142f8164d49f26662303ba70a4ecf68994b6f7d6f035517a344794e6",
+        "vllm_fl/worker/scheduler_fl.py": "ebac7e38a6deb7093c110f8e30893f74aaafd70877ee424e86ca0cd59d3114d8",
+        "vllm_fl/worker/worker.py": "f6d179d9344f1946c12cd42ee64e297048b490e6e3333de754677beaf4eadec0"
+      }
+    },
+    "common": {
+      "source_commit": "27e798a577622d872f26917105132495b229b851",
+      "measured_build": {
+        "commit": "78786cebce23a3de6b62f69a7ee27c14698860a8",
+        "archive": "common_source_main442.tar.gz",
+        "archive_sha256": "ccf379dab89450ff589b33dbba447b0310d665438991a40153ffcd5ec9fe6754",
+        "wheel": "vllm_plugin_fl-0.3.0rc2.post1+g78786cebc-py3-none-any.whl",
+        "wheel_sha256": "497dd8435a70fb732c4a35bf86c9d50445340b1778944424a8369ae7031d6e9c"
+      },
+      "excluded_generated_version_file": "vllm_fl/_version.py",
+      "verified_files": {
+        "vllm_fl/__init__.py": "e873e98f92c78ca0a67c695b3ddb215770254d959b8f27b4c6ce20b26cee0efb",
+        "vllm_fl/envs.py": "ecae13cf9bb3cbc83c0c411bd15420031a543743a94b0fe1d41dd959c803222f",
+        "vllm_fl/flaggems_runtime.py": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67",
+        "vllm_fl/platform.py": "edceea1d992885102ef881a9f378c55494e15d817c4152ddd1d8d80d73cf3e51",
+        "vllm_fl/utils.py": "15fb63911ceee23aba1edb12538616edbcf05309722204aa8a8db24055acd8ac",
+        "vllm_fl/version.py": "93ee21c8d963f3eaeb43d733816092436017d97da7135e51f8c20b212ee1ff43",
+        "vllm_fl/attention/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/attention/utils.py": "7c2f45101065c23a50f73bbc2ccd496892498b71013396b242670a1a2a13698e",
+        "vllm_fl/compilation/__init__.py": "3087c9e52b4dce64bef9852cfdb31bea44fe28eb7b8a49453d69174ebcdfdda0",
+        "vllm_fl/compilation/break_graph.py": "acd5bce2b209a7eeafd2356c3670be209051ee8b955542fb170708f01e6d62e9",
+        "vllm_fl/compilation/graph.py": "41cf1b5b4cd0286767c91dc3c2aae30801d9e531fd12a06c6dfcdc326b0acc0d",
+        "vllm_fl/configs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/configs/glm_moe_dsa.py": "d2b0e471d275157e2a92aa6fde6700333e97c3fafe8fe6d94c51a0b26e826e95",
+        "vllm_fl/configs/moe/E=256,N=512,device_name=nvidia,model=Qwen3.6-35B-A3B-H100.json": "97ccbad3a1933385e777d0817618edecbb80ff528b412e353c89c728d7d90193",
+        "vllm_fl/configs/moe/E=256,N=512,device_name=nvidia.json": "97ccbad3a1933385e777d0817618edecbb80ff528b412e353c89c728d7d90193",
+        "vllm_fl/dispatch/README.md": "a5288af54f6da9408042c997f6e2ba1b2d2c84137f3d9062ecf61bc67f5d3bf8",
+        "vllm_fl/dispatch/__init__.py": "2cb8eb13cfb6370d95e2486df037dd06f20773e128b65d35650ba122b32afb34",
+        "vllm_fl/dispatch/builtin_ops.py": "56c0d4770adbbae9b23d77bb08c594ee1e839e1df5d363529845781c746c2ec5",
+        "vllm_fl/dispatch/discovery.py": "cb1021d19df9a8e9de1d26255a6841572048ae665f00307e709689cdc9cab0a4",
+        "vllm_fl/dispatch/io_common.py": "6d8b4adf9ad75a5b79569e4ccc132c1ee69fd525198b3c4e25e2d6de6f3fff55",
+        "vllm_fl/dispatch/io_dumper.py": "a2f9bd9a619eaa6fe6514d873099889c5c08a4f750c049c779c6102305e5c05f",
+        "vllm_fl/dispatch/logger_manager.py": "77fbc785436d2ebe4ef385775208d4eea5eaa0727d1b4828fc80fd54e2e0f1a8",
+        "vllm_fl/dispatch/manager.py": "2884b063a0a4d2890eb63ac32fa929b62ce79af0d701860d1ecc8d126ad9e64c",
+        "vllm_fl/dispatch/ops.py": "d7a4964f20c2045231b0a0b8a90642e19445e231a9aadda7a93ab4a458dcdfdd",
+        "vllm_fl/dispatch/policy.py": "b604ed0af1aed35090b64bb7543c1f33480fa9042cad2e4e389d20feba47a2e6",
+        "vllm_fl/dispatch/registry.py": "938ec89eb5e9079cad4e6eaf68f55f8cba3df74fc1bc6eb028157718f07964aa",
+        "vllm_fl/dispatch/types.py": "65a5d50f9a3ff49466498706e514dfff1d7ff787ca9ba203b4e1a7bd4cebe1f9",
+        "vllm_fl/dispatch/backends/__init__.py": "738a1362638407815f075933eb72006a084065f92ea050f429753779d045ea38",
+        "vllm_fl/dispatch/backends/base.py": "129ebaa3119861dc4cab872de13d5a5fe409226d7d0bc3abc03b418e5f5ebf7a",
+        "vllm_fl/dispatch/backends/flaggems/__init__.py": "cdb25535c7557ad332d03060db63ff84e74f00af24789d33f96aa119c33a3296",
+        "vllm_fl/dispatch/backends/flaggems/flaggems.py": "2da56c92c7e5bf2e1ad4fd33ea803eb3072fc4d43d10c2c0d5d2d8680ea2171d",
+        "vllm_fl/dispatch/backends/flaggems/register_ops.py": "04024d8d4cdd6d2718e633d0f3095cd47fbe11606656e8ea516f10f9ffe21099",
+        "vllm_fl/dispatch/backends/flaggems/impl/__init__.py": "aa85b122306e39c240fd253acc7bc516ea99fffe6e5683ae8ec636fd0e855a86",
+        "vllm_fl/dispatch/backends/flaggems/impl/activation.py": "16a44da4f847e7e169a859f1090f3302a53e6d9aafade0e5cdeff0a8cc891dda",
+        "vllm_fl/dispatch/backends/flaggems/impl/attention.py": "1de63fa6d09c2424f6cd855f954f842f577dd4a33f5fd51765204291ad13b145",
+        "vllm_fl/dispatch/backends/flaggems/impl/custom_attention.py": "09fbd0636f502d9fbca9a3ac34039c81a4b25445ec40f5adade6b6b7b47fca07",
+        "vllm_fl/dispatch/backends/flaggems/impl/fused_moe.py": "a0654e0007b4c88386cff78863cc3ce293c6f2b6578e50823d0c90bad2d92ca5",
+        "vllm_fl/dispatch/backends/flaggems/impl/mla.py": "d9abad157b7a87808f344877af6a6b3c7b1c0996c01591896bbc0ab847619874",
+        "vllm_fl/dispatch/backends/flaggems/impl/normalization.py": "be65216d0989a072a79b80e9aade3e45bc84210c76b0714fa92d4a686261d5ac",
+        "vllm_fl/dispatch/backends/flaggems/impl/quantization.py": "c1ed13815decf39ad3a0c0313686f6857d464ba715e21d3264fd52acc512ec32",
+        "vllm_fl/dispatch/backends/flaggems/impl/rotary.py": "d5ec25896b70a54b10034bb0742fddf82f6f58c828bb41cdaede112070c3bba7",
+        "vllm_fl/dispatch/backends/reference/__init__.py": "9be93fc75eb2c570ba5198118313d4fcbd22f5ee0a6d3360806ea84f031dc17c",
+        "vllm_fl/dispatch/backends/reference/reference.py": "ad81525c1715272e5d52411a165be436f8866baa2a5626f640d0b26677aa4bf1",
+        "vllm_fl/dispatch/backends/reference/register_ops.py": "1ce9b9c5d5dccf4953511b5aae61e4b43ee035435f91d87db0481d63f1e2384d",
+        "vllm_fl/dispatch/backends/reference/impl/__init__.py": "abc03cf2bdc498982f8b7602e77719fecb3ee791455cbf56bc583aaab7020606",
+        "vllm_fl/dispatch/backends/reference/impl/activation.py": "e4e4c84ff2f622806e6331f68cf3cabc78aef72bc81060cbdae45a81b2fb6c1e",
+        "vllm_fl/dispatch/backends/reference/impl/normalization.py": "264e2c6802ea66abcd484a69319350320e020f36c8b93a00a8898551ea256da3",
+        "vllm_fl/dispatch/backends/reference/impl/quantization.py": "c6e382d2ed22f39cd8a424b9de4f087b8944e9517ae19adf6a511cd52534ff73",
+        "vllm_fl/dispatch/backends/reference/impl/rotary.py": "692d19e186c332457bbed1597881b26eb1bffea8bc558a40628a7105679e53f0",
+        "vllm_fl/dispatch/backends/vendor/__init__.py": "156978d4ea442a60be878f32c9e35ded64f87ff6f8caf7de1ecbadcc59d4051d",
+        "vllm_fl/dispatch/backends/vendor/ascend/__init__.py": "646a571ee7d692b0d20e6e0b14593020a42a3d815815bc221974d3e1b86fc5b8",
+        "vllm_fl/dispatch/backends/vendor/ascend/ascend.py": "f4e8f7ee7fcea27f8e01a7d387f1136f39393bc18fed74d2f94d3068017f21f4",
+        "vllm_fl/dispatch/backends/vendor/ascend/patch.py": "753624cacbd0e0e8db786cb6b11b4ac8256372be4d924747bcac21fcb9a9cf98",
+        "vllm_fl/dispatch/backends/vendor/ascend/register_ops.py": "1d6f8991b17685f9b2848f28d90cd1f6c964e3188d146fa2f5351d732e11fcde",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/__init__.py": "d10d497f73002d7a3bfe378453f59d48e0bf8de7ef3999738a3f7400a092b5fc",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/activation.py": "b715b842ba725bdc7aa1a90a8887d9d42ee4a351eec4a8bad2baa2caae83f6e5",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/attention.py": "c108427041e698b39bff809af3947d443cdfd8084f061a9d8534d8b76322e0ed",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/attention_mask.py": "a6819debd213dd0911f5abf19ae7ae36ffadf3790ba5c27a5a55e39c2e82724a",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/causal_conv1d.py": "9b81c766c3505b539dca51638d98573ba8885a8be3583cbc3042a002e8b701c5",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fused_gdn_gating.py": "2303d531396eff403cbdb753e17da8ffeceead48a13f0c2cffe309b441d55a12",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fused_moe.py": "58ff43d0e9bd163e64841d9bbafc2df7d48b010a099c6e917e9658738aba2c8c",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/mm_encoder_attention.py": "25c8d939647b62e6477390224bc8c18602c4e09b5bd08fdece0d374a529854f9",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/normalization.py": "07dbe7cea4b8e7638901071350bc88ddf274b84638f56e10d8ed89b660ed84cc",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/rotary.py": "a16d5fae1e6a6ac3594cd62b789f70b8a679338aa5d539feb37323aa460265cf",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/triton_utils.py": "9cbb62c9edc9e09f03a16f6282291362b30f2aa936caf3e63eb891a66a1dbae3",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/vocab_parallel_embedding.py": "5d61780a86bd7ce24f8d5c4044ea727049d79ae15611ddcf21789de59b975259",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/__init__.py": "c1bb8c39705dd5ace49ac104092247bda53b13da2b6f52fbf2cd2d0f7b7cf9ce",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/chunk.py": "4b76f3f72552affa4589beecdec50c133d73d473d13326d0bb958d7f5062e0d2",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/l2norm.py": "cdc1e989c922c5aac1a8b6c60b5761dd7c37a660a5906877d6627c5e4e51f6d2",
+        "vllm_fl/dispatch/backends/vendor/ascend/impl/fla/utils.py": "ed130b13a194bf2b2ec6f7be29f82862f5d07314c6718de23aa68fc6095db32b",
+        "vllm_fl/dispatch/backends/vendor/ascend/patches/patch_mamba_config.py": "4dea22566e1020e80af1b40a48d41892ebe69d68271026ed28517734ff6de1e4",
+        "vllm_fl/dispatch/backends/vendor/ascend/patches/patch_multimodal_merge.py": "4ce53ac0533bd7bf37fcff7d322b94ffdc300731c21de298094a5c9e2e45e333",
+        "vllm_fl/dispatch/backends/vendor/cuda/__init__.py": "389b55823ef6c4fb2224fa9d95da1f65c83a8ac5e477dd69d464899d44994e9d",
+        "vllm_fl/dispatch/backends/vendor/cuda/cuda.py": "264abf13705daef8714c6b5e3f9c326811eb369b0cd7bac9299cac4afebe83d1",
+        "vllm_fl/dispatch/backends/vendor/cuda/register_ops.py": "3361013005b2a997bf24ee11674279a94cb734b776370da359f82b6ec784267e",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/__init__.py": "12835766b26f81e55a1f77cec726ee498264bad3733c2866f3ad171bdb6ca5b0",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/activation.py": "c7dc7aefe5ce66334feca25b2b5465b0eed06983578984f407800a48c003a109",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/fused_moe.py": "b34dc676c3f08534ec543d584d0e5324b91a37c86ec5b5ecfa5930720a902e03",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/normalization.py": "2174ad46766ed9fe37b6c518f9bd8b97adbb43455dc3a728407d3a3021884c6e",
+        "vllm_fl/dispatch/backends/vendor/cuda/impl/rotary.py": "2290b8a784496ef5c6b7798ee2bbd3e051b4caf5b8e4bbb8cc91e41908a3acb4",
+        "vllm_fl/dispatch/backends/vendor/gcu/__init__.py": "21e193178fcd9d971a4836742a3794a225f5ca2bab8b4d5dc0adb9869cb3c5f3",
+        "vllm_fl/dispatch/backends/vendor/gcu/gcu.py": "f6f668358b2f1e30a434434fcec969de538b6b8ff6bde01ff5667e7ac6b6b087",
+        "vllm_fl/dispatch/backends/vendor/gcu/patch.py": "02a1017238675a5f77fe460aca2ae74a68598b05a19e69ea1632665d7f26212d",
+        "vllm_fl/dispatch/backends/vendor/gcu/register_ops.py": "54bb7156b1ae1e2e97133ce205888781f3a3fbafe58b530e9d917851614017c2",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/activation.py": "ec4a9ba09e4e0f05ab49c61e714afc641db724c1a5f96b75208c42519010fb1a",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/attention.py": "090ed7dc085a963a858ac0496fffe3a5b401f5184d75cdb8c16ecdb2dc4a1a57",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/bilinear_pos_embed.py": "7481faa7ec57a95351e4c649387860f55f241c6413535092f050903defe0b697",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/causal_conv1d.py": "1ac0fdb919fc978f36c2eefab45c1d8a10f9386d017afc6fc882f862db45f9cb",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/chunk_delta_h.py": "f0f9de5ea3f1d6f2cc47d91fee49da51bb26a4be46f6a4f4b0d2193375e075db",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/fused_recurrent_packed_decode.py": "736505647537b7ab8ea406e49558163f8fc91e48acf021fe9ecf755d9e8e557a",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/normalization.py": "8a198fe8a5c3de62cae00212ea4f0df4f193db1ea141dc7c6ce55a47d3fcd0dc",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/reshape_and_cache.py": "a10c23578d15ee4ad736356e82428318513a90dbba1f3198f2da4fb1bc83dcf6",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/rotary.py": "acb9597da8b21f8a43e5260522c7dc7002abdb3fec110dcf668643c2137c179c",
+        "vllm_fl/dispatch/backends/vendor/gcu/impl/sampler.py": "2656b43e08504d8d39ca512cb0177c81fa4e42104e153a2bab1fe4c47ab1cede",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/__init__.py": "a12dab62174445e8fd1475b755e81cd69b240553f7d4e80533363694e1c6659f",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/iluvatar.py": "f146b713929cf7570d5f5f39206494bc3e1c33450b566da87f28ffb508524692",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/register_ops.py": "84bfd8a6fe84a0c7b4bbf6ed3d426768e11dea950defc821c5db2b4168f8c5a3",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/__init__.py": "53ddfb534138f5749c79da2af74db17f1c18322e4fa14c238bab42fcc3eebc60",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/activation.py": "dfe5e32d6bd2e59d3dbc123a4a9222695e930466fca85b0b12168417765e38da",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/normalization.py": "7ce47a046c20b77b37632cbbca118fcc745b1e09cffe89037271c3b4af661132",
+        "vllm_fl/dispatch/backends/vendor/iluvatar/impl/rotary.py": "fba661c630b794d3c63d208a44d51a4bd3eb49b27006771a35b3f605f5ce0663",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/__init__.py": "1835d587cfce43430fbd17961171af14ffd6805ca286c5425c42958047f9042d",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/kunlunxin.py": "df532ee950c531c159b76d6d13ec5579541e9e3b3e13bdcbcd932d437ca0a38a",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patch.py": "99e9076b045fdbc8ce8c0a973360a9ee3d0b0812231865741cf3f4015bb8bfb1",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/register_ops.py": "bb9f3d45601f4c4a4979881fa64e59006a25c6de4370868b998bab5d8b2e4c30",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/__init__.py": "80aeed5552c44b9dba1a61eee7b487ceaab2f85c24faefc255d46e24121952d5",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/activation.py": "8dd59a1d02d1eeb94935307a86c3b4c59fd854cca4d75144ce9ce6f412487a61",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/attention.py": "55dd488fc7e120225d9e622921599a38d5b71443ed0c03a84abf4ed71582638e",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/causal_conv1d.py": "e9079a56c599ac58f4a1cf9b3af31d1320f61811db28ddb8d43a4bb329248a45",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_gdn_gating.py": "ed4b6c69ad39e5fbadb75240f5c218098031acc8e14c8a072ec8b05cbf8ebfb3",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/normalization.py": "d85f9c04ee88273ba293002be70315b893429db23d7f5633ba42484860df319f",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/rotary.py": "6454527450ac5c17a9e6fbe15d909010ba7af2fbc9453f726e7ec5f894414fa4",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fla/__init__.py": "211da5c168c8cf85dbd5312408edfb1e3476f6cee0219953f210bdcc3cc21b7b",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fla/chunk.py": "569b751142b94ff7c890d09a193551f3e2e6fda585b838b4215c27416512e9a3",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fla/fused_recurrent.py": "6619b17a7499451aab938a8f9aa9d051cd5a6f59cfcd319ec5c57fa065f4d91a",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_moe/__init__.py": "4545512a615f279029156d2bf1693de8ea3709ea3609e3584d9acab90392fc09",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_moe/experts_selector.py": "c587f0372333e64ff8e0ed1b0198474bee2890b99c652e8a90382a0161c9229f",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/impl/fused_moe/fused_moe.py": "5f56666466d9779e3943ac75b3329ecbe06544c24c5aa4fe22f3cf33412c7f48",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patches/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patches/patch_fla_utils.py": "821523ea45c2bb01cf1bb9bdea8842b0118517e9e0e21062024f6328a0f5f2b9",
+        "vllm_fl/dispatch/backends/vendor/kunlunxin/patches/patch_forward_core.py": "e91c7fdfe6724f90e553d3d900a1f9e2a920df31d0b7c4c83811e49b7c5ecb84",
+        "vllm_fl/dispatch/backends/vendor/metax/__init__.py": "7ea87fac36eba887f769473dba6ec5df20d677790bb822822f21fbdf74f6570f",
+        "vllm_fl/dispatch/backends/vendor/metax/metax.py": "840454b4c085f8d30e09c9789ceb774be40d38221c01e60712538cd3bc71a1b1",
+        "vllm_fl/dispatch/backends/vendor/metax/register_ops.py": "53ec84f9e95128a878ccfa418339f45b94d1ad78b8651ac705b306ec0aba7abf",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/__init__.py": "ebd65a10d2f48ea4bb51556e41fc278a1c675446ac0e3afea4ff49b7d8ccda7e",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/activation.py": "71469cccecae895899babaab2a66276aa27b34ae3daa68f368bb328da949876e",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/fused_moe.py": "8539acfdc2aea05f9e009ed283d488b54f7263727698dc69196212e6a1763908",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/layernorm.py": "47859a2d9e135f565bedc3f7ae1b0bfccd1a7b64b248821de875e6ed562b0dfa",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/rotary_embedding.py": "adb286691bee515ce569b72b66b46f129d77e0dbe9590f6d1f74e61364331e99",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/flash_attn.py": "f81fa552667b3ed98d1cf141d2dee33ba10476cda9a997744495bdbc36289ef2",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/mla/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/mla/common.py": "816ad0933edf180d1c3551cd73fb6597dbaabd0c88d775f64ba489649f066486",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/mla/flashmla.py": "cd8142a81ac9ac72e106255fd7d7b41efa2422fdccc849f27472ca5f1d8fa586",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/flashmla.py": "cbcabc8e7216bd15fd8a77e1fbc5fbaa1a15ae178f389e01631a6ff54562c37c",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/merge_attn_states.py": "b81e000ab3c49060077fc6f9e73aa930dc0abbf74488566b3080baa9985f121b",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/triton_decode_attention.py": "758e1fcf2a1d2355c282ee81a0d359c03095bc89d3a5567af3e364f567515754",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/triton_unified_attention.py": "a45d06a7e001ddcb6e9f52ef539c94010e4874b0ce22013fe59e95d7eb6338c3",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/ops/vit_attn_wrappers.py": "b8eabff2d884f04fa14b62e017072b9620ffcfe671c20557e688967ac3276908",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/dispatch/backends/vendor/metax/impl/attention/utils/fa_utils.py": "049218963f0ac80bccf3e7a1b5dd2a618f046775dc1f88f32047b5d0b4989bd2",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/__init__.py": "a15c3286023d159b6217c938995ba0ed13292df9a4f6604f0783153743661e60",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/accelerator_compat.py": "895b6674d4333e63a5f730b6770a47ea4d28951a3befcee56b18992904586a7b",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/chunk_delta_h.py": "08c8a117bdd384f98b02de89e42059fc4008180f2b6c84ee69239166fe1ab8b1",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/cuda_wrapper.py": "49e0cb5f259d9dd576447c2121416ac65b3d3614016f97d67ecf4179d63b1f93",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/fix_standalone_compile.py": "e3f5f15b365079177c2a0eb73f1369c6f6752f5c10b95bebb35231434aa7e5cf",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/functorch_config_patch.py": "ddd398331336afbd2a20de66afe00faa9439fb370e93be2b27b47f3313564d9b",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/gdn_linear_attn.py": "eb8561cbecdb61e6f18ca4cec6fec626712d0ecdacdfb4880024d6ad57656473",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/pynccl_wrapper.py": "977a9c37e7bd1335301eda53dbe031f24c04d8e952a9917535bffb82e41d4491",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/topk_topp_sampler.py": "30535591ccd3e909371d0f921bb71fe94774dd8a10f53fa8f745df21629a57f5",
+        "vllm_fl/dispatch/backends/vendor/metax/patches/utils_patch.py": "1edfac73938b8e27c6554836d0f253bcd026e72f15dc5fcf48e1f02d082345d9",
+        "vllm_fl/dispatch/backends/vendor/musa/__init__.py": "f2b99b250f48e34238f2e7ba54e013ffa6bb34859759ac87c0c3d05167ee344f",
+        "vllm_fl/dispatch/backends/vendor/musa/musa.py": "7f823b7205961fa9612daba8ad29be71cc63051e6405405a731a3a845f2a0e4d",
+        "vllm_fl/dispatch/backends/vendor/musa/patch.py": "d499b2bab59776b117f3fd4320fc8628e8f054803936995dbb9dd23e017560d9",
+        "vllm_fl/dispatch/backends/vendor/musa/register_ops.py": "ee12f194d5bc9c4cec5051fba5cbfe496bbdda049ea4be8074bdf67e8e1bc95a",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/__init__.py": "079ec46a4f8e653f00ca58965c99fe723e26233121b501f0ca2ec7fb29e166b5",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/activation.py": "fe592aed37cb91db8efde245ca460b2caa230c2c67fee9310aa4b20b4a9c62d1",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/normalization.py": "f1fe23db24c01d4151bbc6c1f9f0cc09cf59a48e8273248a1bb184c0d557ddc0",
+        "vllm_fl/dispatch/backends/vendor/musa/impl/rotary.py": "0440e45eefbd6f2ea0c6a4f3a8bea5eb77a2a59a5898afdfabeee48da3688fd6",
+        "vllm_fl/dispatch/backends/vendor/sunrise/__init__.py": "6f11110c223ef06d1fc8afe6ece4e86716483e4595011a19c0374cea798679cb",
+        "vllm_fl/dispatch/backends/vendor/sunrise/patch.py": "5357cec7e63118d60d5d8501b78511325f2d770ca883b5a133b439d2b0b57da1",
+        "vllm_fl/dispatch/backends/vendor/sunrise/register_ops.py": "7be6461acbb78d5ce093b2ec84a0e0d219d70494c32fbca5961189d459b1e710",
+        "vllm_fl/dispatch/backends/vendor/sunrise/sunrise.py": "f3f436ba087b8a962f0c1f3789cf190f29ea58b64e0502af1b600efd9e597116",
+        "vllm_fl/dispatch/backends/vendor/sunrise/impl/__init__.py": "a391374e13bf1d4fd8581bef721e3b0b86558febd2f0c155792dfda282178d13",
+        "vllm_fl/dispatch/backends/vendor/sunrise/impl/attention.py": "2b612ff61ebc2328c92b1ad0210420c8093fcca14737422ca8b728b13b1d80d6",
+        "vllm_fl/dispatch/backends/vendor/sunrise/impl/vocab_parallel_embedding.py": "a9398d7265453f8e8e7235777bb5eee2d977acf199b5f638eda6604e61646ae9",
+        "vllm_fl/dispatch/backends/vendor/template/__init__.py": "314614ab2a1787ff77ea51237c265eb96b055bb421ea2d0c1d4e91414593fcab",
+        "vllm_fl/dispatch/backends/vendor/template/register_ops.py": "bc2ccbc86721fcf892af6fe391e8e4161a9b77e0077ce160f638d979e56c2ebd",
+        "vllm_fl/dispatch/backends/vendor/template/template.py": "1a526a4dc790cd5255f8c87699e258b1c9c802e66302d0f8b1c3119bcf51a1c6",
+        "vllm_fl/dispatch/backends/vendor/template/impl/__init__.py": "a391374e13bf1d4fd8581bef721e3b0b86558febd2f0c155792dfda282178d13",
+        "vllm_fl/dispatch/backends/vendor/thead/__init__.py": "3a21abfcef3cdff7272319667d8997658d0eaa22732c5c55f6d9777d269de305",
+        "vllm_fl/dispatch/backends/vendor/thead/register_ops.py": "04e4f81b81e9c15d08bb24314a61f73d56bbab894b8335f6ef00bbe278ece277",
+        "vllm_fl/dispatch/backends/vendor/thead/thead.py": "f4d2e89cb449c24b2291a4bbd128c2126a0b8c383b397db0044a56ddb97d3ec5",
+        "vllm_fl/dispatch/backends/vendor/thead/impl/__init__.py": "f5ce1f3f6a8b4ac659e1dbfa084f9257bf6054a4e719fbffc128b6511b1625bd",
+        "vllm_fl/dispatch/backends/vendor/thead/impl/attention.py": "7eefc5b5cc7269bb5c5c83b2578b33172da5351ce10c22501b468d646df1d278",
+        "vllm_fl/dispatch/backends/vendor/txda/__init__.py": "562e2819426bb4d63f8fe14a85e941d8afbf0caa0c30e2c643d399e19ffa774c",
+        "vllm_fl/dispatch/backends/vendor/txda/register_ops.py": "5c7ac3674069ca81d2163f761dbc2faaaddfd44f25ee57d50516d7d437c8bdbb",
+        "vllm_fl/dispatch/backends/vendor/txda/txda.py": "d915ac05670448837d8761eabfae2efcedc847177e496c0ddd839d83cd3589ab",
+        "vllm_fl/dispatch/backends/vendor/txda/impl/__init__.py": "151b17dac241c9ddafefaa8a7a78774b22dc1edc0e649d03a06c483b2f297b39",
+        "vllm_fl/dispatch/backends/vendor/txda/impl/patchs/__init__.py": "7d324dc1a7e4b22cbbf2c668b8988d4f5ba34db74cc28b07d4647c9089c2eea0",
+        "vllm_fl/dispatch/backends/vendor/txda/impl/patchs/apply_repetition_penalties.py": "38db9f679e9c78a8d03e9ea21dde237798034f7f7e76139e7678c59d4c8e7cba",
+        "vllm_fl/dispatch/config/__init__.py": "2493096111a4a51548ae9d1c7f3fae7e89ecdf16c226f0dcaef37759d067bc90",
+        "vllm_fl/dispatch/config/ascend.yaml": "bb8a872f4872603f8e98ac3750a214a269803725a95df384c5b1dce743f4df5d",
+        "vllm_fl/dispatch/config/enflame.yaml": "ca75937996ed8b7e32f8d317a603b87662a44b939f60d720261b20a82caca290",
+        "vllm_fl/dispatch/config/hygon.yaml": "6044a3435e2f4c13c45005c8cf3aa6ab65086b920b276043aa5858dab63f58d0",
+        "vllm_fl/dispatch/config/iluvatar.yaml": "e37660b6cd5b8dbe0b927e03c9f3bc4e130e42ed643d099eb20981b9afdf95a7",
+        "vllm_fl/dispatch/config/kunlunxin.yaml": "6116dda9dce0fcabbbf766495bec635bc055b5899d4e8a9bbf2d1b49caebcb3a",
+        "vllm_fl/dispatch/config/metax.yaml": "c76fbcc4cca4ae81bf7a8311af7106de801e1d7495c8502803f9074fa540c0b0",
+        "vllm_fl/dispatch/config/musa.yaml": "140234de19c5084a8f1547dfe622829eb23b1f728f6fdc6eda4a750676081ec2",
+        "vllm_fl/dispatch/config/nvidia.yaml": "3c9a8e51b4b382077ab674f2b2a4622a28a9b123b51a9907b71a4e29b105cec0",
+        "vllm_fl/dispatch/config/nvidia_hopper.yaml": "7820cdfd45c3843da3fc14f7dc71d0cbb23fb7d0fcecf10dd5af8fd790cde681",
+        "vllm_fl/dispatch/config/ptg.yaml": "a2ac6c4cbb524f7cfba295f34c52e6b62518bbcf2d2188c4557670e0825f195e",
+        "vllm_fl/dispatch/config/sunrise.yaml": "fd1e5688932d1aaafd692c8c33353a522ca9e8319d669ddfea97b2dabbe3e03a",
+        "vllm_fl/dispatch/config/thead.yaml": "a60a6ae8f9a79ced2b3820088e4b2b874c68db833deb81a3a703c3520ad0a965",
+        "vllm_fl/dispatch/config/utils.py": "0e251942dd870949d0e5860f60801714b790620c2ccf3247da2a62a21135f174",
+        "vllm_fl/distributed/__init__.py": "5c777d99665a8489d556dd609debc9f2408f8f890ddd13a20267aeec319436f0",
+        "vllm_fl/distributed/communicator.py": "be975195eac982eda9c6ac6d15a0b9bbc9c94abd72d5ec6d4b2fe08d5bed36df",
+        "vllm_fl/distributed/device_communicators/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/distributed/device_communicators/flagcx.py": "3458d285ad922d9197899c178965d6d8685f2bf5eb8adda6aea9f8b30a7d68a8",
+        "vllm_fl/distributed/kv_transfer/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/distributed/kv_transfer/flagcx_connector.py": "15a03a419ead1f79d6b10834018bad981f8d8ed10c88d9a5e591dae40aa7cf7f",
+        "vllm_fl/distributed/kv_transfer/flagcx_stats.py": "aad0f8097d2c444d27e7ec37f4f57edf9be8809c6ac7ccd36119b2478d192676",
+        "vllm_fl/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/models/qwen3_5.py": "a258cf04619b5b03ed8ee467620ec73683c1382a36b4a77f737393f2fe8954b0",
+        "vllm_fl/ops/_C_ops_registry.py": "050fc6b04fc00abc66826adfb63c8c7fb768c0a3981c17109d451d8738c0b8ad",
+        "vllm_fl/ops/_C_ops_schemas.py": "6e19065c98f222e7ed9cf03fb21463d5213411a5741397d8ad56d900595cedc4",
+        "vllm_fl/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/ops/activation.py": "6b592e60857bed4643c56b5845e67f4aaa3a677748e019d52290e84748e861bf",
+        "vllm_fl/ops/custom_ops.py": "86e2c09c2e3f94221d7e7a3bc426a6b3cb4860519a5546316a87f68cca88dd28",
+        "vllm_fl/ops/layernorm.py": "59f00c37920a79af6033daa4f99f9869a60095e8c7622a990ed6f1f5ec728bee",
+        "vllm_fl/ops/rotary_embedding.py": "52b54b1494acc08188d8b6f9fd66547382ab5cafb789f7c9befb29e173a7f6fe",
+        "vllm_fl/ops/fla/__init__.py": "49f1402e0eed75fdab38d1b89b87fb18db6bce73148061d1817977e1f45980c5",
+        "vllm_fl/ops/fla/chunk.py": "2f79c57acb01c3f5a6a2c3f8130c0cd89d385927f1d1de08735cf04ddcca068c",
+        "vllm_fl/ops/fla/fused_recurrent.py": "835813cdcef12ae27c7727e9c2a4c8eba7797f0932da8e5b1bf13925c95820f0",
+        "vllm_fl/ops/fla/utils.py": "45cddad43341fedbc993d9d4ef8e097cbac03070b487648b7069c28435302583",
+        "vllm_fl/ops/fused_moe/__init__.py": "2758b27f332840b93227b85d2948130608a6ab07fc830be437eb55cd9a6a15be",
+        "vllm_fl/ops/fused_moe/activation.py": "3412e47bc57702c40d4cfe99cfb54d65733ef1b2f80ac8d44b3c465959e6523e",
+        "vllm_fl/ops/fused_moe/fused_moe.py": "8749de1a11952718ef6562ef84e05531547af891bec9a0c89406f74f4f610b26",
+        "vllm_fl/ops/fused_moe/fused_moe_utils.py": "691dcb24fe876c3879a6b56c0b96cd32a6449e9ec3c62457f9d2a24d6c92d22d",
+        "vllm_fl/ops/fused_moe/layer.py": "d39eee9121f86310cced725c0aac0ea825348464bdb1afda1defdbf9493d35c8",
+        "vllm_fl/ops/fused_moe/router.py": "7d32bf00d6bcee6e453c59d9bd22ec10b0f6ee28e023853fc5c76e3d8c7a2d48",
+        "vllm_fl/patches/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/patches/arm_cpu_gdn.py": "447184c92ac131fcf44968459509eca57d4956907fe6fe67141a0d761bd2648d",
+        "vllm_fl/patches/exponential_compat.py": "92462ce5856be0bd3e35074926f7dd0b03056daf76eff1305e8b4241d97bd17b",
+        "vllm_fl/patches/flaggems_mm_shape_aware.py": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86",
+        "vllm_fl/patches/gdn_packed_decode.py": "ca1c906c28b308d5d4059d19045f7b876d15d41ddf3ed9878ad6b02e2a844105",
+        "vllm_fl/patches/glm_moe_dsa.py": "059187203b42bfb8c63768f1134ef784776e62b11360be525dff5e50d2b8aa7a",
+        "vllm_fl/patches/moe_sum.py": "535439bb2e9bf3278a74a421647743b9fa61657b80ad402e82b9c27e77ff3f9f",
+        "vllm_fl/patches/qwen3_5_text.py": "296a62a23a192a784d748169cf62ef1afe381408488e4ea08df95c03feb921e7",
+        "vllm_fl/patches/triton_kernel.py": "d643039fbb6055822cafb53280c5acd08d0dfa5ac8962e3aefc280a23af0440b",
+        "vllm_fl/quantization/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/quantization/arm_cpu_w4a8.py": "15179bb58fea0746a90b9b1affd1041e0d5b654bdb2ec80d932ee38db3b5aa32",
+        "vllm_fl/quantization/quant_linear.py": "990b52d0eaea4d2b4a7e254bd86af79f339a4b9032b14f7cf2593388338706a7",
+        "vllm_fl/quantization/w8a8/__init__.py": "4d3cf63a2d5f0ff510d84e32886773197252c887b163535e6d8d2c764394dba1",
+        "vllm_fl/quantization/w8a8/int8_mode.py": "9cc58168cf51ba5f24952b7fec6bb3f3a3d1810aba1f29134e938510ec689f30",
+        "vllm_fl/quantization/w8a8/linear.py": "62bc7ff5447ba88385229a679e843df99398b3f7e8073732968d0ad7985be718",
+        "vllm_fl/quantization/w8a8/moe.py": "232831e4542bf390ba6af9fd9fb85129807e2f1b667bb8fb3e8d712eeb8c4ec2",
+        "vllm_fl/quantization/w8a8/moe_experts.py": "1fa04bf21ded5e75ca55db97130947dcdea459596727a5a701c885141e9a37e5",
+        "vllm_fl/quantization/w8a8/packed.py": "48c8b1f7c6536d39f99fe7533153e8af74494232a196b91d150d018b7359f2f2",
+        "vllm_fl/quantization/w8a8/reference.py": "4791b99dcdb69bd6ea6f4ff17002783484c465fc9113224dd43fac7cdb94a3fe",
+        "vllm_fl/worker/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vllm_fl/worker/common_attention_metadata.py": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18",
+        "vllm_fl/worker/model_runner.py": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336",
+        "vllm_fl/worker/scheduler_fl.py": "ebac7e38a6deb7093c110f8e30893f74aaafd70877ee424e86ca0cd59d3114d8",
+        "vllm_fl/worker/worker.py": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+      }
+    }
+  },
+  "fixed_jit_pause_correlation": {
+    "clock_calibration": {
+      "utc": "2026-09-20T06:46:49.908620+00:00",
+      "monotonic_seconds": 4058430.57345604
+    },
+    "method": "Correlate cache mtimes with request start + TTFT + cumulative ITLs; correlation does not measure compiler CPU time.",
+    "rounds": [
+      {
+        "artifact": "candidate_fixed/1k/perf/benchmark/formal1.json",
+        "longest_token_interval": {
+          "request": 92,
+          "interval_index": 2,
+          "duration_seconds": 4.106273797806352,
+          "start_epoch": 1789886146.8776438,
+          "end_epoch": 1789886150.9839177,
+          "cubin_writes": 20,
+          "kernel_names": {
+            "moe_align_block_size_tle_cluster_fused": 1,
+            "sigmoid_forward_kernel_rank_1": 1,
+            "sub_func_tensor_scalar_kernel_rank_1": 1,
+            "ge_func_scalar_kernel_rank_1": 1,
+            "lt_func_scalar_kernel_rank_1": 1,
+            "bitwise_and_func_kernel_rank_1": 1,
+            "clamp_func_kernel_rank_1": 1,
+            "sub_func_kernel_rank_1": 1,
+            "clamp_func_min_kernel_rank_1": 1,
+            "add_func_tensor_scalar_kernel_rank_1": 1,
+            "where_inner_kernel_rank_1": 2,
+            "ne_func_scalar_kernel_rank_1": 1,
+            "bitwise_xor_func_kernel_rank_1": 1,
+            "lt_func_kernel_rank_2": 1,
+            "bitwise_and_func_kernel_rank_2": 1,
+            "bitwise_not_func_kernel_rank_1": 1,
+            "masked_fill_kernel_kernel_rank_3": 1,
+            "_build_qsa_forward_metadata_kernel": 2
+          }
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf/benchmark/formal2.json",
+        "longest_token_interval": {
+          "request": 2,
+          "interval_index": 1,
+          "duration_seconds": 0.48397479206323624,
+          "start_epoch": 1789886181.897895,
+          "end_epoch": 1789886182.3818698,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf/benchmark/formal3.json",
+        "longest_token_interval": {
+          "request": 64,
+          "interval_index": 1,
+          "duration_seconds": 0.48218463780358434,
+          "start_epoch": 1789886253.074203,
+          "end_epoch": 1789886253.5563877,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf_repeat1/benchmark/formal1.json",
+        "longest_token_interval": {
+          "request": 2,
+          "interval_index": 1,
+          "duration_seconds": 0.48267024382948875,
+          "start_epoch": 1789886318.2616591,
+          "end_epoch": 1789886318.7443295,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf_repeat1/benchmark/formal2.json",
+        "longest_token_interval": {
+          "request": 0,
+          "interval_index": 1,
+          "duration_seconds": 0.483987701125443,
+          "start_epoch": 1789886370.0532346,
+          "end_epoch": 1789886370.5372221,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf_repeat1/benchmark/formal3.json",
+        "longest_token_interval": {
+          "request": 94,
+          "interval_index": 1,
+          "duration_seconds": 3.417460475116968,
+          "start_epoch": 1789886447.0117533,
+          "end_epoch": 1789886450.4292138,
+          "cubin_writes": 6,
+          "kernel_names": {
+            "moe_align_block_size_tle_cluster_fused": 1,
+            "lt_func_kernel_rank_2": 1,
+            "bitwise_and_func_kernel_rank_2": 1,
+            "masked_fill_kernel_kernel_rank_3": 1,
+            "_build_qsa_forward_metadata_kernel": 2
+          }
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf_repeat2/benchmark/formal1.json",
+        "longest_token_interval": {
+          "request": 0,
+          "interval_index": 1,
+          "duration_seconds": 0.48139665089547634,
+          "start_epoch": 1789886514.1409583,
+          "end_epoch": 1789886514.622355,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf_repeat2/benchmark/formal2.json",
+        "longest_token_interval": {
+          "request": 0,
+          "interval_index": 1,
+          "duration_seconds": 0.48964709928259254,
+          "start_epoch": 1789886565.9372523,
+          "end_epoch": 1789886566.4268994,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/1k/perf_repeat2/benchmark/formal3.json",
+        "longest_token_interval": {
+          "request": 1,
+          "interval_index": 1,
+          "duration_seconds": 0.4824382271617651,
+          "start_epoch": 1789886617.8421612,
+          "end_epoch": 1789886618.3245995,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/4k/perf/benchmark/formal1.json",
+        "longest_token_interval": {
+          "request": 66,
+          "interval_index": 13,
+          "duration_seconds": 0.5417135837487876,
+          "start_epoch": 1789885323.2758825,
+          "end_epoch": 1789885323.8175962,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/4k/perf/benchmark/formal2.json",
+        "longest_token_interval": {
+          "request": 28,
+          "interval_index": 1019,
+          "duration_seconds": 0.5341194998472929,
+          "start_epoch": 1789885385.8615024,
+          "end_epoch": 1789885386.395622,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      },
+      {
+        "artifact": "candidate_fixed/4k/perf/benchmark/formal3.json",
+        "longest_token_interval": {
+          "request": 0,
+          "interval_index": 1,
+          "duration_seconds": 0.5401341519318521,
+          "start_epoch": 1789885428.5215905,
+          "end_epoch": 1789885429.0617247,
+          "cubin_writes": 0,
+          "kernel_names": {}
+        }
+      }
+    ]
+  },
+  "comparison_limits": "Previous 4K control uses the unpatched FlagGems reduction and has no full serial correctness acceptance. It is a previous-stack performance reference, not a correctness oracle or an isolated plugin A/B.",
+  "superseded_attempts": {
+    "candidate_1k": "3365.912587 tok/s and 17.721899 ms; passed reuse but uses the old dependency",
+    "candidate_4k": "2370.676316 tok/s and 23.603586 ms; failed exact serial repeat",
+    "atomic_reduction": "All 8 isolated BF16 repeats differed at M4096; fixed reduction repeats were exact",
+    "localization": "All 32 per-rank/case model comparisons first diverged at the first MoE with identical inputs"
+  },
+  "common_workers": {
+    "common_full_decode_only": {
+      "cudagraph_mode": "FULL_DECODE_ONLY",
+      "requests_per_policy": 16,
+      "request_reuse_checked": true,
+      "installed_worker_identity_checked": true,
+      "combination": false,
+      "accepted": true,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 0.0,
+      "max_logprob_delta": 0.0,
+      "states": {
+        "stock": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 66
+          }
+        ],
+        "graph": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 5,
+            "replays": 43,
+            "eager_calls": 16
+          }
+        ]
+      }
+    },
+    "common_piecewise": {
+      "cudagraph_mode": "PIECEWISE",
+      "requests_per_policy": 16,
+      "request_reuse_checked": true,
+      "installed_worker_identity_checked": true,
+      "combination": false,
+      "accepted": true,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 1e-05,
+      "max_logprob_delta": 0.0,
+      "states": {
+        "stock": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 64
+          }
+        ],
+        "graph": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 2,
+            "replays": 44,
+            "eager_calls": 15
+          }
+        ]
+      }
+    },
+    "common_full_decode_only_combined": {
+      "cudagraph_mode": "FULL_DECODE_ONLY",
+      "requests_per_policy": 16,
+      "request_reuse_checked": true,
+      "installed_worker_identity_checked": true,
+      "combination": true,
+      "accepted": true,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 0.0009765625,
+      "max_logprob_delta": 0.0002532005310058594,
+      "states": {
+        "stock": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "installed",
+            "mm_backends": {
+              "status": "installed",
+              "reason": "native CUDA for M <= 2; FlagGems otherwise",
+              "native": "SafeKernelFunction(debug='registered at /pytorch/build/aten/src/ATen/RegisterCUDA_0.cpp:16163')",
+              "flaggems": "hopper.ops.mm.mm"
+            },
+            "mm_threshold": 2,
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "installed",
+            "mm_backends": {
+              "status": "installed",
+              "reason": "native CUDA for M <= 2; FlagGems otherwise",
+              "native": "SafeKernelFunction(debug='registered at /pytorch/build/aten/src/ATen/RegisterCUDA_0.cpp:16163')",
+              "flaggems": "hopper.ops.mm.mm"
+            },
+            "mm_threshold": 2,
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 64
+          }
+        ],
+        "graph": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "installed",
+            "mm_backends": {
+              "status": "installed",
+              "reason": "native CUDA for M <= 2; FlagGems otherwise",
+              "native": "SafeKernelFunction(debug='registered at /pytorch/build/aten/src/ATen/RegisterCUDA_0.cpp:16163')",
+              "flaggems": "hopper.ops.mm.mm"
+            },
+            "mm_threshold": 2,
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 5,
+            "replays": 43,
+            "eager_calls": 16
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "errors": [],
+  "expected_ranks": 8,
+  "matched_line_count": 8,
+  "records": [
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 587,
+      "misses": 1265,
+      "rank": 0,
+      "size": 1265
+    },
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 586,
+      "misses": 1265,
+      "rank": 1,
+      "size": 1265
+    },
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 585,
+      "misses": 1265,
+      "rank": 2,
+      "size": 1265
+    },
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 584,
+      "misses": 1265,
+      "rank": 3,
+      "size": 1265
+    },
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 581,
+      "misses": 1265,
+      "rank": 4,
+      "size": 1265
+    },
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 580,
+      "misses": 1265,
+      "rank": 5,
+      "size": 1265
+    },
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 582,
+      "misses": 1265,
+      "rank": 6,
+      "size": 1265
+    },
+    {
+      "bypasses": 32,
+      "enabled": true,
+      "evictions": 0,
+      "hit_rate": 0.9391,
+      "hits": 19511,
+      "installed": true,
+      "line": 583,
+      "misses": 1265,
+      "rank": 7,
+      "size": 1265
+    }
+  ],
+  "server_log_sha256": "c8edbf8affbe05f2158c469cd2ed1f1b2a49814e87695f56e5127bd8db993af1",
+  "status": "pass"
+}
