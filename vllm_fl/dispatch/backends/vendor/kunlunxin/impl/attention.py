@@ -67,6 +67,49 @@ def is_kunlunxin_ops_available() -> bool:
     return _KUNLUNXIN_OPS_AVAILABLE
 
 
+def _is_full_graph_runtime() -> bool:
+    try:
+        from vllm.config import CUDAGraphMode
+        from vllm.forward_context import (
+            get_forward_context,
+            is_forward_context_available,
+        )
+
+        return (
+            is_forward_context_available()
+            and get_forward_context().cudagraph_runtime_mode
+            == CUDAGraphMode.FULL
+        )
+    except Exception:
+        return False
+
+
+def _prepare_full_graph_kv_write(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    slot_mapping: torch.Tensor,
+    block_size: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Mask FULL-graph padding and route it to the reserved null block.
+
+    Kunlunxin cache kernels do not consistently treat PAD_SLOT_ID (-1) as a
+    no-op. Mapping a padded row to -1 can therefore alias the final real cache
+    slot. The captured mask remains data-dependent at replay time: real rows
+    keep their slots while synthetic rows write zeros into distinct positions
+    of vLLM's reserved block zero.
+    """
+    flat_slots = slot_mapping.flatten()
+    valid = flat_slots >= 0
+    row_mask = valid.to(key.dtype).view(-1, 1, 1)
+    key = key * row_mask
+    value = value * row_mask.to(value.dtype)
+    null_slots = torch.arange(
+        flat_slots.numel(), dtype=flat_slots.dtype, device=flat_slots.device
+    ).remainder(block_size)
+    safe_slots = torch.where(valid, flat_slots, null_slots)
+    return key, value, safe_slots, valid
+
+
 @dataclass
 class KunlunxinMetadata:
     """Metadata for Kunlunxin attention."""
@@ -291,6 +334,16 @@ class KunlunxinMetadata:
                                self.query_start_loc[:-self.num_prefills])
             query_start_loc_host = (None if self.query_start_loc_host is None else
                                     self.query_start_loc_host[:-self.num_prefills])
+            kv_prefix_start_loc = (
+                None
+                if self.kv_prefix_start_loc is None
+                else self.kv_prefix_start_loc[:-self.num_prefills]
+            )
+            kv_prefix_start_loc_host = (
+                None
+                if self.kv_prefix_start_loc_host is None
+                else self.kv_prefix_start_loc_host[:-self.num_prefills]
+            )
         else:
             # Compute some attn_metadata fields which default to None
             slot_mapping = (None if self.slot_mapping is None else
@@ -305,6 +358,8 @@ class KunlunxinMetadata:
                                self.query_start_loc)
             query_start_loc_host = (None if self.query_start_loc_host is None else
                                     self.query_start_loc_host)
+            kv_prefix_start_loc = self.kv_prefix_start_loc
+            kv_prefix_start_loc_host = self.kv_prefix_start_loc_host
 
         # Construct & cache decode-phase attention metadata structure
         self._cached_decode_metadata = KunlunxinMetadata(
@@ -317,6 +372,8 @@ class KunlunxinMetadata:
             seq_lens_tensor_host=seq_lens_tensor_host,
             query_start_loc=query_start_loc,
             query_start_loc_host=query_start_loc_host,
+            kv_prefix_start_loc=kv_prefix_start_loc,
+            kv_prefix_start_loc_host=kv_prefix_start_loc_host,
             max_prefill_seq_len=0,
             max_decode_seq_len=self.max_decode_seq_len,
             block_tables=block_tables,
@@ -641,7 +698,11 @@ class KunlunxinPagedAttention(PagedAttention):
         k_scale: torch.Tensor,
         v_scale: torch.Tensor,
         max_window_size: int = -1,
-        output: Optional[torch.Tensor] = None
+        output: Optional[torch.Tensor] = None,
+        query_start_loc: Optional[torch.Tensor] = None,
+        query_start_loc_host: Optional[torch.Tensor] = None,
+        kv_prefix_start_loc: Optional[torch.Tensor] = None,
+        kv_prefix_start_loc_host: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if output is None:
             output = torch.empty_like(query)
@@ -777,6 +838,8 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         else:
             assert value is None
 
+        full_graph_valid_rows = None
+
         # Self-attention vs. cross-attention will impact
         # which KV cache memory-mapping & which
         # seqlen datastructures we utilize
@@ -793,6 +856,21 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
             # i.e. for later use by paged attention
 
             updated_slot_mapping = attn_metadata.slot_mapping
+
+            if _is_full_graph_runtime():
+                # Raw cache is [2, blocks, heads, block_size, head_size].
+                block_size = kv_cache.shape[3]
+                (
+                    key,
+                    value,
+                    updated_slot_mapping,
+                    full_graph_valid_rows,
+                ) = _prepare_full_graph_kv_write(
+                    key,
+                    value,
+                    updated_slot_mapping,
+                    block_size,
+                )
 
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
@@ -906,8 +984,16 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                     k_scale,
                     v_scale,
                     max_window_size=max_window_size,
-                    output=output
+                    output=output,
+                    query_start_loc=decode_meta.query_start_loc,
+                    query_start_loc_host=decode_meta.query_start_loc_host,
+                    kv_prefix_start_loc=decode_meta.kv_prefix_start_loc,
+                    kv_prefix_start_loc_host=decode_meta.kv_prefix_start_loc_host,
                 )
+                if full_graph_valid_rows is not None:
+                    output.mul_(
+                        full_graph_valid_rows.to(output.dtype).view(-1, 1, 1)
+                    )
         # Reshape the output tensor.
         return output.view(-1, self.num_heads * self.head_size)
 

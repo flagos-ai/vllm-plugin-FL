@@ -15,11 +15,30 @@ to prevent torch.xpu.get_device_name crash. See vllm_fl/__init__.py.
 """
 
 import logging
+import os
 
 import torch
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
+
+
+def _is_full_graph_runtime() -> bool:
+    """Return whether the current forward is using a FULL CUDA graph."""
+    try:
+        from vllm.config import CUDAGraphMode
+        from vllm.forward_context import (
+            get_forward_context,
+            is_forward_context_available,
+        )
+
+        return (
+            is_forward_context_available()
+            and get_forward_context().cudagraph_runtime_mode
+            == CUDAGraphMode.FULL
+        )
+    except Exception:
+        return False
 
 
 def apply_kunlunxin_patches():
@@ -30,13 +49,17 @@ def apply_kunlunxin_patches():
     _patches_applied = True
 
     # Disable Triton kernels incompatible with Kunlunxin XPU
-    import os
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
     # RESTORED from old version: Critical Triton kernel compatibility patches
     patch_block_table_slot_mapping()
     patch_attention_backend_registry()
     patch_cudagraph_dispatcher()
+    patch_breakable_cudagraph_mode()
+    patch_breakable_private_pools()
+    patch_breakable_full_only()
+    patch_graph_all_reduce()
+    patch_eager_all_gather()
     patch_topk_topp_sampler()
     patch_fused_moe()
 
@@ -51,14 +74,13 @@ def apply_kunlunxin_patches():
 
 
 def patch_cudagraph_dispatcher():
-    """Use FULL graphs only for exact-size uniform decode batches.
+    """Keep uniform decode on FULL graphs, including padded batches.
 
-    vLLM normally rounds an uncaptured token count up to the next CUDA Graph
-    capture size.  That is unsafe for Kunlunxin recurrent models because the
-    synthetic padding rows can participate in GDN/SSM state updates.  Keep the
-    profitable FULL graph path for exact-size decode batches, but exclude FULL
-    for mixed batches and non-exact decode sizes.  The native dispatcher then
-    falls back to PIECEWISE (or NONE when PIECEWISE is not configured).
+    Padding rows are isolated by the attention cache-write mask and vLLM's
+    reserved NULL recurrent-state slot. Tensor-parallel collectives use the
+    graph-aware ProcessGroup path, so padding is no longer a reason to drop
+    decode to PIECEWISE. Mixed/non-uniform batches remain outside FULL because
+    their control flow is not shape-stable.
     """
     try:
         from functools import wraps
@@ -67,11 +89,11 @@ def patch_cudagraph_dispatcher():
         from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
         original_dispatch = CudagraphDispatcher.dispatch
-        if getattr(original_dispatch, "_kunlunxin_exact_full", False):
+        if getattr(original_dispatch, "_kunlunxin_uniform_full", False):
             return
 
         @wraps(original_dispatch)
-        def dispatch_exact_full(
+        def dispatch_uniform_full(
             self,
             num_tokens,
             uniform_decode=False,
@@ -80,22 +102,13 @@ def patch_cudagraph_dispatcher():
             valid_modes=None,
             invalid_modes=None,
         ):
-            padding_map = getattr(self, "_bs_to_padded_graph_size", None)
-            full_is_exact = (
-                uniform_decode
-                and padding_map is not None
-                and 0 <= num_tokens < len(padding_map)
-                and padding_map[num_tokens] == num_tokens
-            )
-
-            if not full_is_exact:
+            if not uniform_decode:
                 invalid_modes = set(invalid_modes or ())
                 invalid_modes.add(CUDAGraphMode.FULL)
 
-                # A DP re-dispatch can constrain valid_modes to the mode chosen
-                # across ranks.  If that mode is FULL but this local batch is
-                # non-exact, choose the safe no-graph fallback rather than
-                # leaving the native dispatcher with an empty allowed set.
+                # A DP re-dispatch can constrain valid_modes to FULL after the
+                # cross-rank decision.  Keep the allowed set non-empty; NONE is
+                # the only safe local fallback in that special case.
                 if valid_modes is not None and set(valid_modes) <= {
                     CUDAGraphMode.FULL
                 }:
@@ -112,14 +125,249 @@ def patch_cudagraph_dispatcher():
                 invalid_modes=invalid_modes,
             )
 
-        dispatch_exact_full._kunlunxin_exact_full = True
-        CudagraphDispatcher.dispatch = dispatch_exact_full
+        dispatch_uniform_full._kunlunxin_uniform_full = True
+        CudagraphDispatcher.dispatch = dispatch_uniform_full
         logger.info(
-            "Patched CudagraphDispatcher: FULL only for exact-size uniform "
-            "decode batches; non-exact batches fall back safely"
+            "Patched CudagraphDispatcher: uniform padded decode keeps FULL; "
+            "mixed batches exclude FULL"
         )
     except Exception as e:
         logger.warning("Failed to patch CudagraphDispatcher: %s", e)
+
+
+def patch_breakable_cudagraph_mode():
+    """Enable vLLM's breakable wrapper without a process-wide env switch.
+
+    Setting ``VLLM_USE_BREAKABLE_CUDAGRAPH`` changes compilation behavior for
+    every platform.  Patch only the already imported Kunlunxin execution path
+    so PIECEWISE remains the normal compiled path and FULL can break around
+    collectives that cannot be captured safely by FlagCX.
+    """
+    try:
+        import vllm.compilation.breakable_cudagraph as breakable
+        import vllm.v1.worker.gpu_model_runner as gpu_model_runner
+        import vllm_fl.worker.model_runner as fl_model_runner
+
+        def enabled() -> bool:
+            return True
+
+        breakable.is_breakable_cudagraph_enabled = enabled
+        gpu_model_runner.is_breakable_cudagraph_enabled = enabled
+        fl_model_runner.is_breakable_cudagraph_enabled = enabled
+        logger.info("Enabled breakable cudagraph for Kunlunxin FULL graphs")
+    except Exception as e:
+        logger.warning("Failed to enable breakable cudagraph: %s", e)
+
+
+def patch_breakable_private_pools():
+    """Give each FULL batch descriptor an independent graph memory pool.
+
+    Kunlunxin can replay one FULL graph reliably, but graphs with different
+    static shapes cannot safely alias allocations from vLLM's global graph
+    pool. Leaving ``graph_pool`` unset makes each CUDAGraph own its captured
+    activation storage while model parameters remain shared.
+    """
+    try:
+        from functools import wraps
+
+        from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
+
+        original_init = BreakableCUDAGraphWrapper.__init__
+        if getattr(original_init, "_kunlunxin_private_pools", False):
+            return
+
+        @wraps(original_init)
+        def init_with_private_pools(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            self.graph_pool = None
+
+        init_with_private_pools._kunlunxin_private_pools = True
+        BreakableCUDAGraphWrapper.__init__ = init_with_private_pools
+        logger.info("Enabled per-descriptor FULL graph memory pools")
+    except Exception as e:
+        logger.warning("Failed to isolate FULL graph memory pools: %s", e)
+
+
+def patch_breakable_full_only():
+    """Keep PIECEWISE on its compiled runner; break only FULL graphs."""
+    try:
+        from functools import wraps
+
+        from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
+        from vllm.config import CUDAGraphMode
+        from vllm.forward_context import (
+            get_forward_context,
+            is_forward_context_available,
+        )
+        original_call = BreakableCUDAGraphWrapper.__call__
+        if getattr(original_call, "_kunlunxin_full_only", False):
+            return
+
+        @wraps(original_call)
+        def call_full_only(self, *args, **kwargs):
+            if not is_forward_context_available():
+                return original_call(self, *args, **kwargs)
+
+            forward_context = get_forward_context()
+            if forward_context.cudagraph_runtime_mode != CUDAGraphMode.FULL:
+                return self.runnable(*args, **kwargs)
+
+            return original_call(self, *args, **kwargs)
+
+        call_full_only._kunlunxin_full_only = True
+        BreakableCUDAGraphWrapper.__call__ = call_full_only
+        logger.info("Restricted breakable cudagraph capture to FULL mode")
+    except Exception as e:
+        logger.warning("Failed to restrict breakable cudagraph mode: %s", e)
+
+
+def patch_graph_all_reduce():
+    """Capture FULL decode in bounded ProcessGroup graph segments.
+
+    The direct FlagCX ctypes path is retained for eager and PIECEWISE modes.
+    FULL capture uses the registered FlagCX ProcessGroup so the collective is
+    recorded in the decode graph instead of producing eager communication
+    breaks. FlagCX initializes that ProcessGroup lazily, but XCCL cannot create
+    its communicator while a graph capture is active. End the first segment,
+    initialize the communicator once outside capture, then resume capture and
+    record the real collective. The one-time warm-up is not part of replay.
+
+    A full model forward contains roughly 128 all-reduces, which exceeds
+    XCCL's per-graph allocation limit when the leaking KL3 event mode is
+    disabled. End the current graph after a bounded number of collectives and
+    immediately begin the next graph-only segment. Replay remains entirely
+    captured and preserves stream ordering between segments.
+    """
+    try:
+        from functools import wraps
+
+        import torch.distributed as dist
+
+        from vllm.compilation.breakable_cudagraph import (
+            BreakableCUDAGraphCapture,
+        )
+        from vllm.config import CUDAGraphMode
+        from vllm.forward_context import (
+            get_forward_context,
+            is_forward_context_available,
+        )
+        from vllm_fl.distributed.communicator import CommunicatorFL
+
+        original_all_reduce = CommunicatorFL.all_reduce
+        if getattr(original_all_reduce, "_kunlunxin_graph_safe", False):
+            return
+
+        @wraps(original_all_reduce)
+        def graph_safe_all_reduce(self, input_):
+            use_full_graph_collective = (
+                torch.cuda.is_current_stream_capturing()
+                and is_forward_context_available()
+                and get_forward_context().cudagraph_runtime_mode
+                == CUDAGraphMode.FULL
+            )
+            if not use_full_graph_collective:
+                return original_all_reduce(self, input_)
+
+            capture = BreakableCUDAGraphCapture.current()
+            if (
+                not getattr(self, "_kunlunxin_graph_pg_warmed", False)
+                and capture is not None
+                and capture._capturing
+            ):
+                # ProcessGroupFlagCX creates its XCCL communicator on the
+                # first collective. That allocation fails inside capture, so
+                # initialize it once between graph segments. Do not register
+                # this warm-up as an eager replay segment: the actual
+                # all-reduce below is still captured and replay remains FULL.
+                capture._end_segment()
+                warmup = input_.clone()
+                dist.all_reduce(warmup, group=self.device_group)
+                torch.cuda.synchronize()
+                del warmup
+                self._kunlunxin_graph_pg_warmed = True
+                capture._begin_segment()
+
+            output = input_.clone()
+            dist.all_reduce(output, group=self.device_group)
+
+            if capture is not None and capture._capturing:
+                collectives = (
+                    getattr(capture, "_kunlunxin_segment_all_reduces", 0) + 1
+                )
+                if collectives >= 16:
+                    capture._kunlunxin_segment_all_reduces = 0
+                    capture._end_segment()
+                    capture._begin_segment()
+                else:
+                    capture._kunlunxin_segment_all_reduces = collectives
+            return output
+
+        graph_safe_all_reduce._kunlunxin_graph_safe = True
+        CommunicatorFL.all_reduce = graph_safe_all_reduce
+        logger.info(
+            "Patched FULL graph all-reduce into bounded FlagCX graph segments"
+        )
+    except Exception as e:
+        logger.warning("Failed to patch graph-time all-reduce: %s", e)
+
+
+def patch_eager_all_gather():
+    """Keep post-graph TP all-gather off the ProcessGroup event path.
+
+    FULL replay itself needs the graph-aware ProcessGroup for collectives, but
+    logits all-gather runs after replay on every decode step.  FlagCX's
+    ProcessGroup creates a CUDA event for each such call and eventually
+    exhausts the device event pool during a long-running concurrency sweep.
+    Use the existing direct FlagCX communicator outside capture; retain the
+    ProcessGroup implementation if capture is active or direct FlagCX is not
+    available.
+    """
+    try:
+        from functools import wraps
+
+        from vllm_fl.distributed.communicator import CommunicatorFL
+
+        original_all_gather = CommunicatorFL.all_gather
+        if getattr(original_all_gather, "_kunlunxin_direct_eager", False):
+            return
+
+        @wraps(original_all_gather)
+        def direct_eager_all_gather(self, input_, dim=-1):
+            pyflagcx_comm = getattr(self, "pyflagcx_comm", None)
+            if (
+                torch.cuda.is_current_stream_capturing()
+                or pyflagcx_comm is None
+                or pyflagcx_comm.disabled
+            ):
+                return original_all_gather(self, input_, dim)
+
+            if self.world_size == 1:
+                return input_
+            if dim < 0:
+                dim += input_.dim()
+            if not 0 <= dim < input_.dim():
+                raise IndexError(
+                    f"Invalid dim ({dim}) for input shape {input_.shape}"
+                )
+
+            input_tensor = input_.movedim(dim, 0).contiguous()
+            output_shape = (
+                input_tensor.shape[0] * self.world_size,
+                *input_tensor.shape[1:],
+            )
+            output_tensor = torch.empty(
+                output_shape,
+                dtype=input_tensor.dtype,
+                device=input_tensor.device,
+            )
+            pyflagcx_comm.all_gather(output_tensor, input_tensor)
+            return output_tensor.movedim(0, dim).contiguous()
+
+        direct_eager_all_gather._kunlunxin_direct_eager = True
+        CommunicatorFL.all_gather = direct_eager_all_gather
+        logger.info("Patched eager TP all-gather to use direct FlagCX")
+    except Exception as e:
+        logger.warning("Failed to patch eager TP all-gather: %s", e)
 
 
 # ── RESTORED: block_table slot_mapping (Triton kernel bypass) ──
@@ -474,6 +722,7 @@ def patch_fused_gdn_gating():
                 ssm_state_indices = ssm_state_indices[
                     : cu_seqlens.shape[0] - 1
                 ]
+
             return klx_fused_recurrent(
                 q=q,
                 k=k,
@@ -551,64 +800,27 @@ def patch_ssm_cache_update():
 
 # ── decode_paged_attention NaN workaround ──
 def patch_decode_attention():
-    """Replace decode_paged_attention with prefill_attention (prefix_cache mode).
+    """Select a numerically stable decode path for each execution mode.
 
-    xtorch_ops.decode_paged_attention produces NaN on certain layers during
-    decode (observed on layer 43+ of Qwen3.6-27B). Using prefill_attention
-    with is_prefix_cache=True provides correct results.
+    Prefix attention avoids a numerical issue in eager and PIECEWISE decode.
+    Its host LoD launch metadata cannot be updated by a captured FULL graph,
+    so FULL decode uses the graph-safe paged kernel and its device lengths.
     """
     try:
         import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
         import xtorch_ops
-
-        original_forward_decode = attn_mod.KunlunxinPagedAttention.forward_decode
-        def use_native_decode_for_cudagraph() -> bool:
-            try:
-                from vllm.config import CUDAGraphMode
-                from vllm.forward_context import (
-                    get_forward_context,
-                    is_forward_context_available,
-                )
-                if not is_forward_context_available():
-                    return False
-                return (
-                    get_forward_context().cudagraph_runtime_mode
-                    == CUDAGraphMode.FULL
-                )
-            except Exception:
-                # Keep the patch usable across vLLM minor versions that do
-                # not expose the runtime-mode field.
-                return False
 
         @staticmethod
         def patched_forward_decode(
             query, key_cache, value_cache, block_tables,
             seq_lens, seq_lens_host, max_seq_len, num_decode_tokens,
             kv_cache_dtype, num_kv_heads, scale, alibi_slopes,
-            k_scale, v_scale, max_window_size=-1, output=None
+            k_scale, v_scale, max_window_size=-1, output=None,
+            query_start_loc=None, query_start_loc_host=None,
+            kv_prefix_start_loc=None, kv_prefix_start_loc_host=None,
         ):
             """Use prefill_attention in prefix_cache mode for decode."""
             import torch
-
-            if use_native_decode_for_cudagraph():
-                return original_forward_decode(
-                    query,
-                    key_cache,
-                    value_cache,
-                    block_tables,
-                    seq_lens,
-                    seq_lens_host,
-                    max_seq_len,
-                    num_decode_tokens,
-                    kv_cache_dtype,
-                    num_kv_heads,
-                    scale,
-                    alibi_slopes,
-                    k_scale,
-                    v_scale,
-                    max_window_size=max_window_size,
-                    output=output,
-                )
 
             if output is None:
                 output = torch.empty_like(query)
@@ -616,19 +828,18 @@ def patch_decode_attention():
             decode_query = query[:num_decode_tokens]
             decode_output = output[:num_decode_tokens]
 
-            # Build query_start_loc: each decode token has query_len=1
-            query_start_loc_host = torch.arange(
-                num_decode_tokens + 1, dtype=torch.int32, device='cpu'
-            )
-            query_start_loc = query_start_loc_host.to(decode_query.device)
-
-            # Build kv_prefix_start_loc from seq_lens
-            sl = seq_lens_host[:num_decode_tokens].to(torch.int32)
-            kv_prefix_start_loc_host = torch.zeros(
-                num_decode_tokens + 1, dtype=torch.int32, device='cpu'
-            )
-            kv_prefix_start_loc_host[1:] = torch.cumsum(sl, dim=0)
-            kv_prefix_start_loc = kv_prefix_start_loc_host.to(decode_query.device)
+            if any(
+                value is None
+                for value in (
+                    query_start_loc,
+                    query_start_loc_host,
+                    kv_prefix_start_loc,
+                    kv_prefix_start_loc_host,
+                )
+            ):
+                raise RuntimeError(
+                    "Kunlunxin prefix-decode requires persistent LoD metadata"
+                )
 
             window_left = -1
             window_right = -1
@@ -636,29 +847,45 @@ def patch_decode_attention():
                 window_left = max_window_size
                 window_right = 0
             alpha = scale * (float(decode_query.shape[2]) ** 0.5)
-            xtorch_ops.prefill_attention(
-                decode_query,
-                key_cache,
-                value_cache,
-                decode_output,
-                is_causal=True,
-                is_prefix_cache=True,
-                alpha=alpha,
-                context_qlen_lod_cpu=query_start_loc_host,
-                context_qlen_lod_xpu=query_start_loc,
-                context_kvlen_lod_cpu=kv_prefix_start_loc_host,
-                context_kvlen_lod_xpu=kv_prefix_start_loc,
-                block_table=block_tables,
-                alibi_slopes=alibi_slopes,
-                swa_left=window_left,
-                swa_right=window_right,
-            )
+            if _is_full_graph_runtime():
+                xtorch_ops.decode_paged_attention(
+                    decode_query,
+                    key_cache,
+                    value_cache,
+                    seq_lens_host[:num_decode_tokens],
+                    seq_lens[:num_decode_tokens],
+                    block_tables,
+                    decode_output,
+                    alpha=scale,
+                    k_perchannel_scale=k_scale,
+                    v_perchannel_scale=v_scale,
+                    alibi_slopes=alibi_slopes,
+                    sink=None,
+                )
+            else:
+                xtorch_ops.prefill_attention(
+                    decode_query,
+                    key_cache,
+                    value_cache,
+                    decode_output,
+                    is_causal=True,
+                    is_prefix_cache=True,
+                    alpha=alpha,
+                    context_qlen_lod_cpu=query_start_loc_host,
+                    context_qlen_lod_xpu=query_start_loc,
+                    context_kvlen_lod_cpu=kv_prefix_start_loc_host,
+                    context_kvlen_lod_xpu=kv_prefix_start_loc,
+                    block_table=block_tables,
+                    alibi_slopes=alibi_slopes,
+                    swa_left=window_left,
+                    swa_right=window_right,
+                )
             return output
 
         attn_mod.KunlunxinPagedAttention.forward_decode = patched_forward_decode
         logger.info(
             "Patched KunlunxinPagedAttention.forward_decode: "
-            "using prefill_attention (prefix_cache) to fix decode NaN"
+            "using prefix decode outside FULL and paged decode in FULL"
         )
     except Exception as e:
         logger.warning("Failed to patch decode attention: %s", e)

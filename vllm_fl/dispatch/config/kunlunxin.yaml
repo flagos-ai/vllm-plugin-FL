@@ -89,8 +89,12 @@ flagos_blacklist:
   - bmm
   - index_put_
   - normal_
+  - native_layer_norm
+  # FlagTree xpu3.6 cannot lower FlagGems' masked scalar-base pow kernel.
+  - pow_scalar
   - copy_
   - gelu
+  - masked_fill_
   - masked_scatter_
   - scatter
   - scatter_
