@@ -112,6 +112,10 @@ def _normalize_process_group_backend(backend: str) -> str:
     """Return the torch.distributed backend for the active platform."""
     if current_platform.device_type == "ptpu" and backend in {"flagcx", "nccl"}:
         return "pccl"
+    if current_platform.device_type == "npu" and backend == "flagcx":
+        # CommunicatorFL uses FlagCX for tensor-parallel collectives; torch
+        # process groups still use the NPU's native backend.
+        return "hccl"
     return backend
 
 
