@@ -1,0 +1,6 @@
+# Preserve the CPU PyTorch / NPU runtime supplied by the CANN base image.
+# Do not install the CUDA requirements or use vLLM build isolation.
+torch==2.10.0+cpu
+torch-npu==2.10.0
+torchvision==0.25.0+cpu
+torchaudio==2.10.0+cpu

@@ -11,6 +11,7 @@ This module follows a layered testing strategy:
 Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
+from importlib import import_module
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -36,6 +37,37 @@ def has_vllm_model_runner():
 pytestmark = pytest.mark.skipif(
     not has_vllm_model_runner(), reason="vllm_fl.worker.model_runner not available"
 )
+
+
+@pytest.mark.parametrize("reuse_context", [False, True])
+def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    model_runner = import_module("vllm_fl.worker.model_runner")
+
+    capture_stream = MagicMock()
+    current_stream = object()
+    device_api = SimpleNamespace(
+        Stream=MagicMock(return_value=capture_stream),
+        current_stream=MagicMock(return_value=current_stream),
+        stream=MagicMock(return_value=nullcontext()),
+    )
+    monkeypatch.setattr(model_runner.current_platform, "torch_device_fn", device_api)
+    supplied_context = SimpleNamespace(stream=capture_stream) if reuse_context else None
+
+    with model_runner._device_graph_capture(
+        torch.device("cpu"), graph_capture_context=supplied_context
+    ) as capture_context:
+        assert capture_context.stream is capture_stream
+
+    if reuse_context:
+        assert capture_context is supplied_context
+        device_api.Stream.assert_not_called()
+    else:
+        device_api.Stream.assert_called_once_with(device=torch.device("cpu"))
+    capture_stream.wait_stream.assert_called_once_with(current_stream)
+    device_api.stream.assert_called_once_with(capture_stream)
 
 
 # =============================================================================

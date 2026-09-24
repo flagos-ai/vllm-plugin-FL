@@ -222,9 +222,27 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
-        parallel_config = vllm_config.parallel_config
+        if cls.device_type == "npu" and vllm_config.use_v2_model_runner:
+            raise ValueError(
+                "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
+                "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
+            )
         model_config = vllm_config.model_config
+        parallel_config = vllm_config.parallel_config
+        if cls.device_type == "npu" and model_config is not None:
+            from vllm_fl.patches.ascend_glm_dsa import (
+                prepare_glm_dsa_dense_fallback,
+            )
 
+            if prepare_glm_dsa_dense_fallback(model_config):
+                logger.warning_once(
+                    "Ascend uses dense attention for GLM DSA because sparse MLA "
+                    "is not available; max_model_len is limited to index_topk."
+                )
+                # VllmConfig validates parallelism before the platform hook.
+                # Revalidate after changing MLA/KV-head semantics so DCP and TP
+                # constraints are checked against the dense architecture.
+                model_config.verify_with_parallel_config(parallel_config)
         parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
 
         scheduler_config = vllm_config.scheduler_config
@@ -277,10 +295,38 @@ class PlatformFL(Platform):
 
         # lazy import to avoid circular import
         from vllm.config import CUDAGraphMode
+        from vllm.config.compilation import CompilationMode
 
         compilation_config = vllm_config.compilation_config
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
+
+        if cls.device_type == "npu":
+            if (
+                compilation_config.backend == "inductor"
+                and compilation_config.mode != CompilationMode.NONE
+            ):
+                raise ValueError(
+                    "Ascend graph execution requires compilation backend='eager'; "
+                    "the Inductor backend is not supported on torch_npu."
+                )
+            if compilation_config.cudagraph_mode.has_full_cudagraphs():
+                logger.info(
+                    "Ascend: Downgrading cudagraph_mode from %s to PIECEWISE "
+                    "because full-model graph capture still contains CUDA-only "
+                    "distributed capture paths.",
+                    compilation_config.cudagraph_mode,
+                )
+                compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+            if compilation_config.mode != CompilationMode.NONE:
+                # These post-grad fusion passes are only imported by vLLM on
+                # CUDA-like and XPU platforms. Their default-on configuration
+                # otherwise raises NameError while configuring the eager NPU
+                # compile backend.
+                pass_config = compilation_config.pass_config
+                pass_config.fuse_norm_quant = False
+                pass_config.fuse_act_quant = False
+                pass_config.fuse_attn_quant = False
 
         if (
             cls.device_type == "musa"
@@ -417,6 +463,14 @@ class PlatformFL(Platform):
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod
+    def get_compile_backend(cls) -> str:
+        if cls.device_type == "npu":
+            # Keep vLLM's Dynamo tracing and piecewise graph splitting while
+            # returning each FX GraphModule without running CUDA Inductor.
+            return "eager"
+        return super().get_compile_backend()
+
+    @classmethod
     def support_static_graph_mode(cls) -> bool:
         return cls.vendor_name in [
             "nvidia",
@@ -466,14 +520,22 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
-        if cls.vendor_name == "hygon":
-            return False
-        return cls.dist_backend != "flagcx"
+        return cls.vendor_name != "hygon" and cls.dist_backend != "flagcx"
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
         if cls.device_name == "npu":
-            pass
+            # Upstream breakable graph wrappers are CUDA-specific. Ascend uses
+            # vLLM's piecewise GraphWrapper path until those wrappers are made
+            # accelerator-agnostic.
+            if os.environ.get("VLLM_USE_BREAKABLE_CUDAGRAPH") not in (None, "0"):
+                logger.warning_once(
+                    "Ascend ignores VLLM_USE_BREAKABLE_CUDAGRAPH=%s because "
+                    "the breakable graph wrapper still requires CUDA; forcing 0.",
+                    os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"],
+                )
+            os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] = "0"
+            importlib.import_module("vllm_fl.dispatch.backends.vendor.ascend")
         if cls.vendor_name == "iluvatar":
             # Patches are applied at module import time in iluvatar.py.
             # Also call chained-or patch here explicitly from the main process,

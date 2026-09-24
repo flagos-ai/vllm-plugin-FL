@@ -4,9 +4,8 @@
 FlagGems fused moe operator implementations.
 """
 
-from typing import Optional
-
 import torch
+
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
@@ -15,7 +14,7 @@ def moe_align_block_size_flaggems(
     topk_ids: torch.Tensor,
     block_size: int,
     num_experts: int,
-    expert_map: Optional[torch.Tensor] = None,
+    expert_map: torch.Tensor | None = None,
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -58,18 +57,27 @@ def topk_softmax_flaggems(
 ):
     from flag_gems import topk_softmax
 
+    # FlagGems' fused renormalization corrupts the first token on Ascend when
+    # the routed token count exceeds 48. The non-renormalizing kernel is
+    # numerically correct, so normalize its selected weights with PyTorch.
+    normalize_after_kernel = renormalize and gating_output.device.type == "npu"
+    kernel_renormalize = renormalize and not normalize_after_kernel
     try:
         topk_softmax(
             topk_weights,
             topk_indices,
             token_expert_indices,
             gating_output,
-            renormalize,
+            kernel_renormalize,
         )
-    except:
+    except TypeError:
         topk_softmax(topk_weights, topk_indices, token_expert_indices, gating_output)
-        if renormalize:
-            topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+        normalize_after_kernel = renormalize
+    if normalize_after_kernel:
+        denominator = topk_weights.sum(dim=-1, keepdim=True)
+        topk_weights = topk_weights / torch.where(
+            denominator > 0, denominator, torch.ones_like(denominator)
+        )
     return topk_weights, topk_indices
 
 

@@ -1,14 +1,14 @@
 # Adaptation Gate Cases
 
-| Model | mode |single long text case | single long image case| text cases | image cases |mixed text and image cases | total cases
+| Model | mode | long text requests | long image requests | concurrent text requests | concurrent image requests | mixed requests | total requests
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `Qwen3.6-27B` | eager  | 1 | 1 | 8 | 8 | 4+4 | 26 |
 | `Qwen3.6-27B` | graph  | 1 | 1 | 8 | 8 | 4+4 | 26 |
 | `Qwen3.6-35B-A3B` | eager | 1 | 1 | 8 | 8 |  4+4 | 26 |
 | `Qwen3.6-35B-A3B` | graph | 1 | 1 | 8 | 8 |  4+4 | 26 |
 
-The matrix counts pytest scenarios; each concurrent scenario sends eight
-requests.
+Each mode contains five pytest scenarios and sends 26 requests in total. The
+table counts requests; each concurrent scenario sends eight requests.
 
 This directory is a small manual gate for accelerator adaptation and vLLM
 plugin upgrades. It tests two Qwen models in eager and graph modes.

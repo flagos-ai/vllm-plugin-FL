@@ -21,42 +21,17 @@ import einops
 import torch
 import torch.nn.functional as F
 import torch_npu
+
 from vllm.model_executor.layers.attention.mm_encoder_attention import MMEncoderAttention
-from vllm.config import MultiModalConfig
 
 MIN_PAD_SIZE = 64  # min_size to pad weight
 MAX_PAD_SIZE = 128  # max_size to pad weight
+SWA_INT_MAX = 2147483647
+FIA_BLOCK_SIZE = 128
 
 
 class AscendMMEncoderAttention(MMEncoderAttention):
-
-    def __init__(
-        self,
-        num_heads: int,
-        head_size: int,
-        scale: float | None = None,
-        num_kv_heads: int | None = None,
-        prefix: str = "",
-        multimodal_config: MultiModalConfig | None = None,
-    ) -> None:
-        """
-        Args:
-            num_heads: number of attention heads per partition.
-            head_size: hidden_size per attention head.
-            scale: scale factor.
-            num_kv_heads: number of kv heads.
-            prefix: This has no effect, it is only here to make it easier to
-                    swap between Attention and MMEncoderAttention.
-            multimodal_config: configs for multi-modal.
-        """
-        super().__init__(
-            num_heads=num_heads,
-            head_size=head_size,
-            scale=scale,
-            num_kv_heads=num_kv_heads,
-            prefix=prefix,
-            multimodal_config=multimodal_config,
-        )
+    # Inherit vLLM 0.28's constructor; it reads multimodal config from context.
 
     def reshape_qkv_to_3d(
         self,
@@ -83,29 +58,30 @@ class AscendMMEncoderAttention(MMEncoderAttention):
         return query, key, value
 
     def forward_oot(
-            self,
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            cu_seqlens: torch.Tensor | None = None,
-            max_seqlen: torch.Tensor
-        | None = None,  # Only used for Flash Attention
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        cu_seqlens: torch.Tensor | None = None,
+        max_seqlen: torch.Tensor | None = None,  # Only used for Flash Attention
+        sequence_lengths: torch.Tensor | None = None,  # FlashInfer only
     ):
         bsz, q_len = query.size()[:2]
         kv_len = key.size(1)
         is_reshaped = query.dim() == 4
 
         if cu_seqlens is None:
-            cu_seqlens = torch.arange(0, (bsz + 1) * q_len,
-                                      step=q_len,
-                                      dtype=torch.int32,
-                                      device="cpu")
-        cu_seqlens = torch.diff(cu_seqlens).to("cpu")
+            cu_seqlens = torch.arange(
+                0, (bsz + 1) * q_len, step=q_len, dtype=torch.int32, device="cpu"
+            )
+        # FIA's TND layout expects cumulative sequence endpoints, matching the
+        # cu_seqlens contract used by vLLM's multimodal encoders.
+        actual_seq_lengths = cu_seqlens[1:].to("cpu").tolist()
 
         # q, k, v: [b, s, head, head_dim] -> [b * s, head, head_dim]
         q, k, v = self.reshape_qkv_to_3d(query, key, value, bsz, q_len, kv_len)
 
-        enable_pad = (self.head_size > MIN_PAD_SIZE and self.head_size < MAX_PAD_SIZE)
+        enable_pad = self.head_size > MIN_PAD_SIZE and self.head_size < MAX_PAD_SIZE
 
         if enable_pad:
             origin_shape = q.shape[-1]
@@ -115,29 +91,37 @@ class AscendMMEncoderAttention(MMEncoderAttention):
             k = F.pad(k, (0, pad_len), mode="constant", value=0)
             v = F.pad(v, (0, pad_len), mode="constant", value=0)
 
-        context_layer = torch.empty_like(q)
-
-        # operator requires pta version >= 2.5.1
-        torch_npu._npu_flash_attention_unpad(
+        # Use the current Ascend vision-attention path. In particular, this
+        # avoids the legacy unpad kernel's silent corruption with larger
+        # packed multi-image batches on 910C.
+        context_layer, _ = torch_npu.npu_fused_infer_attention_score(
             query=q,
-            key=k,
-            value=v,
-            seq_len=cu_seqlens,
-            scale_value=self.head_size**-0.5,
+            key=k.contiguous(),
+            value=v.contiguous(),
+            atten_mask=None,
+            block_table=None,
+            input_layout="TND",
+            block_size=FIA_BLOCK_SIZE,
+            actual_seq_lengths=actual_seq_lengths,
+            actual_seq_lengths_kv=actual_seq_lengths,
             num_heads=self.num_heads,
-            num_kv_heads=self.num_kv_heads,
-            out=context_layer,
+            # reshape_qkv_to_3d expands GQA heads before the operator call.
+            num_key_value_heads=self.num_heads,
+            scale=self.scale,
+            sparse_mode=0,
+            pre_tokens=SWA_INT_MAX,
+            next_tokens=SWA_INT_MAX,
         )
 
         if enable_pad:
             context_layer = context_layer[..., :origin_shape]
 
         if is_reshaped:
-            context_layer = einops.rearrange(context_layer,
-                                             "(b s) h d -> b s h d",
-                                             b=bsz).contiguous()
+            context_layer = einops.rearrange(
+                context_layer, "(b s) h d -> b s h d", b=bsz
+            ).contiguous()
         else:
-            context_layer = einops.rearrange(context_layer,
-                                             "(b s) h d -> b s (h d)",
-                                             b=bsz).contiguous()
+            context_layer = einops.rearrange(
+                context_layer, "(b s) h d -> b s (h d)", b=bsz
+            ).contiguous()
         return context_layer

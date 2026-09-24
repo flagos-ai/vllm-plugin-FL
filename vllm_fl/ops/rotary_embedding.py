@@ -1,8 +1,10 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-from typing import Optional
+
 import torch
+
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
+
 from vllm_fl.dispatch import CachedOp
 
 _rotary_embedding = CachedOp("rotary_embedding")
@@ -33,15 +35,15 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
-        key: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        key: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         # The FL rotary backends require both query and key.  vLLM 0.28 also
         # calls RotaryEmbedding with key=None for cross-layer KV sharing, so
         # preserve the upstream native path for that supported input.
         if key is None:
-            return super().forward_native(positions, query, key)
+            return self.forward_native(positions, query, key)
 
-        self.cos_sin_cache: torch.Tensor = self.cos_sin_cache.to(positions.device)
+        cos_sin_cache = self._match_cos_sin_cache_dtype(query)
         positions = positions.flatten()
         num_tokens = positions.shape[0]
 
@@ -53,10 +55,10 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query_rot = query[..., : self.rotary_dim]
         key_rot = key[..., : self.rotary_dim]
         if self.rotary_dim < self.head_size:
-            query_pass = query[..., self.rotary_dim:]
-            key_pass = key[..., self.rotary_dim:]
+            query_pass = query[..., self.rotary_dim :]
+            key_pass = key[..., self.rotary_dim :]
 
-        cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
+        cos, sin = cos_sin_cache.chunk(2, dim=-1)
 
         q_embed, k_embed = _rotary_embedding(
             self,
@@ -82,8 +84,8 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
-        key: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        key: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         return self.forward_oot(positions, query, key)
 
 

@@ -31,13 +31,58 @@ logger = init_logger(__name__)
 
 
 # FL-specific: platform-agnostic weak_ref_tensors
-def weak_ref_tensors(tensor: Any) -> Any:
-    try:
-        from vllm.utils.torch_utils import weak_ref_tensors
+def _weak_ref_npu_tensor(value: Any) -> Any:
+    if isinstance(value, torch.Tensor) and value.device.type == "npu":
+        import torch_npu
 
-        return weak_ref_tensors(tensor)
+        return torch_npu._C._weak_ref_tensor(value)
+    return value
+
+
+def _weak_ref_npu_tensors(value: Any) -> Any:
+    """Recursively replace NPU tensors without retaining graph-pool storage."""
+    if isinstance(value, torch.Tensor):
+        return _weak_ref_npu_tensor(value)
+    if isinstance(value, list):
+        return [_weak_ref_npu_tensors(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_weak_ref_npu_tensors(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _weak_ref_npu_tensors(item) for key, item in value.items()}
+
+    from vllm.sequence import IntermediateTensors
+
+    if isinstance(value, IntermediateTensors):
+        return IntermediateTensors(
+            {key: _weak_ref_npu_tensors(item) for key, item in value.tensors.items()}
+        )
+    return value
+
+
+def weak_ref_tensors(value: Any) -> Any:
+    if current_platform.device_type == "npu":
+        # The empty vLLM wheel registers torch.ops._C.weak_ref_tensor as an
+        # identity. torch_npu's private primitive creates the real weak tensor
+        # needed to release captured graph outputs.
+        return _weak_ref_npu_tensors(value)
+
+    try:
+        from vllm.utils.torch_utils import (
+            weak_ref_tensors as upstream_weak_ref_tensors,
+        )
+
+        return upstream_weak_ref_tensors(value)
     except Exception:
-        return tensor
+        return value
+
+
+def _graph_capture_stream() -> Any:
+    if current_platform.device_type == "npu":
+        # vLLM's current_stream helper maintains CUDA-specific thread-local
+        # state and can remain on the default stream while torch.npu.stream()
+        # has selected the side stream used for graph capture.
+        return current_platform.torch_device_fn.current_stream()
+    return current_stream()
 
 
 # FL-specific: platform-agnostic graph class selection
@@ -212,19 +257,17 @@ class GraphWrapper:
                     set_graph_pool_id(current_platform.graph_pool_handle())
 
                 # Sync offloader's copy stream before capture if available.
-                try:
+                with suppress(ImportError, RuntimeError):
                     from vllm.model_executor.offloader.base import get_offloader
 
                     get_offloader().sync_prev_onload()
-                except (ImportError, RuntimeError):
-                    pass
 
                 # FL-specific: use platform-agnostic graph capture while
                 # preserving the explicit stream used by vLLM v0.28.0.
                 with current_platform.torch_device_fn.graph(
                     graph,
                     pool=self.graph_pool,
-                    stream=current_stream(),
+                    stream=_graph_capture_stream(),
                 ):
                     output = self.runnable(*args, **kwargs)
                     with suppress(ImportError, RuntimeError, UnboundLocalError):
@@ -254,12 +297,10 @@ class GraphWrapper:
             )
 
         # Sync offloader before replay if available
-        try:
+        with suppress(ImportError, RuntimeError):
             from vllm.model_executor.offloader.base import get_offloader
 
             get_offloader().sync_prev_onload()
-        except (ImportError, RuntimeError):
-            pass
 
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
