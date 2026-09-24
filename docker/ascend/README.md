@@ -92,10 +92,9 @@ export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
 multi-host jobs must use an interface reachable by all ranks.
 
 Ascend defaults to `ModelRunnerFL` (`VLLM_USE_V2_MODEL_RUNNER=0`). The upstream
-V2 runner requires CUDA/UVA operations unavailable on NPU. This stack also
-requires eager execution: the platform rejects non-eager configuration early
-because vLLM 0.28's compilation and graph paths still contain CUDA-only
-assumptions. Use:
+V2 runner requires CUDA/UVA operations unavailable on NPU. Eager execution is
+the validated deployment setting below; NPU graph execution is experimental
+and requires an explicit eager compilation backend. Use:
 
 ```bash
 vllm serve /models/Qwen3-0.6B \

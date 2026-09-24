@@ -39,7 +39,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Chip Vendor | Status | Reference |
 |-------------|--------|-----------|
 | NVIDIA | Supported | [deployment guide](./docs/usage/nvidia.md) |
-| Ascend | Supported | - |
+| Ascend | Supported | [deployment guide](./docs/usage/ascend.md) |
 | MetaX | Supported | - |
 | T-Head | Supported | - |
 | Iluvatar | Supported | - |
