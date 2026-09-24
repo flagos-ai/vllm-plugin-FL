@@ -92,7 +92,7 @@ a100:
       pr:
         inference:
           qwen3:
-            - 35b_tp4
+            - 4b_tp2
           minicpm:
             - o45_tp4
       nightly:
