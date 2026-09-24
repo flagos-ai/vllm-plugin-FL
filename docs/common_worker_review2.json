@@ -1,0 +1,467 @@
+{
+  "build": {
+    "commit": "78786cebce23a3de6b62f69a7ee27c14698860a8",
+    "archive": "common_source_main442.tar.gz",
+    "archive_sha256": "ccf379dab89450ff589b33dbba447b0310d665438991a40153ffcd5ec9fe6754",
+    "wheel": "vllm_plugin_fl-0.3.0rc2.post1+g78786cebc-py3-none-any.whl",
+    "wheel_sha256": "497dd8435a70fb732c4a35bf86c9d50445340b1778944424a8369ae7031d6e9c"
+  },
+  "installed_tests": {
+    "tests": 91,
+    "supplemental_probe_tests": 3,
+    "unique_selected_tests": 92,
+    "runtime_files_verified": 248
+  },
+  "full_workers": {
+    "common_full_decode_only": {
+      "cudagraph_mode": "FULL_DECODE_ONLY",
+      "requests_per_policy": 16,
+      "request_reuse_checked": true,
+      "installed_worker_identity_checked": true,
+      "combination": false,
+      "accepted": true,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 0.0,
+      "max_logprob_delta": 0.0,
+      "states": {
+        "stock": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 66
+          }
+        ],
+        "graph": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 5,
+            "replays": 43,
+            "eager_calls": 16
+          }
+        ]
+      }
+    },
+    "common_piecewise": {
+      "cudagraph_mode": "PIECEWISE",
+      "requests_per_policy": 16,
+      "request_reuse_checked": true,
+      "installed_worker_identity_checked": true,
+      "combination": false,
+      "accepted": true,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 1e-05,
+      "max_logprob_delta": 0.0,
+      "states": {
+        "stock": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 64
+          }
+        ],
+        "graph": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "disabled",
+            "mm_backends": null,
+            "mm_threshold": null,
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 2,
+            "replays": 44,
+            "eager_calls": 15
+          }
+        ]
+      }
+    },
+    "common_full_decode_only_combined": {
+      "cudagraph_mode": "FULL_DECODE_ONLY",
+      "requests_per_policy": 16,
+      "request_reuse_checked": true,
+      "installed_worker_identity_checked": true,
+      "combination": true,
+      "accepted": true,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 0.0009765625,
+      "max_logprob_delta": 0.0002532005310058594,
+      "states": {
+        "stock": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "installed",
+            "mm_backends": {
+              "status": "installed",
+              "reason": "native CUDA for M <= 2; FlagGems otherwise",
+              "native": "SafeKernelFunction(debug='registered at /pytorch/build/aten/src/ATen/RegisterCUDA_0.cpp:16163')",
+              "flaggems": "hopper.ops.mm.mm"
+            },
+            "mm_threshold": 2,
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "installed",
+            "mm_backends": {
+              "status": "installed",
+              "reason": "native CUDA for M <= 2; FlagGems otherwise",
+              "native": "SafeKernelFunction(debug='registered at /pytorch/build/aten/src/ATen/RegisterCUDA_0.cpp:16163')",
+              "flaggems": "hopper.ops.mm.mm"
+            },
+            "mm_threshold": 2,
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 64
+          }
+        ],
+        "graph": [
+          {
+            "identity": {
+              "package_path": "/opt/installed-common/vllm_fl/__init__.py",
+              "files": {
+                "vllm_fl.worker.common_attention_metadata": {
+                  "path": "/opt/installed-common/vllm_fl/worker/common_attention_metadata.py",
+                  "sha256": "b4846913d878f7938994b0ad3cc9c4de8bdcaaa3fd5d22baaaefb2adc242ab18"
+                },
+                "vllm_fl.worker.model_runner": {
+                  "path": "/opt/installed-common/vllm_fl/worker/model_runner.py",
+                  "sha256": "28562bb938bad6f9b9bed1fd7e594cf38248ec38708b2524ada49d154af72336"
+                },
+                "vllm_fl.worker.worker": {
+                  "path": "/opt/installed-common/vllm_fl/worker/worker.py",
+                  "sha256": "abe80d0ec68b9ab407f0959ca9f0524045ba47e8aef184930a563d7bae47eaa8"
+                },
+                "vllm_fl.patches.flaggems_mm_shape_aware": {
+                  "path": "/opt/installed-common/vllm_fl/patches/flaggems_mm_shape_aware.py",
+                  "sha256": "550be74c24780e89e6f02fb9f44b6f392f662bd5b9aa1bc1971ca58b51c5aa86"
+                },
+                "vllm_fl.flaggems_runtime": {
+                  "path": "/opt/installed-common/vllm_fl/flaggems_runtime.py",
+                  "sha256": "f8e6e9228270ec313b650e4298e00d2f2e348da694c4b0601381c5bb9a9c4c67"
+                }
+              },
+              "versions": {
+                "vllm-plugin-FL": "0.3.0rc2.post1+g78786cebc",
+                "vllm": "0.24.0+cu129",
+                "torch": "2.11.0+cu129",
+                "flag-gems": "5.3.3.dev15+gf471641e5.pkgfix1",
+                "triton": null
+              }
+            },
+            "shape_aware_mm": "installed",
+            "mm_backends": {
+              "status": "installed",
+              "reason": "native CUDA for M <= 2; FlagGems otherwise",
+              "native": "SafeKernelFunction(debug='registered at /pytorch/build/aten/src/ATen/RegisterCUDA_0.cpp:16163')",
+              "flaggems": "hopper.ops.mm.mm"
+            },
+            "mm_threshold": 2,
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 5,
+            "replays": 43,
+            "eager_calls": 16
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "runtime_commit": "fd21d86cb580d2150b8abded45727ed6276df6a1",
+  "runtime_sha256": {
+    "vllm_fl/worker/worker.py": "340c8e4f17e86fe888b7093f0f059f36f20f648a5af644aecd7fcbe15d16e779",
+    "vllm_fl/worker/model_runner.py": "31d86f37c61608698b2ef10b6696a1a1f64b1d367029219ec8465f45fe89dbd8",
+    "vllm_fl/worker/common_attention_metadata.py": "8997649e44b473b24dd0dbfae02cfe3cc0ddd084fa181e88af3b3ff347d071b4",
+    "vllm_fl/patches/flaggems_mm_shape_aware.py": "5236cb50d0ae1f71d675264c6bcca2abf8f0a840511d07921abf40fe7024a0a4"
+  },
+  "device": "H100",
+  "vllm": "0.24.0+cu129",
+  "torch": "2.11.0+cu129",
+  "python_wheel_version": "0.0.0+day0.common.review.20260919.r2",
+  "installed_tests": 83,
+  "mixed_full_model_graph": "unresolved output instability; also reproduced with main 940480f worker files",
+  "cross_vendor_validation": false,
+  "pr442_fused_kernel_included": false,
+  "public_probe_results": {
+    "FULL_DECODE_ONLY": {
+      "cudagraph_mode": "FULL_DECODE_ONLY",
+      "requests_per_policy": 16,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 0.0,
+      "max_logprob_delta": 0.0,
+      "states": {
+        "stock": [
+          {
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 64
+          }
+        ],
+        "graph": [
+          {
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 5,
+            "replays": 43,
+            "eager_calls": 16
+          }
+        ]
+      }
+    },
+    "PIECEWISE": {
+      "cudagraph_mode": "PIECEWISE",
+      "requests_per_policy": 16,
+      "token_ids_and_top5_identities_exactly_equal": true,
+      "logprob_atol": 1e-05,
+      "max_logprob_delta": 4.291534423828125e-06,
+      "states": {
+        "stock": [
+          {
+            "policy": "stock",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 0
+          }
+        ],
+        "eager": [
+          {
+            "policy": "eager",
+            "async_scheduling": true,
+            "captures": 0,
+            "replays": 0,
+            "eager_calls": 64
+          }
+        ],
+        "graph": [
+          {
+            "policy": "graph",
+            "async_scheduling": true,
+            "captures": 2,
+            "replays": 44,
+            "eager_calls": 15
+          }
+        ]
+      }
+    }
+  },
+  "probe_script_sha256": "2269690d9f4cfd2e3b1a26d01fa97b59c804cfee55d9625f5c0d601794e4ac6f"
+}

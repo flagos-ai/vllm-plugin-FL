@@ -162,7 +162,7 @@ from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.math_utils import cdiv, round_up
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
-from vllm.utils.platform_utils import num_compute_units, is_pin_memory_available, num_compute_units
+from vllm.utils.platform_utils import is_pin_memory_available, num_compute_units
 from vllm.utils.torch_utils import (
     get_dtype_size,
     is_quantized_kv_cache,
@@ -283,8 +283,9 @@ from vllm_fl.dispatch.io_dumper import (
 )
 from vllm_fl.worker.common_attention_metadata import (
     CommonAttentionMetadataGraphRunner,
-    common_attention_metadata_enabled,
+    PreparedMetadata,
     compute_common_attention_metadata,
+    resolve_metadata_policy,
 )
 
 GraphWrapper = GraphWrapper
@@ -793,9 +794,19 @@ class ModelRunnerFL(
         self.query_start_loc = self._make_buffer(
             self.max_num_reqs + 1, dtype=torch.int32
         )
+        self.common_metadata_policy = resolve_metadata_policy(
+            use_ubatching=self.parallel_config.use_ubatching,
+            async_spec_decode=self.use_async_spec_decode,
+        )
+        logger.info(
+            "Common metadata: requested=%s mode=%s reason=%s",
+            self.common_metadata_policy.requested,
+            self.common_metadata_policy.mode,
+            self.common_metadata_policy.reason,
+        )
         self.common_attention_metadata_graph = (
             CommonAttentionMetadataGraphRunner()
-            if common_attention_metadata_enabled()
+            if self.common_metadata_policy.mode != "stock"
             else None
         )
         self.seq_lens = torch.zeros(
@@ -2306,7 +2317,7 @@ class ModelRunnerFL(
         num_scheduled_tokens: dict[str, int] | None = None,
         cascade_attn_prefix_lens: list[list[int]] | None = None,
         slot_mappings: dict[int, torch.Tensor] | None = None,
-        block_table_rows_are_current: bool = False,
+        prepared_metadata: PreparedMetadata | None = None,
     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
         """
         :return: tuple[attn_metadata, spec_decode_common_attn_metadata]
@@ -2318,6 +2329,11 @@ class ModelRunnerFL(
         num_tokens_padded = num_tokens_padded or num_tokens
         num_reqs_padded = num_reqs_padded or num_reqs
         assert num_reqs_padded is not None and num_tokens_padded is not None
+
+        if prepared_metadata is not None:
+            prepared_metadata.validate(
+                self.input_batch.block_table, num_reqs_padded, num_tokens_padded
+            )
 
         attn_metadata: PerLayerAttnMetadata = {}
         if ubatch_slices is not None:
@@ -2346,7 +2362,7 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 blk_table_tensor = blk_table.get_device_tensor(num_reqs_padded)
 
-            if not block_table_rows_are_current:
+            if prepared_metadata is None:
                 # Fill unused block table entries with NULL_BLOCK_ID (null
                 # block) for graph padding. Block 0 is reserved for padding.
                 blk_table_tensor[num_reqs:num_reqs_padded].fill_(NULL_BLOCK_ID)
@@ -2423,7 +2439,8 @@ class ModelRunnerFL(
             _num_computed_tokens_cpu=num_computed_tokens_cpu,
             _num_computed_tokens_cache=(
                 self.num_computed_tokens[:num_reqs_padded]
-                if self.common_attention_metadata_graph is not None else None
+                if prepared_metadata is not None
+                else None
             ),
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             num_reqs=num_reqs_padded,
@@ -4066,9 +4083,9 @@ class ModelRunnerFL(
         cudagraph_mode: CUDAGraphMode,
         *,
         capture: bool = False,
-    ) -> bool:
+    ) -> PreparedMetadata | None:
         if self.common_attention_metadata_graph is None:
-            return False
+            return None
         # PIECEWISE descriptors pad tokens, not requests. A fixed request
         # extent covers mixed batches whose request counts never occur in the
         # token-size capture list. query_start_loc/seq_lens have padded tails.
@@ -4078,7 +4095,8 @@ class ModelRunnerFL(
         # graph also benefits piecewise execution; ubatching retains eager
         # generation because its metadata is sliced per microbatch.
         use_graph = (
-            cudagraph_mode != CUDAGraphMode.NONE
+            self.common_metadata_policy.mode == "graph"
+            and cudagraph_mode != CUDAGraphMode.NONE
             and not self.parallel_config.use_ubatching
         )
         return self.common_attention_metadata_graph.run(
@@ -4099,7 +4117,7 @@ class ModelRunnerFL(
         num_reqs_padded: int,
         num_tokens_unpadded: int,
         ubatch_slices: "UBatchSlices | None" = None,
-        slot_mapping_is_current: bool = False,
+        prepared_metadata: PreparedMetadata | None = None,
     ) -> tuple[
         dict[int, torch.Tensor] | None,
         dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None,
@@ -4125,6 +4143,11 @@ class ModelRunnerFL(
         ):
             return None, None
 
+        if prepared_metadata is not None:
+            prepared_metadata.validate(
+                self.input_batch.block_table, num_reqs_padded, num_tokens_padded
+            )
+
         def _get_slot_mapping(kv_cache_gid: int):
             assert num_reqs_padded is not None and num_tokens_padded is not None
             kv_cache_spec = self.kv_cache_config.kv_cache_groups[
@@ -4140,7 +4163,7 @@ class ModelRunnerFL(
                 blk_table = self.input_batch.block_table[kv_cache_gid]
                 slot_mapping = blk_table.slot_mapping.gpu[:num_tokens_padded]
 
-            if not slot_mapping_is_current:
+            if prepared_metadata is None:
                 # Fill unused with -1. Needed for reshape_and_cache in full
                 # graph mode. `blk_table_tensor` -1 matches mamba PAD_SLOT_ID.
                 slot_mapping[num_tokens_unpadded:num_tokens_padded].fill_(-1)
@@ -4379,7 +4402,9 @@ class ModelRunnerFL(
             use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
             ubatch_slices_attn = ubatch_slices_padded if pad_attn else ubatch_slices
 
-            self._run_common_attention_metadata(num_reqs_padded, cudagraph_mode)
+            prepared_metadata = self._run_common_attention_metadata(
+                num_reqs_padded, cudagraph_mode
+            )
             slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
                 num_tokens_padded=num_tokens_padded
                 if pad_attn or has_separate_kv_update
@@ -4389,7 +4414,7 @@ class ModelRunnerFL(
                 ),
                 num_tokens_unpadded=num_tokens_unpadded,
                 ubatch_slices=ubatch_slices_padded,
-                slot_mapping_is_current=self.common_attention_metadata_graph is not None,
+                prepared_metadata=prepared_metadata,
             )
 
             attn_metadata, spec_decode_common_attn_metadata = (
@@ -4405,7 +4430,7 @@ class ModelRunnerFL(
                     num_scheduled_tokens=scheduler_output.num_scheduled_tokens,
                     cascade_attn_prefix_lens=cascade_attn_prefix_lens,
                     slot_mappings=slot_mappings_by_group,
-                    block_table_rows_are_current=self.common_attention_metadata_graph is not None,
+                    prepared_metadata=prepared_metadata,
                 )
             )
 
@@ -5967,19 +5992,12 @@ class ModelRunnerFL(
 
         attn_metadata: PerLayerAttnMetadata | None = None
 
-        slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
-            num_tokens_padded=num_tokens_padded,
-            num_reqs_padded=num_reqs_padded,
-            num_tokens_unpadded=num_tokens_unpadded,
-            ubatch_slices=ubatch_slices_padded,
-            slot_mapping_is_current=self.common_attention_metadata_graph is not None,
-        )
-
         # _dummy_run shares pinned CPU buffers (seq_lens, query_start_loc,
         # etc.) with execute_model.  It must participate in the same event
         # protocol so that back-to-back dummy/real steps don't overwrite
         # pinned memory while a prior non_blocking H2D DMA is still reading.
         with self.synchronize_input_prep():
+            prepared_metadata = None
             build_attention = (
                 force_attention or cudagraph_runtime_mode == CUDAGraphMode.FULL
             )
@@ -6017,11 +6035,19 @@ class ModelRunnerFL(
                 # builder. Without this, stale block IDs from finished
                 # requests can corrupt Mamba state.
                 self.input_batch.block_table.commit_block_table(num_reqs_padded)
-                self._run_common_attention_metadata(
+                prepared_metadata = self._run_common_attention_metadata(
                     num_reqs_padded,
                     cudagraph_runtime_mode,
                     capture=is_graph_capturing,
                 )
+
+            slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
+                num_tokens_padded=num_tokens_padded,
+                num_reqs_padded=num_reqs_padded,
+                num_tokens_unpadded=num_tokens_unpadded,
+                ubatch_slices=ubatch_slices_padded,
+                prepared_metadata=prepared_metadata,
+            )
 
             if build_attention:
                 pad_attn = cudagraph_runtime_mode == CUDAGraphMode.FULL
@@ -6034,7 +6060,7 @@ class ModelRunnerFL(
                     for_cudagraph_capture=is_graph_capturing,
                     slot_mappings=slot_mappings_by_group,
                     use_spec_decode=self.speculative_config is not None,
-                    block_table_rows_are_current=self.common_attention_metadata_graph is not None,
+                    prepared_metadata=prepared_metadata,
                 )
 
             # Dummy forwards must not update real KV-cache slots. Capture the
@@ -6528,7 +6554,7 @@ class ModelRunnerFL(
         if current_platform.is_rocm():
             # Drop captured graphs before distributed teardown. On ROCm, delayed
             # graph destruction can surface HSA faults in the next engine startup.
-            CUDAGraphWrapper.clear_all_graphs()
+            GraphWrapper.clear_all_graphs()
             self.encoder_cudagraph_manager = None
         self.compilation_config.static_forward_context.clear()
         self.model = None  # type: ignore[assignment]
@@ -7150,6 +7176,17 @@ class ModelRunnerFL(
             is_profiling=is_profiling,
         )
 
+        if (
+            self.common_metadata_policy.mode != "stock"
+            and cudagraph_mode == CUDAGraphMode.FULL
+        ):
+            logger.warning_once(
+                "Common metadata with mixed FULL model graphs is experimental: "
+                "request-reuse numerical acceptance has not passed. "
+                "Validated modes are FULL_DECODE_ONLY and PIECEWISE. "
+                "Stock metadata does not repair the mixed FULL model-graph issue."
+            )
+
         # Trigger cudagraph dispatching keys initialization after
         # resolved cudagraph mode.
         self.cudagraph_dispatcher.initialize_cudagraph_keys(
@@ -7229,6 +7266,9 @@ class ModelRunnerFL(
         ):
             self._init_block_sizes = block_sizes
             self._init_kernel_block_sizes = kernel_block_sizes
+            _accelerator_synchronize()
+            if self.common_attention_metadata_graph is not None:
+                self.common_attention_metadata_graph.clear()
             self.input_batch = InputBatch(
                 max_num_reqs=self.max_num_reqs,
                 max_model_len=max_model_len,
