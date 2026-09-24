@@ -595,11 +595,18 @@ class WorkerFL(WorkerBase):
             # runtime activations and fail with OOM.
             cudagraph_memory_estimate = 0
             if (
-                current_platform.is_cuda()
+                # cuda-alike covers OOT vendors (e.g. thead) whose is_cuda()
+                # is False; skipping the estimate there lets the KV cache
+                # consume the graph pool's headroom and capture OOMs.
+                current_platform.is_cuda_alike()
                 and self.vllm_config.compilation_config.cudagraph_mode
                 != CUDAGraphMode.NONE
             ):
                 cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
+                logger.warning(
+                    "[fl-debug] cudagraph_memory_estimate = %.2f GiB",
+                    cudagraph_memory_estimate / (1 << 30),
+                )
 
         profile_result.torch_peak_increase = (
             profile_torch_peak - profile_result.before_profile.torch_peak
@@ -635,6 +642,17 @@ class WorkerFL(WorkerBase):
             self.requested_memory
             - profile_result.non_kv_cache_memory
             - cudagraph_memory_estimate_applied
+        )
+        logger.warning(
+            "[fl-debug] requested=%.2f GiB, non_kv=%.2f GiB (weights=%.2f, "
+            "peak_act=%.2f, non_torch=%.2f), cg_est=%.2f GiB -> kv_avail=%.2f GiB",
+            self.requested_memory / (1 << 30),
+            profile_result.non_kv_cache_memory / (1 << 30),
+            profile_result.weights_memory / (1 << 30),
+            profile_result.torch_peak_increase / (1 << 30),
+            profile_result.non_torch_increase / (1 << 30),
+            cudagraph_memory_estimate_applied / (1 << 30),
+            self.available_kv_cache_memory_bytes / (1 << 30),
         )
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
