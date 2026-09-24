@@ -70,6 +70,7 @@ HYGON_RUNTIME_LIB_DIR="${HYGON_RUNTIME_LIB_DIR:-/opt/hyhal/lib}"
 HYGON_RUNTIME_ROOTS="${HYGON_RUNTIME_ROOTS:-/opt/dtk:/opt/hyhal:/usr/local/hyhal}"
 FLAGGEMS_VERSION="${FLAGGEMS_VERSION:-62d70b9e858ec407572153ee8cdf65cc24a637d5}"
 VLLM_PLUGIN_FL_VERSION="${VLLM_PLUGIN_FL_VERSION:-ffa2ee3eb3831f3873dd0966d12fc8e0b4e6e3d4}"
+VLLM_PLUGIN_FL_PACKAGE_VERSION="${VLLM_PLUGIN_FL_PACKAGE_VERSION:-$(git -C "${SCRIPT_DIR}/.." describe --tags --always --dirty 2>/dev/null | sed -E 's/^v//; s/-([0-9]+)-g/\.dev\1+g/; s/-dirty/\.dirty/' || printf '0.0.0')}"
 
 # ---- Build options ----
 PLATFORM="${PLATFORM:-cuda}"
@@ -319,8 +320,13 @@ fi
 # Build
 # ==============================================================================
 
-# Build context is the platform-specific directory (e.g. docker/ascend/)
+# Most Dockerfiles only need their platform directory. Enflame and MUSA also
+# bake the checked-out vllm-plugin-FL package into the image, so they require
+# the repository root as their build context.
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
+if [[ "${PLATFORM}" == "enflame" || "${PLATFORM}" == "musa" ]]; then
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 
 # Platform-specific build args and auto-tag
 BUILD_ARGS=()
@@ -387,6 +393,7 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
         --build-arg "VLLM_VERSION=${MUSA_VLLM_VERSION}"
         --build-arg "TORCH_VERSION=${MUSA_TORCH_VERSION}"
         --build-arg "FLAGGEMS_VERSION=${MUSA_FLAGGEMS_VERSION}"
+        --build-arg "VLLM_PLUGIN_FL_PACKAGE_VERSION=${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${MUSA_VLLM_VERSION}-musa-${TARGET}"
@@ -401,6 +408,7 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
         --build-arg "ENFLAME_BASE_IMAGE=${ENFLAME_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${ENFLAME_VLLM_VERSION}"
         --build-arg "DRIVER_VERSION=${ENFLAME_DRIVER_VERSION}"
+        --build-arg "VLLM_PLUGIN_FL_PACKAGE_VERSION=${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-ci"
@@ -469,10 +477,12 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
     msg "  MUSA PyTorch:   ${MUSA_TORCH_VERSION}"
     msg "  FlagGems:       ${MUSA_FLAGGEMS_VERSION}"
+    msg "  Plugin:         ${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     msg "  Driver:         ${ENFLAME_DRIVER_VERSION}"
     msg "  Enflame Python: ${ENFLAME_PYTHON_VERSION}"
     msg "  Base image:     ${ENFLAME_BASE_IMAGE}"
+    msg "  Plugin:         ${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
 elif [[ "${PLATFORM}" == "iluvatar" ]]; then
     msg "  Driver:         ${ILUVATAR_DRIVER_VERSION}"
     msg "  Iluvatar Python: ${ILUVATAR_PYTHON_VERSION}"
