@@ -125,3 +125,22 @@ def patch_mm_encoder_attention():
             return None
 
     mm_mod.maybe_get_vit_flash_attn_backend = _patched_maybe_get_vit_flash_attn_backend
+
+
+def patch_oot_apply_rotary_emb():
+    """Bind ApplyRotaryEmb to the FL adapter before model construction."""
+
+    from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
+
+    from vllm_fl.ops.rotary_embedding import (
+        apply_rotary_emb_flaggems,
+        apply_rotary_emb_platform,
+    )
+    from vllm_fl.utils import use_flaggems_op
+
+    if use_flaggems_op("rotary_embedding"):
+        ApplyRotaryEmb.forward_oot = apply_rotary_emb_flaggems
+        logger.info_once("Using FlagGems for ApplyRotaryEmb on FL")
+    else:
+        ApplyRotaryEmb.forward_oot = apply_rotary_emb_platform
+        logger.info_once("Using platform implementation for ApplyRotaryEmb on FL")
