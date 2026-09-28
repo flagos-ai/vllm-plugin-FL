@@ -110,7 +110,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     3.2 Install FlagGems
 
     ```sh
-    git clone -b v5.3.4 https://github.com/flagos-ai/FlagGems
+    git clone -b v5.4.0 https://github.com/flagos-ai/FlagGems
     cd FlagGems
     pip install --no-build-isolation .
     # or editable install
