@@ -1,5 +1,5 @@
-# vLLM-FL Dispatch Configuration for CUDA
-# Auto-loaded when running on NVIDIA GPU hardware
+# vLLM-FL Dispatch Configuration for T-Head PPU
+# Auto-loaded when running on T-Head hardware
 
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
@@ -24,12 +24,12 @@ strict: false
 #   - flagos        : Default FlagOS implementation (Triton)
 #   - reference     : PyTorch reference implementation
 #   - vendor        : Any available vendor backend (auto-detected)
-#   - vendor:cuda   : CUDA-specific vendor backend
+#   - vendor:thead  : T-Head-specific vendor backend
 op_backends:
-  # attention_backend: prioritize flagos (Triton attention)
+  # PPU attention requires the vendor flash_attn_3 bridge.
   attention_backend:
+    - vendor:thead
     - flagos
-    - vendor
     - reference
   rms_norm:
     - flagos
