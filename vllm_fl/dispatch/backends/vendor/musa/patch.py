@@ -103,6 +103,13 @@ def patch_accelerator_missing_attrs():
       measure peak memory. Same ``_accelerator_isAllocatorInitialized()``
       assert. Delegated to ``torch_musa.max_memory_allocated()``.
 
+    - ``memory_stats()``, ``memory_reserved()``, ``reset_peak_memory_stats()``
+      and ``get_memory_info()`` — used by vLLM's MemorySnapshot and
+      memory_profiling during worker startup. The vendor Torch 2.9 accelerator
+      allocator APIs assert on MUSA, and ``get_memory_info`` is absent.
+      Delegate to the corresponding torch_musa APIs (``mem_get_info`` for
+      ``get_memory_info``), preserving the optional device argument.
+
     - ``torch.accelerator.device_index(index)`` — used as a context manager in
       fla/ops/utils.py to pin operations to a specific device. The MUSA
       equivalent is ``torch_musa.device(index)``.
@@ -122,6 +129,13 @@ def patch_accelerator_missing_attrs():
         # max_memory_allocated is called by base_loader after model load.
         torch.accelerator.max_memory_allocated = torch_musa.max_memory_allocated
         logger.info("Patched torch.accelerator.max_memory_allocated for MUSA")
+
+        # MemorySnapshot/memory_profiling must use MUSA's allocator too.
+        torch.accelerator.memory_stats = torch_musa.memory_stats
+        torch.accelerator.memory_reserved = torch_musa.memory_reserved
+        torch.accelerator.reset_peak_memory_stats = torch_musa.reset_peak_memory_stats
+        torch.accelerator.get_memory_info = torch_musa.mem_get_info
+        logger.info("Patched torch.accelerator memory profiling APIs for MUSA")
 
         if not hasattr(torch.accelerator, 'device_index'):
             torch.accelerator.device_index = torch_musa.device
