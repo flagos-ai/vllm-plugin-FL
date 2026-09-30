@@ -205,8 +205,8 @@ def _thead_get_scheduler_metadata(
 
 
 _flash_attn_mod.get_scheduler_metadata = _thead_get_scheduler_metadata
-# The upstream CC selector chooses FA2 on CC8.0. The PPU wheel implements
-# FA3 on that device, including graph-safe AOT metadata scheduling.
+# The upstream CC8.0 selector chooses FA2. Select the PPU wheel
+# flash_attn_3 API with FA version 3.
 _flash_attn_mod.get_flash_attn_version = lambda **kwargs: 3
 
 # ---------------------------------------------------------------------------

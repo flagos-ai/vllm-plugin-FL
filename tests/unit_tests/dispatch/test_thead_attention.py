@@ -179,6 +179,10 @@ def test_paged_long_kv_eager_and_aot_match_sdpa(
     expected = _sdpa_oracle(inputs, sequence_lens)
     eager = _forward(ppu_attention, inputs, sequence_lens, num_splits=num_splits)
     scheduler = _metadata(ppu_attention, inputs, sequence_lens, num_splits)
+    assert isinstance(scheduler, torch.Tensor), (
+        f"PPU FA3 getter returned {type(scheduler).__name__}; "
+        "AOT forward was not executed. Eager output cannot validate AOT."
+    )
     aot = _forward(
         ppu_attention, inputs, sequence_lens, metadata=scheduler, num_splits=num_splits
     )
@@ -202,6 +206,10 @@ def test_aot_metadata_buffer_refreshes_long_kv_on_graph_replay(ppu_attention):
     initial_lens, next_lens = (1025, 2057), (2037, 769)
     num_splits = 4
     initial_metadata = _metadata(ppu_attention, inputs, initial_lens, num_splits)
+    assert isinstance(initial_metadata, torch.Tensor), (
+        f"PPU FA3 getter returned {type(initial_metadata).__name__}; "
+        "AOT graph capture/replay was not executed."
+    )
     assert initial_metadata.dtype == torch.int32
     assert initial_metadata.is_cuda and initial_metadata.is_contiguous()
     assert initial_metadata.ndim == 1 and initial_metadata.numel() > 0
@@ -241,6 +249,10 @@ def test_aot_metadata_buffer_refreshes_long_kv_on_graph_replay(ppu_attention):
 
     for lengths in (initial_lens, next_lens, initial_lens):
         refreshed = _metadata(ppu_attention, inputs, lengths, num_splits)
+        assert isinstance(refreshed, torch.Tensor), (
+            f"PPU FA3 refresh getter returned {type(refreshed).__name__}; "
+            "AOT metadata refresh and this graph replay were not executed."
+        )
         assert refreshed.shape == initial_metadata.shape
         metadata_buffer.zero_()
         captured_metadata.copy_(refreshed)

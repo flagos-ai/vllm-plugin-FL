@@ -84,14 +84,13 @@ class TheadBackend(Backend):
             x_float if variance_size is None else x_float[..., :variance_size]
         )
         variance = variance_input.square().mean(dim=-1, keepdim=True)
-        output = (x_float * torch.rsqrt(variance + obj.variance_epsilon)).to(
-            input_dtype
-        )
+        output = x_float * torch.rsqrt(variance + obj.variance_epsilon)
         pass_weight = getattr(
             obj, "pass_weight_add" if residual is not None else "pass_weight", True
         )
         if pass_weight:
-            output = output * obj.weight
+            output = output.to(obj.weight.dtype) * obj.weight
+        output = output.to(input_dtype)
 
         if residual is not None:
             return output, residual
@@ -108,13 +107,51 @@ class TheadBackend(Backend):
         rotary_interleaved: bool = False,
         inplace: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Apply rotary embedding using the caches supplied by RotaryEmbeddingFL."""
+        """Rotate token/head inputs or direct batch/head/sequence inputs."""
         del obj
-        cos_selected = cos[position_ids]
-        sin_selected = sin[position_ids]
-        if query.ndim in (3, 4):
+        if (
+            query.dtype != key.dtype
+            or query.device != key.device
+            or query.shape[-1] != key.shape[-1]
+        ):
+            raise ValueError(
+                "Rotary query and key must share dtype, device and head size"
+            )
+        cos_selected = cos.to(device=query.device, dtype=query.dtype)[position_ids]
+        sin_selected = sin.to(device=query.device, dtype=query.dtype)[position_ids]
+        if query.ndim == key.ndim == 3:
+            # FL normalizes its inputs to [tokens, heads, head_size].
+            if (
+                position_ids.ndim != 1
+                or query.shape[0] != key.shape[0]
+                or position_ids.shape[0] != query.shape[0]
+            ):
+                raise ValueError(
+                    "3D rotary expects token/head inputs and positions[tokens]"
+                )
             cos_selected = cos_selected.unsqueeze(1)
             sin_selected = sin_selected.unsqueeze(1)
+        elif query.ndim == key.ndim == 4:
+            # Direct 4D calls use [batch, heads, sequence, head_size].
+            if query.shape[0] != key.shape[0] or query.shape[2] != key.shape[2]:
+                raise ValueError(
+                    "4D rotary query and key must share batch and sequence"
+                )
+            if position_ids.ndim == 1 and position_ids.shape[0] == query.shape[2]:
+                cos_selected = cos_selected.unsqueeze(0).unsqueeze(0)
+                sin_selected = sin_selected.unsqueeze(0).unsqueeze(0)
+            elif position_ids.ndim == 2 and tuple(position_ids.shape) == (
+                query.shape[0],
+                query.shape[2],
+            ):
+                cos_selected = cos_selected.unsqueeze(1)
+                sin_selected = sin_selected.unsqueeze(1)
+            else:
+                raise ValueError(
+                    "4D rotary expects positions[sequence] or [batch, sequence]"
+                )
+        else:
+            raise ValueError("Rotary supports 3D token/head or 4D batch/head/sequence")
 
         if cos_selected.shape[-1] * 2 == query.shape[-1]:
             if rotary_interleaved:
