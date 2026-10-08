@@ -59,12 +59,19 @@ def _configure_musa_tp_piecewise_graph(
     *,
     all2all_backend: str,
     data_parallel_size: int,
+    device_type: str = "musa",
 ) -> None:
-    """Keep MUSA TP collectives outside stream-captured graph segments."""
-    # ProcessGroupMCCL's watchdog may call MUSA APIs while another thread is
-    # capturing a graph. Blocking wait avoids creating that watchdog thread.
-    # This must be set before the process group is constructed.
-    os.environ.setdefault("TORCH_MCCL_BLOCKING_WAIT", "1")
+    """Keep TP collectives outside stream-captured graph segments.
+
+    Shared by MUSA (MCCL) and PTPU (PCCL/FlagCX): neither vendor's collective
+    library can run while a device stream is being captured, so the TP
+    communication ops must be split out of the piecewise cudagraph.
+    """
+    if device_type == "musa":
+        # ProcessGroupMCCL's watchdog may call MUSA APIs while another thread is
+        # capturing a graph. Blocking wait avoids creating that watchdog thread.
+        # This must be set before the process group is constructed.
+        os.environ.setdefault("TORCH_MCCL_BLOCKING_WAIT", "1")
 
     # Do not enable vLLM's global input-copy wrapper here. Full-model inputs
     # have dynamic shapes and strides, while only the PIECEWISE segments after
@@ -86,7 +93,7 @@ def _configure_musa_tp_piecewise_graph(
         data_parallel_size=data_parallel_size,
     )
     assert compilation_config.splitting_ops is not None
-    for op in SPLITTING_OPS.get("musa", ()):
+    for op in SPLITTING_OPS.get(device_type, ()):
         if op not in compilation_config.splitting_ops:
             compilation_config.splitting_ops.append(op)
 
@@ -278,20 +285,22 @@ class PlatformFL(Platform):
             compilation_config.compile_sizes = []
 
         if (
-            cls.device_type == "musa"
+            cls.device_type in ("musa", "ptpu")
             and compilation_config.cudagraph_mode.has_full_cudagraphs()
         ):
             logger.info(
-                "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
-                "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
-                "is not yet supported by torch_musa. PIECEWISE graphs still "
-                "provide graph capture benefits for non-TP-communication regions.",
+                "%s: Downgrading cudagraph_mode from %s to PIECEWISE because "
+                "FULL cudagraphs require thread-local stream capture which is "
+                "not yet supported by this vendor backend. PIECEWISE graphs "
+                "still provide graph capture benefits for non-TP-communication "
+                "regions.",
+                cls.device_type.upper(),
                 compilation_config.cudagraph_mode,
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
-            cls.device_type == "musa"
+            cls.device_type in ("musa", "ptpu")
             and parallel_config.tensor_parallel_size > 1
             and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
         ):
@@ -304,10 +313,13 @@ class PlatformFL(Platform):
                 compilation_config,
                 all2all_backend=parallel_config.all2all_backend,
                 data_parallel_size=effective_dp_size,
+                device_type=cls.device_type,
             )
             logger.info(
-                "MUSA: Keeping TP collective ops outside PIECEWISE graph "
-                "capture because MCCL does not support stream capture."
+                "%s: Keeping TP collective ops outside PIECEWISE graph "
+                "capture because the vendor collective library (MCCL/PCCL) "
+                "does not support stream capture.",
+                cls.device_type.upper(),
             )
 
         if (
@@ -442,6 +454,12 @@ class PlatformFL(Platform):
             "enflame",
             "kunlunxin",
             "biren",
+            # sunrise/PTPU: opt in to the static-graph path so VllmConfig
+            # resolves a non-NONE cudagraph_mode (defaults to PIECEWISE) instead
+            # of hard-forcing NONE in the else branch (vllm/config/vllm.py).
+            # The PTPU-specific PIECEWISE downgrade / TP-collective splitting is
+            # wired in check_and_update_config + SPLITTING_OPS["ptpu"] above.
+            "sunrise",
         ]:
             return True
         return False
@@ -535,6 +553,30 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
+        # PTPU: route collectives through torch.ops.vllm.* custom ops so that
+        # Dynamo treats FlagCX/PCCL all-reduce as an opaque op (traced via its
+        # fake impl only) instead of stepping into the real communicator, whose
+        # `with self._device_ctx:` and lazy init are untraceable (gb0142). This
+        # also lets the ops be split out of piecewise cudagraphs (SPLITTING_OPS
+        # "ptpu"), keeping PCCL off the captured stream. Mirrors MUSA/CUDA.
+        #
+        # Gate on graph mode: this custom-op wrapping is only needed when
+        # torch.compile actually traces the collectives. Under enforce-eager
+        # (cudagraph_mode == NONE) there is no Dynamo tracing, so keep the
+        # stock direct-communicator path to avoid changing eager behaviour.
+        if cls.device_type == "ptpu":
+            from vllm.config import CUDAGraphMode, get_current_vllm_config_or_none
+
+            vllm_config = get_current_vllm_config_or_none()
+            if vllm_config is None:
+                # Config not resolved yet (early probe); default to the eager
+                # path — the GroupCoordinator that matters is built after
+                # check_and_update_config has finalized cudagraph_mode.
+                return False
+            return (
+                vllm_config.compilation_config.cudagraph_mode
+                != CUDAGraphMode.NONE
+            )
         return cls.vendor_name in ("nvidia", "thead", "iluvatar")
 
     @classmethod
