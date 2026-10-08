@@ -29,7 +29,9 @@ class RotaryEmbeddingFL(RotaryEmbedding):
         query: torch.Tensor,
         key: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        self.cos_sin_cache: torch.Tensor = self.cos_sin_cache.to(positions.device)
+        # Keep module buffers immutable during forward. Updating a registered
+        # buffer is forbidden when cudagraph is used inside torch.compile.
+        cos_sin_cache = self.cos_sin_cache.to(positions.device)
         positions = positions.flatten()
         num_tokens = positions.shape[0]
 
@@ -44,7 +46,7 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             query_pass = query[..., self.rotary_dim:]
             key_pass = key[..., self.rotary_dim:]
 
-        cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
+        cos, sin = cos_sin_cache.chunk(2, dim=-1)
 
         q_embed, k_embed = _rotary_embedding(
             self,
