@@ -231,6 +231,20 @@ def _make_forward_cuda_wrapper(orig_forward_cuda):
                 cache[big_key] = base
             buf = base[:num_tokens]
 
+        # Correctness (see vLLM PR #28182): upstream forward_cuda deliberately
+        # allocates core_attn_out with ``torch.zeros`` (NOT ``torch.empty``)
+        # because the core custom op only fills ``[:num_actual_tokens]``. Under
+        # cudagraph padding (num_actual_tokens < num_tokens) the tail rows are
+        # never written by the kernel and must stay zero, otherwise the
+        # subsequent per-row out_proj reads garbage from those rows -- upstream
+        # measured this as a gsm8k 0.84 -> 0.00 regression when the padded shape
+        # mix was diverse enough. Our reused buffer (cache hit or the shared
+        # grow-to-max view) still holds the previous forward's data, so we must
+        # re-zero it here to preserve that invariant. ``zero_()`` reuses the same
+        # storage (the whole point of the buffer reuse) and is captured as a
+        # memset under cudagraph.
+        buf.zero_()
+
         token = _TARGET.set((expected_shape, expected_dtype, expected_device, buf))
         try:
             return orig_forward_cuda(self, hidden_states, output)
