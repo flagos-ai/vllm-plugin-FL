@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set, Tuple
@@ -634,4 +635,8 @@ def reset_default_manager() -> None:
     global _default_manager
 
     with _manager_lock:
+        dispatch_module = sys.modules.get("vllm_fl.dispatch")
+        thaw = getattr(dispatch_module, "thaw_dispatch", None)
+        if callable(thaw):
+            thaw()
         _default_manager = None
