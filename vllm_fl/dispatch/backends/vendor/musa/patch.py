@@ -20,7 +20,9 @@ def apply_musa_patches():
     patch_topk_topp_sampler()
     patch_triton_reshape_and_cache_flash()
     patch_cuda_get_device_properties()
-    patch_accelerator_missing_attrs()
+    if not patch_accelerator_missing_attrs():
+        _patches_applied = False
+        return
     patch_cuda_stream_for_musa()
     patch_inductor_triton_for_musa()
     patch_moe_topk_softmax_for_musa()
@@ -87,7 +89,7 @@ def patch_cuda_get_device_properties():
         logger.warning("Failed to patch cuda_get_device_properties for MUSA: %s", e)
 
 
-def patch_accelerator_missing_attrs():
+def patch_accelerator_missing_attrs() -> bool:
     """Patch missing/broken torch.accelerator attributes for MUSA compatibility.
 
     Some vLLM modules call APIs that were added to torch.accelerator in newer
@@ -113,37 +115,47 @@ def patch_accelerator_missing_attrs():
     - ``torch.accelerator.device_index(index)`` — used as a context manager in
       fla/ops/utils.py to pin operations to a specific device. The MUSA
       equivalent is ``torch_musa.device(index)``.
+
+    Validate all required vendor APIs before changing bindings. Return False
+    on failure so the patch entry point can retry incomplete initialization.
     """
     try:
         import torch
         import torch_musa
 
         if getattr(torch.accelerator, "_musa_attrs_patched", False):
-            return
+            return True
 
-        # Unconditionally override: the built-in impls call
-        # _accelerator_isAllocatorInitialized() which asserts on MUSA.
-        torch.accelerator.empty_cache = torch_musa.empty_cache
-        logger.info("Patched torch.accelerator.empty_cache for MUSA")
+        vendor_names = {
+            "empty_cache": "empty_cache",
+            "max_memory_allocated": "max_memory_allocated",
+            "memory_stats": "memory_stats",
+            "memory_reserved": "memory_reserved",
+            "reset_peak_memory_stats": "reset_peak_memory_stats",
+            "get_memory_info": "mem_get_info",
+        }
+        # Preserve an existing device context; older builds need MUSA's one.
+        if not hasattr(torch.accelerator, "device_index"):
+            vendor_names["device_index"] = "device"
 
-        # max_memory_allocated is called by base_loader after model load.
-        torch.accelerator.max_memory_allocated = torch_musa.max_memory_allocated
-        logger.info("Patched torch.accelerator.max_memory_allocated for MUSA")
+        bindings = {}
+        for accelerator_name, vendor_name in vendor_names.items():
+            vendor_api = getattr(torch_musa, vendor_name)
+            if not callable(vendor_api):
+                raise TypeError(f"torch_musa.{vendor_name} must be callable")
+            bindings[accelerator_name] = vendor_api
 
-        # MemorySnapshot/memory_profiling must use MUSA's allocator too.
-        torch.accelerator.memory_stats = torch_musa.memory_stats
-        torch.accelerator.memory_reserved = torch_musa.memory_reserved
-        torch.accelerator.reset_peak_memory_stats = torch_musa.reset_peak_memory_stats
-        torch.accelerator.get_memory_info = torch_musa.mem_get_info
-        logger.info("Patched torch.accelerator memory profiling APIs for MUSA")
-
-        if not hasattr(torch.accelerator, 'device_index'):
-            torch.accelerator.device_index = torch_musa.device
-            logger.info("Patched torch.accelerator.device_index for MUSA")
+        # The built-in allocator APIs assert on MUSA. Install the complete
+        # set only after all replacements have passed validation.
+        for accelerator_name, vendor_api in bindings.items():
+            setattr(torch.accelerator, accelerator_name, vendor_api)
 
         torch.accelerator._musa_attrs_patched = True
+        logger.info("Patched torch.accelerator allocator APIs for MUSA")
+        return True
     except Exception as e:
         logger.warning("Failed to patch torch.accelerator attrs for MUSA: %s", e)
+        return False
 
 
 def patch_cuda_stream_for_musa():

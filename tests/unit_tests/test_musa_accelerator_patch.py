@@ -143,3 +143,80 @@ def test_vendor_memory_errors_are_not_hidden(monkeypatch, musa_patch, vendor_mod
     with pytest.raises(RuntimeError, match="MUSA device is unavailable"):
         torch.accelerator.get_memory_info(device=2)
     musa.mem_get_info.assert_called_once_with(device=2)
+
+
+@pytest.mark.parametrize(
+    "vendor_name",
+    [
+        "empty_cache",
+        "max_memory_allocated",
+        "memory_stats",
+        "memory_reserved",
+        "reset_peak_memory_stats",
+        "mem_get_info",
+        "device",
+    ],
+)
+@pytest.mark.parametrize("invalid_api", ["missing", "not_callable"])
+def test_invalid_vendor_api_leaves_original_bindings_and_allows_retry(
+    monkeypatch, musa_patch, vendor_modules, caplog, vendor_name, invalid_api
+):
+    torch, musa = vendor_modules
+    original = vars(torch.accelerator).copy()
+    vendor_api = getattr(musa, vendor_name)
+    if invalid_api == "missing":
+        delattr(musa, vendor_name)
+    else:
+        setattr(musa, vendor_name, None)
+
+    _apply_patch(monkeypatch, musa_patch, vendor_modules)
+
+    assert vars(torch.accelerator) == original
+    assert not getattr(torch.accelerator, "_musa_attrs_patched", False)
+    assert "Failed to patch torch.accelerator attrs for MUSA" in caplog.text
+
+    setattr(musa, vendor_name, vendor_api)
+    _apply_patch(monkeypatch, musa_patch, vendor_modules)
+    assert torch.accelerator._musa_attrs_patched is True
+    assert torch.accelerator.get_memory_info is musa.mem_get_info
+    assert torch.accelerator.device_index is musa.device
+
+
+def test_patch_entry_point_retries_after_incomplete_vendor_api(
+    monkeypatch, musa_patch, vendor_modules
+):
+    torch, musa = vendor_modules
+    original = vars(torch.accelerator).copy()
+    memory_info = musa.mem_get_info
+    del musa.mem_get_info
+    other_patches = [
+        "patch_topk_topp_sampler",
+        "patch_triton_reshape_and_cache_flash",
+        "patch_cuda_get_device_properties",
+        "patch_cuda_stream_for_musa",
+        "patch_inductor_triton_for_musa",
+        "patch_moe_topk_softmax_for_musa",
+        "patch_triton_mtgpu_alias_for_musa",
+        "patch_device_config_for_musa",
+    ]
+    for name in other_patches:
+        monkeypatch.setattr(musa_patch, name, Mock())
+
+    with monkeypatch.context() as imports:
+        imports.setitem(sys.modules, "torch", torch)
+        imports.setitem(sys.modules, "torch_musa", musa)
+        musa_patch.apply_musa_patches()
+        assert musa_patch._patches_applied is False
+        assert vars(torch.accelerator) == original
+
+        musa.mem_get_info = memory_info
+        musa_patch.apply_musa_patches()
+        assert musa_patch._patches_applied is True
+        assert torch.accelerator._musa_attrs_patched is True
+        assert torch.accelerator.get_memory_info is memory_info
+
+        calls = {name: getattr(musa_patch, name).call_count for name in other_patches}
+        musa_patch.apply_musa_patches()
+        assert calls == {
+            name: getattr(musa_patch, name).call_count for name in other_patches
+        }
