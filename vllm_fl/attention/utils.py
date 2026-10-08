@@ -16,8 +16,8 @@ def patch_mm_encoder_attention():
     fallback to flash_attn.
     """
     import vllm.model_executor.layers.attention.mm_encoder_attention as mm_mod
-    from vllm.v1.attention.backends.registry import AttentionBackendEnum
     from vllm.platforms import current_platform
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
     if getattr(current_platform, "vendor_name", None) == "kunlunxin":
         import torch
@@ -25,6 +25,14 @@ def patch_mm_encoder_attention():
 
         def _apply_chunked_sdpa(q, k, v, scale, enable_gqa):
             """Run exact SDPA while bounding the materialized score matrix."""
+            from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.mm_encoder_attention import (
+                try_native_large_mm_attention,
+            )
+
+            native_output = try_native_large_mm_attention(q, k, v, scale)
+            if native_output is not None:
+                return native_output
+
             q = q.permute(0, 2, 1, 3)
             k = k.permute(0, 2, 1, 3)
             v = v.permute(0, 2, 1, 3)
@@ -34,7 +42,9 @@ def patch_mm_encoder_attention():
                 k_batch = k[batch_idx : batch_idx + 1]
                 v_batch = v[batch_idx : batch_idx + 1]
                 query_outputs = []
-                for start in range(0, q_batch.size(2), _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE):
+                for start in range(
+                    0, q_batch.size(2), _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE
+                ):
                     query_outputs.append(
                         F.scaled_dot_product_attention(
                             q_batch[
