@@ -236,13 +236,21 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
                 state_metadata.block_size,
             )
 
+        num_tokens = positions.shape[0]
+        compressed_slots = compressed_metadata.slot_mapping[:num_tokens].long()
+        active = ((positions + 1).remainder(ratio) == 0) & (compressed_slots >= 0)
+        if not active.any():
+            return
+        positions = positions[active]
+        compressed_slots = compressed_slots[active]
+
         window = coff * ratio
         offsets = torch.arange(window, device=positions.device)
         history_pos = positions[:, None] - window + 1 + offsets[None, :]
         history_valid = history_pos >= 0
         safe_pos = history_pos.clamp_min(0)
         assert state_metadata.token_to_req_indices is not None
-        request_ids = state_metadata.token_to_req_indices[: positions.shape[0]].long()
+        request_ids = state_metadata.token_to_req_indices[:num_tokens][active].long()
         state_block_size = state_metadata.block_size
         state_blocks = state_metadata.block_table[
             request_ids[:, None], safe_pos // state_block_size
@@ -283,16 +291,12 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
         ).flatten(-2)
         compressed = torch.cat((compressed[:, :-rope_dim], rotated), dim=-1)
 
-        compressed_slots = compressed_metadata.slot_mapping[: positions.shape[0]].long()
-        boundary = (positions + 1).remainder(ratio) == 0
-        valid_compressed = boundary & (compressed_slots >= 0)
-        if valid_compressed.any():
-            _store_cache_rows(
-                self.kv_cache,
-                compressed_slots[valid_compressed],
-                compressed[valid_compressed],
-                compressed_metadata.block_size // ratio,
-            )
+        _store_cache_rows(
+            self.kv_cache,
+            compressed_slots,
+            compressed,
+            compressed_metadata.block_size // ratio,
+        )
 
     def _prepare_and_attn(
         self,
