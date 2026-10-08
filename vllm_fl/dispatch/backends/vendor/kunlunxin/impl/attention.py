@@ -17,7 +17,6 @@ KV cache layout HND by default: (2, num_blocks, num_kv_heads, block_size, head_s
 
 from __future__ import annotations
 
-import os
 import logging
 import math
 from dataclasses import dataclass
@@ -82,6 +81,26 @@ def _is_full_graph_runtime() -> bool:
         )
     except Exception:
         return False
+
+
+def _requires_flash_kv_cache(vllm_config: VllmConfig) -> bool:
+    """Return whether full-attention layers share a hybrid model KV cache.
+
+    Qwen3-Next/Qwen3.5-style models alternate linear-attention and
+    full-attention layers. Their full-attention cache uses the flash layout,
+    while ordinary Transformer models use the standard paged-cache layout.
+    Deriving this from ``layer_types`` keeps one launch configuration valid
+    for both model families.
+    """
+    layer_types = getattr(
+        vllm_config.model_config.hf_text_config,
+        "layer_types",
+        None,
+    )
+    if not layer_types:
+        return False
+    layer_types = set(layer_types)
+    return {"linear_attention", "full_attention"}.issubset(layer_types)
 
 
 def _prepare_full_graph_kv_write(
@@ -209,6 +228,9 @@ class KunlunxinMetadata:
     # for spec decode api
     is_spec_decode: Optional[bool] = False
 
+    # Hybrid linear/full-attention models use the flash KV-cache layout.
+    use_flash_kv_cache: bool = False
+
     def __post_init__(self):
         # Set during the execution of the first attention op.
         # It is a list because it is needed to set per prompt
@@ -304,6 +326,7 @@ class KunlunxinMetadata:
             max_encoder_seq_len=self.max_encoder_seq_len,
             cross_slot_mapping=self.cross_slot_mapping,
             cross_block_tables=self.cross_block_tables,
+            use_flash_kv_cache=self.use_flash_kv_cache,
             enable_kv_scales_calculation=False)
         return self._cached_prefill_metadata
 
@@ -384,6 +407,7 @@ class KunlunxinMetadata:
             max_encoder_seq_len=self.max_encoder_seq_len,
             cross_slot_mapping=self.cross_slot_mapping,
             cross_block_tables=self.cross_block_tables,
+            use_flash_kv_cache=self.use_flash_kv_cache,
             enable_kv_scales_calculation=False,
             is_spec_decode=self.is_spec_decode)
         return self._cached_decode_metadata
@@ -403,6 +427,7 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
                  device: torch.device):
         self.device = device
         self.is_spec_decode = vllm_config.speculative_config is not None
+        self.use_flash_kv_cache = _requires_flash_kv_cache(vllm_config)
         if self.is_spec_decode:
             self.reorder_batch_threshold = 1 + vllm_config.speculative_config.num_speculative_tokens
 
@@ -502,6 +527,7 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
             context_lens_tensor=None,
             block_tables=block_table_tensor,
             use_cuda_graph=False,
+            use_flash_kv_cache=self.use_flash_kv_cache,
             is_spec_decode=self.is_spec_decode,
         )
 
@@ -876,7 +902,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory
             # profiling run.
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
+            if attn_metadata.use_flash_kv_cache:
                 key_cache, value_cache = KunlunxinPagedAttention.split_kv_cache(
                     kv_cache, self.num_kv_heads, self.head_size
                 )
@@ -951,7 +977,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
 
         if num_decode_tokens != 0:
             decode_meta = attn_metadata.decode_metadata
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
+            if attn_metadata.use_flash_kv_cache:
                 # For hybrid Attention (Qwen3-Next, Qwen3.5)
                 tmp_block_tables = (
                     decode_meta.block_tables * 2
@@ -1027,7 +1053,7 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
         # prefix cache part
         if actual_query_start_loc_host[-1] != kv_prefix_start_loc_host[-1]:
             max_kv_len = attn_metadata.max_kv_len
-            if os.environ.get("USE_RESHAPE_AND_CACHE_FLASH", "0") == "1":
+            if attn_metadata.use_flash_kv_cache:
                 # For hybrid Attention (Qwen3-Next, Qwen3.5)
                 tmp_block_tables = (attn_metadata.block_tables * 2)
             else:

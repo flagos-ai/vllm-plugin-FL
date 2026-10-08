@@ -84,6 +84,7 @@ flagos_blacklist:
   - _flash_attention_backward
   - _safe_softmax
   - _scaled_dot_product_attention_math
+  - _scaled_dot_product_flash_attention
   - _scaled_dot_product_flash_attention_backward
   - argmax
   - bmm
@@ -105,6 +106,8 @@ flagos_blacklist:
   - softmax
   - sort
   - topk_softmax
+  # FlagGems RoPE produces incorrect Qwen3 token semantics on Kunlunxin.
+  - rotary_embedding
   - attention_backend
   # --- OOT ops never registered through FlagGems ---
   - chunk_gated_delta_rule_fwd
