@@ -24,7 +24,6 @@ try:
     from flagcx.api import (
         FLAGCXLibrary,
         buffer_type,
-        flagcxComm_t,
         flagcxDataTypeEnum,
         flagcxUniqueId,
         flagcxRedOpTypeEnum,
@@ -41,7 +40,6 @@ except (ImportError, ModuleNotFoundError):
         from plugin.interservice.flagcx_wrapper import (
             FLAGCXLibrary,
             buffer_type,
-            flagcxComm_t,
             flagcxDataTypeEnum,
             flagcxUniqueId,
             flagcxRedOpTypeEnum,
@@ -51,7 +49,6 @@ except (ImportError, ModuleNotFoundError):
         _flagcx_available = False
         FLAGCXLibrary = None
         buffer_type = None
-        flagcxComm_t = None
         flagcxDataTypeEnum = None
         flagcxUniqueId = None
         flagcxRedOpTypeEnum = None
