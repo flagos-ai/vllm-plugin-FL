@@ -135,10 +135,12 @@ def test_compressed_and_swa_keys_share_attention_softmax(
     assert output[0, 0, 0] > 0
 
 
-@pytest.mark.parametrize("ratio,num_tokens", [(4, 8), (128, 128)])
+@pytest.mark.parametrize(
+    "ratio,num_tokens,state_block_size", [(4, 8, 4), (128, 128, 128), (128, 128, 8)]
+)
 @pytest.mark.parametrize("device", ["cpu", "npu"])
 def test_compressed_bf16_cache_matches_reference(
-    monkeypatch, ratio, num_tokens, device
+    monkeypatch, ratio, num_tokens, state_block_size, device
 ):
     if device == "npu" and (
         not getattr(torch, "npu", None) or not torch.npu.is_available()
@@ -155,8 +157,16 @@ def test_compressed_bf16_cache_matches_reference(
     ape = ape_cpu.to(device)
     norm_weight = norm_weight_cpu.to(device)
     positions = torch.arange(num_tokens, device=device)
+    num_state_blocks = (num_tokens + state_block_size - 1) // state_block_size
+    state_block_table = torch.arange(num_state_blocks, device=device).flip(0)
+    state_slots = (
+        state_block_table[positions // state_block_size] * state_block_size
+        + positions % state_block_size
+    )
     state_cache = torch.zeros(
-        (1, 128, 2 * state_width), dtype=torch.float32, device=device
+        (num_state_blocks, state_block_size, 2 * state_width),
+        dtype=torch.float32,
+        device=device,
     )
     compressed_cache = torch.zeros(
         (1, 128 // ratio, head_dim), dtype=torch.bfloat16, device=device
@@ -166,10 +176,10 @@ def test_compressed_bf16_cache_matches_reference(
     for slot, position in enumerate(boundaries):
         compressed_slots[position] = slot
     state_metadata = SimpleNamespace(
-        slot_mapping=positions,
+        slot_mapping=state_slots,
         token_to_req_indices=torch.zeros(num_tokens, dtype=torch.int32, device=device),
-        block_table=torch.tensor([[0]], device=device),
-        block_size=128,
+        block_table=state_block_table.unsqueeze(0),
+        block_size=state_block_size,
     )
     compressed_metadata = SimpleNamespace(slot_mapping=compressed_slots, block_size=128)
     monkeypatch.setattr(
