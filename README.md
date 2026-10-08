@@ -32,6 +32,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
+| HY4 preview | Merging (NVIDIA) | [installation](#hy4-on-nvidia) |
 
 ### Supported Chips
 
@@ -184,6 +185,29 @@ If there are multiple plugins in the current environment, you can specify use vl
 
     Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
 
+
+### HY4 on NVIDIA
+
+HY4 is paired with this branch's vLLM 0.24.0 environment. Install the HY4 extra
+after installing the framework and FlagGems dependencies described above:
+
+```sh
+pip install --no-build-isolation '.[hy4]'
+```
+
+The extra pins the public MLA query concatenation API and TLE capability checks
+from [FlagGems-vllm #897](https://github.com/flagos-ai/FlagGems-vllm/pull/897) to
+commit `e24933fc80dcd6ba2d687f6b4fceeb87a94483fa`. Sparse indexer, cache and attention
+replacements also use `flaggems_vllm`; query quantization uses general FlagGems.
+Runtime selection checks callable APIs, device kernels and the shared dispatch
+policy before allocating model weights. A selected operator's execution error
+propagates without retrying another implementation.
+
+Use `hy4_safetensors` to load the preview checkpoint with expert slicing. The
+portable path requires BF16 KV (`auto` with a BF16 model, or `bfloat16`); FP8 KV
+requires the complete native sparse/cache/prefill path. Shared indexers require
+pipeline parallel size 1. The [checkpoint smoke configuration](./tests/models/hy4/fp8_tp16.yaml)
+requires 16 NVIDIA GPUs; the single-GPU dummy smoke checks model integration.
 
 ### Run a Task
 
