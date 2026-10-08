@@ -13,6 +13,7 @@ from vllm.models.deepseek_v4.sparse_mla import (
     DeepseekV4SparseMLABackend,
     DeepseekV4SparseMLAMetadataBuilder,
 )
+from vllm.platforms import current_platform
 from vllm.v1.attention.backends.mla.sparse_swa import (
     DeepseekSparseSWABackend,
     DeepseekSparseSWAMetadata,
@@ -467,11 +468,13 @@ def _install_hc_head_fallback() -> None:
     HCHeadOp._vllm_fl_ascend = True
 
 
-_install_hc_head_fallback()
+if current_platform.device_type == "npu":
+    _install_hc_head_fallback()
 
 from vllm.models.deepseek_v4.xpu import model as _xpu_model  # noqa: E402
 
-_xpu_model.DeepseekV4XPUAttention = DeepseekV4FLAttention
+if current_platform.device_type == "npu":
+    _xpu_model.DeepseekV4XPUAttention = DeepseekV4FLAttention
 
 
 class DeepseekV4ForCausalLM(_xpu_model.DeepseekV4ForCausalLM):

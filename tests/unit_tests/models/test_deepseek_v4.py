@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+pytest.importorskip("torch_npu")
+
 from vllm_fl.models import deepseek_v4
 from vllm_fl.models.deepseek_v4 import (
     DeepseekV4FLAttention,
