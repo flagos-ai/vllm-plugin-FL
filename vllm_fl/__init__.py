@@ -271,6 +271,13 @@ def register_model():
 
     apply_qwen3_5_text_patches()
 
+    # MiniCPM-V 4.7 is not registered by vLLM 0.24. Its vision stack is
+    # compatible with the 4.6 implementation shipped by that release, while
+    # its text tower can be either Qwen3.5 dense or Qwen3.5 MoE.
+    from vllm_fl.models.minicpmv4_7 import register_minicpmv4_7
+
+    register_minicpmv4_7()
+
     from vllm.platforms import current_platform
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
         from vllm_fl.patches.arm_cpu_gdn import (
