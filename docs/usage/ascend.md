@@ -12,7 +12,7 @@ for larger models.
 |---|---|
 | Prebuilt CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` |
 | Image manifest | `sha256:d80f4616b04fda507ce6d9dc54d36983d4ef134730bb9305b45409931260d688` |
-| Plugin source and dispatch policy | `65b46e41b8622913bf81398c7ad546da5e90de94` |
+| Plugin source and dispatch policy | `86d32aaac3dc568014e9734ea17596ce17a2b784` |
 | Base image | `quay.io/ascend/vllm-ascend:v0.20.2rc1-a3` |
 | CANN | `9.0.0` |
 | Python | `3.11.15` on aarch64 |
@@ -68,7 +68,7 @@ the host outside the container:
 git clone https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
 git fetch origin refs/pull/487/head
-export PLUGIN_REVISION=65b46e41b8622913bf81398c7ad546da5e90de94
+export PLUGIN_REVISION=86d32aaac3dc568014e9734ea17596ce17a2b784
 git checkout --detach "$PLUGIN_REVISION"
 test "$(git rev-parse HEAD)" = "$PLUGIN_REVISION"
 test -f vllm_fl/dispatch/config/ascend.yaml
