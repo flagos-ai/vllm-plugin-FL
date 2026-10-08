@@ -536,7 +536,12 @@ Currently supported operators:
 | `silu_and_mul` | SiLU activation + element-wise multiplication | ✓ | ✓ | ✓ |
 | `rms_norm` | RMS normalization | ✓ | ✓ | ✓ |
 | `rotary_embedding` | Rotary position embedding | ✓ | ✓ | ✓ |
+| `apply_rotary_emb` | Single-tensor RoPE, including partial rotary dimensions | ✓ | ✓ | CUDA |
 | `attention_backend` | Attention backend class path | ✓ | - | ✓ |
+
+`apply_rotary_emb` has its own backend policy because its single-tensor interface
+differs from `rotary_embedding`'s Q/K interface. The existing FlagGems
+`rotary_embedding` enable/disable switch controls both interfaces.
 
 ## Selection Process
 

@@ -42,6 +42,10 @@ op_backends:
     - flagos
     - vendor
     - reference
+  apply_rotary_emb:
+    - flagos
+    - vendor
+    - reference
 
 # FlagOS operator blacklist
 flagos_blacklist:

@@ -9,6 +9,13 @@ from __future__ import annotations
 import torch
 
 
+def apply_rotary_emb_cuda(
+    obj, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> torch.Tensor:
+    """Use vLLM's CUDA kernel, which supports partial rotary dimensions."""
+    return obj.forward_cuda(x, cos, sin)
+
+
 def rotary_embedding_cuda(
     obj,
     query: torch.Tensor,

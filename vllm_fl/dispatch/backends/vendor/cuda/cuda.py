@@ -158,6 +158,13 @@ class CudaBackend(Backend):
             inplace=inplace,
         )
 
+    def apply_rotary_emb(
+        self, obj, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+    ) -> torch.Tensor:
+        from .impl.rotary import apply_rotary_emb_cuda
+
+        return apply_rotary_emb_cuda(obj, x, cos, sin)
+
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for CUDA.

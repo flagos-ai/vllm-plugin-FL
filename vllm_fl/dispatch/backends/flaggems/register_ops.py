@@ -97,6 +97,14 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        OpImpl(
+            op_name="apply_rotary_emb",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.apply_rotary_emb, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # Attention Backend
         OpImpl(
             op_name="attention_backend",
@@ -153,5 +161,13 @@ def register_builtins(registry) -> None:
         ),
     ]
 
-    filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
+    # Keep the existing rotary_embedding FlagGems switch for both vLLM RoPE
+    # interfaces; dispatch uses separate names because their signatures differ.
+    filtered = [
+        impl
+        for impl in impls
+        if use_flaggems_op(
+            "rotary_embedding" if impl.op_name == "apply_rotary_emb" else impl.op_name
+        )
+    ]
     registry.register_many(filtered)

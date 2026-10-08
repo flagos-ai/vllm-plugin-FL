@@ -28,6 +28,10 @@ op_backends:
     - flagos
     - vendor
     - reference
+  apply_rotary_emb:
+    - flagos
+    - vendor
+    - reference
 
 flagos_blacklist:
   - index_put_

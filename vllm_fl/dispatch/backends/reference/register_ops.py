@@ -45,6 +45,7 @@ def register_builtins(registry) -> None:
         "gelu_and_mul",
         "rms_norm",
         "rotary_embedding",
+        "apply_rotary_emb",
         "attention_backend",
         "moe_align_block_size",
         "moe_sum",

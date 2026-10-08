@@ -125,3 +125,14 @@ def patch_mm_encoder_attention():
             return None
 
     mm_mod.maybe_get_vit_flash_attn_backend = _patched_maybe_get_vit_flash_attn_backend
+
+
+def patch_oot_apply_rotary_emb():
+    """Bind ApplyRotaryEmb to FL dispatch before model construction."""
+
+    from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
+
+    from vllm_fl.ops.rotary_embedding import apply_rotary_emb_dispatch
+
+    ApplyRotaryEmb.forward_oot = apply_rotary_emb_dispatch
+    logger.info_once("Routing ApplyRotaryEmb through FL dispatch")
