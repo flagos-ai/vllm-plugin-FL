@@ -377,6 +377,132 @@ def test_flaggems_six_argument_rotary_preserves_inplace_contract(monkeypatch):
     assert len(calls) == 3
 
 
+@pytest.mark.parametrize("inplace", [False, True])
+@pytest.mark.parametrize("interleaved", [False, True])
+def test_flaggems_six_argument_rotary_compacts_packed_partial_views(
+    monkeypatch, inplace, interleaved
+):
+    def ascend_apply_rotary_pos_emb(
+        query, key, cos, sin, position_ids=None, rotary_interleaved=False
+    ):
+        # The pinned kernel uses the input strides when writing empty_like
+        # outputs. That addressing is safe only when their strides match.
+        query_output = torch.empty_like(query)
+        key_output = torch.empty_like(key)
+        assert query.stride() == query_output.stride()
+        assert key.stride() == key_output.stride()
+        query_output.copy_(
+            _expected_rotary(query, cos, sin, position_ids, rotary_interleaved)
+        )
+        key_output.copy_(
+            _expected_rotary(key, cos, sin, position_ids, rotary_interleaved)
+        )
+        return query_output, key_output
+
+    _install_fake_flaggems(
+        monkeypatch,
+        ascend_apply_rotary_pos_emb,
+        lambda *args, **kwargs: pytest.fail("unexpected common RoPE wrapper"),
+    )
+    flaggems_rotary._supports_inplace_argument.cache_clear()
+
+    # Q and K use only the first eight dimensions of packed QKV heads. The
+    # token/head strides retain the full packed width and are not compact.
+    packed = torch.randn(4, 3, 2, 16, dtype=torch.bfloat16)
+    packed_before = packed.clone()
+    query = packed[:, 0, :, :8]
+    key = packed[:, 1, :, :8]
+    assert not query.is_contiguous()
+    assert not key.is_contiguous()
+    _, _, cos, sin, positions = _rotary_inputs(torch.bfloat16)
+    expected_query = _expected_rotary(query, cos, sin, positions, interleaved)
+    expected_key = _expected_rotary(key, cos, sin, positions, interleaved)
+
+    actual_query, actual_key = flaggems_rotary.rotary_embedding_flaggems(
+        None,
+        query,
+        key,
+        cos,
+        sin,
+        positions,
+        rotary_interleaved=interleaved,
+        inplace=inplace,
+    )
+
+    torch.testing.assert_close(actual_query, expected_query)
+    torch.testing.assert_close(actual_key, expected_key)
+    if inplace:
+        assert actual_query is query
+        assert actual_key is key
+        torch.testing.assert_close(packed[:, 0, :, 8:], packed_before[:, 0, :, 8:])
+        torch.testing.assert_close(packed[:, 1, :, 8:], packed_before[:, 1, :, 8:])
+        torch.testing.assert_close(packed[:, 2], packed_before[:, 2])
+    else:
+        assert actual_query is not query
+        assert actual_key is not key
+        torch.testing.assert_close(packed, packed_before)
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+@pytest.mark.parametrize("interleaved", [False, True])
+def test_flaggems_ascend_rotary_packed_partial_views_on_npu(inplace, interleaved):
+    pytest.importorskip("torch_npu")
+    if not torch.npu.is_available():
+        pytest.skip("Ascend NPU is unavailable")
+    import flag_gems
+    from flag_gems.config import use_c_extension
+
+    assert flag_gems.vendor_name == "ascend"
+    assert not use_c_extension
+    assert not flaggems_rotary._supports_inplace_argument(
+        flag_gems.apply_rotary_pos_emb
+    )
+
+    packed_cpu = torch.randn(4, 3, 2, 16, dtype=torch.float32).to(torch.bfloat16)
+    packed = packed_cpu.to("npu")
+    query = packed[:, 0, :, :8]
+    key = packed[:, 1, :, :8]
+    assert not query.is_contiguous() and not key.is_contiguous()
+    _, _, cos_cpu, sin_cpu, positions_cpu = _rotary_inputs(torch.bfloat16)
+    expected_query = _expected_rotary(
+        packed_cpu[:, 0, :, :8].float(),
+        cos_cpu.float(),
+        sin_cpu.float(),
+        positions_cpu,
+        interleaved,
+    ).to(torch.bfloat16)
+    expected_key = _expected_rotary(
+        packed_cpu[:, 1, :, :8].float(),
+        cos_cpu.float(),
+        sin_cpu.float(),
+        positions_cpu,
+        interleaved,
+    ).to(torch.bfloat16)
+
+    actual_query, actual_key = flaggems_rotary.rotary_embedding_flaggems(
+        None,
+        query,
+        key,
+        cos_cpu.to("npu"),
+        sin_cpu.to("npu"),
+        positions_cpu.to("npu"),
+        rotary_interleaved=interleaved,
+        inplace=inplace,
+    )
+    torch.npu.synchronize()
+
+    torch.testing.assert_close(actual_query.cpu(), expected_query, rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(actual_key.cpu(), expected_key, rtol=1e-2, atol=1e-2)
+    if inplace:
+        assert actual_query is query and actual_key is key
+        torch.testing.assert_close(packed[:, 0, :, 8:].cpu(), packed_cpu[:, 0, :, 8:])
+        torch.testing.assert_close(packed[:, 1, :, 8:].cpu(), packed_cpu[:, 1, :, 8:])
+        torch.testing.assert_close(packed[:, 2].cpu(), packed_cpu[:, 2])
+    else:
+        assert actual_query is not query and actual_key is not key
+        torch.testing.assert_close(packed.cpu(), packed_cpu)
+
+
 def test_six_argument_rotary_compatibility_is_ascend_only(monkeypatch):
     def six_argument_rotary(query, key, cos, sin, positions, interleaved):
         raise AssertionError("non-Ascend backend must use the common wrapper")

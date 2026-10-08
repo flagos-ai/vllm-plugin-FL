@@ -15,6 +15,14 @@ from vllm_fl.dispatch.backends.vendor.ascend.patches import triton_compat
 def test_apply_ascend_patches_installs_mamba_batch_memcpy(monkeypatch):
     from vllm.v1.worker import mamba_utils
 
+    create_func = mamba_utils.MambaCopyBuffers.create.__func__
+    if getattr(create_func, "_vllm_fl_ascend_patched", False):
+        # Keep the test independent of earlier patch installation.
+        monkeypatch.setattr(
+            mamba_utils.MambaCopyBuffers,
+            "create",
+            classmethod(create_func.__wrapped__.__func__),
+        )
     sentinel = object()
     monkeypatch.setattr(mamba_utils, "batch_memcpy", sentinel)
     monkeypatch.setattr(mamba_utils, "batch_memcpy_kernel", sentinel)
@@ -33,6 +41,94 @@ def test_apply_ascend_patches_installs_mamba_batch_memcpy(monkeypatch):
 
     assert mamba_utils.batch_memcpy is batch_memcpy_impl.batch_memcpy
     assert mamba_utils.batch_memcpy_kernel is batch_memcpy_impl.batch_memcpy_kernel
+
+
+def test_mamba_patch_rolls_back_after_partial_install(monkeypatch):
+    from vllm.v1 import worker
+
+    owner_calls = []
+
+    class Buffers:
+        @classmethod
+        def create(cls, max_num_reqs, kv_cache_config, copy_funcs, make_buffer):
+            owner_calls.append(cls)
+            return make_buffer(max_num_reqs, dtype=torch.uint64)
+
+    original_create = vars(Buffers)["create"]
+    original_kernel = object()
+    original_memcpy = object()
+
+    class RejectLastAssignment:
+        def __init__(self):
+            self.MambaCopyBuffers = Buffers
+            self.batch_memcpy_kernel = original_kernel
+            self.batch_memcpy = original_memcpy
+            self.fail_once = True
+
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+            if name == "batch_memcpy" and getattr(self, "fail_once", False):
+                object.__setattr__(self, "fail_once", False)
+                raise RuntimeError("injected installation failure")
+
+    fake_utils = RejectLastAssignment()
+    monkeypatch.setattr(worker, "mamba_utils", fake_utils)
+
+    assert ascend_patch.patch_mamba_batch_memcpy() is False
+    assert vars(Buffers)["create"] is original_create
+    assert fake_utils.batch_memcpy_kernel is original_kernel
+    assert fake_utils.batch_memcpy is original_memcpy
+
+    assert ascend_patch.patch_mamba_batch_memcpy() is True
+    installed_create = vars(Buffers)["create"]
+    assert installed_create.__func__.__wrapped__.__func__ is original_create.__func__
+    assert fake_utils.batch_memcpy_kernel is batch_memcpy_impl.batch_memcpy_kernel
+    assert fake_utils.batch_memcpy is batch_memcpy_impl.batch_memcpy
+    assert Buffers.create(1, None, None, lambda size, *, dtype: dtype) == torch.int64
+    assert owner_calls == [Buffers]
+
+    assert ascend_patch.patch_mamba_batch_memcpy() is True
+    assert vars(Buffers)["create"] is installed_create
+    assert fake_utils.batch_memcpy_kernel is batch_memcpy_impl.batch_memcpy_kernel
+    assert fake_utils.batch_memcpy is batch_memcpy_impl.batch_memcpy
+
+
+def test_mamba_patch_does_not_publish_when_create_lookup_fails(monkeypatch):
+    from vllm.v1 import worker
+
+    class BrokenMeta(type):
+        @property
+        def create(cls):
+            raise RuntimeError("injected descriptor failure")
+
+    class Buffers(metaclass=BrokenMeta):
+        pass
+
+    fake_utils = SimpleNamespace(
+        MambaCopyBuffers=Buffers,
+        batch_memcpy_kernel=object(),
+        batch_memcpy=object(),
+    )
+    original_kernel = fake_utils.batch_memcpy_kernel
+    original_memcpy = fake_utils.batch_memcpy
+    monkeypatch.setattr(worker, "mamba_utils", fake_utils)
+
+    assert ascend_patch.patch_mamba_batch_memcpy() is False
+    assert fake_utils.batch_memcpy_kernel is original_kernel
+    assert fake_utils.batch_memcpy is original_memcpy
+
+
+def test_failed_mamba_install_leaves_apply_retryable(monkeypatch):
+    monkeypatch.setattr(ascend_patch, "_patches_applied", False)
+    monkeypatch.setattr(
+        "vllm_fl.dispatch.backends.vendor.ascend.patches.triton_compat.patch_triton_compile_hooks",
+        lambda: None,
+    )
+    monkeypatch.setattr(ascend_patch, "patch_topk_topp_sampler", lambda: None)
+    monkeypatch.setattr(ascend_patch, "patch_mamba_batch_memcpy", lambda: False)
+
+    ascend_patch.apply_ascend_patches()
+    assert ascend_patch._patches_applied is False
 
 
 def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):

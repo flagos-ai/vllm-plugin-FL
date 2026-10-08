@@ -44,6 +44,12 @@ op_backends:
     - vendor
     - flagos
     - reference
+  grouped_moe_experts:
+    - vendor:ascend
+  w8a8_moe_experts:
+    - vendor:ascend
+    - flagos
+    - reference
 
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.

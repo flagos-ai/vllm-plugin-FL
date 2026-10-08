@@ -59,9 +59,15 @@ def rotary_embedding_flaggems(
         and not use_c_extension
         and not _supports_inplace_argument(flag_gems.apply_rotary_pos_emb)
     ):
+        # The pinned Ascend kernel addresses its outputs with the input
+        # strides, even though it allocates them with empty_like(). Packed
+        # QKV/partial-RoPE views can have gaps that empty_like() removes.
+        # Pass compact work tensors so the input and output strides agree.
+        query_work = query.contiguous()
+        key_work = key.contiguous()
         q_embed, k_embed = flag_gems.apply_rotary_pos_emb(
-            query,
-            key,
+            query_work,
+            key_work,
             cos,
             sin,
             position_ids,

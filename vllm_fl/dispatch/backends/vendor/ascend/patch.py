@@ -1,6 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 import logging
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
@@ -11,17 +12,18 @@ def apply_ascend_patches():
     global _patches_applied
     if _patches_applied:
         return
-    _patches_applied = True
     from .patches.triton_compat import patch_triton_compile_hooks
 
     patch_triton_compile_hooks()
     patch_topk_topp_sampler()
     # Patch modules for Ascend platform
-    patch_mamba_batch_memcpy()
+    if not patch_mamba_batch_memcpy():
+        return
     patch_causal_conv1d()
     patch_fla_ops()
     patch_op_cls()
     patch_fused_moe()
+    _patches_applied = True
 
 
 def patch_topk_topp_sampler():
@@ -38,7 +40,7 @@ def patch_topk_topp_sampler():
         logger.warning("Failed to patch the top-k/top-p sampler: %s", exc)
 
 
-def patch_mamba_batch_memcpy():
+def patch_mamba_batch_memcpy() -> bool:
     """Replace vLLM's Mamba state copy with the Ascend-safe Triton kernel."""
     try:
         import torch
@@ -47,39 +49,91 @@ def patch_mamba_batch_memcpy():
 
         from .impl.batch_memcpy import batch_memcpy, batch_memcpy_kernel
 
-        mamba_utils.batch_memcpy_kernel = batch_memcpy_kernel
-        mamba_utils.batch_memcpy = batch_memcpy
-
-        create = mamba_utils.MambaCopyBuffers.create
+        buffers_cls = mamba_utils.MambaCopyBuffers
+        create = buffers_cls.create
+        if not callable(create):
+            raise TypeError("MambaCopyBuffers.create is not callable")
         create_func = getattr(create, "__func__", create)
-        if not getattr(create_func, "_vllm_fl_ascend_patched", False):
-            original_create = create
+        if getattr(create_func, "_vllm_fl_ascend_patched", False):
+            # A subsequent owner may have wrapped either function. Do not
+            # replace its objects or claim success if the contract was lost.
+            complete = _wraps_target(mamba_utils.batch_memcpy, batch_memcpy) and (
+                _wraps_target(mamba_utils.batch_memcpy_kernel, batch_memcpy_kernel)
+            )
+            if not complete:
+                logger.warning("Mamba state-copy patch is only partially installed")
+            return complete
 
-            @classmethod
-            def _patched_create(
-                cls,
+        original_kernel = mamba_utils.batch_memcpy_kernel
+        original_memcpy = mamba_utils.batch_memcpy
+        local_kernel = vars(mamba_utils).get("batch_memcpy_kernel", _MISSING)
+        local_memcpy = vars(mamba_utils).get("batch_memcpy", _MISSING)
+        original_descriptor = vars(buffers_cls).get("create", _MISSING)
+
+        @classmethod
+        @wraps(create)
+        def _patched_create(
+            cls,
+            max_num_reqs,
+            kv_cache_config,
+            copy_funcs,
+            make_buffer,
+        ):
+            def _make_buffer(*args, **kwargs):
+                if kwargs.get("dtype") == torch.uint64:
+                    kwargs["dtype"] = torch.int64
+                return make_buffer(*args, **kwargs)
+
+            return create(
                 max_num_reqs,
                 kv_cache_config,
                 copy_funcs,
-                make_buffer,
+                _make_buffer,
+            )
+
+        _patched_create.__func__._vllm_fl_ascend_patched = True
+        _patched_create.__func__._vllm_fl_original_batch_memcpy = original_memcpy
+        _patched_create.__func__._vllm_fl_original_batch_memcpy_kernel = original_kernel
+
+        # The three values form one contract: the Ascend kernel expects the
+        # pointer buffers produced by the wrapped classmethod. Publish only
+        # after all imports and lookups succeed, and undo every assignment if
+        # an owner rejects any part of the installation.
+        try:
+            buffers_cls.create = _patched_create
+            mamba_utils.batch_memcpy_kernel = batch_memcpy_kernel
+            mamba_utils.batch_memcpy = batch_memcpy
+        except Exception:
+            namespace = vars(mamba_utils)
+            for name, original in (
+                ("batch_memcpy", local_memcpy),
+                ("batch_memcpy_kernel", local_kernel),
             ):
-                def _make_buffer(*args, **kwargs):
-                    if kwargs.get("dtype") == torch.uint64:
-                        kwargs["dtype"] = torch.int64
-                    return make_buffer(*args, **kwargs)
-
-                return original_create(
-                    max_num_reqs,
-                    kv_cache_config,
-                    copy_funcs,
-                    _make_buffer,
-                )
-
-            _patched_create.__func__._vllm_fl_ascend_patched = True
-            mamba_utils.MambaCopyBuffers.create = _patched_create
+                if original is _MISSING:
+                    namespace.pop(name, None)
+                else:
+                    namespace[name] = original
+            if original_descriptor is _MISSING:
+                type.__delattr__(buffers_cls, "create")
+            else:
+                type.__setattr__(buffers_cls, "create", original_descriptor)
+            raise
         logger.info("Patched Mamba batch_memcpy for Ascend")
+        return True
     except Exception as exc:
         logger.warning("Failed to patch Mamba batch_memcpy: %s", exc)
+        return False
+
+
+_MISSING = object()
+
+
+def _wraps_target(function, target) -> bool:
+    while function is not None:
+        if function is target:
+            return True
+        function = getattr(function, "__wrapped__", None)
+    return False
 
 
 def patch_causal_conv1d():

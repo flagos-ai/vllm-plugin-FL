@@ -5,7 +5,10 @@ Tests for compilation graph module.
 """
 
 from importlib import import_module
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def test_npu_weak_refs_are_recursive(monkeypatch):
@@ -99,6 +102,81 @@ def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
 
     assert graph_module._graph_capture_stream() is expected_stream
     vllm_current_stream.assert_called_once_with()
+
+
+@pytest.mark.gpu
+def test_npu_graph_wrapper_capture_and_replay(monkeypatch):
+    """Capture the real wrapper, then replay changed inputs into poisoned output."""
+    import torch
+
+    from vllm.config import CUDAGraphMode
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "npu":
+        pytest.skip("Requires an Ascend NPU")
+    import torch_npu  # noqa: F401 - registers torch.npu
+
+    mode = CUDAGraphMode.FULL
+    descriptor = object()
+    forward_context = SimpleNamespace(
+        batch_descriptor=descriptor, cudagraph_runtime_mode=mode
+    )
+    monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
+    monkeypatch.setattr(graph_module, "get_forward_context", lambda: forward_context)
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
+
+    calls = []
+
+    def eager_reference(x):
+        return torch.relu(x * 2) + 3
+
+    def runnable(x):
+        calls.append(None)
+        return eager_reference(x)
+
+    wrapper = graph_module.GraphWrapper(
+        runnable,
+        SimpleNamespace(compilation_config=SimpleNamespace()),
+        mode,
+        graph_module.GraphOptions(weak_ref_output=False),
+    )
+    static_input = torch.arange(-4, 4, device="npu", dtype=torch.float32).reshape(2, 4)
+    capture_stream = torch.npu.Stream()
+    capture_stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(capture_stream):
+        captured_output = wrapper(static_input)
+    torch.npu.current_stream().wait_stream(capture_stream)
+    torch.npu.synchronize()
+
+    entry = wrapper.concrete_graph_entries[descriptor]
+    assert isinstance(entry.graph, torch.npu.NPUGraph)
+    assert len(calls) == 1
+
+    # NPU capture need not materialize its output until the first replay.
+    captured_output.fill_(-999)
+    torch.npu.synchronize()
+    initial_replay = wrapper(static_input)
+    torch.npu.synchronize()
+    torch.testing.assert_close(initial_replay, eager_reference(static_input))
+    assert len(calls) == 1
+
+    for values in (
+        torch.full_like(static_input, -2),
+        torch.arange(8, device="npu", dtype=torch.float32).reshape(2, 4),
+    ):
+        static_input.copy_(values)
+        captured_output.fill_(-999)
+        torch.npu.synchronize()
+
+        replayed_output = wrapper(static_input)
+        torch.npu.synchronize()
+        expected = eager_reference(values)
+        torch.testing.assert_close(replayed_output, expected)
+        assert not torch.all(replayed_output == -999).item()
+        assert wrapper.concrete_graph_entries[descriptor].graph is entry.graph
+        assert len(calls) == 1
 
 
 class TestGraphOptions:
