@@ -48,8 +48,11 @@ def _load_platform_policy(monkeypatch):
 
     patch_module = ModuleType("vllm_fl.dispatch.backends.vendor.ascend.patch")
     patch_module.refresh_block_size = lambda config: None
+    shutdown_module = ModuleType("vllm_fl.patches.worker_shutdown")
+    shutdown_module.patch_worker_shutdown = lambda: None
     for name in (
         "vllm_fl",
+        "vllm_fl.patches",
         "vllm_fl.dispatch",
         "vllm_fl.dispatch.backends",
         "vllm_fl.dispatch.backends.vendor",
@@ -59,6 +62,7 @@ def _load_platform_policy(monkeypatch):
         package.__path__ = []
         monkeypatch.setitem(sys.modules, name, package)
     monkeypatch.setitem(sys.modules, patch_module.__name__, patch_module)
+    monkeypatch.setitem(sys.modules, shutdown_module.__name__, shutdown_module)
 
     namespace = {
         "logger": SimpleNamespace(
