@@ -4,16 +4,14 @@ import logging
 from functools import wraps
 
 logger = logging.getLogger(__name__)
-_patches_applied = False
-_core_patches_applied = False
+_patch_state = {"core_applied": False, "complete": False}
 
 
 def apply_ascend_patches():
     """Apply all Ascend-specific patches."""
-    global _patches_applied, _core_patches_applied
-    if _patches_applied:
+    if _patch_state["complete"]:
         return
-    if not _core_patches_applied:
+    if not _patch_state["core_applied"]:
         from .patches.triton_compat import patch_triton_compile_hooks
 
         patch_triton_compile_hooks()
@@ -24,8 +22,8 @@ def apply_ascend_patches():
         patch_fla_ops()
         patch_op_cls()
         patch_fused_moe()
-        _core_patches_applied = True
-    _patches_applied = patch_mamba_batch_memcpy()
+        _patch_state["core_applied"] = True
+    _patch_state["complete"] = patch_mamba_batch_memcpy()
 
 
 def patch_topk_topp_sampler():

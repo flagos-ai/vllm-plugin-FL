@@ -26,7 +26,7 @@ def test_apply_ascend_patches_installs_mamba_batch_memcpy(monkeypatch):
     sentinel = object()
     monkeypatch.setattr(mamba_utils, "batch_memcpy", sentinel)
     monkeypatch.setattr(mamba_utils, "batch_memcpy_kernel", sentinel)
-    monkeypatch.setattr(ascend_patch, "_patches_applied", False)
+    monkeypatch.setitem(ascend_patch._patch_state, "complete", False)
     monkeypatch.setattr(triton_compat, "patch_triton_compile_hooks", lambda: None)
     for patch_name in (
         "patch_topk_topp_sampler",
@@ -119,8 +119,8 @@ def test_mamba_patch_does_not_publish_when_create_lookup_fails(monkeypatch):
 
 
 def test_failed_mamba_install_leaves_apply_retryable(monkeypatch):
-    monkeypatch.setattr(ascend_patch, "_patches_applied", False)
-    monkeypatch.setattr(ascend_patch, "_core_patches_applied", False)
+    monkeypatch.setitem(ascend_patch._patch_state, "complete", False)
+    monkeypatch.setitem(ascend_patch._patch_state, "core_applied", False)
     calls = []
     monkeypatch.setattr(
         "vllm_fl.dispatch.backends.vendor.ascend.patches.triton_compat.patch_triton_compile_hooks",
@@ -141,8 +141,8 @@ def test_failed_mamba_install_leaves_apply_retryable(monkeypatch):
     monkeypatch.setattr(ascend_patch, "patch_mamba_batch_memcpy", lambda: False)
 
     ascend_patch.apply_ascend_patches()
-    assert ascend_patch._patches_applied is False
-    assert ascend_patch._core_patches_applied is True
+    assert ascend_patch._patch_state["complete"] is False
+    assert ascend_patch._patch_state["core_applied"] is True
     assert calls == [
         "triton",
         "patch_topk_topp_sampler",
@@ -154,7 +154,7 @@ def test_failed_mamba_install_leaves_apply_retryable(monkeypatch):
 
     monkeypatch.setattr(ascend_patch, "patch_mamba_batch_memcpy", lambda: True)
     ascend_patch.apply_ascend_patches()
-    assert ascend_patch._patches_applied is True
+    assert ascend_patch._patch_state["complete"] is True
     assert len(calls) == 6
 
 

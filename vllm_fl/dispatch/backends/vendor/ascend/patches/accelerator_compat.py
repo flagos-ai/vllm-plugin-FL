@@ -43,8 +43,10 @@ def _make_bridge(name, original, npu_function):
                 result = original(*args, **kwargs)
                 if name != "memory_stats" or result:
                     return result
-            except (AssertionError, NotImplementedError):
-                pass
+            except (AssertionError, NotImplementedError) as exc:
+                logger.debug(
+                    "Accelerator %s is unavailable; using torch.npu: %s", name, exc
+                )
             except RuntimeError as exc:
                 if "allocator" not in str(exc).lower():
                     raise
