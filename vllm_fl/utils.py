@@ -3,16 +3,6 @@
 import json
 import os
 
-import flag_gems
-
-try:
-    # FlagGems<=5.0.2: DeviceDetector lives in device.
-    from flag_gems.runtime.backend.device import DeviceDetector
-except (ImportError, FileNotFoundError):
-    # FlagGems>5.0.2: DeviceDetector lives in device_finder.
-    from flag_gems.runtime.backend.device_finder import DeviceDetector
-from flag_gems.runtime import backend
-
 _OP_CONFIG: dict[str, str] | None = None
 
 # Mapping used by dispatch registration to resolve the current runtime platform
@@ -275,6 +265,17 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
+        # Vendor runtime imports belong to device discovery, not config loading.
+        import flag_gems  # noqa: F401
+
+        try:
+            # FlagGems<=5.0.2: DeviceDetector lives in device.
+            from flag_gems.runtime.backend.device import DeviceDetector
+        except (ImportError, FileNotFoundError):
+            # FlagGems>5.0.2: DeviceDetector lives in device_finder.
+            from flag_gems.runtime.backend.device_finder import DeviceDetector
+        from flag_gems.runtime import backend
+
         self.device = DeviceDetector()
         self.supported_device = [
             "nvidia",
@@ -304,11 +305,15 @@ class DeviceInfo:
     @property
     def torch_device_fn(self):
         # torch_device_fn is like 'torch.cuda' object
+        from flag_gems.runtime import backend
+
         return backend.gen_torch_device_object()
 
     @property
     def torch_backend_device(self):
         # torch_backend_device is like 'torch.backend.cuda' object
+        from flag_gems.runtime import backend
+
         return backend.get_torch_backend_device_fn()
 
     def get_supported_device(self):
@@ -321,6 +326,8 @@ def get_flaggems_all_ops() -> list[str]:
     """
     Get all FlagGems operator names from flag_gems._FULL_CONFIG.
     """
+    import flag_gems
+
     try:
         # _FULL_CONFIG is a tuple of (op_name, function, ...) tuples
         # Some entries have 2 elements, some have 3
