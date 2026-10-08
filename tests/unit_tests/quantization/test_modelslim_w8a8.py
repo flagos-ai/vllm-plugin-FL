@@ -6,7 +6,6 @@ import torch
 
 import vllm.model_executor.parameter as vllm_parameter
 
-import vllm_fl.quantization.modelslim_w8a8 as modelslim_w8a8
 from vllm_fl.quantization.modelslim_w8a8 import (
     ModelSlimW8A8Config,
     _ModelSlimW8A8StaticLinearScheme,
@@ -427,7 +426,11 @@ def test_static_scheme_row_parallel_bias_is_applied_once_before_tp_reduction(
     class FakeRowParallelLinear(torch.nn.Module):
         pass
 
-    monkeypatch.setattr(modelslim_w8a8, "RowParallelLinear", FakeRowParallelLinear)
+    monkeypatch.setattr(
+        sys.modules[ModelSlimW8A8Config.__module__],
+        "RowParallelLinear",
+        FakeRowParallelLinear,
+    )
     x = torch.tensor(
         [[1.0625, -0.8125, 0.4375, 1.6875, -1.1875, 0.3125, 1.9375, -0.5625]],
         dtype=torch.bfloat16,
@@ -540,7 +543,11 @@ def test_real_ascend_static_modelslim_tp_shard_sum_matches_cpu_reference(
     class FakeRowParallelLinear(torch.nn.Module):
         pass
 
-    monkeypatch.setattr(modelslim_w8a8, "RowParallelLinear", FakeRowParallelLinear)
+    monkeypatch.setattr(
+        sys.modules[ModelSlimW8A8Config.__module__],
+        "RowParallelLinear",
+        FakeRowParallelLinear,
+    )
     x = (((torch.arange(512).reshape(2, 256) % 19) - 9).float() / 16 + 0.015625).to(
         torch.bfloat16
     )
