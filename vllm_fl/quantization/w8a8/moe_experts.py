@@ -43,6 +43,19 @@ def _dynamic_int8_qdq(value: torch.Tensor) -> torch.Tensor:
     return (quantized * scale).to(value.dtype)
 
 
+def _w8a8_swiglu(gate_up: torch.Tensor, clamp_limit: float | None) -> torch.Tensor:
+    """Apply vLLM's optional SwiGLU clamp before the second W8A8 quantization."""
+    if clamp_limit is not None and clamp_limit > 0:
+        # vLLM's pad-aware SwiGLU kernel computes in FP32 and writes the
+        # activation in the GEMM output dtype before quantizing it again.
+        gate, up = gate_up.float().chunk(2, dim=-1)
+        return (
+            F.silu(gate.clamp(max=clamp_limit)) * up.clamp(-clamp_limit, clamp_limit)
+        ).to(gate_up.dtype)
+    gate, up = gate_up.chunk(2, dim=-1)
+    return F.silu(gate) * up
+
+
 def _native_w8a8_fused_experts(
     hidden_states: torch.Tensor,
     w1: torch.Tensor,
@@ -55,6 +68,8 @@ def _native_w8a8_fused_experts(
     w2_bias: torch.Tensor | None,
     expert_map: torch.Tensor | None,
     apply_router_weight_on_input: bool,
+    *,
+    clamp_limit: float | None = None,
 ) -> torch.Tensor:
     """Small-batch W8A8 MoE fallback using torch/torch_npu operations."""
     # The modular prepare stage has already applied input-side router weights.
@@ -78,8 +93,7 @@ def _native_w8a8_fused_experts(
             gate_up = torch.matmul(inputs, gate_up_weight.transpose(0, 1))
             if w1_bias is not None:
                 gate_up = gate_up + w1_bias[expert_id].to(gate_up.dtype)
-            gate, up = gate_up.chunk(2, dim=-1)
-            intermediate = _dynamic_int8_qdq(F.silu(gate) * up)
+            intermediate = _dynamic_int8_qdq(_w8a8_swiglu(gate_up, clamp_limit))
 
             down_weight = w2[expert_id].to(intermediate.dtype) * w2_scale[
                 expert_id
@@ -127,6 +141,8 @@ def _ascend_w8a8_grouped_experts(
     w2_bias: torch.Tensor | None,
     expert_map: torch.Tensor | None,
     apply_router_weight_on_input: bool,
+    *,
+    clamp_limit: float | None = None,
 ) -> torch.Tensor:
     """Run dynamic W8A8 experts with native Ascend grouped matmuls."""
     import torch_npu
@@ -179,7 +195,11 @@ def _ascend_w8a8_grouped_experts(
         )[0]
 
     gate_up = quantized_grouped_matmul(expanded, w1, w1_scale, w1_bias)
-    activated = torch_npu.npu_swiglu(gate_up, dim=-1)
+    activated = (
+        _w8a8_swiglu(gate_up, clamp_limit)
+        if clamp_limit is not None and clamp_limit > 0
+        else torch_npu.npu_swiglu(gate_up, dim=-1)
+    )
     expert_output = quantized_grouped_matmul(activated, w2, w2_scale, w2_bias)
     if not apply_router_weight_on_input:
         expert_output = (
@@ -404,14 +424,14 @@ class FlagGemsW8A8Experts(TritonExperts):
             quant_config.w2_bias,
         )
 
-        ascend_biases_supported = all(
-            bias is None or bias.dtype == torch.int32
-            for bias in (quant_config.w1_bias, quant_config.w2_bias)
-        )
-        if _is_ascend_npu_tensor(hidden_states) and ascend_biases_supported:
-            # FlagTree cannot lower FlagGems' fused MoE kernel for GLM prefill
-            # batches on 910C. Keep the dynamic INT8 path in native CANN ops.
-            result = _ascend_w8a8_grouped_experts(
+        clamp_limit = self.activation_config.clamp_limit
+        if _is_ascend_npu_tensor(hidden_states):
+            # Ascend policy selects the provider. The vendor provider checks
+            # the checkpoint's bias contract before using grouped CANN matmul.
+            from vllm_fl.dispatch import call_op
+
+            result = call_op(
+                "w8a8_moe_experts",
                 hidden_states=hidden_states,
                 w1=w1,
                 w2=w2,
@@ -423,20 +443,9 @@ class FlagGemsW8A8Experts(TritonExperts):
                 w2_bias=quant_config.w2_bias,
                 expert_map=expert_map,
                 apply_router_weight_on_input=apply_router_weight_on_input,
-            )
-        elif _is_ascend_npu_tensor(hidden_states):
-            result = _native_w8a8_fused_experts(
-                hidden_states=hidden_states,
-                w1=w1,
-                w2=w2,
-                topk_weights=topk_weights,
-                topk_ids=topk_ids,
-                w1_scale=quant_config.w1_scale,
-                w2_scale=quant_config.w2_scale,
-                w1_bias=quant_config.w1_bias,
-                w2_bias=quant_config.w2_bias,
-                expert_map=expert_map,
-                apply_router_weight_on_input=apply_router_weight_on_input,
+                activation=activation.value,
+                global_num_experts=global_num_experts,
+                clamp_limit=clamp_limit,
             )
         else:
             result = _flaggems_fused_experts_impl(

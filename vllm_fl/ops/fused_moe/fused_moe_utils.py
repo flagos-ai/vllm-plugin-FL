@@ -25,7 +25,7 @@ from vllm.model_executor.layers.fused_moe.utils import (
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl
 
-from vllm_fl.dispatch import CachedOp
+from vllm_fl.dispatch import CachedOp, call_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
 from vllm_fl.utils import get_oot_blacklist, use_flaggems
 
@@ -294,12 +294,9 @@ class TritonExpertsFL(TritonExperts):
         ):
             # v0.28 modular experts bypass the legacy fused_experts_impl patch.
             # Generic Triton MoE kernels are not usable on Ascend 910C.
-            from vllm_fl.dispatch.backends.vendor.ascend.impl.grouped_moe import (
-                grouped_experts,
-            )
-
             output.copy_(
-                grouped_experts(
+                call_op(
+                    "grouped_moe_experts",
                     hidden_states,
                     w1,
                     w2,

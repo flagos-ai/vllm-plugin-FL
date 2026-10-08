@@ -6,6 +6,7 @@ import torch
 
 import vllm.model_executor.parameter as vllm_parameter
 
+import vllm_fl.quantization.modelslim_w8a8 as modelslim_w8a8
 from vllm_fl.quantization.modelslim_w8a8 import (
     ModelSlimW8A8Config,
     _ModelSlimW8A8StaticLinearScheme,
@@ -274,4 +275,328 @@ def test_static_scheme_quantizes_each_fused_partition_and_calls_torch_npu(
             [[1, 1, 1, 2, 2, 2, 2, 2], [1, 1, 1, 2, 2, 2, 2, 2]],
             dtype=torch.bfloat16,
         ),
+    )
+
+
+def _loaded_static_layer(
+    checkpoint_weight: torch.Tensor,
+    partition_widths: list[int],
+    input_scale: torch.Tensor,
+    input_offset: torch.Tensor,
+    deq_scale: torch.Tensor,
+    quant_bias: torch.Tensor,
+    layer: torch.nn.Module | None = None,
+) -> tuple[_ModelSlimW8A8StaticLinearScheme, torch.nn.Module]:
+    scheme = _ModelSlimW8A8StaticLinearScheme()
+    layer = torch.nn.Module() if layer is None else layer
+    scheme.create_weights(
+        layer,
+        output_partition_sizes=partition_widths,
+        input_size_per_partition=checkpoint_weight.shape[1],
+        params_dtype=torch.bfloat16,
+        weight_loader=lambda *args, **kwargs: None,
+    )
+    layer.weight.data.copy_(checkpoint_weight)
+    layer.input_scale.data.copy_(input_scale)
+    layer.input_offset.data.copy_(input_offset)
+    layer.deq_scale.data.copy_(deq_scale)
+    layer.quant_bias.data.copy_(quant_bias)
+    scheme.process_weights_after_loading(layer)
+    return scheme, layer
+
+
+def _static_modelslim_reference(
+    x: torch.Tensor,
+    checkpoint_weight: torch.Tensor,
+    partition_widths: list[int],
+    input_scale: torch.Tensor,
+    input_offset: torch.Tensor,
+    deq_scale: torch.Tensor,
+    quant_bias: torch.Tensor,
+    bias: torch.Tensor | None,
+    *,
+    tp_rank: int = 0,
+) -> torch.Tensor:
+    """Reference from checkpoint values, without prepared tensors or NPU ops.
+
+    AscendQuantV3 computes round(x / scale + offset), and int32 matmul bias
+    is added before the channel dequantization scale. Row-parallel shards
+    apply both checkpoint and floating-point bias on TP rank zero only.
+    """
+    output_offset = 0
+    outputs = []
+    for partition, width in enumerate(partition_widths):
+        output_slice = slice(output_offset, output_offset + width)
+        quantized = (
+            (x.float() / input_scale[partition] + input_offset[partition])
+            .round()
+            .clamp(-128, 127)
+            .to(torch.int32)
+        )
+        accumulator = quantized @ checkpoint_weight[output_slice].to(torch.int32).T
+        if tp_rank == 0:
+            accumulator = accumulator + quant_bias[output_slice]
+        output = (accumulator.float() * deq_scale[output_slice].float()).to(
+            torch.bfloat16
+        )
+        if bias is not None and tp_rank == 0:
+            output = output + bias[output_slice]
+        outputs.append(output)
+        output_offset += width
+    return torch.cat(outputs, dim=-1)
+
+
+def _install_numerical_torch_npu_stubs(monkeypatch):
+    """Execute the documented quantize/matmul equations on CPU tensors."""
+    torch_npu = ModuleType("torch_npu")
+
+    def quantize(x, scale, offset, dtype, axis, sqrt_mode):
+        assert (dtype, axis, sqrt_mode) == (torch.qint8, -1, False)
+        return (
+            (x.float() * scale.float() + offset.float())
+            .round()
+            .clamp(-128, 127)
+            .to(torch.int8)
+        )
+
+    def quant_matmul(x, weight, deq_scale, *, bias, output_dtype):
+        accumulator = x.to(torch.int32) @ weight.to(torch.int32)
+        if bias is not None:
+            accumulator = accumulator + bias
+        return (accumulator.float() * deq_scale.float()).to(output_dtype)
+
+    torch_npu.npu_quantize = quantize
+    torch_npu.npu_quant_matmul = quant_matmul
+    monkeypatch.setitem(sys.modules, "torch_npu", torch_npu)
+
+
+def test_static_scheme_matches_independent_fused_partition_reference(monkeypatch):
+    _install_numerical_torch_npu_stubs(monkeypatch)
+    x = torch.tensor(
+        [[1.0625, -0.8125, 0.4375, 1.6875], [-1.1875, 0.3125, 1.9375, -0.5625]],
+        dtype=torch.bfloat16,
+    )
+    checkpoint_weight = torch.tensor(
+        [
+            [2, -3, 1, 4],
+            [-1, 2, -4, 3],
+            [3, 1, -2, -1],
+            [1, -2, 3, 2],
+            [-4, 1, 2, -3],
+            [2, 3, -1, -2],
+            [-3, -2, 1, 4],
+            [4, -1, -3, 2],
+        ],
+        dtype=torch.int8,
+    )
+    widths = [3, 5]
+    input_scale = torch.tensor([0.5, 0.25])
+    input_offset = torch.tensor([1, -2], dtype=torch.int8)
+    deq_scale = torch.tensor([0.0625, 0.125, 0.25, 0.5, 1, 0.03125, 0.25, 0.125])
+    quant_bias = torch.tensor([3, -2, 1, 4, -3, 2, -1, 5], dtype=torch.int32)
+    bias = torch.tensor(
+        [0.125, -0.25, 0.5, 1, -1, 0.75, -0.125, 0.25],
+        dtype=torch.bfloat16,
+    )
+
+    scheme, layer = _loaded_static_layer(
+        checkpoint_weight, widths, input_scale, input_offset, deq_scale, quant_bias
+    )
+    actual = scheme.apply_weights(layer, x, bias)
+    expected = _static_modelslim_reference(
+        x,
+        checkpoint_weight,
+        widths,
+        input_scale,
+        input_offset,
+        deq_scale,
+        quant_bias,
+        bias,
+    )
+
+    assert torch.equal(actual, expected)
+    assert torch.count_nonzero(actual) == actual.numel()
+    assert not torch.equal(actual[:, :3], actual[:, 3:6])
+
+
+def test_static_scheme_row_parallel_bias_is_applied_once_before_tp_reduction(
+    monkeypatch,
+):
+    _install_numerical_torch_npu_stubs(monkeypatch)
+
+    class FakeRowParallelLinear(torch.nn.Module):
+        pass
+
+    monkeypatch.setattr(modelslim_w8a8, "RowParallelLinear", FakeRowParallelLinear)
+    x = torch.tensor(
+        [[1.0625, -0.8125, 0.4375, 1.6875, -1.1875, 0.3125, 1.9375, -0.5625]],
+        dtype=torch.bfloat16,
+    )
+    checkpoint_weight = torch.tensor(
+        [
+            [2, -3, 1, 4, 3, -1, 2, 1],
+            [-1, 2, -4, 3, 1, -2, 4, -3],
+            [3, 1, -2, -1, -1, 4, -3, 2],
+            [1, -2, 3, 2, 2, -3, 1, -4],
+        ],
+        dtype=torch.int8,
+    )
+    input_scales = [torch.tensor([0.5]), torch.tensor([0.25])]
+    input_offsets = [
+        torch.tensor([1], dtype=torch.int8),
+        torch.tensor([-2], dtype=torch.int8),
+    ]
+    deq_scale = torch.tensor([0.0625, 0.125, 0.25, 0.5])
+    quant_bias = torch.tensor([3, -2, 1, 4], dtype=torch.int32)
+    bias = torch.tensor([0.125, -0.25, 0.5, 1], dtype=torch.bfloat16)
+
+    local_outputs = []
+    reference_outputs = []
+    for rank in (0, 1):
+        shard = slice(rank * 4, (rank + 1) * 4)
+        layer = FakeRowParallelLinear()
+        layer.tp_rank = rank
+        scheme, layer = _loaded_static_layer(
+            checkpoint_weight[:, shard],
+            [4],
+            input_scales[rank],
+            input_offsets[rank],
+            deq_scale,
+            quant_bias,
+            layer,
+        )
+        local_outputs.append(scheme.apply_weights(layer, x[:, shard], bias))
+        reference_outputs.append(
+            _static_modelslim_reference(
+                x[:, shard],
+                checkpoint_weight[:, shard],
+                [4],
+                input_scales[rank],
+                input_offsets[rank],
+                deq_scale,
+                quant_bias,
+                bias,
+                tp_rank=rank,
+            )
+        )
+
+    reduced = local_outputs[0] + local_outputs[1]
+    expected = reference_outputs[0] + reference_outputs[1]
+    assert torch.equal(local_outputs[0], reference_outputs[0])
+    assert torch.equal(local_outputs[1], reference_outputs[1])
+    assert torch.equal(reduced, expected)
+    assert not torch.equal(reduced, expected + bias)
+
+
+@pytest.mark.gpu
+def test_real_ascend_static_modelslim_fused_partitions_match_cpu_reference():
+    pytest.importorskip("torch_npu")
+    if not torch.npu.is_available():
+        pytest.skip("requires an Ascend NPU")
+
+    # Use aligned K/N dimensions required by the actual quantized matmul.
+    x = (((torch.arange(256).reshape(2, 128) % 17) - 8).float() / 16 + 0.015625).to(
+        torch.bfloat16
+    )
+    checkpoint_weight = (((torch.arange(128 * 128).reshape(128, 128) * 3) % 11) - 5).to(
+        torch.int8
+    )
+    widths = [64, 64]
+    input_scale = torch.tensor([0.25, 0.5], dtype=torch.float32)
+    input_offset = torch.tensor([1, -2], dtype=torch.int8)
+    deq_scale = (0.03125 * (2.0 ** (torch.arange(128) % 4))).to(torch.float32)
+    quant_bias = ((torch.arange(128) % 7) - 3).to(torch.int32)
+    bias = (((torch.arange(128) % 5) - 2).float() / 16).to(torch.bfloat16)
+
+    scheme, layer = _loaded_static_layer(
+        checkpoint_weight, widths, input_scale, input_offset, deq_scale, quant_bias
+    )
+    expected = _static_modelslim_reference(
+        x,
+        checkpoint_weight,
+        widths,
+        input_scale,
+        input_offset,
+        deq_scale,
+        quant_bias,
+        bias,
+    )
+    layer = layer.to("npu:0")
+    actual = scheme.apply_weights(layer, x.to("npu:0"), bias.to("npu:0"))
+
+    torch.testing.assert_close(
+        actual.cpu().float(), expected.float(), rtol=0.03, atol=0.25
+    )
+
+
+@pytest.mark.gpu
+def test_real_ascend_static_modelslim_tp_shard_sum_matches_cpu_reference(
+    monkeypatch,
+):
+    pytest.importorskip("torch_npu")
+    if not torch.npu.is_available():
+        pytest.skip("requires an Ascend NPU")
+
+    class FakeRowParallelLinear(torch.nn.Module):
+        pass
+
+    monkeypatch.setattr(modelslim_w8a8, "RowParallelLinear", FakeRowParallelLinear)
+    x = (((torch.arange(512).reshape(2, 256) % 19) - 9).float() / 16 + 0.015625).to(
+        torch.bfloat16
+    )
+    checkpoint_weight = (((torch.arange(128 * 256).reshape(128, 256) * 5) % 13) - 6).to(
+        torch.int8
+    )
+    input_scales = [torch.tensor([0.25]), torch.tensor([0.5])]
+    input_offsets = [
+        torch.tensor([1], dtype=torch.int8),
+        torch.tensor([-2], dtype=torch.int8),
+    ]
+    deq_scale = (0.03125 * (2.0 ** (torch.arange(128) % 4))).float()
+    quant_bias = ((torch.arange(128) % 7) - 3).to(torch.int32)
+    bias = (((torch.arange(128) % 5) - 2).float() / 16).to(torch.bfloat16)
+
+    local_outputs = []
+    reference_outputs = []
+    for rank in (0, 1):
+        shard = slice(rank * 128, (rank + 1) * 128)
+        layer = FakeRowParallelLinear()
+        layer.tp_rank = rank
+        scheme, layer = _loaded_static_layer(
+            checkpoint_weight[:, shard],
+            [128],
+            input_scales[rank],
+            input_offsets[rank],
+            deq_scale,
+            quant_bias,
+            layer,
+        )
+        reference_outputs.append(
+            _static_modelslim_reference(
+                x[:, shard],
+                checkpoint_weight[:, shard],
+                [128],
+                input_scales[rank],
+                input_offsets[rank],
+                deq_scale,
+                quant_bias,
+                bias,
+                tp_rank=rank,
+            )
+        )
+        layer = layer.to("npu:0")
+        local_outputs.append(
+            scheme.apply_weights(layer, x[:, shard].to("npu:0"), bias.to("npu:0")).cpu()
+        )
+
+    # A real TP all-reduce sums these local BF16 outputs; this checks its
+    # numerical inputs and verifies that neither bias was added on rank one.
+    actual_reduced = local_outputs[0] + local_outputs[1]
+    expected_reduced = reference_outputs[0] + reference_outputs[1]
+    for actual, expected in zip(local_outputs, reference_outputs, strict=True):
+        torch.testing.assert_close(
+            actual.float(), expected.float(), rtol=0.03, atol=0.25
+        )
+    torch.testing.assert_close(
+        actual_reduced.float(), expected_reduced.float(), rtol=0.03, atol=0.25
     )

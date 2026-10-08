@@ -1,26 +1,79 @@
-"""DeepSeek-V4 short-context inference adapter for Ascend 910C."""
+"""DeepSeek-V4 short-context BF16 attention adapter for Ascend 910C."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import torch
 
 from vllm.forward_context import get_forward_context
 from vllm.models.deepseek_v4.attention import DeepseekV4Attention
-from vllm.models.deepseek_v4.sparse_mla import DeepseekV4SparseMLABackend
+from vllm.models.deepseek_v4.sparse_mla import (
+    DeepseekV4FlashMLAMetadata,
+    DeepseekV4SparseMLABackend,
+    DeepseekV4SparseMLAMetadataBuilder,
+)
 from vllm.v1.attention.backends.mla.sparse_swa import (
     DeepseekSparseSWABackend,
     DeepseekSparseSWAMetadata,
     DeepseekSparseSWAMetadataBuilder,
 )
 
-if TYPE_CHECKING:
-    pass
+
+def _validate_short_context_attention(vllm_config) -> None:
+    """Only admit contexts where C4A can select every compressed candidate."""
+    config = vllm_config.model_config.hf_config
+    for layer_id, ratio in enumerate(
+        config.compress_ratios[: config.num_hidden_layers]
+    ):
+        if ratio not in (0, 1, 4, 128):
+            raise NotImplementedError(
+                "DeepSeek-V4 Ascend BF16 attention does not support "
+                f"layer {layer_id} compress_ratio={ratio}."
+            )
+    max_model_len = vllm_config.model_config.max_model_len
+    supported_context = min(config.sliding_window, 128)
+    if max_model_len > supported_context:
+        raise ValueError(
+            "DeepSeek-V4 on Ascend 910C currently supports max_model_len <= "
+            f"128 and <= sliding_window ({config.sliding_window}); set "
+            f"--max-model-len {supported_context}."
+        )
+    if (
+        4 in config.compress_ratios[: config.num_hidden_layers]
+        and (max_model_len + 3) // 4 > config.index_topk
+    ):
+        raise NotImplementedError(
+            "DeepSeek-V4 C4A on Ascend requires all compressed candidates "
+            "to fit index_topk within the configured max_model_len."
+        )
+
+
+def _cache_rows(cache: torch.Tensor, slots: torch.Tensor, block_size: int):
+    """Read logical cache rows without assuming contiguous page allocation."""
+    if cache.ndim != 3 or cache.shape[1] != block_size:
+        raise ValueError(
+            f"Unexpected DeepSeek-V4 KV cache shape {tuple(cache.shape)} "
+            f"for block size {block_size}"
+        )
+    return cache[slots // block_size, slots % block_size]
+
+
+def _store_cache_rows(
+    cache: torch.Tensor, slots: torch.Tensor, rows: torch.Tensor, block_size: int
+) -> None:
+    """Write logical rows into potentially non-contiguous shared KV pages."""
+    if cache.ndim != 3 or cache.shape[1] != block_size:
+        raise ValueError(
+            f"Unexpected DeepSeek-V4 KV cache shape {tuple(cache.shape)} "
+            f"for block size {block_size}"
+        )
+    cache[slots // block_size, slots % block_size] = rows.to(cache.dtype)
 
 
 class DeepseekV4FLMetadataBuilder(DeepseekSparseSWAMetadataBuilder):
+    """Build metadata for the separate SWA cache; compressed MLA uses upstream."""
+
     def build_tile_scheduler(self, num_decode_tokens: int):
         del num_decode_tokens
         return {"swaonly": None, "c4a": None, "c128a": None}
@@ -45,7 +98,7 @@ class DeepseekV4FLBackend(DeepseekV4SparseMLABackend):
 
     @staticmethod
     def get_builder_cls():
-        return DeepseekV4FLMetadataBuilder
+        return DeepseekV4SparseMLAMetadataBuilder
 
     @classmethod
     def supports_compute_capability(cls, capability) -> bool:
@@ -54,7 +107,7 @@ class DeepseekV4FLBackend(DeepseekV4SparseMLABackend):
 
 
 class DeepseekV4FLAttention(DeepseekV4Attention):
-    """Portable BF16 SWA path used when FP8 E4M3 is unavailable on 910C."""
+    """BF16 C4A/C128A/SWA attention for bounded 910C contexts."""
 
     backend_cls = DeepseekV4FLBackend
     swa_backend_cls = DeepseekV4FLSWABackend
@@ -65,25 +118,14 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
         if vllm_config is None and args:
             vllm_config = args[0]
         assert vllm_config is not None
-        config = vllm_config.model_config.hf_config
-        if vllm_config.model_config.max_model_len > config.sliding_window:
-            raise ValueError(
-                "DeepSeek-V4 on Ascend 910C currently supports max_model_len <= "
-                f"sliding_window ({config.sliding_window}); set --max-model-len "
-                f"{config.sliding_window}."
-            )
+        _validate_short_context_attention(vllm_config)
 
-        prefix = kwargs.get("prefix", args[1] if len(args) > 1 else "")
-        layer_id = int(prefix.split(".")[-2])
-        original_ratio = config.compress_ratios[layer_id]
-        config.compress_ratios[layer_id] = 1
         original_event = torch.cuda.Event
         torch.cuda.Event = torch.npu.Event  # type: ignore[attr-defined,misc]
         try:
             super().__init__(*args, **kwargs)
         finally:
             torch.cuda.Event = original_event  # type: ignore[misc]
-            config.compress_ratios[layer_id] = original_ratio
 
     @classmethod
     def get_padded_num_q_heads(cls, num_heads: int) -> int:
@@ -130,6 +172,18 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
         )
         return self._o_proj(o_padded[:, : self.n_local_heads, :], positions)
 
+    def _run_parallel_input_projections(self, hidden_states):
+        # torch.mm(..., out_dtype=torch.float32) in the upstream implementation
+        # is unavailable in torch-npu. Keep the compressor projection in FP32.
+        qr_kv = self._fused_wqa_wkv_gemm(hidden_states)
+        kv_score = None
+        if self.compressor is not None:
+            weight = self.compressor.fused_wkv_wgate.weight
+            kv_score = torch.mm(hidden_states.float(), weight.float().T)
+        # C4A selects all compressed candidates in this bounded context, so
+        # indexer ranking and its auxiliary projection do not affect attention.
+        return qr_kv, kv_score, None, None
+
     def _fused_qnorm_rope_kv_insert(self, q, kv, positions, attn_metadata):
         if not isinstance(attn_metadata, dict):
             return q
@@ -146,9 +200,99 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
         slots = metadata.slot_mapping
         valid = slots >= 0
         if valid.any():
-            cache = self.swa_cache_layer.kv_cache.view(-1, self.head_dim)
-            cache.index_copy_(0, slots[valid], kv[valid].to(cache.dtype))
+            _store_cache_rows(
+                self.swa_cache_layer.kv_cache,
+                slots[valid].long(),
+                kv[valid],
+                metadata.block_size,
+            )
         return q
+
+    def _compress_kv_bf16(self, kv_score, positions) -> None:
+        """Build the upstream C4A/C128A compressed key in the BF16 cache."""
+        metadata_dict = get_forward_context().attn_metadata
+        if not isinstance(metadata_dict, dict):
+            return
+        compressor = self.compressor
+        assert compressor is not None
+        ratio = self.compress_ratio
+        overlap = ratio == 4
+        coff = 1 + overlap
+        state_width = coff * self.head_dim
+        state_metadata = metadata_dict[compressor.state_cache.prefix]
+        compressed_metadata = metadata_dict[self.prefix]
+
+        kv, score = kv_score.split([state_width, state_width], dim=-1)
+        ape = compressor.ape[positions.remainder(ratio)]
+        packed_state = torch.cat((kv, score + ape), dim=-1)
+        state_cache = compressor.state_cache.kv_cache
+        state_slots = state_metadata.slot_mapping[: positions.shape[0]].long()
+        valid_state = state_slots >= 0
+        if valid_state.any():
+            _store_cache_rows(
+                state_cache,
+                state_slots[valid_state],
+                packed_state[valid_state],
+                state_metadata.block_size,
+            )
+
+        window = coff * ratio
+        offsets = torch.arange(window, device=positions.device)
+        history_pos = positions[:, None] - window + 1 + offsets[None, :]
+        history_valid = history_pos >= 0
+        safe_pos = history_pos.clamp_min(0)
+        assert state_metadata.token_to_req_indices is not None
+        request_ids = state_metadata.token_to_req_indices[: positions.shape[0]].long()
+        state_block_size = state_metadata.block_size
+        state_blocks = state_metadata.block_table[
+            request_ids[:, None], safe_pos // state_block_size
+        ].long()
+        history_valid &= state_blocks >= 0
+        history_slots = (
+            state_blocks.clamp_min(0) * state_block_size + safe_pos % state_block_size
+        ).long()
+        history = _cache_rows(state_cache, history_slots, state_block_size)
+
+        channel_offsets = torch.arange(self.head_dim, device=positions.device)
+        if overlap:
+            channel_offsets = (
+                channel_offsets[None, :]
+                + (offsets[:, None] >= ratio).long() * self.head_dim
+            )
+        else:
+            channel_offsets = channel_offsets[None, :].expand(window, -1)
+        channel_offsets = channel_offsets[None, :, :].expand(positions.shape[0], -1, -1)
+        state_kv = torch.gather(history[:, :, :state_width], 2, channel_offsets)
+        state_score = torch.gather(history[:, :, state_width:], 2, channel_offsets)
+        state_score = state_score.masked_fill(~history_valid[:, :, None], -float("inf"))
+        compressed = (torch.softmax(state_score, dim=1) * state_kv).sum(dim=1)
+        compressed = (
+            compressed
+            * torch.rsqrt(compressed.square().mean(dim=-1, keepdim=True) + self.eps)
+            * compressor.norm.weight.float()
+        )
+
+        rope_dim = self.rope_head_dim
+        compressed_pos = (positions // ratio) * ratio
+        cos_sin = self.rotary_emb.cos_sin_cache[compressed_pos]
+        rope = compressed[:, -rope_dim:]
+        even, odd = rope[:, ::2], rope[:, 1::2]
+        cos, sin = cos_sin[:, : rope_dim // 2], cos_sin[:, rope_dim // 2 :]
+        rotated = torch.stack(
+            (even * cos - odd * sin, odd * cos + even * sin), dim=-1
+        ).flatten(-2)
+        compressed = torch.cat((compressed[:, :-rope_dim], rotated), dim=-1)
+
+        compressed_slots = compressed_metadata.slot_mapping[: positions.shape[0]].long()
+        boundary = (positions + 1).remainder(ratio) == 0
+        valid_compressed = boundary & (compressed_slots >= 0)
+        if valid_compressed.any():
+            _store_cache_rows(
+                self.kv_cache,
+                compressed_slots[valid_compressed],
+                compressed[valid_compressed],
+                compressed_metadata.block_size // ratio,
+            )
 
     def _prepare_and_attn(
         self,
@@ -161,11 +305,24 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
         positions,
         o_padded,
     ) -> None:
-        del hidden_states, kv_score, indexer_kv_score, indexer_weights
+        del hidden_states, indexer_kv_score, indexer_weights
         q = self.wq_b(qr).view(-1, self.n_local_heads, self.head_dim)
         q = self._fused_qnorm_rope_kv_insert(
             q, kv, positions, get_forward_context().attn_metadata
         )
+        if self.compressor is not None:
+            assert kv_score is not None
+            self._compress_kv_bf16(kv_score, positions)
+        if self.compress_ratio == 4:
+            assert self.indexer is not None
+            assert self.topk_indices_buffer is not None
+            candidates = torch.arange(
+                self.indexer.topk_tokens, device=positions.device, dtype=torch.int32
+            )
+            valid = candidates[None, :] < ((positions[:, None] + 1) // 4)
+            self.topk_indices_buffer[: positions.shape[0]].copy_(
+                torch.where(valid, candidates[None, :], -1)
+            )
         self.forward_mqa(q, kv, positions, o_padded)
 
     def _o_proj(self, o: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
@@ -189,24 +346,66 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
         if not isinstance(metadata_dict, dict):
             output.zero_()
             return
-        metadata = cast(
+        swa_metadata = cast(
             DeepseekSparseSWAMetadata,
             metadata_dict[self.swa_cache_layer.prefix],
         )
-        assert metadata.token_to_req_indices is not None
-        block_size = metadata.block_size
-        offsets = torch.arange(self.window_size - 1, -1, -1, device=positions.device)
-        history_pos = positions[:, None] - offsets[None, :]
-        valid = history_pos >= 0
-        safe_pos = history_pos.clamp_min(0)
-        request_ids = metadata.token_to_req_indices[: positions.shape[0]].long()
-        block_ids = metadata.block_table[
-            request_ids[:, None], safe_pos // block_size
+        assert swa_metadata.token_to_req_indices is not None
+        request_ids = swa_metadata.token_to_req_indices[: positions.shape[0]].long()
+
+        swa_block_size = swa_metadata.block_size
+        swa_offsets = torch.arange(
+            self.window_size - 1, -1, -1, device=positions.device
+        )
+        swa_pos = positions[:, None] - swa_offsets[None, :]
+        swa_valid = swa_pos >= 0
+        safe_pos = swa_pos.clamp_min(0)
+        swa_blocks = swa_metadata.block_table[
+            request_ids[:, None], safe_pos // swa_block_size
         ].long()
-        valid &= block_ids >= 0
-        slots = (block_ids.clamp_min(0) * block_size + safe_pos % block_size).long()
-        cache = self.swa_cache_layer.kv_cache.view(-1, self.head_dim)
-        history = cache[slots]
+        swa_valid &= swa_blocks >= 0
+        swa_slots = (
+            swa_blocks.clamp_min(0) * swa_block_size + safe_pos % swa_block_size
+        ).long()
+        history = _cache_rows(self.swa_cache_layer.kv_cache, swa_slots, swa_block_size)
+
+        if self.compress_ratio > 1:
+            compressed_metadata = cast(
+                DeepseekV4FlashMLAMetadata, metadata_dict[self.prefix]
+            )
+            compressed_block_size = (
+                compressed_metadata.block_size // self.compress_ratio
+            )
+            candidate_count = (
+                self.max_model_len + self.compress_ratio - 1
+            ) // self.compress_ratio
+            candidates = torch.arange(
+                candidate_count, device=positions.device, dtype=torch.long
+            )[None, :].expand(positions.shape[0], -1)
+            if self.compress_ratio == 4:
+                assert self.topk_indices_buffer is not None
+                candidates = self.topk_indices_buffer[
+                    : positions.shape[0], :candidate_count
+                ].long()
+            compressed_valid = (candidates >= 0) & (
+                candidates < ((positions[:, None] + 1) // self.compress_ratio)
+            )
+            safe_candidates = candidates.clamp_min(0)
+            compressed_blocks = compressed_metadata.block_table[
+                request_ids[:, None], safe_candidates // compressed_block_size
+            ].long()
+            compressed_valid &= compressed_blocks >= 0
+            compressed_slots = (
+                compressed_blocks.clamp_min(0) * compressed_block_size
+                + safe_candidates % compressed_block_size
+            ).long()
+            compressed_history = _cache_rows(
+                self.kv_cache, compressed_slots, compressed_block_size
+            )
+            history = torch.cat((compressed_history, history), dim=1)
+            valid = torch.cat((compressed_valid, swa_valid), dim=1)
+        else:
+            valid = swa_valid
         scores = torch.matmul(
             q.float().unsqueeze(-2), history.float().unsqueeze(1).transpose(-1, -2)
         ).squeeze(-2)
@@ -217,9 +416,9 @@ class DeepseekV4FLAttention(DeepseekV4Attention):
         weights = torch.exp(scores - max_score) * valid[:, None, :]
         denominator = weights.sum(-1, keepdim=True) + torch.exp(sink - max_score)
         result = torch.matmul(
-            weights.to(history.dtype).unsqueeze(-2), history.unsqueeze(1)
+            weights.unsqueeze(-2), history.float().unsqueeze(1)
         ).squeeze(-2)
-        output.copy_((result / denominator.to(result.dtype)).to(output.dtype))
+        output.copy_((result / denominator).to(output.dtype))
 
 
 def _install_hc_head_fallback() -> None:
@@ -272,15 +471,11 @@ _xpu_model.DeepseekV4XPUAttention = DeepseekV4FLAttention
 
 
 class DeepseekV4ForCausalLM(_xpu_model.DeepseekV4ForCausalLM):
-    """vLLM 0.28 DeepSeek-V4 architecture with FL Ascend kernels."""
+    """vLLM 0.28 DeepSeek-V4 architecture with Ascend BF16 attention."""
 
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        filtered = (
-            (name, value)
-            for name, value in weights
-            if ".compressor." not in name and ".indexer." not in name
-        )
-        return super().load_weights(filtered)
+    def __init__(self, *, vllm_config, prefix: str = "") -> None:
+        _validate_short_context_attention(vllm_config)
+        super().__init__(vllm_config=vllm_config, prefix=prefix)
 
 
 __all__ = ["DeepseekV4ForCausalLM", "DeepseekV4FLAttention"]
