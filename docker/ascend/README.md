@@ -68,22 +68,25 @@ non-editably from a checkout and publish the resulting image separately. The
 shared CI overlays the pull-request checkout with an editable install so that
 each run tests the submitted source.
 
-Install the plugin checkout without replacing the prepared dependencies:
+For a deployable image, install a wheel from the selected immutable plugin
+revision without replacing the prepared dependencies:
 
 ```bash
-python -m pip install --no-build-isolation --no-deps -e .
+python -m pip wheel --no-build-isolation --no-deps --wheel-dir /tmp/vllm-fl-wheels .
+python -m pip install --no-deps --force-reinstall /tmp/vllm-fl-wheels/vllm_plugin_fl-*.whl
 ```
 
 ## Inference settings
 
 Select the NPUs assigned to the job and load the CANN environment before
-starting inference. For the single-host 910C_174 development environment:
+starting inference. Replace the example device ID with the device IDs assigned
+on your host:
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 export VLLM_PLUGINS=fl
 export VLLM_FL_PLATFORM=ascend
-export ASCEND_RT_VISIBLE_DEVICES=14,15
+export ASCEND_RT_VISIBLE_DEVICES=0
 export GLOO_SOCKET_IFNAME=lo
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
 ```
@@ -106,10 +109,9 @@ vllm serve /models/Qwen3-0.6B \
 ```
 
 Run long installations and inference jobs in a named `tmux` session. The
-driver must be usable inside the container; on 910C_174 the two-device
-unprivileged configuration failed initialization, while the approved
-privileged task container initialized correctly. Keep process device
-selection set explicitly when using a privileged container.
+driver must be usable inside the container. The validated container uses
+`--privileged`; keep process device selection explicit and adapt the driver
+mounts to your host.
 
 The multimodal smoke example recreates the reference document's 300x200
 white image, blue rectangle and yellow "Hello VLM" text. It checks the
@@ -173,39 +175,21 @@ cannot lower its large-batch kernel on 910C, including the profiling batch
 used by the OpenAI server. Sampling uses vLLM's PyTorch implementation; this
 allows the normal server batch-size default without changing request behavior.
 
-## Validation on 910C_174
+## Validation scope
 
-The following checks ran in the prepared task container on NPUs 14 and 15
-with the versions above and the default Ascend operator policy:
-
-| Check | Settings | Result |
-| --- | --- | --- |
-| Qwen3-0.6B text | TP1 and TP2, BF16, eager, 2048 tokens, memory 0.3 | Correct arithmetic and Chinese capital answers |
-| Qwen3 scheduling | TP2, chunked prefill, prefix caching, async scheduling | Long prompt crossed the prefill chunk; second prefix pass reused 384 cached tokens; async answers correct |
-| Qwen3-4B OpenAI API | TP2, BF16, eager, streaming Chat API | `/v1/models` and streaming chat passed |
-| Qwen3.6-27B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, yellow text, blue rectangle |
-| Qwen3.6-35B-A3B text + image | TP2, BF16, eager, 4096 tokens, memory 0.8 | Paris; Hello VLM, blue rectangle; text color described ambiguously as white or pale yellow |
-| Qwen3.6-35B-A3B OpenAI API | TP2, BF16, eager, text and generated image | `/v1/models`, Paris, Hello VLM and blue rectangle passed |
-| DeepSeek-V4-Flash W8A8 | TP8, BF16 KV cache, eager, 128 tokens, ModelSlim dynamic INT8 | Loaded 70/70 shards; `The capital of France is` completed as `Paris. The capital` |
-| GLM-5.2 W8A8 | TP16, BF16, eager, 128 tokens, ModelSlim dynamic INT8 | Loaded 182/182 shards; native grouped W8A8 MoE completed short and 27-token prompts |
-| Unit regression | Entire `tests/unit_tests` suite | 561 passed; 9 platform-specific tests skipped |
-| Functional device checks | Ascend ops, HCCL helpers and raw `torch.npu.NPUGraph` primitives | All selected tests passed |
-
-Qwen3.6-27B passed a manual full-model graph capture and replay test. Graph
-mode remains experimental: Qwen3.6-35B-A3B graph testing was skipped, and the
-raw `torch.npu.NPUGraph` checks above cover only the primitive. Video processing
-has not been validated. The shared CI benchmark passed, though broader
-performance tuning remains. The hybrid attention bridge currently makes
-contiguous cache inputs for native attention kernels. The packaged A3 image is
-published as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean`
-and is selected by the shared CI platform configuration.
+The shared CI runs setup, unit and functional tests, offline and serving
+inference, and a benchmark smoke test on the configured 910C runner. See the
+[Ascend platform cases](../../tests/platforms/ascend.yaml) for the active
+matrix and [PR #487](https://github.com/flagos-ai/vllm-plugin-FL/pull/487)
+for SHA-bound validation results and limitations. Graph mode and video
+processing are outside the supported deployment settings in this guide.
 
 ## Model provisioning
 
-On 910C_174, models are stored under `/public-flash/models`. The Ascend CI
-configuration mounts that directory read-only at `/data/models/Qwen`, matching
-the model YAML files. The resulting container layout is:
+Provision model weights before starting CI. The mount in
+[the Ascend CI configuration](../../.github/configs/ascend.yml) must expose the
+model paths declared by the model YAML files. For the current matrix, the
+container layout is:
 
 ```text
 /data/models/

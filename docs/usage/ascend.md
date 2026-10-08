@@ -12,6 +12,7 @@ for larger models.
 |---|---|
 | Prebuilt CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` |
 | Image manifest | `sha256:d80f4616b04fda507ce6d9dc54d36983d4ef134730bb9305b45409931260d688` |
+| Plugin source and dispatch policy | `65b46e41b8622913bf81398c7ad546da5e90de94` |
 | Base image | `quay.io/ascend/vllm-ascend:v0.20.2rc1-a3` |
 | CANN | `9.0.0` |
 | Python | `3.11.15` on aarch64 |
@@ -24,9 +25,10 @@ for larger models.
 The checked-in [Ascend dispatch policy](../../vllm_fl/dispatch/config/ascend.yaml)
 loads automatically. Keep it and the plugin checkout on the same revision.
 The CI image contains the validated runtime, but its packaged plugin wheel
-predates some changes in this guide. Step 5 installs your checkout over that
-wheel without changing the runtime dependencies. For build details and the
-full 910C validation matrix, see the [Ascend image guide](../../docker/ascend/README.md).
+predates some changes in this guide. Step 5 builds and installs a non-editable
+wheel from the selected plugin revision without changing runtime dependencies.
+For build details, see the
+[Ascend image guide](../../docker/ascend/README.md).
 
 ## 1. Check the host
 
@@ -42,8 +44,8 @@ test -e /dev/davinci_manager
 test -f /etc/ascend_install.info
 ```
 
-Set the visible devices explicitly. `0` is an example; the shared 910C CI
-runner uses `14,15`. For tensor parallelism, the number of selected devices
+Set the visible devices explicitly. `0` is an example; use the devices
+assigned on your host. For tensor parallelism, the number of selected devices
 must match `TP_SIZE`.
 
 ```bash
@@ -57,13 +59,19 @@ the mounts in steps 4 and 5 to match its Ascend installation.
 
 ## 2. Prepare the repository and model
 
-Use the branch, tag, or commit that contains the plugin version you intend to
-deploy. Keep the checkout, this guide, and the Ascend dispatch policy on that
-same revision. Provision model weights on the host outside the container:
+The executable example pins the reviewed PR #487 runtime commit. Fetch the PR
+ref before checking out that immutable revision; its checked-in Ascend policy
+is the policy paired with the image runtime above. Provision model weights on
+the host outside the container:
 
 ```bash
 git clone https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
+git fetch origin refs/pull/487/head
+export PLUGIN_REVISION=65b46e41b8622913bf81398c7ad546da5e90de94
+git checkout --detach "$PLUGIN_REVISION"
+test "$(git rev-parse HEAD)" = "$PLUGIN_REVISION"
+test -f vllm_fl/dispatch/config/ascend.yaml
 
 export REPO_DIR="$PWD"
 export MODEL_DIR=/data/models/Qwen3-0.6B
@@ -84,7 +92,7 @@ out of scripts and shell history.
 ```bash
 docker login harbor.baai.ac.cn
 
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:d80f4616b04fda507ce6d9dc54d36983d4ef134730bb9305b45409931260d688
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 ```
@@ -141,10 +149,11 @@ PY
 
 ## 5. Start the inference service
 
-The command installs the current plugin checkout in editable mode without
-resolving dependencies. This is how the shared CI tests pull-request source
-against the prepared image; it also ensures that the service uses your checkout
-instead of the older wheel inside this published tag.
+The command builds a wheel from the selected plugin revision and installs it
+non-editably without resolving dependencies. It checks that the installed
+module and Ascend dispatch policy come from site-packages, rather than the
+mounted checkout. Shared CI uses an editable checkout for pull-request tests;
+this deployment path validates the package that will be delivered.
 
 ```bash
 docker run --rm -d \
@@ -160,6 +169,7 @@ docker run --rm -d \
   -v "$MODEL_DIR:/models/Qwen3-0.6B:ro" \
   -e VLLM_PLUGINS=fl \
   -e VLLM_FL_PLATFORM=ascend \
+  -e PLUGIN_REVISION="$PLUGIN_REVISION" \
   -e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
   -e GLOO_SOCKET_IFNAME=lo \
   -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800 \
@@ -168,7 +178,27 @@ docker run --rm -d \
 set -euo pipefail
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 cd /workspace/vllm-plugin-FL
-python -m pip install --no-build-isolation --no-deps -e .
+python -m pip wheel --no-build-isolation --no-deps \
+  --wheel-dir /tmp/vllm-fl-wheels .
+python -m pip install --no-deps --force-reinstall \
+  /tmp/vllm-fl-wheels/vllm_plugin_fl-*.whl
+cd /tmp
+python - <<PY
+from importlib.resources import files
+from pathlib import Path
+import os
+import vllm_fl
+from vllm_fl.version import git_version
+
+module_path = Path(vllm_fl.__file__).resolve()
+assert "site-packages" in str(module_path), module_path
+policy = files("vllm_fl.dispatch.config").joinpath("ascend.yaml")
+assert policy.read_bytes() == Path(
+    "/workspace/vllm-plugin-FL/vllm_fl/dispatch/config/ascend.yaml"
+).read_bytes()
+assert git_version != "Unknown" and os.environ["PLUGIN_REVISION"].startswith(git_version)
+print(f"Installed plugin: {module_path}")
+PY
 exec vllm serve /models/Qwen3-0.6B \
   --served-model-name qwen3-0.6b \
   --host 127.0.0.1 --port 8000 \
@@ -244,9 +274,9 @@ The published image does **not** bundle FlagCX. The separately validated
 FlagCX v0.13.0 configuration mounted a built FlagCX core library and set
 `FLAGCX_PATH`. It used HCCL for PyTorch process groups and FlagCX's C API for
 tensor-parallel device collectives; the FlagCX Torch plugin was not installed.
-On 910C_174, Qwen3-0.6B and Qwen3.6-27B TP2 eager inference and two-rank
-`all_reduce`, `all_gather`, `all_gatherv`, and `reduce_scatterv` checks passed.
-Pipeline and expert parallelism were not covered by that FlagCX test.
+The validated FlagCX setup covers TP2 eager inference and two-rank
+`all_reduce`, `all_gather`, `all_gatherv`, and `reduce_scatterv`. Pipeline
+and expert parallelism have not been validated.
 
 Build the v0.13.0 core for Ascend in an environment with CANN development
 headers, following the [FlagCX build instructions](https://github.com/flagos-ai/FlagCX/blob/v0.13.0/docs/getting_started.md).
@@ -289,9 +319,8 @@ export IMAGE=vllm-plugin-fl:ascend-vllm0.28.0-local
 ```
 
 Run step 4 before serving. The Dockerfile prepares the runtime and CI tools
-but does not install this repository's plugin wheel. Keep the step 5 checkout
-overlay, or build a separate release image that installs the plugin
-non-editably from a fixed revision. The
+but does not install this repository's current plugin wheel. Use the step 5
+wheel build, or publish a separate release image with that fixed wheel. The
 [image guide](../../docker/ascend/README.md) documents build constraints and
 the known OpenCV/NumPy dependency conflict in this pinned stack.
 
@@ -299,7 +328,7 @@ the known OpenCV/NumPy dependency conflict in this pinned stack.
 
 - **No NPU inside the container:** inspect `npu-smi info`,
   `ASCEND_RT_VISIBLE_DEVICES`, the Ascend runtime, driver mounts, and device
-  access. The working 910C task container uses `--privileged`.
+  access. The validated task container uses `--privileged`.
 - **Wrong vLLM or Triton version:** rerun step 4. Non-NVIDIA devices require
   `vllm==0.28.0+empty`; FlagTree supplies Triton 3.5.1 without a standalone
   `triton` or `triton-ascend` distribution.
