@@ -35,6 +35,7 @@ else:
     CacheDType = None
 
 from vllm_fl.utils import (
+    SPLITTING_OPS,
     DeviceInfo,
     get_device_control_env_var,
     get_device_name,
@@ -63,6 +64,43 @@ def _flagcx_backend_enabled() -> bool:
         return importlib.util.find_spec("flagcx") is not None
     except (ImportError, ValueError):
         return False
+
+
+def _configure_musa_tp_piecewise_graph(
+    compilation_config,
+    *,
+    all2all_backend: str,
+    data_parallel_size: int,
+) -> None:
+    """Keep MUSA TP collectives outside stream-captured graph segments."""
+    # ProcessGroupMCCL's watchdog may call MUSA APIs while another thread is
+    # capturing a graph. Blocking wait avoids creating that watchdog thread.
+    # This must be set before the process group is constructed.
+    os.environ.setdefault("TORCH_MCCL_BLOCKING_WAIT", "1")
+
+    # Do not enable vLLM's global input-copy wrapper here. Full-model inputs
+    # have dynamic shapes and strides, while only the PIECEWISE segments after
+    # eager MCCL collectives need capture-buffer copies. GraphWrapper handles
+    # those segment inputs locally and still honors an explicit global setting.
+
+    # Keep the conservative torch_musa 2.9 platform default for pointwise
+    # autotuning. This is independent of the input-stride fix above; an
+    # explicit user setting still takes precedence.
+    compilation_config.inductor_compile_config.setdefault(
+        "triton.autotune_pointwise", False
+    )
+
+    # This normally runs immediately after Platform.check_and_update_config.
+    # Initialize vLLM's default attention/KV-cache splitting ops first so
+    # adding device-specific ops does not replace those defaults.
+    compilation_config.set_splitting_ops_for_v1(
+        all2all_backend=all2all_backend,
+        data_parallel_size=data_parallel_size,
+    )
+    assert compilation_config.splitting_ops is not None
+    for op in SPLITTING_OPS.get("musa", ()):
+        if op not in compilation_config.splitting_ops:
+            compilation_config.splitting_ops.append(op)
 
 
 class PlatformFL(Platform):
@@ -106,6 +144,16 @@ class PlatformFL(Platform):
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
+
+    @classmethod
+    def is_arch_support_pdl(cls) -> bool:
+        if cls.vendor_name != "nvidia":
+            return False
+        try:
+            major, _ = cls.torch_device_fn.get_device_capability()
+        except Exception:
+            return False
+        return major >= 9
 
     def is_musa(self) -> bool:
         if hasattr(torch, 'musa') and torch.musa.is_available():
@@ -255,6 +303,26 @@ class PlatformFL(Platform):
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
+            cls.device_type == "musa"
+            and parallel_config.tensor_parallel_size > 1
+            and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+        ):
+            effective_dp_size = (
+                parallel_config.data_parallel_size
+                if model_config is None or model_config.is_moe
+                else 1
+            )
+            _configure_musa_tp_piecewise_graph(
+                compilation_config,
+                all2all_backend=parallel_config.all2all_backend,
+                data_parallel_size=effective_dp_size,
+            )
+            logger.info(
+                "MUSA: Keeping TP collective ops outside PIECEWISE graph "
+                "capture because MCCL does not support stream capture."
+            )
+
+        if (
             parallel_config.all2all_backend == "deepep_high_throughput"
             and parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
@@ -385,6 +453,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "biren",
         ]:
             return True
         return False

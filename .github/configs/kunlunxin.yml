@@ -15,7 +15,7 @@
 # Kunlunxin P800 OAM hardware configuration.
 platform: kunlunxin
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-kunlunxin-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-kunlunxin-ci
 
 runner_labels:
   - kunlunxin-p800

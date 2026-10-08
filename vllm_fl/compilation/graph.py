@@ -70,6 +70,37 @@ class GraphEntry:
     # for graph debugging, track the input addresses
     # during capture, and check if they are the same during replay
     input_addresses: list[int] | None = None
+    input_tensors: list[torch.Tensor] | None = None
+
+
+def _copy_graph_inputs(
+    static_inputs: list[torch.Tensor] | None,
+    runtime_inputs: list[torch.Tensor],
+) -> None:
+    if static_inputs is None or len(static_inputs) != len(runtime_inputs):
+        raise RuntimeError(
+            "Graph input count changed between capture and replay: "
+            f"expected {len(static_inputs or [])}, got {len(runtime_inputs)}"
+        )
+
+    for index, (static, runtime) in enumerate(zip(static_inputs, runtime_inputs)):
+        if static.data_ptr() == runtime.data_ptr():
+            continue
+        if (
+            static.shape != runtime.shape
+            or static.stride() != runtime.stride()
+            or static.dtype != runtime.dtype
+            or static.device != runtime.device
+        ):
+            raise RuntimeError(
+                f"Graph input {index} metadata changed between capture and "
+                f"replay: expected shape={tuple(static.shape)}, "
+                f"stride={static.stride()}, dtype={static.dtype}, "
+                f"device={static.device}; got shape={tuple(runtime.shape)}, "
+                f"stride={runtime.stride()}, dtype={runtime.dtype}, "
+                f"device={runtime.device}"
+            )
+        static.copy_(runtime)
 
 
 @dataclasses.dataclass
@@ -100,6 +131,15 @@ class GraphWrapper:
         self.vllm_config = vllm_config
         self.runtime_mode = runtime_mode
         self.compilation_config = vllm_config.compilation_config
+        # Eager MCCL collectives produce new tensor addresses on every call.
+        # Copy only TP PIECEWISE segment inputs into their capture-time buffers;
+        # enabling vLLM's full-model copy wrapper would clone dynamic views and
+        # can change strides before Inductor sees them.
+        self._copy_inputs = self.compilation_config.cudagraph_copy_inputs or (
+            current_platform.device_type == "musa"
+            and vllm_config.parallel_config.tensor_parallel_size > 1
+            and runtime_mode == CUDAGraphMode.PIECEWISE
+        )
 
         self.first_run_finished = False
         self.is_debugging_mode = envs.VLLM_LOGGING_LEVEL == "DEBUG"
@@ -179,10 +219,12 @@ class GraphWrapper:
             # validate that cudagraph capturing is legal at this point.
             validate_cudagraph_capturing_enabled()
 
-            input_addresses = [
-                x.data_ptr() for x in args if isinstance(x, torch.Tensor)
-            ]
-            entry.input_addresses = input_addresses
+            input_tensors = [x for x in args if isinstance(x, torch.Tensor)]
+            entry.input_addresses = [x.data_ptr() for x in input_tensors]
+            if self._copy_inputs:
+                # Keep the capture-time buffers alive so replay can copy
+                # runtime values back to the addresses recorded by the graph.
+                entry.input_tensors = input_tensors
             graph = Graph.graph()
 
             with ExitStack() as stack:
@@ -231,11 +273,12 @@ class GraphWrapper:
             # manage the memory during graph capture
             return output
 
-        if self.is_debugging_mode:
+        runtime_inputs = [x for x in args if isinstance(x, torch.Tensor)]
+        if self._copy_inputs:
+            _copy_graph_inputs(entry.input_tensors, runtime_inputs)
+        elif self.is_debugging_mode:
             # check if the input addresses are the same
-            new_input_addresses = [
-                x.data_ptr() for x in args if isinstance(x, torch.Tensor)
-            ]
+            new_input_addresses = [x.data_ptr() for x in runtime_inputs]
             assert new_input_addresses == entry.input_addresses, (
                 f"Input addresses for cudagraphs are different "
                 f"during replay. Expected {entry.input_addresses}, "

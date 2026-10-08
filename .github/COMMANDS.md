@@ -6,7 +6,7 @@ access to this repository — can manage their own PR's CI from the timeline.
 
 | Command | Who can use | What it does |
 |---|---|---|
-| `/rerun-failed-ci` | PR author, or collaborators with `write`+ | Re-runs the failed jobs of the latest failed workflow runs for the PR's head commit (e.g. the main CI run and CodeQL, up to 5) |
+| `/rerun-failed-ci` | PR author, or collaborators with `write`+ | Re-runs failed and cancelled jobs from the latest failed/cancelled workflow runs for the PR's head commit (e.g. the main CI run and CodeQL, up to 5 runs) |
 | `/cancel-ci` | PR author, or collaborators with `write`+ | Cancels all in-progress / queued workflow runs for the PR's head commit — the stop-loss for a hung e2e on a vendor runner |
 
 The bot reacts to the command comment when authorized and posts a result

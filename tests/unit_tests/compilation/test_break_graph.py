@@ -104,17 +104,17 @@ class TestIsBreakableCudagraphEnabled:
         assert isinstance(result, bool)
 
     def test_enabled_when_set(self, monkeypatch):
-        import vllm.envs
+        import vllm.envs as vllm_envs
 
-        monkeypatch.setattr(vllm.envs, "VLLM_USE_BREAKABLE_CUDAGRAPH", 1)
+        monkeypatch.setattr(vllm_envs, "VLLM_USE_BREAKABLE_CUDAGRAPH", 1)
         import vllm_fl.compilation.break_graph as bg
 
         assert bg.is_breakable_cudagraph_enabled() is True
 
     def test_disabled_when_unset(self, monkeypatch):
-        import vllm.envs
+        import vllm.envs as vllm_envs
 
-        monkeypatch.setattr(vllm.envs, "VLLM_USE_BREAKABLE_CUDAGRAPH", 0)
+        monkeypatch.setattr(vllm_envs, "VLLM_USE_BREAKABLE_CUDAGRAPH", 0)
         import vllm_fl.compilation.break_graph as bg
 
         assert bg.is_breakable_cudagraph_enabled() is False

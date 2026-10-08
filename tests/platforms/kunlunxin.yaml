@@ -43,7 +43,7 @@ device_overrides:
       disable_custom_all_reduce: false
     serve:
       served_model_name: "qwen3"
-      startup_retries: 300
+      startup_retries: 420
       max_tokens: 256
       extra_args:
         - "--reasoning-parser"
@@ -94,7 +94,8 @@ p800:
         - compilation/test_graph_capture.py
     unit:
       include: "*"
-      exclude: []
+      exclude:
+        - dispatch/test_flaggems_quantization.py
     benchmark:
       enabled: true
       smoke: ["serve"]

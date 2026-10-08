@@ -110,7 +110,7 @@ class TestArmCpuRegistration(unittest.TestCase):
         arm_cpu_platform.assert_not_called()
         gdn_module.apply_arm_cpu_gdn_state_indices_patch.assert_not_called()
         adapter_module.install_arm_cpu_packed_w4a8.assert_not_called()
-        moe_sum.assert_called_once_with()
+        moe_sum.assert_not_called()
         flagcx.assert_called_once_with()
         quant_linear.assert_called_once_with()
         router.assert_called_once_with()
@@ -123,6 +123,25 @@ class TestArmCpuRegistration(unittest.TestCase):
         ):
             self.assertIsNone(vllm_fl._arm_cpu_platform())
             platforms.cpu_platform_plugin.assert_not_called()
+
+    def test_general_registration_does_not_patch_moe_sum(self):
+        platforms = _fake_vllm_platforms(cpu_platform=None)
+
+        for device_type in ("musa", "cuda"):
+            platforms.current_platform.device_type = device_type
+            with (
+                patch("platform.machine", return_value="x86_64"),
+                patch("vllm_fl.patches.qwen3_5_text.apply_qwen3_5_text_patches"),
+                patch("vllm_fl.patches.moe_sum.patch_vllm_moe_sum") as moe_sum,
+                patch.object(vllm_fl, "_register_flagcx_connector"),
+                patch.object(vllm_fl, "register_quant_linear"),
+                patch.object(vllm_fl, "register_router"),
+                patch.object(vllm_fl, "_register_gdn_packed_decode_patch"),
+                patch.dict(sys.modules, {platforms.__name__: platforms}),
+            ):
+                vllm_fl.register_model()
+
+            moe_sum.assert_not_called()
 
     def test_arm_registration_enables_quant_runtime_without_mode_flags(self):
         adapter_module = ModuleType("vllm_fl.quantization.arm_cpu_w4a8")

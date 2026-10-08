@@ -58,6 +58,24 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "enflame": {"device_type": "gcu", "device_name": "gcu"},
     # Registered backend: vendor/kunlunxin
     "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
+    # Registered backend: vendor/supa
+    "biren": {"device_type": "cuda", "device_name": "supa"},
+}
+
+# Extra graph-partition boundaries required by a device runtime. vLLM's
+# default attention/KV-cache splitting ops are still installed first.
+SPLITTING_OPS: dict[str, tuple[str, ...]] = {
+    # MCCL collectives cannot run while a MUSA stream is being captured.
+    "musa": (
+        "vllm::all_reduce",
+        "vllm::all_gather",
+        "vllm::reduce_scatter",
+        "vllm::patched_fused_scaled_matmul_reduce_scatter",
+        "_c10d_functional::all_reduce",
+        "_c10d_functional::all_gather_into_tensor",
+        "_c10d_functional::reduce_scatter_tensor",
+        "_c10d_functional::wait_tensor",
+    ),
 }
 
 # Keep the vLLM base-class no-op for platforms not validated by this change.
@@ -273,6 +291,7 @@ class DeviceInfo:
             "gcu",
             "enflame",
             "kunlunxin",
+            "biren",
         ]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 

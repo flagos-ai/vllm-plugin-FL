@@ -127,6 +127,11 @@ Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
 
+### Operator profiling
+
+See the [operator profiling tools](./tools/operator_profile/README.md) for a
+reproducible native-vLLM and plugin comparison workflow.
+
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
     4.1 Clone the repository:

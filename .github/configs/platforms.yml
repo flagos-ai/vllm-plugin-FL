@@ -29,8 +29,12 @@ platforms:
   metax:
     enabled: true
   musa:
-    enabled: false
+    enabled: true
   enflame:
     enabled: true
+  iluvatar:
+    enabled: true
   kunlunxin:
-    enabled: false
+    enabled: true
+  thead:
+    enabled: true

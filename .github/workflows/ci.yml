@@ -175,3 +175,23 @@ jobs:
     with:
       platform: kunlunxin
     secrets: inherit
+
+ # ============================================================
+  # Job 4h: THead platform testing
+  # ============================================================
+  test-thead:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: thead
+  # ============================================================
+  # Job 4h: Iluvatar platform testing
+  # ============================================================
+  test-iluvatar:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: iluvatar
+    secrets: inherit

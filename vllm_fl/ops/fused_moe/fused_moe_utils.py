@@ -335,7 +335,15 @@ class TritonExpertsFL(TritonExperts):
             return
 
         # Fast path (no LoRA, NVIDIA only): single fused FlagGems call.
-        if self._lora_context is None and current_platform.is_cuda():
+        # FlagGems currently only supports the standard SiLU gated activation.
+        # Models such as MiniMax-M3 use SWIGLUOAI and must fall back to the
+        # generic Triton pipeline below, whose activation dispatch supports it.
+        if (
+            self._lora_context is None
+            and current_platform.is_cuda()
+            and activation == MoEActivation.SILU
+            and self.gemm1_clamp_limit is None
+        ):
             import flag_gems
 
             output.copy_(flag_gems.fused_experts_impl(
@@ -489,7 +497,12 @@ class TritonExpertsFL(TritonExperts):
             )
 
         apply_moe_activation(
-            activation, intermediate_cache2, intermediate_cache1.view(-1, N)
+            activation,
+            intermediate_cache2,
+            intermediate_cache1.view(-1, N),
+            clamp_limit=self.gemm1_clamp_limit,
+            alpha=self.gemm1_alpha,
+            beta=self.gemm1_beta,
         )
 
         a2q_scale: torch.Tensor | None = None

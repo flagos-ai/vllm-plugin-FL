@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG KUNLUNXIN_BASE_IMAGE=harbor.baai.ac.cn/plugin/xvllm-ubuntu2204-py310-torch29-0200:v20.0.10.0
+ARG KUNLUNXIN_BASE_IMAGE=harbor.baai.ac.cn/plugin/kunlunxin001-gems5.4.0-treenone-triton3.0.0-cx0.13.0-plugin0.3.0-vllm0.24.0-cp310-pt29-x64-v5.0.21.43:20260917
 
 # ---------- base stage ----------
 FROM ${KUNLUNXIN_BASE_IMAGE} AS base
@@ -20,10 +20,10 @@ FROM ${KUNLUNXIN_BASE_IMAGE} AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG KUNLUNXIN_BASE_IMAGE
-ARG VLLM_VERSION=0.20.2
-ARG FLAGGEMS_REF=v5.0.0
+ARG VLLM_VERSION=0.24.0
+ARG FLAGGEMS_REF=v5.4.0
 ARG FLAGCX_REF=v0.13.0
-ARG VLLM_PLUGIN_FL_REF=38e7dbc20197e2db742c4e4c9687d36ea4df9900
+ARG VLLM_PLUGIN_FL_REF=fd5c727fcdb607bc4354cd11384761bb5d5ecfba
 ARG DRIVER_VERSION=5.0.21.43
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
@@ -163,24 +163,7 @@ RUN python -m pip install --no-cache-dir \
         pyyaml \
         sqlalchemy
 
-RUN python - <<'PY'
-import os
-import sys
-
-flagcx_path = os.environ["FLAGCX_PATH"]
-if flagcx_path not in sys.path:
-    sys.path.insert(0, flagcx_path)
-
-import flag_gems
-import flagcx  # noqa: F401
-import torch
-import vllm
-
-print(f"vLLM: {vllm.__version__}")
-print(f"FlagGems: {getattr(flag_gems, '__version__', 'unknown')}")
-print(f"Torch: {torch.__version__}")
-print("FlagCX import ok")
-PY
+RUN python -c 'import os, sys; flagcx_path = os.environ["FLAGCX_PATH"]; sys.path.insert(0, flagcx_path) if flagcx_path not in sys.path else None; import flag_gems, flagcx, torch, vllm; print("vLLM:", vllm.__version__); print("FlagGems:", getattr(flag_gems, "__version__", "unknown")); print("Torch:", torch.__version__); print("FlagCX import ok")'
 
 WORKDIR /workspace
 
