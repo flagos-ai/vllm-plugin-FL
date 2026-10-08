@@ -76,6 +76,19 @@ SPLITTING_OPS: dict[str, tuple[str, ...]] = {
         "_c10d_functional::reduce_scatter_tensor",
         "_c10d_functional::wait_tensor",
     ),
+    # PCCL collectives (FlagCX/tang) likewise cannot run while a PTPU stream
+    # is being captured, so the TP communication ops must be split out of the
+    # piecewise cudagraph (same set as MUSA above).
+    "ptpu": (
+        "vllm::all_reduce",
+        "vllm::all_gather",
+        "vllm::reduce_scatter",
+        "vllm::patched_fused_scaled_matmul_reduce_scatter",
+        "_c10d_functional::all_reduce",
+        "_c10d_functional::all_gather_into_tensor",
+        "_c10d_functional::reduce_scatter_tensor",
+        "_c10d_functional::wait_tensor",
+    ),
 }
 
 # Keep the vLLM base-class no-op for platforms not validated by this change.
