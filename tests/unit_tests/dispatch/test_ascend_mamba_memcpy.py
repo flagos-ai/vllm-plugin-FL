@@ -120,15 +120,42 @@ def test_mamba_patch_does_not_publish_when_create_lookup_fails(monkeypatch):
 
 def test_failed_mamba_install_leaves_apply_retryable(monkeypatch):
     monkeypatch.setattr(ascend_patch, "_patches_applied", False)
+    monkeypatch.setattr(ascend_patch, "_core_patches_applied", False)
+    calls = []
     monkeypatch.setattr(
         "vllm_fl.dispatch.backends.vendor.ascend.patches.triton_compat.patch_triton_compile_hooks",
-        lambda: None,
+        lambda: calls.append("triton"),
     )
-    monkeypatch.setattr(ascend_patch, "patch_topk_topp_sampler", lambda: None)
+    for patch_name in (
+        "patch_topk_topp_sampler",
+        "patch_causal_conv1d",
+        "patch_fla_ops",
+        "patch_op_cls",
+        "patch_fused_moe",
+    ):
+        monkeypatch.setattr(
+            ascend_patch,
+            patch_name,
+            lambda name=patch_name: calls.append(name),
+        )
     monkeypatch.setattr(ascend_patch, "patch_mamba_batch_memcpy", lambda: False)
 
     ascend_patch.apply_ascend_patches()
     assert ascend_patch._patches_applied is False
+    assert ascend_patch._core_patches_applied is True
+    assert calls == [
+        "triton",
+        "patch_topk_topp_sampler",
+        "patch_causal_conv1d",
+        "patch_fla_ops",
+        "patch_op_cls",
+        "patch_fused_moe",
+    ]
+
+    monkeypatch.setattr(ascend_patch, "patch_mamba_batch_memcpy", lambda: True)
+    ascend_patch.apply_ascend_patches()
+    assert ascend_patch._patches_applied is True
+    assert len(calls) == 6
 
 
 def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):

@@ -5,25 +5,27 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
+_core_patches_applied = False
 
 
 def apply_ascend_patches():
     """Apply all Ascend-specific patches."""
-    global _patches_applied
+    global _patches_applied, _core_patches_applied
     if _patches_applied:
         return
-    from .patches.triton_compat import patch_triton_compile_hooks
+    if not _core_patches_applied:
+        from .patches.triton_compat import patch_triton_compile_hooks
 
-    patch_triton_compile_hooks()
-    patch_topk_topp_sampler()
-    # Patch modules for Ascend platform
-    if not patch_mamba_batch_memcpy():
-        return
-    patch_causal_conv1d()
-    patch_fla_ops()
-    patch_op_cls()
-    patch_fused_moe()
-    _patches_applied = True
+        patch_triton_compile_hooks()
+        patch_topk_topp_sampler()
+        # Mamba is optional; its installation failure must not suppress the
+        # independent Ascend kernels and model patches.
+        patch_causal_conv1d()
+        patch_fla_ops()
+        patch_op_cls()
+        patch_fused_moe()
+        _core_patches_applied = True
+    _patches_applied = patch_mamba_batch_memcpy()
 
 
 def patch_topk_topp_sampler():
