@@ -77,6 +77,7 @@ Configuration File (YAML):
 """
 
 import os
+import weakref
 
 from .types import OpImpl, BackendImplKind, BackendPriority, match_token
 from .registry import OpRegistry, OpRegistrySnapshot
@@ -146,6 +147,7 @@ def resolve_op(op_name: str):
 # Fast-path opt-out: set VLLM_FL_OP_FAST_PATH=0 to disable per-op fn caching
 # in hot OOT layers and route every call back through OpManager.call.
 _OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
+_CACHED_OPS = weakref.WeakSet()
 
 
 class CachedOp:
@@ -172,6 +174,7 @@ class CachedOp:
         "_manager_id",
         "_manager_epoch",
         "_policy_epoch",
+        "__weakref__",
     )
 
     def __init__(self, op_name: str) -> None:
@@ -181,6 +184,23 @@ class CachedOp:
         self._manager_id = -1
         self._manager_epoch = -1
         self._policy_epoch = -1
+        _CACHED_OPS.add(self)
+
+    def prepare(self) -> None:
+        """Resolve and import the selected implementation before graph capture."""
+        if not _OP_FAST_PATH_ENABLED:
+            return
+        mgr = get_default_manager()
+        impl = mgr._resolve_impl(self._op_name)
+        prepare = getattr(impl.fn, "_prepare", None)
+        if prepare is not None:
+            prepare()
+        mgr._record_first_use(self._op_name, impl)
+        self._impl = impl
+        self._use_manager_call = False
+        self._manager_id = id(mgr)
+        self._manager_epoch = mgr.policy_epoch
+        self._policy_epoch = get_policy_epoch()
 
     def __call__(self, *args, **kwargs):
         mgr = get_default_manager()
@@ -229,6 +249,12 @@ class CachedOp:
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)
+
+
+def prepare_cached_ops() -> None:
+    """Prepare all live CachedOp call sites before torch.compile tracing."""
+    for op in tuple(_CACHED_OPS):
+        op.prepare()
 
 
 __all__ = [
@@ -282,4 +308,5 @@ __all__ = [
     "call_op",
     "resolve_op",
     "CachedOp",
+    "prepare_cached_ops",
 ]

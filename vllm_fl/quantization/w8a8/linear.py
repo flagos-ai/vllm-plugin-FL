@@ -22,6 +22,8 @@ from vllm.model_executor.kernels.linear import (
     Int8ScaledMMLinearLayerConfig,
 )
 from vllm.model_executor.layers.quantization.utils import replace_parameter
+from vllm.platforms import current_platform
+from vllm.utils.torch_utils import direct_register_custom_op
 
 from vllm_fl.dispatch import CachedOp
 from vllm_fl.utils import (
@@ -32,6 +34,57 @@ from vllm_fl.utils import (
 FLAGGEMS_W8A8_LINEAR_OP = "w8a8_dynamic_per_token_linear"
 
 _dynamic_per_token_quant_int8 = CachedOp("dynamic_per_token_quant_int8")
+
+
+def _w8a8_dynamic_per_token_linear_impl(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Runtime implementation kept behind an opaque vLLM custom-op boundary."""
+    from flag_gems import scaled_mm
+
+    x_q, x_scale = _dynamic_per_token_quant_int8(x)
+    return scaled_mm(
+        x_q,
+        weight,
+        x_scale,
+        weight_scale,
+        bias=bias,
+        out_dtype=x.dtype,
+    )
+
+
+def _w8a8_dynamic_per_token_linear_fake(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    del weight_scale, bias
+    return torch.empty(
+        (x.shape[0], weight.shape[1]),
+        dtype=x.dtype,
+        device=x.device,
+    )
+
+
+# Dispatch policy and FlagGems both contain Python-side control flow. Keeping
+# that control flow inside a registered custom op lets Dynamo represent W8A8 as
+# one opaque graph node while eager execution still uses the normal plugin
+# dispatch chain and fallback semantics.
+direct_register_custom_op(
+    op_name="fl_w8a8_dynamic_per_token_linear",
+    op_func=_w8a8_dynamic_per_token_linear_impl,
+    mutates_args=[],
+    fake_impl=_w8a8_dynamic_per_token_linear_fake,
+    dispatch_key=current_platform.dispatch_key,
+)
+
+_w8a8_dynamic_per_token_linear = (
+    torch.ops.vllm.fl_w8a8_dynamic_per_token_linear.default
+)
 
 
 class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
@@ -99,19 +152,14 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        from flag_gems import scaled_mm
-
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape
         x_2d = x.reshape(-1, original_shape[-1]).contiguous()
-        x_q, x_scale = _dynamic_per_token_quant_int8(x_2d)
-        output = scaled_mm(
-            x_q,
+        output = _w8a8_dynamic_per_token_linear(
+            x_2d,
             weight,
-            x_scale,
             weight_scale,
-            bias=bias,
-            out_dtype=x.dtype,
+            bias,
         )
         return output.reshape(*original_shape[:-1], weight.shape[1])
 

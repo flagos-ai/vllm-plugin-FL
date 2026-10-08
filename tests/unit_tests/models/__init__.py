@@ -1,0 +1,1 @@
+"""Model adapter unit tests."""

@@ -1,0 +1,1 @@
+"""Plugin-owned multimodal processors."""
