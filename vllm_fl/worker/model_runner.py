@@ -120,6 +120,21 @@ def _accelerator_synchronize() -> None:
         torch.accelerator.synchronize()
 
 
+def _async_ready_event() -> torch.Event:
+    """Sleep while waiting on T-Head copies, preserving other platforms."""
+    if current_platform.device_name == "thead":
+        return torch.cuda.Event(blocking=True)
+    return torch.Event()
+
+
+def _uses_qwen38_ngram_embedding(hf_text_config: Any) -> bool:
+    """Return whether the model opts into the Qwen3.8 runner metadata path."""
+    return bool(
+        getattr(hf_text_config, "supports_qwen38_ngram_context", False)
+        and getattr(hf_text_config, "ple_layer_ids", ())
+    )
+
+
 if current_platform.dist_backend == "flagcx" or current_platform.device_type == "musa":
     @contextmanager
     def graph_capture(device: torch.device):
@@ -284,7 +299,6 @@ from vllm_fl.dispatch.io_dumper import (
 from vllm_fl.worker.common_attention_metadata import (
     CommonAttentionMetadataGraphRunner,
     common_attention_metadata_enabled,
-    compute_common_attention_metadata,
 )
 
 GraphWrapper = GraphWrapper
@@ -321,7 +335,7 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
         self._invalid_req_indices = invalid_req_indices
 
         # Event on the copy stream so we can synchronize the non-blocking copy.
-        self.async_copy_ready_event = torch.Event()
+        self.async_copy_ready_event = _async_ready_event()
 
         # Keep a reference to the device tensor to avoid it being
         # deallocated until we finish copying it to the host.
@@ -442,7 +456,7 @@ class AsyncGPUPoolingModelRunnerOutput(AsyncModelRunnerOutput):
         self._model_runner_output = model_runner_output
 
         # Event on the copy stream so we can synchronize the non-blocking copy.
-        self.async_copy_ready_event = torch.Event()
+        self.async_copy_ready_event = _async_ready_event()
 
         # Keep a reference to the device tensors to avoid them being
         # deallocated until we finish copying it to the host.
@@ -551,6 +565,26 @@ class ModelRunnerFL(
         self.inputs_embeds_size = model_config.get_inputs_embeds_size()
         # Only relevant for models using ALiBi (e.g, MPT)
         self.use_alibi = model_config.uses_alibi
+
+        # Qwen3.8-Flash-Next PLE consumes the raw token history preceding each
+        # scheduled chunk. Keep this in the plugin-owned v0.24 runner so the
+        # installed vLLM tree remains unmodified.
+        self.uses_ngram_embedding = _uses_qwen38_ngram_embedding(
+            model_config.hf_text_config
+        )
+        if self.uses_ngram_embedding:
+            self.ngram_context_len = int(model_config.hf_text_config.ngram_size) - 1
+            self.ngram_eos_token_id = int(model_config.hf_text_config.eos_token_id)
+        else:
+            self.ngram_context_len = 0
+            self.ngram_eos_token_id = 0
+        if self.uses_ngram_embedding and self.ngram_context_len <= 0:
+            raise ValueError("N-gram embedding requires context length >= 1.")
+        if self.uses_ngram_embedding and len(get_pp_group().ranks) > 1:
+            raise RuntimeError(
+                "N-gram PLE embedding currently requires "
+                "pipeline_parallel_size=1."
+            )
 
         self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
@@ -765,7 +799,7 @@ class ModelRunnerFL(
         self.prepare_inputs_event: torch.Event | None = None
         if self.use_async_scheduling:
             self.async_output_copy_stream = current_platform.torch_device_fn.Stream()
-            self.prepare_inputs_event = torch.Event()
+            self.prepare_inputs_event = _async_ready_event()
 
         # self.cudagraph_batch_sizes sorts in ascending order.
         if (
@@ -793,11 +827,18 @@ class ModelRunnerFL(
         self.query_start_loc = self._make_buffer(
             self.max_num_reqs + 1, dtype=torch.int32
         )
-        self.common_attention_metadata_graph = (
-            CommonAttentionMetadataGraphRunner()
-            if common_attention_metadata_enabled()
-            else None
-        )
+        if self.uses_ngram_embedding:
+            # Qwen PLE uses its dispatch-owned producer with the shared graph
+            # lifecycle, rather than also running the generic pointer kernel.
+            from vllm_fl.worker.common_slot_mapping import CommonSlotMappingGraphRunner
+
+            self.common_attention_metadata_graph = CommonSlotMappingGraphRunner()
+        else:
+            self.common_attention_metadata_graph = (
+                CommonAttentionMetadataGraphRunner()
+                if common_attention_metadata_enabled()
+                else None
+            )
         self.seq_lens = torch.zeros(
             self.max_num_reqs, dtype=torch.int32, device=self.device
         )
@@ -828,6 +869,12 @@ class ModelRunnerFL(
         self.inputs_embeds = self._make_buffer(
             self.max_num_tokens, self.inputs_embeds_size, dtype=self.dtype, numpy=False
         )
+        if self.uses_ngram_embedding:
+            self.ngram_context = self._make_buffer(
+                self.max_num_reqs,
+                self.ngram_context_len,
+                dtype=torch.int32,
+            )
         self.is_token_ids = self._make_buffer(self.max_num_tokens, dtype=torch.bool)
         self.discard_request_mask = self._make_buffer(
             self.max_num_reqs, dtype=torch.bool
@@ -3527,10 +3574,86 @@ class ModelRunnerFL(
         inputs_embeds = self.inputs_embeds.gpu[:num_tokens]
         return input_ids, inputs_embeds
 
+    def _prepare_ngram_context(
+        self,
+        num_reqs: int,
+        num_reqs_padded: int,
+    ) -> torch.Tensor:
+        """Build the left context for every real or CUDA-graph padding row."""
+        if not self.uses_ngram_embedding:
+            raise RuntimeError("N-gram context requested for non-ngram model.")
+        eos_token_id = int(self.ngram_eos_token_id)
+        if num_reqs_padded == 0 or self.ngram_context_len == 0:
+            return self.ngram_context.gpu[:num_reqs_padded]
+
+        context_cpu = self.ngram_context.np[:num_reqs_padded]
+        context_cpu.fill(eos_token_id)
+        num_computed = self.input_batch.num_computed_tokens_cpu
+        token_ids = self.input_batch.token_ids_cpu
+        is_token_ids = self.input_batch.is_token_ids
+
+        for req_idx in range(num_reqs):
+            end = int(num_computed[req_idx])
+            if end <= 0:
+                continue
+            start = max(0, end - self.ngram_context_len)
+            context_tokens = token_ids[req_idx, start:end]
+            if context_tokens.size == 0:
+                continue
+            if self.enable_prompt_embeds and not is_token_ids[
+                req_idx, start:end
+            ].all():
+                context_tokens = context_tokens.copy()
+                context_tokens[~is_token_ids[req_idx, start:end]] = eos_token_id
+            context_cpu[req_idx, -context_tokens.size :] = context_tokens
+
+        self.ngram_context.copy_to_gpu(num_reqs_padded)
+        return self.ngram_context.gpu[:num_reqs_padded]
+
+    def _maybe_add_ngram_kwargs(
+        self,
+        model_kwargs: dict[str, Any],
+        *,
+        num_reqs: int,
+        num_reqs_padded: int,
+        is_first_rank: bool,
+        is_encoder_decoder: bool,
+        use_dummy_context: bool,
+        query_start_loc: torch.Tensor | None = None,
+        num_scheduled_tokens: np.ndarray | None = None,
+    ) -> None:
+        if not self.uses_ngram_embedding or not is_first_rank or is_encoder_decoder:
+            return
+
+        eos_token_id = int(self.ngram_eos_token_id)
+        if query_start_loc is None:
+            if num_scheduled_tokens is None:
+                raise RuntimeError("query_start_loc is required for N-gram input.")
+            cu_num_tokens = np.cumsum(num_scheduled_tokens, dtype=np.int32)
+            last = int(cu_num_tokens[-1]) if num_reqs > 0 else 0
+            self.query_start_loc.np[0] = 0
+            if num_reqs > 0:
+                self.query_start_loc.np[1 : num_reqs + 1] = cu_num_tokens
+            self.query_start_loc.np[num_reqs + 1 :].fill(last)
+            self.query_start_loc.copy_to_gpu()
+            query_start_loc = self.query_start_loc.gpu[: num_reqs_padded + 1]
+        model_kwargs["query_start_loc"] = query_start_loc
+
+        if use_dummy_context:
+            self.ngram_context.np[:num_reqs_padded].fill(eos_token_id)
+            self.ngram_context.copy_to_gpu(num_reqs_padded)
+            model_kwargs["ngram_context"] = self.ngram_context.gpu[:num_reqs_padded]
+        else:
+            model_kwargs["ngram_context"] = self._prepare_ngram_context(
+                num_reqs, num_reqs_padded
+            )
+
     def _preprocess(
         self,
         scheduler_output: "SchedulerOutput",
         num_input_tokens: int,  # Padded
+        num_reqs: int,
+        num_reqs_padded: int,
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> tuple[
         torch.Tensor | None,
@@ -3634,6 +3757,26 @@ class ModelRunnerFL(
             input_ids = self.input_ids.gpu[:num_input_tokens]
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
+
+        if (
+            self.uses_ngram_embedding
+            and is_first_rank
+            and not is_encoder_decoder
+            and input_ids is None
+        ):
+            raise RuntimeError(
+                "N-gram PLE requires token ids on the first pipeline rank; "
+                "inputs_embeds-only batches are not supported."
+            )
+        self._maybe_add_ngram_kwargs(
+            model_kwargs,
+            num_reqs=num_reqs,
+            num_reqs_padded=num_reqs_padded,
+            is_first_rank=is_first_rank,
+            is_encoder_decoder=is_encoder_decoder,
+            use_dummy_context=False,
+            query_start_loc=self.query_start_loc.gpu[: num_reqs_padded + 1],
+        )
 
         if self.uses_mrope:
             positions = self.mrope_positions.gpu[:, :num_input_tokens]
@@ -4090,7 +4233,6 @@ class ModelRunnerFL(
             self.num_computed_tokens[:num_reqs],
             use_graph=use_graph,
             capture=capture,
-            compute=compute_common_attention_metadata,
         )
 
     def _get_slot_mappings(
@@ -4417,7 +4559,11 @@ class ModelRunnerFL(
                 model_kwargs,
                 ec_connector_output,
             ) = self._preprocess(
-                scheduler_output, num_tokens_padded, intermediate_tensors
+                scheduler_output,
+                num_tokens_padded,
+                num_reqs,
+                num_reqs_padded,
+                intermediate_tensors,
             )
 
         # Set cudagraph mode to none if calc_kv_scales is true.
@@ -6037,11 +6183,10 @@ class ModelRunnerFL(
                     block_table_rows_are_current=self.common_attention_metadata_graph is not None,
                 )
 
-            # Dummy forwards must not update real KV-cache slots. Capture the
-            # metadata producer first, then restore the existing PAD_SLOT_ID
-            # behavior before the model dummy/capture forward. Runtime replay
-            # overwrites these fixed-address buffers with current metadata.
-            if slot_mappings_by_group is not None:
+            # Generic dummy forwards must not update real KV-cache slots.
+            # PLE/QSA dummy forwards retain the producer's slot metadata, as
+            # their state/cache graph capture requires those bindings.
+            if not self.uses_ngram_embedding and slot_mappings_by_group is not None:
                 for slot_mapping in slot_mappings_by_group.values():
                     slot_mapping.fill_(-1)
 
@@ -6069,6 +6214,16 @@ class ModelRunnerFL(
             else:
                 input_ids = self.input_ids.gpu[:num_tokens_padded]
                 inputs_embeds = None
+
+            self._maybe_add_ngram_kwargs(
+                model_kwargs,
+                num_reqs=num_reqs,
+                num_reqs_padded=num_reqs_padded,
+                is_first_rank=get_pp_group().is_first_rank,
+                is_encoder_decoder=self.model_config.is_encoder_decoder,
+                use_dummy_context=True,
+                num_scheduled_tokens=num_scheduled_tokens,
+            )
 
             if self.uses_mrope:
                 positions = self.mrope_positions.gpu[:, :num_tokens_padded]
@@ -7513,6 +7668,14 @@ class ModelRunnerFL(
             self.kv_caches,
             num_attn_module,
         )
+        # vLLM 0.24's helper assigns ``layer.kv_cache`` directly. QSA's raw
+        # side cache needs its bind hook to expose typed key/position views;
+        # newer vLLM calls this hook natively.
+        for layer_name, kv_cache in kv_caches.items():
+            layer = self.compilation_config.static_forward_context[layer_name]
+            bind_hook = getattr(layer, "bind_kv_cache", None)
+            if callable(bind_hook):
+                bind_hook(kv_cache)
         return kv_caches
 
     def maybe_add_kv_sharing_layers_to_kv_cache_groups(

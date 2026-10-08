@@ -39,6 +39,56 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
+        OpImpl(
+            op_name="mla_prefill",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.mla_prefill, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        # BF16 indexer graph operators
+        OpImpl(
+            op_name="bf16_indexer_cache_write",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.bf16_indexer_cache_write, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="bf16_indexer_decode",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.bf16_indexer_decode, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        *[
+            OpImpl(
+                op_name=op_name,
+                impl_id="default.flagos",
+                kind=BackendImplKind.DEFAULT,
+                fn=_bind_is_available(
+                    getattr(backend, op_name),
+                    functools.partial(backend.fused_op_is_available, op_name),
+                ),
+                vendor=None,
+                priority=BackendPriority.DEFAULT,
+            )
+            for op_name in (
+                "qsa_mqa_paged",
+                "expand_qsa_block_indices",
+                "qsa_select_paged_tokens",
+                "qsa_sparse_paged_attention",
+                "qsa_store_cache_rows",
+                "qsa_compress_groups_with_ratio",
+                "ple_state_gather",
+                "ple_state_scatter_",
+                "gdn_packed_decode",
+                "compute_common_slot_mapping",
+            )
+        ],
         # Quantization
         OpImpl(
             op_name="dynamic_per_token_quant_int8",

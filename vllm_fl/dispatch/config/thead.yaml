@@ -1,5 +1,6 @@
-# vLLM-FL Dispatch Configuration for CUDA
-# Auto-loaded when running on NVIDIA GPU hardware
+# T-Head PPU dispatch defaults.
+# Site-specific validation policies can be supplied with VLLM_FL_CONFIG.
+# Establish the FlagGems baseline first; vendor kernels remain optional fallbacks.
 
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
@@ -26,7 +27,15 @@ strict: false
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:cuda   : CUDA-specific vendor backend
 op_backends:
-  # attention_backend: prioritize flagos (Triton attention)
+  mla_prefill: [flagos, vendor]
+  bf16_indexer_cache_write: [flagos, vendor, reference]
+  bf16_indexer_decode: [flagos, reference]
+  # MLA query concatenation and cache writes belong to attention_backend.
+  dynamic_per_token_quant_int8: [flagos, vendor, reference]
+  moe_align_block_size: [flagos, vendor, reference]
+  moe_sum: [flagos, vendor, reference]
+  topk_softmax: [flagos, vendor, reference]
+  grouped_topk: [flagos, vendor, reference]
   attention_backend:
     - flagos
     - vendor
@@ -46,4 +55,44 @@ op_backends:
 
 # FlagOS operator blacklist
 flagos_blacklist:
+  - to_copy
+  - _to_copy
+  - zeros
+  - copy_
+  - fill_scalar_
+  - sum_dim
+  - exponential_
+  - mm
+  - resolve_neg
+  - resolve_conj
+  - eq_scalar
+  - floor_divide
+  - cumsum
+  - mul
+  - reciprocal
+  - repeat
+  - randn
+  - add
+  - ge_scalar
+  - sub
+  - bitwise_and
+  - bitwise_not
+  - slice_scatter
+  - fill_tensor_
+  - conv1d
+  - conv2d
+  - uniform_
+  - prod
+  - max
+  - amax
+  - cat
+  - stack
+  - flatten
+  - reshape
+  - view
+  - tensor
+  - topk
+  - slice
 
+# OOT (Out-of-Tree) operator blacklist
+# oot_blacklist: []

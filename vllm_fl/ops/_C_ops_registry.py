@@ -45,6 +45,12 @@ _CUDA_FALLBACK_IMPLS = [
 
 def register_op_schemas():
     """Register _C op schemas if not already present."""
+    # T-Head, like MetaX below, must load native schemas before fallbacks.
+    # Keep platform detection and SO details inside the vendor loader.
+    from vllm_fl.dispatch.backends.vendor.thead.bootstrap import initialize_native_extensions
+
+    initialize_native_extensions()
+
     if getattr(register_op_schemas, "_lib", None) is not None:
         return
 
