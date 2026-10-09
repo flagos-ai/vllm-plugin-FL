@@ -28,9 +28,25 @@ def _require_ascend():
 
 
 @contextmanager
-def _enable(op, *, native=False):
+def _strict_policy():
+    from flag_gems.runtime import error as registration_errors
+
+    def fail_registration(error):
+        raise RuntimeError(f"FlagGems operator registration failed: {error}") from error
+
     _, blacklist = get_flag_gems_whitelist_blacklist()
-    with flag_gems.use_gems(exclude=blacklist):
+    # The pinned registrar records names before lib.impl and otherwise logs
+    # registration failures. Reject them so native kernels cannot pass these
+    # tests while an intended FlagGems override was silently skipped.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(registration_errors, "register_error", fail_registration)
+        with flag_gems.use_gems(exclude=blacklist):
+            yield
+
+
+@contextmanager
+def _enable(op, *, native=False):
+    with _strict_policy():
         registered = flag_gems.all_registered_ops()
         if native:
             assert op not in registered, f"{op} must use the native implementation"
@@ -384,7 +400,7 @@ def test_silu_and_mul_flaggems_fallback_on_npu(dtype, layout):
     assert "silu_and_mul" not in blacklist
     # This direct FL fallback is not an ATen registration. Exercise its actual
     # work tensors under the same policy as the model worker.
-    with flag_gems.use_gems(exclude=blacklist):
+    with _strict_policy():
         actual = silu_and_mul_flaggems(None, npu)
         torch.npu.synchronize()
     _assert(actual, expected, dtype)
