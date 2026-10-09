@@ -1,11 +1,13 @@
-# MUSA four-route Gate CI draft
+# MUSA four-route Gate CI runner
 
-This directory is a local draft. Nothing here has run a vendor import, device
-probe, model, build, installation, SSH command, or CI job. The local consumer
-tests use labelled filesystem fixtures and do not certify GPU behavior.
+The MUSA workflow invokes this runner after ordinary wheel installation. The
+GitHub CI job has not been executed in this validation record. Separate
+isolated model runs and their actual results are recorded in the
+[MUSA deployment guide](musa.md#validation-record). Local consumer tests use
+labelled filesystem fixtures and do not certify GPU behavior.
 
-The runner executes the original `tools/adaptation-gate-cases` without modifying
-its 19 files. It runs `test_text.py`, `test_image.py`, and
+The runner executes the committed `tools/adaptation-gate-cases` without editing
+its 19 files during execution. It runs `test_text.py`, `test_image.py`, and
 `test_mix_text_image.py` separately for each route and continues after an
 ordinary pytest failure. The four sequential routes are:
 
@@ -78,7 +80,7 @@ arguments. `gate_entry.py` then uses `MUSA_CI_PYTHON` (or `PYTHON`/`python`),
 exclusive input/evidence directories under `MUSA_CI_RESULT_ROOT`
 (default`$RUNNER_TEMP/musa-gate`, or`/tmp/musa-gate`) and task caches under
 `MUSA_CI_CACHE_ROOT` (default`/root/.cache/musa-gate`). Model and port overrides
-are `MUSA_CI_MODEL_27B`, `MUSA_CI_MODEL_35B` and `MUSA_CI_PORTS`. It performs a
+are `MUSA_GATE_MODEL_27B`, `MUSA_GATE_MODEL_35B_A3B` and `MUSA_CI_PORTS`. It performs a
 bounded actual source/cache/device binding, then creates readonly observer
 configuration using only original `case_utils.scenario_requests`; it sends no
 request and imports no unused original test. The installed observer wheel must
@@ -101,13 +103,16 @@ bash "$tools/run-adaptation-gate.sh" \
 Model paths and the four ports have explicit CLI overrides. The server uses
 TP4, bf16, length32768, sequences8, batch tokens4096 and memory utilization0.6;
 its local-media whitelist is the original Gate images directory. Eager routes
-add `--enforce-eager`. Graph routes preserve the existing plugin policy,
-including the MUSA FULL-to-PIECEWISE downgrade; the draft does not promote FULL.
+add `--enforce-eager`. Every route passes `--shutdown-timeout 60` so the API
+uses drain mode and gives real workers time to close their observer streams.
+Graph routes preserve the existing plugin policy,
+including the MUSA FULL-to-PIECEWISE downgrade; the runner does not promote FULL.
 
 Deadlines are startup30s, readiness600s, each original pytest1900s, all clients
-in a route5800s, and route6900s. Shell whole-entry timeout is29400s with65s termination
-grace. Shutdown first sends TERM to the held, verified own leader PID and waits
-15s for normal engine/worker shutdown. A verified own-group KILL15 fallback is
+in a route5800s, and route6900s. Shell whole-entry timeout is29400s with180s
+termination grace. Shutdown sends TERM to the held, verified own leader PID;
+the API server has90s to finish its60s engine drain and real worker cleanup.
+Other owned actors retain15s TERM grace. A verified own-group KILL15 fallback is
 recorded as failure. Unknown identity never permits signalling another process.
 Every actually sampled child lifetime is retained and rechecked even if it
 changes its session. Cleanup scope is these owned process leases in the already
@@ -153,17 +158,64 @@ and diagnostics, but the full matrix will intentionally fail graph acceptance.
 
 ## Local checks
 
-`tests/run-consumer-checks.py` performs only AST/memory compilation and pure
-stdlib report-consumer filesystem fixtures. `consumer-result01` preserves the
-first13-test result; `consumer-result02` preserves the14-test result after
-adding the three original client-process requirement. `consumer-result03`
-preserves14 passing fixtures for the companion observer's actual flat summary,
-including canonical full input/output row hashes and PID-namespace joins.
-`consumer-result04` adds original-row/namespace/raw-trace counterexamples.
-`consumer-result05` records23 passing consumer/admission/known-child reader
-fixtures. No runner, preflight or configuration producer was executed by these
-checks. The final filenames and byte hashes are recorded
-in `draft-files.json` when this draft is frozen for review.
+`.github/scripts/musa/tests/test_aggregate_gate.py` checks the report consumer,
+route admission and owned-child identity contracts with filesystem fixtures.
+`test_shutdown_window.py` exercises actual four-route CLI construction and the
+owned-process close path with a CPU clock/process fixture. The 26 CPU CI helper
+tests pass after the shutdown-window fix; these tests do not execute real
+workers or signals on the MUSA host.
+`tools/musa-gate-observer/tests/test_summarize.py` checks full-matrix and
+single-route observer consumption;
+`tools/musa-gate-observer/tests/test_producer_contract.py` checks producer
+wrappers with Mock dependencies. Syntax checks and these fixtures do not
+execute the CI runner, preflight, model or actual graph capture/replay.
+
+The targeted `tests/unit_tests/test_musa_accelerator_patch.py` CPU Mock
+regression passed 48 cases after adding the MUSA synchronization binding.
+That result covers callable validation, default/explicit device forwarding,
+vendor error propagation and idempotence. Separately, candidate
+`f867afb0c7f026bcabc8f80c2a68277a993ae800` completed the isolated CPU09 ordinary
+three-wheel installation and source/metadata/RECORD binding with unchanged
+vendor packages. Its actual 27B graph runtime30 and 35B-A3B graph runtime27 reached
+readiness and recorded native capture/replay, then each failed with a
+`sample_tokens` RPC timeout. Each route has 26 failed logical attempts,
+three original pytest exits of 1 and five failed real JUnit testcases (2/2/1).
+The original request errors retain `checks={}`; unavailable quality checks
+were not synthesized. Both unchanged offline partial-route observer consumers
+exited 1 on error events, leaving partial and full-matrix completion false.
+The preserved eager runs runtime28/29 have 26/26 and25/26 quality successes,
+respectively, but both original consumers exit1 because four worker traces lack
+`telemetry_end`. The 35B single-text answer lacks literal `limitations`, failing
+only the original semantic/order checks. Resource cleanup supplies no observer
+end event. These runs used the upstream default abort shutdown with timeout0.
+The graceful-window reruns preserve every request, check and observer contract.
+Runtime31 adds only `--shutdown-timeout 60` and passes the complete 27B eager
+single route: 26/26 quality successes, three pytest exits0, five JUnit passes,
+eight real activation/end-bounded traces with no errors, all26 original
+response-to-engine joins, and unchanged partial-route consumer exit0. The API
+reports drain mode and all workers exiting gracefully; owned cleanup passes.
+Runtime32 closes all eight real process traces normally with the same60s drain,
+but its original 35B quality remains25/26: the1,578-character single-text
+response lacks literal `limitations`, failing only semantic/order checks.
+Three original pytest exits are1/0/0 and four of five JUnit testcases pass;
+the unchanged consumer exits1 at joins for `original logical quality failure`.
+The job exits1 despite API0 and successful owned resource cleanup. No consumer,
+original quality threshold or vendor source was changed to pass either route.
+
+All four current routes retain20 original reports and104 logical results:
+52 text and52 image, with51 quality successes and53 failures. The12 original
+pytest invocations produce20 real JUnit testcases, with9 passes,11 failures and
+no error or skip testcase. The original full consumer runs once in default full
+mode using all32 byte-verified, unfiltered current trace copies (runtime30/27/31/32),
+without substituting old28/29 or selecting a partial route. It exits1 at events
+on an actual graph API error. It stops early; this is no claim of complete
+parsing or acceptance of all32 files. All full-matrix flags remainfalse, and
+all208 required graph request/rank joins have not been verified complete.
+Full four-route Gate acceptance is FAIL. Actual manual runs do not establish
+execution of the GitHub CI job, which remains NOT_RUN. Automatic MUSA discovery
+remains disabled in `.github/configs/platforms.yml` (`musa.enabled: false`).
+Historical f80 and initial eager failures are retained in the
+[deployment validation record](musa.md#validation-record).
 
 
 ## CI application wiring
