@@ -28,6 +28,8 @@ PYTEST_SECONDS = 1900
 CLIENT_SECONDS = 5800
 ROUTE_SECONDS = 6900
 TERM_SECONDS = 15
+API_SHUTDOWN_SECONDS = 60
+API_TERM_SECONDS = 90
 KILL_SECONDS = 15
 INTERRUPTED = False
 
@@ -131,7 +133,8 @@ class OwnedProcess:
     Signals require the original leader's current starttime, parent, PGID and SID.
     Unknown ownership is a cleanup failure, never permission to kill another job.
     """
-    def __init__(self, argv, env, cwd, log_root):
+    def __init__(self, argv, env, cwd, log_root, term_seconds=TERM_SECONDS):
+        self.term_seconds = term_seconds
         self.argv = argv
         self.out_path = log_root / "stdout.raw"
         self.err_path = log_root / "stderr.raw"
@@ -223,7 +226,7 @@ class OwnedProcess:
                 require(getattr(self.process, "pid", None) is None,
                         "Startup left a PID with UNKNOWN ownership")
             else:
-                for signum, grace in ((signal.SIGTERM, TERM_SECONDS),
+                for signum, grace in ((signal.SIGTERM, self.term_seconds),
                                       (signal.SIGKILL, KILL_SECONDS)):
                     members = self.members()
                     live = [row for row in members if proc_stat(row["pid"])["state"] != "Z"]
@@ -251,7 +254,7 @@ class OwnedProcess:
                 require(not remaining, "Owned subprocess descendants remain alive")
                 actual_exit = self.process.wait(timeout=1)
                 if forced_kill:
-                    errors.append("Normal owned-process shutdown exceeded TERM15; KILL15 fallback was required")
+                    errors.append(f"Normal owned-process shutdown exceeded TERM{self.term_seconds}; KILL15 fallback was required")
         except Exception:
             errors.append(traceback.format_exc())
         finally:
@@ -414,6 +417,7 @@ def one_route(args, route, root, binding_id):
                 "--tensor-parallel-size", "4", "--dtype", "bfloat16", "--max-model-len", "32768",
                 "--max-num-seqs", "8", "--max-num-batched-tokens", "4096",
                 "--gpu-memory-utilization", "0.6", "--trust-remote-code",
+                "--shutdown-timeout", str(API_SHUTDOWN_SECONDS),
                 "--allowed-local-media-path", str(Path(args.gate_dir) / "images")]
         if route["mode"] == "eager":
             argv.append("--enforce-eager")
@@ -421,7 +425,7 @@ def one_route(args, route, root, binding_id):
         route["server"]["attempted"] = True
         server_logs = logs / "server"
         server_logs.mkdir()
-        server = OwnedProcess(argv, env, args.repo, server_logs)
+        server = OwnedProcess(argv, env, args.repo, server_logs, term_seconds=API_TERM_SECONDS)
         require(server.start_error is None, server.start_error or "")
         route["server"].update({"started": True, "identity": server.initial})
         (logs / "server.pid").write_text(str(server.initial["pid"]) + "\n", encoding="ascii")
@@ -562,7 +566,8 @@ def main():
                 "routes": [], "errors": [], "budgets_seconds": {
                     "startup": START_SECONDS, "readiness": READY_SECONDS,
                     "pytest_each": PYTEST_SECONDS, "client_route": CLIENT_SECONDS,
-                    "route": ROUTE_SECONDS, "term": TERM_SECONDS, "kill": KILL_SECONDS}}
+                    "route": ROUTE_SECONDS, "term": TERM_SECONDS, "kill": KILL_SECONDS,
+                    "server_shutdown": API_SHUTDOWN_SECONDS, "server_term": API_TERM_SECONDS}}
     if args.observer_config:
         config = read_json(args.observer_config)
         require(config["run_id"] == manifest["run_id"],
