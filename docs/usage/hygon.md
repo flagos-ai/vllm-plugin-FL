@@ -208,7 +208,13 @@ complete operator/collective ABI test.
 
 ## Build the CI image from this repository
 
+Build on a Linux host from a clean committed checkout. Docker BuildKit and the
+buildx plugin are required. The build wrapper records the current Git revision;
+use the same committed source for the wheel and image.
+
 ```bash
+docker buildx version
+git diff --exit-code HEAD -- vllm_fl pyproject.toml setup.py README.md LICENSE
 bash docker/build.sh --platform hygon --target ci \
   --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl \
   --image-tag v0.28.0-hygon-ci
@@ -219,6 +225,9 @@ FlagGems/FlagTree installation, then builds and installs ordinary wheels for
 the empty vLLM and this plugin.
 Builds use `--no-deps --no-build-isolation` to preserve the vendor runtime.
 Do not apply the upstream CUDA PyTorch requirements to this Hygon image.
+If Git needs a proxy, set `HYGON_GIT_CONFIG` to a local Git configuration file.
+The builder mounts it as a BuildKit secret for Git only; it does not store the
+proxy in image layers. Keep HTTP proxy variables unset for pip and curl.
 The existing Hygon CI runner label is `hg-cicd-vllm-plugin-0240`; its name is
 an infrastructure label and does not specify the vLLM version inside the image.
 
