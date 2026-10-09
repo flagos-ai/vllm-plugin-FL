@@ -48,11 +48,13 @@ def test_request_failure_survives_normal_yield_fixture_teardown(
     running_server, capsys, error
 ):
     server, log_path, process = running_server
+    request = Mock(side_effect=error)
     with (
         pytest.raises(type(error), match=str(error)),
         server.log_on_failure("Serving chat failed"),
     ):
-        raise error
+        request()
+    request.assert_called_once()
 
     # A pytest yield fixture calls __exit__ with no exception, even on failure.
     server.__exit__(None, None, None)
