@@ -22,14 +22,26 @@ ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci
 runner_labels:
   - mt-cicd-vllm-plugin
 
+# The existing image tag is a vendor baseline, not a published 0.28 image.
+# MUSA_CI_IMAGE may select a separately validated image/digest.
 container_volumes:
-  - /data:/data
+  - /data:/data:ro
 
+# Allocation/runtime/wheel/model values are resolved by load_config.py from
+# explicit repository variables. Never allocate every GPU implicitly.
 container_options: >-
   --hostname vllm-plugin-fl
-  --privileged
-  --ipc=host
-  --shm-size=64g
+  --ipc=private
+  --shm-size=16g
+  --cpus=24
+  --memory=256g
+  --pids-limit=4096
+  --tmpfs /root/.cache:rw,exec,nosuid,nodev,size=8g
   --env GEMS_VENDOR=mthreads
   --env VLLM_PLUGINS=fl
-  --env MTHREADS_VISIBLE_DEVICES=all
+  --env USE_FLAGGEMS=1
+  --env VLLM_NO_USAGE_STATS=1
+  --env PYTHONDONTWRITEBYTECODE=1
+  --env TRITON_CACHE_DIR=/root/.cache/triton
+  --env FLAGGEMS_CACHE_DIR=/root/.cache/flaggems
+  --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor

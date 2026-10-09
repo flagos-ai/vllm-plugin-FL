@@ -30,7 +30,6 @@ device_overrides:
 env_defaults:
   GEMS_VENDOR: "mthreads"
   VLLM_PLUGINS: "fl"
-  MTHREADS_VISIBLE_DEVICES: "all"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 
 s5000:

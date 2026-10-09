@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -46,6 +47,60 @@ def load_platform_config(platform: str) -> dict:
     # Ensure the platform key is present
     config.setdefault("platform", platform)
     config.setdefault("device_runner_labels", {})
+    if platform == "musa":
+        config = resolve_musa_config(config)
+    return config
+
+
+def resolve_musa_config(config: dict) -> dict:
+    """Validate runner variables before constructing Docker's concrete options."""
+    def required(name: str) -> str:
+        value = os.environ.get(name, "")
+        if not value:
+            raise ValueError(f"Set repository variable {name} before enabling MUSA CI")
+        return value
+
+    runtime = required("MUSA_CI_RUNTIME")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", runtime):
+        raise ValueError("Invalid MUSA_CI_RUNTIME")
+    physical = required("MUSA_CI_PHYSICAL_DEVICES")
+    logical = required("MUSA_CI_LOGICAL_DEVICES")
+    ids = physical.split(",")
+    if len(ids) != 4 or any(not re.fullmatch(r"0|[1-9][0-9]*", i) for i in ids) or len({int(i) for i in ids}) != 4:
+        raise ValueError("MUSA requires exactly four unique physical device IDs")
+    if logical != "0,1,2,3":
+        raise ValueError("MUSA_CI_LOGICAL_DEVICES must be 0,1,2,3 for the allocated container")
+    pci = required("MUSA_CI_PCI_BUS_IDS")
+    if len(pci.split(",")) != 4 or len(set(pci.split(","))) != 4 or any(
+        not re.fullmatch(r"0000:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", i) for i in pci.split(",")
+    ):
+        raise ValueError("MUSA_CI_PCI_BUS_IDS must provide four canonical PCI IDs in logical order")
+
+    def data_path(name: str, suffix: str = "") -> str:
+        value = required(name)
+        if not value.startswith("/data/") or ".." in value.split("/") or not re.fullmatch(r"[/A-Za-z0-9_.+-]+", value):
+            raise ValueError(f"{name} must be an absolute /data path without shell metacharacters")
+        if suffix and not value.endswith(suffix):
+            raise ValueError(f"{name} must end with {suffix}")
+        return value
+
+    wheel = data_path("MUSA_CI_EMPTY_WHEEL", ".whl")
+    sha = required("MUSA_CI_EMPTY_WHEEL_SHA256")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise ValueError("Invalid empty wheel SHA256")
+    models = {"MUSA_GATE_MODEL_27B": data_path("MUSA_GATE_MODEL_27B"),
+              "MUSA_GATE_MODEL_35B_A3B": data_path("MUSA_GATE_MODEL_35B_A3B")}
+    image = os.environ.get("MUSA_CI_IMAGE")
+    if image:
+        if not re.fullmatch(r"[A-Za-z0-9./_:@-]+", image):
+            raise ValueError("Invalid MUSA_CI_IMAGE")
+        config["ci_image"] = image
+    env = {"MTHREADS_VISIBLE_DEVICES": physical, "MUSA_VISIBLE_DEVICES": logical,
+           "MUSA_CI_PCI_BUS_IDS": pci, "MUSA_CI_EMPTY_WHEEL": wheel,
+           "MUSA_CI_EMPTY_WHEEL_SHA256": sha, **models}
+    config["container_options"] += " --runtime=" + runtime
+    for key, value in env.items():
+        config["container_options"] += f" --env {key}={value}"
     return config
 
 

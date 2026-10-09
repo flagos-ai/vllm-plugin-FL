@@ -7,8 +7,9 @@
 | `Qwen3.6-35B-A3B` | eager | 1 | 1 | 8 | 8 |  4+4 | 26 |
 | `Qwen3.6-35B-A3B` | graph | 1 | 1 | 8 | 8 |  4+4 | 26 |
 
-The matrix counts pytest scenarios; each concurrent scenario sends eight
-requests.
+The matrix counts logical SDK requests. Each route runs five pytest scenarios
+and 26 requests; the four routes produce 20 scenario reports and 104 requests.
+SDK retries can produce additional HTTP attempts and do not increase this logical count.
 
 This directory is a small manual gate for accelerator adaptation and vLLM
 plugin upgrades. It tests two Qwen models in eager and graph modes.
@@ -36,9 +37,9 @@ Each mode runs the following scenarios:
 
 The image fixtures cover quadrant colors, shape ordering, shape counting, OCR
 of `hello vllm`, nested shapes, shape colors, and colored-shape counting. The
-single-image case performs exact OCR. The eight-way case uses every image and
-checks text presence for the OCR fixture while keeping exact checks for the
-other visual tasks.
+single-image case checks that the OCR answer contains the expected words.
+The eight-way case uses every image and checks the original semantic and order
+constraints. These checks do not require exact equality of the whole response.
 
 ## Run
 
@@ -108,7 +109,9 @@ vllm serve /models/Qwen3.6-27B \
 Use `--enforce-eager` for the eager run. Remove it for the graph run, then
 run `MODEL_PATH=/path/to/model PORT=8000 ./run_test.sh` against each service.
 Both runs are mandatory even though the test client does not need to know the
-execution mode.
+execution mode. For MUSA acceptance, graph mode also requires evidence of actual
+capture and replay joined to these requests; removing `--enforce-eager` alone
+does not prove that graphs were used. See [the MUSA guide](../../docs/usage/musa.md).
 
 Each pytest file or individual case can also be run directly. `PORT` and at
 least one of `SERVED_MODEL_NAME` or `MODEL_PATH` are required. The result label
@@ -128,8 +131,8 @@ MODEL_PATH=/models/Qwen3.6-27B PORT=8000 \
 Each pytest case writes one JSON file under
 `results/MODEL/port-PORT/SCENARIO.json`. Use different ports for eager and
 graph services when both result sets must be retained; reusing a port
-overwrites that model and port's previous result. A two-model, two-port matrix
-contains 20 JSON files.
+overwrites that model and port's previous result. A two-model, two-mode matrix
+contains 20 JSON files. Use a distinct port or result root for every route.
 Every file contains the exact inputs, API outputs, timing, per-response checks,
 and a pass/fail summary. On failure, a concise request-level error summary is
 also printed to the terminal.

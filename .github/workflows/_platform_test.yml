@@ -49,6 +49,11 @@ on:
       FEISHU_CHAT_ID:
         required: false
 
+# One MUSA allocation must not be shared by two workflow runs.
+concurrency:
+  group: ${{ inputs.platform == 'musa' && format('musa-{0}', github.repository) || format('platform-{0}-{1}', inputs.platform, github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   setup:
     name: "Setup (${{ inputs.platform }})"
@@ -76,6 +81,16 @@ jobs:
         with:
           fetch-depth: 0
       - id: load
+        env:
+          MUSA_CI_RUNTIME: ${{ vars.MUSA_CI_RUNTIME }}
+          MUSA_CI_PHYSICAL_DEVICES: ${{ vars.MUSA_CI_PHYSICAL_DEVICES }}
+          MUSA_CI_LOGICAL_DEVICES: ${{ vars.MUSA_CI_LOGICAL_DEVICES }}
+          MUSA_CI_PCI_BUS_IDS: ${{ vars.MUSA_CI_PCI_BUS_IDS }}
+          MUSA_CI_EMPTY_WHEEL: ${{ vars.MUSA_CI_EMPTY_WHEEL }}
+          MUSA_CI_EMPTY_WHEEL_SHA256: ${{ vars.MUSA_CI_EMPTY_WHEEL_SHA256 }}
+          MUSA_GATE_MODEL_27B: ${{ vars.MUSA_GATE_MODEL_27B }}
+          MUSA_GATE_MODEL_35B_A3B: ${{ vars.MUSA_GATE_MODEL_35B_A3B }}
+          MUSA_CI_IMAGE: ${{ vars.MUSA_CI_IMAGE }}
         run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
       - id: changes
         name: Detect changed files (PR only)
@@ -131,6 +146,7 @@ jobs:
     if: needs.setup.outputs.e2e_matrix != '[]'
     strategy:
       fail-fast: false
+      max-parallel: ${{ inputs.platform == 'musa' && 1 || 256 }}
       matrix:
         test: ${{ fromJson(needs.setup.outputs.e2e_matrix) }}
     uses: ./.github/workflows/_e2e_test.yml
@@ -157,11 +173,45 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
 
+  # Run the original acceptance matrix after the other GPU jobs release the allocation.
+  musa_gate:
+    name: MUSA original adaptation Gate
+    needs: [setup, unit, functional, e2e, benchmark]
+    if: ${{ always() && !cancelled() && inputs.platform == 'musa' && needs.setup.result == 'success' }}
+    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
+    # Four bounded 6900-second routes plus setup, cleanup and artifact collection.
+    timeout-minutes: 500
+    container:
+      image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      volumes: ${{ fromJson(needs.setup.outputs.config).container_volumes }}
+      options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+    env:
+      MUSA_GATE_ARTIFACT_DIR: ${{ runner.temp }}/musa-gate-${{ github.run_id }}-${{ github.run_attempt }}
+      MUSA_CI_RESULT_ROOT: ${{ runner.temp }}/musa-gate-${{ github.run_id }}-${{ github.run_attempt }}
+      VLLM_NO_USAGE_STATS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check allocated devices
+        run: bash .github/scripts/musa/check.sh
+      - name: Install the isolated candidate
+        run: bash .github/scripts/musa/setup.sh
+      - name: Run both models in eager and graph modes
+        run: bash .github/scripts/musa/run-adaptation-gate.sh
+      - name: Preserve all Gate and installation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musa-adaptation-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.MUSA_GATE_ARTIFACT_DIR }}
+            ${{ runner.temp }}/musa-install.*
+          if-no-files-found: error
+
   # ============================================================
   # Feishu notification — per-platform status
   # ============================================================
   notify:
-    needs: [unit, functional, e2e, benchmark]
+    needs: [unit, functional, e2e, benchmark, musa_gate]
     if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
@@ -170,11 +220,13 @@ jobs:
         ${{ (needs.unit.result == 'success' &&
              needs.functional.result == 'success' &&
              (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped'))
+             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped') &&
+             (inputs.platform != 'musa' || needs.musa_gate.result == 'success'))
             && 'success'
             || (needs.unit.result == 'cancelled' ||
                 needs.functional.result == 'cancelled' ||
                 needs.e2e.result == 'cancelled' ||
-                needs.benchmark.result == 'cancelled')
+                needs.benchmark.result == 'cancelled' ||
+                needs.musa_gate.result == 'cancelled')
                && 'cancelled'
                || 'failure' }}

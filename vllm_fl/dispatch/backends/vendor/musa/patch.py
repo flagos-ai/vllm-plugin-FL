@@ -112,6 +112,10 @@ def patch_accelerator_missing_attrs() -> bool:
       Delegate to the corresponding torch_musa APIs (``mem_get_info`` for
       ``get_memory_info``), preserving the optional device argument.
 
+    - ``torch.accelerator.synchronize(device)`` — used during graph memory
+      profiling. The generic Torch accelerator implementation does not support
+      synchronizing all streams on MUSA. Delegate to torch_musa.synchronize.
+
     - ``torch.accelerator.device_index(index)`` — used as a context manager in
       fla/ops/utils.py to pin operations to a specific device. The MUSA
       equivalent is ``torch_musa.device(index)``.
@@ -133,6 +137,7 @@ def patch_accelerator_missing_attrs() -> bool:
             "memory_reserved": "memory_reserved",
             "reset_peak_memory_stats": "reset_peak_memory_stats",
             "get_memory_info": "mem_get_info",
+            "synchronize": "synchronize",
         }
         # Preserve an existing device context; older builds need MUSA's one.
         if not hasattr(torch.accelerator, "device_index"):

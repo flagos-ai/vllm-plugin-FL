@@ -35,6 +35,7 @@ def vendor_modules():
         memory_stats=unsupported,
         memory_reserved=unsupported,
         reset_peak_memory_stats=unsupported,
+        synchronize=unsupported,
     )
     musa = ModuleType("torch_musa")
     musa.empty_cache = Mock(return_value=None)
@@ -44,6 +45,7 @@ def vendor_modules():
     musa.reset_peak_memory_stats = Mock(return_value=None)
     musa.mem_get_info = Mock(return_value=(512, 1024))
     musa.device = Mock(return_value=object())
+    musa.synchronize = Mock(return_value=None)
     return torch, musa
 
 
@@ -129,6 +131,7 @@ def test_repeated_patch_is_idempotent(monkeypatch, musa_patch, vendor_modules):
     musa.mem_get_info = Mock()
     musa.empty_cache = Mock()
     musa.device = Mock()
+    musa.synchronize = Mock()
     _apply_patch(monkeypatch, musa_patch, vendor_modules)
 
     assert vars(torch.accelerator) == patched
@@ -154,6 +157,7 @@ def test_vendor_memory_errors_are_not_hidden(monkeypatch, musa_patch, vendor_mod
         "memory_reserved",
         "reset_peak_memory_stats",
         "mem_get_info",
+        "synchronize",
         "device",
     ],
 )
@@ -220,3 +224,37 @@ def test_patch_entry_point_retries_after_incomplete_vendor_api(
         assert calls == {
             name: getattr(musa_patch, name).call_count for name in other_patches
         }
+
+
+def test_synchronize_uses_vendor_current_device_when_argument_is_omitted(
+    monkeypatch, musa_patch, vendor_modules
+):
+    torch, musa = vendor_modules
+    _apply_patch(monkeypatch, musa_patch, vendor_modules)
+
+    assert torch.accelerator.synchronize is musa.synchronize
+    assert torch.accelerator.synchronize() is None
+    musa.synchronize.assert_called_once_with()
+
+
+@pytest.mark.parametrize("device", [None, 1, "musa:1", object()])
+def test_synchronize_forwards_explicit_device_unchanged(
+    monkeypatch, musa_patch, vendor_modules, device
+):
+    torch, musa = vendor_modules
+    _apply_patch(monkeypatch, musa_patch, vendor_modules)
+
+    assert torch.accelerator.synchronize(device) is None
+    musa.synchronize.assert_called_once_with(device)
+
+
+def test_synchronize_vendor_errors_are_not_hidden(
+    monkeypatch, musa_patch, vendor_modules
+):
+    torch, musa = vendor_modules
+    musa.synchronize.side_effect = RuntimeError("MUSA device is unavailable")
+    _apply_patch(monkeypatch, musa_patch, vendor_modules)
+
+    with pytest.raises(RuntimeError, match="MUSA device is unavailable"):
+        torch.accelerator.synchronize(2)
+    musa.synchronize.assert_called_once_with(2)
