@@ -1,76 +1,44 @@
 #!/bin/bash
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Setup script for Hygon DCU CI environment.
+# Install the checked-out Hygon plugin as an ordinary wheel.
 set -euo pipefail
 
-git config --global --add safe.directory "$(pwd)"
+REPO_ROOT="$(pwd -P)"
+VERIFY_SCRIPT="${REPO_ROOT}/.github/scripts/hygon/verify_install.py"
+git config --global --add safe.directory "${REPO_ROOT}"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${ROCM_PATH:?ROCM_PATH is not set}"
 : "${HIP_PATH:?HIP_PATH is not set}"
 : "${LD_LIBRARY_PATH:?LD_LIBRARY_PATH is not set}"
-
-# Optional vars - use if set, otherwise use defaults
+[[ "${GEMS_VENDOR}" == hygon ]]
+[[ "${VLLM_PLUGINS}" == fl ]]
 DTK_HOME="${DTK_HOME:-${DTKROOT:-/opt/dtk}}"
-
-unset VLLM_FL_IMAGE_PLUGIN_ROOT
-unset HYGON_USE_IMAGE_PLUGIN
-
-echo "DTK_HOME=${DTK_HOME}"
-echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 test -e "${HIP_PATH}/lib/libgalaxyhip.so.5"
 test -e "${DTK_HOME}/llvm/lib/libomp.so"
 
-python -m pip install --no-build-isolation --no-deps -e .
+# The validated Hygon image supplies native libraries, Torch, Gems and Tree.
+# Do not compile CUDA extensions or resolve/upgrade the vendor dependencies.
+unset VLLM_VENDOR VLLM_FL_IMAGE_PLUGIN_ROOT HYGON_USE_IMAGE_PLUGIN
+unset PYTHONPATH PYTHONHOME
+unset SETUPTOOLS_SCM_PRETEND_VERSION SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL
+export GEMS_VENDOR=hygon VLLM_PLUGINS=fl
+export PLUGIN_SOURCE_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
 
-python - <<'PY'
-from importlib import metadata
-
-from packaging.requirements import Requirement
-from packaging.specifiers import SpecifierSet
-from packaging.utils import canonicalize_name
-from packaging.version import Version
-
-import vllm
-
-installed_version = Version(metadata.version("vllm"))
-imported_version = Version(vllm.__version__)
-print(f"vLLM installed version: {installed_version}")
-print(f"vLLM imported version: {imported_version}, path: {vllm.__file__}")
-
-vllm_requirements = []
-for raw_requirement in metadata.requires("vllm-plugin-fl") or []:
-    requirement = Requirement(raw_requirement)
-    if canonicalize_name(requirement.name) != "vllm":
-        continue
-    if requirement.marker is None or requirement.marker.evaluate({"extra": "test"}):
-        vllm_requirements.append(requirement)
-
-if not vllm_requirements:
-    raise SystemExit(
-        "ERROR: vllm-plugin-fl metadata has no vllm requirement for the test extra"
-    )
-
-for requirement in vllm_requirements:
-    specifier = SpecifierSet(str(requirement.specifier))
-    if not str(specifier):
-        raise SystemExit(f"ERROR: vLLM requirement has no version constraint: {requirement}")
-    print(f"Required vLLM version: {specifier}")
-    if installed_version not in specifier or imported_version not in specifier:
-        raise SystemExit(
-            f"ERROR: vLLM installed={installed_version}, imported={imported_version} "
-            f"does not satisfy vllm-plugin-fl requirement {requirement}"
-        )
-
-import flag_gems
-import torch
-import vllm_fl
-
-print(f"vLLM import ok: {vllm.__version__}")
-print(f"vLLM-FL import ok: {vllm_fl.__file__}")
-print(f"FlagGems import ok: {getattr(flag_gems, '__version__', 'unknown')}")
-print(f"Torch import ok: {torch.__version__}")
-print(f"Accelerator available: {torch.cuda.is_available()}")
-print(f"Accelerator count: {torch.cuda.device_count()}")
-PY
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vllm-fl-hygon.XXXXXXXX")"
+trap 'rm -rf -- "${BUILD_DIR}"' EXIT
+cd "${BUILD_DIR}"
+python -I -B "${VERIFY_SCRIPT}" --write-vendor-snapshot "${BUILD_DIR}/vendor-before.json"
+python -I -B -m pip wheel \
+    --no-build-isolation --no-deps --no-cache-dir \
+    --wheel-dir "${BUILD_DIR}/wheels" "${REPO_ROOT}"
+shopt -s nullglob
+WHEELS=("${BUILD_DIR}"/wheels/vllm_plugin_fl-*.whl)
+[[ "${#WHEELS[@]}" -eq 1 ]]
+python -I -B -m pip install \
+    --force-reinstall --no-build-isolation --no-deps --no-cache-dir \
+    "${WHEELS[0]}"
+python -I -B "${VERIFY_SCRIPT}" \
+    --compare-vendor-snapshot "${BUILD_DIR}/vendor-before.json" \
+    --min-devices "${HYGON_MIN_DEVICES:-2}"
