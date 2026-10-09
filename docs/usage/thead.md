@@ -23,6 +23,12 @@ The following stack passed the T-Head acceptance matrix on 2026-10-09.
 | Required FlagGems fix | Three production files from [PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894), fixed head `4e330227564ccc7f6a373be2d48a5d2cb7f2823e`, applied to the base above |
 | Model execution | BF16, TP=4, eager and graph; maximum model length 32768, maximum sequences 8, memory utilization 0.85 |
 
+The vLLM distribution version is `0.28.0+empty`, while its generated module
+version (`vllm.__version__`) is `0.28.0`. The empty build suffix is added to
+wheel metadata. Verify both versions and confirm that the imported module
+belongs to that distribution; checking the module string for `+empty` rejects
+this valid build.
+
 The tested FlagGems code is **the pinned base plus the three-file fix**.
 Checking out the entire PR head, installing a moving `master`, or relying on
 package version strings alone does not identify the tested code. The repaired

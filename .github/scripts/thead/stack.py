@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 import sysconfig
+from contextlib import redirect_stdout
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -64,6 +65,33 @@ def vendor_snapshot():
     }
 
 
+def validate_vllm_provider(
+    module_version, distribution_version, module_origin, distribution_module_origin
+):
+    # Upstream writes the SCM version before adding +empty to wheel metadata.
+    actual = {
+        "vllm_module_version": module_version,
+        "vllm_distribution_version": distribution_version,
+        "vllm_origin": str(module_origin),
+        "vllm_distribution_origin": str(distribution_module_origin),
+    }
+    same_origin = (
+        module_origin is not None
+        and distribution_module_origin is not None
+        and Path(module_origin).resolve() == Path(distribution_module_origin).resolve()
+    )
+    if (
+        module_version != "0.28.0"
+        or distribution_version != "0.28.0+empty"
+        or not same_origin
+    ):
+        raise RuntimeError(
+            "CI requires vLLM module 0.28.0 from distribution 0.28.0+empty "
+            "at the same origin; actual: " + repr(actual)
+        )
+    return actual
+
+
 def check_stack():
     # Preserve the ordinary import order used for the verified vendor stack.
     torch = importlib.import_module("torch")
@@ -86,10 +114,13 @@ def check_stack():
         raise RuntimeError("FlagGems base version does not match the reviewed commit")
     if triton.__version__ != "3.6.0":
         raise RuntimeError("Active Triton module must come from PPU FlagTree 3.6")
-    if not vllm.__version__.startswith("0.28.0") or "empty" not in vllm.__version__:
-        raise RuntimeError(
-            "CI image must provide vLLM 0.28.0+empty, not system vLLM 0.23"
-        )
+    vllm_distribution = metadata.distribution("vllm")
+    vllm_provider = validate_vllm_provider(
+        vllm.__version__,
+        vllm_distribution.version,
+        vllm.__file__,
+        vllm_distribution.locate_file("vllm/__init__.py"),
+    )
     if getattr(current_platform, "vendor_name", None) != "thead":
         raise RuntimeError("Normal FL registration did not activate the THead platform")
     if not torch.cuda.is_available() or torch.cuda.device_count() != 4:
@@ -114,7 +145,7 @@ def check_stack():
         "patched_files": STACK["files"],
         "vllm_triton_utils_origin": triton_utils.__file__,
         "vllm_version": vllm.__version__,
-        "vllm_origin": vllm.__file__,
+        **vllm_provider,
         "plugin_origin": vllm_fl.__file__,
         "worker_class": WorkerFL.__qualname__,
         "platform": type(current_platform).__qualname__,
@@ -137,7 +168,9 @@ def main():
             parser.error("apply-patch requires --source")
         apply_patch(args.source)
         return
-    facts = vendor_snapshot() if args.action == "snapshot" else check_stack()
+    # Keep ordinary import logs in stderr so stdout remains one JSON document.
+    with redirect_stdout(sys.stderr):
+        facts = vendor_snapshot() if args.action == "snapshot" else check_stack()
     if args.compare is not None:
         expected = json.loads(args.compare.read_text())
         actual = facts if args.action == "snapshot" else facts["vendor"]

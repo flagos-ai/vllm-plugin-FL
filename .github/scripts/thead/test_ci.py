@@ -2,11 +2,13 @@
 """CPU-only regressions for CI acceptance boundaries; no vendor imports."""
 
 import hashlib
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ HERE = Path(__file__).resolve().parent
 # These are the actual standalone CI modules, not substitutes for runtime code.
 sys.path.insert(0, str(HERE))
 import run_tests
+import stack
 from common import session_members, validate_junit
 from config import resolve_config
 from run_gate import CHECKS, SCENARIOS, parse_graph_observations, validate_documents
@@ -32,6 +35,62 @@ class IsolatedEntryTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("usage:", result.stdout)
+
+    def test_stack_cli_keeps_import_info_off_json_stdout(self):
+        facts = {"provider": "ordinary-wheel", "version": "0.28.0+empty"}
+
+        def check():
+            print("INFO normal import check")
+            return facts
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(sys, "argv", ["stack.py", "check"]),
+            patch.object(stack, "check_stack", side_effect=check),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            stack.main()
+        self.assertEqual(json.loads(stdout.getvalue()), facts)
+        self.assertIn("INFO normal import check", stderr.getvalue())
+        self.assertNotIn("INFO", stdout.getvalue())
+
+
+class VllmProviderTests(unittest.TestCase):
+    def setUp(self):
+        self.origin = str((HERE / "image-provider/vllm/__init__.py").resolve())
+
+    def assert_provider_rejected(self, module_version, distribution_version, origin):
+        with self.assertRaises(RuntimeError) as error:
+            stack.validate_vllm_provider(
+                module_version, distribution_version, self.origin, origin
+            )
+        for value in (module_version, distribution_version, self.origin, origin):
+            self.assertIn(repr(value), str(error.exception))
+
+    def test_actual_split_versions_and_resolved_origin_pass(self):
+        distribution_origin = str(HERE / "image-provider/vllm/../vllm/__init__.py")
+        self.assertEqual(
+            stack.validate_vllm_provider(
+                "0.28.0", "0.28.0+empty", self.origin, distribution_origin
+            ),
+            {
+                "vllm_module_version": "0.28.0",
+                "vllm_distribution_version": "0.28.0+empty",
+                "vllm_origin": self.origin,
+                "vllm_distribution_origin": distribution_origin,
+            },
+        )
+
+    def test_wrong_module_version_rejected_with_actual_values(self):
+        self.assert_provider_rejected("0.23.0", "0.28.0+empty", self.origin)
+
+    def test_distribution_without_empty_rejected_with_actual_values(self):
+        self.assert_provider_rejected("0.28.0", "0.28.0", self.origin)
+
+    def test_wrong_provider_origin_rejected_with_actual_values(self):
+        wrong_origin = str((HERE / "system-provider/vllm/__init__.py").resolve())
+        self.assert_provider_rejected("0.28.0", "0.28.0+empty", wrong_origin)
 
 
 class ConfigurationTests(unittest.TestCase):
