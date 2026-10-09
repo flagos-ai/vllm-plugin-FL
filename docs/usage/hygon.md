@@ -228,6 +228,13 @@ Do not apply the upstream CUDA PyTorch requirements to this Hygon image.
 If Git needs a proxy, set `HYGON_GIT_CONFIG` to a local Git configuration file.
 The builder mounts it as a BuildKit secret for Git only; it does not store the
 proxy in image layers. Keep HTTP proxy variables unset for pip and curl.
+For an offline upstream install, set `HYGON_VLLM_WHEEL_DIR` to a directory
+containing exactly one previously built `vllm-0.28.0+empty-*.whl`, and set
+`HYGON_VLLM_WHEEL_SHA256` to its verified SHA256. The build checks that digest
+and installs the wheel normally; it does not copy old native vLLM extensions.
+Use a wheel built from the upstream revision listed above. Leave these variables
+unset to build vLLM from the official Git source.
+
 The existing Hygon CI runner label is `hg-cicd-vllm-plugin-0240`; its name is
 an infrastructure label and does not specify the vLLM version inside the image.
 
