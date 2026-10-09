@@ -18,7 +18,7 @@
 platform: hygon
 
 # Docker image for this hardware.
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d
 
 # Runner labels for this hardware.
 runner_labels:
