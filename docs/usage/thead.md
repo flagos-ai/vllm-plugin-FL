@@ -535,6 +535,15 @@ models, and TP4 configuration, not a blanket result for every PPU/model setup.
   the intended FlagTree wheel supplies the imported compiler.
 - **Socket creation or multiprocessing startup fails on a mounted path:** set
   `TMPDIR=/tmp`, not a FUSE-backed workspace directory.
+- **Cold compilation fails with `Resource temporarily unavailable` or a
+  `log_file` `NameError`:** on the validated 176-CPU host, a container PID/thread
+  limit of 512 made `ppu-llc` fail to create threads (`EAGAIN`). FlagTree's error
+  handler then referenced an undefined `log_file`, hiding the compiler error.
+  Removing that added limit restored the original nine-call D72 SDPA smoke
+  test without changing package bytes or numerical tolerances. Size the thread
+  budget for the host and concurrent compilation; the baseline does not impose
+  a low PID limit. Keep the other container isolation settings. This diagnosis
+  does not claim that FlagTree's error handler has been fixed.
 - **GPU tests skip or attention imports fail:** verify device mounts, visibility,
   vendor SDK, and the PPU `flash_attn_3` package. Standard NVIDIA FA3 is not a
   substitute for the PPU implementation.
