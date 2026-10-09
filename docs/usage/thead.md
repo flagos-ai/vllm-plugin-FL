@@ -475,7 +475,11 @@ It uses the same configuration loader as the other platforms, with
 digest below and reserve four PPU cards on a registered runner. Device mounts
 grant access; they do not reserve cards or prove that the cards are idle.
 
-Configure these repository variables:
+The versioned THead configuration supplies the approved image, runner, four
+reserved cards, model mount, and image Python. This also supports PR runs that
+receive empty repository variables. Maintainers may override these defaults
+with the following repository variables; defaults and overrides undergo the
+same validation:
 
 | Variable | Value |
 |---|---|
@@ -492,7 +496,8 @@ The published image provides `/opt/thead/venv` and the complete repaired
 ordinary stack. Ensure that the runner can pull this digest and access the
 configured model mounts. Keep any registry authentication in the runner/CI
 secret configuration. The workflow rejects a missing image digest, invalid
-card selection, and privileged container options.
+card selection, and privileged container options, including invalid explicit
+overrides instead of silently using defaults.
 
 The image must contain the complete repaired ordinary stack: vendor PyTorch
 2.10.0 and SDK/extensions, vLLM 0.28.0+empty, FlagTree 0.7.0+ppu3.6, the pinned

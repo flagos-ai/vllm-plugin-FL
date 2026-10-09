@@ -44,6 +44,71 @@ class ConfigurationTests(unittest.TestCase):
             "THEAD_CI_MODEL_35B": "/models/moe",
         }
 
+    def versioned_resources(self):
+        return {
+            "ci_image": "registry.example/pinned@sha256:" + "b" * 64,
+            "runner_labels": ["reserved-ppu"],
+            "container_volumes": ["/model-store:/models:ro"],
+            "container_options": "--device /dev/alixpu",
+            "visible_devices": "12,13,14,15",
+            "model_27b": "/models/dense",
+            "model_35b": "/models/moe",
+            "base_python": "/opt/thead/venv/bin/python",
+        }
+
+    def test_empty_vars_use_versioned_resources(self):
+        defaults = self.versioned_resources()
+        empty = {
+            key: ""
+            for key in (
+                *self.env,
+                "THEAD_CI_RUNNER_LABELS",
+                "THEAD_CI_CONTAINER_OPTIONS",
+                "THEAD_CI_CONTAINER_VOLUMES",
+                "THEAD_CI_BASE_PYTHON",
+            )
+        }
+        self.assertEqual(resolve_config(defaults, empty), defaults)
+
+    def test_invalid_versioned_resources_fail(self):
+        for key, value in (
+            ("ci_image", "registry.example/ppu:latest"),
+            ("visible_devices", "12,12,14,15"),
+            ("runner_labels", "reserved-ppu"),
+            ("container_volumes", {"host": "/models"}),
+            ("base_python", "python"),
+        ):
+            defaults = dict(self.versioned_resources(), **{key: value})
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                resolve_config(defaults, {})
+
+    def test_invalid_override_does_not_fall_back(self):
+        with self.assertRaises(ValueError):
+            resolve_config(
+                self.versioned_resources(),
+                {"THEAD_CI_IMAGE": "registry.example/ppu:latest"},
+            )
+        with self.assertRaises(ValueError):
+            resolve_config(
+                self.versioned_resources(),
+                {"THEAD_CI_CONTAINER_VOLUMES": "not-json"},
+            )
+
+    def test_valid_overrides_replace_versioned_resources(self):
+        config = resolve_config(
+            self.versioned_resources(),
+            dict(
+                self.env,
+                THEAD_CI_CONTAINER_VOLUMES='["/new-model-store:/models:ro"]',
+                THEAD_CI_BASE_PYTHON="/custom/runtime/bin/python",
+            ),
+        )
+        self.assertEqual(config["ci_image"], self.env["THEAD_CI_IMAGE"])
+        self.assertEqual(config["visible_devices"], "0,1,2,3")
+        self.assertEqual(config["runner_labels"], ["reserved-ppu"])
+        self.assertEqual(config["container_volumes"], ["/new-model-store:/models:ro"])
+        self.assertEqual(config["base_python"], "/custom/runtime/bin/python")
+
     def test_main_runner_default_and_overrides(self):
         config = resolve_config(self.defaults, self.env)
         self.assertEqual(config["runner_labels"], ["flagcicd-810e"])

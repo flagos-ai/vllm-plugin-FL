@@ -27,6 +27,7 @@ jobs:
       - id: config
         name: Validate the actual THead CI resources
         env:
+          THEAD_CI_BASE_PYTHON: ${{ vars.THEAD_CI_BASE_PYTHON }}
           THEAD_CI_IMAGE: ${{ vars.THEAD_CI_IMAGE }}
           THEAD_CI_RUNNER_LABELS: ${{ vars.THEAD_CI_RUNNER_LABELS }}
           THEAD_CI_CONTAINER_OPTIONS: ${{ vars.THEAD_CI_CONTAINER_OPTIONS }}
@@ -46,7 +47,7 @@ jobs:
       options: ${{ fromJson(needs.setup.outputs.config).container_options }}
     env:
       CUDA_VISIBLE_DEVICES: ${{ fromJson(needs.setup.outputs.config).visible_devices }}
-      THEAD_BASE_PYTHON: ${{ vars.THEAD_CI_BASE_PYTHON }}
+      THEAD_BASE_PYTHON: ${{ fromJson(needs.setup.outputs.config).base_python }}
       GEMS_VENDOR: thead
       VLLM_PLUGINS: fl
       TORCH_DEVICE_BACKEND_AUTOLOAD: "1"
