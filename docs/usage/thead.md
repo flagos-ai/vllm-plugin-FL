@@ -77,7 +77,7 @@ done
 docker run -d --name vllm-fl-thead \
     "${device_args[@]}" \
     --read-only --cap-drop ALL --security-opt no-new-privileges \
-    --shm-size 8g --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+    --shm-size 8g --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g \
     -v "$WORK_DIR:/work" \
     -v "$REPO_DIR:/workspace/vllm-plugin-FL:ro" \
     -v "$MODEL_DIR:/models:ro" \
@@ -92,9 +92,16 @@ examples bind to container loopback, so run the Gate client inside the same
 container. Exposing an API outside the container additionally requires an
 appropriate bind address and Docker port mapping.
 
-Keep `TMPDIR=/tmp`. A writable bind mount can still use a filesystem such as
-FUSE that does not support the Unix-domain sockets needed by multiprocessing.
-Using such a mount for temporary sockets failed during validation.
+Keep `TMPDIR=/tmp` on a local filesystem. The runtime's Triton cache also
+stores generated `.so` libraries under `/tmp/thead-runtime` by default, so its
+filesystem must allow executable mappings. Specify `exec` for the `/tmp`
+tmpfs, retaining `nosuid,nodev`; a `noexec` mount can fail with
+`failed to map segment from shared object` when Triton loads a generated
+library. If `THEAD_RUNTIME_ROOT` selects another cache mount, that mount must
+also permit executable mappings. A writable bind mount can still use a
+filesystem such as FUSE that does not support the Unix-domain sockets needed
+by multiprocessing. Using such a mount for temporary sockets failed during
+validation.
 
 ## 3. Prepare the Python stack without replacing vendor packages
 
