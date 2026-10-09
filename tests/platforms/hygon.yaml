@@ -49,6 +49,8 @@ device_overrides:
     serve:
       startup_retries: 360
       extra_args: ["--no-enable-prefix-caching"]
+      chat_template_kwargs:
+        enable_thinking: false
       extra_engine:
         enable_log_requests: false
         enable_prefix_caching: false
