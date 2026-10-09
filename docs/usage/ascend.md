@@ -30,6 +30,25 @@ wheel from the selected plugin revision without changing runtime dependencies.
 For build details, see the
 [Ascend image guide](../../docker/ascend/README.md).
 
+### FlagGems execution mode
+
+The validated image uses FlagGems's Python/Triton operators with
+`USE_C_EXTENSION=0` and `flag_gems.config.use_c_extension == False`. The
+installation in the Ascend Dockerfile needs no C++ extension:
+
+```bash
+python -m pip install --no-build-isolation --no-deps /workspace/FlagGems
+```
+
+`use_c_extension` is a FlagGems runtime flag. Enabling it requires building
+the optional C++ extension for NPU and setting `USE_C_EXTENSION=1` before
+importing FlagGems. See the pinned
+[FlagGems source-installation instructions](https://github.com/flagos-ai/FlagGems/blob/3b406c36212744b98b9720bf6d0a5387c09fe96b/docs/content/en/getting-started/install.md#331-install-with-c-extension)
+for the build dependencies and the `FLAGGEMS_BACKEND=NPU` and
+`FLAGGEMS_BUILD_C_EXTENSIONS=ON` options. That optional mode has not been
+validated by this deployment recipe; keep `USE_C_EXTENSION=0` to reproduce
+the tested stack.
+
 ## 1. Check the host
 
 The host needs a working CANN driver, Docker, and an Ascend container runtime.
@@ -111,6 +130,7 @@ FlagTree must own the `triton` module; a separately installed `triton` or
 docker run --rm \
   --runtime=ascend --privileged --network=host --ipc=host \
   -e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
+  -e USE_C_EXTENSION=0 \
   -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
   -v /usr/local/dcmi:/usr/local/dcmi \
   -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
@@ -122,6 +142,8 @@ npu-smi info
 python - <<PY
 from importlib.metadata import PackageNotFoundError, version
 import triton
+import flag_gems
+from flag_gems.config import use_c_extension
 
 expected = {
     "vllm": "0.28.0+empty",
@@ -143,6 +165,9 @@ for name in ("triton", "triton-ascend"):
         continue
     raise RuntimeError(f"Remove standalone {name}=={installed}; use FlagTree")
 print(f"Triton={triton.__version__} (from FlagTree)")
+assert flag_gems.vendor_name == "ascend", flag_gems.vendor_name
+assert not use_c_extension, "Use USE_C_EXTENSION=0 for the validated Ascend stack"
+print("FlagGems=Ascend Python/Triton operators (C++ extension disabled)")
 PY
 '
 ```
@@ -169,6 +194,7 @@ docker run --rm -d \
   -v "$MODEL_DIR:/models/Qwen3-0.6B:ro" \
   -e VLLM_PLUGINS=fl \
   -e VLLM_FL_PLATFORM=ascend \
+  -e USE_C_EXTENSION=0 \
   -e PLUGIN_REVISION="$PLUGIN_REVISION" \
   -e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
   -e GLOO_SOCKET_IFNAME=lo \

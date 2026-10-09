@@ -53,7 +53,9 @@ def rotary_embedding_flaggems(
     # The official Ascend implementation in the qwen-vllm_for_ascend branch
     # exposes a six-argument apply_rotary_pos_emb without ``inplace``.  The
     # common Gems wrapper assumes the seven-argument API when the C extension
-    # is disabled, so call the backend implementation directly in that case.
+    # is disabled, even for inplace=False, so call the backend implementation
+    # directly in that case. Keep the caller's mutation contract: this kernel
+    # always allocates outputs, and inplace=True requires copying them back.
     if (
         getattr(flag_gems, "vendor_name", None) == "ascend"
         and not use_c_extension

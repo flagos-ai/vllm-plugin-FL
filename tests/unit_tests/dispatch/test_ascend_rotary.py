@@ -74,7 +74,11 @@ def _expected_rotary(value, cos, sin, positions, interleaved):
 
 
 def _install_fake_flaggems(
-    monkeypatch, apply_rotary, common_rotary, vendor_name="ascend"
+    monkeypatch,
+    apply_rotary,
+    common_rotary,
+    vendor_name="ascend",
+    use_c_extension=False,
 ):
     flag_gems = ModuleType("flag_gems")
     flag_gems.__path__ = []
@@ -82,7 +86,7 @@ def _install_fake_flaggems(
     flag_gems.vendor_name = vendor_name
 
     config = ModuleType("flag_gems.config")
-    config.use_c_extension = False
+    config.use_c_extension = use_c_extension
     modules = ModuleType("flag_gems.modules")
     modules.__path__ = []
     rotary = ModuleType("flag_gems.modules.rotary_embedding")
@@ -525,3 +529,39 @@ def test_six_argument_rotary_compatibility_is_ascend_only(monkeypatch):
     assert result_query is query
     assert result_key is key
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+@pytest.mark.parametrize("use_c_extension", [False, True])
+def test_flaggems_ascend_common_wrapper_preserves_requested_inplace(
+    monkeypatch, inplace, use_c_extension
+):
+    def legacy_rotary(query, key, cos, sin, position_ids, rotary_interleaved):
+        pytest.fail("the C-extension path must use the common wrapper")
+
+    def modern_rotary(query, key, cos, sin, position_ids, rotary_interleaved, inplace):
+        pytest.fail("the seven-argument API must use the common wrapper")
+
+    calls = []
+
+    def common_rotary(*args, **kwargs):
+        calls.append(kwargs)
+        return args[0], args[1]
+
+    _install_fake_flaggems(
+        monkeypatch,
+        legacy_rotary if use_c_extension else modern_rotary,
+        common_rotary,
+        use_c_extension=use_c_extension,
+    )
+    flaggems_rotary._supports_inplace_argument.cache_clear()
+    query, key, cos, sin, positions = _rotary_inputs()
+
+    result_query, result_key = flaggems_rotary.rotary_embedding_flaggems(
+        None, query, key, cos, sin, positions, inplace=inplace
+    )
+
+    assert result_query is query and result_key is key
+    assert len(calls) == 1
+    assert calls[0]["position_ids"] is positions
+    assert calls[0]["inplace"] is inplace
