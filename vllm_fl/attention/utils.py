@@ -5,6 +5,37 @@ logger = init_logger(__name__)
 _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE = 512
 
 
+def _patch_hygon_sdpa_contiguous():
+    """Use contiguous BHSD inputs and D72 padding for Hygon ViT Torch SDPA."""
+    from vllm.v1.attention.ops import vit_attn_wrappers as vit_mod
+
+    if getattr(vit_mod.apply_sdpa, "_fl_hygon_sdpa_layout", None) == "bhsd-pad-d72":
+        return
+
+    def _hygon_apply_sdpa(q, k, v, scale=None, enable_gqa=False):
+        q, k, v = (
+            vit_mod.einops.rearrange(x, "b s h d -> b h s d").contiguous()
+            for x in (q, k, v)
+        )
+        pad_d72 = q.shape[-1] == k.shape[-1] == v.shape[-1] == 72
+        if pad_d72:
+            q, k, v = (vit_mod.F.pad(x, (0, 56)).contiguous() for x in (q, k, v))
+            if scale is None:
+                scale = 72**-0.5
+        output = vit_mod.F.scaled_dot_product_attention(
+            q, k, v, dropout_p=0.0, scale=scale, enable_gqa=enable_gqa
+        )
+        if pad_d72:
+            output = output[..., :72]
+        return vit_mod.einops.rearrange(output, "b h s d -> b s h d ")
+
+    _hygon_apply_sdpa._fl_hygon_sdpa_layout = "bhsd-pad-d72"
+    vit_mod.apply_sdpa = _hygon_apply_sdpa
+    logger.info_once(
+        "Using contiguous BHSD Torch SDPA inputs with D72 padding for Hygon MM encoder."
+    )
+
+
 def patch_mm_encoder_attention():
     """
     Patch vllm.attention.layers.mm_encoder_attention.maybe_get_vit_flash_attn_backend
@@ -16,8 +47,11 @@ def patch_mm_encoder_attention():
     fallback to flash_attn.
     """
     import vllm.model_executor.layers.attention.mm_encoder_attention as mm_mod
-    from vllm.v1.attention.backends.registry import AttentionBackendEnum
     from vllm.platforms import current_platform
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+    if getattr(current_platform, "vendor_name", None) == "hygon":
+        _patch_hygon_sdpa_contiguous()
 
     if getattr(current_platform, "vendor_name", None) == "kunlunxin":
         import torch
@@ -34,7 +68,9 @@ def patch_mm_encoder_attention():
                 k_batch = k[batch_idx : batch_idx + 1]
                 v_batch = v[batch_idx : batch_idx + 1]
                 query_outputs = []
-                for start in range(0, q_batch.size(2), _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE):
+                for start in range(
+                    0, q_batch.size(2), _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE
+                ):
                     query_outputs.append(
                         F.scaled_dot_product_attention(
                             q_batch[
