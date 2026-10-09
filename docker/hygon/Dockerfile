@@ -26,15 +26,21 @@ ARG PLUGIN_SOURCE_SHA
 ARG INDEX_URL=https://pypi.org/simple
 ARG EXTRA_INDEX_URL
 
-# Inherit the digest-pinned vendor SDK/runtime environment unchanged.
+# Keep vendor packages and SDK files; explicitly provide their runtime paths.
 ENV DEBIAN_FRONTEND=noninteractive \
+    ROCM_PATH=/opt/dtk \
+    HIP_PATH=/opt/dtk/hip \
+    DTKROOT=/opt/dtk \
+    HYHAL_PATH=/opt/hyhal \
+    LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:/opt/mpi/lib:/opt/hwloc/lib:/opt/dtk/dcc/gcvm/lib:/opt/dtk/hip/lib:/opt/dtk/llvm/lib:/opt/dtk/lib:/opt/dtk/lib64:/opt/hyhal/lib:/opt/hyhal/lib64:/opt/dtk/dushmem/lib:/opt/dtk/opencl/lib:/opt/dtk/.hyhal/rocm_smi/lib \
     GEMS_VENDOR=hygon \
+    USE_FLAGGEMS=1 \
     VLLM_PLUGINS=fl \
     VLLM_VENDOR="" \
     PYTHONPATH=""
 
 ENV VIRTUAL_ENV=/opt/vllm-fl/venv \
-    PATH=/opt/vllm-fl/venv/bin:${PATH} \
+    PATH=/opt/vllm-fl/venv/bin:/opt/dtk/bin:/opt/dtk/llvm/bin:/opt/dtk/hip/bin:/opt/hyhal/bin:${PATH} \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
