@@ -17,7 +17,6 @@ from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
     patch_breakable_cudagraph_mode,
     patch_breakable_private_pools,
     patch_cudagraph_dispatcher,
-    patch_decode_attention,
     patch_eager_all_gather,
     patch_graph_all_reduce,
 )
@@ -28,45 +27,36 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def make_dispatcher(tensor_parallel_size=1):
+class _Capture:
+    _capturing = True
+
+    def __init__(self):
+        self.end_calls = 0
+        self.begin_calls = 0
+
+    def _end_segment(self):
+        self.end_calls += 1
+        self._capturing = False
+
+    def _begin_segment(self):
+        self.begin_calls += 1
+        self._capturing = True
+
+
+@pytest.mark.parametrize("num_tokens", [3, 4])
+def test_uniform_decode_keeps_full_available(monkeypatch, num_tokens):
+    def dispatch(self, **kwargs):
+        return kwargs
+
+    monkeypatch.setattr(CudagraphDispatcher, "dispatch", dispatch)
+    patch_cudagraph_dispatcher()
+
     dispatcher = object.__new__(CudagraphDispatcher)
-    dispatcher.vllm_config = SimpleNamespace(
-        parallel_config=SimpleNamespace(tensor_parallel_size=tensor_parallel_size)
-    )
-    return dispatcher
-
-
-def test_exact_decode_keeps_full_available(monkeypatch):
-    calls = []
-
-    def dispatch(self, **kwargs):
-        calls.append(kwargs)
-        return kwargs
-
-    monkeypatch.setattr(CudagraphDispatcher, "dispatch", dispatch)
-    patch_cudagraph_dispatcher()
-
-    dispatcher = make_dispatcher()
-    dispatcher._bs_to_padded_graph_size = [0, 1, 2, 4, 4]
-    result = dispatcher.dispatch(num_tokens=4, uniform_decode=True)
-
-    assert result["invalid_modes"] is None
-    assert calls[-1]["num_tokens"] == 4
-
-
-def test_padded_decode_keeps_full_available(monkeypatch):
-    def dispatch(self, **kwargs):
-        return kwargs
-
-    monkeypatch.setattr(CudagraphDispatcher, "dispatch", dispatch)
-    patch_cudagraph_dispatcher()
-
-    dispatcher = make_dispatcher()
-    dispatcher._bs_to_padded_graph_size = [0, 1, 2, 4, 4]
-    result = dispatcher.dispatch(num_tokens=3, uniform_decode=True)
+    result = dispatcher.dispatch(num_tokens=num_tokens, uniform_decode=True)
 
     assert result["invalid_modes"] is None
     assert result["valid_modes"] is None
+    assert result["num_tokens"] == num_tokens
 
 
 def test_non_uniform_batch_excludes_full(monkeypatch):
@@ -76,8 +66,7 @@ def test_non_uniform_batch_excludes_full(monkeypatch):
     monkeypatch.setattr(CudagraphDispatcher, "dispatch", dispatch)
     patch_cudagraph_dispatcher()
 
-    dispatcher = make_dispatcher()
-    dispatcher._bs_to_padded_graph_size = [0, 1, 2]
+    dispatcher = object.__new__(CudagraphDispatcher)
     result = dispatcher.dispatch(num_tokens=2, uniform_decode=False)
 
     assert result["invalid_modes"] == {CUDAGraphMode.FULL}
@@ -90,8 +79,7 @@ def test_padded_decode_accepts_full_only_redispatch(monkeypatch):
     monkeypatch.setattr(CudagraphDispatcher, "dispatch", dispatch)
     patch_cudagraph_dispatcher()
 
-    dispatcher = make_dispatcher()
-    dispatcher._bs_to_padded_graph_size = [0, 1, 2, 4, 4]
+    dispatcher = object.__new__(CudagraphDispatcher)
     result = dispatcher.dispatch(
         num_tokens=3,
         uniform_decode=True,
@@ -102,23 +90,12 @@ def test_padded_decode_accepts_full_only_redispatch(monkeypatch):
     assert result["invalid_modes"] is None
 
 
-def test_tensor_parallel_exact_decode_keeps_full(monkeypatch):
-    def dispatch(self, **kwargs):
-        return kwargs
-
-    monkeypatch.setattr(CudagraphDispatcher, "dispatch", dispatch)
-    patch_cudagraph_dispatcher()
-
-    dispatcher = make_dispatcher(tensor_parallel_size=4)
-    dispatcher._bs_to_padded_graph_size = [0, 1, 2, 4, 4]
-    result = dispatcher.dispatch(num_tokens=4, uniform_decode=True)
-
-    assert result["invalid_modes"] is None
-
-
-def test_full_graph_padding_writes_only_zeroes_to_null_block():
+@pytest.mark.parametrize("padding_value", [0.0, float("nan"), float("inf")])
+def test_full_graph_padding_writes_only_zeroes_to_null_block(padding_value):
     key = torch.arange(8, dtype=torch.float32).view(4, 1, 2)
     value = key + 10
+    key[2:] = padding_value
+    value[2:] = padding_value
     slots = torch.tensor([8, 9, -1, -1], dtype=torch.int64)
 
     safe_key, safe_value, safe_slots, valid = _prepare_full_graph_kv_write(
@@ -133,10 +110,11 @@ def test_full_graph_padding_writes_only_zeroes_to_null_block():
     assert torch.count_nonzero(safe_value[2:]) == 0
 
 
-def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch):
+@pytest.mark.parametrize("strided", [False, True])
+def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch, strided):
     import xtorch_ops
 
-    import vllm_fl.dispatch.backends.vendor.kunlunxin.patch as patch_mod
+    import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
     from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
         KunlunxinPagedAttention,
     )
@@ -144,26 +122,33 @@ def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch):
     calls = []
 
     def paged_decode(*args, **kwargs):
+        assert args[0].is_contiguous()
+        assert args[6].is_contiguous()
         calls.append("paged")
         args[6].fill_(1)
 
     def prefix_decode(*args, **kwargs):
+        assert args[0].is_contiguous()
+        assert args[3].is_contiguous()
         calls.append("prefix")
         args[3].fill_(2)
 
     monkeypatch.setattr(xtorch_ops, "decode_paged_attention", paged_decode)
     monkeypatch.setattr(xtorch_ops, "prefill_attention", prefix_decode)
-    patch_decode_attention()
 
     query = torch.zeros((2, 1, 4))
+    if strided:
+        query = torch.zeros((2, 1, 8))[..., ::2]
     cache = torch.zeros((1, 1, 2, 4))
     block_tables = torch.zeros((2, 1), dtype=torch.int32)
     seq_lens = torch.tensor([3, 4], dtype=torch.int32)
     output = torch.empty_like(query)
+    if strided:
+        output = torch.empty((2, 8))[:, ::2]
     lod = torch.tensor([0, 1, 2], dtype=torch.int32)
     kv_lod = torch.tensor([0, 3, 7], dtype=torch.int32)
 
-    monkeypatch.setattr(patch_mod, "_is_full_graph_runtime", lambda: True)
+    monkeypatch.setattr(attn_mod, "_is_full_graph_runtime", lambda: True)
     KunlunxinPagedAttention.forward_decode(
         query,
         cache,
@@ -180,15 +165,11 @@ def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch):
         torch.tensor(1.0),
         torch.tensor(1.0),
         output=output,
-        query_start_loc=lod,
-        query_start_loc_host=lod,
-        kv_prefix_start_loc=kv_lod,
-        kv_prefix_start_loc_host=kv_lod,
     )
     assert calls == ["paged"]
     assert torch.count_nonzero(output - 1) == 0
 
-    monkeypatch.setattr(patch_mod, "_is_full_graph_runtime", lambda: False)
+    monkeypatch.setattr(attn_mod, "_is_full_graph_runtime", lambda: False)
     KunlunxinPagedAttention.forward_decode(
         query,
         cache,
@@ -304,21 +285,6 @@ def test_full_graph_all_reduce_uses_process_group(monkeypatch):
         process_group_calls.append((output, group))
         output.add_(2)
 
-    class Capture:
-        _capturing = True
-
-        def __init__(self):
-            self.end_calls = 0
-            self.begin_calls = 0
-
-        def _end_segment(self):
-            self.end_calls += 1
-            self._capturing = False
-
-        def _begin_segment(self):
-            self.begin_calls += 1
-            self._capturing = True
-
     monkeypatch.setattr(CommunicatorFL, "all_reduce", eager_all_reduce)
     monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: True)
     monkeypatch.setattr(forward_context, "is_forward_context_available", lambda: True)
@@ -328,7 +294,7 @@ def test_full_graph_all_reduce_uses_process_group(monkeypatch):
         lambda: SimpleNamespace(cudagraph_runtime_mode=CUDAGraphMode.FULL),
     )
     monkeypatch.setattr(dist, "all_reduce", process_group_all_reduce)
-    capture = Capture()
+    capture = _Capture()
     monkeypatch.setattr(
         breakable.BreakableCUDAGraphCapture,
         "current",
@@ -366,21 +332,6 @@ def test_full_graph_all_reduce_warms_process_group_outside_capture(monkeypatch):
         process_group_calls.append((output.clone(), group))
         output.add_(2)
 
-    class Capture:
-        _capturing = True
-
-        def __init__(self):
-            self.end_calls = 0
-            self.begin_calls = 0
-
-        def _end_segment(self):
-            self.end_calls += 1
-            self._capturing = False
-
-        def _begin_segment(self):
-            self.begin_calls += 1
-            self._capturing = True
-
     monkeypatch.setattr(CommunicatorFL, "all_reduce", lambda self, input_: input_ + 10)
     monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: True)
     monkeypatch.setattr(
@@ -393,7 +344,7 @@ def test_full_graph_all_reduce_warms_process_group_outside_capture(monkeypatch):
         lambda: SimpleNamespace(cudagraph_runtime_mode=CUDAGraphMode.FULL),
     )
     monkeypatch.setattr(dist, "all_reduce", process_group_all_reduce)
-    capture = Capture()
+    capture = _Capture()
     monkeypatch.setattr(
         breakable.BreakableCUDAGraphCapture,
         "current",
@@ -422,21 +373,6 @@ def test_full_graph_all_reduce_splits_after_sixteen_collectives(monkeypatch):
 
     from vllm_fl.distributed.communicator import CommunicatorFL
 
-    class Capture:
-        _capturing = True
-
-        def __init__(self):
-            self.end_calls = 0
-            self.begin_calls = 0
-
-        def _end_segment(self):
-            self.end_calls += 1
-            self._capturing = False
-
-        def _begin_segment(self):
-            self.begin_calls += 1
-            self._capturing = True
-
     monkeypatch.setattr(CommunicatorFL, "all_reduce", lambda self, input_: input_ + 10)
     monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: True)
     monkeypatch.setattr(forward_context, "is_forward_context_available", lambda: True)
@@ -446,7 +382,7 @@ def test_full_graph_all_reduce_splits_after_sixteen_collectives(monkeypatch):
         lambda: SimpleNamespace(cudagraph_runtime_mode=CUDAGraphMode.FULL),
     )
     monkeypatch.setattr(dist, "all_reduce", lambda output, group: None)
-    capture = Capture()
+    capture = _Capture()
     monkeypatch.setattr(
         breakable.BreakableCUDAGraphCapture,
         "current",

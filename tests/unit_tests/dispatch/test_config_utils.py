@@ -51,12 +51,14 @@ def test_non_hopper_nvidia_keeps_vendor_wide_config(monkeypatch):
     assert "mm" not in config["flagos_blacklist"]
 
 
-def test_kunlunxin_flash_attention_fallback_keeps_cat_enabled():
+def test_kunlunxin_numerical_fallbacks_keep_cat_enabled():
     config = load_platform_config("kunlunxin")
     blacklist = config["flagos_blacklist"]
 
     assert "_scaled_dot_product_flash_attention" in blacklist
+    assert "mul" in blacklist
     assert "cat" not in blacklist
+    assert "cat_out" not in blacklist
 
 
 def test_capability_probe_failure_falls_back_to_vendor_config(monkeypatch):

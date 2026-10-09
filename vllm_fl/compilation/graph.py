@@ -250,8 +250,7 @@ class GraphWrapper:
 
             # FL-specific: use platform-agnostic graph capture
             with current_platform.torch_device_fn.graph(
-                graph,
-                pool=self.graph_pool,
+                graph, pool=self.graph_pool
             ):
                 # `output` is managed by pytorch's cudagraph pool
                 output = self.runnable(*args, **kwargs)

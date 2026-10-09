@@ -114,14 +114,15 @@ def _prepare_full_graph_kv_write(
     Kunlunxin cache kernels do not consistently treat PAD_SLOT_ID (-1) as a
     no-op. Mapping a padded row to -1 can therefore alias the final real cache
     slot. The captured mask remains data-dependent at replay time: real rows
-    keep their slots while synthetic rows write zeros into distinct positions
-    of vLLM's reserved block zero.
+    keep their slots while synthetic rows write zeros within vLLM's reserved
+    block zero.
     """
     flat_slots = slot_mapping.flatten()
     valid = flat_slots >= 0
-    row_mask = valid.to(key.dtype).view(-1, 1, 1)
-    key = key * row_mask
-    value = value * row_mask.to(value.dtype)
+    # Multiplication by zero does not clear NaN/Inf in synthetic rows.
+    row_mask = valid.view(-1, 1, 1)
+    key = torch.where(row_mask, key, 0)
+    value = torch.where(row_mask, value, 0)
     null_slots = torch.arange(
         flat_slots.numel(), dtype=flat_slots.dtype, device=flat_slots.device
     ).remainder(block_size)
@@ -708,6 +709,7 @@ class KunlunxinPagedAttention(PagedAttention):
                     force_sdnn=force_sdnn,
                     BLHD_LAYOUT=BLHD_LAYOUT)
 
+    @staticmethod
     def forward_decode(
         query: torch.Tensor,
         key_cache: torch.Tensor,
@@ -732,21 +734,61 @@ class KunlunxinPagedAttention(PagedAttention):
     ) -> torch.Tensor:
         if output is None:
             output = torch.empty_like(query)
-        assert max_window_size == -1, "not support sliding window"
-        xtorch_ops.decode_paged_attention(
-            query[:num_decode_tokens],
-            key_cache,
-            value_cache,
-            seq_lens_host[:num_decode_tokens],
-            seq_lens[:num_decode_tokens],
-            block_tables,
-            output[:num_decode_tokens],
-            alpha=scale,
-            k_perchannel_scale=k_scale,
-            v_perchannel_scale=v_scale,
-            alibi_slopes=alibi_slopes,
-            sink=None,
-        )
+        # Native attention reads dense query/output buffers without strides.
+        decode_query = query[:num_decode_tokens].contiguous()
+        target_output = output[:num_decode_tokens]
+        decode_output = target_output
+        if not target_output.is_contiguous():
+            decode_output = torch.empty_like(
+                target_output, memory_format=torch.contiguous_format
+            )
+        # FULL replay must read changing device lengths. Prefix attention uses
+        # host LoD, but avoids the eager/PIECEWISE paged-decode numerical issue.
+        if _is_full_graph_runtime():
+            assert max_window_size == -1, "not support sliding window"
+            xtorch_ops.decode_paged_attention(
+                decode_query,
+                key_cache,
+                value_cache,
+                seq_lens_host[:num_decode_tokens],
+                seq_lens[:num_decode_tokens],
+                block_tables,
+                decode_output,
+                alpha=scale,
+                k_perchannel_scale=k_scale,
+                v_perchannel_scale=v_scale,
+                alibi_slopes=alibi_slopes,
+                sink=None,
+            )
+        else:
+            if any(
+                lod is None for lod in (
+                    query_start_loc, query_start_loc_host,
+                    kv_prefix_start_loc, kv_prefix_start_loc_host,
+                )
+            ):
+                raise RuntimeError(
+                    "Kunlunxin prefix-decode requires LoD metadata"
+                )
+            xtorch_ops.prefill_attention(
+                decode_query,
+                key_cache,
+                value_cache,
+                decode_output,
+                is_causal=True,
+                is_prefix_cache=True,
+                alpha=scale * math.sqrt(decode_query.shape[2]),
+                context_qlen_lod_cpu=query_start_loc_host,
+                context_qlen_lod_xpu=query_start_loc,
+                context_kvlen_lod_cpu=kv_prefix_start_loc_host,
+                context_kvlen_lod_xpu=kv_prefix_start_loc,
+                block_table=block_tables,
+                alibi_slopes=alibi_slopes,
+                swa_left=max_window_size if max_window_size > 0 else -1,
+                swa_right=0 if max_window_size > 0 else -1,
+            )
+        if decode_output is not target_output:
+            target_output.copy_(decode_output)
         return output
 
 class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
@@ -1016,10 +1058,8 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                     kv_prefix_start_loc=decode_meta.kv_prefix_start_loc,
                     kv_prefix_start_loc_host=decode_meta.kv_prefix_start_loc_host,
                 )
-                if full_graph_valid_rows is not None:
-                    output.mul_(
-                        full_graph_valid_rows.to(output.dtype).view(-1, 1, 1)
-                    )
+            if full_graph_valid_rows is not None:
+                output.masked_fill_(~full_graph_valid_rows.view(-1, 1, 1), 0)
         # Reshape the output tensor.
         return output.view(-1, self.num_heads * self.head_size)
 

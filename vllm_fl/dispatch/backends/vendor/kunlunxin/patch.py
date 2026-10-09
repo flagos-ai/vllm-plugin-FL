@@ -23,24 +23,6 @@ logger = logging.getLogger(__name__)
 _patches_applied = False
 
 
-def _is_full_graph_runtime() -> bool:
-    """Return whether the current forward is using a FULL CUDA graph."""
-    try:
-        from vllm.config import CUDAGraphMode
-        from vllm.forward_context import (
-            get_forward_context,
-            is_forward_context_available,
-        )
-
-        return (
-            is_forward_context_available()
-            and get_forward_context().cudagraph_runtime_mode
-            == CUDAGraphMode.FULL
-        )
-    except Exception:
-        return False
-
-
 def apply_kunlunxin_patches():
     """Apply all Kunlunxin-specific patches. Idempotent."""
     global _patches_applied
@@ -69,7 +51,6 @@ def apply_kunlunxin_patches():
     patch_fused_gdn_gating()
     patch_ssm_cache_update()
     patch_sampler_rng()
-    patch_decode_attention()
     logger.info("Applied all Kunlunxin patches")
 
 
@@ -140,8 +121,8 @@ def patch_breakable_cudagraph_mode():
 
     Setting ``VLLM_USE_BREAKABLE_CUDAGRAPH`` changes compilation behavior for
     every platform.  Patch only the already imported Kunlunxin execution path
-    so PIECEWISE remains the normal compiled path and FULL can break around
-    collectives that cannot be captured safely by FlagCX.
+    so PIECEWISE remains the compiled path and FULL can split into bounded
+    graph-only segments for FlagCX collectives.
     """
     try:
         import vllm.compilation.breakable_cudagraph as breakable
@@ -246,12 +227,10 @@ def patch_graph_all_reduce():
         from vllm.compilation.breakable_cudagraph import (
             BreakableCUDAGraphCapture,
         )
-        from vllm.config import CUDAGraphMode
-        from vllm.forward_context import (
-            get_forward_context,
-            is_forward_context_available,
-        )
         from vllm_fl.distributed.communicator import CommunicatorFL
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            _is_full_graph_runtime,
+        )
 
         original_all_reduce = CommunicatorFL.all_reduce
         if getattr(original_all_reduce, "_kunlunxin_graph_safe", False):
@@ -261,9 +240,7 @@ def patch_graph_all_reduce():
         def graph_safe_all_reduce(self, input_):
             use_full_graph_collective = (
                 torch.cuda.is_current_stream_capturing()
-                and is_forward_context_available()
-                and get_forward_context().cudagraph_runtime_mode
-                == CUDAGraphMode.FULL
+                and _is_full_graph_runtime()
             )
             if not use_full_graph_collective:
                 return original_all_reduce(self, input_)
@@ -796,96 +773,3 @@ def patch_ssm_cache_update():
         logger.info("Patched GatedDeltaNetAttention._forward_core for Kunlunxin")
     except Exception as e:
         logger.warning("Failed to patch _forward_core: %s", e)
-
-
-# ── decode_paged_attention NaN workaround ──
-def patch_decode_attention():
-    """Select a numerically stable decode path for each execution mode.
-
-    Prefix attention avoids a numerical issue in eager and PIECEWISE decode.
-    Its host LoD launch metadata cannot be updated by a captured FULL graph,
-    so FULL decode uses the graph-safe paged kernel and its device lengths.
-    """
-    try:
-        import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
-        import xtorch_ops
-
-        @staticmethod
-        def patched_forward_decode(
-            query, key_cache, value_cache, block_tables,
-            seq_lens, seq_lens_host, max_seq_len, num_decode_tokens,
-            kv_cache_dtype, num_kv_heads, scale, alibi_slopes,
-            k_scale, v_scale, max_window_size=-1, output=None,
-            query_start_loc=None, query_start_loc_host=None,
-            kv_prefix_start_loc=None, kv_prefix_start_loc_host=None,
-        ):
-            """Use prefill_attention in prefix_cache mode for decode."""
-            import torch
-
-            if output is None:
-                output = torch.empty_like(query)
-
-            decode_query = query[:num_decode_tokens]
-            decode_output = output[:num_decode_tokens]
-
-            if any(
-                value is None
-                for value in (
-                    query_start_loc,
-                    query_start_loc_host,
-                    kv_prefix_start_loc,
-                    kv_prefix_start_loc_host,
-                )
-            ):
-                raise RuntimeError(
-                    "Kunlunxin prefix-decode requires persistent LoD metadata"
-                )
-
-            window_left = -1
-            window_right = -1
-            if max_window_size > 0:
-                window_left = max_window_size
-                window_right = 0
-            alpha = scale * (float(decode_query.shape[2]) ** 0.5)
-            if _is_full_graph_runtime():
-                xtorch_ops.decode_paged_attention(
-                    decode_query,
-                    key_cache,
-                    value_cache,
-                    seq_lens_host[:num_decode_tokens],
-                    seq_lens[:num_decode_tokens],
-                    block_tables,
-                    decode_output,
-                    alpha=scale,
-                    k_perchannel_scale=k_scale,
-                    v_perchannel_scale=v_scale,
-                    alibi_slopes=alibi_slopes,
-                    sink=None,
-                )
-            else:
-                xtorch_ops.prefill_attention(
-                    decode_query,
-                    key_cache,
-                    value_cache,
-                    decode_output,
-                    is_causal=True,
-                    is_prefix_cache=True,
-                    alpha=alpha,
-                    context_qlen_lod_cpu=query_start_loc_host,
-                    context_qlen_lod_xpu=query_start_loc,
-                    context_kvlen_lod_cpu=kv_prefix_start_loc_host,
-                    context_kvlen_lod_xpu=kv_prefix_start_loc,
-                    block_table=block_tables,
-                    alibi_slopes=alibi_slopes,
-                    swa_left=window_left,
-                    swa_right=window_right,
-                )
-            return output
-
-        attn_mod.KunlunxinPagedAttention.forward_decode = patched_forward_decode
-        logger.info(
-            "Patched KunlunxinPagedAttention.forward_decode: "
-            "using prefix decode outside FULL and paged decode in FULL"
-        )
-    except Exception as e:
-        logger.warning("Failed to patch decode attention: %s", e)
