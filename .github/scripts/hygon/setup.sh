@@ -9,12 +9,12 @@ git config --global --add safe.directory "${REPO_ROOT}"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
-: "${ROCM_PATH:?ROCM_PATH is not set}"
-: "${HIP_PATH:?HIP_PATH is not set}"
+DTK_HOME="${DTK_HOME:-${DTKROOT:-/opt/dtk}}"
+export ROCM_PATH="${ROCM_PATH:-${DTK_HOME}}"
+export HIP_PATH="${HIP_PATH:-${DTK_HOME}/hip}"
 : "${LD_LIBRARY_PATH:?LD_LIBRARY_PATH is not set}"
 [[ "${GEMS_VENDOR}" == hygon ]]
 [[ "${VLLM_PLUGINS}" == fl ]]
-DTK_HOME="${DTK_HOME:-${DTKROOT:-/opt/dtk}}"
 test -e "${HIP_PATH}/lib/libgalaxyhip.so.5"
 test -e "${DTK_HOME}/llvm/lib/libomp.so"
 
