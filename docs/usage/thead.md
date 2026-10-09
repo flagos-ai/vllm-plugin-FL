@@ -1,10 +1,10 @@
 # T-Head PPU Deployment Guide
 
-This guide runs vLLM with the FL plugin on T-Head PPU hardware. Start with a
-vendor-provided Python/PyTorch/PPU SDK runtime that matches the host driver,
-then install the pinned Python stack in an isolated environment. Keep the
-vendor runtime intact: replacing its PyTorch or accelerator libraries with
-ordinary CUDA wheels does not reproduce this configuration.
+This guide runs vLLM with the FL plugin on T-Head PPU hardware using the
+published prepared runtime below. It contains the pinned ordinary Python stack
+and repaired FlagGems sources. The host driver must still match its vendor PPU
+runtime. For a custom image, preserve the vendor PyTorch/SDK and follow the
+self-build path in section 3; ordinary CUDA wheels do not reproduce this stack.
 
 ## Validated software stack
 
@@ -37,11 +37,21 @@ SDPA path. Passing text attention tests alone does not validate image inference.
 
 ## 1. Check the host and vendor runtime
 
-Obtain the PPU container image and SDK installation instructions from the
-hardware provider. There is no published T-Head CI image or runner label assumed
-by this guide; configure those for your deployment. This guide does not prescribe a driver or SDK installer:
-those binaries must match the machine. The validated image already provided
-vendor PyTorch, the PPU runtime, and the PPU `flash_attn_3` extension.
+Use the published runtime by immutable digest:
+
+```bash
+export PPU_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb"
+```
+
+The corresponding tag is `v0.28.0-thead-ci-20261009`. The image includes vendor
+PyTorch, the PPU SDK and `flash_attn_3`, plus the repaired stack in the table.
+Obtain matching host driver instructions from the hardware provider.
+
+The packaged payload passed normal imports and a nine-call numerical smoke in
+a separate container without the old build-workspace mounts. The published
+digest and anonymous registry metadata were verified. GPU execution after
+pulling this final digest has not yet been validated; the CI job checks that
+artifact on the configured PPU runner.
 
 ```bash
 docker version
@@ -57,12 +67,14 @@ terminate them; retain the session logs and exit status.
 
 ## 2. Mount devices, source, and models
 
-Set `PPU_IMAGE` to your vendor runtime image. `WORK_DIR` is persistent writable
-storage for environments, source builds, caches, and results. `MODEL_DIR`
-contains model directories with `config.json` and all weight shards.
+`PPU_IMAGE` defaults to the published digest without replacing an existing
+selection. Set it to your own vendor image when following the self-build path.
+`WORK_DIR` is persistent writable storage for environments, source builds,
+caches, and results. `MODEL_DIR` contains model directories with `config.json`
+and all weight shards.
 
 ```bash
-export PPU_IMAGE=your-vendor-ppu-runtime-image
+export PPU_IMAGE="${PPU_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb}"
 export REPO_DIR="$PWD"
 export WORK_DIR=/data/thead-work
 export MODEL_DIR=/data/models
@@ -105,9 +117,21 @@ validation.
 
 ## 3. Prepare the Python stack without replacing vendor packages
 
-If your image already contains the complete repaired stack, use its supplied
-environment and continue with the runtime/source checks below. Rebuild only
-when preparing a new environment. The repair script intentionally rejects
+For the published image, select its supplied ordinary environment and verify
+the package hashes/providers:
+
+```bash
+export ENV_DIR=/opt/thead/venv
+source /opt/thead/runtime-env.sh
+"$ENV_DIR/bin/python" -I -B /opt/thead/verify-image.py --full
+```
+
+Then skip the remaining manual installation commands in this section and
+continue with section 4. The image's `/opt/thead/bin/runtime-entrypoint`
+initializes the same environment before executing a command.
+
+The remaining commands are for preparing a custom vendor image. Rebuild only
+when creating a new environment; the repair script intentionally rejects
 already changed preimages.
 
 For a fresh installation, create a private environment that can read the
@@ -269,8 +293,9 @@ patch hashes in a new container without the build workspace mount before
 publishing the image. This follows the
 [Docker commit behavior](https://docs.docker.com/reference/cli/docker/container/commit/).
 Keep model weights in a separate read-only mount and use writable caches at
-runtime. Record the resulting image digest with the software/source manifest;
-no registry address or published image tag is assumed here.
+runtime. Record the resulting image digest with the software/source manifest.
+The prepared image published for this stack is the digest in section 1; use
+the packaging steps only when producing your own image.
 
 The packaged runtime layout uses `/opt/thead/venv` for the merged ordinary
 packages, `/opt/thead/runtime-env.sh` for environment selection, and
@@ -290,14 +315,18 @@ experiments. Do not reuse a different FlagGems/FlagTree stack's compilation
 cache.
 
 ```bash
-source "$ENV_DIR/bin/activate"
+if [[ "$ENV_DIR" = /opt/thead/venv ]]; then
+    source /opt/thead/runtime-env.sh
+else
+    source "$ENV_DIR/bin/activate"
+fi
 unset PYTHONPATH PYTHONHOME
 export VLLM_PLUGINS=fl
 export TORCH_DEVICE_BACKEND_AUTOLOAD=1
 export GEMS_VENDOR=thead
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export TMPDIR=/tmp
-export RUNTIME_DIR=/work/thead-runtime
+export RUNTIME_DIR="${THEAD_RUNTIME_ROOT:-/work/thead-runtime}"
 export XDG_CACHE_HOME="$RUNTIME_DIR/cache"
 export TRITON_CACHE_DIR="$RUNTIME_DIR/triton"
 export FLAGGEMS_CACHE_DIR="$RUNTIME_DIR/gems"
@@ -442,16 +471,15 @@ Keep every original semantic, OCR, length, repetition, and encoding check.
 
 The reusable workflow is [`.github/workflows/_thead_test.yml`](../../.github/workflows/_thead_test.yml).
 It uses the same configuration loader as the other platforms, with
-[the T-Head configuration](../../.github/configs/thead.yml). A maintainer must
-provide a pullable image digest and reserve four PPU cards on a registered
-runner before enabling the hardware job. Device mounts grant access; they do
-not reserve cards or prove that the cards are idle.
+[the T-Head configuration](../../.github/configs/thead.yml). Use the published
+digest below and reserve four PPU cards on a registered runner. Device mounts
+grant access; they do not reserve cards or prove that the cards are idle.
 
 Configure these repository variables:
 
 | Variable | Value |
 |---|---|
-| `THEAD_CI_IMAGE` | Existing runtime image as `registry/repository@sha256:<64 hex digits>` |
+| `THEAD_CI_IMAGE` | `harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb` |
 | `THEAD_CI_VISIBLE_DEVICES` | Exactly four distinct, exclusively reserved PPU indices, comma-separated |
 | `THEAD_CI_MODEL_27B` | Absolute container path to the complete `Qwen3.8-27B` model |
 | `THEAD_CI_MODEL_35B` | Absolute container path to the complete `Qwen3.6-35B-A3B` model |
@@ -460,10 +488,11 @@ Configure these repository variables:
 | `THEAD_CI_CONTAINER_VOLUMES` | JSON array of Docker volume specifications; mount the two models read-only |
 | `THEAD_CI_CONTAINER_OPTIONS` | Optional Docker options overriding the explicit device grants and shared-memory settings |
 
-No image address or digest is provisioned by this document. Ensure that the
-runner can pull the selected image. Keep registry authentication in the
-runner/CI secret configuration. The workflow rejects a missing image digest,
-invalid card selection, and privileged container options.
+The published image provides `/opt/thead/venv` and the complete repaired
+ordinary stack. Ensure that the runner can pull this digest and access the
+configured model mounts. Keep any registry authentication in the runner/CI
+secret configuration. The workflow rejects a missing image digest, invalid
+card selection, and privileged container options.
 
 The image must contain the complete repaired ordinary stack: vendor PyTorch
 2.10.0 and SDK/extensions, vLLM 0.28.0+empty, FlagTree 0.7.0+ppu3.6, the pinned
