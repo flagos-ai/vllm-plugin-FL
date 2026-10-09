@@ -9,10 +9,7 @@ from vllm.config import CUDAGraphMode
 from vllm.platforms import current_platform
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
-from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-    KunlunxinMetadata,
-    _prepare_full_graph_kv_write,
-)
+import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
 from vllm_fl.dispatch.backends.vendor.kunlunxin.patch import (
     patch_breakable_cudagraph_mode,
     patch_breakable_private_pools,
@@ -98,7 +95,7 @@ def test_full_graph_padding_writes_only_zeroes_to_null_block(padding_value):
     value[2:] = padding_value
     slots = torch.tensor([8, 9, -1, -1], dtype=torch.int64)
 
-    safe_key, safe_value, safe_slots, valid = _prepare_full_graph_kv_write(
+    safe_key, safe_value, safe_slots, valid = attn_mod._prepare_full_graph_kv_write(
         key, value, slots, block_size=4
     )
 
@@ -113,11 +110,6 @@ def test_full_graph_padding_writes_only_zeroes_to_null_block(padding_value):
 @pytest.mark.parametrize("strided", [False, True])
 def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch, strided):
     import xtorch_ops
-
-    import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
-    from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
-        KunlunxinPagedAttention,
-    )
 
     calls = []
 
@@ -149,7 +141,7 @@ def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch, strided
     kv_lod = torch.tensor([0, 3, 7], dtype=torch.int32)
 
     monkeypatch.setattr(attn_mod, "_is_full_graph_runtime", lambda: True)
-    KunlunxinPagedAttention.forward_decode(
+    attn_mod.KunlunxinPagedAttention.forward_decode(
         query,
         cache,
         cache,
@@ -170,7 +162,7 @@ def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch, strided
     assert torch.count_nonzero(output - 1) == 0
 
     monkeypatch.setattr(attn_mod, "_is_full_graph_runtime", lambda: False)
-    KunlunxinPagedAttention.forward_decode(
+    attn_mod.KunlunxinPagedAttention.forward_decode(
         query,
         cache,
         cache,
@@ -196,7 +188,7 @@ def test_full_graph_uses_paged_decode_and_eager_uses_prefix(monkeypatch, strided
 
 
 def test_mixed_batch_decode_metadata_excludes_prefill_kv_lod():
-    metadata = KunlunxinMetadata(
+    metadata = attn_mod.KunlunxinMetadata(
         seq_lens_tensor=torch.tensor([25, 24, 26], dtype=torch.int32),
         max_decode_seq_len=1,
         block_tables=torch.zeros((3, 4), dtype=torch.int32),
