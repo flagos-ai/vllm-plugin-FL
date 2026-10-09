@@ -64,6 +64,14 @@ flagos_blacklist:
   # FlagTree cannot lower pow(float32, int32) in FlagGems' tanh GELU.
   # Keep vision activation on the native torch_npu implementation.
   - gelu
+  # FlagGems conv1d faults in Qwen3.6-27B's GDN prefill process with
+  # 5120 groups, T=15, K=4, padding=3. Keep conv2d enabled: the
+  # native conv1d path passes text/image serving with that override active.
+  - conv1d
+  # Mixed bool values in a stride-2 view are read incorrectly by the
+  # pinned bitwise_not kernel, breaking native boolean indexing.
+  - bitwise_not
+  - bitwise_not_
   # FlagGems index_put cannot compile GDN's boolean state reset on Ascend.
   - index_put
   - index_put_
