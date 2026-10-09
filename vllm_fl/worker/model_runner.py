@@ -276,10 +276,14 @@ def _accelerator_synchronize() -> None:
 if current_platform.dist_backend == "flagcx" or current_platform.device_type == "musa":
 
     @contextmanager
-    def graph_capture(device: torch.device):
-        graph_capture_context = GraphCaptureContext(
-            current_platform.torch_device_fn.Stream(device=device)
-        )
+    def graph_capture(
+        device: torch.device,
+        graph_capture_context: GraphCaptureContext | None = None,
+    ):
+        if graph_capture_context is None:
+            graph_capture_context = GraphCaptureContext(
+                current_platform.torch_device_fn.Stream(device=device)
+            )
         stream = graph_capture_context.stream
         curr_stream = current_platform.torch_device_fn.current_stream()
         if curr_stream != stream:

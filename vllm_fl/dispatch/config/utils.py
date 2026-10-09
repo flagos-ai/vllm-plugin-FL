@@ -41,6 +41,10 @@ from vllm_fl.utils import VENDOR_DEVICE_MAP
 # Directory containing config files (config/)
 _CONFIG_DIR = Path(__file__).parent
 
+# FlagGems identifies Moore Threads hardware as "mthreads", while the
+# dispatch configuration and vendor backend use the device name "musa".
+_PLATFORM_CONFIG_ALIASES = {"mthreads": "musa"}
+
 
 def _get_arch_config_name(platform: str) -> str | None:
     """Return an architecture-specific config name when one is available."""
@@ -100,6 +104,8 @@ def get_config_path(platform: str | None = None) -> Path | None:
     """
     if platform is None:
         platform = get_platform_name()
+
+    platform = _PLATFORM_CONFIG_ALIASES.get(platform, platform)
 
     arch_config = _get_arch_config_name(platform)
     if arch_config is not None:
