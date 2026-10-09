@@ -27,6 +27,8 @@ runner_labels:
 # Container volumes (hardware-specific paths)
 container_volumes:
   - /mnt/airs-business/cicd/models:/data/models
+  - /mnt/data/models/Qwen3.6-27B:/data/models/Qwen/Qwen3.6-27B
+  - /mnt/data/models/Qwen3.6-35B-A3B:/data/models/Qwen/Qwen3.6-35B-A3B
 
 # Container options (hardware-specific settings)
 container_options: >-
