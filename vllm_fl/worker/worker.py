@@ -108,6 +108,17 @@ def _num_workspace_lanes(vllm_config: VllmConfig, use_v2_model_runner: bool) -> 
     )
 
 
+def _normalize_process_group_backend(backend: str) -> str:
+    """Return the torch.distributed backend for the active platform."""
+    if current_platform.device_type == "ptpu" and backend in {"flagcx", "nccl"}:
+        return "pccl"
+    if current_platform.device_type == "npu" and backend == "flagcx":
+        # CommunicatorFL uses FlagCX for tensor-parallel collectives; torch
+        # process groups still use the NPU's native backend.
+        return "hccl"
+    return backend
+
+
 if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
@@ -317,9 +328,7 @@ class WorkerFL(WorkerBase):
         if current_platform.device_type == "gcu" and not os.environ.get(
             "TRITON_CACHE_DIR"
         ):
-            os.environ["TRITON_CACHE_DIR"] = (
-                f"/tmp/triton-cache-fl-rank-{rank}"
-            )
+            os.environ["TRITON_CACHE_DIR"] = f"/tmp/triton-cache-fl-rank-{rank}"
 
         if (
             vllm_config.num_speculative_tokens == 1
@@ -448,6 +457,11 @@ class WorkerFL(WorkerBase):
         checkpoint_restore_distributed_state()
 
     def _maybe_get_memory_pool_context(self, tag: str) -> AbstractContextManager:
+        # Ascend allocates weights and KV cache through torch_npu. The empty
+        # vLLM build has no CuMem sleep-mode allocator.
+        if current_platform.device_type == "npu":
+            return nullcontext()
+
         if (
             current_platform.is_cuda_alike()
             and not self.vllm_config.model_config.enable_cumem_allocator
@@ -928,9 +942,10 @@ class WorkerFL(WorkerBase):
 
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if current_platform.device_type == "txda" or getattr(
-            current_platform, "vendor_name", None
-        ) == "kunlunxin":
+        if (
+            current_platform.device_type == "txda"
+            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+        ):
             logger.warning(
                 "Detected %s device, skipping generic kernel_warmup",
                 getattr(
@@ -1646,7 +1661,7 @@ def init_worker_distributed_environment(
         rank,
         init_method,
         local_rank,
-        backend,
+        _normalize_process_group_backend(backend),
         timeout,
     )
 

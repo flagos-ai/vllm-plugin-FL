@@ -4,7 +4,238 @@
 Tests for compilation graph module.
 """
 
+from importlib import import_module
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
+
+
+def test_npu_weak_refs_are_recursive(monkeypatch):
+    import torch
+
+    from vllm.sequence import IntermediateTensors
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+
+    weak_refs = {}
+
+    def fake_weak_ref(tensor):
+        weak_refs[id(tensor)] = object()
+        return weak_refs[id(tensor)]
+
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
+    monkeypatch.setattr(graph_module, "_weak_ref_npu_tensor", fake_weak_ref)
+
+    first = torch.ones(1)
+    second = torch.ones(2)
+    third = torch.ones(3)
+    empty = torch.ones(8)[:0]
+    value = {
+        "nested": [first, (second, empty)],
+        "intermediate": IntermediateTensors({"hidden": third}),
+        "metadata": None,
+    }
+
+    result = graph_module.weak_ref_tensors(value)
+
+    assert result["nested"][0] is weak_refs[id(first)]
+    assert result["nested"][1][0] is weak_refs[id(second)]
+    assert result["nested"][1][1] is weak_refs[id(empty)]
+    assert result["intermediate"].tensors["hidden"] is weak_refs[id(third)]
+    assert result["metadata"] is None
+    assert len(weak_refs) == 4
+
+
+def test_npu_weak_ref_keeps_cpu_tensors(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+
+    def reject_cpu_tensor(_tensor):
+        raise AssertionError("torch_npu weak refs must only receive NPU tensors")
+
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_npu",
+        SimpleNamespace(_C=SimpleNamespace(_weak_ref_tensor=reject_cpu_tensor)),
+    )
+    tensor = torch.ones(2)
+
+    result = graph_module.weak_ref_tensors({"cpu": tensor})
+
+    assert result["cpu"] is tensor
+
+
+@pytest.mark.parametrize("primitive", [None, object()])
+def test_npu_weak_ref_requires_runtime_primitive(monkeypatch, primitive):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    tensor = MagicMock(spec=torch.Tensor)
+    tensor.device = SimpleNamespace(type="npu")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_npu",
+        SimpleNamespace(_C=SimpleNamespace(_weak_ref_tensor=primitive)),
+    )
+
+    with pytest.raises(RuntimeError, match="NPU graph weak references require"):
+        graph_module._weak_ref_npu_tensor(tensor)
+
+
+@pytest.mark.gpu
+def test_npu_weak_ref_preserves_view_without_owning_storage():
+    import gc
+    import weakref
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "npu":
+        pytest.skip("Requires an Ascend NPU")
+
+    torch.npu.synchronize()
+    baseline = torch.npu.memory_allocated()
+    owner = torch.arange(32, device="npu", dtype=torch.float32).reshape(4, 8)
+    view = owner[1:, 1::2]
+    alias = graph_module._weak_ref_npu_tensor(view)
+    empty_alias = graph_module._weak_ref_npu_tensor(view[:0])
+    assert alias is not view
+    assert alias.data_ptr() == view.data_ptr()
+    assert alias.shape == view.shape
+    assert alias.stride() == view.stride()
+    assert alias.storage_offset() == view.storage_offset()
+    assert alias.untyped_storage()._cdata != view.untyped_storage()._cdata
+    assert empty_alias.shape == view[:0].shape
+    assert empty_alias.stride() == view.stride()
+    assert empty_alias.storage_offset() == view.storage_offset()
+    torch.testing.assert_close(alias, view)
+
+    owner_ref, view_ref = weakref.ref(owner), weakref.ref(view)
+    del owner, view
+    gc.collect()
+    torch.npu.synchronize()
+    assert owner_ref() is None
+    assert view_ref() is None
+    # The aliases remain alive but must not keep the original allocation alive.
+    # Do not dereference their data after releasing the owner.
+    assert torch.npu.memory_allocated() <= baseline
+
+
+def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
+    from types import SimpleNamespace
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+
+    active_stream = object()
+    stale_vllm_stream = MagicMock(return_value=object())
+    npu_current_stream = MagicMock(return_value=active_stream)
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
+    monkeypatch.setattr(
+        graph_module.current_platform,
+        "torch_device_fn",
+        SimpleNamespace(current_stream=npu_current_stream),
+    )
+    monkeypatch.setattr(graph_module, "current_stream", stale_vllm_stream)
+
+    assert graph_module._graph_capture_stream() is active_stream
+    npu_current_stream.assert_called_once_with()
+    stale_vllm_stream.assert_not_called()
+
+
+def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
+    graph_module = import_module("vllm_fl.compilation.graph")
+
+    expected_stream = object()
+    vllm_current_stream = MagicMock(return_value=expected_stream)
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "cuda")
+    monkeypatch.setattr(graph_module, "current_stream", vllm_current_stream)
+
+    assert graph_module._graph_capture_stream() is expected_stream
+    vllm_current_stream.assert_called_once_with()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("weak_ref_output", [False, True])
+def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
+    """Capture the real wrapper, then replay changed inputs into poisoned output."""
+    import torch
+
+    from vllm.config import CUDAGraphMode
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "npu":
+        pytest.skip("Requires an Ascend NPU")
+    import torch_npu  # noqa: F401 - registers torch.npu
+
+    mode = CUDAGraphMode.FULL
+    descriptor = object()
+    forward_context = SimpleNamespace(
+        batch_descriptor=descriptor, cudagraph_runtime_mode=mode
+    )
+    monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
+    monkeypatch.setattr(graph_module, "get_forward_context", lambda: forward_context)
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
+
+    calls = []
+
+    def eager_reference(x):
+        return torch.relu(x * 2) + 3
+
+    def runnable(x):
+        calls.append(None)
+        return eager_reference(x)
+
+    wrapper = graph_module.GraphWrapper(
+        runnable,
+        SimpleNamespace(compilation_config=SimpleNamespace()),
+        mode,
+        graph_module.GraphOptions(weak_ref_output=weak_ref_output),
+    )
+    static_input = torch.arange(-4, 4, device="npu", dtype=torch.float32).reshape(2, 4)
+    capture_stream = torch.npu.Stream()
+    capture_stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(capture_stream):
+        captured_output = wrapper(static_input)
+    torch.npu.current_stream().wait_stream(capture_stream)
+    torch.npu.synchronize()
+
+    entry = wrapper.concrete_graph_entries[descriptor]
+    assert isinstance(entry.graph, torch.npu.NPUGraph)
+    assert len(calls) == 1
+
+    # NPU capture need not materialize its output until the first replay.
+    captured_output.fill_(-999)
+    torch.npu.synchronize()
+    initial_replay = wrapper(static_input)
+    torch.npu.synchronize()
+    torch.testing.assert_close(initial_replay, eager_reference(static_input))
+    assert len(calls) == 1
+
+    for values in (
+        torch.full_like(static_input, -2),
+        torch.arange(8, device="npu", dtype=torch.float32).reshape(2, 4),
+    ):
+        static_input.copy_(values)
+        captured_output.fill_(-999)
+        torch.npu.synchronize()
+
+        replayed_output = wrapper(static_input)
+        torch.npu.synchronize()
+        expected = eager_reference(values)
+        torch.testing.assert_close(replayed_output, expected)
+        assert not torch.all(replayed_output == -999).item()
+        assert wrapper.concrete_graph_entries[descriptor].graph is entry.graph
+        assert len(calls) == 1
 
 
 class TestGraphOptions:

@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import socket
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 import requests
@@ -53,14 +55,19 @@ class VllmServer:
     served_model_name: str = ""
     max_retries: int = 60
     poll_interval: int = 10
+    emit_log_tail: bool = False
 
     # Set after start
     port: int = 0
     base_url: str = ""
     _process: subprocess.Popen | None = None
     _log_file: tempfile._TemporaryFileWrapper | None = None
+    _keep_log: bool = False
+    _failure_logged: bool = False
 
     def start(self) -> None:
+        self._keep_log = False
+        self._failure_logged = False
         self.port = _get_free_port()
         self.base_url = f"http://{self.host}:{self.port}/v1"
 
@@ -83,29 +90,36 @@ class VllmServer:
 
         model_short = os.path.basename(self.model)
         print(f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size})")
-        print(f"[Setup] Command: {' '.join(cmd)}")
 
+        log_dir = Path("test-results/logs").resolve()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_model = re.sub(r"[^A-Za-z0-9_.-]", "_", model_short)
         self._log_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
-            prefix=f"vllm_{model_short}_",
+            prefix=f"vllm_{log_model}_tp{self.tp_size}_{self.port}_",
             suffix=".log",
+            dir=log_dir,
             delete=False,
         )
-        self._process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=self._log_file,
-            stderr=subprocess.STDOUT,
-        )
-        self._wait_ready()
+        try:
+            self._process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=self._log_file,
+                stderr=subprocess.STDOUT,
+            )
+            self._wait_ready()
+        except BaseException:
+            self.preserve_failure_logs("vLLM service startup failed")
+            self.stop()
+            raise
 
     def stop(self) -> None:
-        if self._process is None:
-            return
-        print("\n[Teardown] Shutting down vLLM service...")
         try:
-            # Send SIGTERM to the main process; vLLM handles child cleanup.
-            self._process.terminate()
-            self._process.wait(timeout=30)
+            if self._process is not None:
+                print("\n[Teardown] Shutting down vLLM service...")
+                # Send SIGTERM to the main process; vLLM handles child cleanup.
+                self._process.terminate()
+                self._process.wait(timeout=30)
         except subprocess.TimeoutExpired:
             self._process.kill()
             self._process.wait(timeout=10)
@@ -113,19 +127,90 @@ class VllmServer:
             self._process.kill()
         finally:
             if self._log_file:
+                log_path = Path(self._log_file.name)
                 self._log_file.close()
-                if getattr(self, "_keep_log", False):
-                    print(f"[Teardown] Log preserved: {self._log_file.name}")
+                self._log_file = None
+                if self._keep_log:
+                    # The child has stopped: redact the artifact without racing
+                    # its stdout writes or changing its active file offset.
+                    try:
+                        logs = log_path.read_text(encoding="utf-8", errors="replace")
+                        log_path.write_text(self._redact(logs), encoding="utf-8")
+                    except OSError as exc:
+                        print(f"[Teardown] Could not redact log: {type(exc).__name__}")
+                    print(f"[Teardown] Log preserved: {log_path}")
                 else:
-                    os.unlink(self._log_file.name)
+                    log_path.unlink()
             self._process = None
 
     def __enter__(self) -> VllmServer:
         self.start()
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        if exc_value is not None and not isinstance(exc_value, pytest.skip.Exception):
+            self.preserve_failure_logs("vLLM serving context failed")
         self.stop()
+
+    @contextlib.contextmanager
+    def log_on_failure(self, message: str):
+        """Capture request/assertion failures before a yield fixture tears down.
+
+        Pytest yield fixtures resume normally even when their test failed, so
+        ``__exit__`` alone cannot detect serving smoke test failures.
+        """
+        try:
+            yield
+        except pytest.skip.Exception:
+            raise
+        except BaseException:
+            self.preserve_failure_logs(message)
+            raise
+
+    def _redact(self, text: str) -> str:
+        keys = [self.api_key] if self.api_key else []
+        for i, arg in enumerate(self.extra_args):
+            if arg == "--api-key" and i + 1 < len(self.extra_args):
+                keys.append(self.extra_args[i + 1])
+            elif arg.startswith("--api-key="):
+                keys.append(arg.split("=", 1)[1])
+        for key in keys:
+            if key:
+                text = text.replace(key, "[REDACTED]")
+        return text
+
+    def preserve_failure_logs(
+        self, message: str, *, include_tail: bool | None = None
+    ) -> str:
+        """Retain logs locally; only emit their contents when explicitly enabled.
+
+        Post-start server output may contain sensitive data. Tests only receive
+        its local path by default, so files can be reviewed before sharing.
+        Startup readiness failures retain their existing diagnostic tail.
+        """
+        self._keep_log = True
+        logs = ""
+        log_path = ""
+        emit_tail = self.emit_log_tail if include_tail is None else include_tail
+        if self._log_file:
+            log_path = self._log_file.name
+            if emit_tail:
+                try:
+                    self._log_file.flush()
+                    with open(log_path, "rb") as f:
+                        f.seek(0, os.SEEK_END)
+                        f.seek(max(0, f.tell() - 16000))
+                        logs = f.read().decode("utf-8", errors="replace")
+                except OSError as exc:
+                    logs = f"Unable to read server log: {type(exc).__name__}"
+        details = f"{message}.\nFull log: {log_path or 'unavailable'}"
+        if emit_tail:
+            details += f"\nServer log tail:\n{logs}"
+        details = self._redact(details)
+        if not self._failure_logged:
+            print(f"\n[Failure] {details}")
+            self._failure_logged = True
+        return details
 
     def _wait_ready(self) -> None:
         headers = {}
@@ -169,18 +254,6 @@ class VllmServer:
         self._fail_with_logs("vLLM service startup timed out")
 
     def _fail_with_logs(self, message: str) -> None:
-        logs = ""
-        log_path = ""
-        if self._log_file:
-            self._log_file.flush()
-            log_path = self._log_file.name
-            with open(log_path) as f:
-                logs = f.read()
-        # Keep log file for post-mortem inspection
-        self._keep_log = True
+        details = self.preserve_failure_logs(message, include_tail=True)
         self.stop()
-        tail = logs[-16000:] if len(logs) > 16000 else logs
-        extra = f"\nFull log: {log_path}" if log_path else ""
-        pytest.fail(
-            f"{message}.{extra}\nLogs ({len(logs)} chars, showing tail):\n{tail}"
-        )
+        pytest.fail(details, pytrace=False)

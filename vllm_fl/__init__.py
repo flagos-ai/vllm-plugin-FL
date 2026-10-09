@@ -22,6 +22,7 @@ def _patch_flag_gems_triton_import_compat():
     except ImportError:
         return
     if not hasattr(tl, "map_elementwise"):
+
         def _unsupported_map_elementwise(*args, **kwargs):
             raise NotImplementedError(
                 "triton.language.map_elementwise is unavailable on Kunlunxin; "
@@ -190,7 +191,12 @@ def register():
 
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "nvidia":
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "ascend":
+        # v0.28 defaults some models to the upstream CUDA/UVA runner. Ascend
+        # uses ModelRunnerFL, so select it before VllmConfig reads the default.
+        os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+    if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
 
     return "vllm_fl.platform.PlatformFL"
@@ -288,3 +294,21 @@ def register_model():
     register_router()
 
     _register_gdn_packed_decode_patch()
+
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().vendor_name == "ascend":
+        # Import registers the ModelSlim quantization config before model
+        # configuration resolution in worker processes.
+        from vllm.model_executor.models import ModelRegistry
+
+        from vllm_fl.quantization import modelslim_w8a8  # noqa: F401
+
+        ModelRegistry.register_model(
+            "DeepseekV4ForCausalLM",
+            "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM",
+        )
+        ModelRegistry.register_model(
+            "GlmMoeDsaForCausalLM",
+            "vllm_fl.models.glm_moe_dsa:GlmMoeDsaForCausalLM",
+        )
