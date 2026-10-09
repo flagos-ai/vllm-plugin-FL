@@ -152,6 +152,8 @@ VERSIONS (override via environment variables):
     HYGON_PYTHON_VERSION Python version in Hygon base image tag (default: ${HYGON_PYTHON_VERSION})
     PLUGIN_SOURCE_SHA   Plugin Git revision (default: current repository HEAD)
     HYGON_GIT_CONFIG    Optional Git-only proxy config mounted as a BuildKit secret
+    HYGON_VLLM_WHEEL_DIR Optional directory containing one validated empty vLLM wheel
+    HYGON_VLLM_WHEEL_SHA256 SHA256 required with HYGON_VLLM_WHEEL_DIR
 
 EXAMPLES:
     # Build CUDA dev image
@@ -285,6 +287,12 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     if [[ -n "${HYGON_GIT_CONFIG:-}" ]]; then
         [[ -f "${HYGON_GIT_CONFIG}" ]] || err "HYGON_GIT_CONFIG file does not exist."
         BUILD_SECRET_ARGS+=(--secret "id=git_config,src=${HYGON_GIT_CONFIG}")
+    fi
+    if [[ -n "${HYGON_VLLM_WHEEL_DIR:-}" ]]; then
+        [[ -d "${HYGON_VLLM_WHEEL_DIR}" ]] || err "HYGON_VLLM_WHEEL_DIR directory does not exist."
+        [[ "${HYGON_VLLM_WHEEL_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || err "A validated HYGON_VLLM_WHEEL_SHA256 is required."
+        BUILD_SECRET_ARGS+=(--build-context "vllm_wheels=${HYGON_VLLM_WHEEL_DIR}")
+        BUILD_ARGS+=(--build-arg "VLLM_WHEEL_SHA256=${HYGON_VLLM_WHEEL_SHA256}")
     fi
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${HYGON_VLLM_VERSION}-hygon-${TARGET}"

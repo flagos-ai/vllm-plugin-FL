@@ -15,6 +15,9 @@
 
 ARG HYGON_BASE_IMAGE=harbor.baai.ac.cn/plugin/hygon-dtk26.04-tree0.6.0hcu3.6-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt2100-x64:202609041747@sha256:d2530485457ede1d17dbb26704a3d4408d760ff3e363402599e1738dc5828807
 
+# An optional named context overrides this empty stage with a wheel-only directory.
+FROM scratch AS vllm_wheels
+
 FROM ${HYGON_BASE_IMAGE} AS base
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 ARG VLLM_VERSION=0.28.0
@@ -64,25 +67,41 @@ RUN python -I -B -m pip install --no-deps \
         prometheus-fastapi-instrumentator==8.1.0 xgrammar==0.2.8 \
         apache-tvm-ffi==0.1.11 click==8.4.2 hf-xet==1.5.2
 
+ARG VLLM_WHEEL_SHA256=""
+
 # Optional BuildKit secret git_config supplies a git-only proxy; it is never
 # copied to the image or passed in a build ARG/ENV. Direct Git needs no secret.
-# Build upstream from the released Git revision. Empty mode has no CUDA/HIP _C;
+# Default: build upstream from the released Git revision. An explicitly hashed
+# ordinary empty wheel can instead be provided by the vllm_wheels named context.
+# Empty mode has no CUDA/HIP _C;
 # optional Rust failures remain visible and precompiled downloads are disabled.
 RUN --mount=type=secret,id=git_config,target=/run/secrets/git_config,required=false \
+    --mount=type=bind,from=vllm_wheels,target=/run/vllm_wheels,ro \
     test "$VLLM_VERSION" = 0.28.0 \
-    && GIT_CONFIG_GLOBAL=/run/secrets/git_config git clone --depth 1 --branch "v${VLLM_VERSION}" \
-        https://github.com/vllm-project/vllm.git /opt/vllm-src/vllm \
-    && test "$(git -C /opt/vllm-src/vllm rev-parse HEAD)" = "$VLLM_SOURCE_SHA" \
     && mkdir -p /opt/hygon/wheels /opt/hygon/cargo /opt/hygon/rustup \
-    && env -u VLLM_VENDOR -u VLLM_VERSION_OVERRIDE \
-        -u SETUPTOOLS_SCM_PRETEND_VERSION -u SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM \
-        -u VLLM_PRECOMPILED_WHEEL_LOCATION \
-        VLLM_TARGET_DEVICE=empty VLLM_USE_PRECOMPILED=0 \
-        VLLM_USE_PRECOMPILED_RUST=0 VLLM_DOCKER_BUILD_CONTEXT=0 \
-        VLLM_REQUIRE_RUST_FRONTEND=0 CARGO_NET_OFFLINE=true \
-        RUSTUP_AUTO_INSTALL=0 CARGO_HOME=/opt/hygon/cargo RUSTUP_HOME=/opt/hygon/rustup \
-        python -I -B -m pip wheel --no-deps --no-build-isolation --no-cache-dir \
-        --wheel-dir /opt/hygon/wheels /opt/vllm-src/vllm \
+    && shopt -s nullglob \
+    && wheels=(/run/vllm_wheels/*.whl) \
+    && if (( ${#wheels[@]} )); then \
+        [[ ${#wheels[@]} = 1 && "$VLLM_WHEEL_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+        && test "${wheels[0]##*/}" = 'vllm-0.28.0+empty-cp310-cp310-linux_x86_64.whl' \
+        && printf '%s  %s\n' "$VLLM_WHEEL_SHA256" "${wheels[0]}" | sha256sum -c - \
+        && python -I -S -B -c 'import email,sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); names=z.namelist(); entries=[n for n in names if n.endswith(".dist-info/METADATA")]; assert len(entries)==1; m=email.message_from_bytes(z.read(entries[0])); assert m["Name"]=="vllm" and m["Version"]=="0.28.0+empty"; assert not any(n.startswith("vllm/_C") and n.endswith((".so",".pyd")) for n in names)' "${wheels[0]}" \
+        && cp "${wheels[0]}" /opt/hygon/wheels/; \
+    else \
+        test -z "$VLLM_WHEEL_SHA256" \
+        && GIT_CONFIG_GLOBAL=/run/secrets/git_config git clone --depth 1 --branch "v${VLLM_VERSION}" \
+            https://github.com/vllm-project/vllm.git /opt/vllm-src/vllm \
+        && test "$(git -C /opt/vllm-src/vllm rev-parse HEAD)" = "$VLLM_SOURCE_SHA" \
+        && env -u VLLM_VENDOR -u VLLM_VERSION_OVERRIDE \
+            -u SETUPTOOLS_SCM_PRETEND_VERSION -u SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM \
+            -u VLLM_PRECOMPILED_WHEEL_LOCATION \
+            VLLM_TARGET_DEVICE=empty VLLM_USE_PRECOMPILED=0 \
+            VLLM_USE_PRECOMPILED_RUST=0 VLLM_DOCKER_BUILD_CONTEXT=0 \
+            VLLM_REQUIRE_RUST_FRONTEND=0 CARGO_NET_OFFLINE=true \
+            RUSTUP_AUTO_INSTALL=0 CARGO_HOME=/opt/hygon/cargo RUSTUP_HOME=/opt/hygon/rustup \
+            python -I -B -m pip wheel --no-deps --no-build-isolation --no-cache-dir \
+            --wheel-dir /opt/hygon/wheels /opt/vllm-src/vllm; \
+    fi \
     && python -I -B -m pip install --no-deps --no-index --no-compile \
         /opt/hygon/wheels/vllm-*.whl
 
