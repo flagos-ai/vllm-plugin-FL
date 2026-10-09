@@ -35,7 +35,16 @@ def _weak_ref_npu_tensor(value: Any) -> Any:
     if isinstance(value, torch.Tensor) and value.device.type == "npu":
         import torch_npu
 
-        return torch_npu._C._weak_ref_tensor(value)
+        # Bound in torch_npu/csrc/npu/Module.cpp in the pinned 2.10 runtime.
+        weak_ref_tensor = getattr(
+            getattr(torch_npu, "_C", None), "_weak_ref_tensor", None
+        )
+        if not callable(weak_ref_tensor):
+            raise RuntimeError(
+                "NPU graph weak references require torch_npu._C._weak_ref_tensor. "
+                "Use the documented torch-npu 2.10 runtime or disable graph mode."
+            )
+        return weak_ref_tensor(value)
     return value
 
 

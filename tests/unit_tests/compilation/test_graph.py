@@ -71,6 +71,64 @@ def test_npu_weak_ref_keeps_cpu_tensors(monkeypatch):
     assert result["cpu"] is tensor
 
 
+@pytest.mark.parametrize("primitive", [None, object()])
+def test_npu_weak_ref_requires_runtime_primitive(monkeypatch, primitive):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    tensor = MagicMock(spec=torch.Tensor)
+    tensor.device = SimpleNamespace(type="npu")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_npu",
+        SimpleNamespace(_C=SimpleNamespace(_weak_ref_tensor=primitive)),
+    )
+
+    with pytest.raises(RuntimeError, match="NPU graph weak references require"):
+        graph_module._weak_ref_npu_tensor(tensor)
+
+
+@pytest.mark.gpu
+def test_npu_weak_ref_preserves_view_without_owning_storage():
+    import gc
+    import weakref
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "npu":
+        pytest.skip("Requires an Ascend NPU")
+
+    torch.npu.synchronize()
+    baseline = torch.npu.memory_allocated()
+    owner = torch.arange(32, device="npu", dtype=torch.float32).reshape(4, 8)
+    view = owner[1:, 1::2]
+    alias = graph_module._weak_ref_npu_tensor(view)
+    empty_alias = graph_module._weak_ref_npu_tensor(view[:0])
+    assert alias is not view
+    assert alias.data_ptr() == view.data_ptr()
+    assert alias.shape == view.shape
+    assert alias.stride() == view.stride()
+    assert alias.storage_offset() == view.storage_offset()
+    assert alias.untyped_storage()._cdata != view.untyped_storage()._cdata
+    assert empty_alias.shape == view[:0].shape
+    assert empty_alias.stride() == view.stride()
+    assert empty_alias.storage_offset() == view.storage_offset()
+    torch.testing.assert_close(alias, view)
+
+    owner_ref, view_ref = weakref.ref(owner), weakref.ref(view)
+    del owner, view
+    gc.collect()
+    torch.npu.synchronize()
+    assert owner_ref() is None
+    assert view_ref() is None
+    # The aliases remain alive but must not keep the original allocation alive.
+    # Do not dereference their data after releasing the owner.
+    assert torch.npu.memory_allocated() <= baseline
+
+
 def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
     from types import SimpleNamespace
 
@@ -105,7 +163,8 @@ def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
 
 
 @pytest.mark.gpu
-def test_npu_graph_wrapper_capture_and_replay(monkeypatch):
+@pytest.mark.parametrize("weak_ref_output", [False, True])
+def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     """Capture the real wrapper, then replay changed inputs into poisoned output."""
     import torch
 
@@ -140,7 +199,7 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch):
         runnable,
         SimpleNamespace(compilation_config=SimpleNamespace()),
         mode,
-        graph_module.GraphOptions(weak_ref_output=False),
+        graph_module.GraphOptions(weak_ref_output=weak_ref_output),
     )
     static_input = torch.arange(-4, 4, device="npu", dtype=torch.float32).reshape(2, 4)
     capture_stream = torch.npu.Stream()

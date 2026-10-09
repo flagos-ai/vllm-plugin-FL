@@ -50,6 +50,29 @@ def test_sunrise_process_group_uses_pccl(monkeypatch):
     assert worker_module._normalize_process_group_backend("gloo") == "gloo"
 
 
+@pytest.mark.parametrize(
+    "device_type,flagcx_backend",
+    [
+        ("npu", "hccl"),
+        ("cuda", "flagcx"),
+        ("musa", "flagcx"),
+        ("maca", "flagcx"),
+        ("cpu", "flagcx"),
+    ],
+)
+@pytest.mark.parametrize("backend", ["flagcx", "nccl", "pccl", "hccl", "gloo"])
+def test_sunrise_process_group_mapping_is_ptpu_only(
+    monkeypatch, device_type, flagcx_backend, backend
+):
+    from vllm_fl.worker import worker as worker_module
+
+    monkeypatch.setattr(worker_module.current_platform, "device_type", device_type)
+
+    # Preserve Ascend's own native process group when TP collectives use FlagCX.
+    expected = flagcx_backend if backend == "flagcx" else backend
+    assert worker_module._normalize_process_group_backend(backend) == expected
+
+
 def test_worker_keeps_target_lifecycle_contract():
     from vllm_fl.worker.worker import WorkerFL
 
