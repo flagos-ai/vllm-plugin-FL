@@ -57,12 +57,10 @@ KUNLUNXIN_VLLM_VERSION="${KUNLUNXIN_VLLM_VERSION:-0.20.2}"
 KUNLUNXIN_FLAGGEMS_REF="${KUNLUNXIN_FLAGGEMS_REF:-v5.0.0}"
 KUNLUNXIN_FLAGCX_REF="${KUNLUNXIN_FLAGCX_REF:-v0.13.0}"
 KUNLUNXIN_PLUGIN_FL_REF="${KUNLUNXIN_PLUGIN_FL_REF:-38e7dbc20197e2db742c4e4c9687d36ea4df9900}"
-HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.sourcefind.cn:5443/dcu/admin/base/custom:vllm0.20.0-ubuntu22.04-dtk26.04-py3.10-MiniCPM-V-4.6}"
-HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.20.2}"
+HYGON_BASE_IMAGE="${HYGON_BASE_IMAGE:-harbor.baai.ac.cn/plugin/hygon-dtk26.04-tree0.6.0hcu3.6-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt2100-x64:202609041747@sha256:d2530485457ede1d17dbb26704a3d4408d760ff3e363402599e1738dc5828807}"
+HYGON_VLLM_VERSION="${HYGON_VLLM_VERSION:-0.28.0}"
 HYGON_DTK_VERSION="${HYGON_DTK_VERSION:-26.04}"
 HYGON_PYTHON_VERSION="${HYGON_PYTHON_VERSION:-3.10}"
-HYGON_RUNTIME_LIB_DIR="${HYGON_RUNTIME_LIB_DIR:-/opt/hyhal/lib}"
-HYGON_RUNTIME_ROOTS="${HYGON_RUNTIME_ROOTS:-/opt/dtk:/opt/hyhal:/usr/local/hyhal}"
 FLAGGEMS_VERSION="${FLAGGEMS_VERSION:-62d70b9e858ec407572153ee8cdf65cc24a637d5}"
 VLLM_PLUGIN_FL_VERSION="${VLLM_PLUGIN_FL_VERSION:-ffa2ee3eb3831f3873dd0966d12fc8e0b4e6e3d4}"
 
@@ -75,6 +73,7 @@ INDEX_URL="${INDEX_URL:-}"
 EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}"
 NO_CACHE=""
 EXTRA_BUILD_ARGS=()
+BUILD_SECRET_ARGS=()
 
 # ==============================================================================
 # Helper functions
@@ -87,73 +86,6 @@ err() {
 
 msg() {
     printf ">>> %s\n" "$1"
-}
-
-cleanup_hygon_runtime_overlay() {
-    if [[ -n "${HYGON_RUNTIME_OVERLAY:-}" ]]; then
-        rm -rf "${HYGON_RUNTIME_OVERLAY}"
-    fi
-}
-
-stage_hygon_runtime_files() {
-    local src rel
-    for src in "$@"; do
-        [[ -e "${src}" ]] || continue
-        rel="${src#/}"
-        mkdir -p "${HYGON_RUNTIME_OVERLAY}/$(dirname "${rel}")"
-        cp -aL "${src}" "${HYGON_RUNTIME_OVERLAY}/${rel}"
-    done
-}
-
-prepare_hygon_runtime_overlay() {
-    HYGON_RUNTIME_OVERLAY="${SCRIPT_DIR}/hygon/.hygon-runtime"
-    rm -rf "${HYGON_RUNTIME_OVERLAY}"
-    mkdir -p "${HYGON_RUNTIME_OVERLAY}/opt/hyhal/lib"
-
-    mapfile -t HYGON_RUNTIME_LIBS < <(
-        find "${HYGON_RUNTIME_LIB_DIR}" -maxdepth 1 -name 'librocm_smi64.so*' -print 2>/dev/null | sort
-    )
-    if [[ "${#HYGON_RUNTIME_LIBS[@]}" -eq 0 ]]; then
-        err "Hygon runtime libraries not found: ${HYGON_RUNTIME_LIB_DIR}/librocm_smi64.so*"
-    fi
-
-    stage_hygon_runtime_files "${HYGON_RUNTIME_LIBS[@]}"
-
-    local runtime_roots=()
-    local existing_runtime_roots=()
-    local root
-    IFS=: read -r -a runtime_roots <<< "${HYGON_RUNTIME_ROOTS}"
-    for root in "${runtime_roots[@]}"; do
-        if [[ -d "${root}" ]]; then
-            existing_runtime_roots+=("${root}")
-        fi
-    done
-    if [[ "${#existing_runtime_roots[@]}" -eq 0 ]]; then
-        err "Hygon runtime roots not found: ${HYGON_RUNTIME_ROOTS}"
-    fi
-
-    mapfile -t HYGON_HSA_RUNTIME_FILES < <(
-        find "${existing_runtime_roots[@]}" \( -type f -o -type l \) \
-            \( -name 'libhsa-runtime64.so*' \
-            -o -name 'hsa-runtime64*cmake' \
-            -o -path '*/hsa-runtime64/*.cmake' \) \
-            -print 2>/dev/null | sort -u
-    )
-    if [[ "${#HYGON_HSA_RUNTIME_FILES[@]}" -eq 0 ]]; then
-        err "Hygon HSA runtime files not found under: ${HYGON_RUNTIME_ROOTS}"
-    fi
-    stage_hygon_runtime_files "${HYGON_HSA_RUNTIME_FILES[@]}"
-
-    mapfile -t HYGON_ROCM_SMI_CMAKE_FILES < <(
-        find "${existing_runtime_roots[@]}" \( -type f -o -type l \) \
-            \( -name 'rocm_smi*cmake' -o -path '*/rocm_smi/*.cmake' \) \
-            -print 2>/dev/null | sort -u
-    )
-    if [[ "${#HYGON_ROCM_SMI_CMAKE_FILES[@]}" -gt 0 ]]; then
-        stage_hygon_runtime_files "${HYGON_ROCM_SMI_CMAKE_FILES[@]}"
-    fi
-
-    trap cleanup_hygon_runtime_overlay EXIT
 }
 
 usage() {
@@ -218,10 +150,8 @@ VERSIONS (override via environment variables):
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
     HYGON_DTK_VERSION    DTK version used in generated image tag (default: ${HYGON_DTK_VERSION})
     HYGON_PYTHON_VERSION Python version in Hygon base image tag (default: ${HYGON_PYTHON_VERSION})
-    HYGON_RUNTIME_LIB_DIR Hygon runtime library source dir (default: ${HYGON_RUNTIME_LIB_DIR})
-    HYGON_RUNTIME_ROOTS  Colon-separated roots for Hygon runtime overlay files (default: ${HYGON_RUNTIME_ROOTS})
-    FLAGGEMS_VERSION     FlagGems git ref (default: ${FLAGGEMS_VERSION})
-    VLLM_PLUGIN_FL_VERSION vllm-plugin-FL git ref (default: ${VLLM_PLUGIN_FL_VERSION})
+    PLUGIN_SOURCE_SHA   Plugin Git revision (default: current repository HEAD)
+    HYGON_GIT_CONFIG    Optional Git-only proxy config mounted as a BuildKit secret
 
 EXAMPLES:
     # Build CUDA dev image
@@ -339,18 +269,25 @@ elif [[ "${PLATFORM}" == "ascend" ]]; then
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     PYTHON_VERSION="${HYGON_PYTHON_VERSION}"
     VLLM_VERSION="${HYGON_VLLM_VERSION}"
+    BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    PLUGIN_SOURCE_SHA="${PLUGIN_SOURCE_SHA:-$(git -C "${BUILD_CONTEXT}" rev-parse HEAD)}"
+    [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "PLUGIN_SOURCE_SHA must be a full Git revision."
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+    fi
     BUILD_ARGS+=(
-        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
         --build-arg "HYGON_BASE_IMAGE=${HYGON_BASE_IMAGE}"
-        --build-arg "PYTHON_VERSION=${HYGON_PYTHON_VERSION}"
         --build-arg "VLLM_VERSION=${HYGON_VLLM_VERSION}"
-        --build-arg "INDEX_URL=${INDEX_URL}"
-        --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
-        --build-arg "FLAGGEMS_VERSION=${FLAGGEMS_VERSION}"
-        --build-arg "VLLM_PLUGIN_FL_VERSION=${VLLM_PLUGIN_FL_VERSION}"
+        --build-arg "PLUGIN_SOURCE_SHA=${PLUGIN_SOURCE_SHA}"
     )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
+    if [[ -n "${HYGON_GIT_CONFIG:-}" ]]; then
+        [[ -f "${HYGON_GIT_CONFIG}" ]] || err "HYGON_GIT_CONFIG file does not exist."
+        BUILD_SECRET_ARGS+=(--secret "id=git_config,src=${HYGON_GIT_CONFIG}")
+    fi
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="hygon-vllm${VLLM_VERSION}-dtk${HYGON_DTK_VERSION}-py${HYGON_PYTHON_VERSION}-${TARGET}"
+        IMAGE_TAG="v${HYGON_VLLM_VERSION}-hygon-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "metax" ]]; then
     PYTHON_VERSION="${METAX_PYTHON_VERSION}"
@@ -426,9 +363,8 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     msg "  DTK:            ${HYGON_DTK_VERSION}"
     msg "  Hygon Python:   ${HYGON_PYTHON_VERSION}"
     msg "  Base image:     ${HYGON_BASE_IMAGE}"
-    msg "  Runtime libs:   ${HYGON_RUNTIME_LIB_DIR}"
-    msg "  FlagGems:       ${FLAGGEMS_VERSION}"
-    msg "  Plugin:         ${VLLM_PLUGIN_FL_VERSION}"
+    msg "  Vendor stack:   preserved from the pinned base image"
+    msg "  Plugin source:  ${PLUGIN_SOURCE_SHA}"
 elif [[ "${PLATFORM}" == "metax" ]]; then
     msg "  MACA:           ${METAX_MACA_VERSION}"
     msg "  MetaX Python:   ${METAX_PYTHON_VERSION}"
@@ -457,14 +393,11 @@ fi
 msg "  vLLM:           ${VLLM_VERSION}"
 msg ""
 
-if [[ "${PLATFORM}" == "hygon" ]]; then
-    prepare_hygon_runtime_overlay
-fi
-
 docker build \
     -f "${DOCKERFILE}" \
     --target "${TARGET}" \
     "${BUILD_ARGS[@]}" \
+    "${BUILD_SECRET_ARGS[@]}" \
     ${NO_CACHE} \
     "${EXTRA_BUILD_ARGS[@]+"${EXTRA_BUILD_ARGS[@]}"}" \
     -t "${FULL_IMAGE}" \

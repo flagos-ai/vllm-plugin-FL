@@ -33,21 +33,32 @@ device_overrides:
   bw1000:
     cases:
       - qwen3_6/27b_tp2_eager
-      - qwen3_6/27b_tp4_graph
+      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
-      - qwen3_6/35b_a3b_tp4_graph
+      - qwen3_6/35b_a3b_tp2_graph
     llm:
-      gpu_memory_utilization: 0.8
+      max_model_len: 4096
+      max_num_seqs: 8
+      max_num_batched_tokens: 8192
+      gpu_memory_utilization: 0.85
+      enable_prefix_caching: false
+      compilation_config:
+        cudagraph_mode: FULL_AND_PIECEWISE
+        cudagraph_capture_sizes: [1, 2, 4, 8]
+        max_cudagraph_capture_size: 8
     serve:
       startup_retries: 360
       extra_engine:
         enable_log_requests: false
         enable_prefix_caching: false
+        # The shared CLI adapter expects JSON for structured engine options.
+        compilation_config: '{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[1,2,4,8],"max_cudagraph_capture_size":8}'
 
 env_defaults:
   GEMS_VENDOR: "hygon"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
-  VLLM_FL_FLAGOS_BLACKLIST: "cat,slice"
+  USE_FLAGGEMS: "1"
+  VLLM_PLUGINS: "fl"
   TRITON_CACHE_DIR: "/tmp/triton_cache"
 
 bw1000:
@@ -55,9 +66,9 @@ bw1000:
   tests:
     e2e:
       inference:
-        qwen3_6: ["35b_a3b_tp4_graph", "27b_tp2_eager"]
+        qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
       serving:
-        qwen3_6: ["27b_tp4_graph", "35b_a3b_tp2_eager"]
+        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
     functional:
       include: "*"
       exclude: []

@@ -44,7 +44,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Iluvatar | Supported | - |
 | Tsingmicro | Supported | - |
 | Moore Threads | Supported | - |
-| Hygon | Supported | - |
+| Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |
 | Sunrise | Supported | - |
 | ARM64 CPU | Supported | - |
 
