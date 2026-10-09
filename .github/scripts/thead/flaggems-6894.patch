@@ -1,0 +1,85 @@
+--- a/src/flag_gems/ops/flash_api.py
++++ b/src/flag_gems/ops/flash_api.py
+@@ -1169,7 +1169,9 @@
+                         "lse_split_stride": lse_splits.stride(0),
+                         "out_b_stride": out.stride(0),
+                         "out_s_stride": out.stride(-3),
+-                        "out_h_stride": out.stride(-1),
++                        # Head stride is the second-to-last dim of the BSHD view;
++                        # stride(-1) is the contiguous head-size stride.
++                        "out_h_stride": out.stride(-2),
+                         "out_splits_ptr": out_splits,
+                         "lse_splits_ptr": lse_splits,
+                         "n_splits": n_splits,
+@@ -1177,6 +1179,8 @@
+                         "BLOCK_K": BLOCK_K,
+                         "q_total": B * H * Q,
+                         "MAX_N_SPLITS": triton.next_power_of_2(n_splits),
++                        "num_heads": H,
++                        "seqlen_q": Q,
+                     }
+                     combine_kernel(**combine_args)
+                     return kernel
+--- a/src/flag_gems/ops/flash_kernel.py
++++ b/src/flag_gems/ops/flash_kernel.py
+@@ -1124,12 +1124,13 @@
+     BLOCK_K: tl.constexpr,
+     q_total,
+     MAX_N_SPLITS: tl.constexpr,
++    num_heads: tl.constexpr,
++    seqlen_q: tl.constexpr,
+ ):
+     pid = tl.program_id(0)
+     lse_splits_ptr += pid * BLOCK_M
+     lse_ptr += pid * BLOCK_M
+     out_splits_ptr += pid * BLOCK_M * head_size
+-    out_ptr += pid * BLOCK_M * head_size
+ 
+     # Subtracting maximum from each of the split lse's for better numerical stability
+     lse_split_offset = (
+@@ -1170,8 +1171,21 @@
+     out = tl.sum(Zi_Z[:, :, None] * out_splits, 1)
+     out = out.to(out_ptr.type.element_ty)
+ 
+-    # Write back output
+-    out_offset = tl.arange(0, BLOCK_M)[:, None] * out_s_stride + tl.arange(0, BLOCK_K)
++    # Write back output.
++    # The split buffers flatten [batch, head, query], but `out` is a BSHD view
++    # whose batch/head/query strides need not follow that storage order. Decode
++    # each row into batch/head/query and use the real output strides, instead
++    # of advancing the base by a contiguous row pitch.
++    row = pid * BLOCK_M + tl.arange(0, BLOCK_M)
++    batch = row // (num_heads * seqlen_q)
++    head = (row // seqlen_q) % num_heads
++    query = row % seqlen_q
++    out_offset = (
++        batch[:, None] * out_b_stride
++        + head[:, None] * out_h_stride
++        + query[:, None] * out_s_stride
++        + tl.arange(0, BLOCK_K)[None, :]
++    )
+     dmask = tl.arange(0, BLOCK_K) < head_size
+     tl.store(out_ptr + out_offset, out, mask=out_mask[:, None] & dmask[None, :])
+ 
+--- a/src/flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py
++++ b/src/flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py
+@@ -1167,7 +1167,9 @@
+                         "lse_split_stride": lse_splits.stride(0),
+                         "out_b_stride": out.stride(0),
+                         "out_s_stride": out.stride(-3),
+-                        "out_h_stride": out.stride(-1),
++                        # Head stride is the second-to-last dim of the BSHD view;
++                        # stride(-1) is the contiguous head-size stride.
++                        "out_h_stride": out.stride(-2),
+                         "out_splits_ptr": out_splits,
+                         "lse_splits_ptr": lse_splits,
+                         "n_splits": n_splits,
+@@ -1175,6 +1177,8 @@
+                         "BLOCK_K": BLOCK_K,
+                         "q_total": B * H * Q,
+                         "MAX_N_SPLITS": triton.next_power_of_2(n_splits),
++                        "num_heads": H,
++                        "seqlen_q": Q,
+                     }
+                     combine_kernel(**combine_args)
+                     return kernel

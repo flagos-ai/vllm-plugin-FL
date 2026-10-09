@@ -34,3 +34,5 @@ platforms:
     enabled: false
   kunlunxin:
     enabled: false
+  thead:
+    enabled: true

@@ -1,0 +1,210 @@
+# Copyright 2026 FlagOS Contributors
+"""CPU-only regressions for CI acceptance boundaries; no vendor imports."""
+
+import hashlib
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+HERE = Path(__file__).resolve().parent
+# These are the actual standalone CI modules, not substitutes for runtime code.
+sys.path.insert(0, str(HERE))
+import run_tests
+from common import session_members, validate_junit
+from config import resolve_config
+from run_gate import CHECKS, SCENARIOS, parse_graph_observations, validate_documents
+from stack import STACK, verify_files
+
+
+class IsolatedEntryTests(unittest.TestCase):
+    def test_actual_cli_entrypoints_under_isolated_python(self):
+        for filename in ("run_tests.py", "run_gate.py", "stack.py"):
+            with self.subTest(filename=filename):
+                result = subprocess.run(
+                    [sys.executable, "-I", "-B", str(HERE / filename), "--help"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("usage:", result.stdout)
+
+
+class ConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        self.defaults = {"container_options": "--device /dev/alixpu"}
+        self.env = {
+            "THEAD_CI_IMAGE": "registry.example/ppu@sha256:" + "a" * 64,
+            "THEAD_CI_VISIBLE_DEVICES": "0,1,2,3",
+            "THEAD_CI_MODEL_27B": "/models/dense",
+            "THEAD_CI_MODEL_35B": "/models/moe",
+        }
+
+    def test_main_runner_default_and_overrides(self):
+        config = resolve_config(self.defaults, self.env)
+        self.assertEqual(config["runner_labels"], ["flagcicd-810e"])
+        self.env["THEAD_CI_RUNNER_LABELS"] = '["self-hosted","ppu-dedicated"]'
+        self.assertEqual(
+            resolve_config(self.defaults, self.env)["runner_labels"][-1],
+            "ppu-dedicated",
+        )
+
+    def test_unconfigured_image_fails(self):
+        self.env.pop("THEAD_CI_IMAGE")
+        with self.assertRaisesRegex(ValueError, "THEAD_CI_IMAGE"):
+            resolve_config(self.defaults, self.env)
+
+    def test_unpinned_image_fails(self):
+        self.env["THEAD_CI_IMAGE"] = "registry.example/ppu:latest"
+        with self.assertRaises(ValueError):
+            resolve_config(self.defaults, self.env)
+
+    def test_duplicate_devices_and_privileged_fail(self):
+        self.env["THEAD_CI_VISIBLE_DEVICES"] = "0,1,1,3"
+        with self.assertRaises(ValueError):
+            resolve_config(self.defaults, self.env)
+        self.env["THEAD_CI_VISIBLE_DEVICES"] = "0,1,2,3"
+        self.env["THEAD_CI_CONTAINER_OPTIONS"] = "--privileged"
+        with self.assertRaises(ValueError):
+            resolve_config(self.defaults, self.env)
+
+    def test_invalid_json_shapes_fail(self):
+        for value in ('"ppu"', "[]", "[1]"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                resolve_config(
+                    self.defaults, dict(self.env, THEAD_CI_RUNNER_LABELS=value)
+                )
+
+
+class AcceptanceTests(unittest.TestCase):
+    def test_cleanup_rejects_reused_pid_and_ignores_unrelated_or_zombie(self):
+        identity = {"pid": 100, "pgid": 100, "sid": 100, "start_ticks": 200}
+        own = dict(identity, state="S")
+        child = dict(identity, pid=101, start_ticks=201, state="S")
+        unrelated = dict(identity, pid=102, pgid=102, sid=102, state="S")
+        zombie = dict(identity, pid=103, state="Z")
+        self.assertEqual(
+            session_members(identity, [own, child, unrelated, zombie]), [own, child]
+        )
+        self.assertEqual(session_members(identity, [child]), [child])
+        self.assertEqual(session_members(identity, [zombie]), [])
+        with self.assertRaisesRegex(RuntimeError, "reused"):
+            session_members(identity, [dict(own, start_ticks=300), child])
+        with self.assertRaisesRegex(RuntimeError, "cleanup incomplete"):
+            session_members(identity, [own, dict(child, pgid=101)])
+
+    def test_unit_cleanup_failure_stops_following_suites(self):
+        for cleaned, expected_attempts in ((False, 1), (True, 3)):
+            with self.subTest(cleaned=cleaned), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "units"
+                receipt = {"clean": False, "cleanup_complete": cleaned}
+                with (
+                    patch.object(
+                        sys, "argv", ["run_tests.py", "--output-dir", str(out)]
+                    ),
+                    patch.object(run_tests, "run_command", return_value=receipt) as run,
+                    patch.object(run_tests, "validate_junit", return_value={}),
+                ):
+                    self.assertEqual(run_tests.main(), 1)
+                facts = json.loads((out / "summary.json").read_text())
+                self.assertEqual(run.call_count, expected_attempts)
+                self.assertFalse(facts["passed"])
+                self.assertEqual(facts["only_owned_cleanup_complete"], cleaned)
+
+    def test_zero_skip_unique_junit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "result.xml"
+            path.write_text(
+                '<testsuites><testsuite><testcase classname="c" name="a"/><testcase classname="c" name="b"/></testsuite></testsuites>'
+            )
+            self.assertEqual(validate_junit(path, 2)["passed"], 2)
+            for xml in (
+                "<testsuites/>",
+                '<testsuite><testcase name="a"><skipped/></testcase></testsuite>',
+                '<testsuite><testcase name="a"/><testcase name="a"/></testsuite>',
+                '<testsuite><testcase name="a"><error/></testcase></testsuite>',
+            ):
+                path.write_text(xml)
+                with self.subTest(xml=xml), self.assertRaises(RuntimeError):
+                    validate_junit(path, 2)
+
+    def documents(self, root):
+        for scenario, count in SCENARIOS.items():
+            doc = {
+                "case": {"scenario": scenario},
+                "input": [{}] * count,
+                "output": [
+                    {"passed": True, "checks": dict.fromkeys(CHECKS, True)}
+                    for _ in range(count)
+                ],
+            }
+            (root / (scenario + ".json")).write_text(json.dumps(doc))
+
+    def test_original_five_scenarios_26_requests_260_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.documents(root)
+            facts = validate_documents(root)
+            self.assertEqual((facts["logical_requests"], facts["checks"]), (26, 260))
+            self.assertTrue(facts["passed"])
+            p = root / "text_single.json"
+            doc = json.loads(p.read_text())
+            doc["output"][0]["checks"]["expected_semantics"] = False
+            p.write_text(json.dumps(doc))
+            self.assertFalse(validate_documents(root)["passed"])
+
+    def test_missing_check_or_scenario_is_not_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.documents(root)
+            p = root / "text_single.json"
+            doc = json.loads(p.read_text())
+            doc["output"][0]["checks"].pop("expected_semantics")
+            p.write_text(json.dumps(doc))
+            with self.assertRaises(RuntimeError):
+                validate_documents(root)
+            p.unlink()
+            with self.assertRaises(RuntimeError):
+                validate_documents(root)
+
+    def test_actual_info_graph_evidence_requires_capture_and_dispatch(self):
+        # Sanitized INFO lines from the verified 0.28 graph runs.
+        capture = "Capturing CUDA graphs (decode, FULL): 100%|####| 4/4 [00:01]"
+        stats = "**CUDAGraph Stats:**\\n| Unpadded Tokens | Padded Tokens | Num Paddings | Runtime Mode | Count |\\n| 1 | 1 | 0 | FULL | 39 |"
+        observed = parse_graph_observations(stats, capture)
+        self.assertTrue(observed["graph_capture_observed"])
+        self.assertTrue(observed["graph_runtime_dispatch_observed"])
+        for output, error in (
+            ("cudagraph_mode=FULL", ""),
+            (stats.replace("39", "0"), capture.replace("4/4", "3/4")),
+            ("| 1 | 1 | 0 | FULL | 39 |", "Capturing CUDA graphs 3/4"),
+        ):
+            with self.subTest(output=output):
+                facts = parse_graph_observations(output, error)
+                self.assertFalse(
+                    facts["graph_capture_observed"]
+                    and facts["graph_runtime_dispatch_observed"]
+                )
+
+    def test_three_file_fix_required_not_version_only(self):
+        self.assertEqual(len(STACK["files"]), 3)
+        self.assertEqual(
+            hashlib.sha256((HERE / "flaggems-6894.patch").read_bytes()).hexdigest(),
+            STACK["patch_sha256"],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for row in STACK["files"]:
+                p = root / row["path"]
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(b"unpatched or changed body")
+            with self.assertRaisesRegex(RuntimeError, "binding failed"):
+                verify_files(root, "after")
+
+
+if __name__ == "__main__":
+    unittest.main()
