@@ -62,6 +62,8 @@ env_defaults:
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
   USE_FLAGGEMS: "1"
   VLLM_PLUGINS: "fl"
+  # The upstream V2 runner requires UVA support unavailable on the Hygon OOT platform.
+  VLLM_USE_V2_MODEL_RUNNER: "0"
   TRITON_CACHE_DIR: "/tmp/triton_cache"
 
 bw1000:
