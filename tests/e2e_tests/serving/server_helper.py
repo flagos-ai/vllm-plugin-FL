@@ -90,7 +90,6 @@ class VllmServer:
 
         model_short = os.path.basename(self.model)
         print(f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size})")
-        print(f"[Setup] Command: {self._redact(' '.join(cmd))}")
 
         log_dir = Path("test-results/logs").resolve()
         log_dir.mkdir(parents=True, exist_ok=True)
