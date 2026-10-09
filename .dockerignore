@@ -1,0 +1,25 @@
+# Keep local state and credentials out of repository-root Docker contexts.
+.git
+.git/**
+.hygon-session
+.flflow-progress.json
+.codex*
+.agents
+.idea
+.aws
+.ssh
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.pyc
+.venv
+venv
+build
+dist
+*.egg-info
