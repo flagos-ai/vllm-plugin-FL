@@ -471,13 +471,15 @@ The packaged `run_test.sh` also waits for readiness and runs all three files;
 use it when its `pytest` executable belongs to the intended environment.
 Each model/mode sends 26 requests: 1 text, 8 concurrent text, 1 image,
 8 concurrent image, and 8 mixed requests. It evaluates 260 response checks.
-Quality oracle `2-llm-concepts` keeps ten checks per response. The free-form
+Quality oracle `2.1-llm-concepts` keeps ten checks per response. The free-form
 LLM explanation requires model, training, and inference concepts in order,
 followed by affirmative descriptions of at least two distinct limitations
 (for example, hallucination and bias). This avoids requiring the literal word
 `limitations` when the response already explains those concepts. Evidence
 spans are saved in the JSON results. Exact answer/OCR checks for other requests
-and all length, repetition, and encoding checks are preserved.
+and all length, repetition, and encoding checks are preserved. Version 2.1 fixes
+comma-separated affirmative examples and "lack of" grammar that version 2
+could miss; historical CI results retain their original oracle version.
 
 ## CI configuration
 

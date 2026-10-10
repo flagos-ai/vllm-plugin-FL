@@ -278,6 +278,26 @@ class LlmQualityTests(unittest.TestCase):
         "aw, and education."
     )
 
+    # CI 38017782825 actual text_single response; source SHA256 f8908d3d240a69017e4a67593eba970148f39aeaec7c14fd8a5f11cbd5501b19.
+    CI_RETRY_GRAPH_TEXT = (
+        "Large language models (LLMs) are advanced artificial intelligence systems de"
+        "signed to understand and generate human-like text. These models are built up"
+        "on deep learning architectures, primarily the transformer, which utilizes se"
+        "lf-attention mechanisms to process vast amounts of data efficiently. Trainin"
+        "g involves exposing the model to massive datasets comprising books, articles"
+        ", and code, allowing it to learn complex patterns, grammar, and factual know"
+        "ledge through predictive text completion. During inference, the model proces"
+        "ses user inputs to generate coherent responses by calculating probabilities "
+        "for subsequent tokens. LLMs demonstrate remarkable capabilities, including n"
+        "atural language translation, code generation, summarization, and creative wr"
+        "iting. However, they face significant limitations, such as hallucinations wh"
+        "ere they fabricate information, biases inherited from training data, and a l"
+        "ack of true reasoning or consciousness. Responsible use requires rigorous va"
+        "lidation, transparency about model origins, and continuous monitoring to mit"
+        "igate risks associated with misinformation and ethical concerns, ensuring th"
+        "ese powerful tools serve beneficial purposes in society."
+    )
+
     REPHRASED_TEXT = (
         "Large language models learn patterns from examples. Training adjusts their "
         "parameters on extensive text. During inference they predict likely next "
@@ -310,7 +330,7 @@ class LlmQualityTests(unittest.TestCase):
         )
 
     def test_versioned_oracle_accepts_three_real_responses_with_reviewable_spans(self):
-        self.assertEqual(self.quality.ORACLE_VERSION, "2-llm-concepts")
+        self.assertEqual(self.quality.ORACLE_VERSION, "2.1-llm-concepts")
         for text in (self.V51_TEXT, self.CI_GRAPH_TEXT, self.CI_EAGER_TEXT):
             with self.subTest(text=text[:70]):
                 checks = self.checks(text)
@@ -566,6 +586,136 @@ class LlmQualityTests(unittest.TestCase):
                 "expected_semantics"
             ]
         )
+
+    def test_real_retry_graph_response_has_affirmative_concept_evidence(self):
+        checks = self.checks(self.CI_RETRY_GRAPH_TEXT)
+        self.assertTrue(all(checks.values()), checks)
+        evidence = self.quality.llm_explanation_evidence(self.CI_RETRY_GRAPH_TEXT)
+        self.assertTrue(evidence["ordered"])
+        self.assertGreaterEqual(len(evidence["distinct_categories"]), 2)
+        normalized = self.quality.normalized_text(self.CI_RETRY_GRAPH_TEXT)
+        for row in evidence["limitations"]:
+            self.assertEqual(normalized[row["start"] : row["end"]], row["text"])
+
+    def test_comma_such_as_punctuation_and_whitespace_variants_pass(self):
+        for clause in (
+            "They face limitations, such as hallucinations and bias.",
+            "They face limitations , such as hallucinations and bias.",
+            "They face limitations,\nsuch as hallucinations and bias.",
+        ):
+            text = (
+                self.PREFIX + clause + " Responsible use requires careful review "
+                "of every claim before generated answers are used in practice."
+            )
+            with self.subTest(clause=clause):
+                self.assertTrue(all(self.checks(text).values()))
+                self.assertEqual(
+                    set(
+                        self.quality.llm_explanation_evidence(text)[
+                            "distinct_categories"
+                        ]
+                    ),
+                    {"factual_reliability", "bias"},
+                )
+
+    def test_affirmative_lack_of_has_independent_limitation_evidence(self):
+        for clause, categories in (
+            (
+                "They can hallucinate and have a lack of true reasoning.",
+                {"factual_reliability", "understanding_reasoning"},
+            ),
+            (
+                "They may reproduce biases and demonstrate a lack of understanding.",
+                {"bias", "understanding_reasoning"},
+            ),
+        ):
+            text = (
+                self.PREFIX + clause + " Responsible use requires careful review "
+                "of every claim before generated answers are used in practice."
+            )
+            with self.subTest(clause=clause):
+                self.assertTrue(all(self.checks(text).values()))
+                self.assertEqual(
+                    set(
+                        self.quality.llm_explanation_evidence(text)[
+                            "distinct_categories"
+                        ]
+                    ),
+                    categories,
+                )
+
+    def test_comma_such_as_and_lack_of_denials_are_not_affirmative(self):
+        for clause, categories in (
+            (
+                "They do not face limitations, such as hallucinations and bias.",
+                [],
+            ),
+            (
+                "They face no limitations, such as hallucinations and bias.",
+                [],
+            ),
+            (
+                "They are without limitations, such as hallucinations and bias.",
+                [],
+            ),
+            (
+                (
+                    "They face limitations, such as hallucinations and bias, "
+                    "but neither is a problem for them."
+                ),
+                [],
+            ),
+            (
+                (
+                    "Do not suffer from a lack of true understanding. They may "
+                    "reproduce biases."
+                ),
+                ["bias"],
+            ),
+            (
+                "They have no lack of true reasoning and may reproduce biases.",
+                ["bias"],
+            ),
+            (
+                ("They do not have a lack of true reasoning and may reproduce biases."),
+                ["bias"],
+            ),
+        ):
+            text = self.PREFIX + clause
+            with self.subTest(clause=clause):
+                checks = self.checks(text)
+                self.assertTrue(checks["minimum_length"])
+                self.assertFalse(checks["expected_semantics"])
+                self.assertFalse(checks["expected_order"])
+                self.assertEqual(
+                    self.quality.llm_explanation_evidence(text)["distinct_categories"],
+                    categories,
+                )
+
+    def test_comma_such_as_headings_and_single_category_are_rejected(self):
+        for clause, categories in (
+            (
+                "Limitations, such as hallucinations, bias, and lack of true reasoning.",
+                [],
+            ),
+            (
+                "They face limitations, such as hallucinations.",
+                ["factual_reliability"],
+            ),
+        ):
+            text = (
+                self.PREFIX + clause + " Responsible use requires careful review "
+                "of every claim before generated answers are used in practice."
+            )
+            with self.subTest(clause=clause):
+                checks = self.checks(text)
+                self.assertTrue(checks["minimum_length"])
+                self.assertFalse(checks["expected_semantics"])
+                self.assertFalse(checks["expected_order"])
+                self.assertEqual(
+                    self.quality.llm_explanation_evidence(text)["distinct_categories"],
+                    categories,
+                )
 
     def test_unknown_or_mismatched_profile_is_rejected(self):
         for required, profile in (

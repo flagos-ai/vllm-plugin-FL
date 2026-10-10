@@ -140,14 +140,16 @@ output, `!!!`, mojibake, control characters, suspicious character runs, or
 repeated words or phrases. The detailed LLM introduction must also contain at
 least 256 characters. Number words and digits are treated as equivalent.
 
-Quality oracle `2-llm-concepts` uses the explicit `llm-explanation-v1` profile
+Quality oracle `2.1-llm-concepts` uses the explicit `llm-explanation-v1` profile
 only for the detailed LLM introduction. It requires the model, training, and
 inference anchors in order, followed by affirmative descriptions of at least
 two distinct limitations: factual reliability, bias, understanding/reasoning,
 or knowledge freshness. A correct explanation need not contain the literal
 word `limitations`. Headings, denied limitations, and a single limitation do
 not satisfy this profile. JSON results record the oracle version and matching
-evidence spans for review.
+evidence spans for review. Version 2.1 recognizes affirmative comma-separated
+examples (such as "face limitations, such as ...") and "have a lack of ..."
+without accepting bare headings or denials.
 
 Other requests retain their exact required-answer checks. Each request still
 has ten Boolean checks; the prompt, images, token budget, minimum length, and

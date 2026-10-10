@@ -6,7 +6,7 @@ import re
 import unicodedata
 from typing import Any
 
-ORACLE_VERSION = "2-llm-concepts"
+ORACLE_VERSION = "2.1-llm-concepts"
 LLM_EXPLANATION_PROFILE = "llm-explanation-v1"
 LLM_REQUIRED_TERMS = ("large language model", "training", "inference", "limitations")
 
@@ -31,6 +31,7 @@ _POSITIVE_PATTERNS = {
     "understanding_reasoning": (
         r"\b(?:understanding|reasoning)\s+(?:is|can be|may be|remains?)\s+(?:limited|unreliable|imperfect)\b",
         r"\b(?:lack(?:s)?|do not have|does not have)\s+(?:(?:true|real|genuine|reliable|human|deep|robust)\s+)*(?:understanding|reasoning|consciousness)\b",
+        r"\b(?:have|has|demonstrate(?:s)?|suffer(?:s)? from)\s+(?:a\s+)?lack of\s+(?:(?:true|real|genuine|reliable|human|deep|robust)\s+)*(?:understanding|reasoning|consciousness)\b",
         r"\b(?:cannot reliably|cannot truly|do not truly|does not truly)\s+(?:understand|reason)\b",
     ),
     "knowledge_freshness": (
@@ -41,7 +42,11 @@ _POSITIVE_PATTERNS = {
 }
 _LIST_CONTEXT = re.compile(
     r"\b(?:limitations?|weaknesses?|drawbacks?|risks?)\s+"
-    r"(?:such as|include|includes|involve|involves|persist,?\s+such as|remain,?\s+such as)\b[^.!?;]{0,240}"
+    r"(?:such as|include|includes|involve|involves|persist,?\s+such as|remain,?\s+such as)\b[^.!?;]{0,240}|"
+    # A comma-separated example needs a finite affirmative predicate; a bare
+    # "Limitations, such as ..." heading is not explanatory evidence.
+    r"\b(?:face(?:s)?|have|has)\s+(?:(?!no\b|not\b|never\b)\w+\s+){0,3}"
+    r"(?:limitations?|weaknesses?|drawbacks?|risks?)\s*,\s*such as\b[^.!?;]{0,240}"
 )
 _NEGATION = re.compile(
     r"\b(?:no|not|never|without|free of|cannot|can't|don't|doesn't)\b"
