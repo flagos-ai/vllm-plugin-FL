@@ -20,7 +20,6 @@ import stack
 from common import session_members, validate_junit
 from config import resolve_config
 from run_gate import CHECKS, SCENARIOS, parse_graph_observations, validate_documents
-from stack import STACK, verify_files
 
 
 class IsolatedEntryTests(unittest.TestCase):
@@ -315,19 +314,19 @@ class AcceptanceTests(unittest.TestCase):
                 )
 
     def test_three_file_fix_required_not_version_only(self):
-        self.assertEqual(len(STACK["files"]), 3)
+        self.assertEqual(len(stack.STACK["files"]), 3)
         self.assertEqual(
             hashlib.sha256((HERE / "flaggems-6894.patch").read_bytes()).hexdigest(),
-            STACK["patch_sha256"],
+            stack.STACK["patch_sha256"],
         )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for row in STACK["files"]:
+            for row in stack.STACK["files"]:
                 p = root / row["path"]
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_bytes(b"unpatched or changed body")
             with self.assertRaisesRegex(RuntimeError, "binding failed"):
-                verify_files(root, "after")
+                stack.verify_files(root, "after")
 
 
 if __name__ == "__main__":

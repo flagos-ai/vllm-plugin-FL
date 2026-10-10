@@ -20,7 +20,7 @@ validate_junit = _common.validate_junit
 
 REPO = Path(__file__).resolve().parents[3]
 SUITES = (
-    ("cpu-backend", 202, ["tests/unit_tests/dispatch/test_thead_backend_cpu.py"]),
+    ("cpu-backend", 202, [".github/scripts/thead/isolated_backend_cpu.py"]),
     (
         "cpu-cache",
         5,
