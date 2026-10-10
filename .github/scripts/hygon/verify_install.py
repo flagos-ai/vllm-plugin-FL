@@ -5,14 +5,14 @@ import argparse
 import ast
 import base64
 import hashlib
-import importlib
+import importlib.metadata
+import importlib.util
 import json
 import os
 import re
 import stat
 import sys
 import sysconfig
-from importlib import metadata, util
 from pathlib import Path
 
 
@@ -41,7 +41,7 @@ def regular_bytes(path, cap=2 * 1024 * 1024):
 
 
 def ordinary_distribution(name):
-    dist = metadata.distribution(name)
+    dist = importlib.metadata.distribution(name)
     direct_url = dist.read_text("direct_url.json")
     if direct_url:
         require(
@@ -89,7 +89,7 @@ def owned_origin(dist, origin):
 
 
 def spec_origin(dist, module):
-    spec = util.find_spec(module)
+    spec = importlib.util.find_spec(module)
     require(spec is not None, f"Missing module: {module}")
     return owned_origin(dist, spec.origin)
 
@@ -122,7 +122,7 @@ def distribution_snapshot(dist):
 
 def triton_origin(distributions, origin=None):
     if origin is None:
-        spec = util.find_spec("triton")
+        spec = importlib.util.find_spec("triton")
         require(spec is not None, "Missing vendor Triton module")
         origin = spec.origin
     owners = {}
