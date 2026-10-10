@@ -12,6 +12,25 @@ def _platform_with_capability(major: int, minor: int = 0):
     )
 
 
+def test_gcu_vendor_alias_loads_enflame_native_config():
+    with patch("vllm.platforms.current_platform", SimpleNamespace(vendor_name="gcu")):
+        path = get_config_path("gcu")
+        detected_path = get_config_path()
+        config = load_platform_config()
+
+    assert path is not None
+    assert path.name == "enflame.yaml"
+    assert detected_path == path
+    assert load_platform_config("gcu") == config
+    assert load_platform_config("enflame") == config
+    assert config["op_backends"]["attention_backend"] == [
+        "vendor:gcu",
+        "flagos",
+        "reference",
+    ]
+    assert config["flagos_blacklist"] == ["scaled_dot_product_attention"]
+
+
 def test_hopper_optimization_is_disabled_by_default(monkeypatch):
     monkeypatch.delenv("VLLM_FL_HOPPER_LONG_CONTEXT_OPT", raising=False)
     platform = _platform_with_capability(9)
