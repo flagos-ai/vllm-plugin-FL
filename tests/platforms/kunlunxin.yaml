@@ -38,6 +38,9 @@ device_overrides:
       - qwen3_6/35b_a3b_tp4_graph
     llm:
       max_model_len: 16384
+      # Match the validated 1..256 concurrency profile. P800 otherwise uses
+      # vLLM's 1024-sequence default, which exhausts 27B private graph pools.
+      max_num_seqs: 256
       block_size: 128
       gpu_memory_utilization: 0.8
       disable_custom_all_reduce: false
