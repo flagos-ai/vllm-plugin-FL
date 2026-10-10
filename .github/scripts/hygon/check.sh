@@ -1,27 +1,25 @@
 #!/bin/bash
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Check Hygon DCU availability.
+# Check the Hygon CI device/runtime mounts before installation.
 set -euo pipefail
 
 echo "Current time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=== Checking Hygon DCU availability ==="
+test -c /dev/kfd
+test -c /dev/mkfd
+test -d /dev/dri
+test -d /opt/hyhal
 
 HY_SMI_BIN=""
 if command -v hy-smi >/dev/null 2>&1; then
-  HY_SMI_BIN="$(command -v hy-smi)"
+    HY_SMI_BIN="$(command -v hy-smi)"
 elif [[ -x /opt/hyhal/bin/hy-smi ]]; then
-  HY_SMI_BIN="/opt/hyhal/bin/hy-smi"
+    HY_SMI_BIN="/opt/hyhal/bin/hy-smi"
 fi
-
 if [[ -n "${HY_SMI_BIN}" ]]; then
-  echo "Using hy-smi: ${HY_SMI_BIN}"
-  "${HY_SMI_BIN}"
-  "${HY_SMI_BIN}" --showmeminfo vram || true
+    echo "Using hy-smi: ${HY_SMI_BIN}"
+    "${HY_SMI_BIN}"
+    "${HY_SMI_BIN}" --showmeminfo vram || true
 else
-  echo "::warning::hy-smi not found in PATH or /opt/hyhal/bin; skipping SMI output."
+    echo "::warning::hy-smi is unavailable; device nodes are present, GPU runtime is checked by setup.sh."
 fi
-
-test -e /dev/kfd
-test -e /dev/mkfd
-test -d /dev/dri
-test -d /opt/hyhal

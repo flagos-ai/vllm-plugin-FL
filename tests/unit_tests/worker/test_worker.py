@@ -19,6 +19,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture
+def native_nvidia_platform_contract():
+    """Native CUDA-platform contracts apply only to the NVIDIA backend."""
+    from vllm.platforms import current_platform
+
+    if not current_platform.is_cuda():
+        pytest.skip("Native NVIDIA platform contract requires the NVIDIA CUDA backend")
+
+
 def test_worker_keeps_target_lifecycle_contract():
     from vllm_fl.worker.worker import WorkerFL
 
@@ -81,6 +90,7 @@ def test_platform_accepts_v2_model_runner():
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 def test_nvidia_platform_keeps_native_cuda_semantics():
     from vllm.platforms import PlatformEnum
     from vllm.platforms.cuda import CudaPlatform
@@ -94,6 +104,7 @@ def test_nvidia_platform_keeps_native_cuda_semantics():
     assert not platform.is_out_of_tree()
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import patch
@@ -121,6 +132,7 @@ def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
     native_update.assert_called_once_with(vllm_config)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
     from unittest.mock import patch
 
@@ -154,6 +166,7 @@ def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
     native_custom_allreduce.assert_called_once_with()
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import patch
@@ -187,6 +200,7 @@ def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
     native_update.assert_called_once_with(vllm_config)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import patch
@@ -209,6 +223,7 @@ def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
     native_select.assert_called_once_with(None, selector, 32)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 def test_nvidia_platform_honors_explicit_flaggems_attention(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import patch

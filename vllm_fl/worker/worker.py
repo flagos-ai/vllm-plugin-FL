@@ -463,6 +463,16 @@ class WorkerFL(WorkerBase):
         if current_platform.is_cpu():
             return nullcontext()
 
+        # vLLM's allocator only supports CUDA-alike and XPU platforms. OOT
+        # backends such as Hygon use ordinary allocations when sleep is off;
+        # an explicit sleep request must still report an unsupported allocator.
+        if (
+            not current_platform.is_cuda_alike()
+            and not current_platform.is_xpu()
+            and not self.vllm_config.model_config.enable_sleep_mode
+        ):
+            return nullcontext()
+
         allocator = get_mem_allocator_instance()
         if tag == "weights":
             assert allocator.get_current_usage() == 0, (
