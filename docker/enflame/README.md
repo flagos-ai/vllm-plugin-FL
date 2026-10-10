@@ -57,6 +57,16 @@ requirements or `.[test]` can replace vendor torch. The metadata guard
 checks the exact requested vLLM base version, empty build and vendor stack;
 it does not initialize hardware during Docker build.
 
+The build explicitly upgrades the OpenAI Python SDK to `OPENAI_VERSION=3.28.0`
+and pandas to `PANDAS_VERSION=3.0.6` after common requirements, using the same
+vendor constraints. The vendor bundle's older SDK satisfies vLLM's
+`openai>=2.0` requirement but lacks `NamespaceTool`, which caused the first
+task service attempt to fail while importing `vllm.tool_parsers.utils`.
+The next CLI check exposed the bundle's older pandas binary failing against
+NumPy 2 with `numpy.dtype size changed`. After these private environment
+upgrades, `vllm serve --help` exits successfully and vendor torch remains
+unchanged. Model serving and Gate acceptance remain to be verified.
+
 FlagGems 5.4's Python wheel has no native C++ extension bundled. The optional
 `flag-gems-cpp-gcu` package must match the Python package's version and
 source commit; source builds require the TOPS SDK and a C++20 toolchain.
