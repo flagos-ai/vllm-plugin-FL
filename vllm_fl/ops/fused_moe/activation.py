@@ -1,8 +1,7 @@
 import torch
 import torch.nn.functional as F
-
+from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 from vllm.model_executor.layers.fused_moe.activation import (
-    MoEActivation,
     apply_moe_activation as upstream_apply_moe_activation,
 )
 
@@ -37,14 +36,20 @@ def apply_moe_activation(
 
     # Activations with gated multiplication (gate × activation(up))
     if activation == MoEActivation.SILU:
-        if clamp_limit is not None:
-            return upstream_apply_moe_activation(
-                activation,
-                output,
-                input,
-                clamp_limit=clamp_limit,
+        if clamp_limit is None:
+            output.copy_(_silu_and_mul(None, input))
+        else:
+            if input.device.type == "cpu":
+                # The imported GPU clamp kernel cannot accept CPU tensors.
+                return upstream_apply_moe_activation(
+                    activation, output, input, clamp_limit=clamp_limit
+                )
+            dim = input.shape[-1] // 2
+            from flaggems_vllm import silu_and_mul_with_clamp_out
+
+            silu_and_mul_with_clamp_out(
+                input[..., :dim], input[..., dim:], output, clamp_limit
             )
-        output.copy_(_silu_and_mul(None, input))
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.SWIGLUOAI:

@@ -54,13 +54,6 @@ def supports_accelerator_graph() -> bool:
     )
 
 
-@triton.jit
-def _load_ptr(ptr_to_ptr, elem_dtype):
-    ptr = tl.load(ptr_to_ptr)
-    ptr = tl.cast(ptr, tl.pointer_type(elem_dtype))
-    return tl.multiple_of(ptr, 16)
-
-
 # Backported from vLLM's multi-group BlockTables slot-mapping kernel. The
 # padding boundary is read from query_start_loc on device so one captured graph
 # can replay with different request lengths without a host-derived argument.
@@ -82,10 +75,16 @@ def _compute_slot_mapping_graph_kernel(
 ):
     group_idx = tl.program_id(0)
     req_idx = tl.program_id(1)
-    block_table_ptr = _load_ptr(block_table_ptrs + group_idx, tl.int32)
+    block_table_ptr = tl.load(block_table_ptrs + group_idx).to(
+        tl.pointer_type(tl.int32)
+    )
+    block_table_ptr = tl.multiple_of(block_table_ptr, 16)
     block_table_stride = tl.load(block_table_strides + group_idx)
     block_size = tl.load(block_sizes + group_idx)
-    slot_mapping_ptr = _load_ptr(slot_mapping_ptrs + group_idx, tl.int64)
+    slot_mapping_ptr = tl.load(slot_mapping_ptrs + group_idx).to(
+        tl.pointer_type(tl.int64)
+    )
+    slot_mapping_ptr = tl.multiple_of(slot_mapping_ptr, 16)
 
     if req_idx == tl.num_programs(1) - 1:
         actual_num_tokens = tl.load(query_start_loc_ptr + req_idx).to(tl.int64)

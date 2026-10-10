@@ -43,6 +43,10 @@ fl = "vllm_fl:register_model"
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
 
 [project.optional-dependencies]
+glm5 = [
+    "flaggems_vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@ecbccc170a62d6b285ee6750ad8ef7032c77cbb3",
+    "tilelang==0.1.9",
+]
 test = [
     "pytest",
     "pytest-cov",

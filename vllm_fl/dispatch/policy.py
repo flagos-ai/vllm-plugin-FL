@@ -160,7 +160,18 @@ class PolicyManager:
         self._policy_epoch = 0
         self._policy_epoch_lock = threading.Lock()
         self._global_policy = None
-        self._global_policy_lock = threading.Lock()
+        # Explicit programmatic policy set via set_global_policy.  Kept separate
+        # from the environment-derived cache so a plan change can re-merge
+        # defaults without discarding the user's explicit configuration.
+        self._explicit_policy = None
+        # The last environment-derived policy keeps its explicit (user) and
+        # platform-fallback per-op orders separate, so a not-yet-active plan can
+        # be merged with the correct precedence (explicit > plan > platform)
+        # during preflight without treating a platform default as an explicit
+        # user choice.
+        self._env_explicit_per_op = None
+        self._env_fallback_per_op = None
+        self._global_policy_lock = threading.RLock()
 
         self._policy_var = contextvars.ContextVar(
             "vllm_fl_selection_policy",
@@ -188,28 +199,94 @@ class PolicyManager:
             return self._policy_epoch
 
     def get_policy(self) -> SelectionPolicy:
-        """Get the current effective policy (context or global)."""
+        """Get the current effective policy (context, explicit, or env)."""
         ctx_policy = self._policy_var.get()
         if ctx_policy is not None:
             return ctx_policy
 
-        if self._global_policy is None:
-            with self._global_policy_lock:
+        with self._global_policy_lock:
+            if self._explicit_policy is not None:
+                return self._merged_explicit_policy()
+            if self._global_policy is None:
+                self._global_policy = self._policy_from_env()
+            return self._global_policy
+
+    def _merged_explicit_policy(self) -> SelectionPolicy:
+        """Layer the active plan's defaults onto an explicit policy."""
+        from vllm_fl.activation import get_active_moe_defaults, merge_per_op_defaults
+
+        policy = self._explicit_policy
+        defaults = get_active_moe_defaults()
+        if defaults is None:
+            return policy
+        merged = merge_per_op_defaults(
+            defaults, policy.per_op_order_dict or None, None
+        ) or None
+        return SelectionPolicy.from_dict(
+            prefer=policy.prefer,
+            strict=policy.strict,
+            per_op_order=merged,
+            deny_vendors=set(policy.deny_vendors) or None,
+            allow_vendors=set(policy.allow_vendors) if policy.allow_vendors else None,
+        )
+
+    def policy_for_plan(
+        self, defaults: "MoEDispatchDefaults | None"
+    ) -> SelectionPolicy:
+        """Build the effective policy for a *requested* (not yet active) plan.
+
+        No side effect: the requested plan's per-op defaults are layered with
+        user precedence (explicit user order > plan default > platform
+        fallback) on top of the current explicit or environment policy.  This
+        is the policy the resolver will actually use once the plan is active,
+        so preflight candidate/capability checks must run against it instead of
+        the stale pre-activation policy (which cannot tell an explicit order
+        from a platform default).
+        """
+        from vllm_fl.activation import merge_per_op_defaults
+
+        with self._global_policy_lock:
+            if self._explicit_policy is not None:
+                base = self._explicit_policy
+                explicit = base.per_op_order_dict or None
+                fallback = None
+            else:
                 if self._global_policy is None:
                     self._global_policy = self._policy_from_env()
-        return self._global_policy
+                base = self._global_policy
+                explicit = self._env_explicit_per_op
+                fallback = self._env_fallback_per_op
+
+        if defaults is None or defaults.is_empty():
+            return base
+        merged = merge_per_op_defaults(defaults, explicit, fallback) or None
+        return SelectionPolicy.from_dict(
+            prefer=base.prefer,
+            strict=base.strict,
+            per_op_order=merged,
+            deny_vendors=set(base.deny_vendors) or None,
+            allow_vendors=set(base.allow_vendors) if base.allow_vendors else None,
+        )
 
     def set_global_policy(self, policy: SelectionPolicy) -> SelectionPolicy:
-        """Set the global policy and return the old policy."""
+        """Set the explicit global policy and return the previous effective one."""
         with self._global_policy_lock:
-            old_policy = self._global_policy
-            self._global_policy = policy
+            old_policy = self.get_policy()
+            self._explicit_policy = policy
+            self._global_policy = None
             self.bump_policy_epoch()
-            return old_policy if old_policy else self._policy_from_env()
+            return old_policy
+
+    def invalidate_policy_cache(self) -> None:
+        """Rebuild the environment-derived policy, preserving explicit config."""
+        with self._global_policy_lock:
+            self._global_policy = None
+            self.bump_policy_epoch()
 
     def reset_global_policy(self) -> None:
-        """Reset the global policy to environment defaults."""
+        """Reset the global policy to environment defaults (drops explicit)."""
         with self._global_policy_lock:
+            self._explicit_policy = None
             self._global_policy = None
             self.bump_policy_epoch()
 
@@ -394,7 +471,12 @@ class PolicyManager:
         # Priority 1: Check for user-specified config file (complete override)
         config_path = os.environ.get("VLLM_FL_CONFIG", "").strip()
         if config_path and os.path.isfile(config_path):
-            return self._policy_from_config(config_path)
+            policy = self._policy_from_config(config_path)
+            self._env_explicit_per_op = policy.per_op_order_dict or None
+            self._env_fallback_per_op = None
+            return self._merge_plan_defaults(
+                policy, explicit=policy.per_op_order_dict, fallback=None
+            )
 
         # Priority 3: Load platform-specific config as base defaults
         from vllm_fl.dispatch.config import get_config_path
@@ -450,23 +532,61 @@ class PolicyManager:
         else:
             allow_vendors = None
 
-        # Per-op order: env var > op_config > platform config
+        # Per-op order: explicit user order (op_config / env) is kept verbatim;
+        # platform config is only a fallback.  A model plan may add defaults for
+        # operators the user did not specify, and raises if an explicit order
+        # cannot satisfy the model's required capability.
+        explicit_per_op = None
         op_config = get_op_config()
         if op_config:
-            per_op_order = self._parse_op_config(op_config)
+            explicit_per_op = self._parse_op_config(op_config)
         elif env_per_op_str:
-            per_op_order = self._parse_per_op(env_per_op_str)
-        elif platform_policy and platform_policy.per_op_order:
-            per_op_order = platform_policy.per_op_order_dict
-        else:
-            per_op_order = None
+            explicit_per_op = self._parse_per_op(env_per_op_str)
 
-        return SelectionPolicy.from_dict(
+        fallback_per_op = None
+        if platform_policy and platform_policy.per_op_order:
+            fallback_per_op = platform_policy.per_op_order_dict
+
+        per_op_order = explicit_per_op or fallback_per_op
+        self._env_explicit_per_op = explicit_per_op
+        self._env_fallback_per_op = fallback_per_op
+
+        policy = SelectionPolicy.from_dict(
             prefer=prefer_str,
             strict=strict,
             per_op_order=per_op_order,
             deny_vendors=deny_vendors,
             allow_vendors=allow_vendors,
+        )
+        return self._merge_plan_defaults(
+            policy, explicit=explicit_per_op, fallback=fallback_per_op
+        )
+
+    def _merge_plan_defaults(
+        self,
+        policy: SelectionPolicy,
+        explicit: Optional[Dict[str, List[str]]],
+        fallback: Optional[Dict[str, List[str]]],
+    ) -> SelectionPolicy:
+        """Layer the active model plan's per-op defaults under user choices.
+
+        Returns ``policy`` unchanged when no plan is active.  A user order that
+        cannot satisfy the plan's required implementation raises
+        :class:`~vllm_fl.activation.ActivationConflict`.
+        """
+        from vllm_fl.activation import get_active_moe_defaults, merge_per_op_defaults
+
+        defaults = get_active_moe_defaults()
+        if defaults is None:
+            return policy
+
+        merged = merge_per_op_defaults(defaults, explicit, fallback) or None
+        return SelectionPolicy.from_dict(
+            prefer=policy.prefer,
+            strict=policy.strict,
+            per_op_order=merged,
+            deny_vendors=set(policy.deny_vendors) or None,
+            allow_vendors=set(policy.allow_vendors) if policy.allow_vendors else None,
         )
 
 

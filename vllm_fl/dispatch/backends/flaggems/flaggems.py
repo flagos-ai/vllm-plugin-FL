@@ -163,18 +163,20 @@ class FlagGemsBackend(Backend):
         """
         from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
+        if use_sparse and not use_mla:
+            raise ValueError("use_sparse=True requires use_mla=True.")
+
+        # Portable MLA is currently validated through a model activation
+        # plan. A model's provider must never redirect generic dispatch.
+        if use_mla:
+            raise NotImplementedError("FlagGems MLA requires a model runtime plan")
+
         # TritonAttentionBackend requires CUDA, check if available
         if not torch.cuda.is_available():
             raise RuntimeError(
                 "TritonAttentionBackend requires CUDA but CUDA is not available. "
                 "Falling back to vendor implementation."
             )
-
-        if use_mla:
-            raise NotImplementedError("NOT support mla now!")
-
-        if use_sparse:
-            raise ValueError("use_sparse=True requires use_mla=True.")
 
         use_flaggems_attn = os.environ.get(
             "VLLM_FL_USE_FLAGGEMS_ATTN", "0"

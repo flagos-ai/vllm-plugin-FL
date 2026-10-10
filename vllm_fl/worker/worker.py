@@ -6,16 +6,16 @@
 
 import gc
 import os
-from contextlib import nullcontext, contextmanager
-from types import NoneType
-from typing import TYPE_CHECKING, Any, Optional, cast, Generator
+from collections.abc import Generator
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
+from types import NoneType
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
-
 from vllm import envs
 from vllm.config import CUDAGraphMode, VllmConfig, set_current_vllm_config
 from vllm.config.compilation import CompilationMode
@@ -31,32 +31,33 @@ from vllm.distributed.kv_transfer import (
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
+
 try:
     from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
 except ImportError:
     # deep_gemm may be broken in some environments; provide a fallback
     import logging as _logging
+
     _logging.getLogger(__name__).warning(
         "kernel_warmup import failed (likely deep_gemm issue), "
         "using no-op kernel_warmup"
     )
+
     def kernel_warmup(worker):
         pass
-from vllm.distributed.parallel_state import (
-    get_pcp_group,
-    get_pp_group,
-    get_tp_group,
-)
+
+
+import vllm_fl.envs as fl_envs
+from vllm.distributed.parallel_state import get_pcp_group, get_pp_group, get_tp_group
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
-from vllm.utils.torch_utils import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
 from vllm.platforms import current_platform
 from vllm.profiler.wrapper import CudaProfilerWrapper, TorchProfilerWrapper
-
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
 from vllm.utils.mem_utils import GiB_bytes  # , MemorySnapshot, memory_profiling
+from vllm.utils.torch_utils import set_random_seed
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.engine import ReconfigureDistributedRequest, ReconfigureRankType
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
@@ -65,9 +66,6 @@ from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.utils import is_residual_scattered_for_sp
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
-import vllm_fl.envs as fl_envs
-
-from vllm_fl.ops.custom_ops import register_oot_ops
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
@@ -162,10 +160,8 @@ def memory_profiling_fl(
     torch_device_fn.empty_cache()
 
     # Reset peak memory stats - platform agnostic
-    try:
+    with suppress(AttributeError, RuntimeError):
         torch_device_fn.reset_peak_memory_stats()
-    except (AttributeError, RuntimeError):
-        pass  # Some platforms may not support this
 
     result = MemoryProfilingResult()
     result.before_create = baseline_snapshot
@@ -192,6 +188,20 @@ def memory_profiling_fl(
     )
 
 
+def _probe_device_capability():
+    """Best-effort device capability for runtime plan construction.
+
+    ``WorkerFL.__init__`` runs before ``init_device``, so a platform that
+    cannot report capability yet must not fail plan construction; factories
+    that need it treat ``None`` as unknown.
+    """
+    try:
+        return current_platform.get_device_capability()
+    except Exception:  # pragma: no cover - platform/device probe differences
+        logger.debug("Could not probe device capability", exc_info=True)
+        return None
+
+
 class WorkerFL(WorkerBase):
     def __init__(
         self,
@@ -210,9 +220,7 @@ class WorkerFL(WorkerBase):
         if current_platform.device_type == "gcu" and not os.environ.get(
             "TRITON_CACHE_DIR"
         ):
-            os.environ["TRITON_CACHE_DIR"] = (
-                f"/tmp/triton-cache-fl-rank-{rank}"
-            )
+            os.environ["TRITON_CACHE_DIR"] = f"/tmp/triton-cache-fl-rank-{rank}"
 
         if (
             vllm_config.num_speculative_tokens == 1
@@ -251,42 +259,110 @@ class WorkerFL(WorkerBase):
         # Apply the NVIDIA MM encoder dispatch fix before model construction:
         # CustomOp caches its selected forward method in __init__.
         from vllm_fl.attention.utils import patch_mm_encoder_attention
+
         patch_mm_encoder_attention()
+
+        # Resolve the requested model plan and validate the whole startup
+        # configuration BEFORE any side effect: the explicit FlagGems whitelist
+        # must cover the plan's required ops, and the real resolver must be
+        # able to select only implementations that satisfy the plan's
+        # semantics.  Only then is the plan applied (class patches, etc.) and
+        # the process bound to the model.  A plain plugin import activates
+        # nothing; only a matching model does.
+
+        from vllm_fl.activation import (
+            activate_for_model,
+            preflight_activation_config,
+            validate_plan_capability,
+        )
+
+        initial_whitelist = None
+        if fl_envs.USE_FLAGGEMS:
+            initial_whitelist, _ = get_flag_gems_whitelist_blacklist()
+        requested_plan = preflight_activation_config(
+            self.vllm_config, initial_whitelist
+        )
+        self._requested_plan = requested_plan
+
+        from vllm_fl.ops.custom_ops import register_oot_ops
 
         register_oot_ops()
 
-        if fl_envs.USE_FLAGGEMS:
+        from vllm_fl.dispatch import get_default_manager
+        from vllm_fl.dispatch.policy import PolicyManager
+        from vllm_fl.runtime.model_policy import (
+            activate_runtime_plan,
+            build_model_runtime_plan,
+            preflight_runtime_plan,
+        )
+
+        policy_manager = PolicyManager.get_instance()
+        plan_defaults = (
+            requested_plan.moe_defaults if requested_plan is not None else None
+        )
+        # Resolve candidates under the policy the plan will actually run with
+        # (explicit user order > requested plan > platform fallback).  The
+        # pre-activation policy cannot distinguish an explicit order from a
+        # platform default, so checking against it could reject a valid plan.
+        final_policy = policy_manager.policy_for_plan(plan_defaults)
+
+        # Build the model's runtime plan once, after implementation
+        # registration and before model construction.  Pure: no environment
+        # write and no global mutation.
+        runtime_plan = build_model_runtime_plan(
+            self.vllm_config,
+            device_caps=_probe_device_capability(),
+            user_policy=final_policy,
+        )
+        self._runtime_plan = runtime_plan
+        preflight_runtime_plan(runtime_plan)
+
+        if requested_plan is not None:
+            with policy_manager.create_policy_context(runtime_plan.selection_policy):
+                validate_plan_capability(
+                    requested_plan,
+                    get_default_manager().resolve_candidates,
+                    policy_order_for=runtime_plan.selection_policy.get_per_op_order,
+                )
+
+        self._model_plan = activate_for_model(self.vllm_config)
+
+        # Publish the runtime selection.  ``set_global_policy`` activates the
+        # resolved SelectionPolicy and invalidates the dispatch epoch cache;
+        # the attention selector reads the active runtime plan.
+        activate_runtime_plan(runtime_plan)
+        policy_manager.set_global_policy(runtime_plan.selection_policy)
+
+        from vllm_fl.flaggems_runtime import configure_flaggems
+
+        whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+        from vllm_fl.activation import validate_flaggems_whitelist
+
+        whitelist = validate_flaggems_whitelist(whitelist)
+
+        def enable_flaggems(library):
             import flag_gems
 
-            # Get whitelist and blacklist from environment variables
-            whitelist, blacklist = get_flag_gems_whitelist_blacklist()
-
-            # Only rank 0 records the oplist to avoid file truncation and
-            # interleaved writes when tensor-parallel-size > 1.
-            should_record = (rank == 0)
-
-            # Use whitelist if specified (takes precedence over blacklist)
-            if whitelist:
-                logger.info(f"[FlagGems] Enable only the following ops: {whitelist}")
-                flag_gems.only_enable(
-                    include=whitelist,
-                    record=should_record,
-                    once=True,
-                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-                )
+            kwargs = dict(
+                record=rank == 0,
+                once=True,
+                path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+            )
+            if library is not None:
+                kwargs["lib"] = library
+            if whitelist is not None:
+                flag_gems.only_enable(include=whitelist, **kwargs)
             elif blacklist:
-                logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
-                flag_gems.enable(
-                    unused=blacklist,
-                    record=should_record,
-                    once=True,
-                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-                )
+                flag_gems.enable(unused=blacklist, **kwargs)
             else:
-                logger.info("[FlagGems] Enable all ops")
-                flag_gems.enable(
-                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
-                )
+                flag_gems.enable(**kwargs)
+
+        configure_flaggems(
+            enable_flaggems,
+            use_flaggems=fl_envs.USE_FLAGGEMS,
+            whitelist=whitelist,
+            blacklist=blacklist,
+        )
 
     # def sleep(self, level: int = 1) -> None:
     #     TODO(lms): rewrite CuMemAllocator
@@ -358,15 +434,15 @@ class WorkerFL(WorkerBase):
                     patch_sampler_compile_for_iluvatar,
                     patch_torch_inductor_for_iluvatar,
                 )
+
                 # Remap inductor GPUTarget cuda->corex so flagtree triton
                 # backend selection works. Must run in every Worker process.
                 patch_torch_inductor_for_iluvatar()
                 patch_sampler_compile_for_iluvatar()
             except Exception as _e:
                 import logging as _lg
-                _lg.getLogger(__name__).warning(
-                    "iluvatar worker patch failed: %s", _e
-                )
+
+                _lg.getLogger(__name__).warning("iluvatar worker patch failed: %s", _e)
         # This env var set by Ray causes exceptions with graph building.
         if (
             self.parallel_config.distributed_executor_backend
@@ -429,7 +505,9 @@ class WorkerFL(WorkerBase):
         visible_device_index = current_platform.logical_device_id_to_visible_device_id(
             self.local_rank
         )
-        self.device = torch.device(f"{current_platform.device_type}:{visible_device_index}")
+        self.device = torch.device(
+            f"{current_platform.device_type}:{visible_device_index}"
+        )
         current_platform.set_device(self.device)
         if current_platform.device_type == "musa":
             # The loader uses DeviceConfig as its allocation context. Keep it
@@ -452,8 +530,9 @@ class WorkerFL(WorkerBase):
 
         if current_platform.device_type == "npu":
             from vllm_fl.dispatch.backends.vendor.ascend.impl.triton_utils import (
-                    init_device_properties_triton,
+                init_device_properties_triton,
             )
+
             init_device_properties_triton()
         # Set random seed.
         set_random_seed(self.model_config.seed)
@@ -546,9 +625,13 @@ class WorkerFL(WorkerBase):
         if current_platform.device_type == "txda":
             # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
             # e.g., 20 GiB or similar default cache memory size.
-            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
-            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
-                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
+            fallback_val = int(
+                os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024)
+            )
+            logger.info(
+                "txda platform detected. Skipping memory profiling to avoid OOM. "
+                f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB."
+            )
             return fallback_val
 
         GiB = lambda b: b / GiB_bytes
@@ -766,9 +849,10 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if current_platform.device_type == "txda" or getattr(
-            current_platform, "vendor_name", None
-        ) == "kunlunxin":
+        if (
+            current_platform.device_type == "txda"
+            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+        ):
             logger.warning(
                 "Detected %s device, skipping generic kernel_warmup",
                 getattr(
@@ -909,6 +993,7 @@ class WorkerFL(WorkerBase):
 
     def get_compilation_match_table(self) -> dict[str, int]:
         from vllm.compilation.passes.vllm_inductor_pass import get_match_table
+
         return get_match_table()
 
     def get_encoder_timing_stats(self) -> dict[str, dict[str, float | int]]:
@@ -1004,7 +1089,7 @@ class WorkerFL(WorkerBase):
 
         return None
 
-    def take_draft_token_ids(self) -> Optional[DraftTokenIds]:
+    def take_draft_token_ids(self) -> DraftTokenIds | None:
         return self.model_runner.take_draft_token_ids()
 
     def profile(self, is_start: bool = True, profile_prefix: str | None = None):
@@ -1097,7 +1182,7 @@ class WorkerFL(WorkerBase):
         self,
         old_ep_size: int,
         new_ep_size: int,
-        global_expert_loads: Optional[torch.Tensor],
+        global_expert_loads: torch.Tensor | None,
     ) -> None:
         from vllm.distributed.parallel_state import get_ep_group
 
@@ -1142,7 +1227,7 @@ class WorkerFL(WorkerBase):
 
     def _reconfigure_moe(
         self, old_ep_size: int, new_ep_size: int
-    ) -> Optional[torch.Tensor]:
+    ) -> torch.Tensor | None:
         """
         Reconfigure MoE modules with provided reconfig_request
 
@@ -1292,8 +1377,8 @@ class WorkerFL(WorkerBase):
     def save_sharded_state(
         self,
         path: str,
-        pattern: Optional[str] = None,
-        max_size: Optional[int] = None,
+        pattern: str | None = None,
+        max_size: int | None = None,
     ) -> None:
         from vllm.model_executor.model_loader import ShardedStateLoader
 
@@ -1324,7 +1409,7 @@ class WorkerFL(WorkerBase):
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
     rank: int,
-    distributed_init_method: Optional[str] = None,
+    distributed_init_method: str | None = None,
     local_rank: int = -1,
     backend: str = "nccl",
 ) -> None:
