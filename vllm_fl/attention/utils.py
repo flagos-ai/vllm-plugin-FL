@@ -16,8 +16,8 @@ def patch_mm_encoder_attention():
     fallback to flash_attn.
     """
     import vllm.model_executor.layers.attention.mm_encoder_attention as mm_mod
-    from vllm.v1.attention.backends.registry import AttentionBackendEnum
     from vllm.platforms import current_platform
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
     if getattr(current_platform, "vendor_name", None) == "kunlunxin":
         import torch
@@ -34,7 +34,9 @@ def patch_mm_encoder_attention():
                 k_batch = k[batch_idx : batch_idx + 1]
                 v_batch = v[batch_idx : batch_idx + 1]
                 query_outputs = []
-                for start in range(0, q_batch.size(2), _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE):
+                for start in range(
+                    0, q_batch.size(2), _KUNLUNXIN_SDPA_QUERY_CHUNK_SIZE
+                ):
                     query_outputs.append(
                         F.scaled_dot_product_attention(
                             q_batch[
@@ -93,6 +95,11 @@ def patch_mm_encoder_attention():
             return output
 
         mm_mod.MMEncoderAttention._forward_sdpa = _kunlunxin_forward_sdpa
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.mm_encoder_attention import (
+            forward_mm_attention,
+        )
+
+        mm_mod.MMEncoderAttention.forward_oot = forward_mm_attention
         logger.info_once(
             "Using query-chunked Torch SDPA for Kunlunxin MM encoder attention "
             "(chunk_size=%d).",
@@ -103,7 +110,10 @@ def patch_mm_encoder_attention():
     # bind MMEncoderAttention to forward_oot -> forward_native (Torch SDPA).
     # NVIDIA must keep vLLM's CUDA dispatch so the selected FLASH_ATTN backend
     # is actually used during multimodal profiling and inference.
-    if current_platform.is_cuda():
+    if (
+        current_platform.is_cuda()
+        and getattr(current_platform, "vendor_name", None) != "kunlunxin"
+    ):
         mm_mod.MMEncoderAttention.forward_oot = mm_mod.MMEncoderAttention.forward_cuda
 
     def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
