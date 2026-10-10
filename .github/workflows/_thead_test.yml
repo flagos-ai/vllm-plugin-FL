@@ -67,7 +67,7 @@ jobs:
       - name: Backend CPU and native PPU unit tests (zero skips)
         run: |
           "$THEAD_CI_PYTHON" -I -B .github/scripts/thead/run_tests.py --output-dir ci-results/unit
-      - name: Original model Gates, eager then graph, one model at a time
+      - name: Model Gates, eager then graph, one model at a time
         # Keep all four Gate results when a previous quality assertion fails.
         if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.check.outcome == 'success' }}
         shell: bash

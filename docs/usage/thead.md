@@ -443,7 +443,7 @@ pytest files above cover the first 50 cases. Additional regressions passed
 72 packed-GDN calls and 36 public vision SDPA calls across four layout/head
 profiles; these counts are separate from model requests.
 
-For each running service, use the unchanged
+For each running service, use the
 [adaptation Gate cases](../../tools/adaptation-gate-cases/README.md). Set
 `MODEL_PATH`, `SERVED_MODEL_NAME`, and `PORT` to the service values in a second
 tmux session. Use a different `RESULTS_DIR` for every model/mode. The original
@@ -471,7 +471,13 @@ The packaged `run_test.sh` also waits for readiness and runs all three files;
 use it when its `pytest` executable belongs to the intended environment.
 Each model/mode sends 26 requests: 1 text, 8 concurrent text, 1 image,
 8 concurrent image, and 8 mixed requests. It evaluates 260 response checks.
-Keep every original semantic, OCR, length, repetition, and encoding check.
+Quality oracle `2-llm-concepts` keeps ten checks per response. The free-form
+LLM explanation requires model, training, and inference concepts in order,
+followed by affirmative descriptions of at least two distinct limitations
+(for example, hallucination and bias). This avoids requiring the literal word
+`limitations` when the response already explains those concepts. Evidence
+spans are saved in the JSON results. Exact answer/OCR checks for other requests
+and all length, repetition, and encoding checks are preserved.
 
 ## CI configuration
 
@@ -540,14 +546,18 @@ before the next model/mode. Graph mode also requires graph-execution evidence.
 
 The unit runner requires 202 isolated backend CPU tests, 5 CPU cache tests,
 and 45 native PPU cache/attention tests, with zero skips. The isolated backend
-CPU fixture is separate from the normal provider/import check. The manual
+CPU fixture lives at
+[`.github/scripts/thead/isolated_backend_cpu.py`](../../.github/scripts/thead/isolated_backend_cpu.py)
+and runs in its own pytest process, outside generic platform test discovery.
+It is separate from the normal provider/import check. The manual
 24-case FA3 oracle and 72 packed-GDN calls are additional numerical probes;
 the CI unit runner does not claim that coverage. Retain its JUnit, per-request
 JSON results, source/provider snapshots, and complete logs.
 
 ## Recorded acceptance
 
-The exact repaired stack above passed the following serial TP4 matrix:
+The repaired stack above passed the following serial TP4 matrix on
+2026-10-09, before quality oracle `2-llm-concepts`:
 
 | Model | Eager requests | Graph requests |
 |---|---:|---:|

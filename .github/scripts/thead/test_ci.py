@@ -2,6 +2,7 @@
 """CPU-only regressions for CI acceptance boundaries; no vendor imports."""
 
 import hashlib
+import importlib.util
 import io
 import json
 import subprocess
@@ -19,7 +20,13 @@ import run_tests
 import stack
 from common import session_members, validate_junit
 from config import resolve_config
-from run_gate import CHECKS, SCENARIOS, parse_graph_observations, validate_documents
+from run_gate import (
+    CHECKS,
+    QUALITY_ORACLE_VERSION,
+    SCENARIOS,
+    parse_graph_observations,
+    validate_documents,
+)
 
 
 class IsolatedEntryTests(unittest.TestCase):
@@ -203,6 +210,354 @@ class ConfigurationTests(unittest.TestCase):
                 )
 
 
+class LlmQualityTests(unittest.TestCase):
+    # Actual text_single response; source SHA256 6e934ae3ded82db2e8dd8b113edff143247b55a30c9aae17a039e578a2f78964.
+    V51_TEXT = (
+        "Large language models (LLMs) are advanced artificial intelligence systems de"
+        "signed to understand, generate, and manipulate human language with remarkabl"
+        "e fluency. These models are built upon deep learning architectures, primaril"
+        "y the transformer framework, which utilizes self-attention mechanisms to pro"
+        "cess sequential data efficiently. Training involves exposing the model to va"
+        "st datasets comprising text from books, websites, and articles, allowing it "
+        "to learn complex patterns, grammar, and factual knowledge through statistica"
+        "l prediction. During inference, the model generates text token by token, cal"
+        "culating probabilities for the next word based on the preceding context. Cap"
+        "abilities include answering questions, writing code, translating languages, "
+        "and summarizing documents. However, limitations such as hallucinations, bias"
+        ", and lack of true reasoning persist. Responsible use requires careful overs"
+        "ight, fact-checking, and ethical guidelines to mitigate risks and ensure ben"
+        "eficial outcomes for society."
+    )
+
+    # Actual text_single response; source SHA256 1357e9390c957666a1598ff2336516dcc4838dd50c4258027f5537f61c80e5a5.
+    CI_GRAPH_TEXT = (
+        "Large language models (LLMs) are sophisticated artificial intelligence syste"
+        "ms designed to understand, generate, and manipulate human language with rema"
+        "rkable fluency. These models are built upon deep learning architectures, pri"
+        "marily the transformer framework, which utilizes self-attention mechanisms t"
+        "o process vast sequences of text data efficiently. Training involves exposin"
+        "g the model to massive datasets comprising books, articles, code, and web co"
+        "ntent, allowing it to learn complex linguistic patterns, factual knowledge, "
+        "and reasoning structures through predictive tasks. During inference, the mod"
+        "el generates text token by token, calculating probabilities for the next wor"
+        "d based on the context provided by the user’s prompt. This process enables a"
+        " wide array of capabilities, including natural conversation, creative writin"
+        "g, code generation, translation, and summarization. However, LLMs are not in"
+        "fallible; they can suffer from hallucinations, where they confidently presen"
+        "t false information as fact, and may inadvertently reflect biases present in"
+        " their training data. Furthermore, they lack true understanding or conscious"
+        "ness, operating instead on statistical correlations. Responsible use require"
+        "s careful oversight, including human-in-the-loop verification, rigorous bias"
+        " mitigation strategies, and transparent disclosure of AI involvement. Users "
+        "should treat LLM outputs as suggestions rather than absolute truths, ensurin"
+        "g ethical deployment in sensitive domains like healthcare, law, and educatio"
+        "n to maintain trust and safety."
+    )
+
+    # Actual text_single response; source SHA256 4d2d4d1bd600735eb17ba40eab03c2712cc6e64aa6e347be014cff67b59ffecd.
+    CI_EAGER_TEXT = (
+        "Large language models (LLMs) are sophisticated artificial intelligence syste"
+        "ms designed to understand, generate, and manipulate human language with rema"
+        "rkable fluency. These models are built upon deep learning architectures, pri"
+        "marily the transformer framework, which utilizes self-attention mechanisms t"
+        "o process vast sequences of text data efficiently. Training involves exposin"
+        "g the model to massive datasets comprising books, articles, code, and web co"
+        "ntent, allowing it to learn complex linguistic patterns, factual knowledge, "
+        "and reasoning structures through predictive tasks. During inference, the mod"
+        "el generates text token by token, calculating probabilities for the next wor"
+        "d based on the context provided by the user’s prompt. This process enables a"
+        " wide array of capabilities, including natural conversation, creative writin"
+        "g, code generation, translation, and summarization. However, LLMs are not in"
+        "fallible; they can suffer from hallucinations, where they confidently presen"
+        "t false information as fact, and may inadvertently reflect biases present in"
+        " their training data. Furthermore, they lack true understanding or conscious"
+        "ness, operating instead on statistical correlations. Responsible use require"
+        "s careful oversight, including human-in-the-loop validation, rigorous bias m"
+        "itigation strategies, and transparent disclosure of the model’s limitations "
+        "to ensure ethical deployment in sensitive applications such as healthcare, l"
+        "aw, and education."
+    )
+
+    REPHRASED_TEXT = (
+        "Large language models learn patterns from examples. Training adjusts their "
+        "parameters on extensive text. During inference they predict likely next "
+        "tokens to answer questions and summarize material. They can confidently "
+        "invent incorrect facts and may reproduce stereotypes learned from data. "
+        "People should check claims and guard sensitive information when applying "
+        "the system."
+    )
+    PREFIX = (
+        "Large language models learn patterns from examples. Training adjusts their "
+        "parameters on extensive text. During inference they predict likely next "
+        "tokens to answer questions and summarize material. "
+    )
+    REQUIRED = ["large language model", "training", "inference", "limitations"]
+
+    @classmethod
+    def setUpClass(cls):
+        source = HERE.parents[2] / "tools/adaptation-gate-cases/gate_quality.py"
+        spec = importlib.util.spec_from_file_location(
+            "_actual_gate_quality_tests", source
+        )
+        cls.quality = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.quality)
+        if Path(cls.quality.__file__).resolve() != source.resolve():
+            raise AssertionError("Quality tests must load the actual Gate module")
+
+    def checks(self, text):
+        return self.quality.quality_checks(
+            text, self.REQUIRED, min_length=256, semantic_profile="llm-explanation-v1"
+        )
+
+    def test_versioned_oracle_accepts_three_real_responses_with_reviewable_spans(self):
+        self.assertEqual(self.quality.ORACLE_VERSION, "2-llm-concepts")
+        for text in (self.V51_TEXT, self.CI_GRAPH_TEXT, self.CI_EAGER_TEXT):
+            with self.subTest(text=text[:70]):
+                checks = self.checks(text)
+                self.assertEqual(set(checks), set(CHECKS))
+                self.assertTrue(all(checks.values()), checks)
+                evidence = self.quality.llm_explanation_evidence(text)
+                self.assertTrue(evidence["semantics"])
+                self.assertTrue(evidence["ordered"])
+                self.assertGreaterEqual(len(evidence["distinct_categories"]), 2)
+                self.assertGreaterEqual(len(evidence["ordered_categories"]), 2)
+                self.assertEqual(evidence["offsets"], "normalized_text")
+                normalized = self.quality.normalized_text(text)
+                for row in evidence["limitations"]:
+                    self.assertEqual(normalized[row["start"] : row["end"]], row["text"])
+                    self.assertIn(row["category"], evidence["distinct_categories"])
+
+    def test_independently_rephrased_affirmative_limitations_pass(self):
+        self.assertNotIn("limitations", self.REPHRASED_TEXT)
+        self.assertTrue(all(self.checks(self.REPHRASED_TEXT).values()))
+        evidence = self.quality.llm_explanation_evidence(self.REPHRASED_TEXT)
+        self.assertEqual(
+            set(evidence["distinct_categories"]), {"factual_reliability", "bias"}
+        )
+
+        for ending, categories in (
+            (
+                "Their outputs can contain fabricated information and biases "
+                "inherited from training data.",
+                {"factual_reliability", "bias"},
+            ),
+            (
+                "Their reasoning is unreliable, and their knowledge is outdated.",
+                {"understanding_reasoning", "knowledge_freshness"},
+            ),
+            (
+                "They not only can hallucinate facts but may also reproduce biases.",
+                {"factual_reliability", "bias"},
+            ),
+        ):
+            text = (
+                self.PREFIX + ending + " Responsible use requires careful oversight "
+                "and independent verification before applying generated answers."
+            )
+            with self.subTest(ending=ending):
+                self.assertTrue(all(self.checks(text).values()))
+                self.assertEqual(
+                    set(
+                        self.quality.llm_explanation_evidence(text)[
+                            "distinct_categories"
+                        ]
+                    ),
+                    categories,
+                )
+
+    def test_missing_or_only_one_limitation_category_fails(self):
+        for ending, categories in (
+            (
+                "These systems have limitations. Responsible use requires careful "
+                "oversight and experienced human review before deployment.",
+                0,
+            ),
+            (
+                "They may generate false information while sounding authoritative. "
+                "Responsible use requires careful oversight and human review.",
+                1,
+            ),
+        ):
+            text = self.PREFIX + ending
+            with self.subTest(categories=categories):
+                checks = self.checks(text)
+                self.assertTrue(checks["minimum_length"])
+                self.assertFalse(checks["expected_semantics"])
+                self.assertFalse(checks["expected_order"])
+                self.assertEqual(
+                    len(
+                        self.quality.llm_explanation_evidence(text)[
+                            "distinct_categories"
+                        ]
+                    ),
+                    categories,
+                )
+
+    def test_limitation_evidence_before_training_and_inference_is_unordered(self):
+        text = (
+            "Large language models can hallucinate and may exhibit bias. Training "
+            "adjusts their parameters on extensive text. During inference they "
+            "predict likely next tokens to answer questions and summarize material. "
+            "People should check claims carefully before applying generated answers "
+            "in consequential settings."
+        )
+        checks = self.checks(text)
+        self.assertTrue(checks["expected_semantics"])
+        self.assertFalse(checks["expected_order"])
+        evidence = self.quality.llm_explanation_evidence(text)
+        self.assertEqual(len(evidence["distinct_categories"]), 2)
+        self.assertEqual(evidence["ordered_categories"], [])
+
+    def test_ordered_body_limitations_pass_even_when_introduction_mentions_them(self):
+        text = (
+            "Large language models may generate false information and may reproduce "
+            "biases. Training adjusts their parameters on extensive text. During "
+            "inference they predict likely next tokens to answer questions and "
+            "summarize material. They can hallucinate and may reflect stereotypes. "
+            "People should verify generated claims and consider unfair assumptions "
+            "when applying the system."
+        )
+        self.assertTrue(all(self.checks(text).values()))
+        evidence = self.quality.llm_explanation_evidence(text)
+        self.assertEqual(
+            set(evidence["ordered_categories"]), {"factual_reliability", "bias"}
+        )
+        inference_end = evidence["anchor_positions"][-1] + len("inference")
+        for category in evidence["ordered_categories"]:
+            self.assertTrue(
+                any(
+                    row["category"] == category and row["start"] >= inference_end
+                    for row in evidence["limitations"]
+                )
+            )
+
+    def test_bare_keyword_headings_are_not_limitation_evidence(self):
+        text = (
+            self.PREFIX + "Limitations: hallucinations, bias, understanding, "
+            "knowledge cutoff. Responsible use: oversight, review, verification, "
+            "human judgment, policy, ethics, transparency, risk management."
+        )
+        checks = self.checks(text)
+        self.assertTrue(checks["minimum_length"])
+        self.assertFalse(checks["expected_semantics"])
+        self.assertFalse(checks["expected_order"])
+        self.assertEqual(self.quality.llm_explanation_evidence(text)["limitations"], [])
+
+    def test_denied_limitations_are_not_affirmative_evidence(self):
+        for ending, categories in (
+            (
+                "They never hallucinate and never exhibit bias. They do not generate "
+                "false information or reinforce stereotypes.",
+                [],
+            ),
+            (
+                "They cannot hallucinate and cannot exhibit bias. Their answers are "
+                "always correct and fair in every context.",
+                [],
+            ),
+            (
+                "They never suffer from hallucinations and do not lack true "
+                "understanding. They always reason accurately about every topic.",
+                [],
+            ),
+            (
+                "Limitations include no hallucinations and no bias. Responsible use "
+                "requires no fact checking or further review.",
+                [],
+            ),
+            (
+                "It is not true that they can hallucinate facts. It is not true "
+                "that they may reproduce biases.",
+                [],
+            ),
+            (
+                "There is no evidence that they can hallucinate facts or may "
+                "reproduce biases.",
+                [],
+            ),
+            (
+                "Limitations include hallucinations and bias, but neither is a "
+                "problem for them.",
+                [],
+            ),
+            (
+                "They lack any problems with reasoning and may reproduce biases.",
+                ["bias"],
+            ),
+        ):
+            text = self.PREFIX + ending
+            with self.subTest(ending=ending):
+                checks = self.checks(text)
+                self.assertTrue(checks["minimum_length"])
+                self.assertFalse(checks["expected_semantics"])
+                self.assertFalse(checks["expected_order"])
+                self.assertEqual(
+                    self.quality.llm_explanation_evidence(text)["distinct_categories"],
+                    categories,
+                )
+
+    def test_affirmative_persist_and_realtime_knowledge_limitations_pass(self):
+        # The affirmative clause is from the earlier 27B Gate response.
+        for term in ("knowledge", "data", "awareness"):
+            text = (
+                self.PREFIX + "However, limitations persist, such as potential "
+                "hallucinations and lack of real-time " + term + ". Responsible use "
+                "requires careful review of claims before using generated answers."
+            )
+            with self.subTest(term=term):
+                self.assertTrue(all(self.checks(text).values()))
+                self.assertEqual(
+                    set(
+                        self.quality.llm_explanation_evidence(text)[
+                            "distinct_categories"
+                        ]
+                    ),
+                    {"factual_reliability", "knowledge_freshness"},
+                )
+
+    def test_corruption_and_repetition_checks_remain_mandatory(self):
+        for suffix, failed_check in (
+            (" warning warning warning warning", "no_repeated_word_run"),
+            (" review facts review facts review facts", "no_repeated_phrase"),
+            (" \ufffd", "no_mojibake"),
+            ("\x01", "no_control_characters"),
+            ("!!!", "no_bang_triplet"),
+        ):
+            with self.subTest(failed_check=failed_check):
+                checks = self.checks(self.REPHRASED_TEXT + suffix)
+                self.assertTrue(checks["expected_semantics"])
+                self.assertTrue(checks["expected_order"])
+                self.assertFalse(checks[failed_check])
+                self.assertFalse(all(checks.values()))
+
+    def test_default_profile_and_other_tasks_keep_exact_term_matching(self):
+        checks = self.quality.quality_checks(self.CI_GRAPH_TEXT, self.REQUIRED, 256)
+        self.assertFalse(checks["expected_semantics"])
+        self.assertFalse(checks["expected_order"])
+        self.assertTrue(
+            all(
+                self.quality.quality_checks(
+                    "two red squares", ["2", "red", "squares"]
+                ).values()
+            )
+        )
+        self.assertFalse(
+            self.quality.quality_checks("two crimson squares", ["2", "red", "squares"])[
+                "expected_semantics"
+            ]
+        )
+
+    def test_unknown_or_mismatched_profile_is_rejected(self):
+        for required, profile in (
+            (self.REQUIRED, "unknown-profile"),
+            (["red", "square"], "llm-explanation-v1"),
+        ):
+            with self.subTest(profile=profile), self.assertRaises(ValueError):
+                self.quality.quality_checks(
+                    self.REPHRASED_TEXT, required, semantic_profile=profile
+                )
+
+
 class AcceptanceTests(unittest.TestCase):
     def test_cleanup_rejects_reused_pid_and_ignores_unrelated_or_zombie(self):
         identity = {"pid": 100, "pgid": 100, "sid": 100, "start_ticks": 200}
@@ -258,6 +613,7 @@ class AcceptanceTests(unittest.TestCase):
     def documents(self, root):
         for scenario, count in SCENARIOS.items():
             doc = {
+                "quality_oracle_version": QUALITY_ORACLE_VERSION,
                 "case": {"scenario": scenario},
                 "input": [{}] * count,
                 "output": [
@@ -293,6 +649,22 @@ class AcceptanceTests(unittest.TestCase):
             p.unlink()
             with self.assertRaises(RuntimeError):
                 validate_documents(root)
+
+    def test_missing_or_mismatched_quality_oracle_version_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.documents(root)
+            path = root / "text_single.json"
+            original = json.loads(path.read_text())
+            for version in (None, "1-exact-keywords"):
+                document = dict(original)
+                if version is None:
+                    document.pop("quality_oracle_version")
+                else:
+                    document["quality_oracle_version"] = version
+                path.write_text(json.dumps(document))
+                with self.subTest(version=version), self.assertRaises(RuntimeError):
+                    validate_documents(root)
 
     def test_actual_info_graph_evidence_requires_capture_and_dispatch(self):
         # Sanitized INFO lines from the verified 0.28 graph runs.

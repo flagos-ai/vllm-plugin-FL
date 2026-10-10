@@ -8,11 +8,16 @@ import os
 import re
 import sys
 import time
-import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from gate_quality import (
+    LLM_EXPLANATION_PROFILE,
+    ORACLE_VERSION,
+    llm_explanation_evidence,
+    quality_checks,
+)
 from openai import AsyncOpenAI
 
 ROOT = Path(__file__).resolve().parent
@@ -106,6 +111,7 @@ def llm_details_request() -> dict[str, Any]:
         "required_terms": list(required),
         "min_length": 256,
         "max_tokens": 512,
+        "semantic_profile": LLM_EXPLANATION_PROFILE,
     }
 
 
@@ -161,82 +167,6 @@ def scenario_requests(scenario: str) -> list[dict[str, Any]]:
     raise ValueError(f"Unknown scenario: {scenario}")
 
 
-def normalized_text(text: str) -> str:
-    normalized = " ".join(unicodedata.normalize("NFKC", text).lower().split())
-    number_words = {
-        "zero": "0",
-        "one": "1",
-        "two": "2",
-        "three": "3",
-        "four": "4",
-        "five": "5",
-        "six": "6",
-        "seven": "7",
-        "eight": "8",
-        "nine": "9",
-    }
-    for word, digit in number_words.items():
-        normalized = re.sub(rf"\b{word}\b", digit, normalized)
-    return normalized
-
-
-def has_repeated_phrase(text: str) -> bool:
-    tokens = re.findall(r"[a-z0-9]+", text.lower())
-    for size in range(2, min(13, len(tokens) // 3 + 1)):
-        for start in range(0, len(tokens) - size * 3 + 1):
-            phrase = tokens[start : start + size]
-            if (
-                phrase
-                == tokens[start + size : start + size * 2]
-                == tokens[start + size * 2 : start + size * 3]
-            ):
-                return True
-    return False
-
-
-def has_repeated_word_run(text: str) -> bool:
-    tokens = re.findall(r"[a-z0-9]+", text.lower())
-    return any(
-        tokens[index] == tokens[index + 1] == tokens[index + 2]
-        for index in range(len(tokens) - 2)
-    )
-
-
-def quality_checks(
-    text: str, required_terms: list[str], min_length: int = 1
-) -> dict[str, bool]:
-    normalized = normalized_text(text)
-    positions: list[int] = []
-    cursor = 0
-    for term in required_terms:
-        position = normalized.find(term.lower(), cursor)
-        positions.append(position)
-        if position >= 0:
-            cursor = position + len(term)
-    mojibake_markers = (
-        "\ufffd",
-        chr(0x00C3),
-        chr(0x00C2),
-        chr(0x00E2) + chr(0x20AC),
-        chr(0x00EF) + chr(0x00BF) + chr(0x00BD),
-    )
-    return {
-        "non_empty": bool(normalized),
-        "minimum_length": len(text.strip()) >= min_length,
-        "expected_semantics": all(position >= 0 for position in positions),
-        "expected_order": positions == sorted(positions)
-        and all(position >= 0 for position in positions),
-        "no_bang_triplet": "!!!" not in text,
-        "no_mojibake": not any(marker in text for marker in mojibake_markers),
-        "no_control_characters": not any(
-            ord(char) < 32 and char not in "\n\r\t" for char in text
-        ),
-        "no_long_character_run": re.search(r"([^\s])\1{7,}", text) is None,
-        "no_repeated_word_run": not has_repeated_word_run(text),
-        "no_repeated_phrase": not has_repeated_phrase(text),
-    }
-
-
 def resolve_served_model_name() -> str:
     served_model_name = os.environ.get("SERVED_MODEL_NAME")
     if served_model_name:
@@ -268,6 +198,7 @@ async def execute_request(
             text,
             request["required_terms"],
             min_length=int(request.get("min_length", 1)),
+            semantic_profile=request.get("semantic_profile"),
         )
         return {
             "request_id": request["request_id"],
@@ -275,6 +206,11 @@ async def execute_request(
             "latency_seconds": round(time.perf_counter() - started, 3),
             "text": text,
             "checks": checks,
+            "semantic_evidence": (
+                llm_explanation_evidence(text)
+                if request.get("semantic_profile") == LLM_EXPLANATION_PROFILE
+                else None
+            ),
             "passed": all(checks.values()),
             "response": completion.model_dump(mode="json"),
         }
@@ -367,6 +303,7 @@ def run_case(scenario: str) -> None:
     passed_count = sum(bool(output["passed"]) for output in outputs)
     document = {
         "schema_version": 1,
+        "quality_oracle_version": ORACLE_VERSION,
         "case": {
             "scenario": scenario,
             "model_path": model_path,

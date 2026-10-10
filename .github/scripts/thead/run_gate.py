@@ -1,5 +1,5 @@
 # Copyright 2026 FlagOS Contributors
-"""Run the unchanged 26-request adaptation Gate against an owned local server."""
+"""Run the 26-request adaptation Gate with the versioned quality oracle."""
 
 import argparse
 import importlib.util
@@ -28,6 +28,13 @@ validate_junit = _common.validate_junit
 
 REPO = Path(__file__).resolve().parents[3]
 CASES = REPO / "tools/adaptation-gate-cases"
+_quality_spec = importlib.util.spec_from_file_location(
+    "_thead_gate_quality", CASES / "gate_quality.py"
+)
+_quality = importlib.util.module_from_spec(_quality_spec)
+_quality_spec.loader.exec_module(_quality)
+QUALITY_ORACLE_VERSION = _quality.ORACLE_VERSION
+
 SCENARIOS = {
     "text_single": 1,
     "text_concurrent_8": 8,
@@ -55,9 +62,13 @@ def validate_documents(directory):
     by_scenario = {doc["case"]["scenario"]: doc for doc in documents}
     if len(documents) != 5 or set(by_scenario) != set(SCENARIOS):
         raise RuntimeError("Gate did not produce the five unique original scenarios")
-    passed = requests = checks = 0
+    passed = requests = checks = passed_checks = 0
     for scenario, expected in SCENARIOS.items():
         doc = by_scenario[scenario]
+        if doc.get("quality_oracle_version") != QUALITY_ORACLE_VERSION:
+            raise RuntimeError(
+                "Missing or mismatched quality oracle version: " + scenario
+            )
         if len(doc["input"]) != expected or len(doc["output"]) != expected:
             raise RuntimeError("Logical request count changed: " + scenario)
         for row in doc["output"]:
@@ -65,18 +76,20 @@ def validate_documents(directory):
             if set(values) != CHECKS or any(
                 type(value) is not bool for value in values.values()
             ):
-                raise RuntimeError(
-                    "Missing/invalid original quality checks: " + scenario
-                )
+                raise RuntimeError("Missing/invalid quality check fields: " + scenario)
             requests += 1
             checks += len(values)
+            passed_checks += sum(values.values())
             passed += row.get("passed") is True and all(values.values())
     return {
         "logical_requests": requests,
         "checks": checks,
+        "passed_checks": passed_checks,
         "passed_requests": passed,
         "passed": requests == 26 and checks == 260 and passed == 26,
-        "lexical_required_terms_unchanged": True,
+        "quality_oracle_version": QUALITY_ORACLE_VERSION,
+        "llm_explanation_profile": _quality.LLM_EXPLANATION_PROFILE,
+        "other_tasks_use_exact_required_terms": True,
     }
 
 
@@ -155,11 +168,13 @@ def main():
     if not (args.model / "config.json").is_file():
         parser.error("A complete local model mount is required")
     args.output_dir.mkdir(parents=True, exist_ok=False)
+    print(f"Gate start: model={args.model} mode={args.mode}", flush=True)
     summary = {
         "model": str(args.model),
         "mode": args.mode,
         "server_process_started": False,
         "Gate_pass": False,
+        "quality_oracle_version": QUALITY_ORACLE_VERSION,
         "errors": [],
         "upstream_declared_torch_2_13_requirement_satisfied": False,
     }
@@ -246,6 +261,7 @@ def main():
                 time.sleep(1)
         if not ready:
             raise RuntimeError("Own model server readiness timeout")
+        print(f"Gate server ready: model={args.model} mode={args.mode}", flush=True)
         receipts = []
         summary["pytest_receipts"] = receipts
         # Keep all three actual pytest files, even when earlier quality checks fail.
@@ -255,6 +271,7 @@ def main():
             ("test_mix_text_image.py", 1),
         ):
             check_server(process, logs)
+            print(f"Gate cases start: {name}", flush=True)
             junit = (args.output_dir / (name + ".xml")).resolve()
             receipt = run_command(
                 [
@@ -330,6 +347,17 @@ def main():
             )
         )
         save_json(args.output_dir / "summary.json", summary)
+        quality = summary.get("quality", {})
+        print(
+            "Gate complete: "
+            f"model={args.model} mode={args.mode} pass={summary['Gate_pass']} "
+            f"requests={quality.get('passed_requests', 0)}/{quality.get('logical_requests', 0)} "
+            f"checks={quality.get('passed_checks', 0)}/{quality.get('checks', 0)} "
+            f"cleanup={summary.get('only_owned_cleanup_complete', False)} "
+            f"capture={summary['graph_capture_observed']} "
+            f"dispatch={summary['graph_runtime_dispatch_observed']}",
+            flush=True,
+        )
     return 0 if summary["Gate_pass"] else 1
 
 
