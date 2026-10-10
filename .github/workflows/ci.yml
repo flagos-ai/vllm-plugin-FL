@@ -175,3 +175,11 @@ jobs:
     with:
       platform: kunlunxin
     secrets: inherit
+
+
+  # THead uses normal registration and finite suites with zero-skip acceptance.
+  test-thead:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
+    uses: ./.github/workflows/_thead_test.yml
+    secrets: inherit

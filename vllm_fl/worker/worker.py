@@ -118,10 +118,6 @@ def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
     from vllm_fl.ops.custom_ops import register_oot_ops
 
-    logger.debug("=== ENVIRONMENT VARIABLES ===")
-    for key, value in sorted(os.environ.items()):
-        logger.debug("%s=%r", key, value)
-
     # CustomOp caches its selected forward method in __init__, so the
     # multimodal attention patch must run before model construction.
     patch_mm_encoder_attention()
@@ -317,9 +313,7 @@ class WorkerFL(WorkerBase):
         if current_platform.device_type == "gcu" and not os.environ.get(
             "TRITON_CACHE_DIR"
         ):
-            os.environ["TRITON_CACHE_DIR"] = (
-                f"/tmp/triton-cache-fl-rank-{rank}"
-            )
+            os.environ["TRITON_CACHE_DIR"] = f"/tmp/triton-cache-fl-rank-{rank}"
 
         if (
             vllm_config.num_speculative_tokens == 1
@@ -928,9 +922,10 @@ class WorkerFL(WorkerBase):
 
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        if current_platform.device_type == "txda" or getattr(
-            current_platform, "vendor_name", None
-        ) == "kunlunxin":
+        if (
+            current_platform.device_type == "txda"
+            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+        ):
             logger.warning(
                 "Detected %s device, skipping generic kernel_warmup",
                 getattr(

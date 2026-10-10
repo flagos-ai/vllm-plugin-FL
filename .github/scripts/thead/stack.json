@@ -1,0 +1,48 @@
+{
+  "flaggems_commit": "b4b37a7518d511548ed562277e1972a0b5d9986d",
+  "fix_pr": "https://github.com/flagos-ai/FlagGems/pull/6894",
+  "fix_commit": "4e330227564ccc7f6a373be2d48a5d2cb7f2823e",
+  "patch_sha256": "0e839e68dd88086f22d6f6d596362dcc6a018a6f9894bcce2fe4ffea6cf21596",
+  "files": [
+    {
+      "path": "flag_gems/ops/flash_api.py",
+      "before": {
+        "bytes": 44341,
+        "sha256": "9d6f1e1ec802d132b074a618c173a9ea424f4d5793fd0cbcead687796155a70f"
+      },
+      "after": {
+        "bytes": 44575,
+        "sha256": "bd6e3daec6af0d72f5eec25168d1e09cbd7c8ee577896086f6650c800c782485"
+      }
+    },
+    {
+      "path": "flag_gems/ops/flash_kernel.py",
+      "before": {
+        "bytes": 50891,
+        "sha256": "eef0202e6c0ed08bef8098adede1a603c63354c54b54a19414e210b675157265"
+      },
+      "after": {
+        "bytes": 51454,
+        "sha256": "dfb99850150f9c734373247ea005ed3957109347dbc1ce9f5472b3eef8ecb850"
+      }
+    },
+    {
+      "path": "flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py",
+      "before": {
+        "bytes": 44245,
+        "sha256": "df6d4e554b04f6bf06a57346ac5c613f07db2fbf3703328c66920abfe68c39ec"
+      },
+      "after": {
+        "bytes": 44479,
+        "sha256": "52a2d999ef981349542229bf599c9003740bbb63524302bec9e27dccddd4dce6"
+      }
+    }
+  ],
+  "flagtree": {
+    "version": "0.7.0+ppu3.6",
+    "filename": "flagtree-0.7.0+ppu3.6-cp312-cp312-linux_x86_64.whl",
+    "url": "https://resource.flagos.net/repository/flagos-pypi-hosted/packages/flagtree/0.7.0+ppu3.6/flagtree-0.7.0+ppu3.6-cp312-cp312-linux_x86_64.whl",
+    "bytes": 363127160,
+    "sha256": "98fa0c4488e06c904adfb55a8059ef64f2c1bddf5938f6faa7edfc8650dead09"
+  }
+}

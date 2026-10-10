@@ -1,0 +1,39 @@
+# Copyright 2026 FlagOS Contributors
+# Based on main's flagcicd-810e runner and PPU device grants.
+# The administrator must reserve the four visible PPU cards exclusively for CI.
+# This config grants device access; it does not prove fresh idle telemetry.
+# Approved defaults also work when a PR run receives empty repository variables.
+# Optional repository overrides are validated by scripts/thead/config.py.
+platform: thead
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb
+runner_labels: [flagcicd-810e]
+container_volumes: ["/mnt/data1:/models:ro"]
+visible_devices: "12,13,14,15"
+model_27b: /models/Qwen3.8-27B
+model_35b: /models/Qwen3.6-35B-A3B
+base_python: /opt/thead/venv/bin/python
+container_options: >-
+  --hostname vllm-plugin-fl
+  --shm-size=64g
+  --ulimit memlock=-1
+  --ulimit stack=67108864
+  --user root
+  --init
+  --device /dev/alixpu
+  --device /dev/alixpu_ctl
+  --device /dev/alixpu_ppu0
+  --device /dev/alixpu_ppu1
+  --device /dev/alixpu_ppu2
+  --device /dev/alixpu_ppu3
+  --device /dev/alixpu_ppu4
+  --device /dev/alixpu_ppu5
+  --device /dev/alixpu_ppu6
+  --device /dev/alixpu_ppu7
+  --device /dev/alixpu_ppu8
+  --device /dev/alixpu_ppu9
+  --device /dev/alixpu_ppu10
+  --device /dev/alixpu_ppu11
+  --device /dev/alixpu_ppu12
+  --device /dev/alixpu_ppu13
+  --device /dev/alixpu_ppu14
+  --device /dev/alixpu_ppu15

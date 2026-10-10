@@ -40,7 +40,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | NVIDIA | Supported | [deployment guide](./docs/usage/nvidia.md) |
 | Ascend | Supported | - |
 | MetaX | Supported | - |
-| T-Head | Supported | - |
+| T-Head | Supported | [deployment guide](./docs/usage/thead.md) |
 | Iluvatar | Supported | - |
 | Tsingmicro | Supported | - |
 | Moore Threads | Supported | - |
@@ -51,6 +51,10 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 ## Quick Start
 
 ### Setup
+
+For hardware-specific deployment and validation, see the
+[NVIDIA guide](./docs/usage/nvidia.md) and
+[T-Head PPU guide](./docs/usage/thead.md).
 
 1. Install vLLM
 

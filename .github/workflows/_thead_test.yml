@@ -1,0 +1,122 @@
+# Copyright 2026 FlagOS Contributors
+# A managed image supplies the pinned ordinary-wheel PPU software stack.
+name: THead Tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# The runner's reserved PPU set must not serve two PRs simultaneously.
+concurrency:
+  group: thead-ppu-ci
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      config: ${{ steps.config.outputs.config }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check CPU-only CI acceptance regressions
+        run: python -I -S -B .github/scripts/thead/test_ci.py
+      - name: Install config parser
+        run: python -m pip install PyYAML
+      - id: config
+        name: Validate the actual THead CI resources
+        env:
+          THEAD_CI_BASE_PYTHON: ${{ vars.THEAD_CI_BASE_PYTHON }}
+          THEAD_CI_IMAGE: ${{ vars.THEAD_CI_IMAGE }}
+          THEAD_CI_RUNNER_LABELS: ${{ vars.THEAD_CI_RUNNER_LABELS }}
+          THEAD_CI_CONTAINER_OPTIONS: ${{ vars.THEAD_CI_CONTAINER_OPTIONS }}
+          THEAD_CI_CONTAINER_VOLUMES: ${{ vars.THEAD_CI_CONTAINER_VOLUMES }}
+          THEAD_CI_VISIBLE_DEVICES: ${{ vars.THEAD_CI_VISIBLE_DEVICES }}
+          THEAD_CI_MODEL_27B: ${{ vars.THEAD_CI_MODEL_27B }}
+          THEAD_CI_MODEL_35B: ${{ vars.THEAD_CI_MODEL_35B }}
+        run: python .github/scripts/load_config.py --platform thead
+
+  test:
+    needs: setup
+    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
+    timeout-minutes: 240
+    container:
+      image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      volumes: ${{ fromJson(needs.setup.outputs.config).container_volumes }}
+      options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+    env:
+      CUDA_VISIBLE_DEVICES: ${{ fromJson(needs.setup.outputs.config).visible_devices }}
+      THEAD_BASE_PYTHON: ${{ fromJson(needs.setup.outputs.config).base_python }}
+      GEMS_VENDOR: thead
+      VLLM_PLUGINS: fl
+      TORCH_DEVICE_BACKEND_AUTOLOAD: "1"
+      USE_FLAGGEMS: "1"
+      THEAD_MODEL_27B: ${{ fromJson(needs.setup.outputs.config).model_27b }}
+      THEAD_MODEL_35B: ${{ fromJson(needs.setup.outputs.config).model_35b }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install this plugin as an ordinary wheel
+        id: install
+        run: bash .github/scripts/thead/setup.sh
+      - name: Check normal PPU imports and the three-file upstream fix
+        id: check
+        run: bash .github/scripts/thead/check.sh
+      - name: Backend CPU and native PPU unit tests (zero skips)
+        run: |
+          "$THEAD_CI_PYTHON" -I -B .github/scripts/thead/run_tests.py --output-dir ci-results/unit
+      - name: Model Gates, eager then graph, one model at a time
+        # Keep all four Gate results when a previous quality assertion fails.
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.check.outcome == 'success' }}
+        shell: bash
+        run: |
+          test -n "$THEAD_MODEL_27B"
+          test -n "$THEAD_MODEL_35B"
+          test -n "$THEAD_CI_PYTHON"
+          # Unit quality failures may continue; incomplete cleanup may not.
+          "$THEAD_CI_PYTHON" -I -S -B - ci-results/unit/summary.json <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          facts = json.loads(Path(sys.argv[1]).read_text())
+          rows = facts.get("suites", [])
+          if not rows or not facts.get("only_owned_cleanup_complete") or not all(
+              row.get("receipt", {}).get("cleanup_complete") is True for row in rows
+          ):
+              raise RuntimeError("Stop model Gates after an incomplete unit cleanup")
+          PY
+          status=0
+          for model in 27b 35b; do
+            if [[ "$model" = 27b ]]; then path="$THEAD_MODEL_27B"; else path="$THEAD_MODEL_35B"; fi
+            for mode in eager graph; do
+              out="ci-results/gate-$model-$mode"
+              "$THEAD_CI_PYTHON" -I -B .github/scripts/thead/run_gate.py \
+                --model "$path" --mode "$mode" --tensor-parallel-size 4 \
+                --output-dir "$out" || status=1
+              # A quality failure may continue; failed cleanup may not.
+              "$THEAD_CI_PYTHON" -I -S -B - "$out/summary.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          facts = json.loads(Path(sys.argv[1]).read_text())
+          if not facts.get("only_owned_cleanup_complete"):
+              raise RuntimeError("Stop serial Gates after an incomplete own cleanup")
+          PY
+            done
+          done
+          exit "$status"
+      - name: Recheck vendor bytes and normal providers
+        if: always()
+        run: bash .github/scripts/thead/check.sh
+      - name: Upload actual logs, JUnit, request/check results and graph evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: thead-results
+          path: |
+            ci-results/
+            ${{ env.THEAD_CI_WORK_DIR }}/stack.json
+            ${{ env.THEAD_CI_WORK_DIR }}/vendor-before.json
+            ${{ env.THEAD_CI_WORK_DIR }}/base-site.json
