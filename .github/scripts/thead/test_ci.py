@@ -337,8 +337,10 @@ class LlmQualityTests(unittest.TestCase):
 
         for ending, categories in (
             (
-                "Their outputs can contain fabricated information and biases "
-                "inherited from training data.",
+                (
+                    "Their outputs can contain fabricated information and biases "
+                    "inherited from training data."
+                ),
                 {"factual_reliability", "bias"},
             ),
             (
@@ -368,13 +370,17 @@ class LlmQualityTests(unittest.TestCase):
     def test_missing_or_only_one_limitation_category_fails(self):
         for ending, categories in (
             (
-                "These systems have limitations. Responsible use requires careful "
-                "oversight and experienced human review before deployment.",
+                (
+                    "These systems have limitations. Responsible use requires careful "
+                    "oversight and experienced human review before deployment."
+                ),
                 0,
             ),
             (
-                "They may generate false information while sounding authoritative. "
-                "Responsible use requires careful oversight and human review.",
+                (
+                    "They may generate false information while sounding authoritative. "
+                    "Responsible use requires careful oversight and human review."
+                ),
                 1,
             ),
         ):
@@ -446,38 +452,52 @@ class LlmQualityTests(unittest.TestCase):
     def test_denied_limitations_are_not_affirmative_evidence(self):
         for ending, categories in (
             (
-                "They never hallucinate and never exhibit bias. They do not generate "
-                "false information or reinforce stereotypes.",
+                (
+                    "They never hallucinate and never exhibit bias. They do not generate "
+                    "false information or reinforce stereotypes."
+                ),
                 [],
             ),
             (
-                "They cannot hallucinate and cannot exhibit bias. Their answers are "
-                "always correct and fair in every context.",
+                (
+                    "They cannot hallucinate and cannot exhibit bias. Their answers are "
+                    "always correct and fair in every context."
+                ),
                 [],
             ),
             (
-                "They never suffer from hallucinations and do not lack true "
-                "understanding. They always reason accurately about every topic.",
+                (
+                    "They never suffer from hallucinations and do not lack true "
+                    "understanding. They always reason accurately about every topic."
+                ),
                 [],
             ),
             (
-                "Limitations include no hallucinations and no bias. Responsible use "
-                "requires no fact checking or further review.",
+                (
+                    "Limitations include no hallucinations and no bias. Responsible use "
+                    "requires no fact checking or further review."
+                ),
                 [],
             ),
             (
-                "It is not true that they can hallucinate facts. It is not true "
-                "that they may reproduce biases.",
+                (
+                    "It is not true that they can hallucinate facts. It is not true "
+                    "that they may reproduce biases."
+                ),
                 [],
             ),
             (
-                "There is no evidence that they can hallucinate facts or may "
-                "reproduce biases.",
+                (
+                    "There is no evidence that they can hallucinate facts or may "
+                    "reproduce biases."
+                ),
                 [],
             ),
             (
-                "Limitations include hallucinations and bias, but neither is a "
-                "problem for them.",
+                (
+                    "Limitations include hallucinations and bias, but neither is a "
+                    "problem for them."
+                ),
                 [],
             ),
             (
