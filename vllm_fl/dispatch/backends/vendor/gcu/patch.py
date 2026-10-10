@@ -31,6 +31,13 @@ def apply_gcu_patches() -> None:
     apply_chunk_delta_h_gcu_patch()
     apply_sampler_cpu_detour()
     apply_fused_recurrent_packed_decode_gcu_patch()
+
+    # Graph-mode (inductor + cudagraph) compatibility patches: keep the fixes
+    # that would otherwise require editing site-packages (torch_gcu /
+    # triton_gcu / flag_gems) inside the plugin instead.
+    from .impl.graph_compat import apply_graph_mode_compat_patches
+
+    apply_graph_mode_compat_patches()
     _patches_applied = True
 
 

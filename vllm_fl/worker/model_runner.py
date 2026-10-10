@@ -851,8 +851,19 @@ class ModelRunnerFL(
             # identical position IDs, making M-RoPE functionally equivalent to
             # 1D-RoPE.
             # See page 5 of https://arxiv.org/abs/2409.12191
+            # GCU graph mode: mrope positions feed q/k-norm+RoPE fused
+            # kernels whose i64 indexing overflows GCU300 LLVM11 register
+            # allocation. int32 is lossless here (max_position_embeddings
+            # << 2**31) and lets inductor compile the kernel. Gated behind an
+            # env switch so eager runs and other deployments keep int64 intact.
+            import os as _os
+            _mrope_dtype = (
+                torch.int32
+                if _os.environ.get("GCU_MROPE_INT32", "0") == "1"
+                else torch.int64
+            )
             self.mrope_positions = self._make_buffer(
-                (3, self.max_num_tokens + 1), dtype=torch.int64
+                (3, self.max_num_tokens + 1), dtype=_mrope_dtype
             )
 
         # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
