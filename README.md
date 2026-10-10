@@ -41,7 +41,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Ascend | Supported | - |
 | MetaX | Supported | - |
 | T-Head | Supported | - |
-| Iluvatar | Supported | - |
+| Iluvatar | Supported | [deployment guide](./docs/usage/iluvatar.md) |
 | Tsingmicro | Supported | - |
 | Moore Threads | Supported | - |
 | Hygon | Supported | - |

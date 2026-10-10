@@ -1,0 +1,36 @@
+# Iluvatar CoreX Platform Configuration
+platform: iluvatar
+vendor: iluvatar
+
+device_types:
+  bi-v150:
+    memory_gb: 32
+    tags: [iluvatar, corex, bf16]
+
+tolerance:
+  inference:
+    default:  {rtol: 1e-3, atol: 1e-3}
+    bfloat16: {rtol: 1e-2, atol: 1e-2}
+    float16:  {rtol: 1e-2, atol: 1e-2}
+
+device_overrides: {}
+
+unsupported_features: []
+
+env_defaults:
+  VLLM_PLUGINS: "fl"
+
+bi-v150:
+  name: "bi-v150"
+  tests:
+    e2e:
+      inference:
+        qwen2_5: ["7b_tp1", "7b_tp2"]
+      serving:
+        qwen2_5: ["7b_tp2"]
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []

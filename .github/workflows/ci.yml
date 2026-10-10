@@ -175,3 +175,14 @@ jobs:
     with:
       platform: kunlunxin
     secrets: inherit
+
+  # ============================================================
+  # Job 4h: Iluvatar CoreX platform testing
+  # ============================================================
+  test-iluvatar:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: iluvatar
+    secrets: inherit
