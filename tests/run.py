@@ -129,6 +129,16 @@ class TestRunner:
         test_cases = self.discover_tests()
 
         if not test_cases:
+            if self.cases is not None:
+                # An explicit allow-list that matches nothing is a hard
+                # error: silently exiting 0 here has masked skipped test
+                # suites as green runs (PR #562, cuda-a100 e2e).
+                print(
+                    "[run] FATAL no test cases matched the given filters, "
+                    "but --cases was provided - refusing to report success "
+                    "for an empty run."
+                )
+                return 1
             print("[run] No test cases found for the given filters.")
             return 0
 

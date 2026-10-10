@@ -101,6 +101,7 @@ jobs:
 
   unit:
     needs: setup
+    if: fromJson(needs.setup.outputs.config).runner_mode != 'k8s-bypass'
     uses: ./.github/workflows/_unit_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -109,11 +110,66 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
 
+  # Bypass twin for pools whose container hook is broken (PR #562): the
+  # same tests inside a self-orchestrated GPU pod.  Concrete job (not a
+  # reusable call) so skipped twins always render static job ids.
+  unit-bypass:
+    needs: setup
+    if: fromJson(needs.setup.outputs.config).runner_mode == 'k8s-bypass'
+    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
+    timeout-minutes: 60
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+      - name: Run unit tests in self-orchestrated GPU pod
+        run: |
+          set -e
+          env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+            python3 .github/scripts/k8s_bypass.py \
+              --image '${{ fromJson(needs.setup.outputs.config).ci_image }}' \
+              --gpus 1 \
+              --model-hostpath '' \
+              --read-budget 2400 \
+              --copy-back 'coverage-${{ inputs.platform }}.json,report-${{ inputs.platform }}.json' \
+              --command '
+                cd /__w || exit 2
+                export VLLM_PLUGINS=fl USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
+                git config --global --add safe.directory /__w
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/check.sh || exit 3
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/setup.sh || exit 4
+                python3 tests/run.py --platform ${{ inputs.platform }} --scope unit
+              '
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: coverage-${{ inputs.platform }}
+          path: |
+            coverage-${{ inputs.platform }}.json
+            report-${{ inputs.platform }}.json
+      - name: Upload coverage report to FlagCICD
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        continue-on-error: true
+        with:
+          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
+          report_path: 'coverage-${{ inputs.platform }}.json'
+          fail_on_error: 'false'
+
   # Fast component-level GPU tests (ops, compilation, distributed).
   # Runs all tests under tests/functional_tests/ in one job. No model files needed.
   # Runs once per platform (not per device) — functional tests are device-agnostic.
   functional:
-    needs: [setup, unit]
+    needs: [setup, unit, unit-bypass]
+    if: |
+      always() &&
+      fromJson(needs.setup.outputs.config).runner_mode != 'k8s-bypass' &&
+      needs.unit.result == 'success'
     uses: ./.github/workflows/_functional_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -122,13 +178,61 @@ jobs:
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
 
+  functional-bypass:
+    needs: [setup, unit, unit-bypass]
+    if: |
+      always() &&
+      fromJson(needs.setup.outputs.config).runner_mode == 'k8s-bypass' &&
+      needs.unit-bypass.result == 'success'
+    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+      - name: Run functional tests in self-orchestrated GPU pod
+        run: |
+          set -e
+          env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+            python3 .github/scripts/k8s_bypass.py \
+              --image '${{ fromJson(needs.setup.outputs.config).ci_image }}' \
+              --gpus 1 \
+              --model-hostpath '' \
+              --read-budget 900 \
+              --copy-back 'test-results-${{ inputs.platform }}.xml,test-results-${{ inputs.platform }}.json' \
+              --command '
+                cd /__w || exit 2
+                export VLLM_PLUGINS=fl USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
+                git config --global --add safe.directory /__w
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/check.sh || exit 3
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/setup.sh || exit 4
+                python3 tests/run.py --platform ${{ inputs.platform }} --scope functional
+              '
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: functional-${{ inputs.platform }}
+          path: |
+            test-results-${{ inputs.platform }}.xml
+            test-results-${{ inputs.platform }}.json
+
 
   # Slow end-to-end model tests (inference, serving).
   # Grouped by (task, device) — all model/case combos for the same task
   # run inside a single job to avoid repeated container startup.
   e2e:
-    needs: [setup, functional]
-    if: needs.setup.outputs.e2e_matrix != '[]'
+    needs: [setup, functional, functional-bypass]
+    if: |
+      always() &&
+      needs.setup.outputs.e2e_matrix != '[]' &&
+      fromJson(needs.setup.outputs.config).runner_mode != 'k8s-bypass' &&
+      needs.functional.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -145,9 +249,73 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
+  # Bypass twin of e2e (matrix-driven like the container call).  Models
+  # must be pre-staged on the pool - no runtime download in the pipeline.
+  e2e-bypass:
+    needs: [setup, functional, functional-bypass]
+    if: |
+      always() &&
+      needs.setup.outputs.e2e_matrix != '[]' &&
+      fromJson(needs.setup.outputs.config).runner_mode == 'k8s-bypass' &&
+      needs.functional-bypass.result == 'success'
+    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
+    timeout-minutes: ${{ matrix.test.timeout || 60 }}
+    strategy:
+      fail-fast: false
+      # The k8s pool effectively has a single 8-GPU slot: run e2e
+      # entries one at a time so an 8-GPU pod never queues behind
+      # another for its whole job budget.  Drop when the pool grows.
+      max-parallel: 1
+      matrix:
+        test: ${{ fromJson(needs.setup.outputs.e2e_matrix) }}
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+      - name: Encode cases JSON for the pod command
+        id: cases_b64
+        env:
+          CASES: ${{ matrix.test.cases }}
+        run: printf 'b64=%s' "$(printf %s "$CASES" | base64 -w0)" >> "$GITHUB_OUTPUT"
+      - name: Run E2E tests in self-orchestrated GPU pod
+        run: |
+          set -e
+          env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+            python3 .github/scripts/k8s_bypass.py \
+              --image '${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}' \
+              --gpus ${{ matrix.test.gpus || 1 }} \
+              --pin-nodes '${{ join(fromJson(needs.setup.outputs.config).model_nodes || fromJson('[]'), ',') }}' \
+              --read-budget 8400 \
+              --copy-back 'test-results-${{ inputs.platform }}.xml,test-results-${{ inputs.platform }}.json' \
+              --command '
+                cd /__w || exit 2
+                export VLLM_PLUGINS=fl USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
+                git config --global --add safe.directory /__w
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/check.sh || exit 3
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/setup.sh || exit 4
+                python3 tests/run.py --platform ${{ inputs.platform }} --device ${{ matrix.test.device }} --scope e2e --task ${{ matrix.test.task }} --cases "$(printf %s ${{ steps.cases_b64.outputs.b64 }} | base64 -d)"
+              '
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: e2e-${{ inputs.platform }}-${{ matrix.test.device }}-${{ matrix.test.task }}
+          path: |
+            test-results-${{ inputs.platform }}.xml
+            test-results-${{ inputs.platform }}.json
+
   # Validates vllm bench throughput/latency/serve entrypoints.
   benchmark:
-    needs: [setup, e2e]
+    needs: [setup, e2e, e2e-bypass]
+    if: |
+      always() &&
+      fromJson(needs.setup.outputs.config).runner_mode != 'k8s-bypass' &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -157,24 +325,80 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
 
+  # Bypass twin of benchmark (same pod shape as the other bypass twins).
+  # unit-bypass must pass: a bare "e2e-bypass skipped" must not open the
+  # gate, because skipped also covers "skipped by a failed dependency".
+  benchmark-bypass:
+    needs: [setup, unit-bypass, e2e, e2e-bypass]
+    if: |
+      always() &&
+      fromJson(needs.setup.outputs.config).runner_mode == 'k8s-bypass' &&
+      needs.unit-bypass.result == 'success' &&
+      (needs.e2e-bypass.result == 'success' || needs.e2e-bypass.result == 'skipped')
+    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
+    # 65 min: the pod may queue on the pinned model-store nodes for up to
+    # the 30-min ready budget before the ~25-min benchmark run starts.
+    timeout-minutes: 65
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+      - name: Run benchmark smoke tests in self-orchestrated GPU pod
+        run: |
+          set -e
+          env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+            python3 .github/scripts/k8s_bypass.py \
+              --image '${{ fromJson(needs.setup.outputs.config).ci_image }}' \
+              --gpus 1 \
+              --pin-nodes '${{ join(fromJson(needs.setup.outputs.config).model_nodes || fromJson('[]'), ',') }}' \
+              --read-budget 1800 \
+              --copy-back 'test-results-${{ inputs.platform }}.xml,test-results-${{ inputs.platform }}.json' \
+              --command '
+                cd /__w || exit 2
+                export VLLM_PLUGINS=fl USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
+                git config --global --add safe.directory /__w
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/check.sh || exit 3
+                bash .github/scripts/${{ fromJson(needs.setup.outputs.config).script_platform || inputs.platform }}/setup.sh || exit 4
+                python3 tests/run.py --platform ${{ inputs.platform }} --scope benchmark
+              '
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: benchmark-${{ inputs.platform }}
+          path: |
+            test-results-${{ inputs.platform }}.xml
+            test-results-${{ inputs.platform }}.json
+
   # ============================================================
   # Feishu notification — per-platform status
   # ============================================================
   notify:
-    needs: [unit, functional, e2e, benchmark]
+    needs: [unit, unit-bypass, functional, functional-bypass, e2e, e2e-bypass, benchmark, benchmark-bypass]
     if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}
       status: >-
-        ${{ (needs.unit.result == 'success' &&
-             needs.functional.result == 'success' &&
-             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped'))
+        ${{ ((needs.unit.result == 'success' || needs.unit-bypass.result == 'success') &&
+             (needs.functional.result == 'success' || needs.functional-bypass.result == 'success') &&
+             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped' ||
+              needs.e2e-bypass.result == 'success' || needs.e2e-bypass.result == 'skipped') &&
+             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped' ||
+             needs.benchmark-bypass.result == 'success' || needs.benchmark-bypass.result == 'skipped'))
             && 'success'
             || (needs.unit.result == 'cancelled' ||
+                needs.unit-bypass.result == 'cancelled' ||
                 needs.functional.result == 'cancelled' ||
+                needs.functional-bypass.result == 'cancelled' ||
                 needs.e2e.result == 'cancelled' ||
-                needs.benchmark.result == 'cancelled')
+                needs.e2e-bypass.result == 'cancelled' ||
+                needs.benchmark.result == 'cancelled' ||
+                needs.benchmark-bypass.result == 'cancelled')
                && 'cancelled'
                || 'failure' }}
