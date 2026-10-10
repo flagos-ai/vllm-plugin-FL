@@ -1,0 +1,32 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Build from the repository root:
+# docker build -f docker/kunlunxin/Dockerfile.ci -t <new-ci-image> .
+#
+# Both pinned images use Ubuntu 22.04. Copy only the system Git tools, never
+# the donor's environment, accounts, Git configuration or model dependencies.
+ARG GIT_TOOLS_IMAGE=harbor.baai.ac.cn/plugin/kunlunxin001-gems5.4.0-treenone-triton3.0.0-cx0.13.0-plugin0.3.0-vllm0.24.0-cp310-pt29-x64-v5.0.21.43@sha256:f75320183472173221e2e05c3afcd77468d146ac157eb7273b5dd8616624e768
+ARG RUNTIME_IMAGE=harbor.baai.ac.cn/plugin/kunlunxin001-gems5.4.0-tree0.7.0rc2-triton3.6.0-cx0.13.0-plugin0.3.0-vllm0.24.0-cp310-pt29-x64-v5.0.21.47@sha256:13564a0227a99cef89902a12d160ad886ed4c1228c79f9bcc3808c689141a1af
+FROM ${GIT_TOOLS_IMAGE} AS git-tools
+FROM ${RUNTIME_IMAGE}
+
+# checkout@v4 requires Git >=2.18 to avoid the REST archive fallback. The
+# platform setup script also calls git config before installing the checkout.
+COPY --from=git-tools /usr/bin/git /usr/bin/git
+COPY --from=git-tools /usr/lib/git-core/ /usr/lib/git-core/
+COPY --from=git-tools /usr/share/git-core/ /usr/share/git-core/
+
+RUN git --version \
+    && test -x /usr/lib/git-core/git-remote-https \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
+    && python -c 'import subprocess; v = subprocess.check_output(["git", "--version"], text=True).split()[2]; assert tuple(map(int, v.split(".")[:2])) >= (2, 18); output = subprocess.check_output(["ldd", "/usr/lib/git-core/git-remote-https"], text=True); assert "not found" not in output, output'
+
+# tests/run.py always requests coverage and JSON reports. Install only these
+# CI tools; resolving the full test extra would replace vendor dependencies.
+RUN python -m pip install --no-cache-dir --no-deps \
+    --index-url https://pypi.org/simple \
+    pytest-cov==7.0.0 coverage==7.10.7 \
+    pytest-json-report==1.5.0 pytest-metadata==3.1.1 \
+    && python -c 'import subprocess; help_text = subprocess.check_output(["python", "-m", "pytest", "--help"], text=True); assert "--cov=" in help_text and "--json-report" in help_text'
+
+LABEL io.flagos.image.purpose="Sanitized runtime with Git/HTTPS and pytest reporting support for CI"
