@@ -22,6 +22,10 @@
 platforms:
   cuda:
     enabled: true
+  # A100 line on the vllm-plugin-nv-k8s pool (bypass orchestrator while the
+  # pool's container hook is broken - see PR #562).
+  cuda-a100:
+    enabled: true
   ascend:
     enabled: false
   hygon:

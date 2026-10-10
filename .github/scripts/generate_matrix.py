@@ -81,6 +81,16 @@ def get_device_sections(config: dict) -> list[str]:
     return devices
 
 
+def case_tp(model: str, case: str) -> int:
+    """tensor_parallel_size of a case, straight from its YAML (default 1)."""
+    p = REPO_ROOT / "tests" / "models" / model / f"{case}.yaml"
+    try:
+        tp = yaml.safe_load(p.read_text())["llm"].get("tensor_parallel_size", 1)
+        return int(tp)
+    except Exception:  # noqa: BLE001 - any unreadable config falls back to 1 GPU
+        return 1
+
+
 def build_e2e_matrix(
     config: dict,
     devices: list[str],
@@ -126,6 +136,9 @@ def build_e2e_matrix(
                 "device": device,
                 "cases": json.dumps(case_list, separators=(",", ":")),
                 "timeout": timeout,
+                # GPUs a bypass pod must request for this group: the
+                # largest tensor_parallel_size among its cases.
+                "gpus": max(case_tp(c["model"], c["case"]) for c in case_list),
             }
         )
     return entries

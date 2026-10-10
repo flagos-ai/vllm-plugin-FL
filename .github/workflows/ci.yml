@@ -32,10 +32,37 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # PR number instead of the merge ref: same one-run-per-PR semantics,
+  # and it does not share a group with stale zero-job runs parked on the
+  # merge ref (a stuck queued run blocks every later run in its group
+  # and cannot be cancelled without repo admin rights).
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ============================================================
+  # CUDA platform testing - two isolated legs:
+  #   test-cuda      standard line (h20 e2e, old dedicated runner)
+  #   test-cuda-a100 A100 line (k8s pool via the bypass orchestrator,
+  #                  PR #562); expected to carry the pipeline until the
+  #                  pool's container hook is fixed
+  # ============================================================
+  test-cuda:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: cuda
+    secrets: inherit
+
+  test-cuda-a100:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda-a100')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: cuda-a100
+    secrets: inherit
+
   # ============================================================
   # Job 1: Lint (ruff check, ruff format, typos)
   # Runs on every push/PR. Fast, no special requirements.
@@ -98,17 +125,6 @@ jobs:
         run: pip install pyyaml
       - id: detect
         run: python3 .github/scripts/detect_platforms.py
-
-  # ============================================================
-  # Job 4a: CUDA platform testing
-  # ============================================================
-  test-cuda:
-    needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
-    uses: ./.github/workflows/_platform_test.yml
-    with:
-      platform: cuda
-    secrets: inherit
 
   # ============================================================
   # Job 4b: Ascend platform testing
