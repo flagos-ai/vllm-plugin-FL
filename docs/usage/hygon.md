@@ -17,13 +17,24 @@ installed packages; serving does not require a source checkout or editable insta
 | Vendor PyTorch distribution | `2.10.0+das.opt1.dtk2604.20260325.g6b060a` |
 | PyTorch runtime version | `2.10.0` |
 | FlagGems distribution | `0.1.0` |
-| FlagTree | `0.6.0+hcu3.6` |
+| FlagGems source commit | [e12a220a0d54b40d90d0549ff83ffabedb01f6dd](https://github.com/flagos-ai/FlagGems/commit/e12a220a0d54b40d90d0549ff83ffabedb01f6dd) |
+| FlagTree distribution | `0.6.0+hcu3.6` |
+| FlagTree wheel SHA256 | `0fd81f0e691486dfaf85f6a196f9f09d66118b7d2064b4f8c70b6c8bfdb4d52c` |
 | Triton distribution | `3.6.0+gitc73250c4.staging`, coexists with FlagTree in the vendor baseline |
 | Image build source | `544e9cb2484d6bd0d679dcbedb7c9d9621730a09` |
 | Image plugin wheel | `0.0.0+g544e9cb2484d6bd0d679dcbedb7c9d9621730a09` |
 | Model runner | `ModelRunnerFL`, `VLLM_USE_V2_MODEL_RUNNER=0` |
 | Communication | Vendor HIP/RCCL, TP2; `FLAGCX_PATH` unset |
 | Hardware | Two Hygon BW1000 DCUs, 64 GiB each |
+
+FlagGems distribution metadata reports `0.1.0`, which does not identify its
+source revision. All 1,944 installed source/package files match the official
+commit above after accounting for CRLF/LF line-ending differences. The installed
+`direct_url.json` contains no VCS revision; the commit identifies the matching
+package source content rather than a recorded installation revision.
+FlagTree is identified by its distribution version and wheel SHA256 above;
+its full Git commit was not recorded. Triton's `gitc73250c4` is not a FlagTree
+commit.
 
 The vendor PyTorch version is intentional. The empty vLLM wheel is built
 without resolving upstream PyTorch dependencies, which would replace this
