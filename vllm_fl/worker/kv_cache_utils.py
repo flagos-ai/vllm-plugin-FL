@@ -28,9 +28,10 @@ def bind_kv_cache(
         getattr(current_platform, "vendor_name", None) == "iluvatar"
         and current_platform.device_type == "cuda"
     ):
-        return upstream_bind_kv_cache(
+        upstream_bind_kv_cache(
             kv_caches, forward_context, runner_kv_caches, num_attn_module
         )
+        return
 
     assert len(runner_kv_caches) == 0
     index_to_names: dict[int, list[str]] = defaultdict(list)

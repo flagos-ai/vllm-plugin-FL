@@ -35,8 +35,9 @@ def test_upstream_rejection_is_limited_to_cache_binding(iluvatar, monkeypatch):
         upstream_utils.bind_kv_cache(caches, context, [])
 
     runner_caches = []
-    kv_cache_utils.bind_kv_cache(caches, context, runner_caches)
+    result = kv_cache_utils.bind_kv_cache(caches, context, runner_caches)
 
+    assert result is None
     assert len(runner_caches) == 2
     assert all(context[name].kv_cache is tensor for name, tensor in caches.items())
     assert not iluvatar.is_cuda_alike()
@@ -81,7 +82,8 @@ def test_shared_cache_aliases_are_preserved(iluvatar):
     assert all(layer.kv_cache is shared for layer in context.values())
 
 
-def test_multiple_attention_module_indices(iluvatar):
+@pytest.mark.parametrize("positional", [False, True])
+def test_multiple_attention_module_indices(iluvatar, positional):
     caches = {
         "model.layers.1.attn.0": torch.empty(1),
         "model.layers.0.attn.1": torch.empty(1),
@@ -90,10 +92,18 @@ def test_multiple_attention_module_indices(iluvatar):
     context = {name: SimpleNamespace() for name in caches}
     runner_caches = []
 
-    kv_cache_utils.bind_kv_cache(caches, context, runner_caches, num_attn_module=2)
+    if positional:
+        result = kv_cache_utils.bind_kv_cache(caches, context, runner_caches, 2)
+    else:
+        result = kv_cache_utils.bind_kv_cache(
+            caches, context, runner_caches, num_attn_module=2
+        )
 
+    assert result is None
+    assert len(runner_caches) == len(caches)
     for tensor, name in zip(runner_caches, sorted(caches)):
         assert tensor is caches[name]
+        assert context[name].kv_cache is caches[name]
 
 
 def test_existing_runner_cache_is_rejected(iluvatar):
@@ -119,13 +129,70 @@ def test_empty_cache_binding(iluvatar):
         (None, "cpu"),
     ],
 )
-def test_other_platforms_delegate_to_upstream(monkeypatch, vendor, device_type):
+@pytest.mark.parametrize("arguments", ["default", "positional", "keyword"])
+def test_other_platforms_delegate_to_upstream(
+    monkeypatch, vendor, device_type, arguments
+):
     platform = SimpleNamespace(vendor_name=vendor, device_type=device_type)
     monkeypatch.setattr(kv_cache_utils, "current_platform", platform)
-    upstream = Mock()
+    upstream = Mock(return_value=None)
     monkeypatch.setattr(kv_cache_utils, "upstream_bind_kv_cache", upstream)
-    caches, context, runner_caches = {}, {}, []
+    extract = Mock(side_effect=AssertionError("Iluvatar binding must not run"))
+    monkeypatch.setattr(kv_cache_utils, "extract_layer_index", extract)
+    caches = {"model.layers.0.attn": torch.empty(1)}
+    context = {name: SimpleNamespace(kv_cache=None) for name in caches}
+    runner_caches = []
 
-    kv_cache_utils.bind_kv_cache(caches, context, runner_caches, num_attn_module=2)
+    if arguments == "default":
+        result = kv_cache_utils.bind_kv_cache(caches, context, runner_caches)
+    elif arguments == "positional":
+        result = kv_cache_utils.bind_kv_cache(caches, context, runner_caches, 2)
+    else:
+        result = kv_cache_utils.bind_kv_cache(
+            caches, context, runner_caches, num_attn_module=2
+        )
 
-    upstream.assert_called_once_with(caches, context, runner_caches, 2)
+    assert result is None
+    upstream.assert_called_once_with(
+        caches, context, runner_caches, 1 if arguments == "default" else 2
+    )
+    assert upstream.call_args.args[0] is caches
+    assert upstream.call_args.args[1] is context
+    assert upstream.call_args.args[2] is runner_caches
+    extract.assert_not_called()
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, NotImplementedError])
+def test_upstream_failure_after_mutation_propagates_without_retry(
+    monkeypatch, error_type
+):
+    monkeypatch.setattr(
+        kv_cache_utils,
+        "current_platform",
+        SimpleNamespace(vendor_name="nvidia", device_type="cuda"),
+    )
+    tensor = torch.empty(1)
+    caches = {"model.layers.0.attn": tensor}
+    context = {name: SimpleNamespace(kv_cache=None) for name in caches}
+    runner_caches = []
+    error = error_type("native binding failed after mutation")
+
+    def fail_after_mutation(caches, context, runner_caches, num_attn_module):
+        runner_caches.append(tensor)
+        context["model.layers.0.attn"].kv_cache = tensor
+        raise error
+
+    upstream = Mock(side_effect=fail_after_mutation)
+    extract = Mock(side_effect=AssertionError("Iluvatar binding must not run"))
+    monkeypatch.setattr(kv_cache_utils, "upstream_bind_kv_cache", upstream)
+    monkeypatch.setattr(kv_cache_utils, "extract_layer_index", extract)
+
+    with pytest.raises(error_type) as raised:
+        kv_cache_utils.bind_kv_cache(caches, context, runner_caches)
+
+    assert raised.value is error
+    upstream.assert_called_once_with(caches, context, runner_caches, 1)
+    assert len(runner_caches) == 1
+    assert runner_caches[0] is tensor
+    assert context["model.layers.0.attn"].kv_cache is tensor
+    extract.assert_not_called()

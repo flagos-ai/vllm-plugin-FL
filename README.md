@@ -127,6 +127,12 @@ Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
 
+On Iluvatar with vLLM 0.24, the FlagOS GPU runner binds all attention caches
+within each decoder layer, including separate main and index caches. Binding
+preserves layer order, cache order within a layer, tensor identity and shared
+aliases. This cache initialization fix does not enable graph capture or establish
+model or operator support; validate those separately in the target environment.
+
 ### Operator profiling
 
 See the [operator profiling tools](./tools/operator_profile/README.md) for a
