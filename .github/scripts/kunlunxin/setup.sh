@@ -11,7 +11,6 @@ fi
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${FLAGCX_PATH:?FLAGCX_PATH is not set}"
 : "${CUDA_VISIBLE_DEVICES:?CUDA_VISIBLE_DEVICES is not set}"
-: "${USE_RESHAPE_AND_CACHE_FLASH:?USE_RESHAPE_AND_CACHE_FLASH is not set}"
 
 git config --global --add safe.directory "$(pwd)"
 
@@ -29,7 +28,6 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
     VLLM_PLUGINS \
     FLAGCX_PATH \
     CUDA_VISIBLE_DEVICES \
-    USE_RESHAPE_AND_CACHE_FLASH \
     VLLM_ALLOW_LONG_MAX_MODEL_LEN \
     VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS; do
     echo "${name}=${!name-}" >> "${GITHUB_ENV}"

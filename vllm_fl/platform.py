@@ -398,6 +398,15 @@ class PlatformFL(Platform):
             return backend
 
         # Try FlashAttention first
+        if cls.vendor_name == "kunlunxin":
+            from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.mm_encoder_attention import (
+                supports_native_mm_attention,
+            )
+
+            if supports_native_mm_attention(head_size, dtype):
+                return AttentionBackendEnum.FLASH_ATTN
+            return AttentionBackendEnum.TORCH_SDPA
+
         if (cc := cls.get_device_capability()) and cc.major >= 8:
             try:
                 backend_class = AttentionBackendEnum.FLASH_ATTN.get_class()

@@ -25,14 +25,6 @@ def patch_mm_encoder_attention():
 
         def _apply_chunked_sdpa(q, k, v, scale, enable_gqa):
             """Run exact SDPA while bounding the materialized score matrix."""
-            from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.mm_encoder_attention import (
-                try_native_large_mm_attention,
-            )
-
-            native_output = try_native_large_mm_attention(q, k, v, scale)
-            if native_output is not None:
-                return native_output
-
             q = q.permute(0, 2, 1, 3)
             k = k.permute(0, 2, 1, 3)
             v = v.permute(0, 2, 1, 3)
@@ -103,6 +95,11 @@ def patch_mm_encoder_attention():
             return output
 
         mm_mod.MMEncoderAttention._forward_sdpa = _kunlunxin_forward_sdpa
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.mm_encoder_attention import (
+            forward_mm_attention,
+        )
+
+        mm_mod.MMEncoderAttention.forward_oot = forward_mm_attention
         logger.info_once(
             "Using query-chunked Torch SDPA for Kunlunxin MM encoder attention "
             "(chunk_size=%d).",
@@ -113,7 +110,10 @@ def patch_mm_encoder_attention():
     # bind MMEncoderAttention to forward_oot -> forward_native (Torch SDPA).
     # NVIDIA must keep vLLM's CUDA dispatch so the selected FLASH_ATTN backend
     # is actually used during multimodal profiling and inference.
-    if current_platform.is_cuda():
+    if (
+        current_platform.is_cuda()
+        and getattr(current_platform, "vendor_name", None) != "kunlunxin"
+    ):
         mm_mod.MMEncoderAttention.forward_oot = mm_mod.MMEncoderAttention.forward_cuda
 
     def _patched_maybe_get_vit_flash_attn_backend(attn_backend):

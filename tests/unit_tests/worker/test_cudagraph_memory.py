@@ -91,10 +91,14 @@ def test_graph_memory_preserves_pool_policy_and_cleans_up(
             module.ModelRunnerFL.profile_cudagraph_memory(runner)
     else:
         result = module.ModelRunnerFL.profile_cudagraph_memory(runner)
-        # Shared: max(8,24) + 3*4 + 3*12. Private: shared(8+3*4) + 3*(8+4+2+1).
-        assert result == (65 if private else 72) * mib
+        # Shared: max(8,24) + 3*4 + 3*12. Private: (1+3)*(8+4+2+1).
+        assert result == (60 if private else 72) * mib
         full_sizes = [size for mode, size in calls if mode == CUDAGraphMode.FULL]
         assert full_sizes == ([8, 4, 2, 1] if private else [8, 4])
+        piecewise_sizes = [
+            size for mode, size in calls if mode == CUDAGraphMode.PIECEWISE
+        ]
+        assert piecewise_sizes == ([8, 4, 2, 1] if private else [8, 4])
     assert shared.graph_pool is shared_pool
     assert full.graph_pool is (None if private else shared_pool)
     assert counter.num_cudagraph_captured == 7

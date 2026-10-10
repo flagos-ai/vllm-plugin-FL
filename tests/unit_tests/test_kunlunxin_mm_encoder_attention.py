@@ -92,3 +92,169 @@ def test_native_mm_scaling_matches_cpu_reference(device, monkeypatch, head_dim, 
     expected = expected.permute(0, 2, 1, 3)
 
     torch.testing.assert_close(output.cpu().float(), expected, rtol=0.025, atol=0.003)
+
+
+@pytest.mark.parametrize("length", [8192, 16384])
+@pytest.mark.parametrize("head_dim", [64, 72, 96, 128])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_real_long_mm_attention_matches_cpu_reference(device, length, head_dim, dtype):
+    from vllm.platforms import current_platform
+
+    if (
+        device.type != "cuda"
+        or getattr(current_platform, "vendor_name", None) != "kunlunxin"
+    ):
+        pytest.skip("long MM attention requires Kunlunxin hardware")
+    generator = torch.Generator().manual_seed(718)
+    cpu_inputs = [
+        torch.randn((1, length, 4, head_dim), generator=generator).to(dtype)
+        for _ in range(3)
+    ]
+    scale = head_dim**-0.5
+    output = mm_impl.try_native_large_mm_attention(
+        *(tensor.to(device) for tensor in cpu_inputs), scale
+    )
+    torch.cuda.synchronize()
+    actual = output.cpu().float()
+    q, k, v = [tensor.float().permute(0, 2, 1, 3) for tensor in cpu_inputs]
+    # Compare every output element with a bounded independent CPU score matrix.
+    for start in range(0, length, 256):
+        scores = q[:, :, start : start + 256] @ k.transpose(-1, -2) * scale
+        expected = (scores.softmax(-1) @ v).permute(0, 2, 1, 3)
+        torch.testing.assert_close(
+            actual[:, start : start + 256], expected, rtol=0.025, atol=0.003
+        )
+
+
+@pytest.mark.parametrize("entry", ["forward", "forward_cuda", "forward_native"])
+def test_public_explicit_sdpa_never_calls_vendor(monkeypatch, entry):
+    import torch.nn.functional as functional
+
+    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.platforms import current_platform
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+    from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+    if getattr(current_platform, "vendor_name", None) != "kunlunxin":
+        pytest.skip("Kunlunxin provider routing")
+    import vllm.model_executor.layers.attention.mm_encoder_attention as mm_module
+
+    patch_mm_encoder_attention()
+    monkeypatch.setattr(
+        mm_module,
+        "get_vit_attn_backend",
+        lambda **kwargs: AttentionBackendEnum.TORCH_SDPA,
+    )
+    calls = []
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("explicit SDPA/reference entered vendor attention")
+
+    def sdpa(q, k, v, **kwargs):
+        calls.append(q.shape)
+        return q.clone()
+
+    monkeypatch.setattr(mm_impl, "try_native_large_mm_attention", forbidden)
+    monkeypatch.setattr(functional, "scaled_dot_product_attention", sdpa)
+    with set_current_vllm_config(VllmConfig()):
+        attention = mm_module.MMEncoderAttention(4, 72)
+        query = torch.zeros((1, 8192, 4, 72), dtype=torch.bfloat16)
+        output = getattr(attention, entry)(query, query, query)
+    assert calls and sum(shape[2] for shape in calls) == 8192
+    torch.testing.assert_close(output, query)
+
+
+@pytest.mark.parametrize("flattened", [False, True])
+def test_public_cross_attention_preserves_sdpa(device, monkeypatch, flattened):
+    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.platforms import current_platform
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+    from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+    if (
+        device.type != "cuda"
+        or getattr(current_platform, "vendor_name", None) != "kunlunxin"
+    ):
+        pytest.skip("Kunlunxin hardware provider routing")
+    import vllm.model_executor.layers.attention.mm_encoder_attention as mm_module
+
+    patch_mm_encoder_attention()
+    monkeypatch.setattr(
+        mm_module,
+        "get_vit_attn_backend",
+        lambda **kwargs: AttentionBackendEnum.FLASH_ATTN,
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("cross-attention entered self-attention-only vendor provider")
+
+    monkeypatch.setattr(mm_impl, "try_native_large_mm_attention", forbidden)
+    generator = torch.Generator().manual_seed(317)
+    cpu_inputs = [
+        torch.randn((1, length, 4, 72), generator=generator).to(torch.bfloat16)
+        for length in (37, 53, 53)
+    ]
+    q, k, v = [tensor.float().permute(0, 2, 1, 3) for tensor in cpu_inputs]
+    expected = ((q @ k.transpose(-1, -2) / math.sqrt(72)).softmax(-1) @ v).permute(
+        0, 2, 1, 3
+    )
+    inputs = [tensor.to(device) for tensor in cpu_inputs]
+    if flattened:
+        inputs = [tensor.flatten(2) for tensor in inputs]
+        expected = expected.flatten(2)
+    with set_current_vllm_config(VllmConfig()):
+        attention = mm_module.MMEncoderAttention(4, 72)
+        output = attention(*inputs)
+    torch.testing.assert_close(output.cpu().float(), expected, rtol=0.025, atol=0.003)
+
+
+@pytest.mark.parametrize("reference", [False, True])
+def test_public_long_sdpa_numerics_without_vendor(device, monkeypatch, reference):
+    from vllm.config import VllmConfig, set_current_vllm_config
+    from vllm.platforms import current_platform
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+    from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+    if (
+        device.type != "cuda"
+        or getattr(current_platform, "vendor_name", None) != "kunlunxin"
+    ):
+        pytest.skip("Kunlunxin hardware SDPA routing")
+    import xtorch_ops
+
+    import vllm.model_executor.layers.attention.mm_encoder_attention as mm_module
+
+    patch_mm_encoder_attention()
+    monkeypatch.setattr(
+        mm_module,
+        "get_vit_attn_backend",
+        lambda **kwargs: AttentionBackendEnum.TORCH_SDPA,
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("explicit SDPA/reference invoked xtorch attention")
+
+    monkeypatch.setattr(xtorch_ops, "flash_attn_varlen_func", forbidden)
+    generator = torch.Generator().manual_seed(941)
+    cpu = [
+        torch.randn((1, 8192, 4, 72), generator=generator).to(torch.bfloat16)
+        for _ in range(3)
+    ]
+    with set_current_vllm_config(VllmConfig()):
+        attention = mm_module.MMEncoderAttention(4, 72)
+        inputs = [tensor.to(device) for tensor in cpu]
+        output = (
+            (attention.forward_native(*inputs) if reference else attention(*inputs))
+            .cpu()
+            .float()
+        )
+    q, k, v = [tensor.float().permute(0, 2, 1, 3) for tensor in cpu]
+    for start in range(0, 8192, 256):
+        scores = q[:, :, start : start + 256] @ k.transpose(-1, -2) / math.sqrt(72)
+        expected = (scores.softmax(-1) @ v).permute(0, 2, 1, 3)
+        torch.testing.assert_close(
+            output[:, start : start + 256], expected, rtol=0.025, atol=0.003
+        )

@@ -6665,7 +6665,7 @@ class ModelRunnerFL(
         all_wrappers = list(GraphWrapper._all_instances) + list(
             BreakableCUDAGraphWrapper._all_instances
         )
-        private_full_graphs = any(
+        private_breakable_graphs = any(
             instance.graph_pool is None
             for instance in BreakableCUDAGraphWrapper._all_instances
         )
@@ -6691,7 +6691,10 @@ class ModelRunnerFL(
                 for mode, descs in capture_descs:
                     if not descs:
                         continue
-                    private_pools = private_full_graphs and mode == CUDAGraphMode.FULL
+                    # Native Breakable PIECEWISE also owns private pools when
+                    # no compiled runner exists. Measure every descriptor;
+                    # extrapolating a shared-pool sample can under-budget it.
+                    private_pools = private_breakable_graphs
                     # Private pools cannot overlay allocations across sizes or
                     # segments. Capture every descriptor and add its full cost.
                     profile_descs = descs if private_pools else descs[:2]
@@ -6720,7 +6723,7 @@ class ModelRunnerFL(
                             max(sample, 1 << 20) for sample in mem_samples
                         )
                         logger.debug(
-                            "Measured private FULL graph memory: %.2f MiB for %d graphs",
+                            "Measured private graph memory: %.2f MiB for %d graphs",
                             private_memory_estimate / (1 << 20),
                             len(descs),
                         )
@@ -6773,7 +6776,7 @@ class ModelRunnerFL(
             self._cleanup_profiling_kv_cache()
             compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
 
-        # Overlay shared-pool modes, but add private FULL pools: neither their
+        # Overlay shared-pool modes, but add private Breakable pools: neither their
         # sizes nor their breakable segments can share activation storage.
         decoder_estimate = (
             private_memory_estimate
