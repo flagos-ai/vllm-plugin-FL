@@ -268,7 +268,6 @@ from vllm.v1.worker.utils import (
     AttentionGroup,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
-    bind_kv_cache,
     prepare_kernel_block_sizes,
     sanity_check_mm_encoder_outputs,
 )
@@ -286,6 +285,7 @@ from vllm_fl.worker.common_attention_metadata import (
     common_attention_metadata_enabled,
     compute_common_attention_metadata,
 )
+from vllm_fl.worker.kv_cache_utils import bind_kv_cache
 
 GraphWrapper = GraphWrapper
 
