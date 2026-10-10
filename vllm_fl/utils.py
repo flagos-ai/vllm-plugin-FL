@@ -47,6 +47,10 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
     # Registered backend: vendor/hygon
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
+    # Registered backend: vendor/amd (ROCm/HIP exposed through torch.cuda)
+    # FlagGems intentionally reports ``vendor_name=amd`` and
+    # ``device_name=cuda`` for ROCm devices.
+    "amd": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
     # Registered backend: vendor/thead (tsingmicro)
@@ -283,10 +287,12 @@ class DeviceInfo:
         self.device = DeviceDetector()
         self.supported_device = [
             "nvidia",
+            "amd",
             "ascend",
             "metax",
             "mthreads",
             "sunrise",
+            "hygon",
             "thead",
             "gcu",
             "enflame",

@@ -82,6 +82,11 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
     pip install --no-build-isolation -e .
     ```
 
+    Qwen3.8-Flash-Next / Qwen4 uses numerical operators from
+    [FlagGems-vllm PR #896](https://github.com/flagos-ai/FlagGems-vllm/pull/896).
+    Install its pinned operator dependency with
+    `pip install --no-build-isolation -e '.[qwen3_8]'`.
+
     For CUDA-like devices, including CUDA and HIP/ROCm environments that use
     PyTorch's CUDA dispatch key, build the plugin native extension by setting
     `VLLM_VENDOR=cuda` during installation:
