@@ -38,6 +38,20 @@ class TestSiluAndMulFL:
         assert result.shape == (2, 4)
 
 
+def test_silu_and_mul_with_clamp_reference_capability():
+    from vllm_fl.dispatch.backends.reference.impl.activation import (
+        silu_and_mul_with_clamp,
+    )
+
+    x = torch.tensor([[3.0, -2.0, 4.0, -5.0]])
+    actual = silu_and_mul_with_clamp(x, limit=2.5, alpha=0.75, beta=0.25)
+    gate, up = x.chunk(2, dim=-1)
+    gate = gate.clamp(max=2.5)
+    up = up.clamp(min=-2.5, max=2.5)
+    expected = gate * torch.sigmoid(0.75 * gate) * (up + 0.25)
+    torch.testing.assert_close(actual, expected)
+
+
 def test_fused_moe_activation_tolerates_missing_optional_enum(monkeypatch):
     import vllm_fl.ops.fused_moe.activation as activation_module
 

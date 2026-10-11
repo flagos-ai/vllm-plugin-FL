@@ -41,3 +41,11 @@ def gelu_and_mul_torch(obj, x: torch.Tensor) -> torch.Tensor:
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
     return F.gelu(x1, approximate=approximate) * x2
+
+
+def silu_and_mul_with_clamp(x, limit, alpha=1.0, beta=0.0):
+    """Apply the bounded SwiGLU capability using PyTorch operations."""
+    gate, up = x.chunk(2, dim=-1)
+    gate = gate.clamp(max=limit)
+    up = up.clamp(min=-limit, max=limit)
+    return gate * torch.sigmoid(alpha * gate) * (up + beta)
