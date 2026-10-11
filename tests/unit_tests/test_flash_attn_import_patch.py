@@ -139,7 +139,6 @@ class TestGCUVisionAttention(unittest.TestCase):
 
     def setUp(self):
         from vllm.config import VllmConfig, set_current_vllm_config
-        from vllm.model_executor.models import vision
 
         platform = self.platform()
         self.enterContext(patch.object(self.platform, "vendor_name", "enflame"))
@@ -164,8 +163,6 @@ class TestGCUVisionAttention(unittest.TestCase):
                 self.torch, "get_default_dtype", return_value=self.torch.float16
             )
         )
-        vision._get_vit_attn_backend.cache_clear()
-        self.addCleanup(vision._get_vit_attn_backend.cache_clear)
 
     def _provider(self):
         provider = ModuleType("flash_attn.vllm_flash_attn")
