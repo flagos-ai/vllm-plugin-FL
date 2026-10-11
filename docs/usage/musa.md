@@ -83,12 +83,14 @@ gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
 gh run watch "$RUN_ID" --repo flagos-ai/vllm-plugin-FL --exit-status
 ```
 
-The full platform workflow runs unit, functional, e2e and benchmark stages,
-then the original MUSA adaptation Gate after those GPU jobs release the
-allocation. MUSA concurrency prevents two platform workflows from sharing
-that allocation, and its e2e matrix runs serially. Keep the final workflow URL,
-actual checkout commit, image RepoDigest, setup evidence and complete Gate
-artifact. A workflow is qualified only by its actual jobs and unchanged
+The full platform workflow uses one MUSA runner and one container for unit,
+functional, serial e2e, benchmark and the original adaptation Gate. Its native
+PCI check verifies the actual four-card mapping before the test stages; the
+allocation must belong to this executing runner, rather than an earlier
+ephemeral probe. Workflow concurrency serializes these MUSA runs, while the
+operator confirms exclusive use of the assigned cards. Keep the final workflow
+URL, actual checkout commit, image RepoDigest, setup evidence and complete
+suite/Gate artifact. A workflow is qualified only by its actual jobs and unchanged
 four-route Gate: 104 requests, 1040 checks, 20 JUnit cases, 32 complete streams
 and 52/208 graph joins. Probe-only, ordinary build or an earlier private Gate
 does not substitute for this new image/CI result.
@@ -465,16 +467,23 @@ references in GitHub's container options.
 
 The `/data` bind is read-only. Setup builds and installs ordinary wheels into
 a fresh private venv under `RUNNER_TEMP`; it does not edit inherited vendor
-packages. The existing unit, functional, e2e and benchmark jobs retain their
-interfaces. The graph functional helper now exercises TorchMUSA rather than
+packages. MUSA runs the existing unit, functional, e2e and benchmark commands
+serially in one runner/container job, with separate stage report directories.
+Other backends retain their reusable jobs. Docker's private PID namespace keeps
+the existing case cleanup within this job's own container. The wrapper records
+owned-child reaping and blocks further GPU stages on timeout or uncertain cleanup.
+The graph functional helper now exercises TorchMUSA rather than
 skipping the MUSA platform. Its small tensor test is additional component
 validation; it does not replace model Gate acceptance.
 
-The dedicated self-hosted Gate job has a 500-minute outer budget covering all
-four 6900-second route limits and setup/cleanup/artifacts. The runner keeps
-individual readiness and pytest deadlines within that budget. This uses the
-[job timeout setting](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idtimeout-minutes),
-which is separate from the individual step timeout setting.
+The single self-hosted MUSA job has a 1200-minute outer budget for the current
+suite and Gate. Functional and benchmark stages keep their 15/30-minute bounds;
+each E2E group keeps the timeout from its existing matrix, including model
+checking. The original Gate step keeps its 500-minute budget and all four
+6900-second route limits, readiness and pytest deadlines. The workflow's
+[job timeout setting](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idtimeout-minutes)
+is separate from these step/group bounds. A failed earlier test remains a failed
+job even when the subsequent original Gate executes to preserve its evidence.
 
 MUSA discovery remains disabled in `.github/configs/platforms.yml` until the
 runner's image, allocation, wheel, models and full Gate are validated. Configure
