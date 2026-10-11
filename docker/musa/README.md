@@ -58,13 +58,15 @@ python3 -I -B make_stack_manifest.py --plugin-commit "$PLUGIN_COMMIT" \
 python3 -I -B prepare_context.py --manifest "$STACK_MANIFEST" \
   --wheelhouse "$PRIVATE_WHEELHOUSE" --output "$PRIVATE_BUILD_CONTEXT"
 MUSA_BUILD_CONTEXT="$PRIVATE_BUILD_CONTEXT" bash docker/build.sh \
-  --platform musa --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl \
+  --platform musa --target ci --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl \
   --image-tag "v0.28.0-musa-ci-20261011-${PLUGIN_COMMIT:0:12}"
 ```
 
 Use the printed Docker argv prefix plus `--tag "$UNIQUE_IMAGE_TAG"` and the
-context path. Use the main MUSA CI registry namespace:
-`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-musa-ci-20261011-<commit12>`.
+context path. Use the ordinary MUSA image registry namespace:
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci-20261011-<commit12>`.
+The current published tag and immutable RepoDigest are in the
+[MUSA deployment guide](../../docs/usage/musa.md#ordinary-stack-image-and-ci-dispatch).
 Run long remote builds in tmux and preserve stdout, stderr and exit files.
 `--network=none` applies to Docker RUN instructions, and the build uses the
 locally verified base with `--pull=false`. No source or wheel download occurs.
@@ -94,6 +96,9 @@ and binds CI/docs to that immutable digest after a successful push.
 
 The image exposes `MUSA_CI_EMPTY_WHEEL`, its exact SHA and the `latest`
 dependency profile, `/opt/musa/dependency-manifest.json` and its literal SHA.
+The CI configuration defaults to this published image and those five software
+values; the deployment guide records their exact paths and whole-file hashes.
+Hardware allocation still requires operator-supplied JSON for the executing runner.
 That manifest contains exactly FlagGems/FlagTree/PyYAML and their source lineage.
 CI rebuilds the checked-out FL and observer as ordinary wheels for its actual
 merge/branch SHA and installs all six wheels in its fresh venv. A nested venv's

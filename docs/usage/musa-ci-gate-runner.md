@@ -10,15 +10,21 @@ labelled filesystem fixtures and do not certify GPU behavior.
 
 The [ordinary-image and dispatch instructions](musa.md#ordinary-stack-image-and-ci-dispatch)
 describe the six-wheel `/opt/musa/venv` runtime, immutable image binding and
-per-run four-device allocation. The workflow entry is `ci.yml`; a dispatch
+per-run four-device allocation. CI defaults to the published image, its pinned
+empty wheel and the `latest` manifest under `/opt/musa`, with literal whole-file
+SHA values from `.github/configs/musa.yml`. Hardware allocation remains an
+operator-supplied JSON for the actual executing runner. The workflow entry is
+`ci.yml`; a dispatch
 selects `platform=musa` and either inventory-only `musa_probe_only=true` or a
 full run with an explicit `musa_allocation` JSON. The inventory job reads
 sanitized resource observations without a GPU container or Torch import;
 its success is not inference or Gate acceptance.
 
 The committed-source FL/observer ordinary builds and local image CPU
-installation checks passed. Registry publication is blocked by an ordinary
-Docker push `unauthorized` response, so the new image's full GPU CI has not run.
+installation checks passed. The ordinary image is published, with a successful
+normal Docker push and verified manifest/config identity. Use the immutable
+RepoDigest in the deployment guide. The new image's full MUSA GPU CI has not run;
+the executing runner's exclusive four-card allocation remains to be confirmed.
 The inventory-only [run 38108902958](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108902958)
 completed successfully at `2b6bee63ad1b852021a9e166195aa3fac75443f1`.
 Lint, ordinary build, discovery and runner probe passed; `test-musa` was

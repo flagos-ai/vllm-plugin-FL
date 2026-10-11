@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import stat
 import tarfile
 from pathlib import Path, PurePosixPath
@@ -22,6 +23,16 @@ PROFILES = {
         "source-patch-manifest-latest-bfc6-ndsafe512.json",
         "8bc1e37ac07e2473e58ad0f370008034d1aaf33415b89b873bc3a3001f8793db",
     ),
+}
+PATCH_FILES = {
+    "production.patch": {
+        "bytes": 4900,
+        "sha256": "d27c93abc17cfcaf0d50556e15461f1fbb14bb58a5403e2fd4e3bc6fae8e3f12",
+    },
+    "musa-nd-safe512.patch": {
+        "bytes": 1449,
+        "sha256": "b2a06482710863ac5707609f6500058ffeceaa413edc814e64f88b3272fff258",
+    },
 }
 BUNDLE = Path(__file__).resolve(strict=True).parent
 
@@ -110,6 +121,87 @@ def load_profile(profile):
     return manifest, manifest_fp
 
 
+def parse_patch(body):
+    """Accept only the fixed unified-diff format, preserving every source byte."""
+    lines = body.splitlines(keepends=True)
+    files = {}
+    index = 0
+    while index < len(lines):
+        require(lines[index].startswith(b"--- a/"), "Exact patch old path")
+        name = lines[index][6:-1].decode("utf-8")
+        require(
+            lines[index] == f"--- a/{name}\n".encode()
+            and index + 1 < len(lines)
+            and lines[index + 1] == f"+++ b/{name}\n".encode()
+            and name not in files,
+            "Exact unique patch paths",
+        )
+        index += 2
+        hunks = []
+        while index < len(lines) and lines[index].startswith(b"@@ "):
+            match = re.fullmatch(rb"@@ -(\d+),(\d+) \+(\d+),(\d+) @@\n", lines[index])
+            require(match is not None, "Exact patch hunk header")
+            old_start, old_count, new_start, new_count = map(int, match.groups())
+            require(old_start > 0 and new_start > 0, "Positive patch hunk positions")
+            index += 1
+            old, new = [], []
+            while index < len(lines) and lines[index][:1] in {b" ", b"+", b"-"}:
+                if lines[index].startswith(b"--- a/"):
+                    break
+                line = lines[index]
+                require(line.endswith(b"\n"), "Complete patch line")
+                if line[:1] != b"+":
+                    old.append(line[1:])
+                if line[:1] != b"-":
+                    new.append(line[1:])
+                index += 1
+            require(
+                len(old) == old_count and len(new) == new_count,
+                "Exact patch hunk line counts",
+            )
+            hunks.append((old_start, new_start, old, new))
+        require(hunks, "Patch file must have hunks")
+        files[name] = hunks
+    require(files, "Patch must contain files")
+    return files
+
+
+def apply_exact_patch(body, hunks, expected):
+    """Use the specified positions only; no offset search, context fuzz or Git."""
+    original = body.splitlines(keepends=True)
+    result = []
+    cursor = 0
+    for old_start, new_start, old, new in hunks:
+        start = old_start - 1
+        require(cursor <= start <= len(original), "Ordered exact patch position")
+        result.extend(original[cursor:start])
+        require(len(result) == new_start - 1, "Exact patch new position")
+        require(original[start : start + len(old)] == old, "Exact patch context")
+        result.extend(new)
+        cursor = start + len(old)
+    result.extend(original[cursor:])
+    payload = b"".join(result)
+    require(
+        {"bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        == expected,
+        "Whole-file patch postimage mismatch",
+    )
+    return payload
+
+
+def load_patches(profile):
+    names = ["production.patch"]
+    if profile == "latest-bfc6-ndsafe512":
+        names.append("musa-nd-safe512.patch")
+    files, proofs = {}, {}
+    for name in names:
+        body, proofs[name] = regular_bytes(BUNDLE / name, 64 * 1024, PATCH_FILES[name])
+        parsed = parse_patch(body)
+        require(not files.keys() & parsed.keys(), "No duplicate patch file")
+        files.update(parsed)
+    return files, proofs
+
+
 def prepare(archive_path, output_path, variant, profile=DEFAULT_PROFILE):
     manifest, manifest_fp = load_profile(profile)
     require(variant in {"master", "corrected"}, "Unknown variant")
@@ -120,16 +212,13 @@ def prepare(archive_path, output_path, variant, profile=DEFAULT_PROFILE):
         if profile == "latest-bfc6-ndsafe512"
         else ("four_production_replacements", 4)
     )
-    patch_inputs = []
-    for row in manifest[replacement_key]:
-        payload, payload_fp = regular_bytes(
-            BUNDLE / "patch-inputs" / row["input_name"], 128 * 1024, row["after"]
-        )
-        patch_inputs.append((row, payload, payload_fp))
+    replacements = manifest[replacement_key]
+    patch_files, patch_proofs = load_patches(profile)
     require(
-        len(patch_inputs) == replacement_count
-        and len({row[0]["source_path"] for row in patch_inputs}) == replacement_count,
-        "Exact profile production-file count",
+        len(replacements) == replacement_count
+        and len({row["source_path"] for row in replacements}) == replacement_count
+        and set(patch_files) == {row["source_path"] for row in replacements},
+        "Exact profile production-file count and patch scope",
     )
     output = Path(output_path).absolute()
     require(
@@ -189,12 +278,18 @@ def prepare(archive_path, output_path, variant, profile=DEFAULT_PROFILE):
         require(total == expected["expanded_bytes"], "Exact expanded byte total")
     before = inventory(source)
     require(len(before) == expected["regular_files"], "Exact fresh regular file count")
-    for row, _, _ in patch_inputs:
+    patch_inputs = []
+    for row in replacements:
         require(
             before[row["source_path"]] == row["preimage"], "Exact production preimage"
         )
+        body, _ = regular_bytes(
+            source / row["source_path"], 128 * 1024, row["preimage"]
+        )
+        payload = apply_exact_patch(body, patch_files[row["source_path"]], row["after"])
+        patch_inputs.append((row, payload))
     if variant == "corrected":
-        for row, payload, _ in patch_inputs:
+        for row, payload in patch_inputs:
             path = source / row["source_path"]
             regular_bytes(path, 128 * 1024, row["preimage"])
             fd = os.open(path, os.O_WRONLY | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0))
@@ -206,7 +301,7 @@ def prepare(archive_path, output_path, variant, profile=DEFAULT_PROFILE):
     after = inventory(source)
     changed = sorted(name for name in before if before[name] != after.get(name))
     allowed = (
-        sorted(row["source_path"] for row, _, _ in patch_inputs)
+        sorted(row["source_path"] for row, _ in patch_inputs)
         if variant == "corrected"
         else []
     )
@@ -221,6 +316,7 @@ def prepare(archive_path, output_path, variant, profile=DEFAULT_PROFILE):
         "source_commit": manifest["source_commit"],
         "archive": archive_fp,
         "manifest": manifest_fp,
+        "patches": patch_proofs,
         "variant": variant,
         "explicit_archive_version": manifest["versions"][variant],
         "SCM_version_is_true_Git_version": False,

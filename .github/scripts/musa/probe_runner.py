@@ -2,7 +2,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 """Read-only runner inventory without Torch imports or accelerator allocation.
 
-Only sanitized resource numbers, PCI IDs, runtime names, and a hostname digest
+Only sanitized resource numbers, PCI IDs, runtime names, and identity digests
 are emitted. Process IDs, process arguments, account names, environment values,
 Docker configuration paths, and raw vendor query output are never retained.
 """
@@ -39,6 +39,17 @@ def query(argv):
         status["within_output_cap"] = False
         return None, status
     return result.stdout.decode("utf-8", "replace"), status
+
+
+def daemon_id_digest(text):
+    """Hash the JSON daemon ID without retaining its raw identity in reports."""
+    try:
+        value = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9:_.-]{1,256}", value):
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def parse_gmi(text):
@@ -204,6 +215,13 @@ def main():
                 )
         except (ValueError, TypeError):
             runtime_status["parse_ok"] = False
+    identity_text, identity_status = query(
+        ["docker", "info", "--format", "{{json .ID}}"]
+    )
+    identity_digest = None
+    if identity_text is not None:
+        identity_digest = daemon_id_digest(identity_text)
+        identity_status["parse_ok"] = identity_digest is not None
     result = {
         "schema_version": 1,
         "probe_time_utc_seconds": time.time(),
@@ -218,6 +236,8 @@ def main():
         "vendor_resources": gmi,
         "docker_query_status": runtime_status,
         "docker_runtime_names": runtimes,
+        "docker_daemon_query_status": identity_status,
+        "docker_daemon_id_sha256": identity_digest,
         "candidate_idle_devices": candidate_devices(nodes, gmi, fd_report),
         "allocation_reserved": False,
         "GPU_Gate_passed": False,

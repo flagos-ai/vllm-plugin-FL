@@ -50,7 +50,6 @@ extend-exclude = [
     "vllm_fl/**",
     "tests/",
     "tests/**",
-    # Verbatim upstream dependency postimages and patches are SHA-bound inputs.
-    "tools/musa_dependency_recipe/patch-inputs/*.py.raw",
+    # Verbatim upstream dependency patches are SHA-bound inputs.
     "tools/musa_dependency_recipe/*.patch",
 ]

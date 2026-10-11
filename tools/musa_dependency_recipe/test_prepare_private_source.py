@@ -49,12 +49,10 @@ class FixedProfileContract(unittest.TestCase):
         rows = safe["six_production_replacements"]
         self.assertEqual(len(rows), 6)
         self.assertEqual(len({row["source_path"] for row in rows}), 6)
-        for row in rows:
-            body = (HERE / "patch-inputs" / row["input_name"]).read_bytes()
-            self.assertEqual(
-                {"bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()},
-                row["after"],
-            )
+        files, proofs = recipe.load_patches("latest-bfc6-ndsafe512")
+        self.assertEqual(set(files), {row["source_path"] for row in rows})
+        self.assertEqual(proofs, recipe.PATCH_FILES)
+        self.assertFalse(any(HERE.glob("patch-inputs/*.py.raw")))
         self.assertFalse(safe["compiler_root_cause_fixed"])
         self.assertFalse(safe["actual_CPU_ordinary_repack_and_install"]["GPU_executed"])
 
@@ -95,6 +93,61 @@ class FixedProfileContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Whole-file pin mismatch"):
                 recipe.prepare(archive, output, "corrected", "latest-bfc6")
             self.assertFalse(output.exists())
+
+
+class ExactPatchContract(unittest.TestCase):
+    BODY = b"before\nold\nafter\n"
+    PATCH = (
+        b"--- a/file.py\n+++ b/file.py\n@@ -1,3 +1,3 @@\n before\n-old\n+new\n after\n"
+    )
+    AFTER = {
+        "bytes": 17,
+        "sha256": hashlib.sha256(b"before\nnew\nafter\n").hexdigest(),
+    }
+
+    def apply(self, patch_body=None, body=None, expected=None):
+        hunks = recipe.parse_patch(self.PATCH if patch_body is None else patch_body)
+        return recipe.apply_exact_patch(
+            self.BODY if body is None else body,
+            hunks["file.py"],
+            self.AFTER if expected is None else expected,
+        )
+
+    def test_exact_patch_preserves_bytes(self):
+        self.assertEqual(self.apply(), b"before\nnew\nafter\n")
+
+    def test_context_is_not_fuzzed(self):
+        with self.assertRaisesRegex(ValueError, "Exact patch context"):
+            self.apply(body=b"different\nold\nafter\n")
+
+    def test_old_position_is_not_searched(self):
+        with self.assertRaisesRegex(ValueError, "Exact patch context"):
+            self.apply(body=b"prefix\n" + self.BODY)
+
+    def test_new_position_is_exact(self):
+        with self.assertRaisesRegex(ValueError, "Exact patch new position"):
+            self.apply(patch_body=self.PATCH.replace(b"+1,3", b"+2,3"))
+
+    def test_hunk_count_and_duplicate_file_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Exact patch hunk line counts"):
+            self.apply(patch_body=self.PATCH.replace(b"-1,3", b"-1,4"))
+        with self.assertRaisesRegex(ValueError, "Exact unique patch paths"):
+            recipe.parse_patch(self.PATCH + self.PATCH)
+
+    def test_wrong_postimage_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Whole-file patch postimage mismatch"):
+            self.apply(expected={"bytes": 17, "sha256": "0" * 64})
+
+    def test_fixed_patch_tamper_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "production.patch").write_bytes(
+                (HERE / "production.patch").read_bytes() + b" "
+            )
+            with (
+                patch.object(recipe, "BUNDLE", Path(folder)),
+                self.assertRaisesRegex(ValueError, "Whole-file pin mismatch"),
+            ):
+                recipe.load_patches("latest-bfc6")
 
 
 if __name__ == "__main__":

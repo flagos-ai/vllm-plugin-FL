@@ -20,19 +20,30 @@ and editable `.pth` hooks.
 
 The new FL and observer ordinary source builds completed from committed source
 `c35aade3c23e59533260578081a8161c7fb88179`, with actual versions
-`0.0.0+gc35aade3c` and `0.1.0`. Building these wheels is separate from publishing
-the runtime image or validating a workflow. The planned tag
-`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-musa-ci-20261011-c35aade3c23e-b02`
-identifies the candidate selected for publication. Its completed local image,
-`sha256:c9c56cb3553eefab5657074d66c6ce288ae56f63e92f00c4af70da14aad3c9e4`, passed the ordinary-stack CPU
-installation checks. The registry rejected the ordinary Docker push as
-`unauthorized`; the candidate tag is not published. A working publication
-route and an actual immutable RepoDigest are required before image-backed
-GPU CI can run. The local image ID is not a registry digest or full hardware
-qualification.
+`0.0.0+gc35aade3c` and `0.1.0`. The ordinary image was published as
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci-20261011-c35aade3c23e-p03`.
+Its immutable RepoDigest is
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06`.
+The normal Docker push completed successfully, and the published manifest/config
+matched the accepted local image `sha256:c9c56cb3553eefab5657074d66c6ce288ae56f63e92f00c4af70da14aad3c9e4`
+with the same embedded source and six-wheel stack. Ordinary-stack CPU installation
+checks passed. The new image's full MUSA GPU CI has not run; the executing runner's
+exclusive four-card allocation remains to be confirmed.
 
-After publication, select the actual immutable `repository@sha256:digest`
-through `MUSA_CI_IMAGE` or the verified `.github/configs/musa.yml` default.
+The `.github/configs/musa.yml` default selects this immutable RepoDigest;
+`MUSA_CI_IMAGE` can select a separately validated image. Its software defaults are:
+
+| Variable | Default |
+|---|---|
+| `MUSA_CI_EMPTY_WHEEL` | `/opt/musa/wheelhouse/vllm-0.28.0+empty-cp310-cp310-linux_x86_64.whl` |
+| `MUSA_CI_EMPTY_WHEEL_SHA256` | `2306c2ea119182a5690eb05776cdffa4ba097a92ba13114a6cb49722d0b53fec` |
+| `MUSA_CI_DEPENDENCY_PROFILE` | `latest` |
+| `MUSA_CI_DEPENDENCY_MANIFEST` | `/opt/musa/dependency-manifest.json` |
+| `MUSA_CI_DEPENDENCY_MANIFEST_SHA256` | `cd5b1e7a1c232c60df49c1384278a924e17e2a0bc71f9546fe4f8516ad9d5cf2` |
+
+The manifest SHA covers the whole JSON file. These software defaults do not
+allocate GPUs; full hardware dispatch still requires an operator-supplied
+`musa_allocation` JSON for the actual executing runner.
 The image's build commit describes its embedded FL/observer wheels. CI setup
 rebuilds both as ordinary wheels from the actual checked-out CI commit and
 creates a fresh venv, rather than accepting an older embedded plugin as the
@@ -75,6 +86,11 @@ of runner labels and the two `/data/` model paths. The allowed field names are
 `model_27b` and `model_35b_a3b`; duplicate or unknown fields are rejected. The
 allocation applies to this dispatch and does not rewrite shared repository
 variables. Confirm exclusive use of those four devices before the full run.
+
+The existing allocation keys `model_27b` and `model_35b_a3b` set
+`MUSA_GATE_MODEL_27B` and `MUSA_GATE_MODEL_35B_A3B`, so common MUSA E2E
+and the original Gate use the same model source paths. If those environment
+variables are absent, the common catalog paths remain the defaults.
 
 ```bash
 gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
@@ -167,8 +183,9 @@ The recipe profile selects source preparation. CI instead consumes the
 generic `latest` interface and an actual SHA-bound manifest containing exactly
 Gems, Tree and PyYAML wheels, their actual versions/bytes/SHA256, five fixed
 vendor fingerprints and honest `source_lineage` for source builds and repacks.
-It does not fetch HEAD or derive lineage from a wheel version. Before the
-existing workflow setup step, set:
+It does not fetch HEAD or derive lineage from a wheel version. CI defaults
+to the image's manifest and literal whole-file SHA listed above. For a separately
+prepared profile, set its actual manifest before workflow setup:
 
 ```bash
 export MUSA_CI_DEPENDENCY_PROFILE=latest
@@ -274,11 +291,12 @@ streaming aggregation hashes; they are not a process-memory bound.
 | Resource limits | 24 CPUs, 256 GiB memory, 4096 PIDs, private IPC, 16 GiB shared memory |
 | JIT cache | Private 8 GiB tmpfs with `rw,exec,nosuid,nodev` |
 
-These values identify the environment that was inspected. They do not identify
-a published v0.28.0 MUSA image. The existing CI tag
-`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci` remains a vendor
-baseline; it must be validated with the selected empty wheel and candidate.
-`MUSA_CI_IMAGE` can select another validated image or digest.
+These values identify the historical environment that was inspected. The
+historical vendor tag
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci` remains a baseline
+reference and requires validation with the selected empty wheel and candidate.
+The current CI default is the published ordinary image and immutable RepoDigest
+[above](#ordinary-stack-image-and-ci-dispatch).
 
 FlagGems and FlagTree were present and imported from the vendor image. No
 usable FlagCX library/wrapper pair was found in the bounded directories
@@ -335,11 +353,12 @@ prove accelerator inference.
 
 ## Select the CI dependency profile
 
-`MUSA_CI_DEPENDENCY_PROFILE=baseline` is the default: inherit the selected
-image's FlagGems and FlagTree and retain the historical baseline. To test a
-curated update, set `MUSA_CI_DEPENDENCY_PROFILE=latest`,
-`MUSA_CI_DEPENDENCY_MANIFEST=/data/.../dependency-profile.json` and
-`MUSA_CI_DEPENDENCY_MANIFEST_SHA256` to that complete JSON file's SHA256.
+`MUSA_CI_DEPENDENCY_PROFILE=latest` is the CI default, with the published
+image's fixed `/opt/musa/dependency-manifest.json` and literal whole-file SHA
+listed above. The historical `baseline` profile remains an explicit comparison
+choice. For separately prepared dependencies, supply the actual manifest path
+through `MUSA_CI_DEPENDENCY_MANIFEST` and its complete JSON file SHA256 through
+`MUSA_CI_DEPENDENCY_MANIFEST_SHA256`.
 The manifest supplies exactly three existing ordinary wheels (FlagGems, a
 **MUSA** FlagTree wheel, and PyYAML 6.0.1), with each exact version, byte size,
 whole SHA256 and source lineage. It also pins the vendor Torch/TorchMUSA 2.9.0

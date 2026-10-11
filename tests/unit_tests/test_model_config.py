@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import textwrap
+from dataclasses import asdict
+
+import pytest
 
 from tests.utils import platform_config
 from tests.utils.model_config import ModelConfig
@@ -136,3 +139,102 @@ def test_load_without_matching_device_case_override_uses_base_config(
 
     assert cfg.engine["tensor_parallel_size"] == 2
     assert cfg.engine["gpu_memory_utilization"] == 0.95
+
+
+@pytest.mark.parametrize(
+    ("case", "variable", "path"),
+    [
+        ("27b_tp4_eager", "MUSA_GATE_MODEL_27B", "/data/models/Qwen3.6-27B"),
+        (
+            "35b_a3b_tp4_eager",
+            "MUSA_GATE_MODEL_35B_A3B",
+            "/data/models/Qwen3.6-35B-A3B",
+        ),
+    ],
+)
+def test_musa_allocation_paths_only_change_selected_model(
+    monkeypatch, case, variable, path
+):
+    monkeypatch.delenv("MUSA_GATE_MODEL_27B", raising=False)
+    monkeypatch.delenv("MUSA_GATE_MODEL_35B_A3B", raising=False)
+    catalog = ModelConfig.load("qwen3_6", case, platform="musa", device="s5000")
+    monkeypatch.setenv("MUSA_GATE_MODEL_27B", "/data/unused/27B")
+    monkeypatch.setenv("MUSA_GATE_MODEL_35B_A3B", "/data/unused/35B-A3B")
+    monkeypatch.setenv(variable, path)
+    resolved = ModelConfig.load("qwen3_6", case, platform="musa", device="s5000")
+    expected = asdict(catalog)
+    expected["model"] = path
+    assert asdict(resolved) == expected
+    assert resolved.engine_kwargs()["model"] == path
+    assert resolved.serve_args() == catalog.serve_args()
+    assert resolved.engine["tensor_parallel_size"] == 4
+    assert resolved.engine["gpu_memory_utilization"] == 0.90
+    assert resolved.engine["trust_remote_code"] is True
+
+
+@pytest.mark.parametrize("case", ["27b_tp4_eager", "35b_a3b_tp4_eager"])
+def test_cuda_ignores_musa_allocation_paths(monkeypatch, case):
+    monkeypatch.delenv("MUSA_GATE_MODEL_27B", raising=False)
+    monkeypatch.delenv("MUSA_GATE_MODEL_35B_A3B", raising=False)
+    catalog = ModelConfig.load("qwen3_6", case, platform="cuda", device="a100")
+    monkeypatch.setenv("FL_TEST_PLATFORM", "musa")
+    monkeypatch.setenv("MUSA_GATE_MODEL_27B", "/data/replacement/27B")
+    monkeypatch.setenv("MUSA_GATE_MODEL_35B_A3B", "/data/replacement/35B-A3B")
+    resolved = ModelConfig.load("qwen3_6", case, platform="cuda", device="a100")
+    assert asdict(resolved) == asdict(catalog)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "relative/model",
+        "/tmp/model",
+        "/data/../model",
+        "/data/model name",
+        "/data/model;command",
+    ],
+)
+def test_musa_allocation_path_validation_fails_closed(monkeypatch, path):
+    monkeypatch.setenv("MUSA_GATE_MODEL_27B", path)
+    with pytest.raises(ValueError, match="approved absolute /data path"):
+        ModelConfig.load("qwen3_6", "27b_tp4_eager", platform="musa", device="s5000")
+
+
+def test_unmapped_musa_case_keeps_catalog_path(monkeypatch):
+    monkeypatch.delenv("MUSA_GATE_MODEL_27B", raising=False)
+    catalog = ModelConfig.load(
+        "qwen3_6", "27b_tp2_eager", platform="musa", device="s5000"
+    )
+    monkeypatch.setenv("MUSA_GATE_MODEL_27B", "/data/replacement/27B")
+    resolved = ModelConfig.load(
+        "qwen3_6", "27b_tp2_eager", platform="musa", device="s5000"
+    )
+    assert asdict(resolved) == asdict(catalog)
+
+
+def test_musa_platform_environment_uses_same_allocation_path(monkeypatch):
+    monkeypatch.setenv("FL_TEST_PLATFORM", "musa")
+    monkeypatch.setenv("FL_TEST_DEVICE", "s5000")
+    monkeypatch.setenv("MUSA_GATE_MODEL_27B", "/data/models/Qwen3.6-27B")
+    resolved = ModelConfig.load("qwen3_6", "27b_tp4_eager")
+    assert resolved.model == "/data/models/Qwen3.6-27B"
+
+
+def test_other_model_family_keeps_catalog_path(tmp_path, monkeypatch):
+    _write(
+        tmp_path / "other_model" / "27b_tp4_eager.yaml",
+        """
+        llm:
+          model: "/data/catalog/other-model"
+          tensor_parallel_size: 4
+        """,
+    )
+    monkeypatch.setenv("MUSA_GATE_MODEL_27B", "/data/replacement/27B")
+    resolved = ModelConfig.load(
+        "other_model",
+        "27b_tp4_eager",
+        models_dir=tmp_path,
+        platform="musa",
+        device="s5000",
+    )
+    assert resolved.model == "/data/catalog/other-model"

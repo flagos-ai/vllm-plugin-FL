@@ -1,6 +1,6 @@
 # Pinned ordinary-wheel source recipe
 
-This bundle prepares reviewed FlagGems source in new private trees. It supports `latest-bfc6` and opt-in `latest-bfc6-ndsafe512` (Gems HEAD `bfc6c49d2c4d06e5deac9784f203730c8372a84a`) and retains `historical-cf174` as the default. It does not edit installed FlagGems, Torch, TorchMUSA or FlagTree files.
+This bundle prepares reviewed FlagGems source in new private trees. It supports `latest-bfc6` and opt-in `latest-bfc6-ndsafe512` (Gems HEAD `bfc6c49d2c4d06e5deac9784f203730c8372a84a`) and retains `historical-cf174` as the source-preparation script default. CI uses its separate `latest` software profile. It does not edit installed FlagGems, Torch, TorchMUSA or FlagTree files.
 
 The replacements carry the three production changes from [PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894), replace the shared public MHA property-query argument with `q.device`, and use the active runtime accelerator in `_pin_memory` while retaining explicit CPU rejection. The shared `flash_api.py` is the PR postimage plus the device-query correction, rather than an exact PR postimage. The enflame file is retained because it belongs to the reviewed PR; this does not claim that its backend was tested on MUSA. The entire PR head is not installed. The ineffective masked-Q padding experiment is excluded. The public-source accelerator checks are tracked in [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973); issue state is not a Gate prerequisite, and the issue does not identify a cause of the model graph fault.
 
@@ -19,7 +19,7 @@ ordinary stack.
 
 ## Prepare the latest private source trees
 
-From the repository root, run `cd tools/musa_dependency_recipe`. The four raw postimages are in `patch-inputs/`; `production.patch` and the fixed manifests are beside the script. Use Python 3.10+ and an existing private parent; both output leaves must be new. The helper uses only the standard library and imports no accelerator packages.
+From the repository root, run `cd tools/musa_dependency_recipe`. The fixed manifests and two small patches are beside the script. The helper verifies each patch SHA256, applies hunks only at their exact original and final line numbers with complete context, and verifies every whole-file postimage SHA256. It performs no offset search or context fuzz. The manifest `input_name` fields retain the former postimage identifiers for historical evidence; no copied source payloads are required. Use Python 3.10+ and an existing private parent; both output leaves must be new. The helper uses only the standard library and imports no accelerator packages.
 
 ```bash
 curl --fail --location --output FlagGems-bfc6c49.tar.gz \
@@ -155,7 +155,7 @@ Create a fresh private venv from the fixed Python 3.10 SDK/TorchMUSA interpreter
   "$CORRECTED_GEMS_WHEEL" "$MUSA_FLAGTREE_WHEEL" "$PYYAML_WHEEL"
 ```
 
-Validate every installed RECORD/payload, direct-url wheel SHA, private module origin and version. Recheck SDK/Torch/TorchMUSA/vendor fingerprints unchanged. The CI interfaces are `MUSA_CI_DEPENDENCY_PROFILE=latest`, `MUSA_CI_DEPENDENCY_MANIFEST` and `MUSA_CI_DEPENDENCY_MANIFEST_SHA256`; the manifest must use the actual corrected Gems/Tree/PyYAML wheel pins and fixed vendor fingerprints. Source lineage requires preserved source/build receipts; the manifest alone does not derive it. Baseline remains the CI default.
+Validate every installed RECORD/payload, direct-url wheel SHA, private module origin and version. Recheck SDK/Torch/TorchMUSA/vendor fingerprints unchanged. The CI interfaces are `MUSA_CI_DEPENDENCY_PROFILE=latest`, `MUSA_CI_DEPENDENCY_MANIFEST` and `MUSA_CI_DEPENDENCY_MANIFEST_SHA256`; the manifest must use the actual corrected Gems/Tree/PyYAML wheel pins and fixed vendor fingerprints. Source lineage requires preserved source/build receipts; the manifest alone does not derive it. CI defaults to the published image's `latest` manifest at `/opt/musa/dependency-manifest.json` and its literal whole-file SHA, documented in the deployment guide. This is separate from the historical source-preparation script default.
 
 ## Ordinary-stack image handoff
 
@@ -166,8 +166,9 @@ actual wheel bytes/SHA, build receipts and source/repack lineage; the separate
 three-wheel dependency manifest remains the CI `latest` interface.
 CI creates its own fresh venv and rebuilds FL/observer from the actual checkout,
 then explicitly reinstalls the image's dependency wheels rather than relying
-on nested-venv inheritance. Publishing an image and passing its full workflow
-are separate from the recorded CPU07 Gate and remain pending in this record.
+on nested-venv inheritance. The ordinary image is published with verified
+manifest/config identity. Its full MUSA GPU workflow remains pending and is
+separate from the recorded CPU07 Gate.
 Follow the [image and dispatch guide](../../docs/usage/musa.md#ordinary-stack-image-and-ci-dispatch)
 for an immutable digest, read-only runner probe and explicit four-device run.
 
@@ -177,4 +178,4 @@ CPU06 successfully installed seven ordinary wheels; only the two latest dependen
 
 Earlier operator evidence used source `7599dd1` and published MUSA Tree `0.7.0+mthreads3.6`: pin-memory controls passed 44/44; carrying PR #6894 changed the same suite from 10/36 to 30/36, including all 24 direct and six graph cases. Six public MHA numerical failures remained, and Q padding did not improve them. Those results do not establish acceptance on the new HEADs. The historical cf174/`ba25a9551b2e5157d843affe6f4c2cada1dcfde8` migrated baseline remains full Gate FAIL (35/104 quality passes). Detailed runtime54r2/Tiny58/runtime60 and original stream/cleanup boundaries are preserved in [the runner validation history](../../docs/usage/musa-ci-gate-runner.md#validation-history-and-candidate-boundaries). No requests, quality thresholds or observer acceptance rules are relaxed.
 
-The six portable profile/failure tests run with `python3 -I -B tools/musa_dependency_recipe/test_prepare_private_source.py` from the repository root. Actual source-preparation checks are separate from wheel building or accelerator execution.
+The portable profile, exact-patch and failure tests run with `python3 -I -B tools/musa_dependency_recipe/test_prepare_private_source.py` from the repository root. Actual source-preparation checks are separate from wheel building or accelerator execution.
