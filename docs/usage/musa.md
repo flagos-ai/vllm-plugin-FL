@@ -5,6 +5,56 @@ plugin as ordinary wheels in a private environment that inherits the MUSA
 image's vendor packages. The older MUSA guide using vLLM 0.24.0 describes the
 same installation pattern; its vLLM version and image are separate baselines.
 
+## Additional FlagGems and FlagTree modifications
+
+The ordinary stack uses explicit private dependency profiles. A public commit
+pin alone does not include these modifications. Install the verified wheels
+and retain their actual hashes and source/repack lineage; do not label the
+modified wheels as unpatched upstream builds.
+
+FlagGems starts from `bfc6c49d2c4d06e5deac9784f203730c8372a84a` and changes
+exactly six original source files:
+
+| Source file | Modification |
+| --- | --- |
+| `src/flag_gems/ops/flash_api.py` | Carry PR #6894's split-KV head stride and combine dimensions; additionally query properties using `q.device` instead of a CUDA literal. |
+| `src/flag_gems/ops/flash_kernel.py` | Carry PR #6894's decoded batch/head/query output addressing with actual BSHD output strides. |
+| `src/flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py` | Carry the third PR #6894 production postimage. This preserves the reviewed patch scope; it does not certify Enflame hardware. |
+| `src/flag_gems/ops/_pin_memory.py` | Validate explicit accelerators against the active runtime device; retain CPU/non-strided rejection. |
+| `src/flag_gems/ops/mul.py` | Restrict MUSA's shared `mul_generic_nd_kernel` to block 512, four warps and three stages, with FlagTune expansion disabled for this entry. Preserve its kernel body and other backend configurations. |
+| `src/flag_gems/utils/libentry.py` | Reraise native MUSA `illegal memory access` before the compile-failure fallback benchmarks another configuration. |
+
+The three reviewed production changes from
+[PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894) are pinned at
+`4e330227564ccc7f6a373be2d48a5d2cb7f2823e`; the entire PR head is not installed.
+The shared `flash_api.py` also carries the separate device correction.
+[FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973) tracks the
+device literals and is not an extra Gate prerequisite.
+[FlagGems #7005](https://github.com/flagos-ai/FlagGems/issues/7005) tracks native
+error handling. The observed generic fixed-1024 NDmul failure is tracked in
+[FlagTree #1346](https://github.com/flagos-ai/FlagTree/issues/1346); Torch/native
+reference, public autotuned and fixed-256/fixed-512 checks passed in that
+reduced matrix. The block-512 setting is a workaround, not proof of a compiler
+lowering root-cause fix.
+
+FlagTree starts from `69148faf5cc03edb0a5737abd4b75b691132cea9` and changes
+only `third_party/mthreads/bin/RegisterTritonDialects.h`. Before the six
+optional Proton headers, `#else` becomes `#elif defined(__PROTON__)`. Build
+with `FLAGTREE_BACKEND=mthreads`, `TRITON_BUILD_FLAGPRISM=OFF` and
+`TRITON_BUILD_PROTON=OFF`. The MUSA registration and enabled-profiler branches
+retain their text. [FlagTree #1344](https://github.com/flagos-ai/FlagTree/issues/1344)
+tracks this optional-profiler build guard; it does not fix compiler lowering
+for #1346 or certify an unmodified/default-main wheel.
+
+The recorded FlagGems `musafix2` wheel was an ordinary repack of the verified
+`musafix1` source-built wheel: only `mul.py`, `libentry.py`, assigned version,
+METADATA and RECORD changed; 5588 other normalized member bodies matched.
+The FlagTree `profilefix1` wheel was built from its explicit patched source
+profile. Source preparation, source builds, ordinary repacks and installing
+an already verified wheel are distinct operations. New builds must record
+their actual digests. The full recipe, pre/postimage pins and build flags are
+in the [portable source recipe](../../tools/musa_dependency_recipe/README.md).
+
 ## CPU07 NDmul safe512 candidate
 
 Use an isolated Linux x86_64 Python 3.10 environment with MUSA SDK 4.3.5,
@@ -207,7 +257,7 @@ requires a distinct version and its actual new SHA; do not reuse a master pin.
 
 Setup installs the three additional wheels only in its fresh private venv,
 without index access or dependency resolution. Complete wheel and installed
-RECORDs, original payload bytes, direct wheel URLs and actual module origins
+`RECORD` files, original payload bytes, direct wheel URLs and actual module origins
 are verified. Vendor Torch/TorchMUSA and SDK inputs are rechecked unchanged;
 no SDK, driver, Torch or NumPy upgrade is requested. This option does not fetch
 "latest" automatically or select a CUDA FlagTree wheel. The name describes an

@@ -1,0 +1,101 @@
+{
+  "profile": "latest",
+  "schema_version": 1,
+  "source_lineage": {
+    "flag-gems": {
+      "base_source_commit": "bfc6c49d2c4d06e5deac9784f203730c8372a84a",
+      "current_wheel_operation": "ordinary-wheel repack of the prior private musafix1 source-built wheel; not a new source build",
+      "base_source_build_receipt_sha256": "92a92588e78408fd5abe0a0cf3db8d74cb37b166d767a879648db8943b1d847c",
+      "ordinary_repack_receipt_sha256": "122dd395e2925f21610fe06ee2098bd70465bae3d68e828c23fc9ceb7c361672",
+      "changed_wheel_member_bodies": 5,
+      "unchanged_other_wheel_member_bodies": 5588,
+      "additional_changes": [
+        "Three production hunks from FlagGems PR 6894; whole PR head was not installed",
+        "Generic flash device-property query uses q.device",
+        "MUSA pin-memory candidate with explicit CPU rejection",
+        "MUSA NDmul singleton BLOCK_SIZE 512, num_warps 4, num_stages 3, FlagTune expansion disabled",
+        "MUSA native illegal-memory RuntimeError rethrows before LibEntry compile-failure fallback"
+      ],
+      "public_source_recipe_manifest": "tools/musa_dependency_recipe/source-patch-manifest-latest-bfc6-ndsafe512.json",
+      "compiler_root_cause_fixed": false,
+      "upstream_merge_claimed": false
+    },
+    "flagtree": {
+      "base_source_commit": "69148faf5cc03edb0a5737abd4b75b691132cea9",
+      "current_wheel_operation": "ordinary wheel built from an explicitly patched MUSA core source profile",
+      "source_build_receipt_sha256": "ff409afa20da202b5fa39c6e3034aa32c46e90badbb2766479f67ec29859d596",
+      "header_change": "third_party/mthreads/bin/RegisterTritonDialects.h: #else to #elif defined(__PROTON__) before six optional Proton headers",
+      "profile": {
+        "FLAGTREE_BACKEND": "mthreads",
+        "TRITON_BUILD_FLAGPRISM": "OFF",
+        "TRITON_BUILD_PROTON": "OFF",
+        "TRITON_OFFLINE_BUILD": "ON"
+      },
+      "public_source_recipe_manifest": "tools/musa_dependency_recipe/flagtree-source-patch-manifest-latest-69148.json",
+      "pristine_default_profile_main_wheel": false,
+      "compiler_root_cause_fixed": false,
+      "upstream_merge_claimed": false
+    },
+    "scope": "Preserved source/build/repack receipt lineage; the manifest alone does not rederive it or establish a new image GPU/CI pass"
+  },
+  "vendor_files": [
+    {
+      "bytes": 102969,
+      "path": "/usr/local/lib/python3.10/dist-packages/torch/__init__.py",
+      "role": "torch_source",
+      "sha256": "3caf7f40140ede2465bde40b9003af10cbbc8f7bcf436fa1de026471daa1b288"
+    },
+    {
+      "bytes": 6249,
+      "path": "/usr/local/lib/python3.10/dist-packages/torch_musa/__init__.py",
+      "role": "torch_musa_source",
+      "sha256": "8f09513ce9aac2473d9fba69e62a5f3343b1f4d9e509e7d9d5537b48b6735c63"
+    },
+    {
+      "bytes": 29210,
+      "path": "/usr/local/lib/python3.10/dist-packages/torch-2.9.0.dist-info/METADATA",
+      "role": "torch_metadata",
+      "sha256": "cdeb4f47907cce925f8b360e3962b80d28650b1ed5769f72c7b8235317efbf6a"
+    },
+    {
+      "bytes": 337,
+      "path": "/usr/local/lib/python3.10/dist-packages/torch_musa-2.9.0.dist-info/METADATA",
+      "role": "torch_musa_metadata",
+      "sha256": "0cc0c1ab1f6ebb1db831239054d7c23a73dc2f50090887d467bea691854fe94c"
+    },
+    {
+      "bytes": 2852,
+      "path": "/usr/local/musa-4.3.5/version.json",
+      "role": "sdk_version",
+      "sha256": "894200b8c201bfa4668787ca3f75ce188ca147887c76da7c41614d2c5eb216c0"
+    }
+  ],
+  "vendor_versions": {
+    "musa_sdk": "4.3.5",
+    "torch": "2.9.0",
+    "torch_musa": "2.9.0"
+  },
+  "wheels": [
+    {
+      "bytes": 12057216,
+      "name": "flag_gems",
+      "path": "/opt/musa/wheelhouse/flag_gems-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2-py3-none-any.whl",
+      "sha256": "0bdf03d1730885a502c05995ba0d16f89b0f0a6fe8584d24de76dc6e58c69e71",
+      "version": "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2"
+    },
+    {
+      "bytes": 180126552,
+      "name": "flagtree",
+      "path": "/opt/musa/wheelhouse/flagtree-0.7.0+mthreads3.6.git69148faf.profilefix1-cp310-cp310-linux_x86_64.whl",
+      "sha256": "57fd36f4c9be804bb9ab0af2103316746be4c45bc14fe370b543ee0d9c3d1d7e",
+      "version": "0.7.0+mthreads3.6.git69148faf.profilefix1"
+    },
+    {
+      "bytes": 705525,
+      "name": "PyYAML",
+      "path": "/opt/musa/wheelhouse/PyYAML-6.0.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "ba336e390cd8e4d1739f42dfe9bb83a3cc2e80f567d8805e11b46f4a943f5515",
+      "version": "6.0.1"
+    }
+  ]
+}

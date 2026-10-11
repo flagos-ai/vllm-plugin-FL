@@ -9,20 +9,19 @@ contracts use normal site with the actual local CPU Torch installation.
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UTILS_FILE = REPO_ROOT / "vllm_fl" / "utils.py"
 MARKER = "VLLM_FL_LOCAL_CPU_CONTRACT="
 CHILD_TIMEOUT_SECONDS = 20
 
-_FILE_CONFIG = r'''
+_FILE_CONFIG = r"""
 import json, os, pathlib, runpy, sys
 utils_file = pathlib.Path(sys.argv[1]).resolve()
 cases = json.loads(sys.argv[2])
@@ -53,9 +52,9 @@ for case in cases:
     assert not any(name == "flag_gems" or name.startswith("flag_gems.") for name in sys.modules)
     results.append(result)
 print("VLLM_FL_LOCAL_CPU_CONTRACT=" + json.dumps({"kind": "stdlib_config_only", "results": results, "flag_gems_import_attempts": attempted, "accelerator_acceptance": False}))
-'''
+"""
 
-_FILE_MISSING = r'''
+_FILE_MISSING = r"""
 import json, pathlib, runpy, sys, traceback
 utils_file = pathlib.Path(sys.argv[1]).resolve()
 namespace = runpy.run_path(str(utils_file))
@@ -71,9 +70,9 @@ for name in ("DeviceInfo", "get_flaggems_all_ops"):
     else:
         raise AssertionError(name + " swallowed the genuine missing dependency")
 print("VLLM_FL_LOCAL_CPU_CONTRACT=" + json.dumps({"kind": "no_site_missing_dependency_only", "results": results, "accelerator_acceptance": False}))
-'''
+"""
 
-_NORMAL_CPU = r'''
+_NORMAL_CPU = r"""
 import hashlib, json, math, pathlib, sys
 from types import SimpleNamespace
 repo = pathlib.Path(sys.argv[1]).resolve()
@@ -147,9 +146,9 @@ assert (torch.is_grad_enabled(), torch.is_inference_mode_enabled()) == initial
 assert not attempted, attempted
 assert not any(name == "flag_gems" or name.startswith("flag_gems.") for name in sys.modules)
 print("VLLM_FL_LOCAL_CPU_CONTRACT=" + json.dumps({"kind": "real_normal_site_cpu_contract", "torch_version": torch.__version__, "torch_origin": torch.__file__, "plugin_origin": vllm_fl.__file__, "utils_sha256": hashlib.sha256(pathlib.Path(utils.__file__).read_bytes()).hexdigest(), "silu_values": y.tolist(), "rms_values": normalized.tolist(), "rms_residual_values": normalized_residual.tolist(), "inference_non_io": observed, "state_restored_after_exception": True, "io_active_branch_tested": False, "flag_gems_import_attempts": attempted, "accelerator_acceptance": False}))
-'''
+"""
 
-_NORMAL_MISSING = r'''
+_NORMAL_MISSING = r"""
 import importlib.util, json, pathlib, sys, traceback
 repo = pathlib.Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(repo))
@@ -176,7 +175,7 @@ else:
             raise AssertionError(name + " swallowed the genuine missing dependency")
     result = {"kind": "real_normal_site_utils_missing_dependency", "available": False, "results": errors, "torch_version": torch.__version__, "utils_origin": utils.__file__, "flag_gems_operator_tested": False, "accelerator_acceptance": False}
 print("VLLM_FL_LOCAL_CPU_CONTRACT=" + json.dumps(result))
-'''
+"""
 
 
 class TestUtilsImportBoundaries(unittest.TestCase):
@@ -188,20 +187,38 @@ class TestUtilsImportBoundaries(unittest.TestCase):
         environment = os.environ.copy()
         environment.pop("VLLM_FL_OP_CONFIG", None)
         # Other environment values, including plugin and GPU settings, are inherited.
-        completed = subprocess.run(command, env=environment, capture_output=True,
-                                   text=True, encoding="utf-8", errors="strict",
-                                   timeout=CHILD_TIMEOUT_SECONDS, check=False)
+        completed = subprocess.run(
+            command,
+            env=environment,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+            timeout=CHILD_TIMEOUT_SECONDS,
+            check=False,
+        )
         # Emit complete captured streams once, including successful-child warnings.
         sys.stdout.write(completed.stdout)
         sys.stdout.flush()
         sys.stderr.write(completed.stderr)
         sys.stderr.flush()
-        self.assertEqual(completed.returncode, 0,
-                         "Actual child exit {}; complete streams emitted above".format(
-                             completed.returncode))
-        records = [line[len(MARKER):] for line in completed.stdout.splitlines()
-                   if line.startswith(MARKER)]
-        self.assertEqual(len(records), 1, "Expected one result marker; complete streams emitted above")
+        self.assertEqual(
+            completed.returncode,
+            0,
+            "Actual child exit {}; complete streams emitted above".format(
+                completed.returncode
+            ),
+        )
+        records = [
+            line[len(MARKER) :]
+            for line in completed.stdout.splitlines()
+            if line.startswith(MARKER)
+        ]
+        self.assertEqual(
+            len(records),
+            1,
+            "Expected one result marker; complete streams emitted above",
+        )
         result = json.loads(records[0])
         self.assertIs(result["accelerator_acceptance"], False)
         return result
@@ -213,42 +230,67 @@ class TestUtilsImportBoundaries(unittest.TestCase):
             path.write_text(json.dumps(expected), encoding="utf-8")
             empty = Path(directory) / "empty.json"
             empty.write_text("{}", encoding="utf-8")
-            cases = [{"name": "unset", "environment": None},
-                     {"name": "blank", "environment": " \t"},
-                     {"name": "valid", "environment": str(path)},
-                     {"name": "empty_object", "environment": str(empty)}]
-            result = self._probe(_FILE_CONFIG, [UTILS_FILE, json.dumps(cases)], no_site=True)
-        self.assertEqual([row["value"] for row in result["results"]],
-                         [None, None, expected, {}])
-        self.assertTrue(all(row["cached_after_environment_change"] for row in result["results"]))
+            cases = [
+                {"name": "unset", "environment": None},
+                {"name": "blank", "environment": " \t"},
+                {"name": "valid", "environment": str(path)},
+                {"name": "empty_object", "environment": str(empty)},
+            ]
+            result = self._probe(
+                _FILE_CONFIG, [UTILS_FILE, json.dumps(cases)], no_site=True
+            )
+        self.assertEqual(
+            [row["value"] for row in result["results"]], [None, None, expected, {}]
+        )
+        self.assertTrue(
+            all(row["cached_after_environment_change"] for row in result["results"])
+        )
         self.assertEqual(result["flag_gems_import_attempts"], [])
 
     def test_stdlib_config_validation_errors_without_flaggems(self):
-        with tempfile.TemporaryDirectory(prefix="vllm-fl-invalid-config-test-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="vllm-fl-invalid-config-test-"
+        ) as directory:
             base = Path(directory)
             cases = []
-            for name, content in (("malformed", "{"), ("not_object", "[]"),
-                                  ("null_object", "null"), ("non_string_value", '{"rms_norm": 1}')):
+            for name, content in (
+                ("malformed", "{"),
+                ("not_object", "[]"),
+                ("null_object", "null"),
+                ("non_string_value", '{"rms_norm": 1}'),
+            ):
                 path = base / (name + ".json")
                 path.write_text(content, encoding="utf-8")
                 cases.append({"name": name, "environment": str(path)})
             missing = base / "missing.json"
             cases.append({"name": "missing", "environment": str(missing)})
-            result = self._probe(_FILE_CONFIG, [UTILS_FILE, json.dumps(cases)], no_site=True)
-        self.assertEqual([row["error_type"] for row in result["results"]], ["ValueError"] * 5)
-        self.assertEqual([row["message"] for row in result["results"]],
-                         ["Invalid VLLM_FL_OP_CONFIG JSON file.",
-                          "VLLM_FL_OP_CONFIG must be a JSON object.",
-                          "VLLM_FL_OP_CONFIG must be a JSON object.",
-                          "VLLM_FL_OP_CONFIG must map strings to strings.",
-                          "VLLM_FL_OP_CONFIG file not found: " + str(missing)])
+            result = self._probe(
+                _FILE_CONFIG, [UTILS_FILE, json.dumps(cases)], no_site=True
+            )
+        self.assertEqual(
+            [row["error_type"] for row in result["results"]], ["ValueError"] * 5
+        )
+        self.assertEqual(
+            [row["message"] for row in result["results"]],
+            [
+                "Invalid VLLM_FL_OP_CONFIG JSON file.",
+                "VLLM_FL_OP_CONFIG must be a JSON object.",
+                "VLLM_FL_OP_CONFIG must be a JSON object.",
+                "VLLM_FL_OP_CONFIG must map strings to strings.",
+                "VLLM_FL_OP_CONFIG file not found: " + str(missing),
+            ],
+        )
         self.assertEqual(result["flag_gems_import_attempts"], [])
 
     def test_no_site_real_missing_dependency_is_not_swallowed(self):
         result = self._probe(_FILE_MISSING, [UTILS_FILE], no_site=True)
-        self.assertEqual([row["entrypoint"] for row in result["results"]],
-                         ["DeviceInfo", "get_flaggems_all_ops"])
-        self.assertEqual([row["missing_module"] for row in result["results"]], ["flag_gems"] * 2)
+        self.assertEqual(
+            [row["entrypoint"] for row in result["results"]],
+            ["DeviceInfo", "get_flaggems_all_ops"],
+        )
+        self.assertEqual(
+            [row["missing_module"] for row in result["results"]], ["flag_gems"] * 2
+        )
 
     def test_real_normal_site_package_reference_cpu_and_inference_states(self):
         result = self._probe(_NORMAL_CPU, [REPO_ROOT], no_site=False)
@@ -263,10 +305,17 @@ class TestUtilsImportBoundaries(unittest.TestCase):
             self.skipTest(result["not_applicable"])
         self.assertEqual(result["kind"], "real_normal_site_utils_missing_dependency")
         self.assertIs(result["available"], False)
-        self.assertEqual([row["entrypoint"] for row in result["results"]],
-                         ["DeviceInfo", "get_flaggems_all_ops"])
-        self.assertEqual([row["error_type"] for row in result["results"]], ["ModuleNotFoundError"] * 2)
-        self.assertEqual([row["missing_module"] for row in result["results"]], ["flag_gems"] * 2)
+        self.assertEqual(
+            [row["entrypoint"] for row in result["results"]],
+            ["DeviceInfo", "get_flaggems_all_ops"],
+        )
+        self.assertEqual(
+            [row["error_type"] for row in result["results"]],
+            ["ModuleNotFoundError"] * 2,
+        )
+        self.assertEqual(
+            [row["missing_module"] for row in result["results"]], ["flag_gems"] * 2
+        )
         self.assertIs(result["flag_gems_operator_tested"], False)
 
 

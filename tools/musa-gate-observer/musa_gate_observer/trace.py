@@ -20,15 +20,34 @@ MAX_EVENT = 256 * 1024
 END_RESERVE = 64 * 1024
 MAX_ERROR_SAMPLES = 4
 MAX_ERROR_BYTES = 4096
-PROFILE_FIELDS = frozenset((
-    "schema_version", "run_id", "route_id", "model", "mode", "pid",
-    "starttime", "pid_namespace", "process_key", "observer_source_sha256",
-    "source_binding_id",
-))
-GATE_MEMBERS = {".gitignore", "README.md", "case_utils.py", "generate_images.py", "run_serve.sh",
-                "run_serve_eager.sh", "run_serve_graph.sh", "run_test.sh",
-                "test_text.py", "test_image.py", "test_mix_text_image.py"} | {
-                    f"images/image_{index:02d}.png" for index in range(1, 9)}
+PROFILE_FIELDS = frozenset(
+    (
+        "schema_version",
+        "run_id",
+        "route_id",
+        "model",
+        "mode",
+        "pid",
+        "starttime",
+        "pid_namespace",
+        "process_key",
+        "observer_source_sha256",
+        "source_binding_id",
+    )
+)
+GATE_MEMBERS = {
+    ".gitignore",
+    "README.md",
+    "case_utils.py",
+    "generate_images.py",
+    "run_serve.sh",
+    "run_serve_eager.sh",
+    "run_serve_graph.sh",
+    "run_test.sh",
+    "test_text.py",
+    "test_image.py",
+    "test_mix_text_image.py",
+} | {f"images/image_{index:02d}.png" for index in range(1, 9)}
 api_context = contextvars.ContextVar("musa_gate_api", default=None)
 execute_context = contextvars.ContextVar("musa_gate_execute", default=None)
 graph_context = contextvars.ContextVar("musa_gate_graph", default=None)
@@ -67,13 +86,15 @@ def strict_json(raw):
         if isinstance(item, list):
             for child in item:
                 finite(child)
+
     finite(value)
     return value
 
 
 def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-                      allow_nan=False).encode("utf-8")
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    ).encode("utf-8")
 
 
 def digest(value):
@@ -81,8 +102,14 @@ def digest(value):
 
 
 def stat_key(value):
-    return (value.st_dev, value.st_ino, value.st_mode, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns)
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
 
 
 def read_original(path, limit=16 * 1024 * 1024):
@@ -116,8 +143,11 @@ def read_original(path, limit=16 * 1024 * 1024):
     body = b"".join(chunks)
     if len(body) != first.st_size:
         raise Unsupported(f"Input EOF/size mismatch: {path}")
-    return body, {"path": str(path), "bytes": len(body),
-                  "sha256": hashlib.sha256(body).hexdigest()}
+    return body, {
+        "path": str(path),
+        "bytes": len(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
+    }
 
 
 def process_identity():
@@ -125,22 +155,24 @@ def process_identity():
     root = Path("/proc") / str(pid)
     before = (root / "stat").read_text()
     end = before.rfind(") ")
-    if end < 0 or int(before[:before.find(" (")]) != pid:
+    if end < 0 or int(before[: before.find(" (")]) != pid:
         raise Unsupported("Invalid own /proc stat")
-    starttime = int(before[end + 2:].split()[19])
+    starttime = int(before[end + 2 :].split()[19])
     namespace = os.readlink(root / "ns/pid")
     if (root / "stat").read_text() != before:
         # Other stat counters change naturally; bind only the lifetime fields.
         after = (root / "stat").read_text()
         final_end = after.rfind(") ")
-        if int(after[final_end + 2:].split()[19]) != starttime:
+        if int(after[final_end + 2 :].split()[19]) != starttime:
             raise Unsupported("Own process lifetime changed")
     return pid, str(starttime), namespace
 
 
 class Config:
     def __init__(self):
-        raw, self.original = read_original(os.environ["MUSA_GATE_OBSERVER_CONFIG"], 1024 * 1024)
+        raw, self.original = read_original(
+            os.environ["MUSA_GATE_OBSERVER_CONFIG"], 1024 * 1024
+        )
         self.data = strict_json(raw)
         for name in ("observer_source_sha256", "source_binding_id"):
             if not re.fullmatch(r"[0-9a-f]{64}", self.data.get(name, "")):
@@ -164,12 +196,27 @@ class Config:
         if digest(own) != self.data["observer_source_sha256"]:
             raise Unsupported("Observer manifest digest mismatch")
         for name, expected in own.items():
-            if name not in {"__init__.py", "trace.py", "server.py", "pytest_plugin.py", "summarize.py"}:
+            if name not in {
+                "__init__.py",
+                "trace.py",
+                "server.py",
+                "pytest_plugin.py",
+                "summarize.py",
+            }:
                 raise Unsupported("Unexpected observer source member")
             _, actual = read_original(Path(__file__).parent / name)
-            if (actual["bytes"], actual["sha256"]) != (expected["bytes"], expected["sha256"]):
+            if (actual["bytes"], actual["sha256"]) != (
+                expected["bytes"],
+                expected["sha256"],
+            ):
                 raise Unsupported(f"Observer source changed: {name}")
-        if set(own) != {"__init__.py", "trace.py", "server.py", "pytest_plugin.py", "summarize.py"}:
+        if set(own) != {
+            "__init__.py",
+            "trace.py",
+            "server.py",
+            "pytest_plugin.py",
+            "summarize.py",
+        }:
             raise Unsupported("Incomplete observer source manifest")
 
     def verify_module(self, name):
@@ -192,7 +239,9 @@ class Config:
                 expected = self.data["sources"][name]
                 _, actual = read_original(expected["path"])
                 if actual != expected:
-                    raise Unsupported(f"Unloaded original source fingerprint mismatch: {name}")
+                    raise Unsupported(
+                        f"Unloaded original source fingerprint mismatch: {name}"
+                    )
                 result[name] = actual
             else:
                 result[name] = self.verify_module(name)
@@ -219,20 +268,32 @@ class Trace:
         self.config, self.role, self.rank = config, role, rank
         self.pid, self.starttime, self.namespace = process_identity()
         self.process_key = f"{role}:{self.pid}:{self.starttime}"
-        self.path = config.directory / f"{config.route['route_id']}-{role}-{self.pid}-{self.starttime}.jsonl"
-        self.fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                          getattr(os, "O_NOFOLLOW", 0), 0o600)
+        self.path = (
+            config.directory
+            / f"{config.route['route_id']}-{role}-{self.pid}-{self.starttime}.jsonl"
+        )
+        self.fd = os.open(
+            self.path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
         self.seq = self.bytes = 0
         self.errors = []
         self.error_count = self.dropped_events = 0
         self.io_failed = self.cap_exceeded = self.warned = False
-        self.profile = {"schema_version": 1, "run_id": config.data["run_id"],
-                        "route_id": config.route["route_id"], "model": config.route["model"],
-                        "mode": config.route["mode"], "pid": self.pid,
-                        "starttime": self.starttime, "pid_namespace": self.namespace,
-                        "process_key": self.process_key,
-                        "observer_source_sha256": config.data["observer_source_sha256"],
-                        "source_binding_id": config.data["source_binding_id"]}
+        self.profile = {
+            "schema_version": 1,
+            "run_id": config.data["run_id"],
+            "route_id": config.route["route_id"],
+            "model": config.route["model"],
+            "mode": config.route["mode"],
+            "pid": self.pid,
+            "starttime": self.starttime,
+            "pid_namespace": self.namespace,
+            "process_key": self.process_key,
+            "observer_source_sha256": config.data["observer_source_sha256"],
+            "source_binding_id": config.data["source_binding_id"],
+        }
         self.profile_id = digest(self.profile)
         self.profile_written = False
         self.closed = False
@@ -248,18 +309,27 @@ class Trace:
         except Exception:
             raw = canonical({"type": type(detail).__name__, "repr": repr(detail)})
         if len(raw) > MAX_ERROR_BYTES:
-            detail = {"truncated": True, "bytes": len(raw),
-                      "sha256": hashlib.sha256(raw).hexdigest(),
-                      "canonical_prefix": raw[:1024].decode("ascii")}
+            detail = {
+                "truncated": True,
+                "bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "canonical_prefix": raw[:1024].decode("ascii"),
+            }
         self.errors.append(detail)
 
     def _warn_once(self, label):
         if self.warned:
             return
         self.warned = True
-        try:
-            sys.stderr.write(label + " " + canonical({"errors": self.errors,
-                             "error_count": self.error_count}).decode("ascii") + "\n")
+        try:  # noqa: SIM105 - preserve the audited observation failure isolation
+            sys.stderr.write(
+                label
+                + " "
+                + canonical(
+                    {"errors": self.errors, "error_count": self.error_count}
+                ).decode("ascii")
+                + "\n"
+            )
         except Exception:
             # Observation I/O must not replace a production result/exception.
             pass
@@ -272,10 +342,16 @@ class Trace:
                 self.dropped_events += 1
                 return
             try:
-                row = {"profile_id": self.profile_id, "event_id": unique_id(),
-                       "seq": self.seq + 1, "time_ns": time.time_ns(),
-                       "monotonic_ns": time.monotonic_ns(), "kind": kind,
-                       "status": status, "data": data}
+                row = {
+                    "profile_id": self.profile_id,
+                    "event_id": unique_id(),
+                    "seq": self.seq + 1,
+                    "time_ns": time.time_ns(),
+                    "monotonic_ns": time.monotonic_ns(),
+                    "kind": kind,
+                    "status": status,
+                    "data": data,
+                }
                 if not self.profile_written:
                     row["profile"] = self.profile
                 body = canonical(row) + b"\n"
@@ -295,9 +371,15 @@ class Trace:
                 self._warn_once("MUSA_GATE_OBSERVER_IO_ERROR")
 
     def activation(self, hooks, sources, status="ok", error=None, client_scope=None):
-        data = {"role": self.role, "rank": self.rank,
-                "hooks": hooks, "sources_verified": status == "ok", "sources": sources,
-                "config_original": self.config.original, "error": error}
+        data = {
+            "role": self.role,
+            "rank": self.rank,
+            "hooks": hooks,
+            "sources_verified": status == "ok",
+            "sources": sources,
+            "config_original": self.config.original,
+            "error": error,
+        }
         if client_scope is not None:
             data.update(client_scope)
         self.emit("activation", data, status)
@@ -305,20 +387,35 @@ class Trace:
             self._record_error(error or status)
 
     def fail(self, error):
-        detail = {"type": type(error).__name__, "message": str(error),
-                  "traceback": traceback.format_exc()}
+        detail = {
+            "type": type(error).__name__,
+            "message": str(error),
+            "traceback": traceback.format_exc(),
+        }
         with self.lock:
             self._record_error(detail)
-            self.emit("observation_error", detail,
-                      "unsupported" if isinstance(error, Unsupported) else "error")
+            self.emit(
+                "observation_error",
+                detail,
+                "unsupported" if isinstance(error, Unsupported) else "error",
+            )
 
     def close(self):
         with self.lock:
             if not self.closed:
-                data = {"errors": list(self.errors), "error_count": self.error_count,
-                        "dropped_events": self.dropped_events,
-                        "io_failed": self.io_failed, "cap_exceeded": self.cap_exceeded}
-                failed = bool(self.errors or self.error_count or self.dropped_events or self.io_failed)
+                data = {
+                    "errors": list(self.errors),
+                    "error_count": self.error_count,
+                    "dropped_events": self.dropped_events,
+                    "io_failed": self.io_failed,
+                    "cap_exceeded": self.cap_exceeded,
+                }
+                failed = bool(
+                    self.errors
+                    or self.error_count
+                    or self.dropped_events
+                    or self.io_failed
+                )
                 self.emit("telemetry_end", data, "error" if failed else "ok")
                 try:
                     os.close(self.fd)

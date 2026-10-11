@@ -4,6 +4,19 @@ This bundle prepares reviewed FlagGems source in new private trees. It supports 
 
 The replacements carry the three production changes from [PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894), replace the shared public MHA property-query argument with `q.device`, and use the active runtime accelerator in `_pin_memory` while retaining explicit CPU rejection. The shared `flash_api.py` is the PR postimage plus the device-query correction, rather than an exact PR postimage. The enflame file is retained because it belongs to the reviewed PR; this does not claim that its backend was tested on MUSA. The entire PR head is not installed. The ineffective masked-Q padding experiment is excluded. The public-source accelerator checks are tracked in [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973); issue state is not a Gate prerequisite, and the issue does not identify a cause of the model graph fault.
 
+## File-by-file modification inventory
+
+The [deployment guide's dependency inventory](../../docs/usage/musa.md#additional-flaggems-and-flagtree-modifications)
+lists all six Gems production replacements and the one Tree header change.
+The inventory distinguishes the three carried PR #6894 production changes,
+the two accelerator/device corrections, the MUSA NDmul safety configuration
+and native-error propagation, and Tree's optional-profiler build guard.
+The NDmul workaround and header guard do not establish a compiler lowering
+root-cause fix. The observed musafix2 Gems artifact is an ordinary-wheel
+repack; Tree profilefix1 is an explicit patched source build. Keep those
+operations and their actual wheel digests separate when preparing a new
+ordinary stack.
+
 ## Prepare the latest private source trees
 
 From the repository root, run `cd tools/musa_dependency_recipe`. The four raw postimages are in `patch-inputs/`; `production.patch` and the fixed manifests are beside the script. Use Python 3.10+ and an existing private parent; both output leaves must be new. The helper uses only the standard library and imports no accelerator packages.
@@ -64,7 +77,7 @@ SETUPTOOLS_SCM_PRETEND_VERSION_FOR_FLAG_GEMS=5.4.0+archive.gbfc6c49d2c4d.pr6894.
   --wheel-dir "$PRIVATE_PARENT/ndsafe-wheels" "$PRIVATE_PARENT/ndsafe-source/FlagGems"
 ```
 
-This private source preparation changes exactly six original files and preserves the other 6353 byte for byte. Use the unchanged Tree69148 explicit profile below. Record actual rebuilt wheel digests; the observed CPU07 artifact came from an ordinary musafix1 wheel repack, not from this source-build command. CPU07 verified the musafix2 ordinary wheel and all seven private installed RECORDs; its six other wheel bodies and vendor/image files stayed unchanged. The observed Gems wheel is 12,057,216 bytes/SHA `0bdf03d1730885a502c05995ba0d16f89b0f0a6fe8584d24de76dc6e58c69e71`. The repack changed only mul.py, libentry.py, version assignments, METADATA and RECORD; its other 5588 normalized member bodies matched. These CPU/static checks do not establish native numerical, model Gate or compiler acceptance. Keep diagnostics off unless explicitly running a separate diagnostic.
+This private source preparation changes exactly six original files and preserves the other 6353 byte for byte. Use the unchanged Tree69148 explicit profile below. Record actual rebuilt wheel digests; the observed CPU07 artifact came from an ordinary musafix1 wheel repack, not from this source-build command. CPU07 verified the musafix2 ordinary wheel and all seven private installed `RECORD` files; its six other wheel bodies and vendor/image files stayed unchanged. The observed Gems wheel is 12,057,216 bytes/SHA `0bdf03d1730885a502c05995ba0d16f89b0f0a6fe8584d24de76dc6e58c69e71`. The repack changed only mul.py, libentry.py, version assignments, METADATA and RECORD; its other 5588 normalized member bodies matched. These CPU/static checks do not establish native numerical, model Gate or compiler acceptance. Keep diagnostics off unless explicitly running a separate diagnostic.
 
 Separate runtime67r2 numerical diagnostics passed all four native/public
 cases on the recorded 27B and 35B geometries, using synthetic tensor values.
@@ -98,7 +111,7 @@ GitHub CI remains NOT_RUN and automatic discovery remains disabled.
 
 ## Explicit latest FlagTree MUSA core profile
 
-Use public Tree commit `69148faf5cc03edb0a5737abd4b75b691132cea9` plus [the single-header patch](flagtree-musa-proton-off.patch). The [latest Tree manifest](flagtree-source-patch-manifest-latest-69148.json) pins the source/archive, exact header pre/post images, reviewed build inputs and actual wheel. The branch before six optional Proton headers changes only `#else` to `#elif defined(__PROTON__)`; MUSA registration and the FlagPrism/Proton-enabled branches retain their text. This explicitly sets `TRITON_BUILD_FLAGPRISM=OFF` and `TRITON_BUILD_PROTON=OFF`; it is not a pristine/default main wheel. The original ba25 build boundary and guard are tracked in [FlagTree #1344](https://github.com/flagos-ai/FlagTree/issues/1344).
+Use public Tree commit `69148faf5cc03edb0a5737abd4b75b691132cea9` plus [the single-header patch](flagtree-musa-proton-off.patch). The [latest Tree manifest](flagtree-source-patch-manifest-latest-69148.json) pins the source/archive, exact header pre/post images, reviewed build inputs and actual wheel. The branch before six optional Proton headers changes only `#else` to `#elif defined(__PROTON__)`; MUSA registration and the FlagPrism/Proton-enabled branches retain their text. This explicitly sets `TRITON_BUILD_FLAGPRISM=OFF` and `TRITON_BUILD_PROTON=OFF`; it is not a pristine/default main wheel. The original `ba25a9551b2e5157d843affe6f4c2cada1dcfde8` build boundary and guard are tracked in [FlagTree #1344](https://github.com/flagos-ai/FlagTree/issues/1344).
 
 For a new private checkout, set `RECIPE_DIR` to this bundle and `PRIVATE_TREE_SOURCE` to that checkout:
 
@@ -126,7 +139,7 @@ FLAGTREE_WHEEL_VERSION=0.7.0+mthreads3.6.git69148faf.profilefix1 \
   --wheel-dir "$PRIVATE_PARENT/tree-wheels" "$PRIVATE_TREE_SOURCE"
 ```
 
-Preserve the explicit profile, single-header proof, source inventories, actual wheel/tag/SHA and complete RECORD checks. The executed CPU build produced `0.7.0+mthreads3.6.git69148faf.profilefix1`, `cp310-cp310-linux_x86_64`, 180,126,552 bytes/SHA `57fd36f4c9be804bb9ab0af2103316746be4c45bc14fe370b543ee0d9c3d1d7e`. Its original archive joins 6463 official Git members (6455 regular files and eight symlinks); the current receipt does not provide the older ba25 post-build all-other-files proof. Static origins used `PathFinder`, not target imports; CPU build success establishes neither default-profile nor ABI/GPU/model acceptance.
+Preserve the explicit profile, single-header proof, source inventories, actual wheel/tag/SHA and complete RECORD checks. The executed CPU build produced `0.7.0+mthreads3.6.git69148faf.profilefix1`, `cp310-cp310-linux_x86_64`, 180,126,552 bytes/SHA `57fd36f4c9be804bb9ab0af2103316746be4c45bc14fe370b543ee0d9c3d1d7e`. Its original archive joins 6463 official Git members (6455 regular files and eight symlinks); the current receipt does not provide the older `ba25a9551b2e5157d843affe6f4c2cada1dcfde8` post-build all-other-files proof. Static origins used `PathFinder`, not target imports; CPU build success establishes neither default-profile nor ABI/GPU/model acceptance.
 
 The unchanged [historical Tree manifest](flagtree-source-patch-manifest.json) retains base `ba25a9551b2e5157d843affe6f4c2cada1dcfde8`, version `0.7.0+mthreads3.6.gitba25a955.profilefix1`, 180,144,953-byte wheel/SHA `e11252f44e39742553ca52b267d617cae666ee9129da57fae91f76d774a72019`, and its separately verified 6461 unchanged post-build originals. That historical proof does not transfer to the later HEAD.
 
@@ -148,6 +161,6 @@ Validate every installed RECORD/payload, direct-url wheel SHA, private module or
 
 CPU06 successfully installed seven ordinary wheels; only the two latest dependency wheels replaced CPU05, and the other five wheel bodies/vendor fingerprints remained unchanged. CONFIG06 bound seven metadata rows, the original 19 Gate files and four routes × 26 requests/four ranks. The owned CPU objects were stopped and removed with evidence/environment retained. These installation receipts are CPU/static evidence; the historical CPU06 musafix1 four-route GPU runs have 87/104 quality passes and strict full-matrix FAIL, with that profile's 35B-A3B eager unresolved (see the runner results). Automatic discovery remains disabled and GitHub CI is NOT_RUN.
 
-Earlier operator evidence used source `7599dd1` and published MUSA Tree `0.7.0+mthreads3.6`: pin-memory controls passed 44/44; carrying PR #6894 changed the same suite from 10/36 to 30/36, including all 24 direct and six graph cases. Six public MHA numerical failures remained, and Q padding did not improve them. Those results do not establish acceptance on the new HEADs. The historical cf174/ba25 migrated baseline remains full Gate FAIL (35/104 quality passes). Detailed runtime54r2/Tiny58/runtime60 and original stream/cleanup boundaries are preserved in [the runner validation history](../../docs/usage/musa-ci-gate-runner.md#validation-history-and-candidate-boundaries). No requests, quality thresholds or observer acceptance rules are relaxed.
+Earlier operator evidence used source `7599dd1` and published MUSA Tree `0.7.0+mthreads3.6`: pin-memory controls passed 44/44; carrying PR #6894 changed the same suite from 10/36 to 30/36, including all 24 direct and six graph cases. Six public MHA numerical failures remained, and Q padding did not improve them. Those results do not establish acceptance on the new HEADs. The historical cf174/`ba25a9551b2e5157d843affe6f4c2cada1dcfde8` migrated baseline remains full Gate FAIL (35/104 quality passes). Detailed runtime54r2/Tiny58/runtime60 and original stream/cleanup boundaries are preserved in [the runner validation history](../../docs/usage/musa-ci-gate-runner.md#validation-history-and-candidate-boundaries). No requests, quality thresholds or observer acceptance rules are relaxed.
 
 The six portable profile/failure tests run with `python3 -I -B tools/musa_dependency_recipe/test_prepare_private_source.py` from the repository root. Actual source-preparation checks are separate from wheel building or accelerator execution.

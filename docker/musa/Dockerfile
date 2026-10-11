@@ -1,67 +1,46 @@
-ARG MUSA_BASE_IMAGE=registry.mthreads.com/mcconline/inference/vllm:v0.20.2-ph1-4.3.5-torch2.7.1-v1.1.0
-
-# ---------- base stage ----------
+ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64@sha256:6f7c2209c76166c4033bf7693bf5164ed6aee96c1020307b1bd358993c69ac87
 FROM ${MUSA_BASE_IMAGE} AS base
 
-ARG PYTHON_VERSION=3.10
-ARG VLLM_VERSION=0.20.2
-ARG FLAGGEMS_VERSION=5.0.0
+ARG PLUGIN_COMMIT
+ARG STACK_MANIFEST_SHA256
+ARG DEPENDENCY_MANIFEST_SHA256
+ARG EMPTY_WHEEL_FILENAME=vllm-0.28.0+empty-cp310-cp310-linux_x86_64.whl
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    VLLM_PLUGINS=fl
+LABEL org.opencontainers.image.source="https://github.com/flagos-ai/vllm-plugin-FL" \
+      org.opencontainers.image.revision="${PLUGIN_COMMIT}" \
+      ai.flagos.musa.stack-manifest.sha256="${STACK_MANIFEST_SHA256}" \
+      ai.flagos.musa.install-mode="ordinary-wheel" \
+      ai.flagos.musa.communication="MCCL"
 
-# Keep the vendor runtime from the base image and add only the tools required
-# to build the checked-out plugin in CI.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        ca-certificates \
-        curl \
-        git \
-    && rm -rf /var/lib/apt/lists/*
+ENV VLLM_PLUGINS=fl \
+    VLLM_VENDOR=musa \
+    GEMS_VENDOR=mthreads \
+    PYTHONPATH="" \
+    PYTHONNOUSERSITE=1 \
+    VIRTUAL_ENV=/opt/musa/venv \
+    PATH=/opt/musa/venv/bin:${PATH} \
+    MUSA_CI_EMPTY_WHEEL=/opt/musa/wheelhouse/${EMPTY_WHEEL_FILENAME} \
+    MUSA_CI_EMPTY_WHEEL_SHA256=2306c2ea119182a5690eb05776cdffa4ba097a92ba13114a6cb49722d0b53fec \
+    MUSA_CI_DEPENDENCY_PROFILE=latest \
+    MUSA_CI_DEPENDENCY_MANIFEST=/opt/musa/dependency-manifest.json \
+    MUSA_CI_DEPENDENCY_MANIFEST_SHA256=${DEPENDENCY_MANIFEST_SHA256}
 
-RUN python -m pip install --no-cache-dir \
-        "setuptools>=77.0.3,<81.0.0" \
-        wheel \
-        setuptools-scm \
-        scikit-build-core==0.11 \
-        pybind11 \
-        ninja \
-        cmake
-
-# Fail early when a different vendor base image is supplied accidentally.
-RUN python -c 'from importlib.metadata import version; \
-vllm = version("vllm"); \
-flag_gems = version("flag-gems"); \
-assert "empty" in vllm, vllm; \
-assert flag_gems == "5.0.0", flag_gems; \
-print("vLLM:", vllm); \
-print("FlagGems:", flag_gems)'
+# The private build context contains six pinned wheels and public verifier files.
+# No checkout, SDK payload, credential or editable source tree enters this layer.
+COPY wheelhouse/ /opt/musa/wheelhouse/
+COPY stack-manifest.json dependency-manifest.json verify_stack.py /opt/musa/
+RUN python3 -I -B -m venv --system-site-packages --without-pip /opt/musa/venv \
+    && printf '%s  %s\n' "$DEPENDENCY_MANIFEST_SHA256" /opt/musa/dependency-manifest.json | sha256sum --strict -c - \
+    && /opt/musa/venv/bin/python -I -B /opt/musa/verify_stack.py install \
+       --manifest /opt/musa/stack-manifest.json --manifest-sha256 "$STACK_MANIFEST_SHA256" \
+       --expected-commit "$PLUGIN_COMMIT" --wheelhouse /opt/musa/wheelhouse \
+       --output /opt/musa/install-evidence.json
 
 WORKDIR /workspace
+ENTRYPOINT []
+CMD ["python", "-I", "-B", "-m", "vllm.entrypoints.openai.api_server"]
 
-# ---------- dev stage ----------
+# Keep docker/build.sh's target interface while every target uses this same stack.
 FROM base AS dev
-
-RUN python -m pip install --no-cache-dir \
-        pytest==8.4.1 \
-        pytest-cov \
-        pytest-json-report \
-        ruff \
-        pre-commit
-
-WORKDIR /workspace
-
-# ---------- ci stage ----------
-FROM dev AS ci
-
-RUN python -m pip install --no-cache-dir \
-        pytest-timeout \
-        pytest-metadata
-
-WORKDIR /workspace
-
-# ---------- release stage ----------
+FROM base AS ci
 FROM base AS release
-
-WORKDIR /workspace

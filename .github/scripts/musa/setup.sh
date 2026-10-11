@@ -24,9 +24,18 @@ python .github/scripts/musa/verify_empty_wheel.py \
   > "$task_dir/empty-wheel.json"
 python -I -B -m venv --system-site-packages --without-pip "$task_dir/venv"
 task_python="$task_dir/venv/bin/python"
-"$task_python" -I -B -m pip --isolated wheel --no-index --no-deps --no-build-isolation --no-cache-dir \
+# Empty builds are ordinary Python wheels. The runtime vendor remains MUSA,
+# but setup.py supports VLLM_VENDOR only for its optional CUDA extension build.
+# Let setuptools-scm derive the package version from the actual CI checkout.
+build_env=(env -u VLLM_VENDOR)
+while IFS= read -r variable; do
+  case "$variable" in
+    SETUPTOOLS_SCM_PRETEND_VERSION*) build_env+=(-u "$variable") ;;
+  esac
+done < <(compgen -e)
+"${build_env[@]}" "$task_python" -I -B -m pip --isolated wheel --no-index --no-deps --no-build-isolation --no-cache-dir \
   --wheel-dir "$task_dir/wheels" . > "$task_dir/build.stdout.raw" 2> "$task_dir/build.stderr.raw"
-"$task_python" -I -B -m pip --isolated wheel --no-index --no-deps --no-build-isolation --no-cache-dir   --wheel-dir "$task_dir/wheels" ./tools/musa-gate-observer   > "$task_dir/observer-build.stdout.raw" 2> "$task_dir/observer-build.stderr.raw"
+"${build_env[@]}" "$task_python" -I -B -m pip --isolated wheel --no-index --no-deps --no-build-isolation --no-cache-dir   --wheel-dir "$task_dir/wheels" ./tools/musa-gate-observer   > "$task_dir/observer-build.stdout.raw" 2> "$task_dir/observer-build.stderr.raw"
 "$task_python" -I -B .github/scripts/musa/dependency_profile.py stage \
   --task-dir "$task_dir" --profile "$dependency_profile" \
   --manifest "${MUSA_CI_DEPENDENCY_MANIFEST:-}" \
