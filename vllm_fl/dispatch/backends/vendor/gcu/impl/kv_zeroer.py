@@ -1,9 +1,14 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 # Adapted from vLLM v0.28.0, vllm/v1/worker/utils.py (2cf0a6915ce5).
 
-"""Zero KV segments without exceeding Enflame's launch-grid limits."""
+"""Zero KV segments using device addresses and bounded Enflame grids."""
 
+import ctypes
 import logging
+import os
+import re
+from functools import lru_cache
+from pathlib import Path
 
 import torch
 
@@ -14,6 +19,69 @@ logger = logging.getLogger(__name__)
 
 GCU_MAX_GRID_X = 65535
 _patched = False
+
+
+@lru_cache(maxsize=1)
+def _get_tops_pointer_query():
+    # Use the SDK already initialized by torch.gcu. Loading another runtime can
+    # query a different context, so fail if the active SDK is absent/ambiguous.
+    paths = set()
+    for line in Path("/proc/self/maps").read_text().splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) != 6:
+            continue
+        path = fields[5]
+        if path.startswith("/") and re.fullmatch(
+            r"libtopsrt\.so(?:\.[0-9]+)*", Path(path).name
+        ):
+            paths.add(str(Path(path).resolve()))
+    if len(paths) != 1 or not hasattr(os, "RTLD_NOLOAD"):
+        raise RuntimeError("Cannot identify the active Enflame SDK runtime")
+    library = ctypes.CDLL(paths.pop(), mode=os.RTLD_NOW | os.RTLD_NOLOAD)
+    query = library.topsPointerGetAttribute
+    # SDK signature: topsError_t (void*, topsPointer_attribute, topsDeviceptr_t).
+    query.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+    query.restype = ctypes.c_int
+    return query
+
+
+def _device_segment_addresses(raw_addresses: torch.Tensor) -> torch.Tensor:
+    query = _get_tops_pointer_query()
+    translated = []
+    # The official constructor stores torch handles, which differ from the
+    # device VAs used by indirect Triton loads on GCU. Synchronize only here,
+    # before worker warmup/capture; requests retain the original GPU metadata.
+    for segment, address in enumerate(raw_addresses.cpu().tolist()):
+        if not 0 < address < 1 << (ctypes.sizeof(ctypes.c_void_p) * 8):
+            raise RuntimeError(f"Invalid Enflame KV address for segment {segment}")
+        device_address = ctypes.c_void_p()
+        # TOPS_POINTER_ATTRIBUTE_DEVICE_POINTER = 3; topsSuccess = 0.
+        rc = query(ctypes.byref(device_address), 3, ctypes.c_void_p(address))
+        if rc != 0 or not device_address.value:
+            raise RuntimeError(
+                f"Enflame KV device-address query failed for segment {segment}: "
+                f"SDK return code {rc}"
+            )
+        if device_address.value % 4:
+            raise RuntimeError(
+                f"Unaligned Enflame KV device address: segment {segment}"
+            )
+        translated.append(device_address.value)
+    return torch.tensor(translated, dtype=torch.uint64, device=raw_addresses.device)
+
+
+def init_kv_zeroer_gcu(self, *args, **kwargs) -> None:
+    self._gcu_device_addresses_ready = False
+    if torch.gcu.is_current_stream_capturing():
+        raise RuntimeError(
+            "Cannot initialize Enflame KV device addresses during capture"
+        )
+    self._fl_gcu_original_init(*args, **kwargs)
+    if self._meta is not None:
+        device_addresses = _device_segment_addresses(self._meta[0])
+        # Publish the translated table only after every SDK query succeeds.
+        self._meta = (device_addresses, *self._meta[1:])
+    self._gcu_device_addresses_ready = True
 
 
 @triton.jit(do_not_specialize=["n_jobs"])
@@ -55,6 +123,8 @@ def zero_block_ids_gcu(self, block_ids: list[int]) -> None:
     """Use vLLM's original segment metadata and asynchronous block-ID copy."""
     if not block_ids or self._meta is None:
         return
+    if not getattr(self, "_gcu_device_addresses_ready", False):
+        raise RuntimeError("Enflame KV zeroer has no initialized device-address table")
     seg_addrs, seg_block_strides, seg_page_sizes, max_chunks, blk_size, n_segs = (
         self._meta
     )
@@ -84,8 +154,11 @@ def apply_kv_zeroer_gcu_patch() -> None:
         return
     from vllm.v1.worker import utils as worker_utils
 
-    # Keep the official kernel and metadata builder intact. Existing instances
-    # and warmup resolve this class method at call time.
-    worker_utils.KVBlockZeroer.zero_block_ids = zero_block_ids_gcu
+    # Keep the official kernel and builder; translate its address table once.
+    zeroer_class = worker_utils.KVBlockZeroer
+    if not hasattr(zeroer_class, "_fl_gcu_original_init"):
+        zeroer_class._fl_gcu_original_init = zeroer_class.__init__
+    zeroer_class.__init__ = init_kv_zeroer_gcu
+    zeroer_class.zero_block_ids = zero_block_ids_gcu
     _patched = True
-    logger.info("Installed Enflame KV block zeroer with a bounded 1-D grid")
+    logger.info("Installed Enflame KV zeroer with device addresses and a bounded grid")
