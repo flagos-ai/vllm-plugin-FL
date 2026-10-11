@@ -197,7 +197,7 @@ def main():
     try:
         config = make(args.source_binding, args.run_id, args.trace_directory)
         ref = write_json(args.output, config)
-        os.chmod(args.output, 0o444)
+        os.chmod(args.output, 0o400)
         report.update(
             passed=True,
             config=ref,

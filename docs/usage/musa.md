@@ -5,6 +5,94 @@ plugin as ordinary wheels in a private environment that inherits the MUSA
 image's vendor packages. The older MUSA guide using vLLM 0.24.0 describes the
 same installation pattern; its vLLM version and image are separate baselines.
 
+## Ordinary-stack image and CI dispatch
+
+The new image recipe is [docker/musa](../../docker/musa/README.md). It installs
+exactly six verified ordinary wheels: empty vLLM 0.28.0, the FL plugin, the
+Gate observer, the corrected FlagGems profile, the patched MUSA FlagTree profile
+and PyYAML 6.0.1. The interpreter is `/opt/musa/venv/bin/python`; the image keeps
+the wheels under `/opt/musa/wheelhouse`, the six-wheel stack manifest at
+`/opt/musa/stack-manifest.json`, and the three-dependency manifest at
+`/opt/musa/dependency-manifest.json`. Vendor Torch, TorchMUSA and SDK files retain
+their protected fingerprints. No editable install or source checkout enters
+the new layer; validation rejects active editable distributions, egg-links
+and editable `.pth` hooks.
+
+The new FL and observer ordinary source builds completed from committed source
+`c35aade3c23e59533260578081a8161c7fb88179`, with actual versions
+`0.0.0+gc35aade3c` and `0.1.0`. Building these wheels is separate from publishing
+the runtime image or validating a workflow. The planned tag
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-musa-ci-20261011-c35aade3c23e-b02`
+identifies the candidate selected for publication. Its completed local image,
+`sha256:c9c56cb3553eefab5657074d66c6ce288ae56f63e92f00c4af70da14aad3c9e4`, passed the ordinary-stack CPU
+installation checks. The registry rejected the ordinary Docker push as
+`unauthorized`; the candidate tag is not published. A working publication
+route and an actual immutable RepoDigest are required before image-backed
+GPU CI can run. The local image ID is not a registry digest or full hardware
+qualification.
+
+After publication, select the actual immutable `repository@sha256:digest`
+through `MUSA_CI_IMAGE` or the verified `.github/configs/musa.yml` default.
+The image's build commit describes its embedded FL/observer wheels. CI setup
+rebuilds both as ordinary wheels from the actual checked-out CI commit and
+creates a fresh venv, rather than accepting an older embedded plugin as the
+current candidate. Because a nested `--system-site-packages` venv does not
+inherit `/opt/musa/venv`, setup explicitly installs the three pinned image
+dependencies again from `/opt/musa/wheelhouse`. Wheel hashes, complete `RECORD` files,
+module origins and the protected vendor inputs are checked in that venv.
+
+The CI entry is `.github/workflows/ci.yml`, using the same reusable platform
+workflow as main. Automatic MUSA discovery remains disabled until the actual
+image digest and runner allocation are bound. An explicit dispatch can select
+only MUSA. First use the read-only inventory mode on a committed ref:
+
+```bash
+gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
+  -f platform=musa -F musa_probe_only=true
+```
+
+The `musa-runner-probe` artifact contains sanitized runtime names, PCI identities,
+device/memory observations and bounded device-FD counts; it does not create a
+GPU container or run Torch, inference or model checks. Missing access, an
+incomplete scan or a queued probe does not establish an idle allocation. The
+normal lint/build jobs still have their own results, so an inventory success
+alone cannot certify the complete workflow.
+
+The inventory-only
+[run 38108902958](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108902958)
+completed successfully at `2b6bee63ad1b852021a9e166195aa3fac75443f1`:
+lint (Ruff check/format, ShellCheck and Typos), ordinary package build,
+discovery and the read-only runner probe all passed. `test-musa` was skipped
+by the inventory-only selection; no full MUSA GPU CI result is claimed. The earlier
+[run 38108076987](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108076987)
+retains its original queued/failed stages.
+
+For a full run, supply a reviewed allocation JSON with exactly four physical
+device ordinals, logical devices `0,1,2,3`, four canonical PCI IDs in that
+logical order and the installed Docker runtime name. Optional keys are a list
+of runner labels and the two `/data/` model paths. The allowed field names are
+`runtime`, `physical_devices`, `logical_devices`, `pci_bus_ids`, `runner_labels`,
+`model_27b` and `model_35b_a3b`; duplicate or unknown fields are rejected. The
+allocation applies to this dispatch and does not rewrite shared repository
+variables. Confirm exclusive use of those four devices before the full run.
+
+```bash
+gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
+  -f platform=musa -f musa_allocation="$(cat "$ALLOCATION_JSON")" \
+  -F musa_probe_only=false
+gh run watch "$RUN_ID" --repo flagos-ai/vllm-plugin-FL --exit-status
+```
+
+The full platform workflow runs unit, functional, e2e and benchmark stages,
+then the original MUSA adaptation Gate after those GPU jobs release the
+allocation. MUSA concurrency prevents two platform workflows from sharing
+that allocation, and its e2e matrix runs serially. Keep the final workflow URL,
+actual checkout commit, image RepoDigest, setup evidence and complete Gate
+artifact. A workflow is qualified only by its actual jobs and unchanged
+four-route Gate: 104 requests, 1040 checks, 20 JUnit cases, 32 complete streams
+and 52/208 graph joins. Probe-only, ordinary build or an earlier private Gate
+does not substitute for this new image/CI result.
+
 ## Additional FlagGems and FlagTree modifications
 
 The ordinary stack uses explicit private dependency profiles. A public commit
@@ -161,7 +249,8 @@ No cases, retries, check names or thresholds were changed.
 
 This establishes the recorded CPU07 model/observer scope, not a compiler
 root-cause fix, a general memory-fit guarantee or GitHub runner qualification.
-Automatic discovery remains `musa.enabled: false`; GitHub CI remains NOT_RUN.
+This CPU07 record does not qualify the new image or GitHub hardware workflow.
+Current ordinary-image/CI progress is recorded [above](#ordinary-stack-image-and-ci-dispatch).
 The finite evidence budgets are 2 GiB per stream and 12 GiB total with
 streaming aggregation hashes; they are not a process-memory bound.
 
@@ -368,7 +457,7 @@ references in GitHub's container options.
 | `MUSA_CI_PHYSICAL_DEVICES` | Exactly four unique physical device IDs assigned to the runner |
 | `MUSA_CI_LOGICAL_DEVICES` | `0,1,2,3` after validated runtime remapping |
 | `MUSA_CI_PCI_BUS_IDS` | Four canonical PCI IDs in that logical order |
-| `MUSA_CI_EMPTY_WHEEL` | Complete absolute `/data/...whl` path |
+| `MUSA_CI_EMPTY_WHEEL` | Complete absolute `/data/...whl` path, or the verified image `/opt/musa/wheelhouse/...whl` artifact |
 | `MUSA_CI_EMPTY_WHEEL_SHA256` | Actual 64-character lowercase SHA256 |
 | `MUSA_GATE_MODEL_27B` | Complete absolute `/data/.../Qwen3.6-27B` directory |
 | `MUSA_GATE_MODEL_35B_A3B` | Complete absolute `/data/.../Qwen3.6-35B-A3B` directory |

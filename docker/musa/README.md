@@ -58,13 +58,13 @@ python3 -I -B make_stack_manifest.py --plugin-commit "$PLUGIN_COMMIT" \
 python3 -I -B prepare_context.py --manifest "$STACK_MANIFEST" \
   --wheelhouse "$PRIVATE_WHEELHOUSE" --output "$PRIVATE_BUILD_CONTEXT"
 MUSA_BUILD_CONTEXT="$PRIVATE_BUILD_CONTEXT" bash docker/build.sh \
-  --platform musa --target ci --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl \
+  --platform musa --target ci --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl \
   --image-tag "v0.28.0-musa-ci-20261011-${PLUGIN_COMMIT:0:12}"
 ```
 
 Use the printed Docker argv prefix plus `--tag "$UNIQUE_IMAGE_TAG"` and the
-context path. Example registry path follows current PR #574:
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci-20261011-<commit12>`.
+context path. Use the main MUSA CI registry namespace:
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-musa-ci-20261011-<commit12>`.
 Run long remote builds in tmux and preserve stdout, stderr and exit files.
 `--network=none` applies to Docker RUN instructions, and the build uses the
 locally verified base with `--pull=false`. No source or wheel download occurs.
@@ -101,7 +101,7 @@ merge/branch SHA and installs all six wheels in its fresh venv. A nested venv's
 the three image wheelhouse dependencies rather than relying on nested-venv paths.
 CI's validator therefore needs the narrow `/opt/musa/wheelhouse/` allowed root,
 in addition to its existing `/data/` interface, without weakening SHA, vendor or
-RECORD checks. Sync exact image digest and manifest fields into `.musa.yml`.
+RECORD checks. Sync exact image digest and manifest fields into `.github/configs/musa.yml`.
 
 The full GPU Gate retains TP4/MCCL, FlagCX absent, eager utilization 0.6,
 graph utilization 0.92 and sparse captures `[1,2,4,8,16,256,1024,4096]`,

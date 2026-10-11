@@ -6,6 +6,34 @@ isolated model runs and their actual results are recorded in the
 [MUSA deployment guide](musa.md#validation-record). Local consumer tests use
 labelled filesystem fixtures and do not certify GPU behavior.
 
+## Ordinary image and explicit CI dispatch
+
+The [ordinary-image and dispatch instructions](musa.md#ordinary-stack-image-and-ci-dispatch)
+describe the six-wheel `/opt/musa/venv` runtime, immutable image binding and
+per-run four-device allocation. The workflow entry is `ci.yml`; a dispatch
+selects `platform=musa` and either inventory-only `musa_probe_only=true` or a
+full run with an explicit `musa_allocation` JSON. The inventory job reads
+sanitized resource observations without a GPU container or Torch import;
+its success is not inference or Gate acceptance.
+
+The committed-source FL/observer ordinary builds and local image CPU
+installation checks passed. Registry publication is blocked by an ordinary
+Docker push `unauthorized` response, so the new image's full GPU CI has not run.
+The inventory-only [run 38108902958](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108902958)
+completed successfully at `2b6bee63ad1b852021a9e166195aa3fac75443f1`.
+Lint, ordinary build, discovery and runner probe passed; `test-musa` was
+skipped. The CPU07 results below remain separate private model validation
+and are not substituted as this workflow's hardware result.
+
+CI setup rebuilds FL and observer from its actual checkout commit into a fresh
+venv and explicitly reinstalls the three pinned image dependency wheels.
+The nested venv does not inherit the image's `/opt/musa/venv` packages.
+Source binding and vendor/RECORD checks remain mandatory. The full workflow
+sequences unit, functional, serial e2e and benchmark stages before the original
+Gate; MUSA platform concurrency serializes competing uses of the allocation.
+The final acceptance record must identify the actual workflow, checkout and
+published image RepoDigest, together with all four original route results.
+
 ## CPU07 NDmul safe512 candidate
 
 Follow the current [installation and run instructions](musa.md#cpu07-ndmul-safe512-candidate).
@@ -52,7 +80,8 @@ No cases, retries, check names or thresholds were changed.
 
 This establishes the recorded CPU07 model/observer scope, not a compiler
 root-cause fix, a general memory-fit guarantee or GitHub runner qualification.
-Automatic discovery remains `musa.enabled: false`; GitHub CI remains NOT_RUN.
+This CPU07 record does not qualify the new image or GitHub hardware workflow.
+Current ordinary-image/CI progress is recorded [above](#ordinary-image-and-explicit-ci-dispatch).
 The finite evidence budgets are 2 GiB per stream and 12 GiB total with
 streaming aggregation hashes; they are not a process-memory bound.
 

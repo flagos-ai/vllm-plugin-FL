@@ -157,6 +157,20 @@ Create a fresh private venv from the fixed Python 3.10 SDK/TorchMUSA interpreter
 
 Validate every installed RECORD/payload, direct-url wheel SHA, private module origin and version. Recheck SDK/Torch/TorchMUSA/vendor fingerprints unchanged. The CI interfaces are `MUSA_CI_DEPENDENCY_PROFILE=latest`, `MUSA_CI_DEPENDENCY_MANIFEST` and `MUSA_CI_DEPENDENCY_MANIFEST_SHA256`; the manifest must use the actual corrected Gems/Tree/PyYAML wheel pins and fixed vendor fingerprints. Source lineage requires preserved source/build receipts; the manifest alone does not derive it. Baseline remains the CI default.
 
+## Ordinary-stack image handoff
+
+Use the [ordinary image recipe](../../docker/musa/README.md) to combine the
+verified empty vLLM, committed-source FL/observer builds and these three pinned
+dependency wheels into `/opt/musa/venv`. The six-wheel stack manifest records
+actual wheel bytes/SHA, build receipts and source/repack lineage; the separate
+three-wheel dependency manifest remains the CI `latest` interface.
+CI creates its own fresh venv and rebuilds FL/observer from the actual checkout,
+then explicitly reinstalls the image's dependency wheels rather than relying
+on nested-venv inheritance. Publishing an image and passing its full workflow
+are separate from the recorded CPU07 Gate and remain pending in this record.
+Follow the [image and dispatch guide](../../docs/usage/musa.md#ordinary-stack-image-and-ci-dispatch)
+for an immutable digest, read-only runner probe and explicit four-device run.
+
 ## Validation scope
 
 CPU06 successfully installed seven ordinary wheels; only the two latest dependency wheels replaced CPU05, and the other five wheel bodies/vendor fingerprints remained unchanged. CONFIG06 bound seven metadata rows, the original 19 Gate files and four routes × 26 requests/four ranks. The owned CPU objects were stopped and removed with evidence/environment retained. These installation receipts are CPU/static evidence; the historical CPU06 musafix1 four-route GPU runs have 87/104 quality passes and strict full-matrix FAIL, with that profile's 35B-A3B eager unresolved (see the runner results). Automatic discovery remains disabled and GitHub CI is NOT_RUN.
