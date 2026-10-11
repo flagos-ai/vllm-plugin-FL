@@ -195,10 +195,12 @@ jobs:
       volumes: ${{ fromJson(needs.setup.outputs.config).container_volumes }}
       options: ${{ fromJson(needs.setup.outputs.config).container_options }}
     env:
-      MUSA_GATE_ARTIFACT_DIR: ${{ runner.temp }}/musa-gate-${{ github.run_id }}-${{ github.run_attempt }}
-      MUSA_CI_RESULT_ROOT: ${{ runner.temp }}/musa-gate-${{ github.run_id }}-${{ github.run_attempt }}
       VLLM_NO_USAGE_STATS: "1"
     steps:
+      - name: Set unique Gate evidence directories
+        run: |
+          gate_root="${RUNNER_TEMP}/musa-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf 'MUSA_GATE_ARTIFACT_DIR=%s\nMUSA_CI_RESULT_ROOT=%s\n' "$gate_root" "$gate_root" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - name: Check allocated devices
         run: bash .github/scripts/musa/check.sh
