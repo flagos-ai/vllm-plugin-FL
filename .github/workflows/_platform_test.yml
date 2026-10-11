@@ -41,6 +41,11 @@ on:
       platform:
         required: true
         type: string
+      musa_allocation:
+        description: "Explicit MUSA allocation JSON for this workflow only"
+        required: false
+        type: string
+        default: ""
     secrets:
       FEISHU_APP_ID:
         required: false
@@ -82,6 +87,7 @@ jobs:
           fetch-depth: 0
       - id: load
         env:
+          MUSA_CI_ALLOCATION: ${{ inputs.musa_allocation }}
           MUSA_CI_RUNTIME: ${{ vars.MUSA_CI_RUNTIME }}
           MUSA_CI_PHYSICAL_DEVICES: ${{ vars.MUSA_CI_PHYSICAL_DEVICES }}
           MUSA_CI_LOGICAL_DEVICES: ${{ vars.MUSA_CI_LOGICAL_DEVICES }}

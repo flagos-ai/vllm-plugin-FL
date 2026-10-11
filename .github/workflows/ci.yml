@@ -30,6 +30,22 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
   workflow_dispatch:
+    inputs:
+      platform:
+        description: "Run the enabled platform registry, or only MUSA"
+        type: choice
+        options: [all, musa]
+        default: all
+      musa_allocation:
+        description: "MUSA allocation JSON: runtime, physical_devices, logical_devices, pci_bus_ids; optional runner_labels/model paths"
+        type: string
+        required: false
+        default: ""
+      musa_probe_only:
+        description: "Read-only MUSA runner inventory; do not run GPU tests"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -97,7 +113,17 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
       - id: detect
-        run: python3 .github/scripts/detect_platforms.py
+        env:
+          REQUESTED_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && (inputs.musa_probe_only && 'musa' || inputs.platform) || 'all' }}
+        run: |
+          if [ "$REQUESTED_PLATFORM" = "musa" ]; then
+            echo 'platforms=["musa"]' >> "$GITHUB_OUTPUT"
+          elif [ "$REQUESTED_PLATFORM" = "all" ]; then
+            python3 .github/scripts/detect_platforms.py
+          else
+            echo "Unknown platform selection" >&2
+            exit 1
+          fi
 
   # ============================================================
   # Job 4a: CUDA platform testing
@@ -148,10 +174,11 @@ jobs:
   # ============================================================
   test-musa:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
+    if: contains(fromJson(needs.discover.outputs.platforms), 'musa') && !(github.event_name == 'workflow_dispatch' && inputs.musa_probe_only)
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: musa
+      musa_allocation: ${{ github.event_name == 'workflow_dispatch' && inputs.musa_allocation || '' }}
     secrets: inherit
 
   # ============================================================
@@ -175,3 +202,21 @@ jobs:
     with:
       platform: kunlunxin
     secrets: inherit
+
+  # Inventory runs on the same registered MUSA label without a GPU container.
+  # This produces allocation evidence; it is never model or Gate acceptance.
+  musa-runner-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.musa_probe_only
+    runs-on: mt-cicd-vllm-plugin
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read sanitized runner resources
+        env:
+          PROBE_OUTPUT: ${{ runner.temp }}/musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: python3 -I -B .github/scripts/musa/probe_runner.py --output "$PROBE_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
