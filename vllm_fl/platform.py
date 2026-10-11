@@ -227,6 +227,13 @@ class PlatformFL(Platform):
                 "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
+        if cls.vendor_name in ("gcu", "enflame"):
+            from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+            # Install before CustomOp caches even a disabled encoder's native
+            # method during construction; backend selection happens later.
+            patch_mm_encoder_attention()
+
         model_config = vllm_config.model_config
         parallel_config = vllm_config.parallel_config
         if cls.device_type == "npu" and model_config is not None:
@@ -438,8 +445,39 @@ class PlatformFL(Platform):
                 f"Backend {backend} is not supported for vit attention. "
                 f"Supported backends are: {cls.get_supported_vit_attn_backends()}"
             )
+            if (
+                cls.vendor_name in ("gcu", "enflame")
+                and backend == AttentionBackendEnum.FLASH_ATTN
+            ):
+                from vllm_fl.dispatch.backends.vendor.gcu.impl.attention import (
+                    AttentionGCUBackend,
+                )
+
+                if not (
+                    head_size > 0
+                    and AttentionGCUBackend.supports_head_size(head_size)
+                    and AttentionGCUBackend.supports_dtype(dtype)
+                ):
+                    raise ValueError(
+                        "Enflame vision FlashAttention requires FP16/BF16 and "
+                        "a positive head size divisible by 8 and at most 256; "
+                        f"got head_size={head_size}, dtype={dtype}."
+                    )
             logger.info_once(f"Using backend {backend} for vit attention")
             return backend
+
+        if cls.vendor_name in ("gcu", "enflame"):
+            from vllm_fl.dispatch.backends.vendor.gcu.impl.attention import (
+                AttentionGCUBackend,
+            )
+
+            if (
+                head_size > 0
+                and AttentionGCUBackend.supports_head_size(head_size)
+                and AttentionGCUBackend.supports_dtype(dtype)
+            ):
+                return AttentionBackendEnum.FLASH_ATTN
+            return AttentionBackendEnum.TORCH_SDPA
 
         # Try FlashAttention first
         if (cc := cls.get_device_capability()) and cc.major >= 8:
