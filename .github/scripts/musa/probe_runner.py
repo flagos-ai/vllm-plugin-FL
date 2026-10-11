@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 QUERY_CAP = 1024 * 1024
+UUID_INPUT_CAP = 128
 PROCESS_CAP = 100000
 FD_CAP = 500000
 
@@ -50,6 +51,33 @@ def daemon_id_digest(text):
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9:_.-]{1,256}", value):
         return None
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def kernel_uuid_identity(path):
+    """Return only a bounded canonical UUID digest and sanitized read status."""
+    try:
+        with path.open("rb") as source:
+            data = source.read(UUID_INPUT_CAP + 1)
+    except OSError as error:
+        return None, {"available": False, "error_type": type(error).__name__}
+    status = {
+        "available": True,
+        "within_input_cap": len(data) <= UUID_INPUT_CAP,
+        "parse_ok": False,
+    }
+    try:
+        if not status["within_input_cap"]:
+            raise ValueError("UUID input exceeds limit")
+        value = data.decode("ascii").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value):
+            raise ValueError("Invalid UUID format")
+        if value.replace("-", "") in {"0" * 32, "f" * 32}:
+            raise ValueError("Invalid placeholder UUID")
+    except ValueError as error:
+        status["error_type"] = type(error).__name__
+        return None, status
+    status["parse_ok"] = True
+    return hashlib.sha256(value.encode("ascii")).hexdigest(), status
 
 
 def parse_gmi(text):
@@ -222,6 +250,12 @@ def main():
     if identity_text is not None:
         identity_digest = daemon_id_digest(identity_text)
         identity_status["parse_ok"] = identity_digest is not None
+    dmi_digest, dmi_status = kernel_uuid_identity(
+        Path("/sys/class/dmi/id/product_uuid")
+    )
+    boot_digest, boot_status = kernel_uuid_identity(
+        Path("/proc/sys/kernel/random/boot_id")
+    )
     result = {
         "schema_version": 1,
         "probe_time_utc_seconds": time.time(),
@@ -238,6 +272,10 @@ def main():
         "docker_runtime_names": runtimes,
         "docker_daemon_query_status": identity_status,
         "docker_daemon_id_sha256": identity_digest,
+        "dmi_product_uuid_sha256": dmi_digest,
+        "dmi_product_uuid_status": dmi_status,
+        "kernel_boot_id_sha256": boot_digest,
+        "kernel_boot_id_status": boot_status,
         "candidate_idle_devices": candidate_devices(nodes, gmi, fd_report),
         "allocation_reserved": False,
         "GPU_Gate_passed": False,
