@@ -45,3 +45,8 @@ container_options: >-
   --env TRITON_CACHE_DIR=/root/.cache/triton
   --env FLAGGEMS_CACHE_DIR=/root/.cache/flaggems
   --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
+
+# MUSA_CI_DEPENDENCY_PROFILE defaults to baseline (inherited Gems/Tree).
+# latest requires a /data manifest plus its whole SHA; setup installs only its
+# three verified ordinary FlagGems/FlagTree/PyYAML wheels in the fresh venv.
+# Torch, TorchMUSA and the SDK remain the selected image's protected baseline.

@@ -95,9 +95,21 @@ def resolve_musa_config(config: dict) -> dict:
         if not re.fullmatch(r"[A-Za-z0-9./_:@-]+", image):
             raise ValueError("Invalid MUSA_CI_IMAGE")
         config["ci_image"] = image
+    profile = os.environ.get("MUSA_CI_DEPENDENCY_PROFILE", "") or "baseline"
+    if profile not in {"baseline", "latest"}:
+        raise ValueError("MUSA_CI_DEPENDENCY_PROFILE must be baseline or latest")
+    profile_env = {"MUSA_CI_DEPENDENCY_PROFILE": profile}
+    if profile == "latest":
+        profile_env["MUSA_CI_DEPENDENCY_MANIFEST"] = data_path("MUSA_CI_DEPENDENCY_MANIFEST", ".json")
+        dependency_sha = required("MUSA_CI_DEPENDENCY_MANIFEST_SHA256")
+        if not re.fullmatch(r"[0-9a-f]{64}", dependency_sha):
+            raise ValueError("Invalid MUSA dependency manifest SHA256")
+        profile_env["MUSA_CI_DEPENDENCY_MANIFEST_SHA256"] = dependency_sha
+    elif os.environ.get("MUSA_CI_DEPENDENCY_MANIFEST") or os.environ.get("MUSA_CI_DEPENDENCY_MANIFEST_SHA256"):
+        raise ValueError("Baseline must not silently ignore a latest dependency manifest")
     env = {"MTHREADS_VISIBLE_DEVICES": physical, "MUSA_VISIBLE_DEVICES": logical,
            "MUSA_CI_PCI_BUS_IDS": pci, "MUSA_CI_EMPTY_WHEEL": wheel,
-           "MUSA_CI_EMPTY_WHEEL_SHA256": sha, **models}
+           "MUSA_CI_EMPTY_WHEEL_SHA256": sha, **models, **profile_env}
     config["container_options"] += " --runtime=" + runtime
     for key, value in env.items():
         config["container_options"] += f" --env {key}={value}"

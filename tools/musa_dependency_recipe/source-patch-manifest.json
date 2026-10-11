@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "scope": "Fixed public cf174 archive plus four private-source production replacements; ordinary wheels only",
+  "source_commit": "cf174ab70ab2af934158c83385458fcc9c830712",
+  "archive": {
+    "url": "https://api.github.com/repos/flagos-ai/FlagGems/tarball/cf174ab70ab2af934158c83385458fcc9c830712",
+    "bytes": 13976589,
+    "sha256": "366c9d2d712a6c409482c4e0d0743b9c51db71f4a09787c12542a8d6892e43ae",
+    "root": "flagos-ai-FlagGems-cf174ab",
+    "members": 6591,
+    "regular_files": 6344,
+    "expanded_bytes": 53727150
+  },
+  "versions": {
+    "master": "5.4.0+archive.gcf174ab70ab2",
+    "corrected": "5.4.0+archive.gcf174ab70ab2.pr6894.musafix1"
+  },
+  "PR6894_head": "4e330227564ccc7f6a373be2d48a5d2cb7f2823e",
+  "PR_whole_head_installed": false,
+  "four_production_replacements": [
+    {
+      "source_path": "src/flag_gems/ops/flash_api.py",
+      "installed_path": "flag_gems/ops/flash_api.py",
+      "preimage": {
+        "bytes": 44341,
+        "sha256": "9d6f1e1ec802d132b074a618c173a9ea424f4d5793fd0cbcead687796155a70f"
+      },
+      "after": {
+        "bytes": 44577,
+        "sha256": "8d51a06b65f60357f318e13ab9dba4c8ab35a0cae8e1bc017f045531f031e191"
+      },
+      "input_name": "production-0.py.raw",
+      "scope": "PR6894 plus q.device property-query fix"
+    },
+    {
+      "source_path": "src/flag_gems/ops/flash_kernel.py",
+      "installed_path": "flag_gems/ops/flash_kernel.py",
+      "preimage": {
+        "bytes": 50891,
+        "sha256": "eef0202e6c0ed08bef8098adede1a603c63354c54b54a19414e210b675157265"
+      },
+      "after": {
+        "bytes": 51454,
+        "sha256": "dfb99850150f9c734373247ea005ed3957109347dbc1ce9f5472b3eef8ecb850"
+      },
+      "input_name": "production-1.py.raw",
+      "scope": "Exact PR6894 production postimage"
+    },
+    {
+      "source_path": "src/flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py",
+      "installed_path": "flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py",
+      "preimage": {
+        "bytes": 44245,
+        "sha256": "df6d4e554b04f6bf06a57346ac5c613f07db2fbf3703328c66920abfe68c39ec"
+      },
+      "after": {
+        "bytes": 44479,
+        "sha256": "52a2d999ef981349542229bf599c9003740bbb63524302bec9e27dccddd4dce6"
+      },
+      "input_name": "production-2.py.raw",
+      "scope": "Exact PR6894 production postimage"
+    },
+    {
+      "source_path": "src/flag_gems/ops/_pin_memory.py",
+      "installed_path": "flag_gems/ops/_pin_memory.py",
+      "preimage": {
+        "bytes": 1500,
+        "sha256": "25b53a6321baaa806e2ef8ca4bd07a69dac2feda2f54992a4724e31cba72f5c7"
+      },
+      "after": {
+        "bytes": 1631,
+        "sha256": "56bd360ccf0e3f97231d7343e4738efc1bf1d7fb4bbd3582b5429a550bd1d67d"
+      },
+      "input_name": "production-3.py.raw",
+      "scope": "MUSA pin-memory candidate revision02, explicit CPU rejection"
+    }
+  ],
+  "Q_padding_patch_included": false,
+  "whole_model_gate_acceptance": false,
+  "tolerances_changed": false,
+  "newly_built_wheel_bytes_are_not_promised_reproducible": true
+}

@@ -3,6 +3,7 @@
 import argparse
 import contextlib
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -416,11 +417,17 @@ def one_route(args, route, root, binding_id):
                 route["served_model_name"], "--host", "127.0.0.1", "--port", str(route["port"]),
                 "--tensor-parallel-size", "4", "--dtype", "bfloat16", "--max-model-len", "32768",
                 "--max-num-seqs", "8", "--max-num-batched-tokens", "4096",
-                "--gpu-memory-utilization", "0.6", "--trust-remote-code",
+                "--gpu-memory-utilization", ("0.92" if route["mode"] == "graph" else "0.6"), "--trust-remote-code",
                 "--shutdown-timeout", str(API_SHUTDOWN_SECONDS),
                 "--allowed-local-media-path", str(Path(args.gate_dir) / "images")]
         if route["mode"] == "eager":
             argv.append("--enforce-eager")
+        else:
+            # Cover mixed prefill/decode batches up to the scheduler budget.
+            # The default is derived from max_num_seqs and can stop at 16.
+            argv.extend(["--compilation-config", json.dumps({
+                "cudagraph_capture_sizes": [1, 2, 4, 8, 16, 256, 1024, 4096],
+            }, separators=(",", ":"))])
         route["server"]["argv"] = argv
         route["server"]["attempted"] = True
         server_logs = logs / "server"

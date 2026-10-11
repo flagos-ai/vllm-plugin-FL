@@ -1,0 +1,60 @@
+{
+  "CPU_only_limits": {
+    "GPU_executed": false,
+    "kernel_ABI_passed": false,
+    "model_Gate_passed": false,
+    "target_packages_imported": false
+  },
+  "actual_wheel": {
+    "bytes": 180144953,
+    "sha256": "e11252f44e39742553ca52b267d617cae666ee9129da57fae91f76d774a72019",
+    "tag": "cp310-cp310-linux_x86_64",
+    "version": "0.7.0+mthreads3.6.gitba25a955.profilefix1"
+  },
+  "after": {
+    "bytes": 6032,
+    "sha256": "98e3daec66874141c6628e3d8b1e39e36adb6c26f0a42a34f53de372a29d71d0"
+  },
+  "base_commit": "ba25a9551b2e5157d843affe6f4c2cada1dcfde8",
+  "before": {
+    "bytes": 6012,
+    "sha256": "5a4868d5eb23cb81c5e795412cfdb5ca334224bae2352d3a40af99e79f566765"
+  },
+  "default_build_profile_tested": false,
+  "exact_change": "Only the preprocessor directive before six Proton headers: #else -> #elif defined(__PROTON__)",
+  "installed_or_vendor_source_edit_allowed": false,
+  "kernel_or_model_fix_claimed": false,
+  "patch": {
+    "bytes": 584,
+    "path": "flagtree-musa-proton-off.patch",
+    "sha256": "0f748432c10e1309d4c51eb963d9ed8e4379ae1c528ed81314c3e954fbe46008"
+  },
+  "post_build_source_verification": {
+    "actual_original_members": 6462,
+    "bytes": 2635262,
+    "declared_changed_original_members": 1,
+    "other_original_members_unchanged": 6461,
+    "sha256": "42f99975b65badf5e613374c7db88b8ee0d4f190b6bf6a56b9fdcc0bd7fd0712"
+  },
+  "profile": {
+    "FLAGTREE_BACKEND": "mthreads",
+    "FLAGTREE_WHEEL_VERSION": "0.7.0+mthreads3.6.gitba25a955.profilefix1",
+    "TRITON_BUILD_FLAGPRISM": "OFF",
+    "TRITON_BUILD_PROTON": "OFF"
+  },
+  "schema_version": 1,
+  "scope": "Explicitly patched MUSA core ordinary-wheel build and CPU-static installation; not pristine default main",
+  "source_member": "third_party/mthreads/bin/RegisterTritonDialects.h",
+  "source_repository": "https://github.com/flagos-ai/FlagTree",
+  "status": {
+    "CPU_config37": "ACTUAL_STATIC_SOURCE_CONFIG_BIND_SUCCESS",
+    "attempt03_unpatched_explicit_OFF_OFF_build": "ACTUAL_COMPILE_FAILED_MISSING_GENERATED_PROTON_HEADER",
+    "attempt04_patched_build": "ACTUAL_CPU_STATIC_BUILD_INSTALL_SUCCESS",
+    "latest_original_four_route_Gate": "NOT_RUN",
+    "new_private_latest7_install": "ACTUAL_CPU_STATIC_INSTALL_SUCCESS",
+    "ordinary_wheel": "ACTUAL_RECORD_VERIFIED",
+    "source_peer": "CLOSED"
+  },
+  "upstream_issue": "https://github.com/flagos-ai/FlagTree/issues/1344",
+  "upstream_merge_claimed": false
+}

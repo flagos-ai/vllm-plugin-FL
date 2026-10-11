@@ -5,7 +5,117 @@ plugin as ordinary wheels in a private environment that inherits the MUSA
 image's vendor packages. The older MUSA guide using vLLM 0.24.0 describes the
 same installation pattern; its vLLM version and image are separate baselines.
 
-## Environment observed during this upgrade
+## CPU07 NDmul safe512 candidate
+
+Use an isolated Linux x86_64 Python 3.10 environment with MUSA SDK 4.3.5,
+driver 3.3.5-server and Torch/TorchMUSA 2.9.0. The observed TP4 communication
+path uses MCCL; FlagCX was not installed. Preserve the vendor packages and
+use ordinary wheels in a fresh private venv.
+
+Prepare Gems from the pinned bfc6 archive with the explicit
+`latest-bfc6-ndsafe512` source recipe. Build Tree from pinned 69148 with
+`TRITON_BUILD_FLAGPRISM=OFF`, `TRITON_BUILD_PROTON=OFF` and the single-header
+Proton guard. Follow the [portable recipe](../../tools/musa_dependency_recipe/README.md)
+for complete commands, offline inputs and RECORD validation. CPU07 used an
+ordinary `musafix2` Gems wheel repacked from its verified `musafix1` source-built
+wheel; it did not execute the new source-build command. Its other six wheel
+bodies and vendor/image inputs stayed unchanged. The safety profile limits
+only the shared MUSA NDmul entry to block 512 and disables that entry's
+FlagTune expansion; it is a workaround, not a compiler root-cause fix.
+
+The recipe profile selects source preparation. CI instead consumes the
+generic `latest` interface and an actual SHA-bound manifest containing exactly
+Gems, Tree and PyYAML wheels, their actual versions/bytes/SHA256, five fixed
+vendor fingerprints and honest `source_lineage` for source builds and repacks.
+It does not fetch HEAD or derive lineage from a wheel version. Before the
+existing workflow setup step, set:
+
+```bash
+export MUSA_CI_DEPENDENCY_PROFILE=latest
+export MUSA_CI_DEPENDENCY_MANIFEST=/data/verified/dependency-profile.json
+export MUSA_CI_DEPENDENCY_MANIFEST_SHA256="$(sha256sum "$MUSA_CI_DEPENDENCY_MANIFEST" | cut -d' ' -f1)"
+```
+
+The setup step builds current FL and observer ordinary wheels, installs the
+three manifest wheels into its fresh venv and verifies their installed payloads.
+Keep the current FL capture-input staging and collective split, and the
+observer's strict semantic joins. Optional diagnostics remain disabled and
+excluded from the Gate plugin allowlist.
+
+CI setup must use committed FL and observer changes: `MUSA_CI_EXPECTED_COMMIT`
+and, when set, `GITHUB_SHA` must identify that commit. `git rev-parse HEAD`
+does not give uncommitted working-tree edits committed provenance; the local
+CPU07 ordinary repack is not a new Git commit.
+
+After that setup, inside the already isolated four-device container, run:
+
+```bash
+export MUSA_CI_PYTHON=/path/to/verified-private-venv/bin/python
+export MUSA_CI_EXPECTED_COMMIT="$(git rev-parse HEAD)"
+export MUSA_GATE_MODEL_27B=/data/models/Qwen3.6-27B
+export MUSA_GATE_MODEL_35B_A3B=/data/models/Qwen3.6-35B-A3B
+bash .github/scripts/musa/run-adaptation-gate.sh
+```
+
+The runner retains TP4, bf16, maximum 8 sequences, 4096 batch tokens and the
+original 26 logical cases and ten checks per route. Graph routes use GPU
+memory utilization 0.92 and the following capture buckets; eager routes retain
+`--enforce-eager` and utilization 0.6:
+
+```bash
+--compilation-config '{"cudagraph_capture_sizes":[1,2,4,8,16,256,1024,4096]}'
+```
+
+No graph mode is forced. The sparse capture buckets cover every integer
+batch count through 4096, including the previously observed mixed-prefill
+batches 967, 194, 722 and 527. Both graph routes completed at utilization 0.92
+with the unchanged 32768-token model limit. This is an observed fit for these
+exact runs; other models, inputs and shared-memory budgets need qualification.
+
+Earlier trials remain preserved: runtime71 passed quality under maximum
+capture size 16 but failed strict replay coverage; runtime76 had 25/26 quality
+passes because its long-text output omitted the required `limitations`.
+Runtime74/77/78 failed KV allocation before READY or a model client, and
+runtime79 was unexecuted. See the [runner record](musa-ci-gate-runner.md#earlier-cpu07-trials)
+for those separate scopes; none is rewritten as a successful run.
+
+Separate runtime67r2 numerical diagnostics passed all four native/public
+cases on the recorded 27B and 35B geometries, using synthetic tensor values.
+The public entry used block 512 with zero benchmark calls; the child checked
+the complete independent CPU oracle, output sentinels and unchanged inputs.
+These synthetic checks establish that numerical scope, not compiler
+root-cause acceptance or a substitute for the model Gate.
+
+| CPU07 route / actual evidence | Original quality | JUnit / complete telemetry |
+| --- | --- | --- |
+| 35B-A3B eager / runtime68r2 | 26/26; 260/260 checks true | 5 passing cases; 8 clean ends |
+| 27B eager / runtime70 | 26/26; 260/260 checks true | 5 passing cases; 8 clean ends |
+| 35B-A3B graph / runtime81 | 26/26; 260/260 checks true | 5 passing cases; 8 clean ends |
+| 27B graph / runtime80 | 26/26; 260/260 checks true | 5 passing cases; 8 clean ends |
+
+**The CPU07 four-route Gate passed for these exact runs.** All 104 original
+logical outcomes passed all 1040 original checks, with zero false or absent
+checks. The 12 JUnit XML files contain 20 passing cases, zero failures, errors
+or skips. All 32 process streams have normal final ends with no errors,
+drops, cap or I/O failures; all four owned jobs stopped with PID 0, no OOM
+and empty cleanup errors.
+
+The unchanged strict consumer ran once in full-matrix scope and exited 0.
+It accepted all 32 byte-identical original streams (465,877,818 bytes), all
+104 logical results and 20 scenarios, and certified 52 graph-request joins
+and 208 request/rank replay joins. Its five full-matrix completion flags are
+true and errors are empty. The consumer's separate source/GPU/ABI/model/Gate
+acceptance flags remain false by design; the combined Gate conclusion uses
+the independently checked original quality, JUnit and lifecycle evidence.
+No cases, retries, check names or thresholds were changed.
+
+This establishes the recorded CPU07 model/observer scope, not a compiler
+root-cause fix, a general memory-fit guarantee or GitHub runner qualification.
+Automatic discovery remains `musa.enabled: false`; GitHub CI remains NOT_RUN.
+The finite evidence budgets are 2 GiB per stream and 12 GiB total with
+streaming aggregation hashes; they are not a process-memory bound.
+
+## Historical vendor environment observed during this upgrade
 
 | Component | Observed version or configuration |
 |---|---|
@@ -81,6 +191,51 @@ FlagTree/Triton or FlagGems to make pip dependency resolution succeed. Import
 provenance must show `vllm` and `vllm_fl` inside the new venv and vendor modules
 in the image's existing site-packages. A successful wheel build alone does not
 prove accelerator inference.
+
+## Select the CI dependency profile
+
+`MUSA_CI_DEPENDENCY_PROFILE=baseline` is the default: inherit the selected
+image's FlagGems and FlagTree and retain the historical baseline. To test a
+curated update, set `MUSA_CI_DEPENDENCY_PROFILE=latest`,
+`MUSA_CI_DEPENDENCY_MANIFEST=/data/.../dependency-profile.json` and
+`MUSA_CI_DEPENDENCY_MANIFEST_SHA256` to that complete JSON file's SHA256.
+The manifest supplies exactly three existing ordinary wheels (FlagGems, a
+**MUSA** FlagTree wheel, and PyYAML 6.0.1), with each exact version, byte size,
+whole SHA256 and source lineage. It also pins the vendor Torch/TorchMUSA 2.9.0
+source/metadata and SDK 4.3.5 version file. A corrected private FlagGems wheel
+requires a distinct version and its actual new SHA; do not reuse a master pin.
+
+Setup installs the three additional wheels only in its fresh private venv,
+without index access or dependency resolution. Complete wheel and installed
+RECORDs, original payload bytes, direct wheel URLs and actual module origins
+are verified. Vendor Torch/TorchMUSA and SDK inputs are rechecked unchanged;
+no SDK, driver, Torch or NumPy upgrade is requested. This option does not fetch
+"latest" automatically or select a CUDA FlagTree wheel. The name describes an
+explicit dependency profile, not a statement of compatibility.
+
+The inspected public artifacts were FlagGems master
+`7599dd130046f84df099aa771e91d35d5991e69a` with explicitly assigned archive
+version `5.4.0+archive.g7599dd130046`, and FlagTree `0.7.0+mthreads3.6`.
+The archive version is not a Git-derived release version. The unmodified
+master profile failed model startup at MUSA pinned-memory validation; do not
+claim it passes the model or Gate. Component probes alone do not replace the
+unchanged four-route 20-scenario/104-request Gate and its 32 complete observer
+streams. New profile results must retain that full-matrix contract.
+
+## Historical CPU06 musafix1 dependency profile
+
+The CPU06 private environment used FlagGems `bfc6c49d2c4d06e5deac9784f203730c8372a84a` and FlagTree `69148faf5cc03edb0a5737abd4b75b691132cea9`. The [portable recipe](../../tools/musa_dependency_recipe/README.md) supplies an explicit latest Gems profile and Tree header-patch manifest, while retaining the historical fixed profile. PR #6894 contributes the reviewed split-KV production changes; the separate device checks tracked by [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973) are not a model graph-cause claim or a Gate prerequisite. [FlagTree #1344](https://github.com/flagos-ai/FlagTree/issues/1344) records the optional OFF/OFF header build guard, not general GPU compatibility.
+
+| Scope | Actual result |
+| --- | --- |
+| Gems/Tree CPU source builds | Ordinary wheels and complete RECORD checks passed; explicit patched source profiles |
+| CPU06 private installation | Seven ordinary wheels verified; only Gems/Tree replace CPU05; other five wheel bodies and vendor fingerprints unchanged |
+| CONFIG06 | Seven metadata rows, original 19 Gate files, four routes × 26 requests and four ranks bound successfully |
+| Current captured-input implementation | Strong capture-input references and checked copies before replay; 34 CPU contract cases passed |
+| CPU06 original four-route GPU Gate | 87/104 quality passes; strict full-matrix consumer FAIL; 35B-A3B eager remains unresolved |
+| Historical migrated baseline | 35/104 quality passes; full Gate FAIL |
+
+The CPU06 Tree wheel used explicit TRITON_BUILD_FLAGPRISM=OFF/TRITON_BUILD_PROTON=OFF plus the header guard, not a pristine default build. CPU checks do not establish native ABI, graph numerical or model acceptance. The observed TP4 communication route uses MCCL; FlagCX was not installed. Diagnostics remain disabled by default, automatic discovery remains `musa.enabled: false`, and GitHub CI is NOT_RUN. Requests, retries, check names/thresholds and strict observer joins are unchanged. Detailed run/candidate boundaries are centralized in [the runner validation history](musa-ci-gate-runner.md#validation-history-and-candidate-boundaries); successful resource release never repairs failed quality, missing end events or cleanup errors.
 
 ## Allocate devices and executable caches
 
@@ -389,7 +544,7 @@ has 420 payload files plus its manifest, 57,692,160 tar bytes, SHA256
 | 35B-A3B eager, runtime32 | 26 | FAIL: 25/26 quality; literal `limitations` missing |
 | 35B-A3B graph, runtime27 | 26 | FAIL: 0/26 quality successes; RPC timeout |
 
-All four current routes were executed, retaining **20 original JSON reports
+All four historical runtime30/27/31/32 routes were executed, retaining **20 original JSON reports
 and 104 logical requests**: 52 text and 52 image inputs, **51 quality successes
 and 53 failures**. Their 12 original pytest invocations produce 20 real JUnit
 testcases: nine pass, 11 fail, with no error or skip testcase. Failed graph
@@ -405,7 +560,7 @@ The consumer stops at that error; verified copies do not mean it parsed all
 32 streams to completion. All full-matrix completion and acceptance flags remain
 false, and the required 208 graph request/rank joins are not verified complete.
 
-Full four-route Gate acceptance is **FAIL**. The CI runner's shutdown-window
+The historical runtime30/27/31/32 full four-route Gate acceptance is **FAIL**. The CI runner's shutdown-window
 fix is applied locally and its 26 CPU helper tests pass. The GitHub CI job has
 not executed, and automatic MUSA discovery remains disabled in
 `.github/configs/platforms.yml` (`musa.enabled: false`).

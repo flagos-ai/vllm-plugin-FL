@@ -56,6 +56,32 @@ class ShutdownWindow(unittest.TestCase):
                         self.assertEqual(argv[argv.index("--shutdown-timeout") + 1], "60")
                         self.assertEqual(grace, 90)
                         self.assertEqual("--enforce-eager" in argv, mode == "eager")
+                        self.assertEqual(argv[argv.index("--max-num-seqs") + 1], "8")
+                        self.assertEqual(argv.count("--gpu-memory-utilization"), 1)
+                        self.assertEqual(argv[argv.index("--gpu-memory-utilization") + 1],
+                                         "0.92" if mode == "graph" else "0.6")
+                        budget = int(argv[argv.index("--max-num-batched-tokens") + 1])
+                        self.assertEqual(budget, 4096)
+                        if mode == "graph":
+                            self.assertEqual(argv.count("--compilation-config"), 1)
+                            config = json.loads(argv[argv.index("--compilation-config") + 1])
+                            self.assertEqual(set(config), {"cudagraph_capture_sizes"})
+                            sizes = config["cudagraph_capture_sizes"]
+                            self.assertEqual(sizes, [1, 2, 4, 8, 16, 256, 1024, 4096])
+                            self.assertEqual(sizes, sorted(set(sizes)))
+                            self.assertTrue(all(type(size) is int and size > 0 for size in sizes))
+                            self.assertEqual(sizes[0], 1)
+                            self.assertEqual(sizes[-1], budget)
+                            # Every admitted batch has a bounded capture key,
+                            # including the observed mixed-prefill sizes.
+                            for tokens in range(1, budget + 1):
+                                padded = next(size for size in sizes if size >= tokens)
+                                self.assertLessEqual(padded, budget)
+                            for tokens, padded in ((194, 256), (527, 1024),
+                                                   (722, 1024), (967, 1024)):
+                                self.assertEqual(next(size for size in sizes if size >= tokens), padded)
+                        else:
+                            self.assertNotIn("--compilation-config", argv)
                         self.assertEqual(result["server"]["argv"], argv)
                         self.assertTrue(result["server"]["attempted"])
                         self.assertFalse(result["server"]["started"])

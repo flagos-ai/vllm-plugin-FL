@@ -91,6 +91,9 @@ jobs:
           MUSA_GATE_MODEL_27B: ${{ vars.MUSA_GATE_MODEL_27B }}
           MUSA_GATE_MODEL_35B_A3B: ${{ vars.MUSA_GATE_MODEL_35B_A3B }}
           MUSA_CI_IMAGE: ${{ vars.MUSA_CI_IMAGE }}
+          MUSA_CI_DEPENDENCY_PROFILE: ${{ vars.MUSA_CI_DEPENDENCY_PROFILE }}
+          MUSA_CI_DEPENDENCY_MANIFEST: ${{ vars.MUSA_CI_DEPENDENCY_MANIFEST }}
+          MUSA_CI_DEPENDENCY_MANIFEST_SHA256: ${{ vars.MUSA_CI_DEPENDENCY_MANIFEST_SHA256 }}
         run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
       - id: changes
         name: Detect changed files (PR only)

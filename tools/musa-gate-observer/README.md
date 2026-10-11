@@ -1,8 +1,10 @@
-# Independent MUSA Gate observer draft
+# Independent MUSA Gate observer
 
-This is a separate test wheel, proposed for `tools/musa-gate-observer/`.
-It does not change the FL plugin or a vendor package. No server, SDK request,
-GPU import, graph, model or Gate has been run with this draft.
+This is a separate ordinary test wheel in `tools/musa-gate-observer/`.
+It observes original runtime calls and validates their event contract without
+changing the FL plugin, vendor packages or original Gate quality rules. CPU
+contract tests do not establish native, model or Gate acceptance; each installed
+wheel and runtime result needs its own independently verified evidence.
 
 Build/install this wheel only in the Gate job, using the already provisioned
 offline build tools. No dependency download is implicit in the package.
@@ -14,7 +16,7 @@ python -I -B -m pip install --no-index --no-deps OBSERVER_WHEEL
 
 The actual wheel bytes, installed source bytes, normal package origins, candidate
 wheel/commit, upstream wheel/commit and container/process identities need their
-own independently verified manifest. This draft contains no installation proof.
+own independently verified manifest. Build commands are not installation proof.
 `pyproject.toml` has one `vllm.general_plugins` entry and no automatic pytest
 entry. Enable it only for a concrete Gate run:
 
@@ -120,7 +122,7 @@ Required worker sources include `vllm.plugins`,
 `vllm.forward_context`, `torch_musa.musa_graph.graphs`.
 Worker hooks are `runner.execute_model`, `GraphWrapper.__call__`,
 `torch.musa.graph.__enter__`, `torch.musa.graph.__exit__`, `MUSAGraph.replay`,
-`worker.shutdown`. This draft supports the real FL V1 `ModelRunnerFL`; another
+`worker.shutdown`. This observer supports the real FL V1 `ModelRunnerFL`; another
 runner is explicitly unsupported. Normal `WorkerWrapperBase.init_device`
 returns before attaching these hooks, before subsequent model load/capture.
 
@@ -138,14 +140,41 @@ the two image scenarios and one mixed client covers the mixed scenario.
 
 ## Actual observation and limits
 
-Each event carries run/source/route/model/mode plus actual own PID, `/proc`
-starttime and PID namespace, a contiguous process-local sequence, event UUID,
-wall/monotonic timestamps, kind/status and data. Activation is first and a
-zero-error telemetry footer is last. Files are regular/canonical/stable,
-bounded 64 MiB each with 256 KiB event caps and exclusive creation. Consumer
-limits are 128 files and 256 MiB total. Missing footer, any error/unsupported
-status, duplicate/nonfinite JSON, gaps, mixed identities or cap failure rejects
-completion. Forced termination can lose a footer and must remain incomplete.
+The semantic event carries run/source/route/model/mode, actual own PID,
+`/proc` starttime and PID namespace, contiguous process-local sequence, event
+UUID, wall/monotonic timestamps, kind/status and the complete dynamic data.
+Activation is first and a zero-error telemetry footer is last.
+
+Physical JSONL defines the eleven immutable process/source-binding fields once
+in the first row's `profile`, with their canonical SHA256 in `profile_id`.
+Later rows use that file-local reference. Every event UUID, sequence, timestamp,
+kind, status and full data object remains recorded. The reader expands the
+profile into the original eighteen-field event before applying the existing
+schema, source, identity, role, sequence, closure and graph/request joins.
+Legacy complete rows remain readable. Unknown or mismatched references,
+redefined profiles and mixed compact/legacy files are rejected.
+
+Each exclusively created process file has a finite **2 GiB** budget and
+**256 KiB** event cap, with **64 KiB** reserved for a failure footer. The first
+I/O, serialization or cap failure latches observation failure; later non-end
+events are counted as dropped. Up to four bounded error samples and a total
+error count remain, with one bounded stderr warning. A footer with errors or
+dropped evidence has error status and cannot satisfy the original acceptance
+checks. There is no event sampling, fabricated success or original trace rewrite.
+
+Consumer limits are **128 files and 12 GiB total input**. These are finite
+evidence-retention budgets, not a proof that every capture topology fits them
+or a bound on RSS: the reader retains expanded events for joins, so memory can
+exceed encoded input size. Files must remain regular, canonical and stable.
+Missing footer, error/unsupported status, duplicate/nonfinite JSON, gaps, mixed
+identities or cap failure rejects completion. Forced termination can lose a
+footer and must remain incomplete.
+
+A new ordinary observer wheel must regenerate RECORD and bind the actual five
+installed source fingerprints in a fresh config. Reusing an older observer
+manifest cannot validate changed source bytes. The separate optional sampling
+or mul diagnostic plugin remains disabled by default; observer enablement does
+not enable those diagnostics or change the original Gate requests or thresholds.
 
 The actual vendor source observed in this task was `graphs.py`, 22300 bytes,
 SHA256 `f4dbde4a5d224942cc2c6fffc174cb0bc9f34b297c58127c013c8099bfe7316c`,

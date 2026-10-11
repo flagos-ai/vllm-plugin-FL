@@ -276,7 +276,7 @@ class PlatformFL(Platform):
             logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
 
         # lazy import to avoid circular import
-        from vllm.config import CUDAGraphMode
+        from vllm.config import CUDAGraphMode, CompilationMode
 
         compilation_config = vllm_config.compilation_config
         if compilation_config.compile_sizes is None:
@@ -328,6 +328,32 @@ class PlatformFL(Platform):
         # not available.
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
+
+        if (
+            cls.device_type == "musa"
+            and cls.dist_backend == "mccl"
+            and parallel_config.tensor_parallel_size > 1
+            and compilation_config.mode == CompilationMode.VLLM_COMPILE
+            and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+            and not compilation_config.use_inductor_graph_partition
+        ):
+            # This platform hook runs before vLLM initializes default split ops.
+            # Use its public initializer to retain attention/KV boundaries and
+            # any fusion-driven graph-mode changes before adding the TP boundary.
+            effective_dp_size = (
+                parallel_config.data_parallel_size
+                if model_config is None or model_config.is_moe
+                else 1
+            )
+            compilation_config.set_splitting_ops_for_v1(
+                all2all_backend=parallel_config.all2all_backend,
+                data_parallel_size=effective_dp_size,
+            )
+            if (
+                compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+                and "vllm::all_reduce" not in compilation_config.splitting_ops
+            ):
+                compilation_config.splitting_ops.append("vllm::all_reduce")
 
     @classmethod
     def get_attn_backend_cls(
@@ -519,7 +545,9 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
+        return cls.vendor_name in ("nvidia", "thead", "iluvatar") or (
+            cls.device_type == "musa" and cls.dist_backend == "mccl"
+        )
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:

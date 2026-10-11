@@ -1,0 +1,36 @@
+--- a/src/flag_gems/ops/mul.py
++++ b/src/flag_gems/ops/mul.py
+@@ -152,13 +152,18 @@
+ 
+ @libentry()
+ @libtuner(
+-    configs=mul_broadcast_get_configs(),
++    # MUSA BLOCK1024 faults on the tested BF16 ND layouts; keep one safe candidate.
++    configs=(
++        [triton.Config({"BLOCK_SIZE": 512}, num_warps=4, num_stages=3)]
++        if _DEVICE_NAME == "musa"
++        else mul_broadcast_get_configs()
++    ),
+     key=["n_elements", "dtype"],
+     strategy=["align32", "default"],
+     warmup=5,
+     rep=5,
+-    flagtune_op_name="mul",
+-    flagtune_expand_op_name="mul",
++    flagtune_op_name=None if _DEVICE_NAME == "musa" else "mul",
++    flagtune_expand_op_name=None if _DEVICE_NAME == "musa" else "mul",
+ )
+ @triton.jit
+ def mul_generic_nd_kernel(
+--- a/src/flag_gems/utils/libentry.py
++++ b/src/flag_gems/utils/libentry.py
+@@ -1040,6 +1040,9 @@
+                         try:
+                             ret = self._bench(*args, config=config, **kwargs)
+                         except RuntimeError as e:
++                            # A native MUSA fault is not a failed compilation candidate.
++                            if device.name == "musa" and "illegal memory access" in str(e).lower():
++                                raise
+                             if getattr(self, "_flagtune_strict_benchmark", False):
+                                 raise
+                             # A config whose COMPILE raises a plain RuntimeError

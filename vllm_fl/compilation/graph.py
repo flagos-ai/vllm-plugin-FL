@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 from unittest.mock import patch
 
 import torch
+from torch.utils._pytree import tree_flatten
 
 import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
@@ -71,6 +72,11 @@ class GraphEntry:
     # for graph debugging, track the input addresses
     # during capture, and check if they are the same during replay
     input_addresses: list[int] | None = None
+
+    # Keep MUSA PIECEWISE inputs alive and stage fresh inter-piece allocations.
+    musa_input_leaves: list[Any] | None = None
+    musa_input_spec: Any | None = None
+    musa_input_metadata: list[Any] | None = None
 
 
 @dataclasses.dataclass
@@ -147,6 +153,104 @@ class GraphWrapper:
     def clear_graphs(self) -> None:
         self.concrete_graph_entries.clear()
 
+    @staticmethod
+    def _musa_tensor_metadata(tensor):
+        return (
+            tensor.shape,
+            tensor.stride(),
+            tensor.dtype,
+            tensor.device,
+            tensor.layout,
+            tensor.storage_offset(),
+            tensor.requires_grad,
+        )
+
+    def _stage_musa_inputs(self, entry, args, kwargs):
+        def require(condition, message):
+            if not condition:
+                raise ValueError(message)
+
+        leaves, spec = tree_flatten((args, kwargs))
+        require(spec == entry.musa_input_spec, "MUSA graph input structure changed")
+        require(
+            len(leaves) == len(entry.musa_input_leaves),
+            "MUSA graph input count changed",
+        )
+        copies = []
+        captured_tensors = []
+        incoming_tensors = []
+        incoming_by_destination = {}
+        for captured, incoming, metadata in zip(
+            entry.musa_input_leaves, leaves, entry.musa_input_metadata
+        ):
+            if isinstance(captured, torch.Tensor):
+                require(
+                    isinstance(incoming, torch.Tensor),
+                    "MUSA graph tensor input type changed",
+                )
+                require(
+                    self._musa_tensor_metadata(captured) == metadata,
+                    "Captured MUSA graph input metadata was mutated",
+                )
+                require(
+                    self._musa_tensor_metadata(incoming) == metadata,
+                    "MUSA graph input tensor metadata changed",
+                )
+                captured_tensors.append(captured)
+                incoming_tensors.append(incoming)
+                previous = incoming_by_destination.setdefault(id(captured), incoming)
+                require(
+                    previous.data_ptr() == incoming.data_ptr(),
+                    "A repeated MUSA graph input changed its alias relationship",
+                )
+                if captured.data_ptr() != incoming.data_ptr():
+                    require(
+                        not torch._C._is_alias_of(captured, incoming),
+                        "MUSA graph staging source overlaps its destination",
+                    )
+                    require(
+                        captured.device.type == "musa",
+                        "A captured host tensor address changed",
+                    )
+                    copies.append((captured, incoming))
+            else:
+                require(
+                    type(incoming) is type(captured)
+                    and (incoming is captured or incoming == captured),
+                    "MUSA graph non-tensor input changed",
+                )
+
+        # Validate the complete call before writing any captured storage.
+        for index, captured in enumerate(captured_tensors):
+            for other_index in range(index):
+                require(
+                    torch._C._is_alias_of(captured, captured_tensors[other_index])
+                    == torch._C._is_alias_of(
+                        incoming_tensors[index], incoming_tensors[other_index]
+                    ),
+                    "MUSA graph input tensor alias relationship changed",
+                )
+        # Distinct views or cross-input aliases require a separate staging policy.
+        for captured, incoming in copies:
+            for other in captured_tensors:
+                if other is captured:
+                    continue
+                require(
+                    not torch._C._is_alias_of(captured, other),
+                    "MUSA graph changed input aliases another captured input",
+                )
+                require(
+                    not torch._C._is_alias_of(incoming, other),
+                    "MUSA graph input aliases another staging destination",
+                )
+        copied = set()
+        for captured, incoming in copies:
+            identity = id(captured)
+            if identity in copied:
+                continue
+            captured.copy_(incoming)
+            copied.add(identity)
+
     def __call__(self, *args, **kwargs):
         if not is_forward_context_available():
             # No forward context means we are outside the normal
@@ -186,6 +290,19 @@ class GraphWrapper:
                 x.data_ptr() for x in args if isinstance(x, torch.Tensor)
             ]
             entry.input_addresses = input_addresses
+            musa_inputs = None
+            if (
+                current_platform.device_type == "musa"
+                and self.runtime_mode == CUDAGraphMode.PIECEWISE
+            ):
+                leaves, spec = tree_flatten((args, kwargs))
+                metadata = [
+                    self._musa_tensor_metadata(x)
+                    if isinstance(x, torch.Tensor)
+                    else None
+                    for x in leaves
+                ]
+                musa_inputs = (leaves, spec, metadata)
             graph = Graph.graph()
 
             with ExitStack() as stack:
@@ -224,7 +341,12 @@ class GraphWrapper:
                 with current_platform.torch_device_fn.graph(
                     graph,
                     pool=self.graph_pool,
-                    stream=current_stream(),
+                    # Native MUSA contexts do not update vLLM's CUDA stream cache.
+                    stream=(
+                        current_platform.torch_device_fn.current_stream()
+                        if current_platform.device_type == "musa"
+                        else current_stream()
+                    ),
                 ):
                     output = self.runnable(*args, **kwargs)
                     with suppress(ImportError, RuntimeError, UnboundLocalError):
@@ -234,6 +356,12 @@ class GraphWrapper:
 
             entry.output = weak_ref_tensors(output)
             entry.graph = graph
+            if musa_inputs is not None:
+                (
+                    entry.musa_input_leaves,
+                    entry.musa_input_spec,
+                    entry.musa_input_metadata,
+                ) = musa_inputs
 
             compilation_counter.num_cudagraph_captured += 1
 
@@ -242,7 +370,10 @@ class GraphWrapper:
             # manage the memory during graph capture
             return output
 
-        if self.is_debugging_mode:
+        if entry.musa_input_leaves is not None:
+            self._stage_musa_inputs(entry, args, kwargs)
+
+        if self.is_debugging_mode and entry.musa_input_leaves is None:
             # check if the input addresses are the same
             new_input_addresses = [
                 x.data_ptr() for x in args if isinstance(x, torch.Tensor)

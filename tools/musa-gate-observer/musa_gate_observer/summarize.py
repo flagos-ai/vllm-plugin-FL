@@ -17,8 +17,8 @@ import stat
 import sys
 from collections import Counter, defaultdict
 
-MAX_FILE_BYTES = 64 * 1024**2
-MAX_TOTAL_BYTES = 256 * 1024**2
+MAX_FILE_BYTES = 2 * 1024**3
+MAX_TOTAL_BYTES = 12 * 1024**3
 MAX_EVENT_FILES = 128
 CHECKS = frozenset((
     "non_empty", "minimum_length", "expected_semantics", "expected_order",
@@ -46,6 +46,11 @@ EVENT_FIELDS = frozenset((
     "pid", "starttime", "pid_namespace", "time_ns", "monotonic_ns",
     "process_key", "seq", "kind", "status",
     "observer_source_sha256", "source_binding_id", "data",
+))
+PROFILE_FIELDS = frozenset((
+    "schema_version", "run_id", "route_id", "model", "mode", "pid",
+    "starttime", "pid_namespace", "process_key", "observer_source_sha256",
+    "source_binding_id",
 ))
 KINDS = frozenset((
     "activation", "telemetry_end", "api_response", "engine_queued",
@@ -281,12 +286,42 @@ def _fingerprint_claim(fp):
             "scenario output fingerprint claim")
 
 
+def _expand_event(row, state):
+    """Expand a file-local immutable profile before the unchanged event checks."""
+    require(isinstance(row, dict), "event must be an object")
+    if set(row) == EVENT_FIELDS:
+        require(state.get("mode") in (None, "legacy"), "mixed compact/legacy event file")
+        state["mode"] = "legacy"
+        return row
+    dynamic = EVENT_FIELDS - PROFILE_FIELDS
+    reference_fields = dynamic | {"profile_id"}
+    if "profile" in row:
+        require(not state, "profile may only be defined by the first event")
+        require(set(row) == reference_fields | {"profile"}, "exact profile event fields")
+        profile = row["profile"]
+        require(isinstance(profile, dict) and set(profile) == PROFILE_FIELDS,
+                "exact immutable profile fields")
+        raw = json.dumps(profile, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=True, allow_nan=False).encode("utf-8")
+        require(digest(row["profile_id"])
+                and hashlib.sha256(raw).hexdigest() == row["profile_id"],
+                "immutable profile digest mismatch")
+        state.update(mode="compact", profile=profile, profile_id=row["profile_id"])
+    else:
+        require(state.get("mode") == "compact", "unknown immutable profile reference")
+        require(set(row) == reference_fields, "exact profile reference fields")
+        require(row["profile_id"] == state["profile_id"], "immutable profile reference mismatch")
+    expanded = dict(state["profile"])
+    expanded.update({key: row[key] for key in dynamic})
+    return expanded
+
+
 def _events(raw, c, routes, seen_ids):
     require(raw and raw.endswith(b"\n"), "empty or non-LF-terminated event file")
-    events, identities = [], set()
+    events, identities, profile_state = [], set(), {}
     for line in raw.split(b"\n")[:-1]:
         require(line and b"\r" not in line, "blank line or raw CR in event JSONL")
-        e = _json(line)
+        e = _expand_event(_json(line), profile_state)
         require(isinstance(e, dict) and set(e) == EVENT_FIELDS, "exact event schema fields")
         require(type(e["schema_version"]) is int and e["schema_version"] == 1, "event schema version")
         for key in ("run_id", "observer_source_sha256", "source_binding_id"):

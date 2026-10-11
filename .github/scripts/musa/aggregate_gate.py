@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gate_common import (CHECKS, GATE_FILES, ROUTES, SCENARIOS, TEST_FILES, bound_json,
-                         fingerprint, read_bytes, read_json, require, write_json)
+                         fingerprint, fingerprint_streaming, read_bytes, read_json, require, write_json)
 
 
 def original_scenario(report, scenario):
@@ -103,6 +103,11 @@ def route_business(route, root, binding_id):
         response_ids[scenario] = original_scenario(report, scenario)
     require(not route["errors"], "Route orchestration errors")
     return response_ids
+
+
+# Match the bounded raw-input budgets of the companion observer consumer.
+OBSERVER_RAW_MAX_FILE_BYTES = 2 * 1024**3
+OBSERVER_RAW_MAX_TOTAL_BYTES = 12 * 1024**3
 
 
 def canonical_sha(value):
@@ -354,10 +359,10 @@ def aggregate(manifest_path, observer_path=None):
             require(len(inputs) == 33 and inputs[0] == manifest["observer_config"],
                     "Observer config is not the first actual raw input")
             require(len({ref["path"] for ref in inputs}) == len(inputs)
-                    and sum(ref["bytes"] for ref in inputs) <= 256 * 1024 * 1024,
+                    and sum(ref["bytes"] for ref in inputs) <= OBSERVER_RAW_MAX_TOTAL_BYTES,
                     "Observer raw input duplicate or total cap exceeded")
             for ref in inputs[1:]:
-                require(fingerprint(ref["path"], 64 * 1024 * 1024, root) == ref,
+                require(fingerprint_streaming(ref["path"], OBSERVER_RAW_MAX_FILE_BYTES, root) == ref,
                         "Observer raw events changed")
         except (ValueError, KeyError, TypeError, OSError, ET.ParseError) as error:
             observer_error = f"{type(error).__name__}: {error}"

@@ -87,6 +87,43 @@ def fingerprint(path, cap=8 * 1024 * 1024, root=None):
             "sha256": hashlib.sha256(data).hexdigest()}
 
 
+
+def fingerprint_streaming(path, cap=8 * 1024 * 1024, root=None):
+    """Hash a complete, stable regular file without retaining its body."""
+    path = Path(path).absolute()
+    require(path.resolve(strict=True) == path, f"Noncanonical input: {path}")
+    if root is not None:
+        path.relative_to(Path(root).resolve(strict=True))
+    before = path.lstat()
+    require(stat.S_ISREG(before.st_mode), f"Not a regular file: {path}")
+    require(not getattr(before, "st_file_attributes", 0) & 0x400,
+            f"Reparse input: {path}")
+    require(0 <= before.st_size <= cap, f"Input exceeds cap: {path}")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0))
+    try:
+        first = os.fstat(fd)
+        cross_count = 5 if os.name == "nt" else 6
+        require(_identity(before)[:cross_count] == _identity(first)[:cross_count],
+                f"Changed input at open: {path}")
+        digest, count = hashlib.sha256(), 0
+        while count <= cap:
+            part = os.read(fd, min(65536, cap + 1 - count))
+            if not part:
+                break
+            digest.update(part)
+            count += len(part)
+        require(count == first.st_size and count <= cap,
+                f"Incomplete or oversized input: {path}")
+        require(_identity(first) == _identity(os.fstat(fd)),
+                f"Input changed while reading: {path}")
+    finally:
+        os.close(fd)
+    require(_identity(before) == _identity(path.lstat()),
+            f"Input path changed while reading: {path}")
+    return {"path": str(path), "bytes": count, "sha256": digest.hexdigest()}
+
+
 def strict_json(data):
     def pairs(items):
         result = {}

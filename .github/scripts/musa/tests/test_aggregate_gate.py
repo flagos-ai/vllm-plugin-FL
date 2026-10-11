@@ -7,11 +7,14 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
+import aggregate_gate  # noqa: E402
+import gate_common  # noqa: E402
 from aggregate_gate import aggregate, canonical_sha, original_scenario  # noqa: E402
-from gate_common import (CHECKS, GATE_FILES, ROUTES, SCENARIOS, TEST_FILES, fingerprint,
+from gate_common import (CHECKS, GATE_FILES, ROUTES, SCENARIOS, TEST_FILES, fingerprint, fingerprint_streaming,
                          read_bytes, strict_json, write_json)  # noqa: E402
 from run_gate import route_cleanup_complete, verify_known_lifetimes  # noqa: E402
 
@@ -223,6 +226,102 @@ class Contract(unittest.TestCase):
         self.assertTrue(result["gate_passed"])
         self.assertEqual(result["expected_logical_requests"], 104)
         self.assertEqual(len(result["routes"]), 4)
+
+
+    def test_observer_stream_above_old_cap_is_hashed_in_bounded_chunks(self):
+        trace = Path(self.observer["input_fingerprints"][1]["path"])
+        block = b"x" * (1024 * 1024)
+        digest = hashlib.sha256()
+        with trace.open("wb") as stream:
+            for _ in range(64):
+                stream.write(block)
+                digest.update(block)
+            stream.write(b"x")
+            digest.update(b"x")
+        expected = {"path": str(trace), "bytes": 64 * 1024 * 1024 + 1,
+                    "sha256": digest.hexdigest()}
+        read_sizes = []
+        original_read = gate_common.os.read
+
+        def measured_read(fd, size):
+            read_sizes.append(size)
+            return original_read(fd, size)
+
+        with mock.patch.object(gate_common.os, "read", side_effect=measured_read), \
+                mock.patch.object(gate_common, "read_bytes",
+                                  side_effect=AssertionError("Body-retaining reader used")):
+            self.assertEqual(fingerprint_streaming(trace, 2 * 1024**3, self.root), expected)
+        self.assertGreater(len(read_sizes), 1024)
+        self.assertLessEqual(max(read_sizes), 65536)
+        self.observer["input_fingerprints"][1] = expected
+        self.assertTrue(self.result()["gate_passed"])
+
+    def test_observer_file_budget_boundary_and_overflow(self):
+        cap = self.observer["input_fingerprints"][1]["bytes"]
+        with mock.patch.object(aggregate_gate, "OBSERVER_RAW_MAX_FILE_BYTES", cap):
+            self.assertTrue(self.result()["gate_passed"])
+        with mock.patch.object(aggregate_gate, "OBSERVER_RAW_MAX_FILE_BYTES", cap - 1):
+            result = aggregate(self.root / "route-manifest.json", self.root / "observer-summary.json")
+        self.assertFalse(result["gate_passed"])
+        self.assertTrue(all(route["business_passed"] for route in result["routes"]))
+        self.assertIn("Input exceeds cap", result["routes"][0]["errors"][0])
+
+    def test_observer_total_budget_boundary_and_overflow(self):
+        cap = sum(ref["bytes"] for ref in self.observer["input_fingerprints"])
+        with mock.patch.object(aggregate_gate, "OBSERVER_RAW_MAX_TOTAL_BYTES", cap):
+            self.assertTrue(self.result()["gate_passed"])
+        with mock.patch.object(aggregate_gate, "OBSERVER_RAW_MAX_TOTAL_BYTES", cap - 1), \
+                mock.patch.object(aggregate_gate, "fingerprint_streaming",
+                                  side_effect=AssertionError("Over-budget input was read")):
+            result = aggregate(self.root / "route-manifest.json", self.root / "observer-summary.json")
+        self.assertFalse(result["gate_passed"])
+        self.assertTrue(all(route["business_passed"] for route in result["routes"]))
+        self.assertIn("total cap exceeded", result["routes"][0]["errors"][0])
+
+    def test_observer_stream_hash_mismatch_rejects(self):
+        trace = Path(self.observer["input_fingerprints"][1]["path"])
+        trace.write_bytes(b'{"fixture":fail}\n')
+        self.assertFalse(self.result()["gate_passed"])
+
+    def test_streaming_fingerprint_empty_exact_cap_and_overflow(self):
+        path = self.root / "streaming-boundary.raw"
+        for data in (b"", b"x", b"abcd"):
+            path.write_bytes(data)
+            with self.subTest(bytes=len(data)):
+                self.assertEqual(fingerprint_streaming(path, len(data), self.root),
+                                 fingerprint(path, len(data), self.root))
+                if data:
+                    with mock.patch.object(gate_common.os, "open") as opened:
+                        with self.assertRaisesRegex(ValueError, "Input exceeds cap"):
+                            fingerprint_streaming(path, len(data) - 1, self.root)
+                    opened.assert_not_called()
+
+    def test_streaming_fingerprint_root_escape_rejects(self):
+        outside = self.root.parent / (self.root.name + "-streaming-outside")
+        outside.write_bytes(b"out")
+        self.addCleanup(outside.unlink)
+        with self.assertRaises(ValueError):
+            fingerprint_streaming(outside, root=self.root)
+
+    def test_streaming_fingerprint_changed_file_rejects(self):
+        path = self.root / "streaming-mutation.raw"
+        original_read = gate_common.os.read
+        for data in (b"abcdx", b"abc"):
+            path.write_bytes(b"abcd")
+            changed = False
+
+            def mutate_after_read(fd, size):
+                nonlocal changed
+                part = original_read(fd, size)
+                if not changed:
+                    changed = True
+                    path.write_bytes(data)
+                return part
+
+            with self.subTest(after_size=len(data)), \
+                    mock.patch.object(gate_common.os, "read", side_effect=mutate_after_read), \
+                    self.assertRaises(ValueError):
+                fingerprint_streaming(path, 16, self.root)
 
     def test_missing_observer_rejects_full_gate(self):
         result = self.result(False)

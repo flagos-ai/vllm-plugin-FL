@@ -15,8 +15,16 @@ import traceback
 import uuid
 from pathlib import Path
 
-MAX_FILE = 64 * 1024 * 1024
+MAX_FILE = 2 * 1024 * 1024 * 1024
 MAX_EVENT = 256 * 1024
+END_RESERVE = 64 * 1024
+MAX_ERROR_SAMPLES = 4
+MAX_ERROR_BYTES = 4096
+PROFILE_FIELDS = frozenset((
+    "schema_version", "run_id", "route_id", "model", "mode", "pid",
+    "starttime", "pid_namespace", "process_key", "observer_source_sha256",
+    "source_binding_id",
+))
 GATE_MEMBERS = {".gitignore", "README.md", "case_utils.py", "generate_images.py", "run_serve.sh",
                 "run_serve_eager.sh", "run_serve_graph.sh", "run_test.sh",
                 "test_text.py", "test_image.py", "test_mix_text_image.py"} | {
@@ -216,60 +224,105 @@ class Trace:
                           getattr(os, "O_NOFOLLOW", 0), 0o600)
         self.seq = self.bytes = 0
         self.errors = []
+        self.error_count = self.dropped_events = 0
+        self.io_failed = self.cap_exceeded = self.warned = False
+        self.profile = {"schema_version": 1, "run_id": config.data["run_id"],
+                        "route_id": config.route["route_id"], "model": config.route["model"],
+                        "mode": config.route["mode"], "pid": self.pid,
+                        "starttime": self.starttime, "pid_namespace": self.namespace,
+                        "process_key": self.process_key,
+                        "observer_source_sha256": config.data["observer_source_sha256"],
+                        "source_binding_id": config.data["source_binding_id"]}
+        self.profile_id = digest(self.profile)
+        self.profile_written = False
         self.closed = False
         self.lock = threading.RLock()
         atexit.register(self.close)
+
+    def _record_error(self, detail):
+        self.error_count += 1
+        if len(self.errors) >= MAX_ERROR_SAMPLES:
+            return
+        try:
+            raw = canonical(detail)
+        except Exception:
+            raw = canonical({"type": type(detail).__name__, "repr": repr(detail)})
+        if len(raw) > MAX_ERROR_BYTES:
+            detail = {"truncated": True, "bytes": len(raw),
+                      "sha256": hashlib.sha256(raw).hexdigest(),
+                      "canonical_prefix": raw[:1024].decode("ascii")}
+        self.errors.append(detail)
+
+    def _warn_once(self, label):
+        if self.warned:
+            return
+        self.warned = True
+        try:
+            sys.stderr.write(label + " " + canonical({"errors": self.errors,
+                             "error_count": self.error_count}).decode("ascii") + "\n")
+        except Exception:
+            # Observation I/O must not replace a production result/exception.
+            pass
 
     def emit(self, kind, data, status="ok"):
         with self.lock:
             if self.closed:
                 return
-            row = {"schema_version": 1, "run_id": self.config.data["run_id"],
-                   "route_id": self.config.route["route_id"], "model": self.config.route["model"],
-                   "mode": self.config.route["mode"], "event_id": unique_id(),
-                   "pid": self.pid, "starttime": self.starttime, "pid_namespace": self.namespace,
-                   "process_key": self.process_key, "seq": self.seq + 1,
-                   "time_ns": time.time_ns(), "monotonic_ns": time.monotonic_ns(),
-                   "kind": kind, "status": status, "data": data,
-                   "observer_source_sha256": self.config.data["observer_source_sha256"],
-                   "source_binding_id": self.config.data["source_binding_id"]}
+            if self.io_failed and kind != "telemetry_end":
+                self.dropped_events += 1
+                return
             try:
+                row = {"profile_id": self.profile_id, "event_id": unique_id(),
+                       "seq": self.seq + 1, "time_ns": time.time_ns(),
+                       "monotonic_ns": time.monotonic_ns(), "kind": kind,
+                       "status": status, "data": data}
+                if not self.profile_written:
+                    row["profile"] = self.profile
                 body = canonical(row) + b"\n"
-                limit = MAX_FILE if kind == "telemetry_end" else MAX_FILE - 8192
+                limit = MAX_FILE if kind == "telemetry_end" else MAX_FILE - END_RESERVE
                 if len(body) > MAX_EVENT or self.bytes + len(body) > limit:
+                    self.cap_exceeded = True
                     raise Unsupported("Telemetry cap exceeded")
                 if os.write(self.fd, body) != len(body):
                     raise Unsupported("Partial telemetry write")
                 self.seq += 1
                 self.bytes += len(body)
+                self.profile_written = True
             except Exception:
-                self.errors.append(traceback.format_exc())
-                # Do not replace a production result/exception with telemetry failure.
-                sys.stderr.write("MUSA_GATE_OBSERVER_IO_ERROR\n" + self.errors[-1])
+                self.io_failed = True
+                self.dropped_events += 1
+                self._record_error(traceback.format_exc())
+                self._warn_once("MUSA_GATE_OBSERVER_IO_ERROR")
 
     def activation(self, hooks, sources, status="ok", error=None, client_scope=None):
         data = {"role": self.role, "rank": self.rank,
-                  "hooks": hooks, "sources_verified": status == "ok", "sources": sources,
-                  "config_original": self.config.original, "error": error}
+                "hooks": hooks, "sources_verified": status == "ok", "sources": sources,
+                "config_original": self.config.original, "error": error}
         if client_scope is not None:
             data.update(client_scope)
         self.emit("activation", data, status)
         if status != "ok":
-            self.errors.append(error or status)
+            self._record_error(error or status)
 
     def fail(self, error):
         detail = {"type": type(error).__name__, "message": str(error),
                   "traceback": traceback.format_exc()}
-        self.errors.append(detail)
-        self.emit("observation_error", detail, "unsupported" if isinstance(error, Unsupported) else "error")
+        with self.lock:
+            self._record_error(detail)
+            self.emit("observation_error", detail,
+                      "unsupported" if isinstance(error, Unsupported) else "error")
 
     def close(self):
         with self.lock:
             if not self.closed:
-                self.emit("telemetry_end", {"errors": list(self.errors)}, "ok" if not self.errors else "error")
+                data = {"errors": list(self.errors), "error_count": self.error_count,
+                        "dropped_events": self.dropped_events,
+                        "io_failed": self.io_failed, "cap_exceeded": self.cap_exceeded}
+                failed = bool(self.errors or self.error_count or self.dropped_events or self.io_failed)
+                self.emit("telemetry_end", data, "error" if failed else "ok")
                 try:
                     os.close(self.fd)
                 except OSError as error:
-                    self.errors.append(str(error))
-                    sys.stderr.write(f"MUSA_GATE_OBSERVER_CLOSE_ERROR: {error}\n")
+                    self._record_error(str(error))
+                    self._warn_once("MUSA_GATE_OBSERVER_CLOSE_ERROR")
                 self.closed = True
