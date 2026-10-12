@@ -13,6 +13,51 @@ _ADAPTER_MARKER = "_fl_gcu_persistent_reduction_adapter"
 _REGISTRATION_MARKER = "_fl_gcu_persistent_reduction_registration"
 _I64_OPTIONS_MARKER = "_fl_gcu_i64_compile_options_adapter"
 _I64_SIGNATURES = frozenset({"i64", "u64", "*i64", "*u64"})
+_RESOURCE_ERROR_MARKER = "_fl_gcu_register_resource_error_adapter"
+_REGISTER_ERROR = "error: ran out of registers during register allocation"
+
+
+def _install_gcu_resource_errors(heuristics) -> None:
+    autotuner = getattr(heuristics, "CachingAutotuner", None)
+    original = getattr(autotuner, "_precompile_config", None)
+    if original is None:
+        raise RuntimeError("Torch CachingAutotuner precompile interface is missing")
+    if getattr(original, _RESOURCE_ERROR_MARKER, False) is True:
+        return
+    if tuple(inspect.signature(original).parameters) != ("self", "cfg"):
+        raise RuntimeError("Unknown Torch CachingAutotuner precompile ABI")
+    resource_error = getattr(heuristics, "OutOfResources", None)
+    try:
+        resource_parameters = tuple(inspect.signature(resource_error).parameters)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("Unknown Triton OutOfResources ABI") from error
+    if (
+        not isinstance(resource_error, type)
+        or not issubclass(resource_error, Exception)
+        or resource_parameters != ("required", "limit", "name")
+    ):
+        raise RuntimeError("Unknown Triton OutOfResources ABI")
+
+    @wraps(original)
+    def precompile_gcu_config(self, cfg):
+        try:
+            return original(self, cfg)
+        except Exception as error:
+            # The observed GCU compiler reports this resource failure as a
+            # plain Exception. Torch only skips OutOfResources candidates;
+            # one failed tile must not discard other valid configurations.
+            if (
+                self.device_props.type != "gcu"
+                or type(error) is not Exception
+                or str(error).splitlines()[:1] != [_REGISTER_ERROR]
+            ):
+                raise
+            # The compiler reports neither count. Preserve the original
+            # diagnostic as the cause instead of inventing register counts.
+            raise resource_error("unknown", "unknown", "GCU registers") from error
+
+    setattr(precompile_gcu_config, _RESOURCE_ERROR_MARKER, True)
+    autotuner._precompile_config = precompile_gcu_config
 
 
 def _install_gcu_i64_compile_options(heuristics) -> None:
@@ -132,6 +177,7 @@ def _install_gcu_inductor_hooks(provider, heuristics) -> None:
             result = register(self, *args, **kwargs)
             _adapt_registered_persistent_reduction(provider, heuristics)
             _install_gcu_i64_compile_options(heuristics)
+            _install_gcu_resource_errors(heuristics)
             return result
 
         setattr(register_compatible, _REGISTRATION_MARKER, True)
@@ -139,6 +185,7 @@ def _install_gcu_inductor_hooks(provider, heuristics) -> None:
     # Also handle a process where TorchGCU has already registered its provider.
     _adapt_registered_persistent_reduction(provider, heuristics)
     _install_gcu_i64_compile_options(heuristics)
+    _install_gcu_resource_errors(heuristics)
 
 
 def _loaded_gcu_inductor_providers(provider):
