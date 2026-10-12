@@ -144,7 +144,7 @@ class TestRunner:
 
             # Clean up device resources between e2e tests to prevent
             # GPU/NPU memory leaks from cascading into subsequent cases
-            if tc.task in ("inference", "serving"):
+            if not self.dry_run and tc.task in ("inference", "serving"):
                 device_cleanup(self.config.platform)
 
         self.report.finalize()

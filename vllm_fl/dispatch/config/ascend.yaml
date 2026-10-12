@@ -37,76 +37,83 @@ op_backends:
     - flagos
     - reference
   silu_and_mul:
-    - flagos
+    # Both implementations pass numerical tests; torch_npu has lower launch
+    # latency. Prefer it without excluding the FlagGems fallback.
     - vendor
+    - flagos
     - reference
   rotary_embedding:
     - vendor
     - flagos
     - reference
+  grouped_moe_experts:
+    - vendor:ascend
+  w8a8_moe_experts:
+    - vendor:ascend
+    - flagos
+    - reference
 
-# FlagOS operator blacklist
-# These operators will NOT use FlagOS implementation even if FlagOS is enabled.
+# Exclusions validated against the image's FlagGems 3b406c36 / FlagTree ascend3.5.
+# ATen exclusions use implementation function names, not torch schema names.
+# Vendor-auto-excluded ops (to_copy, copy_, cat, exponential_) need no duplicate
+# entry here. Performance preferences belong in op_backends above.
 flagos_blacklist:
-  - masked_scatter_
-  - masked_scatter
-  - scatter_add_
-  - ones
-  - ones_like
-  - isclose
-  - allclose
-  - mean_dim
-  - chunk_gated_delta_rule_fwd
-  - rsqrt # performance loss
-  - index_select
-  - true_divide
-  - silu
-  - silu_and_mul # performance loss end
-  - to_copy
-  - _to_copy
-  - zeros
-  - acos
-  - copy_
-  - fill_scalar_
-  - sum_dim
-  - exponential_
-  - mm
-  - resolve_neg
-  - resolve_conj
-  - eq_scalar
-  - floor_divide
-  - cumsum
-  - cumsum_out
-  - mul
-  - reciprocal
-  - repeat
-  - randn
-  - add
-  - ge_scalar
-  - sub
-  - bitwise_and
-  - bitwise_not
-  - slice_scatter
-  - fill_tensor_
+  # qwen-vllm_for_ascend (3b406c36) wraps argmax twice with LibEntry,
+  # failing sampler warmup with "Invalid Runtime Function". Use torch_npu.
+  - argmax
+  # FlagTree cannot lower pow(float32, int32) in FlagGems' tanh GELU.
+  # Keep vision activation on the native torch_npu implementation.
+  - gelu
+  # FlagGems conv1d faults in Qwen3.6-27B's GDN prefill process with
+  # 5120 groups, T=15, K=4, padding=3. Keep conv2d enabled: the
+  # native conv1d path passes text/image serving with that override active.
   - conv1d
-  - conv2d
-  - uniform_
-  - prod
-  - max
-  - amax
-  - cat
-  - stack
-  - flatten
-  - reshape
-  - view
-  - tensor
-  - rand
-  - rand_like
-  - gather
-  - _log_softmax
-  - _flash_attention_forward
+  # Mixed bool values in a stride-2 view are read incorrectly by the
+  # pinned bitwise_not kernel, breaking native boolean indexing.
+  - bitwise_not
+  - bitwise_not_
+  # FlagGems index_put cannot compile GDN's boolean state reset on Ascend.
+  - index_put
+  - index_put_
+  - _index_put_impl_
+  # FlagGems Ascend index assumes contiguous input and misreads the
+  # strided cosine/sine cache used by Qwen vision RoPE (3b406c36).
+  - index
+  # In-place masked scatter rejects noncontiguous tensors. Scatter variants
+  # miscalculate strided offsets, including their CPU reduction fallback.
+  - masked_scatter_
+  - scatter_add_
   - scatter
   - scatter_
+  # Empty inputs cause zero-sized Triton blocks or invalid coreDim launches.
+  - ones
+  - ones_like
+  - cumsum
+  - cumsum_out
+  - gather
+  # Native randn delegates to normal_; both must stay native for empty shapes.
+  - randn
+  - normal_
+  # Fill/uniform and negative/conjugate view implementations corrupt or
+  # misread storage, including interleaved noncontiguous in-place views.
+  - fill_scalar_
+  - fill_tensor_
+  - uniform_
+  - resolve_neg
+  - resolve_conj
+  # Reduction / layout contracts: mean(dim=None) returns the wrong shape,
+  # sum/prod do not promote integers, and amax/stack misread strided storage.
+  - mean_dim
+  - sum_dim
+  - prod
+  - amax
+  - stack
+  # rand/rand_like exceed the Ascend UB limit for a 257x257 FP32 tensor.
+  - rand
+  - rand_like
+  # FlagGems FLA overflows UB at T=65, K=V=64. Keep the Ascend adapter for
+  # vLLM's packed/GQA, v-first-state GDN contract.
+  - chunk_gated_delta_rule_fwd
 
 # OOT (Out-of-Tree) operator blacklist
 # These operators will NOT be registered as OOT replacements.

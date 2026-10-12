@@ -35,6 +35,45 @@ def rotary_embedding_torch(
     Returns:
         Tuple of (embedded_query, embedded_key)
     """
+    if query.device != key.device or query.dtype != key.dtype:
+        raise ValueError("query and key must have the same device and dtype")
+    if query.dim() not in (3, 4) or key.dim() != query.dim():
+        raise ValueError("query and key must both be 3D or both be 4D")
+    if query.shape[-1] != key.shape[-1]:
+        raise ValueError("query and key must have the same head dimension")
+    if query.shape[-1] <= 0 or query.shape[-1] % 2 != 0:
+        raise ValueError("the rotary head dimension must be a positive even number")
+    if position_ids.dtype not in (torch.int32, torch.int64):
+        raise ValueError("position_ids must have dtype int32 or int64")
+    if query.dim() == 3:
+        if position_ids.dim() != 1:
+            raise ValueError("3D query and key require 1D position_ids")
+        if query.shape[0] != key.shape[0] or query.shape[0] != position_ids.numel():
+            raise ValueError(
+                "query, key, and position_ids must have equal token counts"
+            )
+    elif (
+        position_ids.dim() != 2
+        or query.shape[0] != key.shape[0]
+        or query.shape[2] != key.shape[2]
+        or position_ids.shape != (query.shape[0], query.shape[2])
+    ):
+        raise ValueError(
+            "4D BCHD query and key require matching batch/sequence dimensions "
+            "and [batch, sequence] position_ids"
+        )
+    if cos.dim() != 2 or sin.shape != cos.shape:
+        raise ValueError("cos and sin must be same-shaped 2D caches")
+    if cos.shape[-1] not in (query.shape[-1], query.shape[-1] // 2):
+        raise ValueError("cos and sin width must equal the head dimension or its half")
+
+    # vLLM normally performs this match at the layer boundary. Keep the
+    # standalone reference backend deterministic for direct callers and for
+    # guarded vendor fallbacks as well.
+    cos = cos.to(device=query.device, dtype=query.dtype)
+    sin = sin.to(device=query.device, dtype=query.dtype)
+    position_ids = position_ids.to(device=query.device, dtype=torch.long)
+
     # Get cos/sin for the positions
     # position_ids can be [batch, seq_len] or [seq_len]
     if position_ids.dim() == 1:
@@ -64,10 +103,15 @@ def rotary_embedding_torch(
     head_dim = query.shape[-1]
 
     if rotary_dim != head_dim:
-        # cos/sin only covers half of head_dim, need to repeat
-        # This handles the case where rotary is only applied to part of the dimensions
-        cos_selected = torch.cat([cos_selected, cos_selected], dim=-1)
-        sin_selected = torch.cat([sin_selected, sin_selected], dim=-1)
+        # Half-width caches follow the coordinate layout used by each rotary
+        # style: adjacent pairs for interleaved and two contiguous halves for
+        # NeoX.
+        if rotary_interleaved:
+            cos_selected = cos_selected.repeat_interleave(2, dim=-1)
+            sin_selected = sin_selected.repeat_interleave(2, dim=-1)
+        else:
+            cos_selected = torch.cat([cos_selected, cos_selected], dim=-1)
+            sin_selected = torch.cat([sin_selected, sin_selected], dim=-1)
 
     def rotate_half(x):
         """Rotates half the hidden dims of the input."""

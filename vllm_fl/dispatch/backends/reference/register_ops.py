@@ -24,6 +24,17 @@ def _bind_is_available(fn, is_available_fn):
     return wrapper
 
 
+def _reference_w8a8_moe_experts(*, activation, global_num_experts, **kwargs):
+    """Use the independent PyTorch W8A8 path when policy requests reference."""
+    if activation != "silu":
+        raise NotImplementedError("Reference W8A8 MoE supports SwiGLU only")
+    del global_num_experts
+
+    from vllm_fl.quantization.w8a8.moe_experts import _native_w8a8_fused_experts
+
+    return _native_w8a8_fused_experts(**kwargs)
+
+
 def register_builtins(registry) -> None:
     """
     Register all PyTorch (REFERENCE) operator implementations.
@@ -67,5 +78,16 @@ def register_builtins(registry) -> None:
                 priority=BackendPriority.REFERENCE,
             )
         )
+
+    impls.append(
+        OpImpl(
+            op_name="w8a8_moe_experts",
+            impl_id="reference.torch",
+            kind=BackendImplKind.REFERENCE,
+            fn=_bind_is_available(_reference_w8a8_moe_experts, is_avail),
+            vendor=None,
+            priority=BackendPriority.REFERENCE,
+        )
+    )
 
     registry.register_many(impls)

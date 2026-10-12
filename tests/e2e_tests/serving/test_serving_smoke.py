@@ -95,12 +95,15 @@ _REQUEST_MODEL = _CFG.serve.request_model(_CFG.model)
 
 
 @pytest.mark.e2e
-def test_model_list(base_url, headers):
+def test_model_list(server, base_url, headers):
     """Service must expose the loaded model in /v1/models."""
-    response = requests.get(f"{base_url}/models", headers=headers, proxies=_NO_PROXY)
-    assert response.status_code == 200
-    models = response.json()["data"]
-    assert any(m["id"] == _REQUEST_MODEL for m in models)
+    with server.log_on_failure("Serving /v1/models validation failed"):
+        response = requests.get(
+            f"{base_url}/models", headers=headers, proxies=_NO_PROXY
+        )
+        assert response.status_code == 200
+        models = response.json()["data"]
+        assert any(m["id"] == _REQUEST_MODEL for m in models)
 
 
 # ---------------------------------------------------------------------------
@@ -316,8 +319,9 @@ _ENDPOINT_RUNNERS = {
 
 @pytest.mark.e2e
 @pytest.mark.parametrize("endpoint", _CFG.serve.endpoints, ids=_CFG.serve.endpoints)
-def test_endpoint(endpoint: str, base_url, headers):
+def test_endpoint(endpoint: str, server, base_url, headers):
     """Validate a serving endpoint configured in the model YAML."""
-    runner = _ENDPOINT_RUNNERS.get(endpoint)
-    assert runner is not None, f"Unknown endpoint type: {endpoint}"
-    runner(base_url, headers)
+    with server.log_on_failure(f"Serving endpoint '{endpoint}' validation failed"):
+        runner = _ENDPOINT_RUNNERS.get(endpoint)
+        assert runner is not None, f"Unknown endpoint type: {endpoint}"
+        runner(base_url, headers)

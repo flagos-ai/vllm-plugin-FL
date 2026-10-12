@@ -238,3 +238,18 @@ def test_other_model_family_keeps_catalog_path(tmp_path, monkeypatch):
         device="s5000",
     )
     assert resolved.model == "/data/catalog/other-model"
+
+
+def test_ascend_910c_caps_offline_profile_batch():
+    cfg = ModelConfig.load(
+        "qwen3_6",
+        "35b_a3b_tp2_eager",
+        platform="ascend",
+        device="910c",
+    )
+
+    assert cfg.engine_kwargs()["max_num_batched_tokens"] == 4096
+    assert (
+        cfg.serve_args()[cfg.serve_args().index("--max-num-batched-tokens") + 1]
+        == "4096"
+    )

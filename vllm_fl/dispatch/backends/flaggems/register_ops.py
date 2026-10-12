@@ -37,6 +37,7 @@ def register_builtins(registry) -> None:
 
     backend = FlagGemsBackend()
     is_avail = backend.is_available
+    from .impl.w8a8_moe import w8a8_moe_experts
 
     impls = [
         # Quantization
@@ -148,6 +149,14 @@ def register_builtins(registry) -> None:
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.grouped_topk, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="w8a8_moe_experts",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(w8a8_moe_experts, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),

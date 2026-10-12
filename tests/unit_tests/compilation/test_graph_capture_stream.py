@@ -172,6 +172,12 @@ def contract():
         if isinstance(node, ast.ClassDef) and node.name in names
     ]
     assert {node.name for node in classes} == names
+    helpers = [
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_graph_capture_stream"
+    ]
+    assert len(helpers) == 1
     state = _Contract()
 
     def deny_target_import(name, *args, **kwargs):
@@ -211,7 +217,7 @@ def contract():
     }
     exec(
         compile(
-            ast.Module(body=classes, type_ignores=[]),
+            ast.Module(body=[*helpers, *classes], type_ignores=[]),
             str(source),
             "exec",
             flags=__future__.annotations.compiler_flag,
