@@ -203,6 +203,17 @@ jobs:
       platform: kunlunxin
     secrets: inherit
 
+  # ============================================================
+  # Job 4h: Iluvatar CoreX platform testing
+  # ============================================================
+  test-iluvatar:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
+    uses: ./.github/workflows/_platform_test.yml
+    with:
+      platform: iluvatar
+    secrets: inherit
+
   # Inventory runs on the same registered MUSA label without a GPU container.
   # This produces allocation evidence; it is never model or Gate acceptance.
   musa-runner-probe:

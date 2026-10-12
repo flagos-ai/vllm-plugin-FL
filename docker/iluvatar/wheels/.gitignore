@@ -1,0 +1,5 @@
+# Place the empty vLLM wheel here when building the CI image locally:
+#   vllm-0.28.0+empty-cp312-cp312-linux_x86_64.whl
+# Do not commit large wheel binaries to git.
+*
+!.gitignore
