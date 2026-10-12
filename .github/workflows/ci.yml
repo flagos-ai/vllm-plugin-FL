@@ -231,3 +231,10 @@ jobs:
           name: musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}.json
           if-no-files-found: error
+
+  # THead uses normal registration and finite suites with zero-skip acceptance.
+  test-thead:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
+    uses: ./.github/workflows/_thead_test.yml
+    secrets: inherit

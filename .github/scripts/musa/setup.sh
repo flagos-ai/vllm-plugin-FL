@@ -195,6 +195,8 @@ except Exception as error:
 finally:
     (root / 'test-tools.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
 PY_TEST_TOOLS
+"$task_python" -I -B .github/scripts/install_flaggems_vllm.py \
+  > "$task_dir/flaggems-vllm-install.stdout.raw" 2> "$task_dir/flaggems-vllm-install.stderr.raw"
 "$task_python" -I -B .github/scripts/musa/dependency_profile.py installed \
   --task-dir "$task_dir" --profile "$dependency_profile" \
   --manifest "${MUSA_CI_DEPENDENCY_MANIFEST:-}" \
@@ -208,10 +210,10 @@ import sysconfig
 site = pathlib.Path(sysconfig.get_path('purelib')).resolve()
 profile = json.loads((root / 'dependency-profile-staged.json').read_text())['profile']
 rows = []
-names = ['vllm', 'vllm_fl', 'musa_gate_observer', 'torch', 'torch_musa', 'flag_gems', 'triton', 'pytest', 'openai', 'httpx']
+names = ['vllm', 'vllm_fl', 'musa_gate_observer', 'flaggems_vllm', 'torch', 'torch_musa', 'flag_gems', 'triton', 'pytest', 'openai', 'httpx']
 if profile == 'latest':
     names.append('yaml')
-private = {'vllm', 'vllm_fl', 'musa_gate_observer'}
+private = {'vllm', 'vllm_fl', 'musa_gate_observer', 'flaggems_vllm'}
 vendor = {'torch', 'torch_musa'}
 if profile == 'latest':
     private |= {'flag_gems', 'triton', 'yaml'}

@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import torch
+import torch.nn.functional as F
 
 
 def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch):
@@ -49,3 +50,78 @@ def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch)
         weights,
         torch.tensor([[0.25, 0.75, 1.25, 1.25]], dtype=torch.float32),
     )
+
+
+def test_sqrtsoftplus_fallback_matches_dsv4_formula():
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    logits = torch.tensor([[0.0, 1.0, -1.0, 3.0]], dtype=torch.float32)
+    bias = torch.tensor([0.4, 0.0, 0.8, -0.2], dtype=torch.float32)
+    weights, ids = router_mod._sqrtsoftplus_topk(
+        gating_output=logits,
+        e_score_correction_bias=bias,
+        topk=2,
+        renormalize=True,
+        indices_type=torch.int64,
+        input_tokens=None,
+        hash_indices_table=None,
+        routed_scaling_factor=0.5,
+    )
+
+    scores = torch.sqrt(F.softplus(logits))
+    expected_ids = torch.topk(scores + bias, k=2, dim=-1, sorted=False).indices
+    expected_weights = scores.gather(1, expected_ids)
+    expected_weights = expected_weights / expected_weights.sum(-1, keepdim=True) * 0.5
+    assert torch.equal(ids, expected_ids)
+    assert torch.allclose(weights, expected_weights)
+
+
+def test_ascend_sqrtsoftplus_uses_torch_even_when_cuda_op_is_present(monkeypatch):
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    monkeypatch.setattr(router_mod, "_is_ascend_npu_tensor", lambda value: True)
+    monkeypatch.setattr(
+        router_mod,
+        "fused_topk_bias",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("Ascend must not call the CUDA router")
+        ),
+    )
+    router = SimpleNamespace(
+        e_score_correction_bias=None,
+        top_k=1,
+        renormalize=True,
+        scoring_func="sqrtsoftplus",
+        routed_scaling_factor=1.0,
+        _hash_indices_table=None,
+        num_fused_shared_experts=0,
+    )
+
+    weights, ids = router_mod.FusedTopKBiasRouterFL._compute_routing(
+        router,
+        torch.zeros((1, 4)),
+        torch.tensor([[0.0, 2.0]], dtype=torch.float32),
+        torch.int32,
+    )
+
+    assert torch.equal(ids, torch.tensor([[1]], dtype=torch.int32))
+    assert torch.equal(weights, torch.ones((1, 1), dtype=torch.float32))
+
+
+def test_sqrtsoftplus_fallback_honors_hash_table():
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    weights, ids = router_mod._sqrtsoftplus_topk(
+        gating_output=torch.tensor([[0.0, 1.0, 2.0]], dtype=torch.float32),
+        e_score_correction_bias=torch.zeros(3),
+        topk=2,
+        renormalize=False,
+        indices_type=torch.int32,
+        input_tokens=torch.tensor([1], dtype=torch.int64),
+        hash_indices_table=torch.tensor([[0, 1], [2, 0]], dtype=torch.int32),
+        routed_scaling_factor=2.0,
+    )
+
+    expected = torch.sqrt(F.softplus(torch.tensor([2.0, 0.0]))) * 2.0
+    assert torch.equal(ids, torch.tensor([[2, 0]], dtype=torch.int32))
+    assert torch.allclose(weights[0], expected)

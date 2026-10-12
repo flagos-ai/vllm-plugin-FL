@@ -77,43 +77,44 @@ Configuration File (YAML):
 """
 
 import os
+import weakref
 
-from .types import OpImpl, BackendImplKind, BackendPriority, match_token
-from .registry import OpRegistry, OpRegistrySnapshot
-from .policy import (
-    SelectionPolicy,
-    PolicyManager,
-    get_policy,
-    get_policy_epoch,
-    set_global_policy,
-    reset_global_policy,
-    policy_context,
-    policy_from_config,
-    with_strict_mode,
-    with_preference,
-    with_allowed_vendors,
-    with_denied_vendors,
-    PREFER_DEFAULT,
-    PREFER_VENDOR,
-    PREFER_REFERENCE,
-)
-from .manager import OpManager, get_default_manager, reset_default_manager
-from .ops import VLLMFLBackendBase
 from .discovery import (
-    discover_plugins,
-    get_discovered_plugins,
-    clear_discovered_plugins,
     PLUGIN_GROUP,
     PLUGIN_MODULES_ENV,
+    clear_discovered_plugins,
+    discover_plugins,
+    get_discovered_plugins,
 )
-from .logger_manager import get_logger, set_log_level
+from .io_common import list_model_layers, register_tensor_stat, tensor_stats
 from .io_dumper import (
-    enable_io_dump,
     disable_io_dump,
+    enable_io_dump,
     io_dump_step,
     is_dump_enabled,
 )
-from .io_common import list_model_layers, register_tensor_stat, tensor_stats
+from .logger_manager import get_logger, set_log_level
+from .manager import OpManager, get_default_manager, reset_default_manager
+from .ops import VLLMFLBackendBase
+from .policy import (
+    PREFER_DEFAULT,
+    PREFER_REFERENCE,
+    PREFER_VENDOR,
+    PolicyManager,
+    SelectionPolicy,
+    get_policy,
+    get_policy_epoch,
+    policy_context,
+    policy_from_config,
+    reset_global_policy,
+    set_global_policy,
+    with_allowed_vendors,
+    with_denied_vendors,
+    with_preference,
+    with_strict_mode,
+)
+from .registry import OpRegistry, OpRegistrySnapshot
+from .types import BackendImplKind, BackendPriority, OpImpl, match_token
 
 
 def call_op(op_name: str, *args, **kwargs):
@@ -146,6 +147,7 @@ def resolve_op(op_name: str):
 # Fast-path opt-out: set VLLM_FL_OP_FAST_PATH=0 to disable per-op fn caching
 # in hot OOT layers and route every call back through OpManager.call.
 _OP_FAST_PATH_ENABLED = os.environ.get("VLLM_FL_OP_FAST_PATH", "1") == "1"
+_CACHED_OPS = weakref.WeakSet()
 
 
 class CachedOp:
@@ -166,6 +168,7 @@ class CachedOp:
     """
 
     __slots__ = (
+        "__weakref__",
         "_op_name",
         "_impl",
         "_use_manager_call",
@@ -181,6 +184,19 @@ class CachedOp:
         self._manager_id = -1
         self._manager_epoch = -1
         self._policy_epoch = -1
+        _CACHED_OPS.add(self)
+
+    def warmup(self, mgr=None) -> None:
+        """Resolve this op outside Dynamo's compiled region."""
+        if mgr is None:
+            mgr = get_default_manager()
+        impl = mgr._resolve_impl(self._op_name)
+        mgr._record_first_use(self._op_name, impl)
+        self._impl = impl
+        self._use_manager_call = False
+        self._manager_id = id(mgr)
+        self._manager_epoch = mgr.policy_epoch
+        self._policy_epoch = get_policy_epoch()
 
     def __call__(self, *args, **kwargs):
         mgr = get_default_manager()
@@ -229,6 +245,21 @@ class CachedOp:
             mgr._mark_failed_impl(self._op_name, impl.impl_id)
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)
+
+
+def warmup_cached_ops(mgr=None) -> None:
+    """Best-effort resolve imported CachedOps before model compilation."""
+    if mgr is None:
+        mgr = get_default_manager()
+    # Discovery can import modules that create additional CachedOps. Complete
+    # it before taking the snapshot and do not hide initialization failures.
+    mgr.ensure_initialized()
+    for cached_op in tuple(_CACHED_OPS):
+        try:
+            cached_op.warmup(mgr)
+        except RuntimeError:
+            # Optional ops can be unavailable on the active platform.
+            continue
 
 
 __all__ = [
@@ -282,4 +313,5 @@ __all__ = [
     "call_op",
     "resolve_op",
     "CachedOp",
+    "warmup_cached_ops",
 ]

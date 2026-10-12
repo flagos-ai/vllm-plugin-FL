@@ -146,6 +146,7 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         # Apply GCU monkey-patches (Triton grid limits, etc.).
         if getattr(current_platform, "vendor_name", None) in ("gcu", "enflame"):
             from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+
             apply_gcu_patches()
     # Kunlunxin patches must run even when no OOT operator was selected.
     from vllm_fl.dispatch.config.utils import get_platform_name
@@ -185,9 +186,10 @@ def _patch_fused_moe_factory() -> None:
 
     # Model modules can import the factory before worker initialization. Patch
     # those cached module globals as well, but only when they still point to
-    # the exact upstream object.
+    # the exact upstream object. Inspect stored globals directly: getattr on
+    # lazy modules (for example transformers) can import unrelated models.
     for module in tuple(sys.modules.values()):
-        if module is not None and getattr(module, "FusedMoEFactory", None) is original:
+        if module is not None and vars(module).get("FusedMoEFactory") is original:
             module.FusedMoEFactory = FusedMoEFactoryFL  # noqa: F405
 
     logger.info("Monkey-patched FusedMoEFactory -> FusedMoEFactoryFL")

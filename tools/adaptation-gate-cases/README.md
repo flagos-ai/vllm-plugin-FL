@@ -1,6 +1,6 @@
 # Adaptation Gate Cases
 
-| Model | mode |single long text case | single long image case| text cases | image cases |mixed text and image cases | total cases
+| Model | mode | long text requests | long image requests | concurrent text requests | concurrent image requests | mixed requests | total requests
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `Qwen3.6-27B` | eager  | 1 | 1 | 8 | 8 | 4+4 | 26 |
 | `Qwen3.6-27B` | graph  | 1 | 1 | 8 | 8 | 4+4 | 26 |
@@ -10,6 +10,7 @@
 The matrix counts logical SDK requests. Each route runs five pytest scenarios
 and 26 requests; the four routes produce 20 scenario reports and 104 requests.
 SDK retries can produce additional HTTP attempts and do not increase this logical count.
+Each concurrent scenario sends eight logical requests.
 
 This directory is a small manual gate for accelerator adaptation and vLLM
 plugin upgrades. It tests two Qwen models in eager and graph modes.

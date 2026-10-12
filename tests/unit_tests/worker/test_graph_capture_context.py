@@ -88,11 +88,9 @@ def helper_and_backend():
     source = Path(__file__).resolve().parents[3] / "vllm_fl/worker/model_runner.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     functions = [
-        child
+        node
         for node in module.body
-        if isinstance(node, ast.If)
-        for child in node.body
-        if isinstance(child, ast.FunctionDef) and child.name == "graph_capture"
+        if isinstance(node, ast.FunctionDef) and node.name == "_device_graph_capture"
     ]
     assert len(functions) == 1
     backend = _Backend()
@@ -114,7 +112,7 @@ def helper_and_backend():
         ),
         namespace,
     )
-    return namespace["graph_capture"], backend
+    return namespace["_device_graph_capture"], backend
 
 
 @pytest.mark.parametrize(

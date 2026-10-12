@@ -23,7 +23,7 @@ platforms:
   cuda:
     enabled: true
   ascend:
-    enabled: false
+    enabled: true
   hygon:
     enabled: false
   metax:
@@ -36,4 +36,6 @@ platforms:
     enabled: false
   # Image published; needs a self-hosted runner with labels in configs/iluvatar.yml.
   iluvatar:
+    enabled: true
+  thead:
     enabled: true

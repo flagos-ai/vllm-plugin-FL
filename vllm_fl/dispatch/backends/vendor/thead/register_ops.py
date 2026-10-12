@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -28,8 +28,8 @@ def register_builtins(registry) -> None:
     """
     Register all thead (PPU) VENDOR operator implementations.
 
-    At registration time we also load the flash_attn_3 wheel so that
-    TheadFlashAttentionBackend can call FA3 ops.
+    Only attention is vendor-specific. Shared operators are registered by
+    the FlagGems and reference backends; the FA3 wheel is loaded lazily.
 
     Args:
         registry: Registry to register into

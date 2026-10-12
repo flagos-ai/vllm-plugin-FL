@@ -27,6 +27,8 @@ fi
 # Install only the checked-out plugin source for this workflow run.
 python -m pip install --no-build-isolation --no-deps -e .
 
+python .github/scripts/install_flaggems_vllm.py
+
 python - <<'PY'
 import flag_gems
 import torch

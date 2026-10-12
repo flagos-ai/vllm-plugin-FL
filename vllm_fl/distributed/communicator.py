@@ -51,6 +51,10 @@ class CommunicatorFL(DeviceCommunicatorBase):
                 group=self.cpu_group,
                 device=self.device,
             )
+            if self.device.type == "npu" and self.pyflagcx_comm.disabled:
+                raise RuntimeError(
+                    "FlagCX requested on NPU but failed to initialize"
+                ) from self.pyflagcx_comm.init_error
 
         if self.use_all2all:
             self._init_all2all_manager(tcp_store_group)

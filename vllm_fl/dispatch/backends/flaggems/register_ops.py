@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import functools
 
+from vllm.logger import init_logger
+
 from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 from vllm_fl.utils import use_flaggems_op
+
+logger = init_logger(__name__)
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -33,10 +37,18 @@ def register_builtins(registry) -> None:
     Args:
         registry: Registry to register into
     """
+    import flaggems_vllm
+
     from .flaggems import FlagGemsBackend
+
+    logger.info_once(
+        "FlagGems-vllm integration activated: package=%s",
+        getattr(flaggems_vllm, "__file__", "<unknown>"),
+    )
 
     backend = FlagGemsBackend()
     is_avail = backend.is_available
+    from .impl.w8a8_moe import w8a8_moe_experts
 
     impls = [
         # Quantization
@@ -148,6 +160,14 @@ def register_builtins(registry) -> None:
             impl_id="default.flagos",
             kind=BackendImplKind.DEFAULT,
             fn=_bind_is_available(backend.grouped_topk, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
+        OpImpl(
+            op_name="w8a8_moe_experts",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(w8a8_moe_experts, is_avail),
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),

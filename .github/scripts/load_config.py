@@ -49,6 +49,10 @@ def load_platform_config(platform: str) -> dict:
     config.setdefault("device_runner_labels", {})
     if platform == "musa":
         config = resolve_musa_config(config)
+    elif platform == "thead":
+        from thead.config import resolve_config
+
+        config = resolve_config(config, os.environ)
     return config
 
 

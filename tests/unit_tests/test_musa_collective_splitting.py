@@ -105,7 +105,7 @@ ConfigContract = CONFIG_NS["ConfigContract"]
 
 
 def platform_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name == "vllm.config" and level == 0:
+    if name in ("vllm.config", "vllm.config.compilation") and level == 0:
         return SimpleNamespace(CUDAGraphMode=GraphMode, CompilationMode=Mode)
     return builtins.__import__(name, globals, locals, fromlist, level)
 

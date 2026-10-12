@@ -99,8 +99,6 @@ def patch_distributed_runtime():
 
         from vllm_fl.distributed.communicator import CommunicatorFL
 
-        worker_mod = importlib.import_module("vllm_fl.worker.worker")
-
         platform_cls = (
             current_platform
             if isinstance(current_platform, type)
@@ -113,6 +111,10 @@ def patch_distributed_runtime():
         # Preserve the original Sunrise/FlagCX communicator selection logic.
         platform_cls.dist_backend = "flagcx"
         current_platform.dist_backend = "flagcx"
+
+        # WorkerFL normalizes flagcx/nccl process groups to pccl for PTPU.
+        # Do not import or wrap worker here: worker -> custom_ops -> this module
+        # would create a circular import during backend registration.
 
         if not getattr(CommunicatorFL, "_sunrise_all_gather_patched", False):
 
@@ -147,32 +149,6 @@ def patch_distributed_runtime():
 
             CommunicatorFL.all_gather = _all_gather
             CommunicatorFL._sunrise_all_gather_patched = True
-
-        init_dist = worker_mod.init_worker_distributed_environment
-        if not getattr(init_dist, "_sunrise_backend_patched", False):
-
-            def _init_worker_distributed_environment(
-                vllm_config,
-                rank,
-                distributed_init_method=None,
-                local_rank=-1,
-                backend="nccl",
-            ):
-                backend_for_pg = backend
-                if backend in ("flagcx", "nccl"):
-                    backend_for_pg = "pccl"
-                return init_dist(
-                    vllm_config,
-                    rank,
-                    distributed_init_method=distributed_init_method,
-                    local_rank=local_rank,
-                    backend=backend_for_pg,
-                )
-
-            _init_worker_distributed_environment._sunrise_backend_patched = True
-            worker_mod.init_worker_distributed_environment = (
-                _init_worker_distributed_environment
-            )
 
         logger.info("Configured Sunrise/PTPU to use FlagCX communicator with pccl PGs")
     except Exception as e:
