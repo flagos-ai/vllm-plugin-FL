@@ -42,7 +42,20 @@ def make_provider(function=None, shared_heuristics=None):
                 self.received = (cfg, compile_meta)
                 return self.options
 
+            def _precompile_config(self, cfg):
+                self.compile_received = cfg
+                if isinstance(cfg, BaseException):
+                    raise cfg
+                return cfg
+
         heuristics.CachingAutotuner = CachingAutotuner
+    if not hasattr(heuristics, "OutOfResources"):
+
+        class OutOfResources(Exception):
+            def __init__(self, required, limit, name):
+                self.required, self.limit, self.name = required, limit, name
+
+        heuristics.OutOfResources = OutOfResources
     registrations = []
 
     class GCUInductorPatcher:
@@ -58,6 +71,91 @@ def make_provider(function=None, shared_heuristics=None):
         GCUInductorPatcher=GCUInductorPatcher,
     )
     return provider, heuristics, calls, result, registrations
+
+
+@pytest.mark.parametrize("style", ["positional", "keyword"])
+def test_gcu_resource_adapter_preserves_success_and_lazy_registration(style):
+    provider, heuristics, _, _, _ = make_provider()
+    original = heuristics.CachingAutotuner._precompile_config
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    wrapped = heuristics.CachingAutotuner._precompile_config
+    autotuner = heuristics.CachingAutotuner("gcu")
+    cfg = object()
+    result = (
+        autotuner._precompile_config(cfg)
+        if style == "positional"
+        else autotuner._precompile_config(cfg=cfg)
+    )
+    assert result is cfg and autotuner.compile_received is cfg
+    assert inspect.signature(wrapped) == inspect.signature(original)
+    provider.GCUInductorPatcher().patch_triton_heuristics()
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    assert heuristics.CachingAutotuner._precompile_config is wrapped
+
+
+def test_gcu_register_exhaustion_does_not_discard_valid_autotune_candidates():
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_resource_errors(heuristics)
+    autotuner = heuristics.CachingAutotuner("gcu")
+    first, last = object(), object()
+    failure = Exception(
+        "error: ran out of registers during register allocation\n"
+        "llc invocation failed: llcResult 1"
+    )
+    results, failures = [], []
+    for cfg in [first, failure, last]:
+        try:
+            results.append(autotuner._precompile_config(cfg))
+        except heuristics.OutOfResources as error:
+            failures.append(error)
+    assert results == [first, last]
+    assert len(failures) == 1 and failures[0].__cause__ is failure
+    assert failures[0].required == failures[0].limit == "unknown"
+    assert failures[0].name == "GCU registers"
+    # A lone failed configuration must still raise, never become a result.
+    with pytest.raises(heuristics.OutOfResources):
+        autotuner._precompile_config(failure)
+
+
+@pytest.mark.parametrize(
+    "device,error",
+    [
+        ("cuda", Exception(inductor._REGISTER_ERROR)),
+        ("cpu", Exception(inductor._REGISTER_ERROR)),
+        ("gcu", Exception("error: invalid compiler IR")),
+        ("gcu", Exception("context\n" + inductor._REGISTER_ERROR)),
+        ("gcu", Exception()),
+        ("gcu", RuntimeError(inductor._REGISTER_ERROR)),
+    ],
+)
+def test_gcu_resource_adapter_preserves_other_failures(device, error):
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_resource_errors(heuristics)
+    with pytest.raises(type(error)) as caught:
+        heuristics.CachingAutotuner(device)._precompile_config(error)
+    assert caught.value is error
+
+
+def test_gcu_resource_adapter_preserves_existing_resource_error():
+    _, heuristics, _, _, _ = make_provider()
+    error = heuristics.OutOfResources(512, 256, "registers")
+    inductor._install_gcu_resource_errors(heuristics)
+    with pytest.raises(heuristics.OutOfResources) as caught:
+        heuristics.CachingAutotuner("gcu")._precompile_config(error)
+    assert caught.value is error
+
+
+@pytest.mark.parametrize("interface", ["missing", "precompile", "resource_error"])
+def test_gcu_resource_adapter_rejects_unknown_interfaces(interface):
+    _, heuristics, _, _, _ = make_provider()
+    if interface == "missing":
+        del heuristics.CachingAutotuner._precompile_config
+    elif interface == "precompile":
+        heuristics.CachingAutotuner._precompile_config = lambda self, config: config
+    else:
+        heuristics.OutOfResources = RuntimeError
+    with pytest.raises(RuntimeError, match="(missing|ABI)"):
+        inductor._install_gcu_resource_errors(heuristics)
 
 
 @pytest.mark.parametrize("dtype", ["i64", "u64", "*i64", "*u64"])
