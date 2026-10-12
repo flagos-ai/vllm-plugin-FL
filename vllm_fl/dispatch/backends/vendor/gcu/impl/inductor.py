@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Keep TorchGCU reduction configuration compatible with Torch's metadata ABI."""
+"""Adapt TorchGCU compilation metadata to the installed Torch interfaces."""
 
 import inspect
 import os
@@ -11,6 +11,48 @@ from functools import wraps
 _PARAMETERS = ("size_hints", "reduction_hint", "inductor_meta", "triton_meta")
 _ADAPTER_MARKER = "_fl_gcu_persistent_reduction_adapter"
 _REGISTRATION_MARKER = "_fl_gcu_persistent_reduction_registration"
+_I64_OPTIONS_MARKER = "_fl_gcu_i64_compile_options_adapter"
+_I64_SIGNATURES = frozenset({"i64", "u64", "*i64", "*u64"})
+
+
+def _install_gcu_i64_compile_options(heuristics) -> None:
+    autotuner = getattr(heuristics, "CachingAutotuner", None)
+    original = getattr(autotuner, "_create_compile_options", None)
+    if original is None:
+        raise RuntimeError("Torch CachingAutotuner compile options are missing")
+    if getattr(original, _I64_OPTIONS_MARKER, False) is True:
+        return
+    if tuple(inspect.signature(original).parameters) != ("self", "cfg", "compile_meta"):
+        raise RuntimeError("Unknown CachingAutotuner compile options ABI")
+
+    @wraps(original)
+    def create_gcu_compile_options(self, cfg, compile_meta):
+        options = original(self, cfg, compile_meta)
+        if getattr(self.device_props, "type", None) != "gcu":
+            return options
+        if "enable_i64" in options or "ENABLE_I64" in options:
+            return options
+        explicit = {
+            key: compile_meta[key]
+            for key in ("enable_i64", "ENABLE_I64")
+            if key in compile_meta
+        }
+        if explicit:
+            return {**options, **explicit}
+        signature = compile_meta.get("signature")
+        if not isinstance(signature, Mapping) or not any(
+            isinstance(dtype, str) and dtype in _I64_SIGNATURES
+            for dtype in signature.values()
+        ):
+            return options
+        # Torch keeps dynamic sizes as i64 to avoid overflow. Its compiler
+        # option whitelist drops GCU's flag, so pass it at the actual options
+        # boundary. The GCU backend requires an explicit option; setting only
+        # ENABLE_I64_CHECK does not enable its 64-bit lowering.
+        return {**options, "enable_i64": True}
+
+    setattr(create_gcu_compile_options, _I64_OPTIONS_MARKER, True)
+    autotuner._create_compile_options = create_gcu_compile_options
 
 
 def _configuration_arity(function) -> int:
@@ -89,12 +131,14 @@ def _install_gcu_inductor_hooks(provider, heuristics) -> None:
             # Installing only the current slot would be overwritten then.
             result = register(self, *args, **kwargs)
             _adapt_registered_persistent_reduction(provider, heuristics)
+            _install_gcu_i64_compile_options(heuristics)
             return result
 
         setattr(register_compatible, _REGISTRATION_MARKER, True)
         patcher_type.patch_triton_heuristics = register_compatible
     # Also handle a process where TorchGCU has already registered its provider.
     _adapt_registered_persistent_reduction(provider, heuristics)
+    _install_gcu_i64_compile_options(heuristics)
 
 
 def _loaded_gcu_inductor_providers(provider):

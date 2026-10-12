@@ -31,6 +31,18 @@ def make_provider(function=None, shared_heuristics=None):
     heuristics = shared_heuristics or SimpleNamespace(
         _persistent_reduction_configs=generator.persistent_reduction_configs
     )
+    if not hasattr(heuristics, "CachingAutotuner"):
+
+        class CachingAutotuner:
+            def __init__(self, device):
+                self.device_props = SimpleNamespace(type=device)
+                self.options = {"num_warps": 4, "num_stages": 1}
+
+            def _create_compile_options(self, cfg, compile_meta):
+                self.received = (cfg, compile_meta)
+                return self.options
+
+        heuristics.CachingAutotuner = CachingAutotuner
     registrations = []
 
     class GCUInductorPatcher:
@@ -46,6 +58,99 @@ def make_provider(function=None, shared_heuristics=None):
         GCUInductorPatcher=GCUInductorPatcher,
     )
     return provider, heuristics, calls, result, registrations
+
+
+@pytest.mark.parametrize("dtype", ["i64", "u64", "*i64", "*u64"])
+@pytest.mark.parametrize("style", ["positional", "keyword"])
+def test_gcu_i64_option_reaches_compiler_without_narrowing_metadata(dtype, style):
+    provider, heuristics, _, _, _ = make_provider()
+    original = heuristics.CachingAutotuner._create_compile_options
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    wrapped = heuristics.CachingAutotuner._create_compile_options
+    autotuner = heuristics.CachingAutotuner("gcu")
+    meta = {"signature": {"ks0": dtype, "xnumel": "i32"}, "constants": {}}
+    before, cfg = dict(meta), object()
+    if style == "positional":
+        options = autotuner._create_compile_options(cfg, meta)
+    else:
+        options = autotuner._create_compile_options(cfg=cfg, compile_meta=meta)
+    assert autotuner.received[0] is cfg and autotuner.received[1] is meta
+    assert meta == before and "enable_i64" not in meta
+    assert options == {**autotuner.options, "enable_i64": True}
+    assert options is not autotuner.options
+    assert "enable_i64" not in autotuner.options
+    assert inspect.signature(wrapped) == inspect.signature(original)
+    provider.GCUInductorPatcher().patch_triton_heuristics()
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    assert heuristics.CachingAutotuner._create_compile_options is wrapped
+
+
+@pytest.mark.parametrize(
+    "device,dtype", [("cuda", "i64"), ("cpu", "i64"), ("gcu", "i32")]
+)
+def test_i64_option_does_not_change_other_kernels(device, dtype):
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_i64_compile_options(heuristics)
+    autotuner = heuristics.CachingAutotuner(device)
+    options = autotuner._create_compile_options(object(), {"signature": {"ks0": dtype}})
+    assert options is autotuner.options
+
+
+@pytest.mark.parametrize("key", ["enable_i64", "ENABLE_I64"])
+@pytest.mark.parametrize("value", [False, True])
+@pytest.mark.parametrize("location", ["metadata", "options"])
+def test_gcu_i64_options_preserve_explicit_preference(key, value, location):
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_i64_compile_options(heuristics)
+    autotuner = heuristics.CachingAutotuner("gcu")
+    meta = {"signature": {"ks0": "i64"}}
+    if location == "metadata":
+        meta[key] = value
+    else:
+        autotuner.options[key] = value
+        meta[key] = not value
+    before = dict(meta)
+    options = autotuner._create_compile_options(object(), meta)
+    assert options[key] is value and meta == before
+    assert ("ENABLE_I64" if key == "enable_i64" else "enable_i64") not in options
+    if location == "options":
+        assert options is autotuner.options
+    else:
+        assert key not in autotuner.options
+
+
+def test_gcu_i64_option_preserves_both_explicit_metadata_keys():
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_i64_compile_options(heuristics)
+    autotuner = heuristics.CachingAutotuner("gcu")
+    meta = {"signature": {"ks0": "i64"}, "enable_i64": False, "ENABLE_I64": True}
+    options = autotuner._create_compile_options(object(), meta)
+    assert options == {**autotuner.options, "enable_i64": False, "ENABLE_I64": True}
+
+
+def test_i64_options_reject_unknown_abi():
+    with pytest.raises(RuntimeError, match="compile options are missing"):
+        inductor._install_gcu_i64_compile_options(SimpleNamespace())
+    unknown = SimpleNamespace(_create_compile_options=lambda self, metadata: {})
+    with pytest.raises(RuntimeError, match="compile options ABI"):
+        inductor._install_gcu_i64_compile_options(
+            SimpleNamespace(CachingAutotuner=unknown)
+        )
+
+
+def test_i64_options_preserve_original_failure():
+    failure = ValueError("original compile option failure")
+
+    class FailingAutotuner:
+        def _create_compile_options(self, cfg, compile_meta):
+            raise failure
+
+    inductor._install_gcu_i64_compile_options(
+        SimpleNamespace(CachingAutotuner=FailingAutotuner)
+    )
+    with pytest.raises(ValueError) as raised:
+        FailingAutotuner()._create_compile_options(None, {})
+    assert raised.value is failure
 
 
 @pytest.mark.parametrize("style", ["legacy", "positional", "keyword"])
@@ -206,13 +311,9 @@ def test_registration_error_propagates():
 
 def test_both_loaded_gcu_namespaces_keep_registered_and_lazy_abis(monkeypatch):
     canonical, heuristics, calls, result, _ = make_provider()
-    alias, _, alias_calls, alias_result, _ = make_provider(
-        shared_heuristics=heuristics
-    )
+    alias, _, alias_calls, alias_result, _ = make_provider(shared_heuristics=heuristics)
     canonical.__file__ = alias.__file__ = __file__
-    monkeypatch.setitem(
-        sys.modules, "torch.gcu.inductor.backend_register", alias
-    )
+    monkeypatch.setitem(sys.modules, "torch.gcu.inductor.backend_register", alias)
     # Reproduce an already-registered slot whose class belongs to the other
     # loaded module, followed by lazy registrations through either namespace.
     alias.GCUInductorPatcher().patch_triton_heuristics()
@@ -246,9 +347,7 @@ def test_alias_with_unverified_source_is_rejected(monkeypatch, alias_source):
     provider.__file__ = __file__
     alias, _, _, _, _ = make_provider()
     alias.__file__ = alias_source
-    monkeypatch.setitem(
-        sys.modules, "torch.gcu.inductor.backend_register", alias
-    )
+    monkeypatch.setitem(sys.modules, "torch.gcu.inductor.backend_register", alias)
     with pytest.raises(RuntimeError, match="different sources"):
         inductor._loaded_gcu_inductor_providers(provider)
 
@@ -260,18 +359,14 @@ def test_alias_from_another_existing_file_is_rejected(monkeypatch, tmp_path):
     other.write_text("# unrelated provider\n")
     alias, _, _, _, _ = make_provider()
     alias.__file__ = str(other)
-    monkeypatch.setitem(
-        sys.modules, "torch.gcu.inductor.backend_register", alias
-    )
+    monkeypatch.setitem(sys.modules, "torch.gcu.inductor.backend_register", alias)
     with pytest.raises(RuntimeError, match="different sources"):
         inductor._loaded_gcu_inductor_providers(provider)
 
 
 def test_identical_module_alias_is_only_installed_once(monkeypatch):
     provider, _, _, _, _ = make_provider()
-    monkeypatch.setitem(
-        sys.modules, "torch.gcu.inductor.backend_register", provider
-    )
+    monkeypatch.setitem(sys.modules, "torch.gcu.inductor.backend_register", provider)
     assert inductor._loaded_gcu_inductor_providers(provider) == (provider,)
 
 
