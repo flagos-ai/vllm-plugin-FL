@@ -11,7 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 
 
-def test_npu_weak_refs_are_recursive(monkeypatch):
+@pytest.mark.parametrize("device_type", ["npu", "gcu"])
+def test_device_weak_refs_are_recursive(monkeypatch, device_type):
     import torch
 
     from vllm.sequence import IntermediateTensors
@@ -24,8 +25,8 @@ def test_npu_weak_refs_are_recursive(monkeypatch):
         weak_refs[id(tensor)] = object()
         return weak_refs[id(tensor)]
 
-    monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
-    monkeypatch.setattr(graph_module, "_weak_ref_npu_tensor", fake_weak_ref)
+    monkeypatch.setattr(graph_module.current_platform, "device_type", device_type)
+    monkeypatch.setattr(graph_module, f"_weak_ref_{device_type}_tensor", fake_weak_ref)
 
     first = torch.ones(1)
     second = torch.ones(2)
@@ -278,3 +279,121 @@ class TestGraphEntry:
         assert entry.graph is None
         assert entry.output is None
         assert entry.input_addresses is None
+
+
+def test_gcu_weak_ref_keeps_cpu_tensors(monkeypatch):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "gcu")
+    # CPU values must not require a vendor runtime primitive.
+    monkeypatch.setitem(sys.modules, "torch_gcu", SimpleNamespace())
+    value = torch.ones(2)
+    assert graph_module.weak_ref_tensors({"cpu": value})["cpu"] is value
+
+
+@pytest.mark.parametrize("missing", ["storage", "tensor"])
+@pytest.mark.parametrize("primitive", [None, object()])
+def test_gcu_weak_ref_requires_runtime_primitives(monkeypatch, missing, primitive):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    tensor = MagicMock(spec=torch.Tensor)
+    tensor.device = SimpleNamespace(type="gcu")
+    storage_constructor = primitive if missing == "storage" else lambda *args: None
+    tensor_constructor = primitive if missing == "tensor" else lambda *args: None
+    monkeypatch.setattr(
+        torch._C,
+        "_construct_storage_from_data_pointer",
+        storage_constructor,
+        raising=False,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_gcu",
+        SimpleNamespace(
+            _C=SimpleNamespace(
+                _construct_GCU_Tensor_From_Storage_And_Metadata=tensor_constructor
+            )
+        ),
+    )
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "gcu")
+    with pytest.raises(RuntimeError, match="GCU graph weak references require"):
+        graph_module.weak_ref_tensors(tensor)
+
+
+def test_gcu_weak_ref_propagates_construction_failure(monkeypatch):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    tensor = MagicMock(spec=torch.Tensor)
+    tensor.device = SimpleNamespace(type="gcu")
+
+    def incompatible(*args):
+        raise ValueError("incompatible vendor tensor metadata")
+
+    monkeypatch.setattr(
+        torch._C,
+        "_construct_storage_from_data_pointer",
+        lambda *args: object(),
+        raising=False,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_gcu",
+        SimpleNamespace(
+            _C=SimpleNamespace(
+                _construct_GCU_Tensor_From_Storage_And_Metadata=incompatible
+            )
+        ),
+    )
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "gcu")
+    with pytest.raises(ValueError, match="incompatible vendor tensor metadata"):
+        graph_module.weak_ref_tensors(tensor)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype_name", ["float32", "bfloat16"])
+def test_gcu_weak_ref_preserves_views_without_owning_storage(dtype_name):
+    import gc
+    import weakref
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "gcu":
+        pytest.skip("Requires an Enflame GCU")
+
+    torch.gcu.synchronize()
+    baseline = torch.gcu.memory_allocated()
+    owner = torch.arange(32, device="gcu", dtype=getattr(torch, dtype_name)).reshape(
+        4, 8
+    )
+    view = owner[1:, 1::2]
+    alias = graph_module.weak_ref_tensors(view)
+    empty = graph_module.weak_ref_tensors(view[:0])
+    assert alias is not view
+    assert alias.data_ptr() == view.data_ptr()
+    assert alias.shape == view.shape and alias.stride() == view.stride()
+    assert alias.storage_offset() == view.storage_offset()
+    assert alias.untyped_storage()._cdata != view.untyped_storage()._cdata
+    assert alias.untyped_storage().nbytes() == view.untyped_storage().nbytes()
+    assert empty.shape == view[:0].shape and empty.stride() == view.stride()
+    assert empty.storage_offset() == view.storage_offset()
+    assert empty.untyped_storage()._cdata != view.untyped_storage()._cdata
+    torch.testing.assert_close(alias.cpu(), view.cpu(), rtol=0, atol=0)
+
+    owner_ref, view_ref = weakref.ref(owner), weakref.ref(view)
+    del owner, view
+    gc.collect()
+    torch.gcu.synchronize()
+    assert owner_ref() is None and view_ref() is None
+    # Borrowed aliases stay alive but their original allocation must be released.
+    # Never dereference either alias after its owning tensor/graph is released.
+    assert torch.gcu.memory_allocated() <= baseline
