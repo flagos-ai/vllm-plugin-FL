@@ -202,6 +202,7 @@ def main():
             write_json(inputs / "entry-launch-failure.json", report)
         print(f"MUSA Gate entry failed; evidence: {inputs}", file=sys.stderr)
         return 1
+    return None
 
 
 if __name__ == "__main__":

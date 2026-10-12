@@ -8,8 +8,8 @@ import io
 import json
 import tempfile
 import unittest
+import unittest.mock as mock
 from pathlib import Path
-from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1] / "musa_gate_observer" / "summarize.py"
 SPEC = importlib.util.spec_from_file_location("pure_observer_consumer", SOURCE)

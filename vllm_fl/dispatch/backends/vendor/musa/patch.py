@@ -20,8 +20,8 @@ def apply_musa_patches():
     patch_topk_topp_sampler()
     patch_triton_reshape_and_cache_flash()
     patch_cuda_get_device_properties()
-    if not patch_accelerator_missing_attrs():
-        _patches_applied = False
+    _patches_applied = bool(patch_accelerator_missing_attrs())
+    if not _patches_applied:
         return
     patch_cuda_stream_for_musa()
     patch_inductor_triton_for_musa()

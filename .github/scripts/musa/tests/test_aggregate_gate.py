@@ -6,26 +6,27 @@ import json
 import sys
 import tempfile
 import unittest
+import unittest.mock as mock
 from pathlib import Path
-from unittest import mock
 
 TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
 import aggregate_gate  # noqa: E402
 import gate_common  # noqa: E402
-from aggregate_gate import aggregate, canonical_sha, original_scenario  # noqa: E402
-from gate_common import (
-    CHECKS,
-    GATE_FILES,
-    ROUTES,
-    SCENARIOS,
-    TEST_FILES,
-    fingerprint,
-    fingerprint_streaming,
-    read_bytes,  # noqa: E402
-    strict_json,
-    write_json,
-)
+
+aggregate = aggregate_gate.aggregate
+canonical_sha = aggregate_gate.canonical_sha
+original_scenario = aggregate_gate.original_scenario
+CHECKS = gate_common.CHECKS
+GATE_FILES = gate_common.GATE_FILES
+ROUTES = gate_common.ROUTES
+SCENARIOS = gate_common.SCENARIOS
+TEST_FILES = gate_common.TEST_FILES
+fingerprint = gate_common.fingerprint
+fingerprint_streaming = gate_common.fingerprint_streaming
+read_bytes = gate_common.read_bytes
+strict_json = gate_common.strict_json
+write_json = gate_common.write_json
 from run_gate import route_cleanup_complete, verify_known_lifetimes  # noqa: E402
 
 

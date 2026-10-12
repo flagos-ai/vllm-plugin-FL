@@ -6,9 +6,9 @@ import importlib.util
 import io
 import tempfile
 import unittest
+import unittest.mock as mock
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1] / "musa_gate_observer"
 
