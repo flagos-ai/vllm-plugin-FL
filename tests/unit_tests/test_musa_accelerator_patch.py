@@ -202,6 +202,7 @@ def test_patch_entry_point_retries_after_incomplete_vendor_api(
         "patch_moe_topk_softmax_for_musa",
         "patch_triton_mtgpu_alias_for_musa",
         "patch_device_config_for_musa",
+        "patch_musa_vision_rotary_layout",
     ]
     for name in other_patches:
         monkeypatch.setattr(musa_patch, name, Mock())
