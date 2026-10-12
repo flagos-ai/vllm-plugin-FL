@@ -114,6 +114,39 @@ def selected_record(dist_name, paths):
     }
 
 
+OWNER_DISTRIBUTION_CAP = 4096
+OWNER_MEMBER_CAP = 200000
+
+
+def record_owner_candidates(path):
+    """Discover project hints from actual installed RECORD member locations."""
+    names = []
+    member_count = 0
+    for distribution_index, dist in enumerate(importlib.metadata.distributions(), 1):
+        require(
+            distribution_index <= OWNER_DISTRIBUTION_CAP,
+            "RECORD owner distribution scan cap exceeded",
+        )
+        owns_path = False
+        for member in dist.files or ():
+            member_count += 1
+            require(
+                member_count <= OWNER_MEMBER_CAP,
+                "RECORD owner member scan cap exceeded",
+            )
+            if Path(str(member)).name == path.name:
+                owns_path |= Path(dist.locate_file(member)).resolve() == path
+        if owns_path:
+            name = dist.metadata["Name"]
+            require(
+                isinstance(name, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,255}", name),
+                "Invalid RECORD owner project name",
+            )
+            names.append(name)
+    return names
+
+
 def selected_owner(top_name, path):
     """Resolve the real imported path, de-duplicating same-project metadata.
 
@@ -121,6 +154,10 @@ def selected_owner(top_name, path):
     Only the distribution whose selected RECORD really contains these bytes wins.
     """
     advertised = importlib.metadata.packages_distributions().get(top_name, [])
+    # Top-level advertisements are hints and may be absent for an ordinary wheel.
+    # Discovery still requires the imported path; selected_record verifies bytes.
+    if not advertised:
+        advertised = record_owner_candidates(path)
     candidates = {}
     for name in advertised:
         canonical = re.sub(r"[-_.]+", "-", name).lower()

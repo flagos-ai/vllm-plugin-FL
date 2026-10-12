@@ -257,7 +257,7 @@ jobs:
           path: |
             ${{ env.MUSA_GATE_ARTIFACT_DIR }}
             ${{ env.MUSA_SUITE_ARTIFACT_DIR }}
-            ${{ runner.temp }}/musa-install.*
+            ${{ env.MUSA_CI_INSTALL_EVIDENCE }}
             coverage-musa.json
             report-musa.json
           if-no-files-found: error
