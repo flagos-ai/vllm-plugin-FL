@@ -142,8 +142,10 @@ class ShutdownWindow(unittest.TestCase):
                     actor.err_path = root / f"{grace}.stderr.raw"
                     actor.out = actor.out_path.open("xb")
                     actor.err = actor.err_path.open("xb")
-                    actor.members = lambda actor=actor, alive=alive, clock=clock: (
-                        [actor.initial] if alive[0] and clock[0] < 70 else []
+                    actor.members = (
+                        lambda deadline=None, actor=actor, alive=alive, clock=clock: (
+                            [actor.initial] if alive[0] and clock[0] < 70 else []
+                        )
                     )
 
                     def signal_owned(

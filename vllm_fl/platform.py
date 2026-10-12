@@ -222,9 +222,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
-        if cls.device_type == "npu" and vllm_config.use_v2_model_runner:
+        if cls.device_type in {"npu", "musa"} and vllm_config.use_v2_model_runner:
+            backend = "Ascend" if cls.device_type == "npu" else "MUSA"
             raise ValueError(
-                "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
+                f"{backend} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config

@@ -132,28 +132,39 @@ def same_lifetime_is_live(previous, stat_reader=None):
     return current["state"] != "Z"
 
 
-def verify_known_lifetimes(known, stat_reader=proc_stat, identity_reader=identity):
-    """A previously attested live child cannot disappear by changing its SID."""
+def verify_known_lifetimes(
+    known, stat_reader=proc_stat, identity_reader=identity, *, deadline=None
+):
+    """Reobserve exiting children without accepting incomplete live identities."""
+    # One short window is shared by every known PID in this inventory. Cleanup
+    # supplies its existing grace deadline, so resampling never renews that grace.
+    sample_deadline = time.monotonic() + 0.1
+    if deadline is not None:
+        sample_deadline = min(sample_deadline, deadline)
     live = []
     for previous in known.values():
-        if not same_lifetime_is_live(previous, stat_reader):
-            continue
-        try:
-            current = identity_reader(previous["pid"])
-        except (FileNotFoundError, ProcessLookupError):
-            # Namespace links can disappear while an exiting child becomes a
-            # zombie. Confirm exit; missing metadata for a live PID stays fatal.
-            if not same_lifetime_is_live(previous, stat_reader):
+        while same_lifetime_is_live(previous, stat_reader):
+            try:
+                current = identity_reader(previous["pid"])
+            except (FileNotFoundError, ProcessLookupError):
+                # Namespace teardown can precede the Z state. Only a proved
+                # exit or a complete matching identity closes this race.
+                if not same_lifetime_is_live(previous, stat_reader):
+                    break
+                remaining = sample_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(0.01, remaining))
                 continue
-            raise
-        require(
-            all(
-                current[key] == previous[key]
-                for key in ("pid", "starttime", "pgid", "sid", "uid", "namespaces")
-            ),
-            "Known live child escaped its attested session/group/namespace",
-        )
-        live.append(current)
+            require(
+                all(
+                    current[key] == previous[key]
+                    for key in ("pid", "starttime", "pgid", "sid", "uid", "namespaces")
+                ),
+                "Known live child escaped its attested session/group/namespace",
+            )
+            live.append(current)
+            break
     return live
 
 
@@ -272,10 +283,10 @@ class OwnedProcess:
         else:
             signal.pidfd_send_signal(self.pidfd, signum, None, 0)
 
-    def members(self):
+    def members(self, *, deadline=None):
         if self.initial is None:
             return []
-        live = verify_known_lifetimes(self.known)
+        live = verify_known_lifetimes(self.known, deadline=deadline)
         current = session_processes(self.initial["sid"])
         for row in current:
             self.known.setdefault((row["pid"], row["starttime"]), row)
@@ -301,11 +312,12 @@ class OwnedProcess:
                     "Startup left a PID with UNKNOWN ownership",
                 )
             else:
+                deadline = None
                 for signum, grace in (
                     (signal.SIGTERM, self.term_seconds),
                     (signal.SIGKILL, KILL_SECONDS),
                 ):
-                    members = self.members()
+                    members = self.members(deadline=deadline)
                     live = [row for row in members if same_lifetime_is_live(row)]
                     if not live:
                         break
@@ -323,13 +335,17 @@ class OwnedProcess:
                     deadline = time.monotonic() + grace
                     while time.monotonic() < deadline:
                         live = [
-                            row for row in self.members() if same_lifetime_is_live(row)
+                            row
+                            for row in self.members(deadline=deadline)
+                            if same_lifetime_is_live(row)
                         ]
                         if not live:
                             break
                         time.sleep(0.2)
                 remaining = [
-                    row for row in self.members() if same_lifetime_is_live(row)
+                    row
+                    for row in self.members(deadline=deadline)
+                    if same_lifetime_is_live(row)
                 ]
                 remaining_verified = True
                 require(not remaining, "Owned subprocess descendants remain alive")
