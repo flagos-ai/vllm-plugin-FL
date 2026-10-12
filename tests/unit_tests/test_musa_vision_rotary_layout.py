@@ -1,7 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
+import ast
 import importlib.util
+import inspect
 import sys
+import textwrap
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
@@ -53,7 +56,7 @@ def _forward(rotary, x, cos, sin, neox, fp32=False):
 
 @pytest.mark.parametrize("neox", [True, False])
 @pytest.mark.parametrize("offset", [0, 2])
-def test_rotation_preserves_values_and_copies_only_offset_half_views(
+def test_rotation_preserves_values_and_copies_noncontiguous_half_views(
     monkeypatch, rotary_patch, neox, offset
 ):
     rotary, _, _ = rotary_patch
@@ -82,7 +85,7 @@ def test_rotation_preserves_values_and_copies_only_offset_half_views(
     assert torch.equal(native, before)
     assert actual.device.type == "cpu"
     expected_offsets = [offset, offset + (4 if neox else 1)]
-    assert copies == [(False, value) for value in expected_offsets if value]
+    assert copies == [(False, value) for value in expected_offsets]
 
 
 def test_contiguous_half_with_nonzero_offset_is_not_copied(monkeypatch, rotary_patch):
@@ -148,3 +151,42 @@ def test_rotary_patch_is_idempotent(rotary_patch):
     install()
     assert rotary.forward_native is installed
     assert rotary.forward_native is not original
+
+
+@pytest.mark.parametrize("neox", [True, False])
+@pytest.mark.parametrize("fp32", [True, False])
+def test_rotation_supports_dynamo_fullgraph_on_cpu(rotary_patch, neox, fp32):
+    rotary, _, _ = rotary_patch
+    # Change only the device guard to trace the actual MUSA body on CPU.
+    source = ast.parse(textwrap.dedent(inspect.getsource(rotary.forward_native)))
+    guard = source.body[0].body[0].test
+    assert ast.unparse(guard) == "x.device.type != 'musa'"
+    guard.comparators[0].value = "cpu"
+    namespace = {"torch": torch}
+    exec(compile(source, "<musa-rotary-cpu-trace>", "exec"), namespace)
+    instance = rotary()
+    instance.is_neox_style = neox
+    instance.enable_fp32_compute = fp32
+    graphs = []
+
+    def backend(graph, _inputs):
+        graphs.append(graph)
+        return graph.forward
+
+    compiled = torch.compile(
+        namespace["forward_native"], backend=backend, fullgraph=True
+    )
+    x = torch.arange(48, device="cpu", dtype=torch.bfloat16).reshape(2, 3, 8)
+    before = x.clone()
+    cos = torch.zeros(2, 4, device="cpu")
+    sin = torch.ones_like(cos)
+    indices = [4, 5, 6, 7, 0, 1, 2, 3] if neox else [1, 0, 3, 2, 5, 4, 7, 6]
+    signs = [-1] * 4 + [1] * 4 if neox else [-1, 1] * 4
+    expected = x[..., indices] * torch.tensor(signs, device="cpu")
+
+    actual = compiled(instance, x, cos, sin)
+
+    assert len(graphs) == 1
+    assert actual.dtype == x.dtype
+    assert torch.equal(actual, expected)
+    assert torch.equal(x, before)
