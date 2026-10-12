@@ -12,7 +12,7 @@ for larger models.
 |---|---|
 | Prebuilt CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` |
 | Image manifest | `sha256:d80f4616b04fda507ce6d9dc54d36983d4ef134730bb9305b45409931260d688` |
-| Plugin source and dispatch policy | `86d32aaac3dc568014e9734ea17596ce17a2b784` |
+| Plugin source and dispatch policy | `9a7eaf1191999422682bf5c6d1cf7b3f88d253b5` |
 | Base image | `quay.io/ascend/vllm-ascend:v0.20.2rc1-a3` |
 | CANN | `9.0.0` |
 | Python | `3.11.15` on aarch64 |
@@ -87,7 +87,7 @@ the host outside the container:
 git clone https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
 git fetch origin refs/pull/487/head
-export PLUGIN_REVISION=86d32aaac3dc568014e9734ea17596ce17a2b784
+export PLUGIN_REVISION=9a7eaf1191999422682bf5c6d1cf7b3f88d253b5
 git checkout --detach "$PLUGIN_REVISION"
 test "$(git rev-parse HEAD)" = "$PLUGIN_REVISION"
 test -f vllm_fl/dispatch/config/ascend.yaml
@@ -141,6 +141,7 @@ source /usr/local/Ascend/ascend-toolkit/set_env.sh
 npu-smi info
 python - <<PY
 from importlib.metadata import PackageNotFoundError, version
+import torch  # Initialize torch_npu before FlagTree's Triton backend discovery.
 import triton
 import flag_gems
 from flag_gems.config import use_c_extension
@@ -213,6 +214,7 @@ python - <<PY
 from importlib.resources import files
 from pathlib import Path
 import os
+import torch  # Initialize torch_npu before importing the FL plugin.
 import vllm_fl
 from vllm_fl.version import git_version
 
@@ -359,7 +361,7 @@ the known OpenCV/NumPy dependency conflict in this pinned stack.
   `vllm==0.28.0+empty`; FlagTree supplies Triton 3.5.1 without a standalone
   `triton` or `triton-ascend` distribution.
 - **Plugin not active:** check `VLLM_PLUGINS=fl`, `VLLM_FL_PLATFORM=ascend`,
-  the editable checkout install, and the platform activation in container logs.
+  the wheel installation in step 5, and the platform activation in container logs.
 - **Out of memory:** choose free NPUs, lower `--max-model-len` or
   `--gpu-memory-utilization`, or use a supported tensor-parallel size.
 - **First request is slow:** FlagTree kernels may JIT compile during warm-up.
