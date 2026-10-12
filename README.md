@@ -230,7 +230,6 @@ if __name__ == "__main__":
     llm = LLM(
         model="Qwen/Qwen3-4B",
         max_num_batched_tokens=16384,
-        max_num_seqs=4 if current_platform.device_type == "npu" else 2048,
         enforce_eager=current_platform.device_type == "npu",
     )
     # Generate texts from the prompts.
@@ -240,6 +239,9 @@ if __name__ == "__main__":
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 ```
+
+This single-prompt example uses vLLM's default `max_num_seqs`. Set it based on
+the expected request concurrency and available device memory for your deployment.
 
 ## Advanced use
 

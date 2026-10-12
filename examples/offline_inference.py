@@ -31,7 +31,6 @@ if __name__ == "__main__":
     llm = LLM(
         model="Qwen/Qwen3-4B",
         max_num_batched_tokens=16384,
-        max_num_seqs=4 if current_platform.device_type == "npu" else 2048,
         enforce_eager=current_platform.device_type == "npu",
     )
 

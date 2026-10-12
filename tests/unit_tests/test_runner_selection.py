@@ -137,6 +137,32 @@ def test_ascend_eager_mode_accepts_inductor_backend(monkeypatch):
     assert config.compilation_config.pass_config.fuse_attn_quant is True
 
 
+@pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
+def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, expected):
+    import os
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", "iluvatar")
+    monkeypatch.setattr(PlatformFL, "device_type", "cuda")
+    if requested is None:
+        monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    config = _make_ascend_vllm_config(backend="inductor")
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.compilation_config.cudagraph_mm_encoder is False
+    assert config.compilation_config.use_inductor_graph_partition is True
+    assert config.compilation_config.pass_config.fuse_rope_kvcache_cat_mla is False
+    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
+    # Ascend-only fusion restrictions must not leak into the CoreX backend.
+    assert config.compilation_config.pass_config.fuse_norm_quant is True
+    assert config.compilation_config.pass_config.fuse_act_quant is True
+    assert config.compilation_config.pass_config.fuse_attn_quant is True
+
+
 def test_ascend_revalidates_parallelism_after_glm_dense_fallback(monkeypatch):
     from types import SimpleNamespace
 

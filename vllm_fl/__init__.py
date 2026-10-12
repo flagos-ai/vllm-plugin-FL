@@ -304,6 +304,8 @@ def register_model():
 
         from vllm_fl.quantization import modelslim_w8a8  # noqa: F401
 
+        # Reuse vLLM's DeepSeek-V4 model and loader with an Ascend-only
+        # attention/cache adapter for the torch_npu empty build.
         ModelRegistry.register_model(
             "DeepseekV4ForCausalLM",
             "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM",

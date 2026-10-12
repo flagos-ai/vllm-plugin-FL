@@ -112,6 +112,10 @@ def patch_distributed_runtime():
         platform_cls.dist_backend = "flagcx"
         current_platform.dist_backend = "flagcx"
 
+        # WorkerFL normalizes flagcx/nccl process groups to pccl for PTPU.
+        # Do not import or wrap worker here: worker -> custom_ops -> this module
+        # would create a circular import during backend registration.
+
         if not getattr(CommunicatorFL, "_sunrise_all_gather_patched", False):
 
             def _all_gather(self, input_: torch.Tensor, dim: int = -1):

@@ -1,4 +1,11 @@
-"""DeepSeek-V4 short-context BF16 attention adapter for Ascend 910C."""
+"""Ascend 910C execution adapter for vLLM 0.28's DeepSeek-V4 model.
+
+The model architecture and weight loader are inherited from upstream vLLM.
+The 0.28.0+empty build includes that model, but its device-specific attention
+and cache paths do not run on torch_npu. This module supplies bounded BF16 NPU
+attention and cache operations: max_model_len <= 128 and <= sliding_window.
+Long-context, MTP decoding, and graph mode are not validated here.
+"""
 
 from __future__ import annotations
 
