@@ -31,6 +31,14 @@ checks passed. MUSA is enabled in the existing Job 4e and uses this image for
 PR CI. Full new-image GPU acceptance depends on the actual suite and original
 Gate results; publication and CPU checks alone do not establish it.
 
+The latest [181c512 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38273835802/job/114895296688)
+completed successfully on 2026-10-12 at 17:05:33 UTC. Unit, functional,
+both existing E2E groups, benchmark smoke and the original eager/graph Gate
+step all passed, followed by successful container cleanup. The original Gate
+verified 104 logical requests, 1040 checks and 20 JUnit cases, with 32 complete
+observer streams (52 graph requests and 208 rank joins). These are the MUSA
+job's results; other backend checks remain separate.
+
 The completed [9484c6a attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38264910638/job/114865271015)
 passed unit, functional, both existing E2E groups and benchmark smoke. Both
 original eager Gate routes passed their five scenarios (52 logical requests
