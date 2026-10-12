@@ -15,6 +15,9 @@
 # Enflame S60 hardware configuration.
 platform: enflame
 
+# The v0.28 dependency image has been built locally; registry push is blocked
+# by Harbor authentication. Keep this platform disabled until that image is
+# published and verified, then replace the legacy reference below.
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-enflame-ci
 
 # Replace this with the exact label configured on the Enflame S60 runner.

@@ -20,9 +20,17 @@ selects 0.6.1+enflame3.6; the newer combination requires runtime validation.
 
 The task-private equivalent installation has passed torch/FlagGems device
 addition and FL platform smoke checks on S60 with host driver 1.10.6.
-This Docker build has not been executed; those smoke checks do not establish
-model serving or Gate acceptance. The old vLLM 0.20.2 vendor wrapper remains
-available as `Dockerfile.v0.20.2`.
+A task-private build of this recipe completed on 2026-10-12. Its metadata
+smoke container exited successfully with the pinned vLLM, torch, FlagGems,
+FlagTree and Triton-GCU versions, OpenAI 3.28.0 and pandas 3.0.6. This checks
+the dependency image; it does not establish GPU serving, the final plugin
+commit's CI results or Gate acceptance. The old vLLM 0.20.2 vendor wrapper
+remains available as `Dockerfile.v0.20.2`.
+
+The local image ID is
+`sha256:dfabdef337c4115d019534604c0df01cc2ef7b68c7062bdb5436bd1c5f9d79ab`.
+The attempted Harbor push was rejected as unauthorized. No registry
+manifest digest is available, and this local ID is not a published digest.
 
 ## Build a local candidate
 
