@@ -4,26 +4,36 @@ set -euo pipefail
 : "${MTHREADS_VISIBLE_DEVICES:?Set four allocated physical devices}"
 : "${MUSA_VISIBLE_DEVICES:?Set four logical devices}"
 : "${MUSA_CI_PCI_BUS_IDS:?Set the corresponding four logical PCI bus IDs}"
-if command -v mthreads-gmi >/dev/null 2>&1; then
-  mthreads-gmi
-fi
-python -I -B - <<'PY'
-import ctypes, hashlib, json, os, pathlib, re, stat
-import torch
-import torch_musa
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+python -I -B - "$script_dir/probe_runner.py" <<'PY'
+import ctypes, hashlib, importlib.util, json, os, pathlib, re, stat, sys
 physical = os.environ['MTHREADS_VISIBLE_DEVICES'].split(',')
 logical = os.environ['MUSA_VISIBLE_DEVICES'].split(',')
 expected = os.environ['MUSA_CI_PCI_BUS_IDS'].split(',')
 assert len(physical) == 4 and all(re.fullmatch(r'0|[1-9][0-9]*', x) for x in physical) and len({int(x) for x in physical}) == 4
 assert logical == ['0', '1', '2', '3'], logical
 assert len(set(expected)) == 4 and all(re.fullmatch(r'0000:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]', p) for p in expected)
-assert torch.musa.is_available() and torch.musa.device_count() == 4
 nodes = []
 for node in sorted(pathlib.Path('/dev').glob('mtgpu.*')):
     info = node.lstat(); assert stat.S_ISCHR(info.st_mode)
     pci = (pathlib.Path('/sys/dev/char') / f'{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}' / 'device').resolve(strict=True).name
     nodes.append({'node': str(node), 'rdev': info.st_rdev, 'pci': pci})
 assert len(nodes) == 4 and {x['pci'] for x in nodes} == set(expected), nodes
+spec = importlib.util.spec_from_file_location('musa_resource_preflight', sys.argv[1])
+probe = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(probe)
+for sample in (1, 2):
+    text, status = probe.query(['mthreads-gmi'])
+    resources = probe.parse_gmi(text) if text is not None else {'devices': []}
+    selected = [row for row in resources['devices'] if row['pci'] in expected]
+    print(json.dumps({'resource_preflight_sample': sample, 'query_status': status,
+                      'selected_overview': selected}, sort_keys=True), flush=True)
+    if text is None:
+        raise RuntimeError('MUSA resource query is unavailable')
+    probe.require_idle_devices(resources, expected)
+import torch
+import torch_musa
+assert torch.musa.is_available() and torch.musa.device_count() == 4
 loaded = set()
 for line in pathlib.Path('/proc/self/maps').read_text().splitlines():
     parts = line.split()

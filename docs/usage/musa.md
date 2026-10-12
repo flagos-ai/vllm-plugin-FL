@@ -27,8 +27,9 @@ Its immutable RepoDigest is
 The normal Docker push completed successfully, and the published manifest/config
 matched the accepted local image `sha256:c9c56cb3553eefab5657074d66c6ce288ae56f63e92f00c4af70da14aad3c9e4`
 with the same embedded source and six-wheel stack. Ordinary-stack CPU installation
-checks passed. The new image's full MUSA GPU CI has not run; the executing runner's
-exclusive four-card allocation remains to be confirmed.
+checks passed. MUSA is enabled in the existing Job 4e and uses this image for
+PR CI. Full new-image GPU acceptance depends on the actual suite and original
+Gate results; publication and CPU checks alone do not establish it.
 
 The `.github/configs/musa.yml` default selects this immutable RepoDigest;
 `MUSA_CI_IMAGE` can select a separately validated image. Its software defaults are:
@@ -41,9 +42,9 @@ The `.github/configs/musa.yml` default selects this immutable RepoDigest;
 | `MUSA_CI_DEPENDENCY_MANIFEST` | `/opt/musa/dependency-manifest.json` |
 | `MUSA_CI_DEPENDENCY_MANIFEST_SHA256` | `cd5b1e7a1c232c60df49c1384278a924e17e2a0bc71f9546fe4f8516ad9d5cf2` |
 
-The manifest SHA covers the whole JSON file. These software defaults do not
-allocate GPUs; full hardware dispatch still requires an operator-supplied
-`musa_allocation` JSON for the actual executing runner.
+The manifest SHA covers the whole JSON file. Software artifacts and the
+four-card runner defaults are resolved by the existing platform setup.
+Repository variables or `musa_allocation` can override the defaults.
 The image's build commit describes its embedded FL/observer wheels. CI setup
 rebuilds both as ordinary wheels from the actual checked-out CI commit and
 creates a fresh venv, rather than accepting an older embedded plugin as the
@@ -53,9 +54,9 @@ dependencies again from `/opt/musa/wheelhouse`. Wheel hashes, complete `RECORD` 
 module origins and the protected vendor inputs are checked in that venv.
 
 The CI entry is `.github/workflows/ci.yml`, using the same reusable platform
-workflow as main. Automatic MUSA discovery remains disabled until the actual
-image digest and runner allocation are bound. An explicit dispatch can select
-only MUSA. First use the read-only inventory mode on a committed ref:
+workflow as main. Automatic MUSA discovery is enabled for PR CI. An explicit
+dispatch can select only MUSA; read-only inventory remains available for
+diagnostics on a committed ref:
 
 ```bash
 gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
@@ -78,14 +79,32 @@ by the inventory-only selection; no full MUSA GPU CI result is claimed. The earl
 [run 38108076987](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108076987)
 retains its original queued/failed stages.
 
-For a full run, supply a reviewed allocation JSON with exactly four physical
+Normal PR CI selects MUSA through `.github/configs/platforms.yml`. The registered
+`mt-cicd-vllm-plugin` runner defaults to Docker runtime `mthreads`, physical
+devices `4,5,6,7`, logical devices `0,1,2,3`, and PCI IDs
+`0000:83:00.0,0000:a3:00.0,0000:c3:00.0,0000:e3:00.0`. The model defaults are
+`/data/models/Qwen3.6-27B` and `/data/models/Qwen3.6-35B-A3B`. Before Torch
+initialization, the executing container verifies the four device nodes and
+requires a complete successful vendor query with zero selected memory use
+and utilization. Busy or unknown resources fail this run before GPU tests.
+This admission snapshot is not an exclusive scheduler lease.
+
+A direct full run also works without an allocation input:
+
+```bash
+gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
+  -f platform=musa -F musa_probe_only=false
+```
+
+To override the runner defaults, supply a reviewed allocation JSON with
+exactly four physical
 device ordinals, logical devices `0,1,2,3`, four canonical PCI IDs in that
 logical order and the installed Docker runtime name. Optional keys are a list
 of runner labels and the two `/data/` model paths. The allowed field names are
 `runtime`, `physical_devices`, `logical_devices`, `pci_bus_ids`, `runner_labels`,
 `model_27b` and `model_35b_a3b`; duplicate or unknown fields are rejected. The
 allocation applies to this dispatch and does not rewrite shared repository
-variables. Confirm exclusive use of those four devices before the full run.
+variables. Overrides still undergo the executing job's device and idle checks.
 
 The existing allocation keys `model_27b` and `model_35b_a3b` set
 `MUSA_GATE_MODEL_27B` and `MUSA_GATE_MODEL_35B_A3B`, so common MUSA E2E
@@ -104,7 +123,8 @@ functional, serial e2e, benchmark and the original adaptation Gate. Its native
 PCI check verifies the actual four-card mapping before the test stages; the
 allocation must belong to this executing runner, rather than an earlier
 ephemeral probe. Workflow concurrency serializes these MUSA runs, while the
-operator confirms exclusive use of the assigned cards. Keep the final workflow
+executing container rejects busy or unknown selected cards before initialization.
+Keep the final workflow
 URL, actual checkout commit, image RepoDigest, setup evidence and complete
 suite/Gate artifact. A workflow is qualified only by its actual jobs and unchanged
 four-route Gate: 104 requests, 1040 checks, 20 JUnit cases, 32 complete streams

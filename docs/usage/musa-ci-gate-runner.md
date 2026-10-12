@@ -12,11 +12,14 @@ The [ordinary-image and dispatch instructions](musa.md#ordinary-stack-image-and-
 describe the six-wheel `/opt/musa/venv` runtime, immutable image binding and
 per-run four-device allocation. CI defaults to the published image, its pinned
 empty wheel and the `latest` manifest under `/opt/musa`, with literal whole-file
-SHA values from `.github/configs/musa.yml`. Hardware allocation remains an
-operator-supplied JSON for the actual executing runner. The workflow entry is
+SHA values from `.github/configs/musa.yml`. The existing Job 4e is enabled with
+four-card defaults and checks the executing container's device mapping and idle
+resources before Torch initialization. A per-run allocation remains an
+optional JSON override for the actual executing runner. The workflow entry is
 `ci.yml`; a dispatch
 selects `platform=musa` and either inventory-only `musa_probe_only=true` or a
-full run with an explicit `musa_allocation` JSON. The inventory job reads
+full run using the committed defaults or an explicit `musa_allocation` override.
+The inventory job reads
 sanitized resource observations without a GPU container or Torch import;
 its success is not inference or Gate acceptance.
 
@@ -24,7 +27,8 @@ The committed-source FL/observer ordinary builds and local image CPU
 installation checks passed. The ordinary image is published, with a successful
 normal Docker push and verified manifest/config identity. Use the immutable
 RepoDigest in the deployment guide. The new image's full MUSA GPU CI has not run;
-the executing runner's exclusive four-card allocation remains to be confirmed.
+the executing Job 4e's complete suite and original Gate remain the acceptance
+criteria.
 The inventory-only [run 38108902958](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108902958)
 completed successfully at `2b6bee63ad1b852021a9e166195aa3fac75443f1`.
 Lint, ordinary build, discovery and runner probe passed; `test-musa` was
@@ -349,9 +353,9 @@ without substituting old28/29 or selecting a partial route. It exits1 at events
 on an actual graph API error. It stops early; this is no claim of complete
 parsing or acceptance of all32 files. All full-matrix flags remainfalse, and
 all208 required graph request/rank joins have not been verified complete.
-Full four-route Gate acceptance is FAIL. Actual manual runs do not establish
-execution of the GitHub CI job, which remains NOT_RUN. Automatic MUSA discovery
-remains disabled in `.github/configs/platforms.yml` (`musa.enabled: false`).
+At that validation snapshot, full four-route Gate acceptance was FAIL. The
+manual runs did not establish execution of GitHub CI, which was NOT_RUN;
+automatic discovery was disabled (`musa.enabled: false`).
 Historical f80 and initial eager failures are retained in the
 [deployment validation record](musa.md#validation-record).
 
@@ -439,10 +443,10 @@ Tiny58r3 ran the four-rank GraphWrapper-to-MCCL-to-GraphWrapper reproduction: ea
 
 Runtime60 used the earlier cf174/`ba25a9551b2e5157d843affe6f4c2cada1dcfde8` dependencies and CPU04 observer/diagnostics with the unchanged 27B eager Gate. All 26 logical outputs passed all 260 original checks, the three pytest groups exited 0 and all five JUnit cases passed. Its strict route remains FAIL: the graceful-shutdown wrapper still required the old CPU03 venv executable, rejected the actual CPU04 API argv before sending TERM, and left the API and four worker end events absent. The original cleanup error and incomplete streams are preserved; the later successful owned stop/PID-0 release and removal do not repair that evidence. This is a functional 26/26 result with a wrapper cleanup failure, not a model-quality failure or complete Gate PASS.
 
-The observed TP4 communication route is MCCL; FlagCX was not installed for these runs. The CPU06 graph route and its four-route GPU matrix were pending at that historical snapshot; their completed 87/104 quality result and strict failure are preserved above. The original request bodies, timeouts, retries, ten check names and thresholds, strict observer joins and failure handling remain unchanged. Automatic discovery is still `musa.enabled: false`, and GitHub CI remains NOT_RUN; neither CPU success nor a diagnostic reproduction enables the platform or certifies all 104 requests.
+The observed TP4 communication route is MCCL; FlagCX was not installed for these runs. The CPU06 graph route and its four-route GPU matrix were pending at that historical snapshot; their completed 87/104 quality result and strict failure are preserved above. The original request bodies, timeouts, retries, ten check names and thresholds, strict observer joins and failure handling remain unchanged. At that historical snapshot, automatic discovery was `musa.enabled: false` and GitHub CI was NOT_RUN; neither CPU success nor a diagnostic reproduction certified all 104 requests.
 
 
-Keep the original 104 requests, 20 reports, 32 observer streams and strict full consumer; no CPU record, component-only suite or earlier matrix substitutes for those executions. GitHub CI remains NOT_RUN and `musa.enabled: false` remains the discovery setting.
+Keep the original 104 requests, 20 reports, 32 observer streams and strict full consumer; no CPU record, component-only suite or earlier matrix substitutes for those executions. Automatic MUSA discovery is now enabled in Job 4e; acceptance requires its actual new-image suite and complete original Gate results.
 
 Local syntax and stdlib fixtures do not certify Linux process cleanup, vendor
 ABI, graph capture/replay or model acceptance. The CI environment must execute

@@ -1,3 +1,4 @@
+import ast
 import copy
 import importlib.util
 import json
@@ -31,8 +32,8 @@ class ConfigTests(unittest.TestCase):
         self.config["ci_image"] = (
             "harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl@sha256:" + "a" * 64
         )
-        # Artifact defaults are an isolated fixture; the repository may still
-        # keep MUSA disabled while its image is being published.
+        # This fixture omits hardware defaults to exercise explicit allocations
+        # and rejection without an implicit device fallback.
         self.config["musa_defaults"] = {
             "MUSA_CI_EMPTY_WHEEL": "/opt/musa/wheelhouse/vllm-0.28.0+empty-cp310-cp310-linux_x86_64.whl",
             "MUSA_CI_EMPTY_WHEEL_SHA256": "a" * 64,
@@ -55,6 +56,32 @@ class ConfigTests(unittest.TestCase):
             values["MUSA_CI_ALLOCATION"] = json.dumps(allocation)
         with patch.dict(os.environ, values, clear=True):
             return config_module.resolve_musa_config(copy.deepcopy(self.config))
+
+    def test_repository_defaults_resolve_exact_four_devices_without_env(self):
+        config = yaml.safe_load((ROOT / ".github/configs/musa.yml").read_text())
+        with patch.dict(os.environ, {}, clear=True):
+            result = config_module.resolve_musa_config(config)
+        options = result["container_options"]
+        self.assertEqual(result["runner_labels"], ["mt-cicd-vllm-plugin"])
+        self.assertEqual(
+            result["ci_image"],
+            "harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:"
+            "8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06",
+        )
+        for value in (
+            "--runtime=mthreads",
+            "--env MTHREADS_VISIBLE_DEVICES=4,5,6,7",
+            "--env MUSA_VISIBLE_DEVICES=0,1,2,3",
+            "--env MUSA_CI_PCI_BUS_IDS=0000:83:00.0,0000:a3:00.0,0000:c3:00.0,0000:e3:00.0",
+            "--env MUSA_GATE_MODEL_27B=/data/models/Qwen3.6-27B",
+            "--env MUSA_GATE_MODEL_35B_A3B=/data/models/Qwen3.6-35B-A3B",
+            "--env MUSA_CI_DEPENDENCY_PROFILE=latest",
+        ):
+            self.assertIn(value, options)
+        for value in ("--privileged", "--pid=host", "MTHREADS_VISIBLE_DEVICES=all"):
+            self.assertNotIn(value, options)
+        registry = yaml.safe_load((ROOT / ".github/configs/platforms.yml").read_text())
+        self.assertIs(registry["platforms"]["musa"]["enabled"], True)
 
     def test_dispatch_uses_baked_wheels_and_exact_mask(self):
         result = self.resolve(self.allocation)
@@ -212,21 +239,43 @@ class ConfigTests(unittest.TestCase):
             (ROOT / ".github/workflows/_platform_test.yml").read_text(),
             Loader=yaml.BaseLoader,
         )
-        gate = platform["jobs"]["musa_gate"]
-        self.assertEqual(gate["timeout-minutes"], "500")
-        self.assertNotIn("runner.", json.dumps(gate["env"]))
-        self.assertIn("GITHUB_ENV", gate["steps"][0]["run"])
-        self.assertIn("benchmark", gate["needs"])
-        self.assertTrue(
-            any(
-                step.get("run") == "bash .github/scripts/musa/run-adaptation-gate.sh"
-                for step in gate["steps"]
+        suite = platform["jobs"]["musa_suite"]
+        self.assertEqual(suite["if"], "inputs.platform == 'musa'")
+        self.assertEqual(suite["needs"], "setup")
+        self.assertEqual(suite["timeout-minutes"], "1200")
+        self.assertNotIn("runner.", json.dumps(suite["env"]))
+        self.assertIn("GITHUB_ENV", suite["steps"][0]["run"])
+        stage_commands = [
+            step["run"]
+            for step in suite["steps"]
+            if step.get("run", "").startswith(
+                "python -I -B .github/scripts/musa/run_ci_stage.py"
             )
-        )
+        ]
         self.assertEqual(
-            platform["jobs"]["e2e"]["strategy"]["max-parallel"],
-            "${{ inputs.platform == 'musa' && 1 || 256 }}",
+            stage_commands,
+            [
+                "python -I -B .github/scripts/musa/run_ci_stage.py --scope " + scope
+                for scope in ("unit", "functional", "e2e", "benchmark")
+            ],
         )
+        gate_steps = [
+            step
+            for step in suite["steps"]
+            if step.get("run") == "bash .github/scripts/musa/run-adaptation-gate.sh"
+        ]
+        self.assertEqual(len(gate_steps), 1)
+        gate = gate_steps[0]
+        self.assertEqual(gate["timeout-minutes"], "500")
+        self.assertIn("!cancelled()", gate["if"])
+        for scope in ("unit", "functional", "e2e", "benchmark"):
+            self.assertIn(
+                "steps." + scope + ".outputs.gpu_stages_safe == 'true'", gate["if"]
+            )
+        self.assertIn("steps.devices.outcome == 'success'", gate["if"])
+        self.assertIn("steps.install.outcome == 'success'", gate["if"])
+        self.assertEqual(platform["jobs"]["e2e"]["strategy"]["max-parallel"], "256")
+        self.assertIn("inputs.platform != 'musa'", platform["jobs"]["e2e"]["if"])
 
     def test_probe_is_separate_bare_host_workflow(self):
         workflow = yaml.load(
@@ -259,10 +308,123 @@ Processes:
         self.assertEqual([x["physical_id"] for x in result["devices"]], [0, 4, 7])
         self.assertEqual(result["devices"][1]["pci"], "0000:83:00.0")
         self.assertEqual(result["devices"][1]["memory_used_mib"], 2)
+        self.assertEqual(
+            [row["utilization_percent"] for row in result["devices"]], [23.0, 0.0, 94.0]
+        )
         sanitized = json.dumps(result)
         self.assertNotIn("720902", sanitized)
         self.assertNotIn("SECRET_PASSWORD", sanitized)
         self.assertNotIn("/private", sanitized)
+
+    def idle_resources(self):
+        expected = ["0000:83:00.0", "0000:a3:00.0", "0000:c3:00.0", "0000:e3:00.0"]
+        return expected, {
+            "devices": [
+                {
+                    "physical_id": index + 4,
+                    "pci": pci,
+                    "memory_used_mib": 0,
+                    "memory_total_mib": 81920,
+                    "utilization_percent": 0.0,
+                }
+                for index, pci in enumerate(expected)
+            ]
+        }
+
+    def test_selected_idle_cards_ignore_unselected_busy_and_keep_pci_order(self):
+        expected, resources = self.idle_resources()
+        resources["devices"].reverse()
+        resources["devices"].append(
+            {
+                "physical_id": 0,
+                "pci": "0000:03:00.0",
+                "memory_used_mib": 80408,
+                "memory_total_mib": 81920,
+                "utilization_percent": 99.0,
+            }
+        )
+        original = copy.deepcopy(resources)
+        selected = probe_module.require_idle_devices(resources, expected)
+        self.assertEqual([row["pci"] for row in selected], expected)
+        self.assertEqual(resources, original)
+
+    def test_busy_unknown_or_invalid_selected_usage_is_rejected(self):
+        for field, value in (
+            ("memory_used_mib", 1),
+            ("memory_used_mib", None),
+            ("memory_used_mib", False),
+            ("memory_total_mib", 0),
+            ("utilization_percent", 0.1),
+            ("utilization_percent", None),
+            ("utilization_percent", "0"),
+            ("utilization_percent", False),
+            ("utilization_percent", float("nan")),
+        ):
+            expected, resources = self.idle_resources()
+            resources["devices"][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                probe_module.require_idle_devices(resources, expected)
+
+    def test_missing_or_duplicate_selected_card_is_rejected(self):
+        expected, resources = self.idle_resources()
+        resources["devices"].pop()
+        with self.assertRaises(ValueError):
+            probe_module.require_idle_devices(resources, expected)
+        expected, resources = self.idle_resources()
+        resources["devices"].append(copy.deepcopy(resources["devices"][0]))
+        with self.assertRaises(ValueError):
+            probe_module.require_idle_devices(resources, expected)
+        expected, resources = self.idle_resources()
+        resources["devices"][1]["physical_id"] = 4
+        with self.assertRaises(ValueError):
+            probe_module.require_idle_devices(resources, expected)
+        for selected_pci in (expected[:3], [expected[0]] * 4, ["invalid"] * 4):
+            with self.subTest(selected_pci=selected_pci), self.assertRaises(ValueError):
+                probe_module.require_idle_devices(resources, selected_pci)
+
+    def test_unknown_parser_utilization_cannot_pass_admission(self):
+        expected, resources = self.idle_resources()
+        rows = []
+        for row in resources["devices"]:
+            utilization = "N/A" if row["physical_id"] == 4 else "0%"
+            rows.append(
+                f"{row['physical_id']} MTT S5000 |{row['pci']} |{utilization} 0MiB(81920MiB)"
+            )
+        parsed = probe_module.parse_gmi("\n".join(rows))
+        self.assertIsNone(parsed["devices"][0]["utilization_percent"])
+        with self.assertRaises(ValueError):
+            probe_module.require_idle_devices(parsed, expected)
+
+    def test_resource_admission_precedes_accelerator_initialization(self):
+        script = (ROOT / ".github/scripts/musa/check.sh").read_text()
+        source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+        module = ast.parse(source)
+        guard = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.For)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "sample"
+        )
+        torch_import = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.Import)
+            and any(name.name == "torch" for name in node.names)
+        )
+        node_check = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.Assert) and "len(nodes)" in ast.unparse(node.test)
+        )
+        self.assertLess(node_check.lineno, guard.lineno)
+        self.assertLess(guard.lineno, torch_import.lineno)
+        self.assertEqual(ast.literal_eval(guard.iter), (1, 2))
+        self.assertIn(
+            "probe.require_idle_devices(resources, expected)", ast.unparse(guard)
+        )
+        self.assertIn("raise RuntimeError", ast.unparse(guard))
+        self.assertNotIn("mthreads-gmi\n", script)
 
     def test_busy_fd_holder_prevents_idle_candidate(self):
         nodes = [{"node_id": 4, "pci": "0000:83:00.0"}]

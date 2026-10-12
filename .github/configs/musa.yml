@@ -19,8 +19,15 @@ platform: musa
 
 ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
 
-# Software values are resolved on ubuntu before the image container starts.
+# Job 4e uses the registered MUSA runner and four explicit cards by default.
+# Repository variables or workflow_dispatch allocation can override these.
 musa_defaults:
+  MUSA_CI_RUNTIME: mthreads
+  MUSA_CI_PHYSICAL_DEVICES: 4,5,6,7
+  MUSA_CI_LOGICAL_DEVICES: 0,1,2,3
+  MUSA_CI_PCI_BUS_IDS: 0000:83:00.0,0000:a3:00.0,0000:c3:00.0,0000:e3:00.0
+  MUSA_GATE_MODEL_27B: /data/models/Qwen3.6-27B
+  MUSA_GATE_MODEL_35B_A3B: /data/models/Qwen3.6-35B-A3B
   MUSA_CI_EMPTY_WHEEL: /opt/musa/wheelhouse/vllm-0.28.0+empty-cp310-cp310-linux_x86_64.whl
   MUSA_CI_EMPTY_WHEEL_SHA256: 2306c2ea119182a5690eb05776cdffa4ba097a92ba13114a6cb49722d0b53fec
   MUSA_CI_DEPENDENCY_PROFILE: latest
@@ -35,8 +42,8 @@ runner_labels:
 container_volumes:
   - /data:/data:ro
 
-# Allocation/runtime/wheel/model values are resolved by load_config.py from
-# explicit repository variables. Never allocate every GPU implicitly.
+# load_config.py validates defaults and any explicit per-run overrides.
+# check.sh requires the selected four cards to be idle before Torch starts.
 container_options: >-
   --hostname vllm-plugin-fl
   --ipc=private
