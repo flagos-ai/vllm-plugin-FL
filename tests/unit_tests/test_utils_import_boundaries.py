@@ -86,12 +86,13 @@ def observe(event, arguments):
         if isinstance(name, str) and (name == "flag_gems" or name.startswith("flag_gems.")):
             attempted.append(name)
 sys.addaudithook(observe)
+# Initialize Torch and its installed backends before the plugin imports Triton.
+import torch
 import vllm_fl
 from vllm_fl import utils
 assert pathlib.Path(vllm_fl.__file__).resolve() == repo / "vllm_fl" / "__init__.py"
 assert pathlib.Path(utils.__file__).resolve() == repo / "vllm_fl" / "utils.py"
 assert utils.get_op_config() is None
-import torch
 from vllm_fl.dispatch.backends.reference.reference import ReferenceBackend
 from vllm_fl.dispatch import io_common
 assert pathlib.Path(sys.modules[ReferenceBackend.__module__].__file__).resolve() == repo / "vllm_fl" / "dispatch" / "backends" / "reference" / "reference.py"

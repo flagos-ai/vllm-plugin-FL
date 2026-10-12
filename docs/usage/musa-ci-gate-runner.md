@@ -42,13 +42,25 @@ logical outcomes, 1040/1040 original checks and 20/20 JUnit cases across the
 without forced kills or remaining processes. Container cleanup also succeeded.
 The complete suite and full new-image acceptance remain failed for this attempt.
 
-The latest [71db9a7 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38221809408/job/114721763129)
-passed unit, functional and 27B inference; 35B failed the strict JPEG check.
-Its 27B eager Gate quality checks passed, but owned cleanup hit a process-exit
-race while inspecting `ns/mnt`. The barrier blocked the remaining three routes,
-so this attempt did not pass the Gate. The cleanup fix passed two actual Linux
-exit-race cases, six rejection controls and CPU regressions; new hardware CI
-remains pending. The image failure is still under investigation.
+The latest [da92963 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38232767793/job/114756829319)
+passed unit (763 passed, 42 skipped), functional and 27B inference. The 35B
+JPEG response stopped after 195 completion tokens but missed `Hello VLM` and
+`blue rectangle`; E2E failed and benchmark was skipped. All four original Gate
+routes and container cleanup passed. Full suite acceptance remains failed.
+
+The MUSA rotary fix materializes non-contiguous offset half views before
+broadcast multiplication. An isolated run with the same image and CI wheel
+plus this single-file change passed the original 35B TP4 text and JPEG checks;
+the image answer included both required phrases and stopped after 142 tokens.
+All five owned children were reaped without forced kills. The compiler cause
+remains unknown; current-head full-suite CI acceptance remains pending.
+
+The earlier [71db9a7 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38221809408/job/114721763129)
+passed unit, functional and 27B inference but failed the strict 35B JPEG check.
+Its 27B eager Gate quality checks passed before an owned-cleanup `ns/mnt`
+process-exit race blocked the remaining three routes. It did not pass the Gate.
+The cleanup fix passed two actual Linux exit-race cases, six rejection controls
+and CPU regressions.
 
 MUSA serving smoke disables thinking through its existing platform override;
 token budgets and the image oracle remain unchanged.

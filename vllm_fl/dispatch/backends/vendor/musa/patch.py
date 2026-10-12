@@ -28,6 +28,7 @@ def apply_musa_patches():
     patch_moe_topk_softmax_for_musa()
     patch_triton_mtgpu_alias_for_musa()
     patch_device_config_for_musa()
+    patch_musa_vision_rotary_layout()
 
 
 def patch_topk_topp_sampler():
@@ -531,3 +532,46 @@ def patch_device_config_for_musa():
     except Exception as exc:
         logger.warning(
             "patch_device_config_for_musa failed: %s", exc)
+
+
+def patch_musa_vision_rotary_layout():
+    """Materialize offset rotary half views before MUSA broadcast products."""
+    import torch
+    from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
+
+    original = ApplyRotaryEmb.forward_native
+    if getattr(original, "_musa_rotary_layout_patched", False):
+        return
+
+    def forward_native(self, x, cos, sin):
+        if x.device.type != "musa":
+            return original(self, x, cos, sin)
+
+        origin_dtype = x.dtype
+        if self.enable_fp32_compute:
+            x = x.float()
+        cos = cos.unsqueeze(-2).to(x.dtype)
+        sin = sin.unsqueeze(-2).to(x.dtype)
+        if self.is_neox_style:
+            x1, x2 = torch.chunk(x, 2, dim=-1)
+        else:
+            x1, x2 = x[..., ::2], x[..., 1::2]
+
+        # Offset half views expose incorrect MUSA broadcast-mul results.
+        # Retain the selected operators while normalizing only that layout.
+        if not x1.is_contiguous() and x1.storage_offset() != 0:
+            x1 = x1.contiguous()
+        if not x2.is_contiguous() and x2.storage_offset() != 0:
+            x2 = x2.contiguous()
+        o1 = x1 * cos - x2 * sin
+        o2 = x2 * cos + x1 * sin
+        if self.is_neox_style:
+            output = torch.cat((o1, o2), dim=-1)
+        else:
+            output = torch.stack((o1, o2), dim=-1).flatten(-2)
+        if self.enable_fp32_compute:
+            output = output.to(origin_dtype)
+        return output
+
+    forward_native._musa_rotary_layout_patched = True
+    ApplyRotaryEmb.forward_native = forward_native
