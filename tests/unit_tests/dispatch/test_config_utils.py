@@ -28,7 +28,41 @@ def test_gcu_vendor_alias_loads_enflame_native_config():
         "flagos",
         "reference",
     ]
-    assert config["flagos_blacklist"] == ["scaled_dot_product_attention"]
+    assert config["flagos_blacklist"] == [
+        "scaled_dot_product_attention",
+        "index_put_",
+        "_index_put_impl_",
+    ]
+
+
+def test_enflame_default_policy_keeps_indexed_state_updates_native(monkeypatch):
+    from vllm_fl.utils import (
+        get_flag_gems_whitelist_blacklist,
+        use_flaggems_op,
+    )
+
+    for key in (
+        "VLLM_FL_FLAGOS_WHITELIST",
+        "VLLM_FL_FLAGOS_BLACKLIST",
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("VLLM_FL_PREFER_ENABLED", "True")
+    monkeypatch.setenv("VLLM_FL_PREFER", "flagos")
+    monkeypatch.setenv("USE_FLAGGEMS", "1")
+
+    for vendor in ("gcu", "enflame"):
+        with patch(
+            "vllm.platforms.current_platform", SimpleNamespace(vendor_name=vendor)
+        ):
+            assert get_flag_gems_whitelist_blacklist() == (
+                None,
+                ["scaled_dot_product_attention", "index_put_", "_index_put_impl_"],
+            )
+            assert use_flaggems_op("index_put_") is False
+            assert use_flaggems_op("_index_put_impl_") is False
+            assert use_flaggems_op("index_put") is True
+            assert use_flaggems_op("rms_norm") is True
 
 
 def test_hopper_optimization_is_disabled_by_default(monkeypatch):
