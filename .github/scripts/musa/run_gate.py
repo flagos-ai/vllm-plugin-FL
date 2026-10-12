@@ -117,21 +117,35 @@ def session_processes(sid):
     return result
 
 
+def same_lifetime_is_live(previous, stat_reader=None):
+    """Recheck exit without accepting a reused PID as an owned process."""
+    if stat_reader is None:
+        stat_reader = proc_stat
+    try:
+        current = stat_reader(previous["pid"])
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    require(
+        current["starttime"] == previous["starttime"],
+        "Known child PID was reused; remaining ownership is UNKNOWN",
+    )
+    return current["state"] != "Z"
+
+
 def verify_known_lifetimes(known, stat_reader=proc_stat, identity_reader=identity):
     """A previously attested live child cannot disappear by changing its SID."""
     live = []
     for previous in known.values():
+        if not same_lifetime_is_live(previous, stat_reader):
+            continue
         try:
-            preliminary = stat_reader(previous["pid"])
+            current = identity_reader(previous["pid"])
         except (FileNotFoundError, ProcessLookupError):
-            continue
-        require(
-            preliminary["starttime"] == previous["starttime"],
-            "Known child PID was reused; remaining ownership is UNKNOWN",
-        )
-        if preliminary["state"] == "Z":
-            continue
-        current = identity_reader(previous["pid"])
+            # Namespace links can disappear while an exiting child becomes a
+            # zombie. Confirm exit; missing metadata for a live PID stays fatal.
+            if not same_lifetime_is_live(previous, stat_reader):
+                continue
+            raise
         require(
             all(
                 current[key] == previous[key]
@@ -292,9 +306,7 @@ class OwnedProcess:
                     (signal.SIGKILL, KILL_SECONDS),
                 ):
                     members = self.members()
-                    live = [
-                        row for row in members if proc_stat(row["pid"])["state"] != "Z"
-                    ]
+                    live = [row for row in members if same_lifetime_is_live(row)]
                     if not live:
                         break
                     if signum == signal.SIGKILL:
@@ -311,17 +323,13 @@ class OwnedProcess:
                     deadline = time.monotonic() + grace
                     while time.monotonic() < deadline:
                         live = [
-                            row
-                            for row in self.members()
-                            if proc_stat(row["pid"])["state"] != "Z"
+                            row for row in self.members() if same_lifetime_is_live(row)
                         ]
                         if not live:
                             break
                         time.sleep(0.2)
                 remaining = [
-                    row
-                    for row in self.members()
-                    if proc_stat(row["pid"])["state"] != "Z"
+                    row for row in self.members() if same_lifetime_is_live(row)
                 ]
                 remaining_verified = True
                 require(not remaining, "Owned subprocess descendants remain alive")

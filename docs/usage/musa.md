@@ -30,6 +30,15 @@ with the same embedded source and six-wheel stack. Ordinary-stack CPU installati
 checks passed. MUSA is enabled in the existing Job 4e and uses this image for
 PR CI. Full new-image GPU acceptance depends on the actual suite and original
 Gate results; publication and CPU checks alone do not establish it.
+
+The latest [71db9a7 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38221809408/job/114721763129)
+passed unit, functional and 27B inference; 35B failed the strict JPEG check.
+Its 27B eager Gate quality checks passed, but owned cleanup hit a process-exit
+race while inspecting `ns/mnt`. The barrier blocked the remaining three routes,
+so this attempt did not pass the Gate. The cleanup fix passed two actual Linux
+exit-race cases, six rejection controls and CPU regressions; new hardware CI
+remains pending. The image failure is still under investigation.
+
 The [hardware CI record](musa-ci-gate-runner.md#ordinary-image-and-explicit-ci-dispatch)
 now includes the [e78c890 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38205773888/job/114669187190):
 unit and functional stages passed, as did 27B inference. The four-route original

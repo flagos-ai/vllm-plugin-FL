@@ -135,7 +135,7 @@ class ShutdownWindow(unittest.TestCase):
                     kill_signal = getattr(signal, "SIGKILL", 9)
                     actor = run_gate.OwnedProcess.__new__(run_gate.OwnedProcess)
                     actor.term_seconds = grace
-                    actor.initial = {"pid": 12345, "pgid": 12345}
+                    actor.initial = {"pid": 12345, "pgid": 12345, "starttime": 42}
                     actor.pidfd = None
                     actor.process = SimpleNamespace(wait=lambda timeout: 0)
                     actor.out_path = root / f"{grace}.stdout.raw"
@@ -171,7 +171,11 @@ class ShutdownWindow(unittest.TestCase):
                             run_gate.time, "monotonic", lambda clock=clock: clock[0]
                         ),
                         patch.object(run_gate.time, "sleep", sleep),
-                        patch.object(run_gate, "proc_stat", lambda pid: {"state": "S"}),
+                        patch.object(
+                            run_gate,
+                            "proc_stat",
+                            lambda pid: {"state": "S", "starttime": 42},
+                        ),
                     ):
                         result = actor.close()
                     self.assertEqual(result["forced_kill"], expected_forced)
