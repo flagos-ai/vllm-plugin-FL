@@ -81,6 +81,7 @@ def test_ascend_rejects_explicit_upstream_v2_runner(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     with pytest.raises(ValueError, match="VLLM_USE_V2_MODEL_RUNNER=0"):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
 
@@ -91,6 +92,7 @@ def test_ascend_accepts_non_eager_and_downgrades_full_graphs(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE)
 
     PlatformFL.check_and_update_config(config)
@@ -108,6 +110,7 @@ def test_ascend_rejects_inductor_backend(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(backend="inductor")
 
     with pytest.raises(ValueError, match="backend='eager'"):
@@ -121,6 +124,7 @@ def test_ascend_eager_mode_accepts_inductor_backend(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(
         backend="inductor",
         compilation_mode=CompilationMode.NONE,
@@ -169,6 +173,7 @@ def test_ascend_revalidates_parallelism_after_glm_dense_fallback(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     hf_config = SimpleNamespace(
         model_type="glm_moe_dsa",
         index_topk=128,
