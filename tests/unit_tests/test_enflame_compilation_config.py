@@ -41,6 +41,7 @@ def test_enflame_inductor_disables_combo_without_disabling_graphs(monkeypatch, v
     config = config_for_platform()
     compilation = config.compilation_config
     options = compilation.inductor_compile_config
+    original_options = dict(options)
     graph_settings = (compilation.mode, compilation.cudagraph_mode, compilation.backend)
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
 
@@ -48,9 +49,9 @@ def test_enflame_inductor_disables_combo_without_disabling_graphs(monkeypatch, v
 
     assert compilation.inductor_compile_config is options
     assert options == {
+        **original_options,
         "combo_kernels": False,
         "benchmark_combo_kernel": False,
-        "epilogue_fusion": False,
     }
     assert (
         compilation.mode,
