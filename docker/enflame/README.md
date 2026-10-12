@@ -29,8 +29,13 @@ remains available as `Dockerfile.v0.20.2`.
 
 The local image ID is
 `sha256:dfabdef337c4115d019534604c0df01cc2ef7b68c7062bdb5436bd1c5f9d79ab`.
-The attempted Harbor push was rejected as unauthorized. No registry
-manifest digest is available, and this local ID is not a published digest.
+The dependency image was published on 2026-10-12 as
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci-aa0d5beb87b5-3f1b0d3652`.
+Its registry manifest digest is
+`sha256:cc6a8ed90e93cf9a805f1a88b59600b55d06f06393da5fba173f40fcf1f886d2`.
+Authenticated and anonymous pulls by this digest both resolved to the local
+image ID above. CI pins the digest and installs the tested plugin checkout
+with `--no-deps`; the dependency image does not bake in that checkout.
 
 ## Build a local candidate
 
@@ -45,10 +50,11 @@ docker/build.sh --platform enflame --target ci \
 The example tag is a local build destination, not a published image.
 The default generated tag includes the selected stage, such as
 `v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push.
-`.github/configs/enflame.yml` still references the older published
-`v0.24.0-enflame-ci` image, which does not match this branch's vLLM 0.28
-target. Enflame remains disabled in `platforms.yml`; update its image only
-after a new image is built, validated and published.
+`.github/configs/enflame.yml` references the published vLLM 0.28 dependency
+image by digest. Enflame remains disabled in `platforms.yml` until the
+registered S60 runner label, device allocation and model mounts are
+confirmed. The current runner label is a placeholder; publishing the
+image does not establish that a hardware CI job can be scheduled.
 
 `VLLM_VERSION` and `VLLM_SOURCE_COMMIT` select the source version and exact
 commit; the default official v0.28.0 commit is
