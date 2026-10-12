@@ -51,10 +51,11 @@ The example tag is a local build destination, not a published image.
 The default generated tag includes the selected stage, such as
 `v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push.
 `.github/configs/enflame.yml` references the published vLLM 0.28 dependency
-image by digest. Enflame remains disabled in `platforms.yml` until the
-registered S60 runner label, device allocation and model mounts are
-confirmed. The current runner label is a placeholder; publishing the
-image does not establish that a hardware CI job can be scheduled.
+image by digest. Enflame is enabled in `platforms.yml`, following main's
+existing `enflame-s60` runner label, devices `2,3` and `/data:/data` mount.
+The reference is main commit `6182281a42ce857fa52ef73ec1abafca941cdf3a`.
+Publishing the image and selecting this configuration do not establish
+that hardware CI has passed; record the actual workflow results separately.
 
 `VLLM_VERSION` and `VLLM_SOURCE_COMMIT` select the source version and exact
 commit; the default official v0.28.0 commit is
