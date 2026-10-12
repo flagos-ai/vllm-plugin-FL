@@ -51,8 +51,11 @@ def _make_ascend_vllm_config(
     )
 
 
+@pytest.mark.parametrize("vendor", ["ascend", "mthreads"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_ascend_defaults_to_fl_runner(monkeypatch, requested, expected):
+def test_non_cuda_accelerators_default_to_fl_runner(
+    monkeypatch, vendor, requested, expected
+):
     import os
     from types import SimpleNamespace
 
@@ -68,21 +71,47 @@ def test_ascend_defaults_to_fl_runner(monkeypatch, requested, expected):
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
     monkeypatch.setattr(
-        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name="ascend")
+        vllm_fl.utils, "DeviceInfo", lambda: SimpleNamespace(vendor_name=vendor)
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
 
 
-def test_ascend_rejects_explicit_upstream_v2_runner(monkeypatch):
+@pytest.mark.parametrize("device,backend", [("npu", "Ascend"), ("musa", "MUSA")])
+def test_non_cuda_accelerators_reject_explicit_upstream_v2_runner(
+    monkeypatch, device, backend
+):
     from types import SimpleNamespace
 
     from vllm_fl.platform import PlatformFL
 
-    monkeypatch.setattr(PlatformFL, "device_type", "npu")
-    with pytest.raises(ValueError, match="VLLM_USE_V2_MODEL_RUNNER=0"):
+    monkeypatch.setattr(PlatformFL, "device_type", device)
+    with pytest.raises(ValueError, match=f"{backend}.*VLLM_USE_V2_MODEL_RUNNER=0"):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
+
+
+@pytest.mark.parametrize("tp", [1, 4])
+def test_musa_accepts_fl_runner_for_single_and_multiple_devices(monkeypatch, tp):
+    from vllm.config import CUDAGraphMode
+    from vllm.config.compilation import CompilationMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "musa")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "mthreads")
+    monkeypatch.setattr(PlatformFL, "dist_backend", "mccl")
+    config = _make_ascend_vllm_config(
+        compilation_mode=CompilationMode.NONE,
+        cudagraph_mode=CUDAGraphMode.NONE,
+        enforce_eager=True,
+    )
+    config.parallel_config.tensor_parallel_size = tp
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.use_v2_model_runner is False
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
 def test_ascend_accepts_non_eager_and_downgrades_full_graphs(monkeypatch):

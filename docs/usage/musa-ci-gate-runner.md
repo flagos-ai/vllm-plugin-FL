@@ -42,7 +42,21 @@ logical outcomes, 1040/1040 original checks and 20/20 JUnit cases across the
 without forced kills or remaining processes. Container cleanup also succeeded.
 The complete suite and full new-image acceptance remain failed for this attempt.
 
-The latest [da92963 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38232767793/job/114756829319)
+The completed [8224362 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38242389032/job/114788780567)
+passed unit, functional and both existing E2E groups, including the original
+35B TP4 text and JPEG checks with the unchanged image oracle. Benchmark failed
+at startup: the CUDA V2 model runner called `torch.cuda.Stream(musa:0)` and
+raised `ValueError: Expected a cuda device, but got: musa:0`.
+
+The 27B eager Gate route passed preflight, model readiness and all five
+scenarios (26 requests; three pytest commands exited 0). During owned cleanup,
+reading a process's `ns/mnt` returned `ENOENT`; an immediate PID recheck did
+not confirm exit, so the cleanup barrier blocked the remaining three routes.
+This shutdown sampling race's exact exit ordering remains unknown. Final
+container cleanup succeeded, but that does not establish Gate cleanup success.
+The Gate and full-suite acceptance remain failed for this attempt.
+
+The earlier [da92963 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38232767793/job/114756829319)
 passed unit (763 passed, 42 skipped), functional and 27B inference. The 35B
 JPEG response stopped after 195 completion tokens but missed `Hello VLM` and
 `blue rectangle`; E2E failed and benchmark was skipped. All four original Gate
@@ -53,7 +67,7 @@ broadcast multiplication. An isolated run with the same image and CI wheel
 plus this single-file change passed the original 35B TP4 text and JPEG checks;
 the image answer included both required phrases and stopped after 142 tokens.
 All five owned children were reaped without forced kills. The compiler cause
-remains unknown; current-head full-suite CI acceptance remains pending.
+remains unknown; this isolated result does not establish full-suite CI acceptance.
 
 The earlier [71db9a7 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38221809408/job/114721763129)
 passed unit, functional and 27B inference but failed the strict 35B JPEG check.

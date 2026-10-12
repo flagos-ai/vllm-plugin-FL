@@ -191,6 +191,7 @@ def fixture(
         },
     )
     vconfig = SimpleNamespace(
+        use_v2_model_runner=False,
         compilation_config=config,
         model_config=model,
         parallel_config=SimpleNamespace(
