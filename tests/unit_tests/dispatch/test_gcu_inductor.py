@@ -14,7 +14,7 @@ if os.environ.get("FL_TEST_PLATFORM", "enflame") != "enflame":
 from vllm_fl.dispatch.backends.vendor.gcu.impl import inductor
 
 
-def make_provider(function=None):
+def make_provider(function=None, shared_heuristics=None):
     calls = []
     result = object()
 
@@ -28,7 +28,7 @@ def make_provider(function=None):
     if function is not None:
         GCUTritonConfigGenerator.persistent_reduction_configs = function
     generator = GCUTritonConfigGenerator()
-    heuristics = SimpleNamespace(
+    heuristics = shared_heuristics or SimpleNamespace(
         _persistent_reduction_configs=generator.persistent_reduction_configs
     )
     registrations = []
@@ -202,6 +202,77 @@ def test_registration_error_propagates():
     inductor._install_gcu_inductor_hooks(provider, heuristics)
     with pytest.raises(ValueError, match="vendor registration failed"):
         provider.GCUInductorPatcher().patch_triton_heuristics()
+
+
+def test_both_loaded_gcu_namespaces_keep_registered_and_lazy_abis(monkeypatch):
+    canonical, heuristics, calls, result, _ = make_provider()
+    alias, _, alias_calls, alias_result, _ = make_provider(
+        shared_heuristics=heuristics
+    )
+    canonical.__file__ = alias.__file__ = __file__
+    monkeypatch.setitem(
+        sys.modules, "torch.gcu.inductor.backend_register", alias
+    )
+    # Reproduce an already-registered slot whose class belongs to the other
+    # loaded module, followed by lazy registrations through either namespace.
+    alias.GCUInductorPatcher().patch_triton_heuristics()
+    for provider in inductor._loaded_gcu_inductor_providers(canonical):
+        inductor._install_gcu_inductor_hooks(provider, heuristics)
+    size_hints, reduction_hint, metadata = {}, object(), {}
+    for provider, expected, observed in (
+        (None, alias_result, alias_calls),
+        (canonical, result, calls),
+        (alias, alias_result, alias_calls),
+    ):
+        if provider is not None:
+            provider.GCUInductorPatcher().patch_triton_heuristics()
+        slot = heuristics._persistent_reduction_configs
+        assert tuple(inspect.signature(slot).parameters) == inductor._PARAMETERS
+        assert slot(size_hints, reduction_hint, metadata, {}) is expected
+        assert all(
+            actual is original
+            for actual, original in zip(
+                observed[-1], (size_hints, reduction_hint, metadata)
+            )
+        )
+        for candidate in inductor._loaded_gcu_inductor_providers(canonical):
+            inductor._install_gcu_inductor_hooks(candidate, heuristics)
+        assert heuristics._persistent_reduction_configs is slot
+
+
+@pytest.mark.parametrize("alias_source", [None, "missing-provider.py"])
+def test_alias_with_unverified_source_is_rejected(monkeypatch, alias_source):
+    provider, _, _, _, _ = make_provider()
+    provider.__file__ = __file__
+    alias, _, _, _, _ = make_provider()
+    alias.__file__ = alias_source
+    monkeypatch.setitem(
+        sys.modules, "torch.gcu.inductor.backend_register", alias
+    )
+    with pytest.raises(RuntimeError, match="different sources"):
+        inductor._loaded_gcu_inductor_providers(provider)
+
+
+def test_alias_from_another_existing_file_is_rejected(monkeypatch, tmp_path):
+    provider, _, _, _, _ = make_provider()
+    provider.__file__ = __file__
+    other = tmp_path / "backend_register.py"
+    other.write_text("# unrelated provider\n")
+    alias, _, _, _, _ = make_provider()
+    alias.__file__ = str(other)
+    monkeypatch.setitem(
+        sys.modules, "torch.gcu.inductor.backend_register", alias
+    )
+    with pytest.raises(RuntimeError, match="different sources"):
+        inductor._loaded_gcu_inductor_providers(provider)
+
+
+def test_identical_module_alias_is_only_installed_once(monkeypatch):
+    provider, _, _, _, _ = make_provider()
+    monkeypatch.setitem(
+        sys.modules, "torch.gcu.inductor.backend_register", provider
+    )
+    assert inductor._loaded_gcu_inductor_providers(provider) == (provider,)
 
 
 def test_non_enflame_entry_point_does_not_import_or_modify_provider(monkeypatch):
