@@ -305,6 +305,19 @@ class PlatformFL(Platform):
         from vllm.config.compilation import CompilationMode
 
         compilation_config = vllm_config.compilation_config
+        if (
+            cls.vendor_name in ("gcu", "enflame")
+            and getattr(compilation_config, "backend", None) == "inductor"
+            and getattr(compilation_config, "mode", CompilationMode.NONE)
+            != CompilationMode.NONE
+        ):
+            # TorchGCU's range header uses xloop, whose enclosing loop is only
+            # emitted by its standalone kernel generator. Inductor combo
+            # kernels reuse that header without defining xloop.
+            compilation_config.inductor_compile_config.update(
+                combo_kernels=False,
+                benchmark_combo_kernel=False,
+            )
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
