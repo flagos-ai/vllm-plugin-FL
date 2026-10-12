@@ -1,0 +1,216 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
+
+import inspect
+import os
+import sys
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+if os.environ.get("FL_TEST_PLATFORM", "enflame") != "enflame":
+    pytest.skip("Enflame-specific Inductor adapter", allow_module_level=True)
+
+from vllm_fl.dispatch.backends.vendor.gcu.impl import inductor
+
+
+def make_provider(function=None):
+    calls = []
+    result = object()
+
+    class GCUTritonConfigGenerator:
+        def persistent_reduction_configs(
+            self, size_hints, reduction_hint=False, inductor_meta=None
+        ):
+            calls.append((size_hints, reduction_hint, inductor_meta))
+            return result
+
+    if function is not None:
+        GCUTritonConfigGenerator.persistent_reduction_configs = function
+    generator = GCUTritonConfigGenerator()
+    heuristics = SimpleNamespace(
+        _persistent_reduction_configs=generator.persistent_reduction_configs
+    )
+    registrations = []
+
+    class GCUInductorPatcher:
+        def patch_triton_heuristics(self, marker=None):
+            registrations.append(marker)
+            heuristics._persistent_reduction_configs = (
+                generator.persistent_reduction_configs
+            )
+            return result
+
+    provider = SimpleNamespace(
+        GCUTritonConfigGenerator=GCUTritonConfigGenerator,
+        GCUInductorPatcher=GCUInductorPatcher,
+    )
+    return provider, heuristics, calls, result, registrations
+
+
+@pytest.mark.parametrize("style", ["legacy", "positional", "keyword"])
+def test_adapter_preserves_original_objects_and_configuration(style):
+    provider, heuristics, calls, result, _ = make_provider()
+    size_hints = {"x": 8, "r0_": 128}
+    reduction_hint = object()
+    inductor_meta = {"autotune_pointwise": False}
+    triton_meta = {"native_matmul": False, "signature": {0: "*bf16"}}
+    before = (dict(size_hints), dict(inductor_meta), dict(triton_meta))
+    assert (
+        inductor._adapt_registered_persistent_reduction(provider, heuristics)
+        == "adapted"
+    )
+    adapted = heuristics._persistent_reduction_configs
+    assert tuple(inspect.signature(adapted).parameters) == inductor._PARAMETERS
+    if style == "legacy":
+        actual = adapted(size_hints, reduction_hint, inductor_meta)
+    elif style == "positional":
+        actual = adapted(size_hints, reduction_hint, inductor_meta, triton_meta)
+    else:
+        actual = adapted(
+            size_hints=size_hints,
+            reduction_hint=reduction_hint,
+            inductor_meta=inductor_meta,
+            triton_meta=triton_meta,
+        )
+    assert actual is result
+    assert len(calls) == 1
+    assert all(
+        actual is expected
+        for actual, expected in zip(
+            calls[0], (size_hints, reduction_hint, inductor_meta)
+        )
+    )
+    assert (size_hints, inductor_meta, triton_meta) == before
+
+
+@pytest.mark.parametrize("native_matmul", [True, 1, "native"])
+def test_native_matmul_is_rejected_before_calling_vendor(native_matmul):
+    provider, heuristics, calls, _, _ = make_provider()
+    inductor._adapt_registered_persistent_reduction(provider, heuristics)
+    with pytest.raises(NotImplementedError, match="native_matmul"):
+        heuristics._persistent_reduction_configs(
+            {"x": 1, "y": 2, "r0_": 128},
+            False,
+            {},
+            {"native_matmul": native_matmul},
+        )
+    assert calls == []
+
+
+def test_adapter_rejects_unknown_call_arguments_and_metadata():
+    provider, heuristics, calls, _, _ = make_provider()
+    inductor._adapt_registered_persistent_reduction(provider, heuristics)
+    adapted = heuristics._persistent_reduction_configs
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        adapted({}, new_metadata={})
+    with pytest.raises(TypeError):
+        adapted({}, False, {}, {}, "extra")
+    with pytest.raises(TypeError, match="mapping"):
+        adapted({}, False, {}, ["native_matmul"])
+    assert calls == []
+
+
+def test_compatible_provider_is_preserved_and_receives_new_metadata():
+    received = []
+    result = object()
+
+    def compatible(
+        self, size_hints, reduction_hint=False, inductor_meta=None, triton_meta=None
+    ):
+        received.append((size_hints, reduction_hint, inductor_meta, triton_meta))
+        return result
+
+    provider, heuristics, _, _, _ = make_provider(compatible)
+    original = heuristics._persistent_reduction_configs
+    assert (
+        inductor._adapt_registered_persistent_reduction(provider, heuristics)
+        == "unchanged_compatible_gcu"
+    )
+    assert heuristics._persistent_reduction_configs is original
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    assert heuristics._persistent_reduction_configs is original
+    provider.GCUInductorPatcher().patch_triton_heuristics()
+    current = heuristics._persistent_reduction_configs
+    assert current.__func__ is original.__func__
+    assert current.__self__ is original.__self__
+    metadata = {"native_matmul": True}
+    assert current({}, False, {}, metadata) is result
+    assert received[0][3] is metadata
+
+
+def test_other_provider_is_preserved():
+    provider, heuristics, _, _, _ = make_provider()
+    other = Mock()
+    heuristics._persistent_reduction_configs = other
+    assert (
+        inductor._adapt_registered_persistent_reduction(provider, heuristics)
+        == "unchanged_other_provider"
+    )
+    assert heuristics._persistent_reduction_configs is other
+
+
+@pytest.mark.parametrize(
+    "function",
+    [
+        lambda self, sizes, reduction_hint=False, inductor_meta=None: None,
+        lambda self, size_hints, reduction_hint=False, inductor_meta=None, extra=None: (
+            None
+        ),
+        lambda self, size_hints, reduction_hint=True, inductor_meta=None: None,
+        lambda self, size_hints, reduction_hint=False, inductor_meta=None, **kwargs: (
+            None
+        ),
+    ],
+)
+def test_unknown_gcu_abi_is_rejected_without_replacing_slot(function):
+    provider, heuristics, _, _, _ = make_provider(function)
+    original = heuristics._persistent_reduction_configs
+    with pytest.raises(RuntimeError, match="Unknown TorchGCU"):
+        inductor._adapt_registered_persistent_reduction(provider, heuristics)
+    assert heuristics._persistent_reduction_configs is original
+
+
+def test_lazy_registration_then_reregistration_always_installs_adapter():
+    provider, heuristics, calls, result, registrations = make_provider()
+    untouched = Mock()
+    heuristics._persistent_reduction_configs = untouched
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    wrapped = provider.GCUInductorPatcher.patch_triton_heuristics
+    assert heuristics._persistent_reduction_configs is untouched
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    assert provider.GCUInductorPatcher.patch_triton_heuristics is wrapped
+    patcher = provider.GCUInductorPatcher()
+    for marker in ("first_compile", "second_registration"):
+        assert patcher.patch_triton_heuristics(marker=marker) is result
+        adapted = heuristics._persistent_reduction_configs
+        assert getattr(adapted, inductor._ADAPTER_MARKER) is True
+        assert adapted({}, False, {}, {}) is result
+        inductor._install_gcu_inductor_hooks(provider, heuristics)
+        assert heuristics._persistent_reduction_configs is adapted
+    assert registrations == ["first_compile", "second_registration"]
+    assert len(calls) == 2
+
+
+def test_registration_error_propagates():
+    provider, heuristics, _, _, _ = make_provider()
+
+    def broken(self):
+        raise ValueError("vendor registration failed")
+
+    provider.GCUInductorPatcher.patch_triton_heuristics = broken
+    inductor._install_gcu_inductor_hooks(provider, heuristics)
+    with pytest.raises(ValueError, match="vendor registration failed"):
+        provider.GCUInductorPatcher().patch_triton_heuristics()
+
+
+def test_non_enflame_entry_point_does_not_import_or_modify_provider(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "vllm.platforms",
+        SimpleNamespace(current_platform=SimpleNamespace(vendor_name="nvidia")),
+    )
+    install = Mock()
+    monkeypatch.setattr(inductor, "_install_gcu_inductor_hooks", install)
+    inductor.apply_inductor_gcu_patch()
+    install.assert_not_called()
