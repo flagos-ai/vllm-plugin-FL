@@ -12,6 +12,18 @@ if _test_platform and _test_platform != "enflame":
 from vllm_fl.dispatch.backends.vendor.gcu.impl import reshape_and_cache as impl
 
 
+def test_slot_conversion_preserves_integer_precision_and_all_negative_sentinels():
+    slots = torch.tensor(
+        [-(2**63), -(2**32), -(2**31), -1, 0, 2**24 + 1, 2**31 - 1],
+        dtype=torch.int64,
+    )
+    before = slots.clone()
+    converted = impl._slots_as_int32(slots)
+    assert converted.dtype == torch.int32
+    assert converted.tolist() == [-1, -1, -1, -1, 0, 2**24 + 1, 2**31 - 1]
+    torch.testing.assert_close(slots, before)
+
+
 def _inputs(*, tokens=7, blocks=16, device="cpu"):
     source = torch.arange((tokens + 2) * 3 * 8, dtype=torch.float32, device=device)
     source = source.reshape(tokens + 2, 3, 2, 4)
@@ -86,7 +98,11 @@ def test_long_prefill_splits_at_hardware_grid_limit_without_losing_tokens(monkey
     assert [part[2].numel() for part in calls] == [65535, 3]
     for index, name in enumerate(("key", "value", "slot_mapping")):
         joined = torch.cat([part[index] for part in calls])
-        torch.testing.assert_close(joined, args[name][:count], rtol=0, atol=0)
+        expected = args[name][:count]
+        if name == "slot_mapping":
+            assert joined.dtype == torch.int32
+            expected = expected.to(torch.int32)
+        torch.testing.assert_close(joined, expected, rtol=0, atol=0)
 
 
 def test_empty_slots_do_not_launch(monkeypatch):

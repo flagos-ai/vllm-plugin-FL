@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import torch
 from flag_gems.fused.reshape_and_cache_flash import (
     reshape_and_cache_flash as _gems_reshape_and_cache_flash,
@@ -9,6 +11,18 @@ from flag_gems.fused.reshape_and_cache_flash import (
 
 _INT32_MAX = 2**31 - 1
 _MAX_GRID_X = 65535
+
+
+def _slots_as_int32(slot_mapping: torch.Tensor) -> torch.Tensor:
+    if slot_mapping.dtype == torch.int32:
+        return slot_mapping
+    if sys.byteorder != "little":
+        raise RuntimeError("GCU slot conversion requires little-endian storage")
+    # Valid positive slots fit int32 (checked from the cache metadata below).
+    # Inspect the int64 sign via its high word, preserving all negative
+    # sentinels without unsupported native int64 clamp or float conversion.
+    words = slot_mapping.view(torch.int32).view(-1, 2)
+    return torch.where(words[:, 1] < 0, -1, words[:, 0])
 
 
 def reshape_and_cache_flash(
@@ -86,14 +100,9 @@ def reshape_and_cache_flash(
     if num_tokens == 0:
         return
 
-    # Preserve every negative int64 sentinel before FlagGems downcasts to
-    # int32. In particular, -2**32 must not wrap to slot zero. This operation
-    # stays on device and is captured together with the cache-write kernel.
-    slots = (
-        slot_mapping.clamp_min(-1)
-        if slot_mapping.dtype == torch.int64
-        else slot_mapping
-    )
+    # In particular, -2**32 must not wrap to slot zero. The int32 operations
+    # stay on device and are captured together with the cache-write kernel.
+    slots = _slots_as_int32(slot_mapping)
     # Bound the GCU launch grid. Narrowing only changes metadata and keeps
     # all calls compatible with graph capture, including long prefills.
     for start in range(0, num_tokens, _MAX_GRID_X):
