@@ -42,10 +42,16 @@ logical outcomes, 1040/1040 original checks and 20/20 JUnit cases across the
 without forced kills or remaining processes. Container cleanup also succeeded.
 The complete suite and full new-image acceptance remain failed for this attempt.
 
-MUSA serving smoke explicitly disables thinking through its existing platform
-override, matching the original Gate. Token budgets and the image oracle remain
-unchanged; the changed request mode still requires the next actual hardware CI
-result.
+The latest [71db9a7 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38221809408/job/114721763129)
+passed unit, functional and 27B inference; 35B failed the strict JPEG check.
+Its 27B eager Gate quality checks passed, but owned cleanup hit a process-exit
+race while inspecting `ns/mnt`. The barrier blocked the remaining three routes,
+so this attempt did not pass the Gate. The cleanup fix passed two actual Linux
+exit-race cases, six rejection controls and CPU regressions; new hardware CI
+remains pending. The image failure is still under investigation.
+
+MUSA serving smoke disables thinking through its existing platform override;
+token budgets and the image oracle remain unchanged.
 
 The [48c1dac hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38203107578/job/114660995024)
 passed the allocated-device checks and isolated installation. The unit suite

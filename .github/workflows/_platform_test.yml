@@ -260,6 +260,7 @@ jobs:
             ${{ env.MUSA_CI_INSTALL_EVIDENCE }}
             coverage-musa.json
             report-musa.json
+            test-results/logs
           if-no-files-found: error
 
   # ============================================================
