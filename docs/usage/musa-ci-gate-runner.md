@@ -29,6 +29,14 @@ normal Docker push and verified manifest/config identity. Use the immutable
 RepoDigest in the deployment guide. Hardware CI has now run with this image;
 full acceptance still requires Job 4e's complete suite and original Gate to pass.
 
+The latest [181c512 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38273835802/job/114895296688)
+completed successfully on 2026-10-12 at 17:05:33 UTC. Unit, functional,
+both existing E2E groups, benchmark smoke and the original eager/graph Gate
+step all passed, followed by successful container cleanup. The original Gate
+verified 104 logical requests, 1040 checks and 20 JUnit cases, with 32 complete
+observer streams (52 graph requests and 208 rank joins). These are the MUSA
+job's results; other backend checks remain separate.
+
 The [e78c890 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38205773888/job/114669187190)
 used this immutable image and rebuilt the FL/observer ordinary wheels from its
 actual merge checkout `e2b7cb8ac78de79bcd1b13ec580220db2c01b331`. Unit
