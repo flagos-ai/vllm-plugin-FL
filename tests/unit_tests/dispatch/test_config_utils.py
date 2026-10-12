@@ -32,10 +32,11 @@ def test_gcu_vendor_alias_loads_enflame_native_config():
         "scaled_dot_product_attention",
         "index_put_",
         "_index_put_impl_",
+        "mm_out",
     ]
 
 
-def test_enflame_default_policy_keeps_indexed_state_updates_native(monkeypatch):
+def test_enflame_default_policy_keeps_unsupported_variants_native(monkeypatch):
     from vllm_fl.utils import (
         get_flag_gems_whitelist_blacklist,
         use_flaggems_op,
@@ -57,10 +58,17 @@ def test_enflame_default_policy_keeps_indexed_state_updates_native(monkeypatch):
         ):
             assert get_flag_gems_whitelist_blacklist() == (
                 None,
-                ["scaled_dot_product_attention", "index_put_", "_index_put_impl_"],
+                [
+                    "scaled_dot_product_attention",
+                    "index_put_",
+                    "_index_put_impl_",
+                    "mm_out",
+                ],
             )
             assert use_flaggems_op("index_put_") is False
             assert use_flaggems_op("_index_put_impl_") is False
+            assert use_flaggems_op("mm_out") is False
+            assert use_flaggems_op("mm") is True
             assert use_flaggems_op("index_put") is True
             assert use_flaggems_op("rms_norm") is True
 
