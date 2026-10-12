@@ -1,7 +1,7 @@
 # MUSA four-route Gate CI runner
 
-The MUSA workflow invokes this runner after ordinary wheel installation. The
-GitHub CI job has not been executed in this validation record. Separate
+The MUSA workflow invokes this runner after ordinary wheel installation. Current
+GitHub CI attempts and their acceptance limits are recorded below. Separate
 isolated model runs and their actual results are recorded in the
 [MUSA deployment guide](musa.md#validation-record). Local consumer tests use
 labelled filesystem fixtures and do not certify GPU behavior.
@@ -26,9 +26,16 @@ its success is not inference or Gate acceptance.
 The committed-source FL/observer ordinary builds and local image CPU
 installation checks passed. The ordinary image is published, with a successful
 normal Docker push and verified manifest/config identity. Use the immutable
-RepoDigest in the deployment guide. The new image's full MUSA GPU CI has not run;
-the executing Job 4e's complete suite and original Gate remain the acceptance
-criteria.
+RepoDigest in the deployment guide. Hardware CI has now run with this image;
+full acceptance still requires Job 4e's complete suite and original Gate to pass.
+
+The [48c1dac hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38203107578/job/114660995024)
+passed the allocated-device checks and isolated installation. The unit suite
+recorded 630 passed, 18 skipped and one failure in an incomplete test fixture.
+The original Gate stopped before model startup because its configured model
+directories were absent. Container cleanup completed successfully. The two model
+defaults now follow the existing Qwen CI catalog; the next hardware run must
+verify their actual visibility. Full new-image GPU acceptance remains pending.
 The inventory-only [run 38108902958](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108902958)
 completed successfully at `2b6bee63ad1b852021a9e166195aa3fac75443f1`.
 Lint, ordinary build, discovery and runner probe passed; `test-musa` was
@@ -38,7 +45,11 @@ and are not substituted as this workflow's hardware result.
 CI setup rebuilds FL and observer from its actual checkout commit into a fresh
 venv and explicitly reinstalls the three pinned image dependency wheels.
 The nested venv does not inherit the image's `/opt/musa/venv` packages.
-Source binding and vendor/RECORD checks remain mandatory. The full workflow
+Source binding and vendor/RECORD checks remain mandatory. Setup also installs
+ordinary pytest coverage, JSON-report and timeout wheels from public PyPI into
+the task venv, retains existing pytest/core versions, and verifies the original
+pytest options before GPU tests. `test-tools.json` and command output are uploaded
+with the installation evidence. The full workflow
 sequences unit, functional, serial e2e and benchmark stages before the original
 Gate; MUSA platform concurrency serializes competing uses of the allocation.
 The final acceptance record must identify the actual workflow, checkout and
@@ -162,7 +173,7 @@ All 104 original logical case outcomes were recorded: 87 passed, and 17 returned
 
 The unchanged default full-matrix consumer ran once over byte-identical copies of all 32 streams (506,767,609 bytes). It exited 1 with `ContractError: unsupported/error/unknown event`; its fail-fast summary does not certify all 32 streams or complete graph joins. **The historical CPU06 musafix1 full Gate is FAIL.** These results do not replace the historical matrices below.
 
-The CPU06 Tree wheel used explicit TRITON_BUILD_FLAGPRISM=OFF/TRITON_BUILD_PROTON=OFF plus the header guard, not a pristine default build. CPU checks do not establish native ABI, graph numerical or model acceptance. The observed TP4 communication route uses MCCL; FlagCX was not installed. Diagnostics remain disabled by default, automatic discovery remains `musa.enabled: false`, and GitHub CI is NOT_RUN. Requests, retries, check names/thresholds and strict observer joins are unchanged. Detailed run/candidate boundaries are centralized in [the runner validation history](#validation-history-and-candidate-boundaries); successful resource release never repairs failed quality, missing end events or cleanup errors.
+The CPU06 Tree wheel used explicit TRITON_BUILD_FLAGPRISM=OFF/TRITON_BUILD_PROTON=OFF plus the header guard, not a pristine default build. CPU checks do not establish native ABI, graph numerical or model acceptance. The observed TP4 communication route uses MCCL; FlagCX was not installed. Diagnostics remain disabled by default. At that historical snapshot, automatic discovery was `musa.enabled: false` and GitHub CI was NOT_RUN. Requests, retries, check names/thresholds and strict observer joins are unchanged. Detailed run/candidate boundaries are centralized in [the runner validation history](#validation-history-and-candidate-boundaries); successful resource release never repairs failed quality, missing end events or cleanup errors.
 
 ## Environment and source binding
 
@@ -419,7 +430,7 @@ A second candidate, CPU02, retains the native MUSA capture-stream getter and add
 
 Runtime50 attempted this candidate's unchanged TP4 27B graph route with default asynchronous scheduling. Startup failed during capture: the first native fatal at **2026-10-10 14:29:30.317 UTC** was the MCCL watchdog path `WorkMCCL::finishedGPUExecutionInternal` → `watchdogHandler` → `mcclCommWatchdog`, reporting `operation not permitted when stream is capturing`. Engine initialization cancellation followed. There was no READY, API trace or client execution, and none of the 26 original requests ran: **Startup FAIL / model Gate NOT_RUN**, rather than 0/26 quality results. The four worker traces record captures but zero replay, scheduler-return or end events; they do not satisfy the eight-stream observer contract or establish native graph completion.
 
-The original job exited 1 and retained the graceful-shutdown error `API exited unsuccessfully before cleanup`. The subsequent exact owned stop returned 0; final inspection recorded PID 0, no OOM and container exit 137. These resource records do not erase the startup or cleanup failure. `thread_local` did not make this configuration pass; the evidence does not establish a generally unsupported MCCL graph mode or a responsible kernel/package. The baseline remains 35/104, and the other candidate routes and full candidate matrix have not run. Requests, quality thresholds, observer/consumer rules, disabled automatic discovery and GitHub CI NOT_RUN remain unchanged. The diagnostic plugin stays disabled by default.
+The original job exited 1 and retained the graceful-shutdown error `API exited unsuccessfully before cleanup`. The subsequent exact owned stop returned 0; final inspection recorded PID 0, no OOM and container exit 137. These resource records do not erase the startup or cleanup failure. `thread_local` did not make this configuration pass; the evidence does not establish a generally unsupported MCCL graph mode or a responsible kernel/package. The baseline remains 35/104, and the other candidate routes and full candidate matrix have not run. Requests, quality thresholds and observer/consumer rules are unchanged. At that snapshot, automatic discovery was disabled and GitHub CI was NOT_RUN. The diagnostic plugin stays disabled by default.
 
 A third candidate, CPU03, keeps the native MUSA capture-stream getter with the original global capture mode and adds MUSA-only `vllm::all_reduce` partitioning in `platform.py`. It does not include the failed `thread_local` experiment. The separately installed ordinary FL wheel changes exactly `vllm_fl/compilation/graph.py`, `vllm_fl/platform.py` and RECORD; its other 242 payload members match the original wheel. Distribution version `0.0.0` and the historical `f867afb` source base remain explicit. Seven ordinary wheels passed installed payload/RECORD/direct-URL checks, and the six dependency wheels plus image/vendor fingerprints stayed unchanged. The owned CPU installer and config containers completed successfully and were removed after stopped-PID-0 inspection; their private environment and evidence are preserved.
 
@@ -431,7 +442,7 @@ The observed native error appeared during vision processing: a `mul_generic_nd_k
 
 The original observer also exhausted its separate 64 MiB per-process budget. Each of the four worker files preserves 1351 capture records, 32359 replay records and 168 scheduler returns, then stops without `telemetry_end`; API and three client traces have normal ends. Repeated cap-error reporting produced a large stderr log, and the four worker files together exceed the old consumer's 256 MiB total input budget used for that run. These complete original failure artifacts are retained: Python capture/replay returns do not prove native completion, and this run cannot satisfy the eight-stream observer contract. A separate ordinary observer wheel now uses immutable profile references expanded before the original strict checks, finite 2 GiB per-stream/12 GiB total input budgets and bounded overflow reporting. Overflow remains a failure, and the capacity change does not convert this original run into a PASS.
 
-The job exited 1 and retained the graceful-shutdown assertion that owned worker/engine/client processes remained after natural API exit. Exact owned stop returned 0, with final PID 0, no OOM and container exit 137; those resource records do not erase the Gate or telemetry failures. At that runtime54r2 snapshot, other candidate3 routes/full matrix were NOT_RUN. The subsequent candidate3 eager runtime55 returned 10/26 quality passes (nine text plus one image), 100 true checks and 160 absent checks; its pytest exits were 0/1/1 and JUnit had three passes/two failures. Four worker ends were absent, and the vision illegal-memory observation followed ND-mul metadata N=1290240. The original cleanup failure is retained; asynchronous error exposure does not identify the responsible kernel. The original requests and quality thresholds, baseline **35/104**, disabled automatic discovery and GitHub CI NOT_RUN remain unchanged.
+The job exited 1 and retained the graceful-shutdown assertion that owned worker/engine/client processes remained after natural API exit. Exact owned stop returned 0, with final PID 0, no OOM and container exit 137; those resource records do not erase the Gate or telemetry failures. At that runtime54r2 snapshot, other candidate3 routes/full matrix were NOT_RUN. The subsequent candidate3 eager runtime55 returned 10/26 quality passes (nine text plus one image), 100 true checks and 160 absent checks; its pytest exits were 0/1/1 and JUnit had three passes/two failures. Four worker ends were absent, and the vision illegal-memory observation followed ND-mul metadata N=1290240. The original cleanup failure is retained; asynchronous error exposure does not identify the responsible kernel. The original requests, quality thresholds and baseline **35/104** remain unchanged. At that snapshot, automatic discovery was disabled and GitHub CI was NOT_RUN.
 
 The subsequent private candidate uses actual public source builds at FlagGems `bfc6c49d2c4d06e5deac9784f203730c8372a84a` and FlagTree `69148faf5cc03edb0a5737abd4b75b691132cea9`. The corrected Gems ordinary wheel has explicit archive version `5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix1`; its fresh-master comparison retains exactly the four reviewed production changes plus version packaging. Tree is the explicit MUSA Prism-OFF/Proton-OFF header-patched profile, version `0.7.0+mthreads3.6.git69148faf.profilefix1`. The new Tree receipt verifies the 6463-file original archive and declared header change; it does not supply the older `ba25a9551b2e5157d843affe6f4c2cada1dcfde8` build's separate post-build all-other-files proof. These CPU build receipts do not establish default-profile, native ABI or model acceptance.
 

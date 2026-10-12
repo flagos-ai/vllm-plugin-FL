@@ -30,6 +30,9 @@ with the same embedded source and six-wheel stack. Ordinary-stack CPU installati
 checks passed. MUSA is enabled in the existing Job 4e and uses this image for
 PR CI. Full new-image GPU acceptance depends on the actual suite and original
 Gate results; publication and CPU checks alone do not establish it.
+The [hardware CI record](musa-ci-gate-runner.md#ordinary-image-and-explicit-ci-dispatch)
+now includes a failed suite/Gate attempt with successful installation and cleanup;
+full new-image acceptance remains pending.
 
 The `.github/configs/musa.yml` default selects this immutable RepoDigest;
 `MUSA_CI_IMAGE` can select a separately validated image. Its software defaults are:
@@ -83,7 +86,8 @@ Normal PR CI selects MUSA through `.github/configs/platforms.yml`. The registere
 `mt-cicd-vllm-plugin` runner defaults to Docker runtime `mthreads`, physical
 devices `4,5,6,7`, logical devices `0,1,2,3`, and PCI IDs
 `0000:83:00.0,0000:a3:00.0,0000:c3:00.0,0000:e3:00.0`. The model defaults are
-`/data/models/Qwen3.6-27B` and `/data/models/Qwen3.6-35B-A3B`. Before Torch
+`/data/models/Qwen/Qwen3.6-27B` and `/data/models/Qwen/Qwen3.6-35B-A3B`,
+matching the existing CI model catalog. Before Torch
 initialization, the executing container verifies the four device nodes and
 requires a complete successful vendor query with zero selected memory use
 and utilization. Busy or unknown resources fail this run before GPU tests.
@@ -415,7 +419,7 @@ The CPU06 private environment used FlagGems `bfc6c49d2c4d06e5deac9784f203730c837
 | CPU06 original four-route GPU Gate | 87/104 quality passes; strict full-matrix consumer FAIL; 35B-A3B eager remains unresolved |
 | Historical migrated baseline | 35/104 quality passes; full Gate FAIL |
 
-The CPU06 Tree wheel used explicit TRITON_BUILD_FLAGPRISM=OFF/TRITON_BUILD_PROTON=OFF plus the header guard, not a pristine default build. CPU checks do not establish native ABI, graph numerical or model acceptance. The observed TP4 communication route uses MCCL; FlagCX was not installed. Diagnostics remain disabled by default, automatic discovery remains `musa.enabled: false`, and GitHub CI is NOT_RUN. Requests, retries, check names/thresholds and strict observer joins are unchanged. Detailed run/candidate boundaries are centralized in [the runner validation history](musa-ci-gate-runner.md#validation-history-and-candidate-boundaries); successful resource release never repairs failed quality, missing end events or cleanup errors.
+The CPU06 Tree wheel used explicit TRITON_BUILD_FLAGPRISM=OFF/TRITON_BUILD_PROTON=OFF plus the header guard, not a pristine default build. CPU checks do not establish native ABI, graph numerical or model acceptance. The observed TP4 communication route uses MCCL; FlagCX was not installed. Diagnostics remain disabled by default. At that historical snapshot, automatic discovery was `musa.enabled: false` and GitHub CI was NOT_RUN. Requests, retries, check names/thresholds and strict observer joins are unchanged. Detailed run/candidate boundaries are centralized in [the runner validation history](musa-ci-gate-runner.md#validation-history-and-candidate-boundaries); successful resource release never repairs failed quality, missing end events or cleanup errors.
 
 ## Allocate devices and executable caches
 
@@ -524,9 +528,10 @@ checking. The original Gate step keeps its 500-minute budget and all four
 is separate from these step/group bounds. A failed earlier test remains a failed
 job even when the subsequent original Gate executes to preserve its evidence.
 
-MUSA discovery remains disabled in `.github/configs/platforms.yml` until the
-runner's image, allocation, wheel, models and full Gate are validated. Configure
-the variables above and validate the actual runner before changing that switch.
+MUSA discovery is enabled in `.github/configs/platforms.yml`. The executing
+runner's image, allocation, wheels, model paths and full Gate must still pass
+validation. The selected models must be available through the existing read-only
+`/data` mount. Configure the variables above for the actual runner.
 
 ## Validation record
 
@@ -747,10 +752,10 @@ The consumer stops at that error; verified copies do not mean it parsed all
 32 streams to completion. All full-matrix completion and acceptance flags remain
 false, and the required 208 graph request/rank joins are not verified complete.
 
-The historical runtime30/27/31/32 full four-route Gate acceptance is **FAIL**. The CI runner's shutdown-window
-fix is applied locally and its 26 CPU helper tests pass. The GitHub CI job has
-not executed, and automatic MUSA discovery remains disabled in
-`.github/configs/platforms.yml` (`musa.enabled: false`).
+The historical runtime30/27/31/32 full four-route Gate acceptance is **FAIL**.
+At that snapshot, the CI runner's shutdown-window fix was applied locally and
+its 26 CPU helper tests passed. GitHub CI had not executed, and automatic MUSA
+discovery was disabled in `.github/configs/platforms.yml` (`musa.enabled: false`).
 
 The dedicated job also builds `tools/musa-gate-observer` as a third independent,
 ordinary wheel, without index access, dependencies, or build isolation. It

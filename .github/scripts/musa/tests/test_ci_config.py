@@ -40,8 +40,8 @@ class ConfigTests(unittest.TestCase):
             "MUSA_CI_DEPENDENCY_PROFILE": "latest",
             "MUSA_CI_DEPENDENCY_MANIFEST": "/opt/musa/dependency-manifest.json",
             "MUSA_CI_DEPENDENCY_MANIFEST_SHA256": "b" * 64,
-            "MUSA_GATE_MODEL_27B": "/data/models/Qwen3.6-27B",
-            "MUSA_GATE_MODEL_35B_A3B": "/data/models/Qwen3.6-35B-A3B",
+            "MUSA_GATE_MODEL_27B": "/data/models/Qwen/Qwen3.6-27B",
+            "MUSA_GATE_MODEL_35B_A3B": "/data/models/Qwen/Qwen3.6-35B-A3B",
         }
         self.allocation = {
             "runtime": "mthreads",
@@ -73,8 +73,8 @@ class ConfigTests(unittest.TestCase):
             "--env MTHREADS_VISIBLE_DEVICES=4,5,6,7",
             "--env MUSA_VISIBLE_DEVICES=0,1,2,3",
             "--env MUSA_CI_PCI_BUS_IDS=0000:83:00.0,0000:a3:00.0,0000:c3:00.0,0000:e3:00.0",
-            "--env MUSA_GATE_MODEL_27B=/data/models/Qwen3.6-27B",
-            "--env MUSA_GATE_MODEL_35B_A3B=/data/models/Qwen3.6-35B-A3B",
+            "--env MUSA_GATE_MODEL_27B=/data/models/Qwen/Qwen3.6-27B",
+            "--env MUSA_GATE_MODEL_35B_A3B=/data/models/Qwen/Qwen3.6-35B-A3B",
             "--env MUSA_CI_DEPENDENCY_PROFILE=latest",
         ):
             self.assertIn(value, options)
