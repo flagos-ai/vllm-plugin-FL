@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
+import sys
 import threading
 import yaml
 from dataclasses import dataclass, field
@@ -19,6 +20,19 @@ from vllm_fl.utils import get_op_config
 
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_dispatch_mutable(action: str) -> None:
+    """Reject policy mutations after operator implementations are bound."""
+
+    dispatch_module = sys.modules.get("vllm_fl.dispatch")
+    is_frozen = getattr(dispatch_module, "is_dispatch_frozen", None)
+    if callable(is_frozen) and is_frozen():
+        raise RuntimeError(
+            f"Cannot {action} while vLLM-FL dispatch is frozen. "
+            "Discard the compiled runner and call thaw_dispatch() first."
+        )
+
 
 
 # Valid preference values for VLLM_FL_PREFER
@@ -201,6 +215,7 @@ class PolicyManager:
 
     def set_global_policy(self, policy: SelectionPolicy) -> SelectionPolicy:
         """Set the global policy and return the old policy."""
+        _ensure_dispatch_mutable("set the global policy")
         with self._global_policy_lock:
             old_policy = self._global_policy
             self._global_policy = policy
@@ -209,6 +224,7 @@ class PolicyManager:
 
     def reset_global_policy(self) -> None:
         """Reset the global policy to environment defaults."""
+        _ensure_dispatch_mutable("reset the global policy")
         with self._global_policy_lock:
             self._global_policy = None
             self.bump_policy_epoch()
@@ -479,6 +495,7 @@ class _PolicyContext:
         self._token: Optional[contextvars.Token] = None
 
     def __enter__(self) -> "_PolicyContext":
+        _ensure_dispatch_mutable("enter a policy context")
         policy_var = self._manager._get_policy_var()
         self._token = policy_var.set(self._policy)
         self._manager.bump_policy_epoch()

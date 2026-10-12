@@ -4,23 +4,49 @@
 FlagGems fused moe operator implementations.
 """
 
-from typing import Optional
-
+import flag_gems
 import torch
+from flag_gems import (
+    grouped_topk as _grouped_topk,
+    invoke_fused_moe_triton_kernel as _invoke_fused_moe_triton_kernel,
+    moe_align_block_size_triton as _moe_align_block_size_triton,
+    moe_sum as _moe_sum,
+    topk_softmax as _topk_softmax,
+    topk_softplus_sqrt as _topk_softplus_sqrt,
+)
+from flag_gems.pt2.fused_moe import (
+    moe_sum as _pt2_moe_sum,
+    topk_softmax as _pt2_topk_softmax,
+)
+from flag_gems.pt2.moe_routing import (
+    grouped_topk as _pt2_grouped_topk,
+    uses_common_moe_routing_kernels as _uses_common_moe_routing_kernels,
+)
+
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
+
+# These contracts capture the common/NVIDIA kernel objects.  Other vendors
+# may replace either public FlagGems export, so retain their original path
+# until an equivalent vendor-specific PT2 contract is validated.
+_USE_TRANSPARENT_MOE_PRIMITIVES = flag_gems.vendor_name == "nvidia"
+_USE_TRANSPARENT_MOE_ROUTING = (
+    flag_gems.vendor_name == "nvidia"
+    and _uses_common_moe_routing_kernels(
+        _grouped_topk,
+        _topk_softplus_sqrt,
+    )
+)
 
 
 def moe_align_block_size_flaggems(
     topk_ids: torch.Tensor,
     block_size: int,
     num_experts: int,
-    expert_map: Optional[torch.Tensor] = None,
+    expert_map: torch.Tensor | None = None,
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    from flag_gems import moe_align_block_size_triton
-
     max_num_tokens_padded = topk_ids.numel() + num_experts * (block_size - 1)
     if pad_sorted_ids:
         max_num_tokens_padded = round_up(max_num_tokens_padded, block_size)
@@ -39,7 +65,7 @@ def moe_align_block_size_flaggems(
     # TODO(lms): ignore_invalid_experts not effective now
     # moe_align_block_size has optimize version to filtered out
     # all invalid experts directly when counting the number of experts
-    moe_align_block_size_triton(
+    _moe_align_block_size_triton(
         topk_ids,
         num_experts,
         block_size,
@@ -56,20 +82,26 @@ def moe_align_block_size_flaggems(
 def topk_softmax_flaggems(
     topk_weights, topk_indices, token_expert_indices, gating_output, renormalize=False
 ):
-    from flag_gems import topk_softmax
-
-    try:
-        topk_softmax(
+    # The FlagGems API accepts ``renormalize`` directly; a frozen compiled
+    # path cannot switch implementations after an exception, and Dynamo cannot
+    # soundly trace try/retry control flow.  Both eager and compile call the
+    # same kernel with the same arguments.
+    if _USE_TRANSPARENT_MOE_PRIMITIVES:
+        _pt2_topk_softmax(
             topk_weights,
             topk_indices,
             token_expert_indices,
             gating_output,
             renormalize,
         )
-    except:
-        topk_softmax(topk_weights, topk_indices, token_expert_indices, gating_output)
-        if renormalize:
-            topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+    else:
+        _topk_softmax(
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+        )
     return topk_weights, topk_indices
 
 
@@ -95,9 +127,7 @@ def invoke_fused_moe_triton_kernel_flaggems(
     block_shape=None,
     B_bias=None,
 ):
-    from flag_gems import invoke_fused_moe_triton_kernel
-
-    invoke_fused_moe_triton_kernel(
+    _invoke_fused_moe_triton_kernel(
         A,
         B,
         C,
@@ -131,9 +161,10 @@ def grouped_topk_flaggems(
     bias,
     scoring_func=0,
 ):
-    from flag_gems import grouped_topk
-
-    return grouped_topk(
+    grouped_topk_impl = (
+        _pt2_grouped_topk if _USE_TRANSPARENT_MOE_ROUTING else _grouped_topk
+    )
+    return grouped_topk_impl(
         scores,
         n_group,
         topk_group,
@@ -146,6 +177,7 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    from flag_gems import moe_sum
-
-    moe_sum(inp, out)
+    if _USE_TRANSPARENT_MOE_PRIMITIVES:
+        _pt2_moe_sum(inp, out)
+    else:
+        _moe_sum(inp, out)
