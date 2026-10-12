@@ -29,13 +29,32 @@ normal Docker push and verified manifest/config identity. Use the immutable
 RepoDigest in the deployment guide. Hardware CI has now run with this image;
 full acceptance still requires Job 4e's complete suite and original Gate to pass.
 
+The [e78c890 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38205773888/job/114669187190)
+used this immutable image and rebuilt the FL/observer ordinary wheels from its
+actual merge checkout `e2b7cb8ac78de79bcd1b13ec580220db2c01b331`. Unit
+(631 passed, 18 skipped), functional and 27B inference stages passed. The 35B
+serving text check passed, but the image response missed the unchanged
+`Hello VLM` and `blue rectangle` oracle. E2E therefore failed; benchmark was
+skipped. Its owned children were reaped, allowing the original Gate to run
+through the existing cleanup barrier. All four Gate routes passed: 104/104
+logical outcomes, 1040/1040 original checks and 20/20 JUnit cases across the
+12 original pytest commands. Each server became ready and stopped with exit 0,
+without forced kills or remaining processes. Container cleanup also succeeded.
+The complete suite and full new-image acceptance remain failed for this attempt.
+
+MUSA serving smoke explicitly disables thinking through its existing platform
+override, matching the original Gate. Token budgets and the image oracle remain
+unchanged; the changed request mode still requires the next actual hardware CI
+result.
+
 The [48c1dac hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38203107578/job/114660995024)
 passed the allocated-device checks and isolated installation. The unit suite
 recorded 630 passed, 18 skipped and one failure in an incomplete test fixture.
 The original Gate stopped before model startup because its configured model
-directories were absent. Container cleanup completed successfully. The two model
-defaults now follow the existing Qwen CI catalog; the next hardware run must
-verify their actual visibility. Full new-image GPU acceptance remains pending.
+directories were absent. Container cleanup completed successfully. The model
+defaults were then aligned with the existing Qwen CI catalog, and the e78c890
+attempt above confirmed both models were visible and runnable. The 48c1dac
+attempt did not establish full new-image GPU acceptance.
 The inventory-only [run 38108902958](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108902958)
 completed successfully at `2b6bee63ad1b852021a9e166195aa3fac75443f1`.
 Lint, ordinary build, discovery and runner probe passed; `test-musa` was

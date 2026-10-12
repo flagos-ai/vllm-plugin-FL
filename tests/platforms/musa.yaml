@@ -26,6 +26,9 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.90
       trust_remote_code: true
+    serve:
+      chat_template_kwargs:
+        enable_thinking: false
 
 env_defaults:
   GEMS_VENDOR: "mthreads"

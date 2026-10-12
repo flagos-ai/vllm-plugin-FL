@@ -31,8 +31,12 @@ checks passed. MUSA is enabled in the existing Job 4e and uses this image for
 PR CI. Full new-image GPU acceptance depends on the actual suite and original
 Gate results; publication and CPU checks alone do not establish it.
 The [hardware CI record](musa-ci-gate-runner.md#ordinary-image-and-explicit-ci-dispatch)
-now includes a failed suite/Gate attempt with successful installation and cleanup;
-full new-image acceptance remains pending.
+now includes the [e78c890 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38205773888/job/114669187190):
+unit and functional stages passed, as did 27B inference. The four-route original
+Gate passed all 104 logical outcomes and 1040 quality checks, with 20 passing
+JUnit cases. The 35B serving text check passed, but its image response failed the
+unchanged oracle; benchmark was skipped and container cleanup succeeded. The
+complete suite and full new-image acceptance remain failed for this attempt.
 
 The `.github/configs/musa.yml` default selects this immutable RepoDigest;
 `MUSA_CI_IMAGE` can select a separately validated image. Its software defaults are:
