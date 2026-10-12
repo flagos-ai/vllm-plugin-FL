@@ -535,7 +535,7 @@ def patch_device_config_for_musa():
 
 
 def patch_musa_vision_rotary_layout():
-    """Materialize offset rotary half views before MUSA broadcast products."""
+    """Materialize strided rotary half views before MUSA broadcast products."""
     import torch
     from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
 
@@ -557,11 +557,12 @@ def patch_musa_vision_rotary_layout():
         else:
             x1, x2 = x[..., ::2], x[..., 1::2]
 
-        # Offset half views expose incorrect MUSA broadcast-mul results.
-        # Retain the selected operators while normalizing only that layout.
-        if not x1.is_contiguous() and x1.storage_offset() != 0:
+        # Materialize non-contiguous halves before MUSA broadcast products.
+        # Keep the rotary math unchanged without querying storage_offset(),
+        # whose integer result cannot be traced by Dynamo.
+        if not x1.is_contiguous():
             x1 = x1.contiguous()
-        if not x2.is_contiguous() and x2.storage_offset() != 0:
+        if not x2.is_contiguous():
             x2 = x2.contiguous()
         o1 = x1 * cos - x2 * sin
         o2 = x2 * cos + x1 * sin

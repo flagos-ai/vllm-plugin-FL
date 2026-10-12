@@ -31,6 +31,15 @@ checks passed. MUSA is enabled in the existing Job 4e and uses this image for
 PR CI. Full new-image GPU acceptance depends on the actual suite and original
 Gate results; publication and CPU checks alone do not establish it.
 
+The completed [9484c6a attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38264910638/job/114865271015)
+passed unit, functional, both existing E2E groups and benchmark smoke. Both
+original eager Gate routes passed their five scenarios (52 logical requests
+in total), and all four routes confirmed owned-process cleanup. Both graph
+servers exited before readiness because Dynamo could not trace the rotary
+layout patch's `storage_offset()` query. The missing accepted observer summary
+was a consequence of the incomplete graph routes. Full Gate acceptance remains
+failed for this attempt; no original assertion or graph requirement was relaxed.
+
 The completed [8224362 attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38242389032/job/114788780567)
 passed unit, functional and both existing E2E groups, including the original
 35B TP4 text and JPEG checks with the unchanged image oracle. Benchmark failed
