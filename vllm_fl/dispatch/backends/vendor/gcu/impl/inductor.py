@@ -3,6 +3,8 @@
 """Keep TorchGCU reduction configuration compatible with Torch's metadata ABI."""
 
 import inspect
+import os
+import sys
 from collections.abc import Mapping
 from functools import wraps
 
@@ -95,6 +97,26 @@ def _install_gcu_inductor_hooks(provider, heuristics) -> None:
     _adapt_registered_persistent_reduction(provider, heuristics)
 
 
+def _loaded_gcu_inductor_providers(provider):
+    # TorchGCU exposes torch.gcu as well as torch_gcu.gcu. Importing an
+    # inductor submodule through both names creates distinct classes and
+    # registration state, even though both modules execute the same file.
+    alias = sys.modules.get("torch.gcu.inductor.backend_register")
+    if alias is None or alias is provider:
+        return (provider,)
+    original_file = getattr(provider, "__file__", None)
+    alias_file = getattr(alias, "__file__", None)
+    try:
+        same_source = bool(original_file and alias_file) and os.path.samefile(
+            original_file, alias_file
+        )
+    except OSError:
+        same_source = False
+    if not same_source:
+        raise RuntimeError("TorchGCU Inductor aliases resolve to different sources")
+    return (provider, alias)
+
+
 def apply_inductor_gcu_patch() -> None:
     from vllm.platforms import current_platform
 
@@ -103,4 +125,5 @@ def apply_inductor_gcu_patch() -> None:
     from torch._inductor.runtime import triton_heuristics
     from torch_gcu.gcu.inductor import backend_register
 
-    _install_gcu_inductor_hooks(backend_register, triton_heuristics)
+    for provider in _loaded_gcu_inductor_providers(backend_register):
+        _install_gcu_inductor_hooks(provider, triton_heuristics)
