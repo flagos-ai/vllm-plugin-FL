@@ -148,13 +148,15 @@ def bounded_run(argv, remaining_seconds):
     actual_exit = process.wait()
     cleanup = reap_owned_children()
     timed_out = actual_exit == 124
-    stop_required = actual_exit in {124, 137} or actual_exit < 0
+    # GNU timeout reserves 124-127 for timeout/wrapper/invocation failures.
+    # Higher statuses can encode a signal; cleanup alone cannot make them safe.
+    stop_required = actual_exit < 0 or actual_exit >= 124
     return {
         "actual_exit": actual_exit,
         "process_started": True,
         "direct_process_reaped": True,
         "deadline_exceeded": timed_out,
-        "deadline_or_signal_exit": stop_required,
+        "deadline_or_signal_exit": timed_out or actual_exit < 0 or actual_exit >= 128,
         **cleanup,
         "safe_to_continue": not stop_required and cleanup["cleanup_confirmed"],
     }

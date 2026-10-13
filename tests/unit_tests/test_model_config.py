@@ -145,8 +145,14 @@ def test_load_without_matching_device_case_override_uses_base_config(
     ("case", "variable", "path"),
     [
         ("27b_tp4_eager", "MUSA_GATE_MODEL_27B", "/data/models/Qwen3.6-27B"),
+        ("27b_tp4_graph", "MUSA_GATE_MODEL_27B", "/data/models/Qwen3.6-27B"),
         (
             "35b_a3b_tp4_eager",
+            "MUSA_GATE_MODEL_35B_A3B",
+            "/data/models/Qwen3.6-35B-A3B",
+        ),
+        (
+            "35b_a3b_tp4_graph",
             "MUSA_GATE_MODEL_35B_A3B",
             "/data/models/Qwen3.6-35B-A3B",
         ),
@@ -168,11 +174,14 @@ def test_musa_allocation_paths_only_change_selected_model(
     assert resolved.engine_kwargs()["model"] == path
     assert resolved.serve_args() == catalog.serve_args()
     assert resolved.engine["tensor_parallel_size"] == 4
-    assert resolved.engine["gpu_memory_utilization"] == 0.90
+    assert resolved.engine["gpu_memory_utilization"] == 0.80
     assert resolved.engine["trust_remote_code"] is True
 
 
-@pytest.mark.parametrize("case", ["27b_tp4_eager", "35b_a3b_tp4_eager"])
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp4_eager", "27b_tp4_graph", "35b_a3b_tp4_eager", "35b_a3b_tp4_graph"],
+)
 def test_cuda_ignores_musa_allocation_paths(monkeypatch, case):
     monkeypatch.delenv("MUSA_GATE_MODEL_27B", raising=False)
     monkeypatch.delenv("MUSA_GATE_MODEL_35B_A3B", raising=False)

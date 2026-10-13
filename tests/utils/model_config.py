@@ -95,7 +95,9 @@ def _apply_device_case_overrides(
     if active_platform == "musa" and model == "qwen3_6":
         path_variable = {
             "27b_tp4_eager": "MUSA_GATE_MODEL_27B",
+            "27b_tp4_graph": "MUSA_GATE_MODEL_27B",
             "35b_a3b_tp4_eager": "MUSA_GATE_MODEL_35B_A3B",
+            "35b_a3b_tp4_graph": "MUSA_GATE_MODEL_35B_A3B",
         }.get(case)
         model_path = os.environ.get(path_variable, "") if path_variable else ""
         if model_path:
