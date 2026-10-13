@@ -180,11 +180,16 @@ four-route Gate: 104 requests, 1040 checks, 20 JUnit cases, 32 complete streams
 and 52/208 graph joins. Probe-only, ordinary build or an earlier private Gate
 does not substitute for this new image/CI result.
 
-MUSA disables Torch 2.9 Inductor combo-kernel fusion and its benchmark tuning
-while retaining Inductor compilation and all configured graph shapes. This
-avoids the combo-kernel autotuning path that exhausted memory during startup.
-The parent process installs the MUSA allocator API bindings before model
-imports, so cleanup preserves the original startup exception.
+MUSA defaults to vLLM's FX compiler adapter (`backend="eager"`). Dynamo tracing,
+piecewise splitting and native MUSA graph capture/replay remain enabled for
+graph cases, with all configured capture shapes. This avoids the Inductor
+startup path that took 9941.75 seconds to compile one range and exhausted the
+existing 180-minute E2E group budget. It does not set `enforce_eager=True`.
+Explicit `backend="inductor"` remains available; MUSA disables its Torch 2.9
+combo-kernel fusion and benchmark tuning after an observed startup OOM.
+The parent process installs MUSA allocator API bindings before model imports,
+so cleanup preserves the original startup exception. The new default requires
+actual CI acceptance of all seven E2E cases, benchmark and original Gate.
 
 ## Additional FlagGems and FlagTree modifications
 
