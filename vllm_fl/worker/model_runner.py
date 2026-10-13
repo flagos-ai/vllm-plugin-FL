@@ -5634,6 +5634,16 @@ class ModelRunnerFL(
             # because fullgraph compilation cannot enter that context manager.
             from vllm_fl.dispatch import warmup_cached_ops
 
+            if current_platform.device_type == "musa":
+                import logging
+
+                from torch._dynamo import config as dynamo_config
+
+                # FlagGems debug calls are side effects inside traced ops.
+                # Configure every worker before tracing, including spawn workers.
+                # Eager logging and warning/error logs remain unchanged.
+                dynamo_config.ignore_logger_methods.add(logging.Logger.debug)
+
             warmup_cached_ops()
 
         if (
@@ -6977,9 +6987,24 @@ class ModelRunnerFL(
                     is_musa = current_platform.device_type == "musa"
                     profile_descs = descs if is_musa else descs[:2]
                     mem_samples: list[int] = []
+                    if is_musa:
+                        # Use vLLM's configured logger hierarchy for startup evidence.
+                        profile_logger = init_logger("vllm.musa_graph_profile")
 
                     for i, desc in enumerate(profile_descs):
                         mem_before = torch.accelerator.get_memory_info()[0]
+                        if is_musa:
+                            profile_logger.info(
+                                "MUSA graph profile bucket begin: "
+                                "mode=%s index=%d/%d tokens=%d uniform=%s "
+                                "free_before_bytes=%d",
+                                mode.name,
+                                i + 1,
+                                len(profile_descs),
+                                desc.num_tokens,
+                                desc.uniform,
+                                mem_before,
+                            )
                         self._warmup_and_capture(
                             desc,
                             cudagraph_runtime_mode=mode,
@@ -6995,6 +7020,21 @@ class ModelRunnerFL(
                         torch.accelerator.synchronize()
                         free_after = torch.accelerator.get_memory_info()[0]
                         mem_samples.append(mem_before - free_after)
+                        if is_musa:
+                            profile_logger.info(
+                                "MUSA graph profile bucket completed: "
+                                "mode=%s index=%d/%d tokens=%d uniform=%s "
+                                "free_before_bytes=%d free_after_bytes=%d "
+                                "memory_delta_bytes=%d",
+                                mode.name,
+                                i + 1,
+                                len(profile_descs),
+                                desc.num_tokens,
+                                desc.uniform,
+                                mem_before,
+                                free_after,
+                                mem_samples[-1],
+                            )
 
                     if is_musa:
                         shared_memory_estimate[mode] = max(mem_samples[0], 0)

@@ -50,6 +50,7 @@ def _method(filename, class_name, method_name, namespace):
 def profile_factory():
     def make(device="musa", groups=(), *, encoder_mib=0, fail_at=None):
         state = NS(free=10000 * MIB, seen=[], retained=[], enabled=False)
+        state.profile_logger_factory = Mock(return_value=Mock())
         counter = NS(num_cudagraph_captured=13)
         wrappers = [NS(graph_pool=object()) for _ in range(3)]
         original_pools = [wrapper.graph_pool for wrapper in wrappers]
@@ -60,7 +61,10 @@ def profile_factory():
         capture_groups = []
         increments = {}
         for mode, samples in groups:
-            descs = [NS(num_tokens=size) for size in CAPTURE_SIZES[: len(samples)]]
+            descs = [
+                NS(num_tokens=size, uniform=False)
+                for size in CAPTURE_SIZES[: len(samples)]
+            ]
             capture_groups.append((mode, descs))
             increments.update(
                 {id(d): sample * MIB for d, sample in zip(descs, samples)}
@@ -118,6 +122,7 @@ def profile_factory():
             "set_current_vllm_config": lambda _: nullcontext(),
             "compilation_counter": counter,
             "logger": Mock(),
+            "init_logger": state.profile_logger_factory,
             "current_platform": NS(
                 device_type=device,
                 graph_pool_handle=lambda: next(pools),
