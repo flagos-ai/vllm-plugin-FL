@@ -509,9 +509,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_compile_backend(cls) -> str:
-        if cls.device_type == "npu":
-            # Keep vLLM's Dynamo tracing and piecewise graph splitting while
-            # returning each FX GraphModule without running CUDA Inductor.
+        if cls.device_type in ("npu", "musa"):
+            # Trace and split through Dynamo, then capture the FX modules with
+            # the platform graph wrapper. MUSA Inductor code generation can take
+            # hours for a single range before native graph capture starts.
             return "eager"
         return super().get_compile_backend()
 

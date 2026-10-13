@@ -76,6 +76,7 @@ config_methods = [
         "set_splitting_ops_for_v1",
         "set_splitting_ops_for_attn_fusion",
         "splitting_ops_contain_attention",
+        "is_attention_compiled_piecewise",
     }
     or (
         isinstance(item, ast.Assign)
@@ -111,7 +112,17 @@ def platform_import(name, globals=None, locals=None, fromlist=(), level=0):
     return builtins.__import__(name, globals, locals, fromlist, level)
 
 
+class BasePlatformContract:
+    backend_calls = []
+
+    @classmethod
+    def get_compile_backend(cls):
+        BasePlatformContract.backend_calls.append(cls.device_type)
+        return "inductor"
+
+
 PLATFORM_NS = {
+    "BasePlatformContract": BasePlatformContract,
     "logger": LOGGER,
     "__builtins__": {**vars(builtins), "__import__": platform_import},
 }
@@ -120,7 +131,7 @@ execute(
     [
         ast.ClassDef(
             name="PlatformContract",
-            bases=[],
+            bases=[ast.Name(id="BasePlatformContract", ctx=ast.Load())],
             keywords=[],
             decorator_list=[],
             body=[
@@ -131,6 +142,7 @@ execute(
                     "check_and_update_config",
                     "use_custom_op_collectives",
                     "is_cuda_alike",
+                    "get_compile_backend",
                 }
             ],
         )
@@ -269,6 +281,135 @@ def test_combo_autotuning_is_disabled_only_on_musa(
         assert config.mode is Mode.VLLM_COMPILE
         assert config.cudagraph_mode is GraphMode.PIECEWISE
         assert config.cudagraph_capture_sizes is capture_sizes
+
+
+@pytest.mark.parametrize(
+    "device,expected_backend,delegates",
+    [
+        ("musa", "eager", False),
+        ("npu", "eager", False),
+        ("cuda", "inductor", True),
+        ("gcu", "inductor", True),
+    ],
+)
+def test_real_compile_backend_default_and_parent_delegation(
+    device, expected_backend, delegates
+):
+    platform, _, _ = fixture(device=device)
+    before = len(BasePlatformContract.backend_calls)
+    assert platform.get_compile_backend() == expected_backend
+    assert BasePlatformContract.backend_calls[before:] == (
+        [device] if delegates else []
+    )
+
+
+@pytest.mark.parametrize("device", ["musa", "cuda"])
+@pytest.mark.parametrize("requested_backend", ["", "inductor", "eager"])
+def test_real_compile_config_default_preserves_graph_contract(
+    monkeypatch, device, requested_backend
+):
+    platform, vconfig, _ = fixture(
+        device=device, backend="mccl" if device == "musa" else "nccl"
+    )
+    config = vconfig.compilation_config
+    config.backend = requested_backend
+    config.inductor_passes = {}
+    config.custom_ops = []
+    config.pass_config.enable_qk_norm_rope_fusion = False
+    config.cudagraph_mm_encoder = False
+    config.encoder_cudagraph_token_budgets = []
+    # Preserve the full upstream default sequence observed in the failed CI.
+    capture_sizes = [1, 2, 4, 8, *range(16, 257, 8), *range(272, 513, 16)]
+    assert len(capture_sizes) == 51
+    expected_sizes = tuple(capture_sizes)
+    config.cudagraph_capture_sizes = capture_sizes
+    monkeypatch.setitem(
+        CONFIG_NS, "is_torch_equal_or_newer", lambda version: version == "2.9.0.dev"
+    )
+    monkeypatch.setitem(CONFIG_NS, "envs", SimpleNamespace(VLLM_LOGGING_LEVEL="INFO"))
+    monkeypatch.setitem(
+        CONFIG_NS,
+        "current_platform",
+        SimpleNamespace(
+            is_cpu=lambda: False, get_compile_backend=platform.get_compile_backend
+        ),
+    )
+    # The real config initializer selects a platform default only for an empty
+    # backend. The real hook and repeated upstream initializer must preserve it.
+    expected_backend = requested_backend or (
+        "eager" if device == "musa" else "inductor"
+    )
+    for _ in range(2):
+        config.__post_init__()
+        assert config.backend == expected_backend
+        platform.check_and_update_config(vconfig)
+        config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
+        assert config.backend == expected_backend
+        assert config.mode is Mode.VLLM_COMPILE
+        assert config.cudagraph_mode is GraphMode.PIECEWISE
+        assert config.cudagraph_capture_sizes is capture_sizes
+        assert tuple(config.cudagraph_capture_sizes) == expected_sizes
+        assert config.use_inductor_graph_partition is False
+        assert config.is_attention_compiled_piecewise()
+    if device == "musa":
+        assert config.splitting_ops.count("vllm::all_reduce") == 1
+    else:
+        assert "vllm::all_reduce" not in config.splitting_ops
+
+
+def test_actual_eager_fx_compiler_keeps_piecewise_graph_wrapper():
+    sample = torch.tensor([-2.0, 1.0])
+    graph = fx.symbolic_trace(lambda value: torch.relu(-value))
+    counter = SimpleNamespace(num_eager_compiles=0)
+    compiler_ns = {
+        "CompilerInterface": object,
+        "compilation_counter": counter,
+    }
+    execute(
+        [node(UPSTREAM / "compilation/compiler_interface.py", "EagerAdaptor")],
+        compiler_ns,
+    )
+    platform, vconfig, _ = fixture()
+    config = vconfig.compilation_config
+    config.backend = platform.get_compile_backend()
+    assert config.backend == "eager"
+    platform.check_and_update_config(vconfig)
+    compiled, handle = compiler_ns["EagerAdaptor"]().compile(graph, [sample], {}, None)
+    assert compiled is graph
+    assert handle is None
+    assert counter.num_eager_compiles == 1
+    torch.testing.assert_close(compiled(sample), torch.tensor([2.0, 0.0]))
+    wrapped = []
+
+    class GraphWrapperDouble:
+        def __init__(self, **kwargs):
+            wrapped.append(kwargs)
+
+    def compiler_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if level == 1 and name == "cuda_graph":
+            return SimpleNamespace(CUDAGraphOptions=lambda **kwargs: kwargs)
+        return builtins.__import__(name, globals, locals, fromlist, level)
+
+    wrapper_ns = {
+        "__builtins__": {**vars(builtins), "__import__": compiler_import},
+        "current_platform": SimpleNamespace(
+            get_static_graph_wrapper_cls=lambda: "GraphWrapperDouble"
+        ),
+        "resolve_obj_by_qualname": lambda name: GraphWrapperDouble,
+        "CUDAGraphMode": GraphMode,
+    }
+    execute(
+        [node(UPSTREAM / "compilation/backends.py", "wrap_with_cudagraph_if_needed")],
+        wrapper_ns,
+    )
+    result = wrapper_ns["wrap_with_cudagraph_if_needed"](
+        compiled, vconfig, config, True, True
+    )
+    assert isinstance(result, GraphWrapperDouble)
+    assert len(wrapped) == 1
+    assert wrapped[0]["runnable"] is graph
+    assert wrapped[0]["runtime_mode"] is GraphMode.PIECEWISE
+    assert wrapped[0]["vllm_config"] is vconfig
 
 
 @pytest.mark.parametrize("moe,expected_dp", [(None, 3), (False, 1), (True, 3)])
