@@ -41,11 +41,6 @@ on:
       platform:
         required: true
         type: string
-      musa_allocation:
-        description: "Explicit MUSA allocation JSON for this workflow only"
-        required: false
-        type: string
-        default: ""
     secrets:
       FEISHU_APP_ID:
         required: false
@@ -53,11 +48,6 @@ on:
         required: false
       FEISHU_CHAT_ID:
         required: false
-
-# One MUSA allocation must not be shared by two workflow runs.
-concurrency:
-  group: ${{ inputs.platform == 'musa' && format('musa-{0}', github.repository) || format('platform-{0}-{1}', inputs.platform, github.run_id) }}
-  cancel-in-progress: false
 
 jobs:
   setup:
@@ -86,20 +76,6 @@ jobs:
         with:
           fetch-depth: 0
       - id: load
-        env:
-          MUSA_CI_ALLOCATION: ${{ inputs.musa_allocation }}
-          MUSA_CI_RUNTIME: ${{ vars.MUSA_CI_RUNTIME }}
-          MUSA_CI_PHYSICAL_DEVICES: ${{ vars.MUSA_CI_PHYSICAL_DEVICES }}
-          MUSA_CI_LOGICAL_DEVICES: ${{ vars.MUSA_CI_LOGICAL_DEVICES }}
-          MUSA_CI_PCI_BUS_IDS: ${{ vars.MUSA_CI_PCI_BUS_IDS }}
-          MUSA_CI_EMPTY_WHEEL: ${{ vars.MUSA_CI_EMPTY_WHEEL }}
-          MUSA_CI_EMPTY_WHEEL_SHA256: ${{ vars.MUSA_CI_EMPTY_WHEEL_SHA256 }}
-          MUSA_GATE_MODEL_27B: ${{ vars.MUSA_GATE_MODEL_27B }}
-          MUSA_GATE_MODEL_35B_A3B: ${{ vars.MUSA_GATE_MODEL_35B_A3B }}
-          MUSA_CI_IMAGE: ${{ vars.MUSA_CI_IMAGE }}
-          MUSA_CI_DEPENDENCY_PROFILE: ${{ vars.MUSA_CI_DEPENDENCY_PROFILE }}
-          MUSA_CI_DEPENDENCY_MANIFEST: ${{ vars.MUSA_CI_DEPENDENCY_MANIFEST }}
-          MUSA_CI_DEPENDENCY_MANIFEST_SHA256: ${{ vars.MUSA_CI_DEPENDENCY_MANIFEST_SHA256 }}
         run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
       - id: changes
         name: Detect changed files (PR only)
@@ -124,7 +100,6 @@ jobs:
             $CHANGED_ARG
 
   unit:
-    if: inputs.platform != 'musa'
     needs: setup
     uses: ./.github/workflows/_unit_test.yml
     with:
@@ -138,7 +113,6 @@ jobs:
   # Runs all tests under tests/functional_tests/ in one job. No model files needed.
   # Runs once per platform (not per device) — functional tests are device-agnostic.
   functional:
-    if: inputs.platform != 'musa'
     needs: [setup, unit]
     uses: ./.github/workflows/_functional_test.yml
     with:
@@ -154,10 +128,9 @@ jobs:
   # run inside a single job to avoid repeated container startup.
   e2e:
     needs: [setup, functional]
-    if: inputs.platform != 'musa' && needs.setup.outputs.e2e_matrix != '[]'
+    if: needs.setup.outputs.e2e_matrix != '[]'
     strategy:
       fail-fast: false
-      max-parallel: 256
       matrix:
         test: ${{ fromJson(needs.setup.outputs.e2e_matrix) }}
     uses: ./.github/workflows/_e2e_test.yml
@@ -174,7 +147,6 @@ jobs:
 
   # Validates vllm bench throughput/latency/serve entrypoints.
   benchmark:
-    if: inputs.platform != 'musa'
     needs: [setup, e2e]
     uses: ./.github/workflows/_benchmark_test.yml
     with:
@@ -185,105 +157,24 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
 
-  # One MUSA runner and container retain the explicit four-device mapping
-  # throughout the main test stages and the unchanged original Gate.
-  # An operator must confirm the actual allocation before GPU execution;
-  # a previous ephemeral runner probe does not reserve this runner's cards.
-  musa_suite:
-    name: MUSA complete suite and original adaptation Gate
-    needs: setup
-    if: inputs.platform == 'musa'
-    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
-    # Includes the existing E2E group bounds and four 6900-second Gate routes.
-    timeout-minutes: 1200
-    container:
-      image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      volumes: ${{ fromJson(needs.setup.outputs.config).container_volumes }}
-      options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-    env:
-      VLLM_NO_USAGE_STATS: "1"
-      MUSA_CI_E2E_MATRIX: ${{ needs.setup.outputs.e2e_matrix }}
-      MUSA_CI_SUITE_IMAGE: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-    steps:
-      - name: Set unique suite and Gate evidence directories
-        run: |
-          gate_root="${RUNNER_TEMP}/musa-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          suite_root="${RUNNER_TEMP}/musa-suite-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          printf 'MUSA_GATE_ARTIFACT_DIR=%s\nMUSA_CI_RESULT_ROOT=%s\nMUSA_SUITE_ARTIFACT_DIR=%s\n' "$gate_root" "$gate_root" "$suite_root" >> "$GITHUB_ENV"
-          mkdir -p "$suite_root/unit" "$suite_root/functional" "$suite_root/benchmark"
-      - uses: actions/checkout@v4
-      - name: Check the actual allocated devices and native PCI mapping
-        id: devices
-        timeout-minutes: 5
-        run: bash .github/scripts/musa/check.sh
-      - name: Install the isolated committed candidate
-        id: install
-        timeout-minutes: 60
-        run: bash .github/scripts/musa/setup.sh
-      - name: Verify owned child cleanup without accelerator allocation
-        timeout-minutes: 1
-        run: python -I -B .github/scripts/musa/tests/test_ci_serial.py
-      - name: Run unit tests
-        id: unit
-        timeout-minutes: 361
-        run: python -I -B .github/scripts/musa/run_ci_stage.py --scope unit
-      - name: Run functional tests
-        id: functional
-        timeout-minutes: 16
-        run: python -I -B .github/scripts/musa/run_ci_stage.py --scope functional
-      - name: Run the existing E2E groups serially
-        id: e2e
-        run: python -I -B .github/scripts/musa/run_ci_stage.py --scope e2e
-      - name: Run benchmark smoke tests
-        id: benchmark
-        if: steps.e2e.outputs.gpu_stages_safe == 'true'
-        timeout-minutes: 31
-        run: python -I -B .github/scripts/musa/run_ci_stage.py --scope benchmark
-      - name: Run both original Gate models in eager and graph modes
-        if: |
-          always() && !cancelled() &&
-          steps.devices.outcome == 'success' && steps.install.outcome == 'success' &&
-          steps.unit.outputs.gpu_stages_safe == 'true' &&
-          (steps.functional.outcome == 'skipped' || steps.functional.outputs.gpu_stages_safe == 'true') &&
-          (steps.e2e.outcome == 'skipped' || steps.e2e.outputs.gpu_stages_safe == 'true') &&
-          (steps.benchmark.outcome == 'skipped' || steps.benchmark.outputs.gpu_stages_safe == 'true')
-        timeout-minutes: 500
-        run: bash .github/scripts/musa/run-adaptation-gate.sh
-      - name: Preserve all suite, Gate and installation evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: musa-adaptation-gate-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ env.MUSA_GATE_ARTIFACT_DIR }}
-            ${{ env.MUSA_SUITE_ARTIFACT_DIR }}
-            ${{ env.MUSA_CI_INSTALL_EVIDENCE }}
-            coverage-musa.json
-            report-musa.json
-            test-results/logs
-          if-no-files-found: error
-
   # ============================================================
   # Feishu notification — per-platform status
   # ============================================================
   notify:
-    needs: [unit, functional, e2e, benchmark, musa_suite]
+    needs: [unit, functional, e2e, benchmark]
     if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}
       status: >-
-        ${{ ((inputs.platform == 'musa' && needs.musa_suite.result == 'success') ||
-             (inputs.platform != 'musa' &&
-              needs.unit.result == 'success' &&
-              needs.functional.result == 'success' &&
-              (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-              (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped')))
+        ${{ (needs.unit.result == 'success' &&
+             needs.functional.result == 'success' &&
+             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped'))
             && 'success'
             || (needs.unit.result == 'cancelled' ||
                 needs.functional.result == 'cancelled' ||
                 needs.e2e.result == 'cancelled' ||
-                needs.benchmark.result == 'cancelled' ||
-                needs.musa_suite.result == 'cancelled')
+                needs.benchmark.result == 'cancelled')
                && 'cancelled'
                || 'failure' }}

@@ -568,16 +568,20 @@ The `/data` bind is read-only. Setup builds and installs ordinary wheels into
 a fresh private venv under `RUNNER_TEMP`; it does not edit inherited vendor
 packages. MUSA runs the existing unit, functional, e2e and benchmark commands
 serially in one runner/container job, with separate stage report directories.
-Other backends retain their reusable jobs. Docker's private PID namespace keeps
+The dedicated `_musa_test.yml` workflow contains this MUSA job; other backends
+retain the shared `_platform_test.yml` jobs. The E2E catalog follows the main
+branch configuration: four inference cases and three serving cases across
+Qwen3-0.6B TP1 and Qwen3.6 27B/35B-A3B TP4, with eager and graph modes.
+Docker's private PID namespace keeps
 the existing case cleanup within this job's own container. The wrapper records
 owned-child reaping and blocks further GPU stages on timeout or uncertain cleanup.
 The graph functional helper now exercises TorchMUSA rather than
 skipping the MUSA platform. Its small tensor test is additional component
 validation; it does not replace model Gate acceptance.
 
-The single self-hosted MUSA job has a 1200-minute outer budget for the current
+The single self-hosted MUSA job has a 1440-minute outer budget for the current
 suite and Gate. Functional and benchmark stages keep their 15/30-minute bounds;
-each E2E group keeps the timeout from its existing matrix, including model
+each E2E group keeps the main matrix's 180-minute timeout, including model
 checking. The original Gate step keeps its 500-minute budget and all four
 6900-second route limits, readiness and pytest deadlines. The workflow's
 [job timeout setting](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idtimeout-minutes)

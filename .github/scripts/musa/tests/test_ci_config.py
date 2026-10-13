@@ -233,16 +233,46 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(inputs["platform"]["options"], ["all", "musa"])
         self.assertEqual(
             workflow["jobs"]["test-musa"]["uses"],
-            "./.github/workflows/_platform_test.yml",
+            "./.github/workflows/_musa_test.yml",
         )
         platform = yaml.load(
             (ROOT / ".github/workflows/_platform_test.yml").read_text(),
             Loader=yaml.BaseLoader,
         )
-        suite = platform["jobs"]["musa_suite"]
+        musa = yaml.load(
+            (ROOT / ".github/workflows/_musa_test.yml").read_text(),
+            Loader=yaml.BaseLoader,
+        )
+        self.assertEqual(set(musa["jobs"]), {"setup", "musa_suite", "notify"})
+        self.assertEqual(musa["jobs"]["setup"]["if"], "inputs.platform == 'musa'")
+        self.assertEqual(musa["concurrency"]["group"], "musa-${{ github.repository }}")
+        self.assertEqual(musa["concurrency"]["cancel-in-progress"], "false")
+        self.assertNotIn("musa_suite", platform["jobs"])
+        self.assertNotIn("musa_allocation", platform["on"]["workflow_call"]["inputs"])
+        self.assertEqual(workflow["jobs"]["test-musa"]["with"]["platform"], "musa")
+        for backend in (
+            "cuda",
+            "ascend",
+            "hygon",
+            "metax",
+            "enflame",
+            "kunlunxin",
+            "iluvatar",
+        ):
+            self.assertEqual(
+                workflow["jobs"]["test-" + backend]["uses"],
+                "./.github/workflows/_platform_test.yml",
+            )
+        notify = musa["jobs"]["notify"]
+        self.assertEqual(notify["needs"], ["setup", "musa_suite"])
+        self.assertEqual(notify["if"], "always()")
+        self.assertIn("needs.musa_suite.result == 'success'", notify["with"]["status"])
+        self.assertIn("needs.setup.result == 'cancelled'", notify["with"]["status"])
+        self.assertIn("'failure'", notify["with"]["status"])
+        suite = musa["jobs"]["musa_suite"]
         self.assertEqual(suite["if"], "inputs.platform == 'musa'")
         self.assertEqual(suite["needs"], "setup")
-        self.assertEqual(suite["timeout-minutes"], "1200")
+        self.assertEqual(suite["timeout-minutes"], "1440")
         self.assertNotIn("runner.", json.dumps(suite["env"]))
         self.assertIn("GITHUB_ENV", suite["steps"][0]["run"])
         stage_commands = [
@@ -274,8 +304,16 @@ class ConfigTests(unittest.TestCase):
             )
         self.assertIn("steps.devices.outcome == 'success'", gate["if"])
         self.assertIn("steps.install.outcome == 'success'", gate["if"])
-        self.assertEqual(platform["jobs"]["e2e"]["strategy"]["max-parallel"], "256")
-        self.assertIn("inputs.platform != 'musa'", platform["jobs"]["e2e"]["if"])
+        self.assertNotIn("max-parallel", platform["jobs"]["e2e"]["strategy"])
+        self.assertEqual(platform["jobs"]["e2e"]["strategy"]["fail-fast"], "false")
+        self.assertEqual(
+            platform["jobs"]["e2e"]["if"], "needs.setup.outputs.e2e_matrix != '[]'"
+        )
+        self.assertEqual(platform["jobs"]["benchmark"]["needs"], ["setup", "e2e"])
+        self.assertEqual(
+            platform["jobs"]["notify"]["needs"],
+            ["unit", "functional", "e2e", "benchmark"],
+        )
 
     def test_probe_is_separate_bare_host_workflow(self):
         workflow = yaml.load(

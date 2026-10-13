@@ -1,9 +1,13 @@
+import contextlib
 import importlib.util
+import io
 import json
+import signal
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import yaml
 
@@ -96,15 +100,44 @@ class SerialTests(unittest.TestCase):
 
     def test_one_musa_job_preserves_gate_and_other_backend_paths(self):
         workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/_platform_test.yml").read_text()
+            (ROOT / ".github/workflows/_musa_test.yml").read_text()
         )
         jobs = workflow["jobs"]
         self.assertNotIn("musa_gate", jobs)
         self.assertEqual(jobs["musa_suite"]["needs"], "setup")
         self.assertEqual(jobs["musa_suite"]["if"], "inputs.platform == 'musa'")
-        for key in ["unit", "functional", "benchmark"]:
-            self.assertEqual(jobs[key]["if"], "inputs.platform != 'musa'")
-        self.assertIn("inputs.platform != 'musa'", jobs["e2e"]["if"])
+        platform = yaml.safe_load(
+            (ROOT / ".github/workflows/_platform_test.yml").read_text()
+        )
+        generic_jobs = platform["jobs"]
+        self.assertNotIn("musa_suite", generic_jobs)
+        self.assertEqual(generic_jobs["unit"]["needs"], "setup")
+        self.assertEqual(generic_jobs["functional"]["needs"], ["setup", "unit"])
+        self.assertEqual(generic_jobs["e2e"]["needs"], ["setup", "functional"])
+        self.assertEqual(
+            generic_jobs["e2e"]["if"], "needs.setup.outputs.e2e_matrix != '[]'"
+        )
+        self.assertEqual(generic_jobs["benchmark"]["needs"], ["setup", "e2e"])
+        self.assertEqual(
+            generic_jobs["notify"]["needs"], ["unit", "functional", "e2e", "benchmark"]
+        )
+        caller = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        self.assertEqual(
+            caller["jobs"]["test-musa"]["uses"], "./.github/workflows/_musa_test.yml"
+        )
+        for backend in (
+            "cuda",
+            "ascend",
+            "hygon",
+            "metax",
+            "enflame",
+            "kunlunxin",
+            "iluvatar",
+        ):
+            self.assertEqual(
+                caller["jobs"]["test-" + backend]["uses"],
+                "./.github/workflows/_platform_test.yml",
+            )
         steps = jobs["musa_suite"]["steps"]
         runs = [step.get("run", "") for step in steps]
         self.assertEqual(
@@ -138,6 +171,126 @@ class SerialTests(unittest.TestCase):
             self.assertFalse(rows[0]["safe_to_continue"])
             self.assertFalse(rows[0]["passed"])
 
+    def test_wrapper_failure_and_signal_statuses_block_continuation(self):
+        cleanup = {
+            "adopted_children_reaped": 0,
+            "remaining_owned_children_count": 0,
+            "cleanup_confirmed": True,
+        }
+        codes = [
+            124,
+            125,
+            126,
+            127,
+            128,
+            129,
+            130,
+            134,
+            137,
+            139,
+            143,
+            192,
+            255,
+            -2,
+            -9,
+            -15,
+        ]
+        for code in codes:
+            with self.subTest(code=code):
+                process = Mock()
+                process.wait.return_value = code
+                with (
+                    patch.object(SERIAL.subprocess, "Popen", return_value=process),
+                    patch.object(SERIAL, "reap_owned_children", return_value=cleanup),
+                ):
+                    row = SERIAL.bounded_run([sys.executable, "-c", "pass"], 3)
+                self.assertEqual(row["actual_exit"], code)
+                self.assertTrue(row["direct_process_reaped"])
+                self.assertTrue(row["cleanup_confirmed"])
+                self.assertEqual(row["deadline_exceeded"], code == 124)
+                self.assertEqual(
+                    row["deadline_or_signal_exit"],
+                    code == 124 or code < 0 or code >= 128,
+                )
+                self.assertFalse(row["safe_to_continue"])
+
+    def test_regular_exit_preserves_cleanup_requirement(self):
+        for code in [0, 1, 2, 4, 5, 123]:
+            for confirmed in [False, True]:
+                with self.subTest(code=code, cleanup_confirmed=confirmed):
+                    process = Mock()
+                    process.wait.return_value = code
+                    cleanup = {
+                        "adopted_children_reaped": 0,
+                        "remaining_owned_children_count": 0 if confirmed else None,
+                        "cleanup_confirmed": confirmed,
+                    }
+                    with (
+                        patch.object(SERIAL.subprocess, "Popen", return_value=process),
+                        patch.object(
+                            SERIAL, "reap_owned_children", return_value=cleanup
+                        ),
+                    ):
+                        row = SERIAL.bounded_run([sys.executable, "-c", "pass"], 3)
+                    self.assertEqual(row["actual_exit"], code)
+                    self.assertFalse(row["deadline_or_signal_exit"])
+                    self.assertEqual(row["safe_to_continue"], confirmed)
+
+    def test_encoded_signal_stops_later_groups_and_gate_output(self):
+        cleanup = {
+            "adopted_children_reaped": 0,
+            "remaining_owned_children_count": 0,
+            "cleanup_confirmed": True,
+        }
+        for code in [130, 143]:
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                github_output = output / "github-output.txt"
+                model_check, tests = Mock(), Mock()
+                model_check.wait.return_value = 0
+                tests.wait.return_value = code
+                with (
+                    patch.dict(
+                        SERIAL.os.environ,
+                        {
+                            "GITHUB_OUTPUT": str(github_output),
+                            "MUSA_SUITE_ARTIFACT_DIR": str(output),
+                            "MUSA_CI_E2E_MATRIX": json.dumps(
+                                [group(), group("serving")]
+                            ),
+                            "MUSA_CI_SUITE_IMAGE": "image",
+                        },
+                    ),
+                    patch.object(
+                        SERIAL.sys, "argv", ["run_ci_stage.py", "--scope", "e2e"]
+                    ),
+                    patch.object(
+                        SERIAL.shutil, "which", return_value="/usr/bin/timeout"
+                    ),
+                    patch.object(SERIAL, "prepare_owned_reaping"),
+                    patch.object(SERIAL, "reap_owned_children", return_value=cleanup),
+                    patch.object(
+                        SERIAL.subprocess,
+                        "Popen",
+                        side_effect=[model_check, tests, model_check, model_check],
+                    ) as popen,
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    actual_exit = SERIAL.main()
+                report = json.loads((output / "e2e-execution.json").read_text())
+                self.assertEqual(actual_exit, 1)
+                self.assertEqual(popen.call_count, 2)
+                self.assertEqual(report["requested_group_count"], 2)
+                self.assertEqual(report["group_count"], 1)
+                self.assertEqual(report["groups"][0]["test_exit"], code)
+                self.assertTrue(
+                    report["groups"][0]["test_execution"]["cleanup_confirmed"]
+                )
+                self.assertFalse(report["gpu_stages_safe"])
+                self.assertEqual(report["status"], "FAIL")
+                self.assertFalse(report["passed"])
+                self.assertEqual(github_output.read_text(), "gpu_stages_safe=false\n")
+
 
 @unittest.skipUnless(sys.platform == "linux", "Native Linux owned-child cleanup test")
 class NativeCleanupTests(unittest.TestCase):
@@ -167,6 +320,35 @@ class NativeCleanupTests(unittest.TestCase):
         self.assertTrue(row["cleanup_confirmed"])
         self.assertEqual(row["remaining_owned_children_count"], 0)
         self.assertFalse(row["safe_to_continue"])
+
+    def test_encoded_signal_exit_blocks_after_native_cleanup(self):
+        # Shells and wrappers can return 128 + signal even after reaping a child.
+        for code in [130, 143]:
+            with self.subTest(code=code):
+                row = SERIAL.bounded_run(
+                    [sys.executable, "-c", f"raise SystemExit({code})"], 3
+                )
+                self.assertEqual(row["actual_exit"], code)
+                self.assertTrue(row["direct_process_reaped"])
+                self.assertTrue(row["cleanup_confirmed"])
+                self.assertEqual(row["remaining_owned_children_count"], 0)
+                self.assertFalse(row["safe_to_continue"])
+
+    def test_native_signal_exit_blocks_after_native_cleanup(self):
+        # GNU timeout can propagate the signal itself or return its encoded status.
+        for signum in [signal.SIGINT, signal.SIGTERM]:
+            with self.subTest(signal=signum):
+                child = (
+                    "import os,signal; "
+                    f"signal.signal({int(signum)}, signal.SIG_DFL); "
+                    f"os.kill(os.getpid(), {int(signum)})"
+                )
+                row = SERIAL.bounded_run([sys.executable, "-c", child], 3)
+                self.assertIn(row["actual_exit"], [-int(signum), 128 + int(signum)])
+                self.assertTrue(row["direct_process_reaped"])
+                self.assertTrue(row["cleanup_confirmed"])
+                self.assertEqual(row["remaining_owned_children_count"], 0)
+                self.assertFalse(row["safe_to_continue"])
 
 
 if __name__ == "__main__":
