@@ -16,23 +16,22 @@ different build. Wheel hashes are checked against the official
 The current official [S60/tops1.10.6 configuration](https://github.com/flagos-ai/build-infra/blob/bbc9ae28e946a59c94e2af63d2d8aae04ff846ec/configs.yaml)
 and [Enflame installation guide](https://github.com/flagos-ai/FlagTree/wiki/User-manual-for-enflame)
 select this FlagTree version. FlagGems v5.4.0's own older backend matrix
-selects 0.6.1+enflame3.6; the newer combination requires runtime validation.
+selects 0.6.1+enflame3.6; the newer combination is validated below.
 
-The task-private equivalent installation has passed torch/FlagGems device
-addition and FL platform smoke checks on S60 with host driver 1.10.6.
-A task-private build of this recipe completed on 2026-10-12. Its metadata
-smoke container exited successfully with the pinned vLLM, torch, FlagGems,
-FlagTree and Triton-GCU versions, OpenAI 3.28.0 and pandas 3.0.6. This checks
-the dependency image; it does not establish GPU serving, the final plugin
-commit's CI results or Gate acceptance. The old vLLM 0.20.2 vendor wrapper
-remains available as `Dockerfile.v0.20.2`.
+The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
+The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
+The original Qwen3.6-27B inference and Qwen3.6-35B-A3B serving cases passed in
+both eager and graph modes at plugin commit
+`2cd00248d3992088b2432201629ab295d4d94034`. These image checks are separate
+from each candidate commit's original adaptation Gate. The old vLLM 0.20.2
+vendor wrapper remains available as `Dockerfile.v0.20.2`.
 
 The local image ID is
-`sha256:dfabdef337c4115d019534604c0df01cc2ef7b68c7062bdb5436bd1c5f9d79ab`.
-The dependency image was published on 2026-10-12 as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci-aa0d5beb87b5-3f1b0d3652`.
+`sha256:4feef9aed222a8cffd9fab610288053c3f2ee5acdfc3540786e47d7daea48f0e`.
+The dependency image was published on 2026-10-13 as
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci-2cd00248d399-compiler`.
 Its registry manifest digest is
-`sha256:cc6a8ed90e93cf9a805f1a88b59600b55d06f06393da5fba173f40fcf1f886d2`.
+`sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.
 Authenticated and anonymous pulls by this digest both resolved to the local
 image ID above. CI pins the digest and installs the tested plugin checkout
 with `--no-deps`; the dependency image does not bake in that checkout.
@@ -56,6 +55,8 @@ existing `enflame-s60` runner label, devices `2,3` and `/data:/data` mount.
 The reference is main commit `6182281a42ce857fa52ef73ec1abafca941cdf3a`.
 Publishing the image and selecting this configuration do not establish
 that hardware CI has passed; record the actual workflow results separately.
+The S60 e2e jobs allow 120 minutes for cold-cache compilation, graph capture
+and both original model cases; the measured 35B serving run took 3607 seconds.
 
 `VLLM_VERSION` and `VLLM_SOURCE_COMMIT` select the source version and exact
 commit; the default official v0.28.0 commit is
