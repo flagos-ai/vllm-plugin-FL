@@ -2,12 +2,71 @@
 
 """GCU index_fill_ regression coverage under the normal FlagGems policy."""
 
+import json
 from math import prod
 
 import pytest
 import torch
 
 pytestmark = pytest.mark.gpu
+
+
+def _mismatch_facts(actual, expected):
+    """Summarize CPU snapshots without dumping whole tensors into CI logs."""
+    assert actual.device.type == expected.device.type == "cpu"
+    assert actual.shape == expected.shape and actual.ndim == 2
+    different = actual != expected
+    coordinates = different.nonzero(as_tuple=False)
+
+    def sample(coordinate):
+        row, column = coordinate.tolist()
+        return {
+            "coordinate": [row, column],
+            "actual": actual[row, column].item(),
+            "expected": expected[row, column].item(),
+        }
+
+    return {
+        "mismatch_count": len(coordinates),
+        "per_row_counts": different.sum(dim=1).tolist()[:16],
+        "rows_truncated": actual.shape[0] > 16,
+        "first_mismatches": [sample(c) for c in coordinates[:16]],
+        "last_bad": sample(coordinates[-1]) if len(coordinates) else None,
+    }
+
+
+def _record_int64_roundtrips(actual, first_cpu, expected, record_property):
+    """Probe only after the original D2H snapshot, retaining any probe errors."""
+    copies = {"first_int64": first_cpu}
+    errors = {}
+    probes = {
+        "raw_int32_words": lambda: actual.view(torch.int32).cpu().view(torch.int64),
+        "second_int64": actual.cpu,
+    }
+    for name, probe in probes.items():
+        try:
+            copies[name] = probe()
+        except Exception as error:
+            errors[name] = {"type": type(error).__name__, "message": str(error)[:256]}
+
+    facts = {
+        "shape": list(expected.shape),
+        "dtype": str(expected.dtype),
+        "elements": expected.numel(),
+        "versus_expected": {
+            name: _mismatch_facts(copy, expected) for name, copy in copies.items()
+        },
+        "versus_first_mismatch_counts": {
+            name: (copy != first_cpu).sum().item()
+            for name, copy in copies.items()
+            if name != "first_int64"
+        },
+        "probe_errors": errors,
+    }
+    encoded = json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
+    assert len(encoded) <= 8192, "Int64 diagnostic exceeded its byte budget"
+    record_property("gcu_int64_roundtrips", facts)
+    return copies, errors
 
 
 @pytest.mark.parametrize(
@@ -156,10 +215,20 @@ pytestmark = pytest.mark.gpu
             False,
             id="duplicate-indices-across-launch-tiles",
         ),
+        pytest.param(
+            (4, 151808),
+            0,
+            [1, 3],
+            torch.int64,
+            -3,
+            False,
+            False,
+            id="int64-aligned-fill-count",
+        ),
     ],
 )
 def test_index_fill_gcu_with_platform_policy(
-    device, shape, dim, indices, dtype, value, transpose, tensor_value
+    device, shape, dim, indices, dtype, value, transpose, tensor_value, record_property
 ):
     if device.type != "gcu":
         pytest.skip("Requires the Enflame GCU backend")
@@ -201,4 +270,33 @@ def test_index_fill_gcu_with_platform_policy(
     assert returned is actual
     assert actual.data_ptr() == original_pointer
     assert actual.dtype == dtype
-    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+    first_cpu = actual.cpu()
+    try:
+        torch.testing.assert_close(first_cpu, expected, rtol=0, atol=0)
+    except AssertionError:
+        if dtype == torch.int64:
+            try:
+                _record_int64_roundtrips(actual, first_cpu, expected, record_property)
+            except Exception as error:
+                # Diagnostic failures must not replace the original exact assertion.
+                record_property(
+                    "gcu_int64_diagnostic_error",
+                    {"type": type(error).__name__, "message": str(error)[:256]},
+                )
+        raise
+
+
+def test_int64_gcu_transfer_without_index_fill(device, record_property):
+    """Keep an independent transfer baseline for the original int64 pattern."""
+    if device.type != "gcu":
+        pytest.skip("Requires the Enflame GCU backend")
+
+    source = (torch.arange(4 * 151936) % 7).reshape(4, 151936)
+    actual = source.to(device)
+    first_cpu = actual.cpu()
+    copies, errors = _record_int64_roundtrips(
+        actual, first_cpu, source, record_property
+    )
+    for copy in copies.values():
+        torch.testing.assert_close(copy, source, rtol=0, atol=0)
+    assert not errors, f"Int64 transfer diagnostic failed: {errors}"
