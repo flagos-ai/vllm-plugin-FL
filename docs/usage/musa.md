@@ -187,6 +187,11 @@ startup path that took 9941.75 seconds to compile one range and exhausted the
 existing 180-minute E2E group budget. It does not set `enforce_eager=True`.
 Explicit `backend="inductor"` remains available; MUSA disables its Torch 2.9
 combo-kernel fusion and benchmark tuning after an observed startup OOM.
+Compiled MUSA and NPU models pre-resolve imported CachedOps after model loading,
+before Dynamo traces their operator calls. MUSA graph memory profiling measures
+every configured capture bucket instead of extrapolating the second-largest
+bucket, with the existing driver overhead floor and cleanup. Model and capture
+budgets stay unchanged; exhausted MUSA KV budgets report their byte components.
 The parent process installs MUSA allocator API bindings before model imports,
 so cleanup preserves the original startup exception. The new default requires
 actual CI acceptance of all seven E2E cases, benchmark and original Gate.

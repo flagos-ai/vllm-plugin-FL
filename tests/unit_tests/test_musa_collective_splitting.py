@@ -12,7 +12,9 @@ import enum
 import importlib.util
 import operator
 import os
+import threading
 import uuid
+import weakref
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -663,3 +665,109 @@ def test_actual_fx_all_reduce_partition_excludes_graph_wrapper():
     finally:
         for library in reversed(libraries):
             library._destroy()
+
+
+def run_actual_load_model_dispatch_guard(device, mode, warmup):
+    runner = node(SOURCE / "vllm_fl/worker/model_runner.py", "ModelRunnerFL")
+    load = next(
+        item for item in runner.body if getattr(item, "name", None) == "load_model"
+    )
+    guard = next(
+        item
+        for item in load.body
+        if isinstance(item, ast.If)
+        and any(
+            isinstance(child, ast.ImportFrom)
+            and child.module == "vllm_fl.dispatch"
+            and any(alias.name == "warmup_cached_ops" for alias in child.names)
+            for child in ast.walk(item)
+        )
+    )
+
+    def dispatch_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "vllm_fl.dispatch" and level == 0:
+            return SimpleNamespace(warmup_cached_ops=warmup)
+        return builtins.__import__(name, globals, locals, fromlist, level)
+
+    execute(
+        [guard],
+        {
+            "__builtins__": {**vars(builtins), "__import__": dispatch_import},
+            "current_platform": SimpleNamespace(device_type=device),
+            "CompilationMode": Mode,
+            "self": SimpleNamespace(compilation_config=SimpleNamespace(mode=mode)),
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "device,mode,expected",
+    [
+        ("musa", Mode.VLLM_COMPILE, True),
+        ("musa", Mode.STOCK_TORCH_COMPILE, True),
+        ("musa", Mode.NONE, False),
+        ("npu", Mode.VLLM_COMPILE, True),
+        ("npu", Mode.NONE, False),
+        ("cuda", Mode.VLLM_COMPILE, False),
+        ("gcu", Mode.VLLM_COMPILE, False),
+    ],
+)
+def test_actual_load_model_warms_dispatch_before_tracing(device, mode, expected):
+    called = []
+    run_actual_load_model_dispatch_guard(device, mode, lambda: called.append("warmup"))
+    assert called == (["warmup"] if expected else [])
+
+
+def test_actual_cached_op_fullgraph_uses_model_load_warmup():
+    class ManagerDouble:
+        policy_epoch = 1
+
+        def __init__(self):
+            self.lock = threading.RLock()
+            self.impl = SimpleNamespace(fn=torch.sin, impl_id="reference.cpu_contract")
+
+        def ensure_initialized(self):
+            with self.lock:
+                pass
+
+        def _resolve_impl(self, op):
+            self.ensure_initialized()
+            return self.impl
+
+        def _record_first_use(self, op, impl):
+            pass
+
+    manager = ManagerDouble()
+    ns = {
+        "_CACHED_OPS": weakref.WeakSet(),
+        "_OP_FAST_PATH_ENABLED": True,
+        "get_default_manager": lambda: manager,
+        "is_dump_enabled": lambda: False,
+        "get_policy_epoch": lambda: 1,
+        "get_policy": lambda: SimpleNamespace(strict=True),
+    }
+    dispatch_source = SOURCE / "vllm_fl/dispatch/__init__.py"
+    execute(
+        [node(dispatch_source, "CachedOp"), node(dispatch_source, "warmup_cached_ops")],
+        ns,
+    )
+    cold = ns["CachedOp"]("cold_cpu_contract")
+    hot = ns["CachedOp"]("warm_cpu_contract")
+    sample = torch.ones(2)
+    try:
+        # The actual CachedOp slow path enters an untraceable manager lock.
+        cold_compiled = torch.compile(
+            lambda value: cold(value) + 1, backend="eager", fullgraph=True
+        )
+        with pytest.raises(torch._dynamo.exc.Unsupported, match="RLock"):
+            cold_compiled(sample)
+        run_actual_load_model_dispatch_guard(
+            "musa", Mode.VLLM_COMPILE, ns["warmup_cached_ops"]
+        )
+        assert hot._impl is manager.impl
+        hot_compiled = torch.compile(
+            lambda value: hot(value) + 1, backend="eager", fullgraph=True
+        )
+        torch.testing.assert_close(hot_compiled(sample), torch.sin(sample) + 1)
+    finally:
+        torch._dynamo.reset()
