@@ -451,6 +451,7 @@ class PlatformFL(Platform):
             "enflame",
             "kunlunxin",
             "biren",
+            "sunrise",
         ]:
             return True
         return False
