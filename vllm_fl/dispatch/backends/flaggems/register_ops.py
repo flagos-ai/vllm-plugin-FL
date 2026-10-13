@@ -150,6 +150,18 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        # KV cache write (flash layout).
+        # Required on empty vLLM wheels (VLLM_TARGET_DEVICE=empty) that ship no
+        # compiled torch.ops._C_cache_ops kernel; flag_gems provides a
+        # pure-Triton implementation. Subject to the usual FlagGems op switch.
+        OpImpl(
+            op_name="reshape_and_cache_flash",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(backend.reshape_and_cache_flash, is_avail),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # grouped topk
         OpImpl(
             op_name="grouped_topk",

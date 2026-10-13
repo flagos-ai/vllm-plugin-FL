@@ -157,6 +157,23 @@ class FlagGemsBackend(Backend):
 
         return apply_rotary_emb_flaggems(obj, x, cos, sin)
 
+    def reshape_and_cache_flash(self, *args, **kwargs):
+        """Write key/value into the paged KV cache (flash layout).
+
+        Forwards to ``flag_gems.fused.reshape_and_cache_flash``, a pure-Triton
+        in-place op. Sourced from the concrete submodule rather than the lazy
+        top-level ``flag_gems`` re-export so that it resolves to the real
+        implementation regardless of ``flag_gems`` init ordering.
+
+        Call signature::
+
+            (key, value, key_cache, value_cache, slot_mapping,
+             kv_cache_dtype, k_scale, v_scale) -> None
+        """
+        from flag_gems.fused import reshape_and_cache_flash
+
+        return reshape_and_cache_flash(*args, **kwargs)
+
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """
         Get the attention backend class path for FlagGems.
