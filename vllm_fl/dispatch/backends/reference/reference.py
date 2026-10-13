@@ -52,6 +52,21 @@ class ReferenceBackend(Backend):
 
         return dynamic_per_token_quant_int8_torch(x)
 
+    def bf16_indexer_cache_write(
+        self,
+        keys: torch.Tensor,
+        cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+    ) -> None:
+        from .impl.bf16_indexer import bf16_indexer_cache_write_torch
+
+        bf16_indexer_cache_write_torch(keys, cache, slot_mapping)
+
+    def bf16_indexer_decode(self, *args, **kwargs) -> None:
+        from .impl.bf16_indexer import bf16_indexer_decode_torch
+
+        bf16_indexer_decode_torch(*args, **kwargs)
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.

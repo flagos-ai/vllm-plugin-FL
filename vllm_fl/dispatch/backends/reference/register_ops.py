@@ -40,6 +40,8 @@ def register_builtins(registry) -> None:
     # vLLM 0.24 builds. One absent optional MoE helper must not prevent all
     # available PyTorch fallbacks from registering.
     op_names = (
+        "bf16_indexer_cache_write",
+        "bf16_indexer_decode",
         "dynamic_per_token_quant_int8",
         "silu_and_mul",
         "gelu_and_mul",

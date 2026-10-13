@@ -4,7 +4,9 @@ The producer writes slot mappings, clears padded block-table rows, and updates
 GPU computed-token counts using persistent input and output buffers. Capture
 warms the kernel outside the graph and replays the new graph before returning,
 so attention builders always consume current metadata, including with zero
-model warmups. Dummy model forwards still use PAD_SLOT_ID for every token.
+model warmups. Generic dummy model forwards use PAD_SLOT_ID for every token.
+Qwen PLE/QSA keeps its dispatch-owned producer and dummy slot bindings, using
+the same graph lifecycle with T-Head stream synchronization after replay.
 
 FULL and PIECEWISE model modes both capture this independent metadata graph.
 PIECEWISE uses the runner's maximum request extent because its model graph
@@ -16,7 +18,8 @@ eager mode use eager metadata generation. Profiling cleanup drops cached graphs.
 
 `VLLM_FL_COMMON_ATTENTION_METADATA=0` restores the original per-group
 `BlockTable.compute_slot_mapping` path, builder padding, and computed-token cache
-behavior. NVIDIA enables the new producer by default. Other platforms retain
+behavior for the generic path. Qwen PLE/QSA still requires its dispatch-owned
+metadata producer. NVIDIA enables the generic producer by default. Other platforms retain
 the original producer until validated; `VLLM_FL_COMMON_ATTENTION_METADATA=1`
 opts into the new pointer-table Triton kernel for validation. Graph support is
 checked separately through the platform graph API. An unavailable graph uses
