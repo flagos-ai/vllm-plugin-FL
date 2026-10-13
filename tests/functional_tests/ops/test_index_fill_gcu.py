@@ -2,6 +2,8 @@
 
 """GCU index_fill_ regression coverage under the normal FlagGems policy."""
 
+from math import prod
+
 import pytest
 import torch
 
@@ -134,6 +136,26 @@ pytestmark = pytest.mark.gpu
             False,
             id="boolean-value",
         ),
+        pytest.param(
+            (1, 1, 1, 1, 1, 1, 4, 1, 151936),
+            6,
+            [0, 2],
+            torch.int32,
+            0,
+            False,
+            False,
+            id="high-rank-contiguous",
+        ),
+        pytest.param(
+            (4, 151936),
+            0,
+            [0, 2] * 128,
+            torch.int32,
+            0,
+            False,
+            False,
+            id="duplicate-indices-across-launch-tiles",
+        ),
     ],
 )
 def test_index_fill_gcu_with_platform_policy(
@@ -145,10 +167,15 @@ def test_index_fill_gcu_with_platform_policy(
     # A missing FlagGems dependency on GCU must fail this test, not skip it.
     import flag_gems
 
+    from vllm_fl.dispatch.backends.vendor.gcu.impl.index_fill import (
+        apply_index_fill_gcu_patch,
+    )
     from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
+    apply_index_fill_gcu_patch()
+
     base_shape = shape[::-1] if transpose else shape
-    source = (torch.arange(shape[0] * shape[1]) % 7).to(dtype).reshape(base_shape)
+    source = (torch.arange(prod(shape)) % 7).to(dtype).reshape(base_shape)
     if transpose:
         source = source.t()
     expected = source.clone()
@@ -164,8 +191,8 @@ def test_index_fill_gcu_with_platform_policy(
 
     # Match worker registration using the actual platform policy. In this
     # FlagGems API, use_gems(exclude=...) delegates to enable(unused=...).
-    # Do not inject a test-only exclusion: the unfixed policy must reproduce
-    # the large-vocabulary launch failure.
+    # Keep the actual platform policy without test-only exclusions: the
+    # unadapted launcher must reproduce the large-vocabulary launch failure.
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
     with flag_gems.use_gems(include=whitelist, exclude=blacklist):
         returned = actual.index_fill_(dim, device_indices, device_value)
