@@ -155,7 +155,7 @@ RUN printf '%s --hash=sha256:%s\n' \
         --find-links /tmp/enflame-flagtree-wheel "flagtree==${FLAGTREE_VERSION}" \
     && rm -rf /tmp/enflame-flagtree-wheel /tmp/enflame-flagtree-requirements.txt
 
-COPY docker/enflame/verify_compiler.py /usr/local/share/vllm-plugin-fl/enflame-verify-compiler.py
+COPY verify_compiler.py /usr/local/share/vllm-plugin-fl/enflame-verify-compiler.py
 RUN python /usr/local/share/vllm-plugin-fl/enflame-verify-compiler.py \
     --expected-version "${FLAGTREE_VERSION}"
 
