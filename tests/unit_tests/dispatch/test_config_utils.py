@@ -32,6 +32,7 @@ def test_gcu_vendor_alias_loads_enflame_native_config():
         "scaled_dot_product_attention",
         "index_put_",
         "_index_put_impl_",
+        "index_fill_",
         "mm_out",
     ]
 
@@ -62,11 +63,14 @@ def test_enflame_default_policy_keeps_unsupported_variants_native(monkeypatch):
                     "scaled_dot_product_attention",
                     "index_put_",
                     "_index_put_impl_",
+                    "index_fill_",
                     "mm_out",
                 ],
             )
             assert use_flaggems_op("index_put_") is False
             assert use_flaggems_op("_index_put_impl_") is False
+            assert use_flaggems_op("index_fill_") is False
+            assert use_flaggems_op("index_fill") is True
             assert use_flaggems_op("mm_out") is False
             assert use_flaggems_op("mm") is True
             assert use_flaggems_op("index_put") is True
