@@ -3,8 +3,10 @@
 
 Dispatch registration and the exact tensor-device guard are redirected to CPU
 under a private test namespace; unmodified wrappers separately check CPU fallback.
-The CPU kernel doubles execute the actual torch metadata/device-index helpers
-that failed in MUSA CI; GPU kernel correctness still needs hardware acceptance.
+Pure tensor reference kernels make fallback and gradient assertions independent
+of Dynamo version-specific errors. Separate controls retain the device-index
+limitation and execute dtype metadata behind the opaque dispatcher boundary.
+GPU kernel correctness still needs hardware acceptance.
 """
 
 import ast
@@ -25,8 +27,6 @@ IMPL = ROOT / "vllm_fl/dispatch/backends/flaggems/impl"
 
 
 def rms_kernel(x, residual, weight, epsilon):
-    # This exact helper is intentionally skipped by Dynamo in torch 2.9/2.10.
-    torch._utils._get_device_index(x.device, allow_cpu=True)
     x = x.contiguous()
     if residual is None:
         return (
@@ -43,7 +43,12 @@ def rms_kernel(x, residual, weight, epsilon):
     return x, residual
 
 
+def silu_reference(x, y):
+    return (x.float() / (1 + torch.exp(-x.float())) * y).to(x.dtype)
+
+
 def silu_kernel(x, y):
+    # The metadata helper executes inside the opaque CPU kernel, never in FX.
     _, dtype = elementwise_dtypes(
         x, y, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -52,21 +57,14 @@ def silu_kernel(x, y):
 
 @pytest.fixture(scope="module")
 def boundary():
-    state = NS(
-        platform=NS(device_type="musa"), registrations=[], rms_calls=0, silu_calls=0
-    )
-
-    def rms(*args):
-        state.rms_calls += 1
-        return rms_kernel(*args)
+    state = NS(platform=NS(device_type="musa"), registrations=[], kernel_calls=[])
 
     def silu_out(x, y, out):
-        state.silu_calls += 1
         out.copy_(silu_kernel(x, y))
         return out
 
-    rms_module = NS(gems_rms_forward=rms, use_c_extension=False)
-    silu_module = NS(gems_silu_and_mul=silu_kernel)
+    rms_module = NS(gems_rms_forward=rms_kernel, use_c_extension=False)
+    silu_module = NS(gems_silu_and_mul=silu_reference)
     out_module = NS(silu_and_mul_out=silu_out)
 
     def register(
@@ -77,7 +75,13 @@ def boundary():
         target_lib.define(
             name + torch.library.infer_schema(fn, mutates_args=mutates_args or [])
         )
-        target_lib.impl(name, fn, "CPU")
+
+        def counted_kernel(*args, **kwargs):
+            # Only dispatcher execution mutates this spy; tracing never sees it.
+            state.kernel_calls.append(name)
+            return fn(*args, **kwargs)
+
+        target_lib.impl(name, counted_kernel, "CPU")
         target_lib._register_fake(name, fake_impl)
 
     runtime = NS()
@@ -168,6 +172,7 @@ def boundary():
     state.original_norm = load(IMPL / "normalization.py").rms_norm_flaggems
     state.runtime = runtime
     state.rms_module = fake_modules["flag_gems.modules.normalization"]
+    state.silu_module = fake_modules["flag_gems.modules.activation"]
     state.activation = activation.silu_and_mul_flaggems
     state.norm = norm.rms_norm_flaggems
     yield state
@@ -207,17 +212,35 @@ def rms_oracle(x, weight, epsilon):
     )
 
 
-@pytest.mark.parametrize(
-    "op,pattern", [("norm", "_get_device_index"), ("silu", "non-Tensor")]
-)
-def test_original_python_kernel_hits_real_dynamo_limitation(op, pattern):
-    fn = (
-        (lambda x: rms_kernel(x, None, torch.ones(x.shape[-1]), 1e-6))
-        if op == "norm"
-        else (lambda x: silu_kernel(x, x))
+def test_device_index_limitation_is_hidden_by_opaque_boundary(boundary, monkeypatch):
+    def guarded_rms(x, residual, weight, epsilon):
+        torch._utils._get_device_index(x.device, allow_cpu=True)
+        return rms_kernel(x, residual, weight, epsilon)
+
+    obj = NS(weight=torch.ones(4), variance_epsilon=1e-6)
+    x = torch.arange(1.0, 9.0).reshape(2, 4)
+    with pytest.raises(torch._dynamo.exc.Unsupported):
+        torch.compile(
+            lambda t: guarded_rms(t, None, obj.weight, obj.variance_epsilon),
+            backend="eager",
+            fullgraph=True,
+        )(x)
+    torch._dynamo.reset()
+    monkeypatch.setattr(boundary.rms_module, "gems_rms_forward", guarded_rms)
+    graphs = []
+    actual = compiled(lambda t: boundary.norm(obj, t), graphs)(x)
+    torch.testing.assert_close(actual, rms_oracle(x, obj.weight, obj.variance_epsilon))
+    assert len(graphs) == 1
+    assert any(
+        "musa_boundary_cpu_test.rms_norm" in str(n.target)
+        for n in graphs[0].graph.nodes
     )
-    with pytest.raises(torch._dynamo.exc.Unsupported, match=pattern):
-        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2, 4))
+
+
+def test_dtype_metadata_kernel_preserves_tensor_math():
+    x = torch.arange(-8.0, 8.0).reshape(2, 8)
+    # Do not assume this helper must fail tracing on every supported Torch version.
+    torch.testing.assert_close(silu_kernel(x, x + 1), silu_reference(x, x + 1))
 
 
 def test_rms_fullgraph_uses_one_opaque_node_and_original_kernel(boundary):
@@ -225,13 +248,13 @@ def test_rms_fullgraph_uses_one_opaque_node_and_original_kernel(boundary):
     obj = NS(weight=weight, variance_epsilon=1e-6)
     graphs = []
     fn = compiled(lambda x: boundary.norm(obj, x), graphs)
-    before = boundary.rms_calls
+    before = boundary.kernel_calls.count("rms_norm")
     for x in (torch.arange(1.0, 9.0).reshape(2, 4), torch.full((2, 4), -3.0)):
         result = fn(x)
         torch.testing.assert_close(result, rms_oracle(x, weight, 1e-6))
         assert result.data_ptr() != x.data_ptr()
     assert len(graphs) == 1
-    assert boundary.rms_calls == before + 2
+    assert boundary.kernel_calls.count("rms_norm") == before + 2
     assert any(
         "musa_boundary_cpu_test.rms_norm" in str(n.target)
         for n in graphs[0].graph.nodes
@@ -269,7 +292,7 @@ def test_silu_fullgraph_out_contract_and_no_reused_output_alias(boundary):
     graphs = []
     fn = compiled(lambda x: boundary.activation(None, x), graphs)
     x = torch.arange(-8.0, 8.0).reshape(2, 8)
-    before = boundary.silu_calls
+    before = boundary.kernel_calls.count("silu_and_mul")
     first = fn(x)
     snapshot = first.clone()
     second = fn(x + 1)
@@ -283,7 +306,9 @@ def test_silu_fullgraph_out_contract_and_no_reused_output_alias(boundary):
     torch.testing.assert_close(first, snapshot)
     assert first.data_ptr() != second.data_ptr()
     assert first.data_ptr() != x.data_ptr()
-    assert len(graphs) == 1 and boundary.silu_calls == before + 2
+    assert (
+        len(graphs) == 1 and boundary.kernel_calls.count("silu_and_mul") == before + 2
+    )
     assert any(
         "musa_boundary_cpu_test.silu_and_mul" in str(n.target)
         for n in graphs[0].graph.nodes
@@ -322,55 +347,97 @@ def test_registration_schema_records_exact_mutations(boundary):
     assert schema.endswith("-> ()")
 
 
-@pytest.mark.parametrize("device", ["cuda", "npu", "cpu"])
-def test_non_musa_compilation_does_not_route_to_new_boundary(boundary, device):
-    boundary.platform.device_type = device
-    obj = NS(weight=torch.ones(4), variance_epsilon=1e-6)
-    fn = torch.compile(lambda x: boundary.norm(obj, x), backend="eager", fullgraph=True)
-    with pytest.raises(torch._dynamo.exc.Unsupported, match="_get_device_index"):
-        fn(torch.ones(2, 4))
-
-
-@pytest.mark.parametrize(
-    "op,pattern", [("norm", "_get_device_index"), ("silu", "non-Tensor")]
-)
-def test_cpu_tensor_on_musa_platform_keeps_original_route(boundary, op, pattern):
-    obj = NS(weight=torch.ones(4), variance_epsilon=1e-6)
-    original = (
-        (lambda x: boundary.original_norm(obj, x))
-        if op == "norm"
-        else (lambda x: boundary.original_activation(None, x))
+def assert_plain_graph(graphs):
+    assert len(graphs) == 1
+    assert not any(
+        "musa_boundary_cpu_test" in str(n.target) for n in graphs[0].graph.nodes
     )
-    fn = torch.compile(original, backend="eager", fullgraph=True)
-    with pytest.raises(torch._dynamo.exc.Unsupported, match=pattern):
-        fn(torch.ones(2, 4))
 
 
-def test_eager_musa_retains_original_gems_path(boundary):
-    x = torch.tensor([[1.0, 2.0, 3.0, 4.0]], requires_grad=True)
+def reference_and_wrapper(boundary, op, obj, *, unmodified=False):
+    if op == "norm":
+        wrapper = boundary.original_norm if unmodified else boundary.norm
+        return lambda x: rms_kernel(
+            x, None, obj.weight, obj.variance_epsilon
+        ), lambda x: wrapper(obj, x)
+    wrapper = boundary.original_activation if unmodified else boundary.activation
+    return lambda x: silu_reference(x[..., :2], x[..., 2:]), lambda x: wrapper(None, x)
+
+
+def assert_value_and_grad(actual, expected, inputs):
+    torch.testing.assert_close(actual, expected)
+    if torch.is_grad_enabled():
+        actual_grads = torch.autograd.grad(actual.sum(), inputs)
+        expected_grads = torch.autograd.grad(expected.sum(), inputs)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            torch.testing.assert_close(actual_grad, expected_grad)
+
+
+def check_original_compile(boundary, op, *, unmodified=False, grad_enabled=False):
+    with torch.set_grad_enabled(grad_enabled):
+        weight = torch.tensor([0.5, 1.5, 0.25, 2.0], requires_grad=grad_enabled)
+        obj = NS(weight=weight, variance_epsilon=1e-6)
+        reference, original = reference_and_wrapper(
+            boundary, op, obj, unmodified=unmodified
+        )
+        x = torch.arange(1.0, 9.0).reshape(2, 4).requires_grad_(grad_enabled)
+        inputs = (x, weight) if op == "norm" else (x,)
+        graphs = []
+        calls = list(boundary.kernel_calls)
+        assert_value_and_grad(compiled(original, graphs)(x), reference(x), inputs)
+        assert_plain_graph(graphs)
+        assert boundary.kernel_calls == calls
+
+
+@pytest.mark.parametrize("device", ["cuda", "npu", "cpu"])
+@pytest.mark.parametrize("op", ["norm", "silu"])
+@pytest.mark.parametrize("grad_enabled", [False, True])
+def test_non_musa_compilation_does_not_route_to_new_boundary(
+    boundary, device, op, grad_enabled
+):
+    boundary.platform.device_type = device
+    check_original_compile(boundary, op, grad_enabled=grad_enabled)
+
+
+@pytest.mark.parametrize("op", ["norm", "silu"])
+@pytest.mark.parametrize("grad_enabled", [False, True])
+def test_cpu_tensor_on_musa_platform_keeps_original_route(boundary, op, grad_enabled):
+    check_original_compile(boundary, op, unmodified=True, grad_enabled=grad_enabled)
+
+
+@pytest.mark.parametrize("op", ["norm", "silu"])
+@pytest.mark.parametrize("grad_enabled", [False, True])
+def test_eager_musa_retains_original_gems_path(boundary, monkeypatch, op, grad_enabled):
+    with torch.set_grad_enabled(grad_enabled):
+        weight = torch.tensor([0.5, 1.5, 0.25, 2.0], requires_grad=grad_enabled)
+        obj = NS(weight=weight, variance_epsilon=1e-6)
+        reference, original = reference_and_wrapper(boundary, op, obj)
+        x = torch.arange(1.0, 9.0).reshape(2, 4).requires_grad_(grad_enabled)
+        inputs = (x, weight) if op == "norm" else (x,)
+        calls = list(boundary.kernel_calls)
+        assert_value_and_grad(original(x), reference(x), inputs)
+        assert boundary.kernel_calls == calls
+    sentinel = torch.ones(2, 4)
+    if op == "norm":
+        monkeypatch.setattr(
+            boundary.rms_module, "gems_rms_forward", lambda *args: sentinel
+        )
+    else:
+        monkeypatch.setattr(
+            boundary.silu_module, "gems_silu_and_mul", lambda *args: sentinel
+        )
     obj = NS(weight=torch.ones(4), variance_epsilon=1e-6)
-    with torch.enable_grad():
-        y = boundary.norm(obj, x)
-        y.sum().backward()
-    assert x.grad is not None
+    _, original = reference_and_wrapper(boundary, op, obj)
+    calls = list(boundary.kernel_calls)
+    with torch.set_grad_enabled(grad_enabled):
+        assert original(torch.ones(2, 4)) is sentinel
+    assert boundary.kernel_calls == calls
     assert len(boundary.registrations) == 3
 
 
-@pytest.mark.parametrize(
-    "op,pattern", [("norm", "_get_device_index"), ("silu", "non-Tensor")]
-)
-def test_grad_enabled_compile_keeps_original_kernel_contract(boundary, op, pattern):
-    obj = NS(weight=torch.ones(4, requires_grad=True), variance_epsilon=1e-6)
-    with torch.enable_grad():
-        x = torch.ones(2, 4, requires_grad=True)
-        original = (
-            (lambda t: boundary.norm(obj, t))
-            if op == "norm"
-            else (lambda t: boundary.activation(None, t))
-        )
-        fn = torch.compile(original, backend="eager", fullgraph=True)
-        with pytest.raises(torch._dynamo.exc.Unsupported, match=pattern):
-            fn(x)
+@pytest.mark.parametrize("op", ["norm", "silu"])
+def test_grad_enabled_compile_keeps_original_kernel_contract(boundary, op):
+    check_original_compile(boundary, op, grad_enabled=True)
     assert len(boundary.registrations) == 3
 
 

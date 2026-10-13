@@ -79,6 +79,8 @@ class _Contract:
     def __init__(self):
         self.events = []
         self.errors = {}
+        self.cache_calls = []
+        self.cached_graph_ids = set()
         self.initial_stream = object()
         self.active_stream = self.initial_stream
         self.cached_stream = object()
@@ -140,6 +142,30 @@ class _Contract:
         self.events.append(("graph-created", graph))
         return graph
 
+    def cache_graph_class(self, native_graph_class):
+        self.cache_calls.append(("factory", native_graph_class))
+        return native_graph_class
+
+    @contextmanager
+    def cache_capture(self, graph):
+        assert self.platform.device_type == "musa"
+        self.cache_calls.append(("capture-enter", graph))
+        if "cache-capture" in self.errors:
+            raise self.errors["cache-capture"]
+        try:
+            yield
+            self.cached_graph_ids.add(id(graph))
+        finally:
+            self.cache_calls.append(("capture-exit", graph))
+
+    def cache_replay(self, graph):
+        assert self.platform.device_type == "musa"
+        assert id(graph) in self.cached_graph_ids
+        self.cache_calls.append(("replay", graph))
+        if "cache-replay" in self.errors:
+            raise self.errors["cache-replay"]
+        return graph.replay()
+
     def synchronize(self):
         self.events.append(("synchronize",))
 
@@ -180,12 +206,25 @@ def contract():
     assert len(helpers) == 1
     state = _Contract()
 
-    def deny_target_import(name, *args, **kwargs):
+    cache_api = SimpleNamespace(
+        musa_graph_class=state.cache_graph_class,
+        musa_graph_capture=state.cache_capture,
+        musa_graph_replay=state.cache_replay,
+    )
+
+    def deny_target_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if (
+            name == "vllm_fl.compilation.musa_graph_exec_cache"
+            and level == 0
+            and fromlist
+            and set(fromlist) <= set(vars(cache_api))
+        ):
+            return cache_api
         if name in {"vllm", "torch", "torch_musa", "vllm_fl"} or name.startswith(
             ("vllm.", "torch.", "torch_musa.", "vllm_fl.")
         ):
             raise ImportError("CPU contract does not import target modules")
-        return builtins.__import__(name, *args, **kwargs)
+        return builtins.__import__(name, globals, locals, fromlist, level)
 
     namespace = {
         "__name__": __name__,
@@ -547,3 +586,83 @@ def test_staging_validation_is_active_with_optimized_python_code(contract):
         wrapper(incoming)
     assert contract.events == []
     assert captured.payload.tolist() == [1.0, 2.0]
+
+
+@pytest.mark.parametrize("device", ["cuda", "npu", "musa", "gcu", "ptpu", "txda"])
+def test_graph_factory_uses_only_the_explicit_cpu_cache_interface(contract, device):
+    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
+    module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    factory = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef) and node.name == "Graph"
+    )
+    native_graph = type("NativeGraph", (), {})
+    contract.platform.device_type = device
+    namespace = dict(contract.cpu_namespace)
+    namespace["torch"] = SimpleNamespace(
+        cuda=SimpleNamespace(CUDAGraph=native_graph),
+        npu=SimpleNamespace(NPUGraph=native_graph),
+        musa=SimpleNamespace(MUSAGraph=native_graph),
+        gcu=SimpleNamespace(GCUGraph=native_graph),
+        ptpu=SimpleNamespace(PTPUGraph=native_graph),
+    )
+    exec(
+        compile(ast.Module(body=[factory], type_ignores=[]), str(source), "exec"),
+        namespace,
+    )
+    assert namespace["Graph"].graph is (None if device == "txda" else native_graph)
+    assert contract.cache_calls == (
+        [("factory", native_graph)] if device == "musa" else []
+    )
+
+
+@pytest.mark.parametrize("device", ["musa", "cuda", "npu"])
+def test_wrapper_cache_interface_preserves_native_capture_and_replay(contract, device):
+    contract.platform.device_type = device
+    wrapper = contract.wrapper()
+    assert wrapper() is contract.output
+    graph = wrapper.concrete_graph_entries["batch"].graph
+    assert wrapper() is contract.output
+    assert contract.cache_calls == (
+        [("capture-enter", graph), ("capture-exit", graph), ("replay", graph)]
+        if device == "musa"
+        else []
+    )
+    assert contract.event_names().count("capture-enter") == 1
+    assert contract.event_names().count("replay") == 1
+
+
+@pytest.mark.parametrize("stage", ["cache-capture", "cache-replay"])
+def test_cache_interface_errors_preserve_identity_and_do_not_run_native(
+    contract, stage
+):
+    wrapper = contract.wrapper()
+    if stage == "cache-replay":
+        wrapper()
+    contract.events.clear()
+    error = RuntimeError(stage + " sentinel")
+    contract.errors[stage] = error
+    with pytest.raises(RuntimeError) as caught:
+        wrapper()
+    assert caught.value is error
+    assert "capture-enter" not in contract.event_names()
+    assert "replay" not in contract.event_names()
+    assert contract.counter.num_cudagraph_captured == (stage == "cache-replay")
+
+
+@pytest.mark.parametrize(
+    "name,fromlist",
+    [
+        ("torch_musa", ("MUSAGraph",)),
+        ("vllm_fl.compilation.musa_graph_exec", ("load_musa_graph_exec_ops",)),
+        ("vllm_fl.compilation.musa_graph_exec_cache", ("_get_cache",)),
+        ("vllm_fl.compilation.musa_graph_exec_cache", ()),
+    ],
+)
+def test_cpu_contract_still_rejects_native_and_unapproved_imports(
+    contract, name, fromlist
+):
+    importer = contract.cpu_namespace["__builtins__"]["__import__"]
+    with pytest.raises(ImportError, match="does not import target"):
+        importer(name, fromlist=fromlist)
