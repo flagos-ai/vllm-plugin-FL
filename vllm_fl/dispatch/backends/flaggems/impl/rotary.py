@@ -11,6 +11,11 @@ import inspect
 
 import torch
 
+from vllm.platforms import current_platform
+
+if current_platform.device_type == "musa":
+    from .musa_ops import rotary_embedding as musa_rotary_embedding
+
 
 @functools.cache
 def _supports_inplace_argument(fn) -> bool:
@@ -49,6 +54,18 @@ def rotary_embedding_flaggems(
     import flag_gems
     from flag_gems.config import use_c_extension
     from flag_gems.modules.rotary_embedding import gems_rope_forward
+
+    if (
+        current_platform.device_type == "musa"
+        and query.device.type == "musa"
+        and key.device.type == "musa"
+        and torch.compiler.is_compiling()
+        and not torch.is_grad_enabled()
+        and not use_c_extension
+    ):
+        return musa_rotary_embedding(
+            query, key, cos, sin, position_ids, rotary_interleaved, inplace
+        )
 
     # The official Ascend implementation in the qwen-vllm_for_ascend branch
     # exposes a six-argument apply_rotary_pos_emb without ``inplace``.  The

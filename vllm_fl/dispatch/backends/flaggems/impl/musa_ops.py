@@ -56,6 +56,75 @@ def _silu_and_mul_fake(out: torch.Tensor, x: torch.Tensor) -> None:
     return None
 
 
+def _rotary_embedding(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor | None,
+    rotary_interleaved: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    from flag_gems.modules.rotary_embedding import gems_rope_forward
+
+    return gems_rope_forward(
+        query,
+        key,
+        cos,
+        sin,
+        position_ids=position_ids,
+        rotary_interleaved=rotary_interleaved,
+        inplace=False,
+    )
+
+
+def _rotary_embedding_fake(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor | None,
+    rotary_interleaved: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # Match the original Gems fresh-output allocation, including strided views.
+    query_view = query.view(-1, query.shape[-2], query.shape[-1])
+    key_view = key.view(-1, key.shape[-2], key.shape[-1])
+    return torch.empty_like(query_view).view(query.shape), torch.empty_like(
+        key_view
+    ).view(key.shape)
+
+
+def _rotary_embedding_inplace(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor | None,
+    rotary_interleaved: bool,
+) -> None:
+    from flag_gems.modules.rotary_embedding import gems_rope_forward
+
+    gems_rope_forward(
+        query,
+        key,
+        cos,
+        sin,
+        position_ids=position_ids,
+        rotary_interleaved=rotary_interleaved,
+        inplace=True,
+    )
+
+
+def _rotary_embedding_inplace_fake(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor | None,
+    rotary_interleaved: bool,
+) -> None:
+    return None
+
+
 direct_register_custom_op(
     "rms_norm",
     _rms_norm,
@@ -76,6 +145,23 @@ direct_register_custom_op(
     _silu_and_mul,
     mutates_args=["out"],
     fake_impl=_silu_and_mul_fake,
+    target_lib=_LIB,
+    dispatch_key="PrivateUse1",
+)
+
+
+direct_register_custom_op(
+    "rotary_embedding",
+    _rotary_embedding,
+    fake_impl=_rotary_embedding_fake,
+    target_lib=_LIB,
+    dispatch_key="PrivateUse1",
+)
+direct_register_custom_op(
+    "rotary_embedding_inplace",
+    _rotary_embedding_inplace,
+    mutates_args=["query", "key"],
+    fake_impl=_rotary_embedding_inplace_fake,
     target_lib=_LIB,
     dispatch_key="PrivateUse1",
 )
@@ -102,3 +188,23 @@ def silu_and_mul(x: torch.Tensor) -> torch.Tensor:
     out = torch.empty_like(x[..., :d])
     torch.ops.vllm_fl_musa.silu_and_mul(out, x)
     return out
+
+
+def rotary_embedding(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    position_ids: torch.Tensor | None,
+    rotary_interleaved: bool,
+    inplace: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if inplace:
+        # Return input aliases outside the void custom op's explicit mutation.
+        torch.ops.vllm_fl_musa.rotary_embedding_inplace(
+            query, key, cos, sin, position_ids, rotary_interleaved
+        )
+        return query.view(query.shape), key.view(key.shape)
+    return torch.ops.vllm_fl_musa.rotary_embedding(
+        query, key, cos, sin, position_ids, rotary_interleaved
+    )
