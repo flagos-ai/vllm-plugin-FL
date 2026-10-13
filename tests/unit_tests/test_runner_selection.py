@@ -40,6 +40,7 @@ def _make_ascend_vllm_config(
             backend=backend,
             mode=compilation_mode,
             compile_sizes=None,
+            inductor_compile_config={},
             cudagraph_mode=cudagraph_mode,
             pass_config=SimpleNamespace(
                 fuse_norm_quant=True,
