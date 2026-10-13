@@ -41,11 +41,6 @@ on:
         type: string
         required: false
         default: ""
-      musa_probe_only:
-        description: "Read-only MUSA runner inventory; do not run GPU tests"
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -114,7 +109,7 @@ jobs:
         run: pip install pyyaml
       - id: detect
         env:
-          REQUESTED_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && (inputs.musa_probe_only && 'musa' || inputs.platform) || 'all' }}
+          REQUESTED_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.platform || 'all' }}
         run: |
           if [ "$REQUESTED_PLATFORM" = "musa" ]; then
             echo 'platforms=["musa"]' >> "$GITHUB_OUTPUT"
@@ -174,7 +169,7 @@ jobs:
   # ============================================================
   test-musa:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'musa') && !(github.event_name == 'workflow_dispatch' && inputs.musa_probe_only)
+    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
     uses: ./.github/workflows/_musa_test.yml
     with:
       platform: musa
@@ -213,24 +208,6 @@ jobs:
     with:
       platform: iluvatar
     secrets: inherit
-
-  # Inventory runs on the same registered MUSA label without a GPU container.
-  # This produces allocation evidence; it is never model or Gate acceptance.
-  musa-runner-probe:
-    if: github.event_name == 'workflow_dispatch' && inputs.musa_probe_only
-    runs-on: mt-cicd-vllm-plugin
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: Read sanitized runner resources
-        env:
-          PROBE_OUTPUT: ${{ runner.temp }}/musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}.json
-        run: python3 -I -B .github/scripts/musa/probe_runner.py --output "$PROBE_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/musa-runner-probe-${{ github.run_id }}-${{ github.run_attempt }}.json
-          if-no-files-found: error
 
   # THead uses normal registration and finite suites with zero-skip acceptance.
   test-thead:

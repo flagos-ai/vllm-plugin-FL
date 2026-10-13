@@ -315,21 +315,18 @@ class ConfigTests(unittest.TestCase):
             ["unit", "functional", "e2e", "benchmark"],
         )
 
-    def test_probe_is_separate_bare_host_workflow(self):
+    def test_ci_has_no_optional_runner_probe(self):
         workflow = yaml.load(
             (ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
         )
-        probe = workflow["jobs"]["musa-runner-probe"]
-        self.assertEqual(probe["runs-on"], "mt-cicd-vllm-plugin")
-        self.assertNotIn("container", probe)
-        selection = next(
-            step
-            for step in workflow["jobs"]["discover"]["steps"]
-            if step.get("id") == "detect"
-        )["env"]["REQUESTED_PLATFORM"]
-        self.assertIn("inputs.musa_probe_only && 'musa'", selection)
-        self.assertIn("inputs.musa_probe_only", workflow["jobs"]["test-musa"]["if"])
-        self.assertIn("inputs.musa_probe_only", probe["if"])
+        self.assertNotIn("musa-runner-probe", workflow["jobs"])
+        self.assertNotIn(
+            "musa_probe_only", workflow["on"]["workflow_dispatch"]["inputs"]
+        )
+        self.assertEqual(
+            workflow["jobs"]["test-musa"]["if"],
+            "contains(fromJson(needs.discover.outputs.platforms), 'musa')",
+        )
 
 
 class ProbeTests(unittest.TestCase):

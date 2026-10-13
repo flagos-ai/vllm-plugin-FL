@@ -16,12 +16,10 @@ SHA values from `.github/configs/musa.yml`. The existing Job 4e is enabled with
 four-card defaults and checks the executing container's device mapping and idle
 resources before Torch initialization. A per-run allocation remains an
 optional JSON override for the actual executing runner. The workflow entry is
-`ci.yml`; a dispatch
-selects `platform=musa` and either inventory-only `musa_probe_only=true` or a
-full run using the committed defaults or an explicit `musa_allocation` override.
-The inventory job reads
-sanitized resource observations without a GPU container or Torch import;
-its success is not inference or Gate acceptance.
+`ci.yml`; a dispatch selects `platform=musa` for a full run using the committed
+defaults or an explicit `musa_allocation` override. The standalone inventory
+job has been removed. Device identity and idle checks run within `test-musa`
+before GPU initialization.
 
 The committed-source FL/observer ordinary builds and local image CPU
 installation checks passed. The ordinary image is published, with a successful

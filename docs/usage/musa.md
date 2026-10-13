@@ -31,7 +31,7 @@ checks passed. MUSA is enabled in the existing Job 4e and uses this image for
 PR CI. Full new-image GPU acceptance depends on the actual suite and original
 Gate results; publication and CPU checks alone do not establish it.
 
-The latest [181c512 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38273835802/job/114895296688)
+The completed [181c512 hardware attempt](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38273835802/job/114895296688)
 completed successfully on 2026-10-12 at 17:05:33 UTC. Unit, functional,
 both existing E2E groups, benchmark smoke and the original eager/graph Gate
 step all passed, followed by successful container cleanup. The original Gate
@@ -112,24 +112,14 @@ inherit `/opt/musa/venv`, setup explicitly installs the three pinned image
 dependencies again from `/opt/musa/wheelhouse`. Wheel hashes, complete `RECORD` files,
 module origins and the protected vendor inputs are checked in that venv.
 
-The CI entry is `.github/workflows/ci.yml`, using the same reusable platform
-workflow as main. Automatic MUSA discovery is enabled for PR CI. An explicit
-dispatch can select only MUSA; read-only inventory remains available for
-diagnostics on a committed ref:
+The CI entry is `.github/workflows/ci.yml`. MUSA uses `_musa_test.yml` for
+serial execution on one allocated runner; other backends use the unchanged
+shared `_platform_test.yml` from main. Automatic MUSA discovery is enabled for
+PR CI, and an explicit dispatch can select only MUSA. The optional standalone
+runner inventory job and its `musa_probe_only` input have been removed; device
+identity and idle checks remain inside the executing MUSA test job.
 
-```bash
-gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
-  -f platform=musa -F musa_probe_only=true
-```
-
-The `musa-runner-probe` artifact contains sanitized runtime names, PCI identities,
-device/memory observations and bounded device-FD counts; it does not create a
-GPU container or run Torch, inference or model checks. Missing access, an
-incomplete scan or a queued probe does not establish an idle allocation. The
-normal lint/build jobs still have their own results, so an inventory success
-alone cannot certify the complete workflow.
-
-The inventory-only
+The historical inventory-only
 [run 38108902958](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38108902958)
 completed successfully at `2b6bee63ad1b852021a9e166195aa3fac75443f1`:
 lint (Ruff check/format, ShellCheck and Typos), ordinary package build,
@@ -153,7 +143,7 @@ A direct full run also works without an allocation input:
 
 ```bash
 gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
-  -f platform=musa -F musa_probe_only=false
+  -f platform=musa
 ```
 
 To override the runner defaults, supply a reviewed allocation JSON with
@@ -173,8 +163,7 @@ variables are absent, the common catalog paths remain the defaults.
 
 ```bash
 gh workflow run ci.yml --repo flagos-ai/vllm-plugin-FL --ref "$COMMITTED_REF" \
-  -f platform=musa -f musa_allocation="$(cat "$ALLOCATION_JSON")" \
-  -F musa_probe_only=false
+  -f platform=musa -f musa_allocation="$(cat "$ALLOCATION_JSON")"
 gh run watch "$RUN_ID" --repo flagos-ai/vllm-plugin-FL --exit-status
 ```
 
@@ -190,6 +179,12 @@ suite/Gate artifact. A workflow is qualified only by its actual jobs and unchang
 four-route Gate: 104 requests, 1040 checks, 20 JUnit cases, 32 complete streams
 and 52/208 graph joins. Probe-only, ordinary build or an earlier private Gate
 does not substitute for this new image/CI result.
+
+MUSA disables Torch 2.9 Inductor combo-kernel fusion and its benchmark tuning
+while retaining Inductor compilation and all configured graph shapes. This
+avoids the combo-kernel autotuning path that exhausted memory during startup.
+The parent process installs the MUSA allocator API bindings before model
+imports, so cleanup preserves the original startup exception.
 
 ## Additional FlagGems and FlagTree modifications
 

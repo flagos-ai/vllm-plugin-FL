@@ -259,3 +259,121 @@ def test_synchronize_vendor_errors_are_not_hidden(
     with pytest.raises(RuntimeError, match="MUSA device is unavailable"):
         torch.accelerator.synchronize(2)
     musa.synchronize.assert_called_once_with(2)
+
+
+@pytest.fixture
+def parent_registration(monkeypatch, musa_patch, vendor_modules):
+    import ast
+    import os
+
+    source = Path(__file__).resolve().parents[2] / "vllm_fl/__init__.py"
+    parsed = ast.parse(source.read_text(encoding="utf-8"))
+    functions = [
+        node
+        for node in parsed.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_init_vendor_device", "register"}
+    ]
+    namespace = {
+        "os": os,
+        "_arm_cpu_platform": lambda: None,
+        "_patch_custom_ops": Mock(),
+        "_patch_flash_attn_import": Mock(),
+        "_get_op_config": Mock(),
+    }
+    exec(
+        compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"),
+        namespace,
+    )
+    torch, musa = vendor_modules
+    utils = ModuleType("vllm_fl.utils")
+    utils.DeviceInfo = Mock(return_value=SimpleNamespace(vendor_name="mthreads"))
+    kunlunxin = ModuleType(
+        "vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils"
+    )
+    kunlunxin._patch_xpu_get_device = Mock()
+    with monkeypatch.context() as imports:
+        imports.setitem(sys.modules, "vllm_fl.utils", utils)
+        imports.setitem(
+            sys.modules, "vllm_fl.dispatch.backends.vendor.musa.patch", musa_patch
+        )
+        imports.setitem(sys.modules, kunlunxin.__name__, kunlunxin)
+        imports.setitem(sys.modules, "torch", torch)
+        imports.setitem(sys.modules, "torch_musa", musa)
+        imports.setattr(musa_patch, "apply_musa_patches", Mock())
+        imports.setenv("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+        imports.setenv("VLLM_USE_V2_MODEL_RUNNER", "0")
+        yield namespace, utils, kunlunxin
+        musa_patch.apply_musa_patches.assert_not_called()
+
+
+def test_parent_cleanup_preserves_original_startup_error(
+    parent_registration, vendor_modules
+):
+    namespace, _, _ = parent_registration
+    torch, musa = vendor_modules
+    startup_error = RuntimeError("engine startup failed before model construction")
+    namespace["_patch_custom_ops"].side_effect = startup_error
+
+    # Registration can fail before model initialization; its allocator bridge
+    # must already be present so cleanup cannot replace the original error.
+    with pytest.raises(RuntimeError) as caught:
+        try:
+            namespace["register"]()
+        finally:
+            torch.accelerator.empty_cache()
+    assert caught.value is startup_error
+    musa.empty_cache.assert_called_once_with()
+    assert torch.accelerator.get_memory_info is musa.mem_get_info
+    namespace["_patch_flash_attn_import"].assert_not_called()
+
+
+def test_parent_registration_allocator_binding_is_idempotent(
+    parent_registration, vendor_modules
+):
+    namespace, _, _ = parent_registration
+    torch, musa = vendor_modules
+    assert namespace["register"]() == "vllm_fl.platform.PlatformFL"
+    bindings = vars(torch.accelerator).copy()
+    musa.empty_cache = Mock()
+    musa.mem_get_info = Mock()
+    assert namespace["register"]() == "vllm_fl.platform.PlatformFL"
+    assert vars(torch.accelerator) == bindings
+
+
+@pytest.mark.parametrize("invalid_api", ["missing", "not_callable"])
+def test_parent_registration_rejects_incomplete_allocator_bridge(
+    parent_registration, vendor_modules, invalid_api
+):
+    namespace, _, _ = parent_registration
+    torch, musa = vendor_modules
+    original = vars(torch.accelerator).copy()
+    if invalid_api == "missing":
+        del musa.mem_get_info
+    else:
+        musa.mem_get_info = None
+    with pytest.raises(
+        RuntimeError, match="initialize MUSA accelerator allocator APIs"
+    ):
+        namespace["register"]()
+    assert vars(torch.accelerator) == original
+    namespace["_patch_custom_ops"].assert_not_called()
+
+
+@pytest.mark.parametrize("vendor", ["nvidia", "ascend", "kunlunxin", "metax"])
+def test_parent_registration_keeps_other_vendor_allocator_unchanged(
+    parent_registration, vendor_modules, vendor
+):
+    namespace, utils, kunlunxin = parent_registration
+    torch, musa = vendor_modules
+    utils.DeviceInfo.return_value.vendor_name = vendor
+    original = vars(torch.accelerator).copy()
+    result = namespace["register"]()
+    assert result == (
+        "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+        if vendor == "nvidia"
+        else "vllm_fl.platform.PlatformFL"
+    )
+    assert vars(torch.accelerator) == original
+    musa.empty_cache.assert_not_called()
+    assert kunlunxin._patch_xpu_get_device.call_count == (vendor == "kunlunxin")
