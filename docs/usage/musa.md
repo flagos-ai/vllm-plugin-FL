@@ -196,6 +196,19 @@ The parent process installs MUSA allocator API bindings before model imports,
 so cleanup preserves the original startup exception. The new default requires
 actual CI acceptance of all seven E2E cases, benchmark and original Gate.
 
+Compiled MUSA workers tell Dynamo to omit `logging.Logger.debug` calls during
+tracing. Existing compiler settings, tensor math, eager debug logs and
+warning/error logs remain unchanged.
+MUSA profiling logs each original capture bucket's start, completion and native
+free-memory values to locate startup capture failures.
+
+Earlier functional-stage success records describe command exit status. In CI
+runs `38405604174` and `38423620853`, all 23 GPU-marked functional cases were
+skipped because the shared test-device helper did not detect MUSA. The helper
+now recognizes native MUSA devices and counts while preserving CUDA/NPU
+priority and the existing skip rules; actual functional coverage requires
+validation in the next CI run.
+
 ## Additional FlagGems and FlagTree modifications
 
 The ordinary stack uses explicit private dependency profiles. A public commit
