@@ -21,9 +21,12 @@ _SPEC.loader.exec_module(index_fill)
 
 
 class Tensor:
-    def __init__(self, shape, device="gcu", strides=None, offset=0, writes=None):
+    def __init__(
+        self, shape, device="gcu", strides=None, offset=0, writes=None, dtype="int32"
+    ):
         self.shape = tuple(shape)
         self.device = SimpleNamespace(type=device)
+        self.dtype = dtype
         self.strides = tuple(
             strides or [prod(shape[i + 1 :]) for i in range(len(shape))]
         )
@@ -41,7 +44,13 @@ class Tensor:
 
     def view(self, *shape):
         assert prod(shape) == self.numel()
-        return Tensor(shape, self.device.type, offset=self.offset, writes=self.writes)
+        return Tensor(
+            shape,
+            self.device.type,
+            offset=self.offset,
+            writes=self.writes,
+            dtype=self.dtype,
+        )
 
     def narrow(self, dim, start, length):
         shape = list(self.shape)
@@ -53,6 +62,7 @@ class Tensor:
             self.strides,
             self.offset + start * self.strides[dim],
             self.writes,
+            self.dtype,
         )
 
 
@@ -110,17 +120,19 @@ def provider(simulate=False):
         index_fill_kernel=Kernel(simulate),
         _BLOCK_SIZE=512,
         _MAX_RANK=8,
+        torch=SimpleNamespace(int64="int64"),
     )
     return module, delegated, sentinel
 
 
 @pytest.mark.parametrize("inner,adapted", [(16320, False), (16321, True)])
-def test_grid_y_boundary_preserves_safe_official_launcher(inner, adapted):
+@pytest.mark.parametrize("dtype", ["int32", "int64"])
+def test_grid_y_boundary_preserves_safe_official_launcher(inner, adapted, dtype):
     module, delegated, sentinel = provider()
     launch = index_fill._make_contiguous_launch(
         module, module._index_fill_contiguous_launch
     )
-    out, indices = Tensor((4, inner)), Indices(2)
+    out, indices = Tensor((4, inner), dtype=dtype), Indices(2)
     result = launch(out, 0, indices, 0, False, 2 * inner)
     assert bool(module.index_fill_kernel.calls) is adapted
     assert bool(delegated) is (not adapted)
@@ -204,7 +216,10 @@ def test_tiles_cover_every_fill_coordinate_once(shape, capacity):
         assert set(coords) == set(product(range(outer), range(inner), range(index_len)))
 
 
-def test_strided_tiles_preserve_values_with_duplicate_indices_across_tiles(monkeypatch):
+@pytest.mark.parametrize("dtype", ["int32", "int64"])
+def test_strided_tiles_preserve_values_with_duplicate_indices_across_tiles(
+    monkeypatch, dtype
+):
     module, _, _ = provider(simulate=True)
     module._BLOCK_SIZE = 4
     monkeypatch.setattr(index_fill, "_MAX_GRID_X", 2)
@@ -212,7 +227,7 @@ def test_strided_tiles_preserve_values_with_duplicate_indices_across_tiles(monke
     launch = index_fill._make_contiguous_launch(
         module, module._index_fill_contiguous_launch
     )
-    out = Tensor((2, 3, 9))
+    out = Tensor((2, 3, 9), dtype=dtype)
     launch(out, 1, Indices(3, [0, -1, 0]), 37, False, 2 * 9 * 3)
     expected = {
         outer * 27 + dim * 9 + inner: 37
@@ -220,6 +235,85 @@ def test_strided_tiles_preserve_values_with_duplicate_indices_across_tiles(monke
     }
     assert out.writes == expected
     assert all(grid[0] <= 2 for grid, _, _ in module.index_fill_kernel.calls)
+
+
+@pytest.mark.parametrize("inner,block,grid", [(151936, 256, 1187), (151808, 512, 593)])
+@pytest.mark.parametrize("tensor_value", [False, True])
+def test_int64_tail_uses_full_blocks_without_converting_value(
+    inner, block, grid, tensor_value
+):
+    module, delegated, _ = provider()
+    launch = index_fill._make_contiguous_launch(
+        module, module._index_fill_contiguous_launch
+    )
+    value = object() if tensor_value else -(2**40) - 3
+    launch(
+        Tensor((4, inner), dtype="int64"), 0, Indices(2), value, tensor_value, 2 * inner
+    )
+    assert not delegated
+    assert len(module.index_fill_kernel.calls) == 1
+    actual_grid, args, kwargs = module.index_fill_kernel.calls[0]
+    assert actual_grid == (grid,)
+    assert kwargs["BLOCK_SIZE"] == block
+    assert grid * block == args[3] == 2 * inner
+    assert args[2] is value
+    assert kwargs["VALUE_IS_TENSOR"] is tensor_value
+    assert args[0].dtype == "int64"
+
+
+def _assert_full_block_partition(shape, max_grid, max_block_size=512):
+    launches = list(index_fill._full_block_tiles(*shape, max_block_size, max_grid))
+    boxes = []
+    for block, (os, oc, ins, inc, ns, nc) in launches:
+        assert 0 < block <= max_block_size and block & (block - 1) == 0
+        count = oc * inc * nc
+        assert count % block == 0 and 0 < count // block <= max_grid
+        box = ((os, oc), (ins, inc), (ns, nc))
+        assert all(
+            0 <= start < end and 0 < size <= end - start
+            for (start, size), end in zip(box, shape)
+        )
+        for previous in boxes:
+            assert any(
+                start + size <= other_start or other_start + other_size <= start
+                for (start, size), (other_start, other_size) in zip(box, previous)
+            )
+        boxes.append(box)
+    # Disjoint boxes inside the original domain with equal volume cover it exactly.
+    assert sum(prod(size for _, size in box) for box in boxes) == prod(shape)
+    return launches
+
+
+@pytest.mark.parametrize(
+    "shape,max_grid",
+    [
+        ((1, 151935, 2), 65535),
+        ((1, 151937, 2), 65535),
+        ((3, 131071, 5), 65535),
+        ((65537, 1, 1), 65535),
+        ((1, 1, 65537), 65535),
+        ((2, 4, 32), 1),
+        ((8, 9, 8), 2),
+        ((32, 16, 32), 7),
+        ((1, 151936, 256), 65535),
+    ],
+)
+def test_int64_full_block_partition_covers_large_odd_and_mixed_axes(shape, max_grid):
+    _assert_full_block_partition(shape, max_grid)
+
+
+def test_int64_full_block_partition_exhaustive_small_geometry():
+    for shape in product(range(1, 10), repeat=3):
+        for max_grid in (3, 7):
+            launches = _assert_full_block_partition(shape, max_grid, max_block_size=8)
+            coordinates = set()
+            for _, (os, oc, ins, inc, ns, nc) in launches:
+                coordinates.update(
+                    product(
+                        range(os, os + oc), range(ins, ins + inc), range(ns, ns + nc)
+                    )
+                )
+            assert coordinates == set(product(*(range(size) for size in shape)))
 
 
 def source_provider(tmp_path, monkeypatch):

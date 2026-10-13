@@ -44,10 +44,41 @@ def _tiles(outer: int, inner: int, index_len: int, capacity: int):
                 )
 
 
+def _full_block_tiles(outer, inner, index_len, max_block_size, max_grid):
+    """Tile int64 fills without inactive lanes beyond the fill-space tail."""
+    if min(outer, inner, index_len, max_block_size, max_grid) <= 0:
+        raise ValueError("Index-fill tile dimensions must be positive")
+    count = outer * inner * index_len
+    block_size = min(max_block_size, count & -count)
+    # Distribute the power-of-two block size among divisors of the three
+    # axes. A tile in these units contains a whole number of launch blocks.
+    inner_factor = min(block_size, inner & -inner)
+    outer_factor = min(block_size // inner_factor, outer & -outer)
+    index_factor = block_size // (inner_factor * outer_factor)
+    for os, oc, ins, inc, ns, nc in _tiles(
+        outer // outer_factor,
+        inner // inner_factor,
+        index_len // index_factor,
+        max_grid,
+    ):
+        yield (
+            block_size,
+            (
+                os * outer_factor,
+                oc * outer_factor,
+                ins * inner_factor,
+                inc * inner_factor,
+                ns * index_factor,
+                nc * index_factor,
+            ),
+        )
+
+
 def _make_contiguous_launch(module, original):
     kernel = module.index_fill_kernel
     block_size = module._BLOCK_SIZE
     max_rank = module._MAX_RANK
+    int64_dtype = module.torch.int64
 
     @wraps(original)
     def launch(out, dim, index, value, value_is_tensor, fill_numel):
@@ -69,15 +100,27 @@ def _make_contiguous_launch(module, original):
         # surrounding dimensions as a view so the existing generic kernel can
         # address any original rank using three shape/stride slots.
         view = out.view(outer, dim_size, inner)
-        capacity = _MAX_GRID_X * block_size
-        for (
+        if out.dtype == int64_dtype:
+            # Keep partial fill-space blocks out of the GCU int64 store path.
+            # Values and upstream invalid-index masking remain unchanged.
+            tiles = _full_block_tiles(
+                outer, inner, index.numel(), block_size, _MAX_GRID_X
+            )
+        else:
+            tiles = (
+                (block_size, tile)
+                for tile in _tiles(
+                    outer, inner, index.numel(), _MAX_GRID_X * block_size
+                )
+            )
+        for launch_block_size, (
             outer_start,
             outer_count,
             inner_start,
             inner_count,
             index_start,
             index_count,
-        ) in _tiles(outer, inner, index.numel(), capacity):
+        ) in tiles:
             part = view.narrow(0, outer_start, outer_count).narrow(
                 2, inner_start, inner_count
             )
@@ -85,7 +128,7 @@ def _make_contiguous_launch(module, original):
             count = outer_count * inner_count * index_count
             shapes = list(part.shape) + [1] * (max_rank - 3)
             strides = list(part.stride()) + [0] * (max_rank - 3)
-            kernel[((count + block_size - 1) // block_size,)](
+            kernel[((count + launch_block_size - 1) // launch_block_size,)](
                 part,
                 index_part,
                 value,
@@ -97,7 +140,7 @@ def _make_contiguous_launch(module, original):
                 DIM=1,
                 RANK=3,
                 VALUE_IS_TENSOR=value_is_tensor,
-                BLOCK_SIZE=block_size,
+                BLOCK_SIZE=launch_block_size,
             )
         return None
 
