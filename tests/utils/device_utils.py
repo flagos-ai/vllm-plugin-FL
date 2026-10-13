@@ -11,11 +11,21 @@ or auto-detected from available hardware.
 """
 
 import os
+from importlib.util import find_spec
 
 import pytest
 import torch
 
 _BACKEND = os.environ.get("FL_BACKEND", "").lower()
+
+
+def _gcu_runtime():
+    """Load an installed GCU SDK without hiding driver/import failures."""
+    if find_spec("torch_gcu") is None:
+        return None
+    import torch_gcu  # noqa: F401
+
+    return torch.gcu
 
 
 def get_backend() -> str:
@@ -25,6 +35,9 @@ def get_backend() -> str:
         1. FL_BACKEND environment variable (set by CI workflow)
         2. Auto-detect from available hardware
     """
+    if _BACKEND in ("enflame", "gcu"):
+        runtime = _gcu_runtime()
+        return "enflame" if runtime is not None and runtime.is_available() else "cpu"
     if _BACKEND:
         return _BACKEND
     if torch.cuda.is_available():
@@ -41,6 +54,9 @@ def get_backend() -> str:
             return "ascend"
     except ImportError:
         pass  # torch_npu not installed; ascend backend not available
+    runtime = _gcu_runtime()
+    if runtime is not None and runtime.is_available():
+        return "enflame"
     return "cpu"
 
 
@@ -59,6 +75,8 @@ def get_device(index: int = 0) -> torch.device:
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
+    elif backend == "enflame":
+        return torch.device(f"gcu:{index}")
     return torch.device("cpu")
 
 
@@ -74,6 +92,8 @@ def get_device_count() -> int:
             return torch.npu.device_count()
         except ImportError:
             return 0
+    elif backend == "enflame":
+        return torch.gcu.device_count()
     return 0
 
 

@@ -465,7 +465,7 @@ def test_alias_from_another_existing_file_is_rejected(monkeypatch, tmp_path):
 def test_identical_module_alias_is_only_installed_once(monkeypatch):
     provider, _, _, _, _ = make_provider()
     monkeypatch.setitem(sys.modules, "torch.gcu.inductor.backend_register", provider)
-    assert inductor._loaded_gcu_inductor_providers(provider) == (provider,)
+    assert inductor._loaded_gcu_inductor_providers(provider) == [provider]
 
 
 def test_non_enflame_entry_point_does_not_import_or_modify_provider(monkeypatch):

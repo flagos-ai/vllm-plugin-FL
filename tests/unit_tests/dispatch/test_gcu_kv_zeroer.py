@@ -365,14 +365,13 @@ def test_patch_is_gcu_only_and_warmup_uses_new_launcher(monkeypatch):
         worker_utils.KVBlockZeroer, "_fl_gcu_original_init", raising=False
     )
     monkeypatch.setattr(worker_utils.KVBlockZeroer, "zero_block_ids", original_method)
-    monkeypatch.setattr(kv_zeroer, "_patched", False)
     monkeypatch.setattr(
         vllm.platforms, "current_platform", SimpleNamespace(vendor_name="nvidia")
     )
     kv_zeroer.apply_kv_zeroer_gcu_patch()
     assert worker_utils.KVBlockZeroer.zero_block_ids is original_method
     assert worker_utils.KVBlockZeroer.__init__ is original_init
-    assert not kv_zeroer._patched
+    assert not hasattr(worker_utils.KVBlockZeroer, "_fl_gcu_original_init")
 
     monkeypatch.setattr(
         vllm.platforms, "current_platform", SimpleNamespace(vendor_name="enflame")

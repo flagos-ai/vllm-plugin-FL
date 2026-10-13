@@ -18,7 +18,6 @@ from vllm.utils.torch_utils import async_tensor_h2d
 logger = logging.getLogger(__name__)
 
 GCU_MAX_GRID_X = 65535
-_patched = False
 
 
 @lru_cache(maxsize=1)
@@ -145,9 +144,6 @@ def zero_block_ids_gcu(self, block_ids: list[int]) -> None:
 
 def apply_kv_zeroer_gcu_patch() -> None:
     """Install in each Enflame worker; leave other platforms unchanged."""
-    global _patched
-    if _patched:
-        return
     from vllm.platforms import current_platform
 
     if getattr(current_platform, "vendor_name", None) not in ("gcu", "enflame"):
@@ -156,9 +152,13 @@ def apply_kv_zeroer_gcu_patch() -> None:
 
     # Keep the official kernel and builder; translate its address table once.
     zeroer_class = worker_utils.KVBlockZeroer
+    if (
+        zeroer_class.__init__ is init_kv_zeroer_gcu
+        and zeroer_class.zero_block_ids is zero_block_ids_gcu
+    ):
+        return
     if not hasattr(zeroer_class, "_fl_gcu_original_init"):
         zeroer_class._fl_gcu_original_init = zeroer_class.__init__
     zeroer_class.__init__ = init_kv_zeroer_gcu
     zeroer_class.zero_block_ids = zero_block_ids_gcu
-    _patched = True
     logger.info("Installed Enflame KV zeroer with device addresses and a bounded grid")
