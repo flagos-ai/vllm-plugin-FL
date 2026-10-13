@@ -37,7 +37,7 @@ device_overrides:
       - qwen3_6/35b_a3b_tp2_eager
       - qwen3_6/35b_a3b_tp2_graph
     llm:
-      gpu_memory_utilization: 0.90
+      gpu_memory_utilization: 0.94
       disable_custom_all_reduce: false
     serve:
       startup_retries: 240

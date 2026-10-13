@@ -96,6 +96,14 @@ read-only. Keep the container's default private PID namespace because the
 test runner performs process cleanup. Use a unique task container and
 tmux sessions for setup, service and tests.
 
+On S60, Qwen3.6-35B-A3B was validated in TP2 graph mode with
+`--gpu-memory-utilization 0.94`, `--max-model-len 32768`,
+`--max-num-seqs 256` and FP32 Mamba state. All five original Gate scenarios
+passed (26 requests and 260 checks), with their inputs and checks unchanged.
+Enflame CI shares one device-level memory budget across its four configured
+TP2 eager/graph cases, so the `0.94` override applies to all four while
+retaining their existing model settings and quality thresholds.
+
 Inside that task container, from the private plugin checkout:
 
 ```bash
