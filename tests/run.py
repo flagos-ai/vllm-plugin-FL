@@ -311,7 +311,13 @@ class TestRunner:
         func_filter = self.config.get_functional_filter()
         test_path = "tests/functional_tests/"
 
-        extra_args = ["-v", "--tb=short", "-s"]
+        extra_args = [
+            "-v",
+            "--tb=short",
+            "-s",
+            "--json-report",
+            f"--json-report-file=report-functional-{self.config.platform}.json",
+        ]
 
         # Apply exclude patterns
         for pattern in func_filter.exclude:
