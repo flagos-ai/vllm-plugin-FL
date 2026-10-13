@@ -15,7 +15,6 @@ import math
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
-from unittest.mock import patch
 
 import pytest
 import torch
@@ -55,6 +54,87 @@ def silu_kernel(x, y):
     return (x.float() / (1 + torch.exp(-x.float())) * y).to(dtype)
 
 
+def rope_tensor_math(query, cos, sin, position_ids, interleaved):
+    view = query.view(-1, query.shape[-2], query.shape[-1])
+    if position_ids is None:
+        seq = query.shape[-3]
+        position_ids = torch.arange(seq).repeat(view.shape[0] // seq)
+    cos = cos[position_ids.flatten()].unsqueeze(1).float()
+    sin = sin[position_ids.flatten()].unsqueeze(1).float()
+    if interleaved:
+        rotation = torch.stack((-view[..., 1::2], view[..., ::2]), dim=-1).flatten(-2)
+        cos = cos.repeat_interleave(2, dim=-1)
+        sin = sin.repeat_interleave(2, dim=-1)
+    else:
+        half = view.shape[-1] // 2
+        rotation = torch.cat((-view[..., half:], view[..., :half]), dim=-1)
+        cos = torch.cat((cos, cos), dim=-1)
+        sin = torch.cat((sin, sin), dim=-1)
+    return (
+        (view.float() * cos + rotation.float() * sin).to(query.dtype).view(query.shape)
+    )
+
+
+def rope_kernel(
+    query, key, cos, sin, position_ids=None, rotary_interleaved=False, inplace=False
+):
+    # Match the real Gems view->empty_like->view allocation and input mutations.
+    first = rope_tensor_math(query, cos, sin, position_ids, rotary_interleaved)
+    second = rope_tensor_math(key, cos, sin, position_ids, rotary_interleaved)
+    if inplace:
+        query.copy_(first)
+        key.copy_(second)
+        return query.view(query.shape), key.view(key.shape)
+    first_out = torch.empty_like(query.view(-1, query.shape[-2], query.shape[-1])).view(
+        query.shape
+    )
+    second_out = torch.empty_like(key.view(-1, key.shape[-2], key.shape[-1])).view(
+        key.shape
+    )
+    return first_out.copy_(first), second_out.copy_(second)
+
+
+def rope_oracle(query, cos, sin, positions, interleaved):
+    # Scalar head/position arithmetic is independent of the vectorized kernel.
+    values = query.reshape(-1, query.shape[-2], query.shape[-1]).tolist()
+    if positions is None:
+        seq = query.shape[-3]
+        position_values = [i % seq for i in range(len(values))]
+    else:
+        position_values = positions.flatten().tolist()
+    result = []
+    for token, position in zip(values, position_values):
+        rows = []
+        for row in token:
+            half = len(row) // 2
+            rotated = []
+            for i, value in enumerate(row):
+                partner = (i ^ 1) if interleaved else (i + half) % len(row)
+                negative = i % 2 == 0 if interleaved else i < half
+                index = i // 2 if interleaved else i % half
+                rotated.append(
+                    value * float(cos[position, index])
+                    + (-1 if negative else 1)
+                    * row[partner]
+                    * float(sin[position, index])
+                )
+            rows.append(rotated)
+        result.append(rows)
+    return torch.tensor(result, dtype=query.dtype).reshape(query.shape)
+
+
+def rope_inputs(noncontiguous=False, *, dtype=torch.float32, tokens=3):
+    parent = torch.arange(tokens * 4 * 12, dtype=dtype).reshape(tokens, 4, 12) / 16
+    if noncontiguous:
+        query, key = parent[:, :2, 2:10], parent[:, 2:, 2:10]
+    else:
+        query, key = parent[:, :2, :8].contiguous(), parent[:, 2:, :8].contiguous()
+    cos = torch.arange(1, 65, dtype=torch.float32).reshape(16, 4).cos()
+    sin = torch.arange(1, 65, dtype=torch.float32).reshape(16, 4).sin()
+    positions = torch.arange(tokens, dtype=torch.int64)
+    return query, key, cos, sin, positions
+
+
 @pytest.fixture(scope="module")
 def boundary():
     state = NS(platform=NS(device_type="musa"), registrations=[], kernel_calls=[])
@@ -66,6 +146,8 @@ def boundary():
     rms_module = NS(gems_rms_forward=rms_kernel, use_c_extension=False)
     silu_module = NS(gems_silu_and_mul=silu_reference)
     out_module = NS(silu_and_mul_out=silu_out)
+    rope_module = NS(gems_rope_forward=rope_kernel)
+    config_module = NS(use_c_extension=False)
 
     def register(
         name, fn, mutates_args=None, fake_impl=None, target_lib=None, dispatch_key=None
@@ -91,6 +173,8 @@ def boundary():
         "flag_gems": {},
         "flag_gems.modules": {},
         "flag_gems.fused": {},
+        "flag_gems.config": vars(config_module),
+        "flag_gems.modules.rotary_embedding": vars(rope_module),
         "flag_gems.modules.normalization": vars(rms_module),
         "flag_gems.modules.activation": vars(silu_module),
         "flag_gems.fused.silu_and_mul": vars(out_module),
@@ -99,8 +183,11 @@ def boundary():
         module.__dict__.update(attrs)
         module.__path__ = []
         fake_modules[name] = module
-    module_patch = patch.dict(sys.modules, fake_modules)
-    module_patch.start()
+    # Restore only fake dependency keys; normal Torch modules imported during
+    # compilation must survive alongside their persistent cache registrations.
+    module_patch = pytest.MonkeyPatch()
+    for name, module in fake_modules.items():
+        module_patch.setitem(sys.modules, name, module)
 
     def imports(name, globals=None, locals=None, fromlist=(), level=0):
         if name == "vllm.utils.torch_utils":
@@ -143,7 +230,14 @@ def boundary():
                     self.generic_visit(node)
                     if (
                         ast.dump(node.left)
-                        == ast.dump(ast.parse("x.device.type", mode="eval").body)
+                        in {
+                            ast.dump(ast.parse(value, mode="eval").body)
+                            for value in (
+                                "x.device.type",
+                                "query.device.type",
+                                "key.device.type",
+                            )
+                        }
                         and len(node.ops) == 1
                         and isinstance(node.ops[0], ast.Eq)
                         and len(node.comparators) == 1
@@ -156,7 +250,7 @@ def boundary():
 
             guard = CPUTensorGuard()
             tree = guard.visit(tree)
-            assert guard.count == 1
+            assert guard.count == (2 if path.stem == "rotary" else 1)
         name = "musa_boundary_contract_" + path.stem + ("_cpu" if cpu_tensor else "")
         module = ModuleType(name)
         module.__dict__["__builtins__"] = {**vars(builtins), "__import__": imports}
@@ -168,6 +262,11 @@ def boundary():
     runtime = load(IMPL / "musa_ops.py", namespace_replace=True)
     activation = load(IMPL / "activation.py", cpu_tensor=True)
     norm = load(IMPL / "normalization.py", cpu_tensor=True)
+    rotary = load(IMPL / "rotary.py", cpu_tensor=True)
+    state.original_rotary = load(IMPL / "rotary.py").rotary_embedding_flaggems
+    state.rotary = rotary.rotary_embedding_flaggems
+    state.rope_module = fake_modules["flag_gems.modules.rotary_embedding"]
+    state.config_module = fake_modules["flag_gems.config"]
     state.original_activation = load(IMPL / "activation.py").silu_and_mul_flaggems
     state.original_norm = load(IMPL / "normalization.py").rms_norm_flaggems
     state.runtime = runtime
@@ -178,12 +277,13 @@ def boundary():
     yield state
     for name in loaded_modules:
         sys.modules.pop(name)
-    module_patch.stop()
+    module_patch.undo()
 
 
 @pytest.fixture(autouse=True)
 def isolated_compile(boundary):
     boundary.platform.device_type = "musa"
+    boundary.config_module.use_c_extension = False
     torch._dynamo.reset()
     with torch.no_grad():
         yield
@@ -341,6 +441,8 @@ def test_registration_schema_records_exact_mutations(boundary):
         ("rms_norm", ()),
         ("fused_add_rms_norm", ("x", "residual")),
         ("silu_and_mul", ("out",)),
+        ("rotary_embedding", ()),
+        ("rotary_embedding_inplace", ("query", "key")),
     ]
     schema = str(torch.ops.musa_boundary_cpu_test.fused_add_rms_norm.default._schema)
     assert "Tensor(a0!) x" in schema and "Tensor(a1!) residual" in schema
@@ -432,13 +534,13 @@ def test_eager_musa_retains_original_gems_path(boundary, monkeypatch, op, grad_e
     with torch.set_grad_enabled(grad_enabled):
         assert original(torch.ones(2, 4)) is sentinel
     assert boundary.kernel_calls == calls
-    assert len(boundary.registrations) == 3
+    assert len(boundary.registrations) == 5
 
 
 @pytest.mark.parametrize("op", ["norm", "silu"])
 def test_grad_enabled_compile_keeps_original_kernel_contract(boundary, op):
     check_original_compile(boundary, op, grad_enabled=True)
-    assert len(boundary.registrations) == 3
+    assert len(boundary.registrations) == 5
 
 
 @pytest.mark.parametrize("context", [torch.no_grad, torch.inference_mode])
@@ -518,3 +620,298 @@ def test_noncontiguous_silu_matches_preserve_format_output(boundary):
     actual = fn(x)
     torch.testing.assert_close(actual, expected)
     assert actual.stride() == torch.empty_like(x[..., :4]).stride()
+
+
+@pytest.mark.parametrize("interleaved", [False, True])
+@pytest.mark.parametrize("inplace", [False, True])
+@pytest.mark.parametrize("noncontiguous", [False, True])
+def test_rotary_fullgraph_matches_scalar_math_and_exact_aliases(
+    boundary, interleaved, inplace, noncontiguous
+):
+    graphs = []
+    fn = compiled(
+        lambda q, k, c, s, p: boundary.rotary(
+            None, q, k, c, s, p, interleaved, inplace
+        ),
+        graphs,
+    )
+    name = "rotary_embedding_inplace" if inplace else "rotary_embedding"
+    before = boundary.kernel_calls.count(name)
+    previous = None
+    snapshot = None
+    for shift in (0, 1):
+        q, k, cos, sin, positions = rope_inputs(noncontiguous)
+        q.add_(shift)
+        k.add_(shift)
+        original_q, original_k = q.clone(), k.clone()
+        q_value, k_value = fn(q, k, cos, sin, positions)
+        torch.testing.assert_close(
+            q_value, rope_oracle(original_q, cos, sin, positions, interleaved)
+        )
+        torch.testing.assert_close(
+            k_value, rope_oracle(original_k, cos, sin, positions, interleaved)
+        )
+        if inplace:
+            assert (
+                q_value.data_ptr() == q.data_ptr()
+                and k_value.data_ptr() == k.data_ptr()
+            )
+            assert q_value.stride() == q.stride() and k_value.stride() == k.stride()
+            assert q_value.storage_offset() == q.storage_offset()
+            torch.testing.assert_close(q, q_value)
+            torch.testing.assert_close(k, k_value)
+        else:
+            assert (
+                q_value.data_ptr() != q.data_ptr()
+                and k_value.data_ptr() != k.data_ptr()
+            )
+            torch.testing.assert_close(q, original_q)
+            torch.testing.assert_close(k, original_k)
+            if previous is not None:
+                torch.testing.assert_close(previous, snapshot)
+                assert previous.data_ptr() != q_value.data_ptr()
+            previous, snapshot = q_value, q_value.clone()
+    assert len(graphs) == 1 and boundary.kernel_calls.count(name) == before + 2
+    assert (
+        sum(
+            name == str(node.target).rsplit(".", 1)[-1]
+            or f".{name}." in str(node.target)
+            for node in graphs[0].graph.nodes
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_real_rotary_device_index_oldfail_new_fullgraph_pass(
+    boundary, monkeypatch, inplace
+):
+    def guarded_rope(
+        query, key, cos, sin, position_ids=None, rotary_interleaved=False, inplace=False
+    ):
+        # This is the real Torch function in the new GPU failure's terminal chain.
+        torch._utils._get_device_index(query.device, allow_cpu=True)
+        return rope_kernel(
+            query, key, cos, sin, position_ids, rotary_interleaved, inplace
+        )
+
+    monkeypatch.setattr(boundary.rope_module, "gems_rope_forward", guarded_rope)
+    arguments = rope_inputs()
+    with pytest.raises(torch._dynamo.exc.Unsupported, match="_get_device_index"):
+        torch.compile(
+            lambda q, k, c, s, p: boundary.original_rotary(
+                None, q, k, c, s, p, False, inplace
+            ),
+            backend="eager",
+            fullgraph=True,
+        )(*arguments)
+    torch._dynamo.reset()
+    graphs = []
+    q, k, cos, sin, positions = rope_inputs()
+    expected_q = rope_oracle(q, cos, sin, positions, False)
+    expected_k = rope_oracle(k, cos, sin, positions, False)
+    result = compiled(
+        lambda q, k, c, s, p: boundary.rotary(None, q, k, c, s, p, False, inplace),
+        graphs,
+    )(q, k, cos, sin, positions)
+    torch.testing.assert_close(result[0], expected_q)
+    torch.testing.assert_close(result[1], expected_k)
+    assert len(graphs) == 1
+    assert any(
+        "musa_boundary_cpu_test.rotary_embedding" in str(node.target)
+        for node in graphs[0].graph.nodes
+    )
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+@pytest.mark.parametrize("noncontiguous", [False, True])
+def test_rotary_fake_outputs_match_actual_Gems_view_allocation(
+    boundary, dtype, noncontiguous
+):
+    with FakeTensorMode():
+        q, k, c, s, p = rope_inputs(noncontiguous, dtype=dtype)
+        first, second = boundary.runtime.rotary_embedding(q, k, c, s, p, False, False)
+        for input_, actual in [(q, first), (k, second)]:
+            expected = torch.empty_like(
+                input_.view(-1, input_.shape[-2], input_.shape[-1])
+            ).view(input_.shape)
+            assert (actual.shape, actual.dtype, actual.device, actual.stride()) == (
+                expected.shape,
+                expected.dtype,
+                expected.device,
+                expected.stride(),
+            )
+        first, second = boundary.runtime.rotary_embedding(q, k, c, s, p, False, True)
+        assert (
+            first.storage_offset() == q.storage_offset()
+            and first.stride() == q.stride()
+        )
+        assert (
+            second.storage_offset() == k.storage_offset()
+            and second.stride() == k.stride()
+        )
+
+
+@pytest.mark.parametrize("platform", ["cuda", "npu", "cpu"])
+@pytest.mark.parametrize("inplace", [False, True])
+def test_rotary_other_backends_keep_original_route(boundary, platform, inplace):
+    boundary.platform.device_type = platform
+    before = len(boundary.kernel_calls)
+    q, k, c, s, p = rope_inputs()
+    expected = rope_oracle(q, c, s, p, False), rope_oracle(k, c, s, p, False)
+    graphs = []
+    result = compiled(
+        lambda q, k, c, s, p: boundary.rotary(None, q, k, c, s, p, False, inplace),
+        graphs,
+    )(q, k, c, s, p)
+    torch.testing.assert_close(result[0], expected[0])
+    torch.testing.assert_close(result[1], expected[1])
+    assert len(boundary.kernel_calls) == before
+    assert_plain_graph(graphs)
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_rotary_cpu_tensor_on_musa_keeps_original_route(boundary, inplace):
+    before = len(boundary.kernel_calls)
+    q, k, c, s, p = rope_inputs()
+    expected = rope_oracle(q, c, s, p, False), rope_oracle(k, c, s, p, False)
+    graphs = []
+    result = compiled(
+        lambda q, k, c, s, p: boundary.original_rotary(
+            None, q, k, c, s, p, False, inplace
+        ),
+        graphs,
+    )(q, k, c, s, p)
+    torch.testing.assert_close(result[0], expected[0])
+    torch.testing.assert_close(result[1], expected[1])
+    assert len(boundary.kernel_calls) == before
+    assert_plain_graph(graphs)
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_rotary_C_extension_route_is_not_replaced(boundary, inplace):
+    boundary.config_module.use_c_extension = True
+    before = len(boundary.kernel_calls)
+    q, k, c, s, p = rope_inputs()
+    expected = rope_oracle(q, c, s, p, False), rope_oracle(k, c, s, p, False)
+    graphs = []
+    result = compiled(
+        lambda q, k, c, s, p: boundary.rotary(None, q, k, c, s, p, False, inplace),
+        graphs,
+    )(q, k, c, s, p)
+    torch.testing.assert_close(result[0], expected[0])
+    torch.testing.assert_close(result[1], expected[1])
+    assert len(boundary.kernel_calls) == before
+    assert_plain_graph(graphs)
+
+
+@pytest.mark.parametrize("interleaved", [False, True])
+def test_rotary_grad_enabled_compile_keeps_original_contract(boundary, interleaved):
+    before = len(boundary.kernel_calls)
+    with torch.enable_grad():
+        q, k, c, s, p = rope_inputs()
+        q.requires_grad_()
+        k.requires_grad_()
+        graphs = []
+        first, second = compiled(
+            lambda q, k, c, s, p: boundary.rotary(
+                None, q, k, c, s, p, interleaved, False
+            ),
+            graphs,
+        )(q, k, c, s, p)
+        (first.sum() + second.sum()).backward()
+    cos, sin = c[p], s[p]
+    grad = (
+        torch.stack((cos + sin, cos - sin), dim=-1).flatten(-2)
+        if interleaved
+        else torch.cat((cos + sin, cos - sin), dim=-1)
+    )
+    torch.testing.assert_close(q.grad, grad.unsqueeze(1).expand_as(q))
+    torch.testing.assert_close(k.grad, grad.unsqueeze(1).expand_as(k))
+    assert len(boundary.kernel_calls) == before
+    assert_plain_graph(graphs)
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_rotary_optional_positions_preserve_4D_input_and_math(boundary, inplace):
+    q = torch.arange(64, dtype=torch.float32).reshape(2, 2, 2, 8) / 16
+    k = q[:, :, :1].clone()
+    c = torch.ones(2, 4)
+    s = torch.full((2, 4), 0.25)
+    expected = rope_oracle(q, c, s, None, False), rope_oracle(k, c, s, None, False)
+    graphs = []
+    result = compiled(
+        lambda q, k: boundary.rotary(None, q, k, c, s, None, False, inplace), graphs
+    )(q, k)
+    torch.testing.assert_close(result[0], expected[0])
+    torch.testing.assert_close(result[1], expected[1])
+    assert len(graphs) == 1
+
+
+def test_rotary_mutation_schema_returns_no_alias_tensor(boundary):
+    schema = str(
+        torch.ops.musa_boundary_cpu_test.rotary_embedding_inplace.default._schema
+    )
+    assert "Tensor(a0!) query" in schema and "Tensor(a1!) key" in schema
+    assert schema.endswith("-> ()")
+    fresh = str(torch.ops.musa_boundary_cpu_test.rotary_embedding.default._schema)
+    assert "!" not in fresh and fresh.endswith("-> (Tensor, Tensor)")
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_rotary_eager_musa_retains_original_gems_path(boundary, inplace):
+    before = len(boundary.kernel_calls)
+    q, k, c, s, p = rope_inputs(True)
+    expected = rope_oracle(q, c, s, p, False), rope_oracle(k, c, s, p, False)
+    first, second = boundary.rotary(None, q, k, c, s, p, False, inplace)
+    torch.testing.assert_close(first, expected[0])
+    torch.testing.assert_close(second, expected[1])
+    assert len(boundary.kernel_calls) == before
+    if inplace:
+        assert first.data_ptr() == q.data_ptr() and second.data_ptr() == k.data_ptr()
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_rotary_dynamic_tokens_keep_one_symbolic_fullgraph(boundary, inplace):
+    graphs = []
+
+    def backend(graph, inputs):
+        graphs.append(graph)
+        return graph.forward
+
+    fn = torch.compile(
+        lambda q, k, c, s, p: boundary.rotary(None, q, k, c, s, p, False, inplace),
+        backend=backend,
+        fullgraph=True,
+        dynamic=True,
+    )
+    for tokens in (2, 5, 3):
+        q, k, c, s, p = rope_inputs(tokens=tokens)
+        # Batch tokens are dynamic; fixed head counts must not be duck-shaped
+        # together merely because the initial token count also happens to be 2.
+        for tensor in (q, k, p):
+            torch._dynamo.mark_dynamic(tensor, 0)
+        expected = rope_oracle(q, c, s, p, False), rope_oracle(k, c, s, p, False)
+        first, second = fn(q, k, c, s, p)
+        torch.testing.assert_close(first, expected[0])
+        torch.testing.assert_close(second, expected[1])
+    assert len(graphs) == 1
+
+
+@pytest.mark.parametrize("context", [torch.no_grad, torch.inference_mode])
+def test_rotary_both_inference_contexts_use_opaque_boundary(boundary, context):
+    with context():
+        q, k, c, s, p = rope_inputs()
+        expected = rope_oracle(q, c, s, p, False), rope_oracle(k, c, s, p, False)
+        graphs = []
+        result = compiled(
+            lambda q, k, c, s, p: boundary.rotary(None, q, k, c, s, p, False, True),
+            graphs,
+        )(q, k, c, s, p)
+        torch.testing.assert_close(result[0], expected[0])
+        torch.testing.assert_close(result[1], expected[1])
+        assert len(graphs) == 1
+        assert any(
+            "musa_boundary_cpu_test.rotary_embedding_inplace" in str(node.target)
+            for node in graphs[0].graph.nodes
+        )

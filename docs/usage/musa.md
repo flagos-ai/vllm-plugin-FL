@@ -208,7 +208,7 @@ MUSA profiling logs each original capture bucket's start, completion and native
 free-memory values to locate startup capture failures.
 
 During compiled MUSA inference with gradients disabled, RMSNorm, fused residual
-RMSNorm and SiLU use explicit tensor operator boundaries. They run the same
+RMSNorm, SiLU and rotary embedding use explicit tensor operator boundaries. They run the same
 FlagGems kernels, with declared output metadata and input mutations; eager,
 C-extension, gradient-enabled and other-platform calls retain their original
 paths. Dynamo no longer has to trace their Python device guards or dtype
@@ -223,7 +223,9 @@ This addresses the documented [MUSA executable limit](https://github.com/MooreTh
 its role in the observed 35B failure still requires real CI validation.
 The small host C++ helper builds only when rotation is needed, against installed
 TorchMUSA/PyTorch 2.9 headers and the MUSA SDK. Linux, a C++ compiler and Ninja
-are required for that path; build or lifecycle errors propagate. Shallow models
+are required for that path; build or lifecycle errors propagate. The helper
+includes only its pybind, c10 and native graph dependencies, avoiding mixed
+generated and original Torch frontend headers. Shallow models
 retain the original path without building the helper.
 
 Earlier functional-stage success records describe command exit status. In CI
@@ -233,6 +235,15 @@ now recognizes native MUSA devices and counts while preserving CUDA/NPU
 priority and the existing skip rules. All 23 functional nodes actually passed
 in CI `38436511087`; that run's failed graph cases and skipped benchmark do not
 establish full MUSA acceptance.
+
+The completed [ff6bb555 CI](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38468509808/job/115542872383)
+passed 997 unit tests and all 23 functional nodes. Its four original Gate routes
+independently passed 104 requests, 1040 checks, 20 JUnit cases, 32 complete streams
+and 52/208 graph joins with confirmed cleanup. Three eager E2E cases passed; four
+graph cases failed on rotary device-guard tracing or host-helper header
+redefinitions, and benchmark did not run. The new rotary boundary and narrower
+helper includes require fresh complete hardware CI; no full MUSA or native ABI
+acceptance is claimed from that failed run.
 
 ## Additional FlagGems and FlagTree modifications
 

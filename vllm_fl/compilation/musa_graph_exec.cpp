@@ -23,7 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <torch/extension.h>
+#include <pybind11/pybind11.h>
+#include <c10/util/Exception.h>
 #include <torch_musa/csrc/aten/musa/MUSAGraph.h>
 #include <musa_runtime_api.h>
 
