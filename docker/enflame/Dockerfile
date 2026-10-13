@@ -14,8 +14,8 @@
 
 # vLLM 0.28 empty-device recipe for Enflame S60. Keep the vendor torch_gcu
 # 2.11 stack and install official Enflame compiler/operator wheels.
-# Equivalent runtime smoke passed on driver 1.10.6; this Docker build is
-# untested. The old vendor wrapper remains in Dockerfile.v0.20.2.
+# The runtime is validated on driver 1.10.6. The old vendor wrapper
+# remains in Dockerfile.v0.20.2.
 ARG ENFLAME_BASE_IMAGE=harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853
 # Override with a mirror (e.g. https://gh-proxy.com/https://github.com/...) on
 # hosts with unreliable direct GitHub access.
@@ -126,6 +126,7 @@ RUN (python -m pip uninstall -y vllm || true) \
     && printf '%s\n' \
         'torch==2.11.0+cpu' \
         'torch-gcu==2.11.0+3.8.20260713' \
+        'triton==3.6.0' \
         "triton-gcu==${TRITON_GCU_VERSION}" \
         "flagtree==${FLAGTREE_VERSION}" \
         "flag-gems==${FLAGGEMS_VERSION}" \
@@ -139,6 +140,24 @@ RUN (python -m pip uninstall -y vllm || true) \
         --no-build-isolation --no-deps . \
     && cd / \
     && rm -rf /tmp/vllm /tmp/enflame-vendor-constraints.txt
+
+# vLLM common dependencies may install upstream Triton into the same Python
+# namespace as FlagTree. Restore the pinned Enflame compiler after resolving
+# those dependencies; package version metadata alone cannot detect an overlay.
+RUN printf '%s --hash=sha256:%s\n' \
+        "flagtree==${FLAGTREE_VERSION}" "${FLAGTREE_SHA256}" \
+        > /tmp/enflame-flagtree-requirements.txt \
+    && python -m pip download --no-cache-dir --no-deps --only-binary=:all: \
+        --require-hashes --index-url "${FLAGOS_INDEX_URL}" \
+        --dest /tmp/enflame-flagtree-wheel -r /tmp/enflame-flagtree-requirements.txt \
+    && python -m pip uninstall -y triton \
+    && python -m pip install --force-reinstall --no-deps --no-index \
+        --find-links /tmp/enflame-flagtree-wheel "flagtree==${FLAGTREE_VERSION}" \
+    && rm -rf /tmp/enflame-flagtree-wheel /tmp/enflame-flagtree-requirements.txt
+
+COPY docker/enflame/verify_compiler.py /usr/local/share/vllm-plugin-fl/enflame-verify-compiler.py
+RUN python /usr/local/share/vllm-plugin-fl/enflame-verify-compiler.py \
+    --expected-version "${FLAGTREE_VERSION}"
 
 # Fail early when a wrong vendor base image is supplied. Metadata-only on
 # purpose — importing flag_gems/torch_gcu initializes the GCU driver, which
