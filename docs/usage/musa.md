@@ -202,12 +202,32 @@ warning/error logs remain unchanged.
 MUSA profiling logs each original capture bucket's start, completion and native
 free-memory values to locate startup capture failures.
 
+During compiled MUSA inference with gradients disabled, RMSNorm, fused residual
+RMSNorm and SiLU use explicit tensor operator boundaries. They run the same
+FlagGems kernels, with declared output metadata and input mutations; eager,
+C-extension, gradient-enabled and other-platform calls retain their original
+paths. Dynamo no longer has to trace their Python device guards or dtype
+promotion helpers. Native graph capture and piecewise splitting stay enabled.
+
+FL's MUSA graph wrappers retain every captured graph template, input and output
+while keeping at most 1900 executable handles live per process. Before an
+executable is evicted, its device is synchronized; replay restores that same
+template's executable and uses native replay, including RNG handling. No graph
+bucket is removed and no model forward is repeated to restore an executable.
+This addresses the documented [MUSA executable limit](https://github.com/MooreThreads/torchada#cuda-graphs);
+its role in the observed 35B failure still requires real CI validation.
+The small host C++ helper builds only when rotation is needed, against installed
+TorchMUSA/PyTorch 2.9 headers and the MUSA SDK. Linux, a C++ compiler and Ninja
+are required for that path; build or lifecycle errors propagate. Shallow models
+retain the original path without building the helper.
+
 Earlier functional-stage success records describe command exit status. In CI
 runs `38405604174` and `38423620853`, all 23 GPU-marked functional cases were
 skipped because the shared test-device helper did not detect MUSA. The helper
 now recognizes native MUSA devices and counts while preserving CUDA/NPU
-priority and the existing skip rules; actual functional coverage requires
-validation in the next CI run.
+priority and the existing skip rules. All 23 functional nodes actually passed
+in CI `38436511087`; that run's failed graph cases and skipped benchmark do not
+establish full MUSA acceptance.
 
 ## Additional FlagGems and FlagTree modifications
 

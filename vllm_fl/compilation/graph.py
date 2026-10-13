@@ -101,7 +101,9 @@ class Graph:
     elif current_platform.device_type == "npu":
         graph = torch.npu.NPUGraph
     elif current_platform.device_type == "musa":
-        graph = torch.musa.MUSAGraph
+        from vllm_fl.compilation.musa_graph_exec_cache import musa_graph_class
+
+        graph = musa_graph_class(torch.musa.MUSAGraph)
     elif current_platform.device_type == "gcu":
         graph = torch.gcu.GCUGraph
     elif current_platform.device_type == "ptpu":
@@ -359,6 +361,12 @@ class GraphWrapper:
             graph = Graph.graph()
 
             with ExitStack() as stack:
+                if current_platform.device_type == "musa":
+                    from vllm_fl.compilation.musa_graph_exec_cache import (
+                        musa_graph_capture,
+                    )
+
+                    stack.enter_context(musa_graph_capture(graph))
                 if self.cudagraph_options.gc_disable:
                     stack.enter_context(
                         patch("gc.collect", lambda *args, **kwargs: None)
@@ -438,5 +446,10 @@ class GraphWrapper:
 
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
-        entry.graph.replay()
+        if current_platform.device_type == "musa":
+            from vllm_fl.compilation.musa_graph_exec_cache import musa_graph_replay
+
+            musa_graph_replay(entry.graph)
+        else:
+            entry.graph.replay()
         return entry.output
