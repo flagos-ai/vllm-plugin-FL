@@ -18,6 +18,12 @@ and [Enflame installation guide](https://github.com/flagos-ai/FlagTree/wiki/User
 select this FlagTree version. FlagGems v5.4.0's own older backend matrix
 selects 0.6.1+enflame3.6; the newer combination is validated below.
 
+Enflame uses `ModelRunnerFL` by default for eager and graph execution.
+vLLM 0.28 can otherwise select its upstream V2 runner automatically for
+ordinary dense models, reaching sampler kernels that the current GCU stack
+does not support. Explicit `VLLM_USE_V2_MODEL_RUNNER=1` requests fail during
+configuration; V2-only features are unavailable on this backend.
+
 The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
 The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
 The original Qwen3.6-27B inference and Qwen3.6-35B-A3B serving cases passed in
