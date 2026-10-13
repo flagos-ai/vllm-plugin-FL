@@ -127,3 +127,4 @@ jobs:
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
+            test-results/logs/

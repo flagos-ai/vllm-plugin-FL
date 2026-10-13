@@ -72,6 +72,15 @@ requirements or `.[test]` can replace vendor torch. The metadata guard
 checks the exact requested vLLM base version, empty build and vendor stack;
 it does not initialize hardware during Docker build.
 
+`xgrammar` can install upstream Triton while resolving the common
+requirements, overwriting FlagTree's `triton` namespace while leaving its
+package metadata intact. The recipe constrains that dependency to 3.6.0,
+then removes upstream Triton and force-reinstalls the hash-pinned Enflame
+FlagTree wheel. `verify_compiler.py` checks the active module origin and
+FlagTree RECORD hashes for its shipped `triton` files during the build and
+CI setup, without initializing a GPU. Runtime and original Gate validation
+are still required after this source-file check.
+
 The build explicitly upgrades the OpenAI Python SDK to `OPENAI_VERSION=3.28.0`
 and pandas to `PANDAS_VERSION=3.0.6` after common requirements, using the same
 vendor constraints. The vendor bundle's older SDK satisfies vLLM's
