@@ -302,6 +302,14 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
+        if cls.device_type == "musa":
+            # vLLM enables horizontal fusion on accelerator backends with Torch 2.9.
+            # MUSA combo-kernel autotuning can exhaust device memory before the
+            # model's normal profile forward executes. Keep Inductor and graph
+            # capture, but compile these nodes separately on MUSA.
+            compilation_config.inductor_compile_config["combo_kernels"] = False
+            compilation_config.inductor_compile_config["benchmark_combo_kernel"] = False
+
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
             compilation_config.use_inductor_graph_partition = True

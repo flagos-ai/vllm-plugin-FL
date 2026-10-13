@@ -66,6 +66,7 @@ def test_non_cuda_accelerators_default_to_fl_runner(
         monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)

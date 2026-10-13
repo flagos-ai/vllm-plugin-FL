@@ -72,6 +72,7 @@ config_methods = [
     for item in config_class.body
     if getattr(item, "name", None)
     in {
+        "__post_init__",
         "set_splitting_ops_for_v1",
         "set_splitting_ops_for_attn_fusion",
         "splitting_ops_contain_attention",
@@ -156,6 +157,7 @@ def fixture(
     config.mode = Mode.VLLM_COMPILE if compile_mode is None else compile_mode
     config.cudagraph_mode = GraphMode.PIECEWISE if graph_mode is None else graph_mode
     config.compile_sizes = None
+    config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
     config.pass_config = SimpleNamespace(
@@ -205,6 +207,68 @@ def fixture(
         attention_config=None,
     )
     return platform, vconfig, calls
+
+
+@pytest.mark.parametrize("device", ["musa", "cuda"])
+@pytest.mark.parametrize(
+    "initial_options",
+    [
+        {},
+        {"combo_kernels": True, "benchmark_combo_kernel": True},
+        {"combo_kernels": False, "benchmark_combo_kernel": False},
+        {"combo_kernels": False},
+        {"benchmark_combo_kernel": False},
+        {"combo_kernels": True},
+        {"benchmark_combo_kernel": True},
+    ],
+)
+def test_combo_autotuning_is_disabled_only_on_musa(
+    monkeypatch, device, initial_options
+):
+    platform, vconfig, _ = fixture(
+        device=device, backend="mccl" if device == "musa" else "nccl"
+    )
+    config = vconfig.compilation_config
+    config.inductor_compile_config.update(max_autotune=False, **initial_options)
+    options = config.inductor_compile_config
+    config.inductor_passes = {}
+    config.custom_ops = []
+    config.pass_config.enable_qk_norm_rope_fusion = False
+    config.backend = "inductor"
+    config.cudagraph_mm_encoder = False
+    config.encoder_cudagraph_token_budgets = []
+    capture_sizes = [1, 2, 4, 512]
+    config.cudagraph_capture_sizes = capture_sizes
+    monkeypatch.setitem(
+        CONFIG_NS, "is_torch_equal_or_newer", lambda version: version == "2.9.0.dev"
+    )
+    monkeypatch.setitem(CONFIG_NS, "envs", SimpleNamespace(VLLM_LOGGING_LEVEL="INFO"))
+    monkeypatch.setitem(
+        CONFIG_NS,
+        "current_platform",
+        SimpleNamespace(is_cpu=lambda: False, get_compile_backend=lambda: "inductor"),
+    )
+
+    # Execute upstream's real defaults before the plugin hook, as config
+    # construction does, then repeat them to catch later reinitialization.
+    config.__post_init__()
+    before_platform = options.copy()
+    if not initial_options:
+        assert options["combo_kernels"] is True
+        assert options["benchmark_combo_kernel"] is True
+    for _ in range(2):
+        platform.check_and_update_config(vconfig)
+        config.__post_init__()
+        config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
+        expected = before_platform.copy()
+        if device == "musa":
+            expected.update(combo_kernels=False, benchmark_combo_kernel=False)
+        assert options == expected
+        assert config.inductor_compile_config is options
+        assert config.backend == "inductor"
+        assert config.mode is Mode.VLLM_COMPILE
+        assert config.cudagraph_mode is GraphMode.PIECEWISE
+        assert config.cudagraph_capture_sizes is capture_sizes
 
 
 @pytest.mark.parametrize("moe,expected_dp", [(None, 3), (False, 1), (True, 3)])
