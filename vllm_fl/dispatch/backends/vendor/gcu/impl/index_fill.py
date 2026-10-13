@@ -1,0 +1,144 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
+
+"""Keep FlagGems index_fill launches within the Enflame grid limits."""
+
+from __future__ import annotations
+
+import hashlib
+import importlib
+import inspect
+from functools import wraps
+from math import prod
+from pathlib import Path
+
+# Raw installed FlagGems 5.4 source verified with the supported Enflame stack.
+# Fail closed when upgrading its private kernel API instead of silently adapting
+# a different implementation. No installed package files are modified.
+_SOURCE_SHA256 = "37aacdee85e497881f47a813b5489d26972b335ba89df312dbd74be5b1a2e07c"
+_MAX_GRID_X = 65535
+_MAX_GRID_Y = 255
+_PATCH_STATE = "_fl_gcu_index_fill_patch"
+_LAUNCH_PARAMETERS = ("out", "dim", "index", "value", "value_is_tensor", "fill_numel")
+
+
+def _tiles(outer: int, inner: int, index_len: int, capacity: int):
+    """Partition the fill space without changing indices or increasing blocks."""
+    if min(outer, inner, index_len, capacity) <= 0:
+        raise ValueError("Index-fill tile dimensions must be positive")
+    inner_step = min(inner, capacity)
+    for inner_start in range(0, inner, inner_step):
+        inner_count = min(inner_step, inner - inner_start)
+        outer_step = min(outer, capacity // inner_count)
+        for outer_start in range(0, outer, outer_step):
+            outer_count = min(outer_step, outer - outer_start)
+            index_step = min(index_len, capacity // (inner_count * outer_count))
+            for index_start in range(0, index_len, index_step):
+                index_count = min(index_step, index_len - index_start)
+                yield (
+                    outer_start,
+                    outer_count,
+                    inner_start,
+                    inner_count,
+                    index_start,
+                    index_count,
+                )
+
+
+def _make_contiguous_launch(module, original):
+    kernel = module.index_fill_kernel
+    block_size = module._BLOCK_SIZE
+    max_rank = module._MAX_RANK
+
+    @wraps(original)
+    def launch(out, dim, index, value, value_is_tensor, fill_numel):
+        if out.device.type != "gcu":
+            return original(out, dim, index, value, value_is_tensor, fill_numel)
+        inner = prod(out.shape[dim + 1 :])
+        block_n = min(64, 1 << (inner - 1).bit_length())
+        block_m = block_size if inner <= 4 else max(1, block_size // block_n)
+        outer_index_len = fill_numel // inner
+        grid_x = (outer_index_len + block_m - 1) // block_m
+        grid_y = (inner + block_n - 1) // block_n
+        if grid_x <= _MAX_GRID_X and grid_y <= _MAX_GRID_Y:
+            return original(out, dim, index, value, value_is_tensor, fill_numel)
+
+        dim_size = out.size(dim)
+        outer = out.numel() // (dim_size * inner)
+        # This helper receives contiguous output, including the contiguous
+        # temporary used by FlagGems for strided inputs with rank > 8. Collapse
+        # surrounding dimensions as a view so the existing generic kernel can
+        # address any original rank using three shape/stride slots.
+        view = out.view(outer, dim_size, inner)
+        capacity = _MAX_GRID_X * block_size
+        for (
+            outer_start,
+            outer_count,
+            inner_start,
+            inner_count,
+            index_start,
+            index_count,
+        ) in _tiles(outer, inner, index.numel(), capacity):
+            part = view.narrow(0, outer_start, outer_count).narrow(
+                2, inner_start, inner_count
+            )
+            index_part = index.narrow(0, index_start, index_count)
+            count = outer_count * inner_count * index_count
+            shapes = list(part.shape) + [1] * (max_rank - 3)
+            strides = list(part.stride()) + [0] * (max_rank - 3)
+            kernel[((count + block_size - 1) // block_size,)](
+                part,
+                index_part,
+                value,
+                count,
+                index_count,
+                dim_size,
+                *shapes,
+                *strides,
+                DIM=1,
+                RANK=3,
+                VALUE_IS_TENSOR=value_is_tensor,
+                BLOCK_SIZE=block_size,
+            )
+        return None
+
+    return launch
+
+
+def _install_index_fill_gcu_patch(module) -> bool:
+    original = module._index_fill_contiguous_launch
+    previous = getattr(module, _PATCH_STATE, None)
+    if previous is not None:
+        if original is not previous[0] or module.index_fill_kernel is not previous[1]:
+            raise RuntimeError(
+                "Enflame index_fill implementation changed after patching"
+            )
+        return False
+
+    source = Path(module.__file__)
+    before = source.stat()
+    raw = source.read_bytes()
+    after = source.stat()
+    if (
+        (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
+        or len(raw) != after.st_size
+        or hashlib.sha256(raw).hexdigest() != _SOURCE_SHA256
+    ):
+        raise RuntimeError("Unsupported FlagGems index_fill source for Enflame adapter")
+    if (
+        tuple(inspect.signature(original).parameters) != _LAUNCH_PARAMETERS
+        or module._MAX_RANK != 8
+        or module._BLOCK_SIZE != 512
+        or not hasattr(module.index_fill_kernel, "__getitem__")
+    ):
+        raise RuntimeError("Unsupported FlagGems index_fill kernel API for Enflame")
+
+    wrapped = _make_contiguous_launch(module, original)
+    module._index_fill_contiguous_launch = wrapped
+    setattr(module, _PATCH_STATE, (wrapped, module.index_fill_kernel, original))
+    return True
+
+
+def apply_index_fill_gcu_patch() -> bool:
+    """Adapt the official launcher in memory, preserving FlagGems registration."""
+    module = importlib.import_module("flag_gems.ops.index_fill")
+    return _install_index_fill_gcu_patch(module)

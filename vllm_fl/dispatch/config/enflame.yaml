@@ -27,9 +27,6 @@ flagos_blacklist:
   # The in-place wrapper delegates to the implementation op; keep both native.
   - index_put_
   - _index_put_impl_
-  # FlagGems index_fill_ uses grid.y > 255 for large vocabulary rows on S60.
-  # Keep V2 penalty bincount resets on the native GCU implementation.
-  - index_fill_
   # FlagGems 5.4 exports only functional GCU mm. Its generic mm_out cannot
   # consume the Enflame SPLIT_K tuning config used by Inductor's out variant.
   - mm_out
