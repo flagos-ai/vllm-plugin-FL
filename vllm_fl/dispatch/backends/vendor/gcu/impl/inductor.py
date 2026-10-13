@@ -7,6 +7,7 @@ import os
 import sys
 from collections.abc import Mapping
 from functools import wraps
+from types import ModuleType
 
 _PARAMETERS = ("size_hints", "reduction_hint", "inductor_meta", "triton_meta")
 _ADAPTER_MARKER = "_fl_gcu_persistent_reduction_adapter"
@@ -188,13 +189,13 @@ def _install_gcu_inductor_hooks(provider, heuristics) -> None:
     _install_gcu_resource_errors(heuristics)
 
 
-def _loaded_gcu_inductor_providers(provider):
+def _loaded_gcu_inductor_providers(provider: ModuleType) -> list[ModuleType]:
     # TorchGCU exposes torch.gcu as well as torch_gcu.gcu. Importing an
     # inductor submodule through both names creates distinct classes and
     # registration state, even though both modules execute the same file.
     alias = sys.modules.get("torch.gcu.inductor.backend_register")
     if alias is None or alias is provider:
-        return (provider,)
+        return [provider]
     original_file = getattr(provider, "__file__", None)
     alias_file = getattr(alias, "__file__", None)
     try:
@@ -205,7 +206,7 @@ def _loaded_gcu_inductor_providers(provider):
         same_source = False
     if not same_source:
         raise RuntimeError("TorchGCU Inductor aliases resolve to different sources")
-    return (provider, alias)
+    return [provider, alias]
 
 
 def apply_inductor_gcu_patch() -> None:
