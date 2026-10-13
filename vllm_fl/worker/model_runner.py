@@ -5626,7 +5626,7 @@ class ModelRunnerFL(
             self.eplb_state.start_async_loop()
 
         if (
-            current_platform.device_type == "npu"
+            current_platform.device_type in ("npu", "musa")
             and self.compilation_config.mode != CompilationMode.NONE
         ):
             # Dispatch operators are lazily resolved behind a process-safe
@@ -6971,7 +6971,11 @@ class ModelRunnerFL(
                 torch.accelerator.empty_cache()
 
                 for mode, descs in capture_descs:
-                    profile_descs = descs[:2]
+                    # MUSA retains shape-specific graph inputs. Measure every
+                    # original shape instead of extrapolating the second-largest
+                    # shape's retained allocation to all smaller shapes.
+                    is_musa = current_platform.device_type == "musa"
+                    profile_descs = descs if is_musa else descs[:2]
                     mem_samples: list[int] = []
 
                     for i, desc in enumerate(profile_descs):
@@ -6992,23 +6996,39 @@ class ModelRunnerFL(
                         free_after = torch.accelerator.get_memory_info()[0]
                         mem_samples.append(mem_before - free_after)
 
-                    first_capture = mem_samples[0]
-                    # Use at least 1 MiB per graph for driver overhead
-                    per_graph = max(
-                        mem_samples[1] if len(mem_samples) > 1 else 0, 1 << 20
-                    )
+                    if is_musa:
+                        shared_memory_estimate[mode] = max(mem_samples[0], 0)
+                        # Keep the driver's minimum overhead for each later
+                        # graph, including shapes that reuse the shared pool.
+                        per_graph_estimate[mode] = sum(
+                            max(sample, 1 << 20) for sample in mem_samples[1:]
+                        )
+                        logger.debug(
+                            "Measured %s MUSA graph memory: "
+                            "%.2f MiB first-capture + %.2f MiB for %d later graphs",
+                            mode.name,
+                            shared_memory_estimate[mode] / (1 << 20),
+                            per_graph_estimate[mode] / (1 << 20),
+                            len(descs) - 1,
+                        )
+                    else:
+                        first_capture = mem_samples[0]
+                        # Use at least 1 MiB per graph for driver overhead
+                        per_graph = max(
+                            mem_samples[1] if len(mem_samples) > 1 else 0, 1 << 20
+                        )
 
-                    shared_memory_estimate[mode] = first_capture
-                    per_graph_estimate[mode] = per_graph * (len(descs) - 1)
+                        shared_memory_estimate[mode] = first_capture
+                        per_graph_estimate[mode] = per_graph * (len(descs) - 1)
 
-                    logger.debug(
-                        "Estimated %s CUDA graph memory: "
-                        "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
-                        mode.name,
-                        first_capture / (1 << 20),
-                        len(descs),
-                        per_graph / (1 << 20),
-                    )
+                        logger.debug(
+                            "Estimated %s CUDA graph memory: "
+                            "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
+                            mode.name,
+                            first_capture / (1 << 20),
+                            len(descs),
+                            per_graph / (1 << 20),
+                        )
 
                 if encoder_cudagraph_manager is not None:
                     mem_before = torch.accelerator.get_memory_info()[0]
