@@ -1,0 +1,83 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# A100 device tests for the isolated cuda-a100 platform (k8s pool via
+# the bypass orchestrator - see .github/configs/cuda-a100.yml).
+
+env_defaults:
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  NCCL_ALGO: "Ring"
+
+# Mirrors the a100 entry in tests/platforms/cuda.yaml - PlatformConfig
+# only picks up a device's test section when the device is declared here.
+device_types:
+  a100:
+    compute_capability: "8.0"
+    memory_gb: 80
+    tags: [ampere, fp64, bf16]
+
+# The four e2e models, pre-staged on the pool node's model store
+# (visible read-only at /flagcicd/model in bypass pods).  These copies
+# were fetched once and shard-validated; the pipeline consumes them as
+# plain local paths - no runtime download anywhere in the pipeline.
+# If the store is reorganized, update these paths (config only).
+device_overrides:
+  a100:
+    cases:
+      - qwen3/4b_tp2:
+          llm:
+            model: /flagcicd/model/ci-cache/Qwen3-4B
+      - qwen3/next_tp8:
+          llm:
+            model: /flagcicd/model/ci-cache/Qwen3-Next-80B-A3B-Instruct
+      - qwen3_5/35b_tp4:
+          llm:
+            model: /flagcicd/model/ci-cache/Qwen3.5-35B-A3B
+      - minicpm/o45_tp4:
+          llm:
+            model: /flagcicd/model/ci-cache/MiniCPM
+      # benchmark smoke case: its stock config points at /data/models
+      # (absent on the pool), so steer it at the staged 4B - the smoke
+      # loads dummy weights and only needs a valid config.json.
+      - qwen3/06b_tp2:
+          llm:
+            model: /flagcicd/model/ci-cache/Qwen3-4B
+
+a100:
+  name: "a100"
+  tests:
+    e2e:
+      inference:
+        qwen3: ["4b_tp2", "next_tp8"]
+        qwen3_5: ["35b_tp4"]
+        minicpm: ["o45_tp4"]
+      serving:
+        qwen3: ["next_tp8"]
+    # e2e entries run serialized (single 8-GPU slot on the pool today);
+    # generous budget for multi-model rounds on 8-GPU pods.
+    timeouts:
+      e2e:
+        inference: 240
+        # serving worst case = 30 ready + 10 workspace + 140 exec = 180;
+        # 200 leaves the job budget 20 min of slack over that.
+        serving: 200
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []
+    benchmark:
+      enabled: true
+      smoke: ["throughput", "latency", "serve"]

@@ -309,6 +309,14 @@ class PlatformConfig:
                 llm:
                   gpu_memory_utilization: 0.9
 
+        Entries in ``cases`` may also be mappings for per-case values
+        (merged over the device-level keys, top-level key replaces)::
+
+                cases:
+                  - model_name/e2e_case_a:
+                      llm:
+                        model: /some/path/a
+
         The ``tolerance`` key under the same device remains reserved for
         numerical tolerance overrides and is not treated as a model override.
         """
@@ -321,14 +329,21 @@ class PlatformConfig:
             raise TypeError(f"device_overrides.{self.device}.cases must be a list")
 
         case_key = f"{model}/{case}"
-        if case_key not in cases:
+        per_case: dict[str, Any] = {}
+        for entry in cases:
+            if isinstance(entry, dict):
+                per_case.update(entry)
+
+        if case_key not in per_case and case_key not in cases:
             return {}
 
-        return {
+        merged = {
             key: value
             for key, value in dev_override.items()
             if key not in {"cases", "tolerance"}
         }
+        merged.update(per_case.get(case_key, {}))
+        return merged
 
     def get_e2e_tests(self) -> FunctionalTests:
         """Return e2e test configuration (inference/serving) for the active device."""

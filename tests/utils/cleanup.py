@@ -26,6 +26,15 @@ import time
 from collections.abc import Callable
 
 
+def _base_platform(platform: str) -> str:
+    """Map a derived platform name onto its base-platform registry entry.
+
+    A line isolated on its own pool (e.g. "cuda-a100") shares the device
+    stack of its base platform ("cuda"), so the base hooks must apply.
+    """
+    return platform.split("-")[0]
+
+
 def device_cleanup(platform: str, wait: float = 3.0) -> None:
     """Run platform-specific cleanup between E2E test cases.
 
@@ -35,20 +44,25 @@ def device_cleanup(platform: str, wait: float = 3.0) -> None:
     4. Log device memory state
 
     Args:
-        platform: Platform name (e.g. ``"cuda"``, ``"ascend"``, ``"hygon"``).
+        platform: Platform name (e.g. ``"cuda"``, ``"cuda-a100"``,
+            ``"ascend"``, ``"hygon"``).
         wait: Seconds to wait after killing processes before logging memory.
     """
     _kill_stale_processes()
 
     # Clear framework cache to reclaim memory held by the PyTorch allocator
-    cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
+    cache_fn = _PLATFORM_CACHE_CLEAR.get(platform) or _PLATFORM_CACHE_CLEAR.get(
+        _base_platform(platform), _cache_clear_noop
+    )
     cache_fn()
 
     if wait > 0:
         time.sleep(wait)
 
     # Log current device memory state for diagnostic purposes
-    log_fn = _PLATFORM_MEMORY_LOG.get(platform, _log_memory_noop)
+    log_fn = _PLATFORM_MEMORY_LOG.get(platform) or _PLATFORM_MEMORY_LOG.get(
+        _base_platform(platform), _log_memory_noop
+    )
     log_fn()
 
 
@@ -260,7 +274,9 @@ _PLATFORM_CACHE_CLEAR: dict[str, Callable[[], None]] = {
 
 def get_device_memory(platform: str) -> list[tuple[float, float]]:
     """Return [(free_mb, total_mb), ...] for each device on the platform."""
-    mem_fn = _PLATFORM_MEMORY_INFO.get(platform, _mem_info_noop)
+    mem_fn = _PLATFORM_MEMORY_INFO.get(platform) or _PLATFORM_MEMORY_INFO.get(
+        _base_platform(platform), _mem_info_noop
+    )
     return [(free / (1024 * 1024), total / (1024 * 1024)) for free, total in mem_fn()]
 
 
@@ -281,8 +297,12 @@ def wait_for_memory(
     Returns:
         ``(True, info)`` if memory is available, ``(False, info)`` on timeout.
     """
-    mem_fn = _PLATFORM_MEMORY_INFO.get(platform, _mem_info_noop)
-    cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
+    mem_fn = _PLATFORM_MEMORY_INFO.get(platform) or _PLATFORM_MEMORY_INFO.get(
+        _base_platform(platform), _mem_info_noop
+    )
+    cache_fn = _PLATFORM_CACHE_CLEAR.get(platform) or _PLATFORM_CACHE_CLEAR.get(
+        _base_platform(platform), _cache_clear_noop
+    )
 
     deadline = time.time() + timeout
     attempt = 0
