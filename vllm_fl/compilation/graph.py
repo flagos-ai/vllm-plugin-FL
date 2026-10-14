@@ -69,7 +69,86 @@ def _weak_ref_npu_tensors(value: Any) -> Any:
     return value
 
 
+def _weak_ref_musa_tensors(value: Any) -> Any:
+    """Borrow captured outputs while their native graph pool owns the memory.
+
+    These descriptors do not own allocations. Ordinary captured inputs remain
+    strongly held by GraphEntry; this helper must not weaken those inputs.
+    TorchMUSA 2.9 uses the same storage/metadata APIs in musagraph_trees.py.
+    """
+    tensors = {}
+    storages = {}
+
+    def convert(item):
+        if isinstance(item, torch.Tensor):
+            if item.device.type != "musa":
+                return item
+            if (
+                item.layout != torch.strided
+                or item.is_quantized
+                or item.requires_grad
+                or item.is_conj()
+                or item.is_neg()
+            ):
+                raise ValueError(
+                    "MUSA graph outputs require plain strided inference tensors"
+                )
+            identity = id(item)
+            if identity in tensors:
+                return tensors[identity]
+            source = item.untyped_storage()
+            if source.nbytes() == 0:
+                return item
+            if source.data_ptr() == 0:
+                raise ValueError("Nonempty MUSA graph storage has a null address")
+            import torch_musa
+
+            native = getattr(
+                getattr(torch_musa, "_MUSAC", None),
+                "_construct_MUSA_Tensor_From_Storage_And_Metadata",
+                None,
+            )
+            if not callable(native):
+                raise RuntimeError(
+                    "MUSA graph outputs require TorchMUSA's metadata tensor constructor"
+                )
+            key = source._cdata
+            if key not in storages:
+                storages[key] = torch._C._construct_storage_from_data_pointer(
+                    source.data_ptr(), item.device, source.nbytes()
+                )
+            metadata = {
+                "size": item.size(),
+                "stride": item.stride(),
+                "dtype": item.dtype,
+                "device": item.device,
+                "storage_offset": item.storage_offset(),
+            }
+            result = native(metadata, storages[key])
+            tensors[identity] = result
+            return result
+        if isinstance(item, list):
+            return [convert(child) for child in item]
+        if isinstance(item, tuple):
+            return tuple(convert(child) for child in item)
+        if isinstance(item, dict):
+            return {key: convert(child) for key, child in item.items()}
+
+        from vllm.sequence import IntermediateTensors
+
+        if isinstance(item, IntermediateTensors):
+            return IntermediateTensors(
+                {key: convert(child) for key, child in item.tensors.items()}
+            )
+        return item
+
+    return convert(value)
+
+
 def weak_ref_tensors(value: Any) -> Any:
+    if current_platform.device_type == "musa":
+        return _weak_ref_musa_tensors(value)
+
     if current_platform.device_type == "npu":
         # The empty vLLM wheel registers torch.ops._C.weak_ref_tensor as an
         # identity. torch_npu's private primitive creates the real weak tensor
@@ -220,6 +299,28 @@ class GraphWrapper:
             tensor.requires_grad,
         )
 
+    @staticmethod
+    def _musa_tensors_alias(left, right):
+        if torch._C._is_alias_of(left, right):
+            return True
+        if left.device != right.device or left.device.type != "musa":
+            return False
+        # Borrowed descriptors have distinct StorageImpls. Compare complete
+        # physical storage spans as well, conservatively retaining the existing
+        # prohibition on staging writes across overlapping input allocations.
+        left_storage = left.untyped_storage()
+        right_storage = right.untyped_storage()
+        left_start = left_storage.data_ptr()
+        right_start = right_storage.data_ptr()
+        left_size = left_storage.nbytes()
+        right_size = right_storage.nbytes()
+        return (
+            left_size > 0
+            and right_size > 0
+            and left_start < right_start + right_size
+            and right_start < left_start + left_size
+        )
+
     def _stage_musa_inputs(self, entry, args, kwargs):
         def require(condition, message):
             if not condition:
@@ -260,7 +361,7 @@ class GraphWrapper:
                 )
                 if captured.data_ptr() != incoming.data_ptr():
                     require(
-                        not torch._C._is_alias_of(captured, incoming),
+                        not self._musa_tensors_alias(captured, incoming),
                         "MUSA graph staging source overlaps its destination",
                     )
                     require(
@@ -279,8 +380,8 @@ class GraphWrapper:
         for index, captured in enumerate(captured_tensors):
             for other_index in range(index):
                 require(
-                    torch._C._is_alias_of(captured, captured_tensors[other_index])
-                    == torch._C._is_alias_of(
+                    self._musa_tensors_alias(captured, captured_tensors[other_index])
+                    == self._musa_tensors_alias(
                         incoming_tensors[index], incoming_tensors[other_index]
                     ),
                     "MUSA graph input tensor alias relationship changed",
@@ -291,11 +392,11 @@ class GraphWrapper:
                 if other is captured:
                     continue
                 require(
-                    not torch._C._is_alias_of(captured, other),
+                    not self._musa_tensors_alias(captured, other),
                     "MUSA graph changed input aliases another captured input",
                 )
                 require(
-                    not torch._C._is_alias_of(incoming, other),
+                    not self._musa_tensors_alias(incoming, other),
                     "MUSA graph input aliases another staging destination",
                 )
         copied = set()
