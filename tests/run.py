@@ -311,6 +311,13 @@ class TestRunner:
             "-q",
             "-n",
             str(cpu_workers),
+            # multi_gpu tests spawn their own worker processes that pin
+            # concrete device ordinals (e.g. torch.cuda.set_device(rank));
+            # running them concurrently with 16 xdist workers corrupts the
+            # vendor device layer (kunlunxin: "CUDA error: invalid device
+            # ordinal").  They run serially in a second pass below instead.
+            "-m",
+            "not multi_gpu",
             "--cov=vllm_fl",
             "--cov-report=term-missing",
             f"--cov-report=json:coverage-{self.config.platform}.json",
@@ -327,8 +334,26 @@ class TestRunner:
             include_expr = " or ".join(unit_filter.include)
             extra_args.extend(["-k", include_expr])
 
+        serial_args = [
+            "--tb=short",
+            "-q",
+            "-m",
+            "multi_gpu",
+            "--cov=vllm_fl",
+            "--cov-append",
+            "--cov-report=term-missing",
+            f"--cov-report=json:coverage-{self.config.platform}.json",
+            "--json-report",
+            f"--json-report-file=report-{self.config.platform}-multigpu.json",
+        ]
+        for pattern in unit_filter.exclude:
+            serial_args.extend(["--ignore", f"tests/unit_tests/{pattern}"])
+        if unit_filter.include != "*" and isinstance(unit_filter.include, list):
+            serial_args.extend(["-k", " or ".join(unit_filter.include)])
+
         print(
-            f"[run] Unit tests parallel: {cpu_workers} workers (CPU-only, no device pinning)"
+            f"[run] Unit tests parallel: {cpu_workers} workers (CPU-only, no device pinning); "
+            "multi_gpu spawn tests run serially afterwards"
         )
 
         return [
@@ -337,7 +362,13 @@ class TestRunner:
                 pytest_path=test_path,
                 task="unit",
                 extra_args=extra_args,
-            )
+            ),
+            TestCase(
+                name=f"unit-multi-gpu ({self.config.platform})",
+                pytest_path=test_path,
+                task="unit",
+                extra_args=serial_args,
+            ),
         ]
 
     def _discover_from_yaml(
@@ -346,11 +377,12 @@ class TestRunner:
     ) -> list[TestCase]:
         """Build test cases from platform YAML config for e2e tests.
 
-        For inference tasks, routes to the unified ``test_inference_smoke.py``
-        and injects ``FL_TEST_MODEL``/``FL_TEST_CASE`` env vars so the smoke
-        test can load the correct model YAML config.
+        For inference/serving/concurrent tasks, routes to the unified smoke
+        tests (``test_inference_smoke.py`` etc.) and injects
+        ``FL_TEST_MODEL``/``FL_TEST_CASE`` env vars so the smoke test can
+        load the correct model YAML config.
 
-        For other tasks (serving), falls back to ``-k model`` filtering.
+        For other tasks, falls back to ``-k model`` filtering.
 
         Args:
             base_dir: Root directory (e.g. ``tests/e2e_tests``).
@@ -400,6 +432,13 @@ class TestRunner:
                     "FL_TEST_MODEL": model,
                     "FL_TEST_CASE": case,
                 }
+            elif task == "concurrent":
+                # Route to unified concurrent smoke test with env-based config
+                pytest_path = f"{test_dir}/test_concurrent_smoke.py"
+                extra_env = {
+                    "FL_TEST_MODEL": model,
+                    "FL_TEST_CASE": case,
+                }
             else:
                 # Other tasks: use directory with -k filter
                 pytest_path = test_dir
@@ -421,6 +460,9 @@ class TestRunner:
                 pp = cfg.engine.get("pipeline_parallel_size", 1)
                 num_devices = int(tp) * int(pp)
             except Exception:
+                # Best-effort scheduling hint only: a malformed or missing
+                # model YAML falls back to num_devices=1 rather than
+                # dropping the case from the run.
                 pass
 
             name = f"{task}/{model}/{case}"

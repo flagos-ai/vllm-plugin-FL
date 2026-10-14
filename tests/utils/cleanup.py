@@ -117,6 +117,8 @@ def _pid_owns_slots(pid: str, slots: list[int]) -> bool:
             if pid_slots & slot_set:
                 return True
     except (OSError, ValueError):
+        # Unreadable /proc/<pid>/environ (process gone, permission denied)
+        # or malformed entries — treat as "do not kill" (see docstring).
         pass
     return False
 

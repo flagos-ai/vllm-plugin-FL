@@ -86,21 +86,30 @@ jobs:
         env:
           INPUT_PLATFORMS: ${{ inputs.platforms }}
         run: |
-          python3 .github/scripts/detect_platforms.py
           if [ -n "$INPUT_PLATFORMS" ]; then
             python3 - <<'PYEOF'
           import json, os, subprocess, sys
+
           requested = [p.strip() for p in os.environ["INPUT_PLATFORMS"].split(",") if p.strip()]
+          # The child must not inherit GITHUB_OUTPUT: with it set,
+          # detect_platforms.py writes the platforms output to that file
+          # instead of stdout, this parser then sees nothing, and the
+          # filtered list collapses to [].
+          child_env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
           result = subprocess.run(
               [sys.executable, ".github/scripts/detect_platforms.py"],
-              capture_output=True, text=True
+              capture_output=True, text=True, env=child_env,
           )
+          if result.returncode != 0:
+              # Surface config validation errors instead of silently
+              # producing platforms=[] and skipping every platform job.
+              sys.stderr.write(result.stderr)
+              sys.exit(result.returncode)
+          all_platforms = []
           for line in result.stdout.splitlines():
               if line.startswith("platforms="):
                   all_platforms = json.loads(line[len("platforms="):])
                   break
-          else:
-              all_platforms = []
           filtered = [p for p in requested if p in all_platforms]
           github_output = os.environ.get("GITHUB_OUTPUT")
           value = json.dumps(filtered)
@@ -110,6 +119,8 @@ jobs:
           else:
               print(f"platforms={value}")
           PYEOF
+          else
+            python3 .github/scripts/detect_platforms.py
           fi
 
   # ============================================================
@@ -122,6 +133,7 @@ jobs:
     with:
       platform: cuda
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-ascend:
@@ -131,6 +143,7 @@ jobs:
     with:
       platform: ascend
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-hygon:
@@ -140,6 +153,7 @@ jobs:
     with:
       platform: hygon
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-metax:
@@ -149,6 +163,7 @@ jobs:
     with:
       platform: metax
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-musa:
@@ -158,6 +173,7 @@ jobs:
     with:
       platform: musa
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-enflame:
@@ -167,6 +183,7 @@ jobs:
     with:
       platform: enflame
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-kunlunxin:
@@ -176,6 +193,7 @@ jobs:
     with:
       platform: kunlunxin
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-thead:
@@ -185,6 +203,7 @@ jobs:
     with:
       platform: thead
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit
 
   test-iluvatar:
@@ -194,4 +213,5 @@ jobs:
     with:
       platform: iluvatar
       ci_stage: weekly
+      branch: ${{ inputs.branch }}
     secrets: inherit

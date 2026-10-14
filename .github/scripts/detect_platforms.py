@@ -12,7 +12,9 @@ Priority:
 
 Diff-based routing logic (when --changed-files is given):
   - If any changed file matches ``global_trigger_paths`` → return all enabled
-    platforms (full run).
+    platforms (full run). Paths carved out by a platform's
+    ``exempt_from_global`` never count as global triggers — they route only
+    via the owning platform's ``trigger_paths``.
   - Otherwise, return only platforms whose ``trigger_paths`` match at least
     one changed file.
   - If no platform matches → return empty list (only lint+build will run).
@@ -46,6 +48,49 @@ REGISTRY_FILE = CONFIGS_DIR / "platforms.yml"
 AUTO_SCAN_EXCLUDE = {"template", "platforms"}
 
 
+def _validate_and_collect_exemptions(
+    enabled: dict, global_paths: list[str]
+) -> list[str]:
+    """Collect exempt_from_global prefixes from enabled platforms.
+
+    Guards two-list drift in both directions:
+      error   - exempt entry missing from the same platform's trigger_paths
+                (files matching it would route to NO platform -> exit 2).
+      warning - trigger_path under a global prefix but not exempted
+                (changes there trigger a full run -> over-trigger only).
+      warning - exempt entry not under any global prefix (no-op / stale).
+    """
+    exempt_paths: list[str] = []
+    for name, cfg in enabled.items():
+        triggers: list[str] = cfg.get("trigger_paths", [])
+        exempts: list[str] = cfg.get("exempt_from_global", [])
+        for tp in triggers:
+            if tp not in exempts and any(tp.startswith(gp) for gp in global_paths):
+                print(
+                    f"::warning::platform '{name}': trigger_path '{tp}' is under "
+                    f"a global path but not in exempt_from_global — changes "
+                    f"there will trigger a full run",
+                    file=sys.stderr,
+                )
+        for ep in exempts:
+            if ep not in triggers:
+                print(
+                    f"::error::platform '{name}': exempt_from_global entry "
+                    f"'{ep}' is not in trigger_paths — files matching it "
+                    f"would route to no platform",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            if not any(ep.startswith(gp) or gp.startswith(ep) for gp in global_paths):
+                print(
+                    f"::warning::platform '{name}': exempt_from_global entry "
+                    f"'{ep}' is not under any global path (no-op)",
+                    file=sys.stderr,
+                )
+            exempt_paths.append(ep)
+    return exempt_paths
+
+
 def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
     """Read platforms.yml and return enabled platform names, filtered by
     diff-based routing when changed_files is provided. Returns None if the
@@ -77,15 +122,21 @@ def from_registry(changed_files: list[str] | None = None) -> list[str] | None:
     if not enabled:
         return []
 
+    global_paths: list[str] = data.get("global_trigger_paths", [])
+    exempt_paths = _validate_and_collect_exemptions(enabled, global_paths)
+
     # No diff filtering → return all enabled platforms (nightly/weekly mode)
     if changed_files is None:
         return list(enabled.keys())
 
-    # Diff-based routing
-    global_paths: list[str] = data.get("global_trigger_paths", [])
-
-    # Check if any changed file hits a global path → full run
+    # Diff-based routing. Two keys, two independent questions:
+    #   - exempt_from_global: vendor carve-out; a changed file under one of
+    #     these prefixes does NOT count toward global_trigger_paths.
+    #   - trigger_paths: answers only "does this platform run?" and has no
+    #     effect on the global trigger.
     for f in changed_files:
+        if any(f == ep or f.startswith(ep) for ep in exempt_paths):
+            continue  # vendor carve-out: not a global trigger
         for gp in global_paths:
             if f.startswith(gp):
                 print(

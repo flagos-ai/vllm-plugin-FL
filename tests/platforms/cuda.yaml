@@ -133,13 +133,29 @@ h20:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
         serving:
           qwen3_6:
+            - 27b_tp2_eager
             - 27b_tp2_graph
             - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_graph

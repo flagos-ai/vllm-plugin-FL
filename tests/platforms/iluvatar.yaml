@@ -43,6 +43,10 @@ bi-v150:
           qwen3_6:
             - 27b_tp4_eager
             - 35b_a3b_tp4_eager
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
       nightly:
         inference:
           qwen3_6:
@@ -50,11 +54,17 @@ bi-v150:
             - 35b_a3b_tp4_eager
         serving:
           qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
             - 35b_a3b_tp4_eager
     timeouts:
       e2e:
         inference: 180
         serving: 180
+        concurrent: 180
     functional:
       include: "*"
       exclude: []

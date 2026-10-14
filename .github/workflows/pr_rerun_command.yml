@@ -61,24 +61,43 @@ jobs:
             repos/${{ github.repository }}/issues/comments/${{ github.event.client_payload.github.payload.comment.id }}/reactions \
             -f content='rocket'
 
-      - name: Re-run failed jobs
+      - name: Re-run failed and cancelled jobs
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.client_payload.pull_request.html_url }}
         run: |
           set -euo pipefail
           head_sha=$(gh api "$PR_URL" --jq '.head.sha')
+          # Find the latest failed/cancelled workflow runs for the PR head
+          # commit (e.g. the main CI run and CodeQL), capped to avoid runaway
+          # loops. A cancelled workflow can contain both failed and cancelled
+          # jobs, so select the jobs below rather than rerunning the whole run.
+          # (Ported from rerun-failed-ci.yml #559 when this file replaced it.)
           run_ids=$(gh run list --repo "${{ github.repository }}" \
-            --commit "$head_sha" --status failure --limit 5 --json databaseId \
-            --jq '.[].databaseId')
+            --commit "$head_sha" --limit 30 \
+            --json databaseId,conclusion,createdAt \
+            --jq '.[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.createdAt, .databaseId] | @tsv' \
+            | sort -r | head -n 5 | cut -f2)
           if [ -z "$run_ids" ]; then
-            echo "::error::No failed workflow run found for head SHA $head_sha."
+            echo "::error::No failed or cancelled workflow run found for head SHA $head_sha."
             exit 1
           fi
+
+          rerun_count=0
           for id in $run_ids; do
-            echo "Re-running failed jobs of run $id"
-            gh run rerun "$id" --repo "${{ github.repository }}" --failed
+            job_ids=$(gh run view "$id" --repo "${{ github.repository }}" \
+              --json jobs \
+              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .databaseId')
+            for job_id in $job_ids; do
+              echo "Re-running failed/cancelled job $job_id from run $id"
+              gh run rerun --job "$job_id" --repo "${{ github.repository }}"
+              rerun_count=$((rerun_count + 1))
+            done
           done
+          if [ "$rerun_count" -eq 0 ]; then
+            echo "::error::No failed or cancelled job found in runs for head SHA $head_sha."
+            exit 1
+          fi
 
       - name: Report result
         if: always()
@@ -91,7 +110,7 @@ jobs:
           if [ "${{ steps.auth.outcome }}" = "failure" ]; then
             body="⛔ @$COMMENTER is not authorized (PR author or collaborators with write access only)."
           elif [ "${{ job.status }}" = "success" ]; then
-            body="🚀 Re-triggered failed CI jobs for this PR (requested by @$COMMENTER)."
+            body="🚀 Re-triggered failed/cancelled CI jobs for this PR (requested by @$COMMENTER)."
           else
             body="❌ Failed to re-run CI (requested by @$COMMENTER). See [workflow log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           fi

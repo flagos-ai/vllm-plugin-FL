@@ -53,18 +53,36 @@ zw810e:
         inference:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
         serving:
           qwen3_6:
-            - "35b_a3b_tp4_eager"
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_graph
     timeouts:
       e2e:
         serving: 180
+        concurrent: 180
     functional:
       include: "*"
       exclude: []

@@ -55,6 +55,7 @@ TASK_DIR_MAP: dict[str, str] = {
 DEFAULT_TIMEOUT: dict[str, int] = {
     "inference": 60,
     "serving": 60,
+    "concurrent": 60,
 }
 
 
@@ -101,7 +102,7 @@ def build_e2e_matrix(
     unsupported: list[str],
     ci_stage: str = "nightly",
 ) -> list[dict]:
-    """End-to-end model tests (inference, serving).
+    """End-to-end model tests (inference, serving, concurrent).
 
     These are slow and require model files.  Entries are grouped by
     ``(task, device)`` so that all model/case combos for the same task

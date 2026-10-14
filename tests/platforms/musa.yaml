@@ -41,7 +41,15 @@ s5000:
         inference:
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
             - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
       nightly:
         inference:
           qwen3:
@@ -49,17 +57,26 @@ s5000:
             - 06b_tp1_graph
           qwen3_6:
             - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
         serving:
           qwen3:
             - 06b_tp1_graph
           qwen3_6:
+            - 27b_tp4_eager
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_graph
     timeouts:
       e2e:
         inference: 180
         serving: 180
+        concurrent: 180
     functional:
       include: "*"
       exclude: []
