@@ -25,9 +25,14 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: "Platform name (e.g., cuda, ascend)"
+        description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
+      branch:
+        description: "Branch/ref under test (empty = caller ref)"
+        required: false
+        type: string
+        default: ""
       task:
         description: "Test task category (e.g., inference, serving)"
         required: true
@@ -55,6 +60,11 @@ on:
         required: false
         type: string
         default: ""
+      flaggems_vllm:
+        description: "CUDA fused operator mode for this model gate (0 or 1)"
+        required: false
+        type: string
+        default: ""
       timeout:
         description: "Timeout for the job in minutes"
         required: false
@@ -68,7 +78,7 @@ on:
 
 jobs:
   e2e-test:
-    name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})"
+    name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})${{ inputs.flaggems_vllm != '' && format(' fused={0}', inputs.flaggems_vllm) || '' }}"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
     container:
@@ -80,19 +90,33 @@ jobs:
       - name: Checkout (attempt 1)
         id: checkout1
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      - name: Select fused operator mode
+        if: inputs.platform == 'nvidia' && inputs.flaggems_vllm != ''
+        env:
+          FUSED_MODE: ${{ inputs.flaggems_vllm }}
+        run: |
+          case "$FUSED_MODE" in 0|1) ;; *) exit 1 ;; esac
+          echo "VLLM_FL_USE_FLAGGEMS_VLLM=$FUSED_MODE" >> "$GITHUB_ENV"
+          echo "Model gate: VLLM_FL_USE_FLAGGEMS_VLLM=$FUSED_MODE"
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
@@ -118,7 +142,7 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}
+          name: e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}${{ inputs.flaggems_vllm != '' && format('-fused-{0}', inputs.flaggems_vllm) || '' }}
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json

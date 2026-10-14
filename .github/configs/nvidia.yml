@@ -15,7 +15,7 @@
 # CUDA Hardware Configuration
 # This file defines CI/CD settings for CUDA-based testing
 
-platform: cuda
+platform: nvidia
 
 # Docker image for this hardware
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-cuda-ci

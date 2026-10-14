@@ -14,18 +14,22 @@
 
 # PR CI Workflow
 #
-# Three-stage design:
+# Stage design (PR label tiers gate the hardware stages):
 #   lint + build  — always run, no hardware required
 #   functional    — unit + functional (GPU), requires ci-functional/ci-e2e/ci-full label
 #   e2e smoke     — lightweight E2E (text + multimodal), requires ci-e2e/ci-full label
+#   benchmark     — bench entrypoint validation, requires ci-full label
 #
 # Platform routing: diff-based — only platforms whose trigger_paths match the
-# PR diff are tested. Changes to shared code (vllm_fl/core, tests/unit_tests,
+# PR diff are tested. Changes to shared code (see global_trigger_paths in
+# .github/configs/platforms.yml — vllm_fl/ python, tests/, benchmarks/,
 # .github/scripts, etc.) trigger all enabled platforms.
 #
 # ci-gate is the single Required Status Check configured in branch protection.
-# It aggregates lint, build, and all platform test results. Skipped platform
-# tests (no matching runner, no label) count as passing.
+# It aggregates lint, build, discover, and all platform test results; a
+# discovery failure fails the gate even though the platform jobs it would
+# have spawned show as skipped. Skipped platform tests (no matching runner,
+# no label) count as passing.
 name: CI
 
 on:
@@ -36,7 +40,6 @@ on:
       - "**.md"
       - "docs/**"
       - "examples/**"
-      - "docker/**"
       - "LICENSE"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
@@ -77,6 +80,11 @@ jobs:
     timeout-minutes: 5
     outputs:
       platforms: ${{ steps.detect.outputs.platforms }}
+      # Stage selection from PR labels: ci-functional = functional only,
+      # ci-e2e adds e2e smoke, ci-full adds benchmark. workflow_dispatch
+      # runs everything.
+      run_e2e: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
+      run_benchmark: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
     steps:
       - name: Checkout (attempt 1)
         id: checkout1
@@ -136,10 +144,10 @@ jobs:
   # execute all enabled platforms.
   # Skipped jobs (no label or no matching runner) do not fail ci-gate.
   # ============================================================
-  test-cuda:
+  test-nvidia:
     needs: discover
     if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'cuda') &&
+      contains(fromJson(needs.discover.outputs.platforms), 'nvidia') &&
       (
         github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
@@ -148,8 +156,10 @@ jobs:
       )
     uses: ./.github/workflows/_platform_test.yml
     with:
-      platform: cuda
+      platform: nvidia
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-ascend:
@@ -166,6 +176,8 @@ jobs:
     with:
       platform: ascend
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-hygon:
@@ -182,6 +194,8 @@ jobs:
     with:
       platform: hygon
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-metax:
@@ -198,6 +212,8 @@ jobs:
     with:
       platform: metax
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-musa:
@@ -214,6 +230,8 @@ jobs:
     with:
       platform: musa
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-enflame:
@@ -230,6 +248,8 @@ jobs:
     with:
       platform: enflame
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-kunlunxin:
@@ -246,6 +266,8 @@ jobs:
     with:
       platform: kunlunxin
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-thead:
@@ -262,6 +284,8 @@ jobs:
     with:
       platform: thead
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   test-iluvatar:
@@ -278,22 +302,25 @@ jobs:
     with:
       platform: iluvatar
       ci_stage: pr
+      run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
+      run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
     secrets: inherit
 
   # ============================================================
   # ci-gate — single Required Status Check for branch protection.
   #
   # Rules:
-  #   lint, build          : must be 'success'
-  #   platform test jobs   : 'success' or 'skipped' → pass
-  #                          'failure' or 'cancelled' → fail
+  #   lint, build, discover : must be 'success'
+  #   platform test jobs    : 'success' or 'skipped' → pass
+  #                           'failure' or 'cancelled' → fail
   # ============================================================
   ci-gate:
     name: ci-gate
     needs:
       - lint
       - build
-      - test-cuda
+      - discover
+      - test-nvidia
       - test-ascend
       - test-hygon
       - test-metax
@@ -310,7 +337,8 @@ jobs:
         env:
           LINT_RESULT:       ${{ needs.lint.result }}
           BUILD_RESULT:      ${{ needs.build.result }}
-          CUDA_RESULT:       ${{ needs.test-cuda.result }}
+          DISCOVER_RESULT:   ${{ needs.discover.result }}
+          NVIDIA_RESULT:      ${{ needs.test-nvidia.result }}
           ASCEND_RESULT:     ${{ needs.test-ascend.result }}
           HYGON_RESULT:      ${{ needs.test-hygon.result }}
           METAX_RESULT:      ${{ needs.test-metax.result }}
@@ -343,10 +371,13 @@ jobs:
             esac
           }
 
-          check_required "lint"  "$LINT_RESULT"
-          check_required "build" "$BUILD_RESULT"
+          check_required "lint"    "$LINT_RESULT"
+          check_required "build"   "$BUILD_RESULT"
+          # Discover must succeed: its failure skips every platform job,
+          # and skipped platform jobs must not paper over a dead router.
+          check_required "discover" "$DISCOVER_RESULT"
 
-          check_optional "test-cuda"      "$CUDA_RESULT"
+          check_optional "test-nvidia"    "$NVIDIA_RESULT"
           check_optional "test-ascend"    "$ASCEND_RESULT"
           check_optional "test-hygon"     "$HYGON_RESULT"
           check_optional "test-metax"     "$METAX_RESULT"

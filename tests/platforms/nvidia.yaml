@@ -29,7 +29,7 @@
 # - unsupported_features: Exclude test cases matching specific feature tags
 #
 # ---- Platform-level settings ------------------------------------------------
-platform: cuda
+platform: nvidia
 vendor: nvidia
 
 device_types:
@@ -99,14 +99,14 @@ a100:
         inference:
           qwen3:
             - 4b_tp2
-            - next_tp4
+            - next_tp8
           qwen3_5:
             - 35b_tp4
           minicpm:
             - o45_tp4
         serving:
           qwen3:
-            - next_tp4
+            - next_tp8
     functional:
       include: "*"
       exclude: []
@@ -133,13 +133,29 @@ h20:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
             - 35b_a3b_tp2_graph
         serving:
           qwen3_6:
+            - 27b_tp2_eager
             - 27b_tp2_graph
             - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_graph

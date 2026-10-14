@@ -11,7 +11,7 @@ Usage::
     from tests.utils.cleanup import device_cleanup
 
     # Between test cases:
-    device_cleanup("cuda")  # NVIDIA GPU cleanup
+    device_cleanup("nvidia")  # NVIDIA GPU cleanup
     device_cleanup("ascend")  # Huawei Ascend NPU cleanup
     device_cleanup("hygon")  # Hygon DCU cleanup
 """
@@ -39,7 +39,7 @@ def device_cleanup(
     4. Log device memory state
 
     Args:
-        platform: Platform name (e.g. ``"cuda"``, ``"ascend"``, ``"hygon"``).
+        platform: Platform name (e.g. ``"nvidia"``, ``"ascend"``, ``"hygon"``).
         wait: Seconds to wait after killing processes before logging memory.
         slots: Device slot indices this case owns. When provided, kill is
             restricted to processes whose VISIBLE_DEVICES env matches these
@@ -117,6 +117,8 @@ def _pid_owns_slots(pid: str, slots: list[int]) -> bool:
             if pid_slots & slot_set:
                 return True
     except (OSError, ValueError):
+        # Unreadable /proc/<pid>/environ (process gone, permission denied)
+        # or malformed entries — treat as "do not kill" (see docstring).
         pass
     return False
 
@@ -297,7 +299,7 @@ def _log_memory_noop() -> None:
 
 # Registry: platform name → memory logging function
 _PLATFORM_MEMORY_LOG: dict[str, Callable[[], None]] = {
-    "cuda": _log_memory_cuda,
+    "nvidia": _log_memory_cuda,
     "ascend": _log_memory_ascend,
     "hygon": _log_memory_hygon,
     "thead": _log_memory_thead,
@@ -373,7 +375,7 @@ def _mem_info_thead() -> list[tuple[int, int]]:
 
 
 _PLATFORM_MEMORY_INFO: dict[str, Callable[[], list[tuple[int, int]]]] = {
-    "cuda": _mem_info_cuda,
+    "nvidia": _mem_info_cuda,
     "ascend": _mem_info_ascend,
     # Hygon DCUs are exposed to PyTorch as CUDA devices.
     "hygon": _mem_info_cuda,
@@ -411,7 +413,7 @@ def _cache_clear_noop() -> None:
 
 
 _PLATFORM_CACHE_CLEAR: dict[str, Callable[[], None]] = {
-    "cuda": _cache_clear_cuda,
+    "nvidia": _cache_clear_cuda,
     "ascend": _cache_clear_ascend,
     # Hygon DCUs and T-Head PPUs are exposed to PyTorch as CUDA devices.
     "hygon": _cache_clear_cuda,
@@ -440,7 +442,7 @@ def wait_for_memory(
     """Wait until devices have enough free memory for the given utilization.
 
     Args:
-        platform: Platform name (e.g. ``"cuda"``, ``"ascend"``).
+        platform: Platform name (e.g. ``"nvidia"``, ``"ascend"``).
         gpu_memory_utilization: Fraction of total memory the model needs.
         timeout: Maximum seconds to wait (default 30 min).
         interval: Seconds between polls.

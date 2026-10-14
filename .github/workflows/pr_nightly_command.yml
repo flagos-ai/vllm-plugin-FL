@@ -17,8 +17,8 @@
 #
 # Usage:
 #   /nightly              — test all platforms on this PR's branch
-#   /nightly cuda         — test only cuda platform
-#   /nightly cuda main    — test only cuda on main branch
+#   /nightly nvidia       — test only the nvidia platform
+#   /nightly nvidia main  — test only nvidia on main branch
 #
 # Authorized users: collaborators with triage/write/maintain/admin.
 name: PR /nightly Command
@@ -56,6 +56,7 @@ jobs:
       - name: Parse command arguments
         id: parse
         env:
+          GH_TOKEN: ${{ github.token }}
           COMMAND_ARGS: ${{ github.event.client_payload.slash_command.args.unnamed.arg1 }}
           BRANCH_ARG: ${{ github.event.client_payload.slash_command.args.unnamed.arg2 }}
           PR_URL: ${{ github.event.client_payload.pull_request.html_url }}

@@ -33,7 +33,10 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  # repository_dispatch events require contents:write on the token that
+  # creates them; read-only contents breaks every /rerun /cancel /nightly
+  # /weekly command at the dispatch step.
+  contents: write
   pull-requests: write
   issues: read
 

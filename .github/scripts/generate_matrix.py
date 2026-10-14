@@ -55,6 +55,7 @@ TASK_DIR_MAP: dict[str, str] = {
 DEFAULT_TIMEOUT: dict[str, int] = {
     "inference": 60,
     "serving": 60,
+    "concurrent": 60,
 }
 
 
@@ -101,7 +102,7 @@ def build_e2e_matrix(
     unsupported: list[str],
     ci_stage: str = "nightly",
 ) -> list[dict]:
-    """End-to-end model tests (inference, serving).
+    """End-to-end model tests (inference, serving, concurrent).
 
     These are slow and require model files.  Entries are grouped by
     ``(task, device)`` so that all model/case combos for the same task
@@ -392,6 +393,17 @@ def main(argv: list[str] | None = None) -> int:
         changed = load_changed_files(args.changed_files)
         if changed:
             e2e_matrix = filter_e2e_by_changes(e2e_matrix, changed)
+
+    # The user default is off; preserve the same model gates in both modes.
+    # The NVIDIA pipeline's platform key is "nvidia" (renamed from "cuda" in
+    # this branch); matching the old key silently disabled the dual-mode
+    # expansion and the fused=0 regression gate with it.
+    if args.platform == "nvidia":
+        e2e_matrix = [
+            {**entry, "flaggems_vllm": mode}
+            for entry in e2e_matrix
+            for mode in ("0", "1")
+        ]
 
     e2e_json = json.dumps(e2e_matrix, separators=(",", ":"))
     unit_json = json.dumps(unit_matrix, separators=(",", ":"))

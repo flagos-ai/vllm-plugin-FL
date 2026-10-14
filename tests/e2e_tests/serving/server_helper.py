@@ -77,11 +77,17 @@ class VllmServer:
             "--port",
             str(self.port),
         ]
+        # display_cmd mirrors cmd but never receives the api-key value,
+        # so the printed command cannot leak it (CodeQL: clear-text logging).
+        display_cmd = list(cmd)
         if self.api_key:
             cmd.extend(["--api-key", self.api_key])
+            display_cmd.extend(["--api-key", "***"])
         if self.served_model_name:
             cmd.extend(["--served-model-name", self.served_model_name])
+            display_cmd.extend(["--served-model-name", self.served_model_name])
         cmd.extend(self.extra_args)
+        display_cmd.extend(self.extra_args)
 
         model_short = os.path.basename(self.model)
         visible_env_var = get_visible_device_env_var()
@@ -90,7 +96,7 @@ class VllmServer:
             f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size},"
             f" {visible_env_var}={visible_devices})"
         )
-        print(f"[Setup] Command: {' '.join(cmd)}")
+        print(f"[Setup] Command: {' '.join(display_cmd)}")
 
         self._log_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
             prefix=f"vllm_{model_short}_",

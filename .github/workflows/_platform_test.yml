@@ -21,11 +21,16 @@
 #   nightly — functional + e2e main cases + benchmark
 #   weekly  — functional + e2e full cases + benchmark
 #
+# On PRs the caller additionally tier-selects jobs by label via run_e2e /
+# run_benchmark: ci-functional runs functional only, ci-e2e adds e2e smoke,
+# ci-full adds benchmark.
+#
 # Main steps:
 # 1. setup:      Load platform config and generate test matrices
 # 2. functional: Run unit + functional tests (ops, compilation, distributed)
 # 3. e2e:        Run end-to-end model tests (pr=pr subset, nightly/weekly=full)
-# 4. benchmark:  Validate vllm bench entrypoints (nightly/weekly only)
+# 4. benchmark:  Validate vllm bench entrypoints (nightly/weekly; on PRs
+#                only with the ci-full label or via workflow_dispatch)
 #
 # Notes:
 # - The discover job in ci.yml auto-scans enabled platforms and applies
@@ -44,6 +49,21 @@ on:
         required: false
         type: string
         default: "nightly"
+      branch:
+        description: "Branch/ref under test (nightly/weekly branch input; empty = caller ref)"
+        required: false
+        type: string
+        default: ""
+      run_e2e:
+        description: "Run the e2e jobs (label-tiered on PRs)"
+        required: false
+        type: boolean
+        default: true
+      run_benchmark:
+        description: "Run the benchmark job (label-tiered on PRs)"
+        required: false
+        type: boolean
+        default: true
     secrets:
       FEISHU_APP_ID:
         required: false
@@ -64,6 +84,7 @@ jobs:
         id: checkout1
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
         continue-on-error: true
       - name: Checkout (attempt 2)
@@ -71,12 +92,14 @@ jobs:
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
       - id: load
         run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
@@ -93,6 +116,7 @@ jobs:
     uses: ./.github/workflows/_functional_test.yml
     with:
       platform: ${{ inputs.platform }}
+      branch: ${{ inputs.branch }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
@@ -103,7 +127,7 @@ jobs:
   # nightly/weekly stage: main/full cases, all devices.
   e2e:
     needs: [setup, functional]
-    if: needs.setup.outputs.e2e_matrix != '[]'
+    if: inputs.run_e2e && needs.setup.outputs.e2e_matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -111,23 +135,27 @@ jobs:
     uses: ./.github/workflows/_e2e_test.yml
     with:
       platform: ${{ inputs.platform }}
+      branch: ${{ inputs.branch }}
       task: ${{ matrix.test.task }}
       device: ${{ matrix.test.device }}
       cases: ${{ matrix.test.cases }}
+      flaggems_vllm: ${{ matrix.test.flaggems_vllm || '' }}
       ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
-  # Benchmark validation — runs for all stages; actual test selection
-  # is controlled by the platform YAML (benchmark.pr / benchmark.nightly).
+  # Benchmark validation — actual test selection is controlled by the
+  # platform YAML (benchmark.pr / benchmark.nightly); on PRs it runs only
+  # with the ci-full label.
   benchmark:
-    needs: [setup, e2e]
-    if: always() && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
+    needs: [setup, functional, e2e]
+    if: always() && inputs.run_benchmark && needs.functional.result == 'success' && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
+      branch: ${{ inputs.branch }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
