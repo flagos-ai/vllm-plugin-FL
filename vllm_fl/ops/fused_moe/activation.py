@@ -13,11 +13,12 @@ _gelu_and_mul = CachedOp("gelu_and_mul")
 
 
 class _ApproximateTanh:
-    """让 CachedOp('gelu_and_mul') 走 tanh 近似（等价上游 gelu_tanh_and_mul）。
+    """Route CachedOp('gelu_and_mul') through the tanh approximation.
 
-    补丁说明（metax 侧本地，2026-10-12）：上游 plugin-FL 的 apply_moe_activation
-    缺 MoEActivation.GELU_TANH 分支，而 gemma-4-26B-A4B 的 MoE 正是 GELU_TANH。
-    复用已有算子、只补分支，不改动任何既有逻辑。
+    Equivalent to upstream gelu_tanh_and_mul. Upstream plugin-FL's
+    apply_moe_activation has no branch for MoEActivation.GELU_TANH, which is
+    the activation used by the MoE in gemma-4-26B-A4B. This reuses the
+    existing op and only adds the missing branch; no existing logic changes.
     """
 
     approximate = "tanh"
@@ -62,7 +63,8 @@ def apply_moe_activation(
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.GELU_TANH:
-        # 🔧 本地补丁：等价上游 torch.ops._C.gelu_tanh_and_mul，仍走 FlagGems
+        # Equivalent to upstream torch.ops._C.gelu_tanh_and_mul; still goes
+        # through FlagGems.
         output.copy_(_gelu_and_mul(_GELU_TANH_SHIM, input))
     elif activation == MoEActivation.SWIGLUOAI:
         torch.ops._C.swigluoai_and_mul(output, input)
@@ -85,7 +87,7 @@ def apply_moe_activation(
     elif activation == MoEActivation.GELU_NO_MUL:
         output.copy_(F.gelu(input))
     elif activation == MoEActivation.GELU_TANH_NO_MUL:
-        # 🔧 本地补丁：tanh 近似版 GELU（无 gated mul）
+        # tanh-approximated GELU (no gated mul).
         output.copy_(F.gelu(input, approximate="tanh"))
     elif activation == MoEActivation.RELU2_NO_MUL:
         F.relu(input, inplace=True)
