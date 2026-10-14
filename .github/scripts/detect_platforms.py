@@ -100,6 +100,10 @@ def main() -> int:
     if not platforms:
         print("::warning::No platforms detected", file=sys.stderr)
 
+    # DEBUG PROBE (PR #588): metax-only. This branch debugs the metax model
+    # mount — all other platforms are intentionally skipped here.
+    platforms = [p for p in platforms if p == "metax"]
+
     result = json.dumps(platforms)
     set_output("platforms", result)
 

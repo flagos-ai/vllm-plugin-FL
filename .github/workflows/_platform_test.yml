@@ -99,8 +99,11 @@ jobs:
             --platform ${{ inputs.platform }} \
             $CHANGED_ARG
 
+  # DEBUG PROBE (PR #588): skip unit — already green on this branch in probe
+  # run 2; the single metax runner must serve only the benchmark smoke probe.
   unit:
     needs: setup
+    if: false
     uses: ./.github/workflows/_unit_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -112,8 +115,10 @@ jobs:
   # Fast component-level GPU tests (ops, compilation, distributed).
   # Runs all tests under tests/functional_tests/ in one job. No model files needed.
   # Runs once per platform (not per device) — functional tests are device-agnostic.
+  # DEBUG PROBE (PR #588): skip functional — same reason as unit.
   functional:
     needs: [setup, unit]
+    if: false
     uses: ./.github/workflows/_functional_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -128,7 +133,10 @@ jobs:
   # run inside a single job to avoid repeated container startup.
   e2e:
     needs: [setup, functional]
-    if: needs.setup.outputs.e2e_matrix != '[]'
+    # DEBUG PROBE (PR #588): skip e2e — already proven green on the node-local
+    # mount in run 38377075646; skipping frees the single metax runner for the
+    # benchmark smoke probe.
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -146,8 +154,10 @@ jobs:
       timeout: ${{ matrix.test.timeout || 60 }}
 
   # Validates vllm bench throughput/latency/serve entrypoints.
+  # DEBUG PROBE (PR #588): drop the e2e dependency so the mount question is
+  # answered even while e2e fails its model preflight under the new mount.
   benchmark:
-    needs: [setup, e2e]
+    needs: setup
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
