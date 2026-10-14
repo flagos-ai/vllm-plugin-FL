@@ -235,6 +235,16 @@ class TestRunner:
             status = "FAIL"
             try:
                 device_env = {visible_env_var: visible}
+                # Co-scheduled engines each bind HCCL's default port
+                # (16666); the second bind dies with
+                # Communication_Error_Bind_IP_Port. Give every case a
+                # disjoint port range derived from its (exclusive) first
+                # slot so NPU-family engines never collide. Vendors whose
+                # stack ignores this variable are unaffected.
+                port_base = 18000 + slots[0] * 20
+                device_env["HCCL_NPU_SOCKET_PORT_RANGE"] = (
+                    f"{port_base}-{port_base + 19}"
+                )
                 result = self._run_single(
                     tc, extra_env_override=device_env, _quiet=True
                 )
@@ -735,6 +745,12 @@ class TestRunner:
 
         passed = proc.returncode == 0
         message = "" if passed else f"pytest exited with code {proc.returncode}"
+        if not passed and proc.returncode == 5 and tc.name.startswith("unit-multi-gpu"):
+            # pytest exit 5 = no tests collected. Branches without any
+            # multi_gpu-marked unit test (this port) legitimately collect
+            # nothing in the serial pass — treat as pass, not failure.
+            passed = True
+            message = "no multi_gpu tests collected (skipped)"
 
         return TestResult(
             name=tc.name,

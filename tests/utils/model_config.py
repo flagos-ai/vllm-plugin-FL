@@ -35,7 +35,7 @@ Usage::
     # tests/platforms/cuda.yaml -> device_overrides.h20. If the device's
     # cases list contains qwen3_6/27b_tp2_eager, its llm/serve overrides are
     # merged into the base model config.
-    cfg = ModelConfig.load("qwen3_6", "27b_tp2_eager", platform="cuda", device="h20")
+    cfg = ModelConfig.load("qwen3_6", "27b_tp2_eager", platform="nvidia", device="h20")
 
 """
 

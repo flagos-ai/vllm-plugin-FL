@@ -22,7 +22,7 @@
 #   e2e         — full model test cases (inference + serving, more cases than nightly)
 #   benchmark   — full benchmark suite
 #
-# To run for a single platform: pass platforms="cuda" in workflow_dispatch.
+# To run for a single platform: pass platforms="nvidia" in workflow_dispatch.
 name: Weekly
 
 on:
@@ -126,12 +126,12 @@ jobs:
   # ============================================================
   # Platform tests — one job per enabled platform
   # ============================================================
-  test-cuda:
+  test-nvidia:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
+    if: contains(fromJson(needs.discover.outputs.platforms), 'nvidia')
     uses: ./.github/workflows/_platform_test.yml
     with:
-      platform: cuda
+      platform: nvidia
       ci_stage: weekly
       branch: ${{ inputs.branch }}
     secrets: inherit

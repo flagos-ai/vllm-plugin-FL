@@ -17,8 +17,8 @@
 #
 # Usage:
 #   /nightly              — test all platforms on this PR's branch
-#   /nightly cuda         — test only cuda platform
-#   /nightly cuda main    — test only cuda on main branch
+#   /nightly nvidia       — test only the nvidia platform
+#   /nightly nvidia main  — test only nvidia on main branch
 #
 # Authorized users: collaborators with triage/write/maintain/admin.
 name: PR /nightly Command

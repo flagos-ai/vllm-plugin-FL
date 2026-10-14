@@ -73,13 +73,13 @@ global_trigger_paths:
   - setup.cfg
 
 platforms:
-  cuda:
+  nvidia:
     enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
-      - tests/platforms/cuda.yaml
+      - tests/platforms/nvidia.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml

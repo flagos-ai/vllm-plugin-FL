@@ -144,10 +144,10 @@ jobs:
   # execute all enabled platforms.
   # Skipped jobs (no label or no matching runner) do not fail ci-gate.
   # ============================================================
-  test-cuda:
+  test-nvidia:
     needs: discover
     if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'cuda') &&
+      contains(fromJson(needs.discover.outputs.platforms), 'nvidia') &&
       (
         github.event_name == 'workflow_dispatch' ||
         contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
@@ -156,7 +156,7 @@ jobs:
       )
     uses: ./.github/workflows/_platform_test.yml
     with:
-      platform: cuda
+      platform: nvidia
       ci_stage: pr
       run_e2e: ${{ fromJson(needs.discover.outputs.run_e2e) }}
       run_benchmark: ${{ fromJson(needs.discover.outputs.run_benchmark) }}
@@ -320,7 +320,7 @@ jobs:
       - lint
       - build
       - discover
-      - test-cuda
+      - test-nvidia
       - test-ascend
       - test-hygon
       - test-metax
@@ -338,7 +338,7 @@ jobs:
           LINT_RESULT:       ${{ needs.lint.result }}
           BUILD_RESULT:      ${{ needs.build.result }}
           DISCOVER_RESULT:   ${{ needs.discover.result }}
-          CUDA_RESULT:       ${{ needs.test-cuda.result }}
+          NVIDIA_RESULT:      ${{ needs.test-nvidia.result }}
           ASCEND_RESULT:     ${{ needs.test-ascend.result }}
           HYGON_RESULT:      ${{ needs.test-hygon.result }}
           METAX_RESULT:      ${{ needs.test-metax.result }}
@@ -377,7 +377,7 @@ jobs:
           # and skipped platform jobs must not paper over a dead router.
           check_required "discover" "$DISCOVER_RESULT"
 
-          check_optional "test-cuda"      "$CUDA_RESULT"
+          check_optional "test-nvidia"    "$NVIDIA_RESULT"
           check_optional "test-ascend"    "$ASCEND_RESULT"
           check_optional "test-hygon"     "$HYGON_RESULT"
           check_optional "test-metax"     "$METAX_RESULT"

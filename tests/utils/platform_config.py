@@ -45,7 +45,7 @@ def build_platform_file_map(
 
     Returns:
         Dict mapping platform/device names to YAML filenames.
-        E.g., ``{"cuda": "cuda.yaml", "a100": "cuda.yaml", "a800": "cuda.yaml"}``
+        E.g., ``{"nvidia": "nvidia.yaml", "a100": "nvidia.yaml", "a800": "nvidia.yaml"}``
     """
     if platforms_dir is None:
         platforms_dir = _PLATFORMS_DIR

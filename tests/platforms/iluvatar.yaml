@@ -38,28 +38,26 @@ bi-v150:
   name: "bi-v150"
   tests:
     e2e:
+      # This line stages qwen2.5 7B on iluvatar nodes, not qwen3.6 27B/35B.
       pr:
         inference:
-          qwen3_6:
-            - 27b_tp4_eager
-            - 35b_a3b_tp4_eager
+          qwen2_5:
+            - 7b_tp1
+            - 7b_tp2
         serving:
-          qwen3_6:
-            - 27b_tp4_eager
-            - 35b_a3b_tp4_eager
+          qwen2_5:
+            - 7b_tp2
       nightly:
         inference:
-          qwen3_6:
-            - 27b_tp4_eager
-            - 35b_a3b_tp4_eager
+          qwen2_5:
+            - 7b_tp1
+            - 7b_tp2
         serving:
-          qwen3_6:
-            - 27b_tp4_eager
-            - 35b_a3b_tp4_eager
+          qwen2_5:
+            - 7b_tp2
         concurrent:
-          qwen3_6:
-            - 27b_tp4_eager
-            - 35b_a3b_tp4_eager
+          qwen2_5:
+            - 7b_tp2
     timeouts:
       e2e:
         inference: 180

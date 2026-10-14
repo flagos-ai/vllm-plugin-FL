@@ -17,8 +17,8 @@
 #
 # Usage:
 #   /weekly              — test all platforms on this PR's branch
-#   /weekly cuda         — test only cuda platform
-#   /weekly cuda main    — test only cuda on main branch
+#   /weekly nvidia       — test only the nvidia platform
+#   /weekly nvidia main  — test only nvidia on main branch
 #
 # Authorized users: collaborators with triage/write/maintain/admin.
 name: PR /weekly Command

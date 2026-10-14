@@ -22,7 +22,7 @@
 #   e2e         — main model test cases (inference + serving)
 #   benchmark   — throughput / latency / serve entrypoints
 #
-# To run for a single platform: pass platforms="cuda" in workflow_dispatch.
+# To run for a single platform: pass platforms="nvidia" in workflow_dispatch.
 # The /nightly command passes platform and branch as inputs automatically.
 name: Nightly
 
@@ -127,12 +127,12 @@ jobs:
   # ============================================================
   # Platform tests — one job per enabled platform
   # ============================================================
-  test-cuda:
+  test-nvidia:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
+    if: contains(fromJson(needs.discover.outputs.platforms), 'nvidia')
     uses: ./.github/workflows/_platform_test.yml
     with:
-      platform: cuda
+      platform: nvidia
       ci_stage: nightly
       branch: ${{ inputs.branch }}
     secrets: inherit

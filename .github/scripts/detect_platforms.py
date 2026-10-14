@@ -28,7 +28,7 @@ Usage (in a workflow step)::
           --changed-files /tmp/changed_files.txt
 
 Sets the GitHub Actions output ``platforms`` to a JSON array of platform
-names, e.g. ``["cuda", "ascend"]``.
+names, e.g. ``["nvidia", "ascend"]``.
 """
 
 from __future__ import annotations

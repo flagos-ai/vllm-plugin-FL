@@ -12,6 +12,13 @@ uv pip install \
     --no-deps \
     -e .
 
+# The 0.28 base image lacks pytest-xdist; unit tests run under xdist (-n N).
+uv pip install \
+    --system \
+    --break-system-packages \
+    --extra-index-url https://pypi.org/simple \
+    "pytest-xdist>=3.0.0"
+
 python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
 
