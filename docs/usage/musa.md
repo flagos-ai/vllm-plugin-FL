@@ -214,8 +214,15 @@ C-extension, gradient-enabled and other-platform calls retain their original
 paths. Dynamo no longer has to trace their Python device guards or dtype
 promotion helpers. Native graph capture and piecewise splitting stay enabled.
 
-FL's MUSA graph wrappers retain every captured graph template, input and output
-while keeping at most 1900 executable handles live per process. Before an
+FL's MUSA graph wrappers retain every captured graph template and input, together
+with non-owning output tensor descriptors, while keeping at most 1900 executable
+handles live per process. The native graph pool owns captured output allocations.
+The descriptors use TorchMUSA's storage/metadata reconstruction API so holding an
+output does not keep each shape's allocation live in the shared pool. Ordinary
+external captured inputs remain strongly owned. Tensor identity, view aliases,
+storage offsets, strides, dtype and device are preserved; staging validates both
+StorageImpl aliases and overlapping MUSA storage spans before any copy. Missing
+native reconstruction APIs and unsupported tensor metadata fail explicitly. Before an
 executable is evicted, its device is synchronized; replay restores that same
 template's executable and uses native replay, including RNG handling. No graph
 bucket is removed and no model forward is repeated to restore an executable.
@@ -244,6 +251,22 @@ graph cases failed on rotary device-guard tracing or host-helper header
 redefinitions, and benchmark did not run. The new rotary boundary and narrower
 helper includes require fresh complete hardware CI; no full MUSA or native ABI
 acceptance is claimed from that failed run.
+
+The completed [617abacf CI](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38483470112/job/115592038306)
+passed 1035 unit tests and all 23 functional nodes. Unit skips were 27 cases and
+15 collectors; the four original NPU-only rotary cases are conditional skips,
+not passes. All four inference and two serving cases passed, including the full
+51-shape 35B graph case. Its original four-route Gate independently passed all
+104 requests, 1040 checks and 52/208 graph joins with complete streams and cleanup.
+The remaining 27B graph serving case completed all 51 profiling shapes but had
+58.787–59.035 GB of actual graph memory growth per rank, leaving a negative KV
+budget. The estimate agrees with native free-memory deltas; it is not bypassed.
+The empty-wheel weak-tensor identity fallback retained captured output storage.
+The non-owning MUSA output path addresses that retention while preserving native
+pool lifetime, strong external inputs and all capture shapes. It still requires
+fresh complete GPU CI; benchmark did not run and full MUSA acceptance remains
+false on 617abacf. CPU ownership controls do not certify native pool behavior or
+all vendor ABI compatibility.
 
 ## Additional FlagGems and FlagTree modifications
 

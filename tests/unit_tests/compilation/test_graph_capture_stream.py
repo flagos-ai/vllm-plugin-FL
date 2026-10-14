@@ -69,6 +69,9 @@ class _Tensor:
     def data_ptr(self):
         return self.payload.data_ptr()
 
+    def untyped_storage(self):
+        return self.payload.untyped_storage()
+
     def copy_(self, source):
         self.contract.events.append(("copy", self.data_ptr(), source.data_ptr()))
         self.payload.copy_(source.payload)
@@ -666,3 +669,131 @@ def test_cpu_contract_still_rejects_native_and_unapproved_imports(
     importer = contract.cpu_namespace["__builtins__"]["__import__"]
     with pytest.raises(ImportError, match="does not import target"):
         importer(name, fromlist=fromlist)
+
+
+def _borrow_payload(payload, *, byte_shift=0, nbytes=None):
+    """Keep the caller's real owner alive whenever this descriptor is used."""
+    source = payload.untyped_storage()
+    storage = cpu_torch._C._construct_storage_from_data_pointer(
+        source.data_ptr() + byte_shift,
+        payload.device,
+        source.nbytes() - byte_shift if nbytes is None else nbytes,
+    )
+    return cpu_torch.empty(0, dtype=payload.dtype).set_(
+        storage, payload.storage_offset(), payload.size(), payload.stride()
+    )
+
+
+def test_borrowed_staging_self_overlap_rejected_before_copy(contract):
+    owner = cpu_torch.arange(6, dtype=cpu_torch.float32)
+    captured = _Tensor(contract, payload=owner[:2])
+    incoming = _Tensor(
+        contract, payload=_borrow_payload(captured.payload, byte_shift=4)
+    )
+    assert not cpu_torch._C._is_alias_of(captured.payload, incoming.payload)
+    wrapper = contract.wrapper()
+    wrapper(captured)
+    contract.events.clear()
+    with pytest.raises(ValueError, match="overlaps its destination"):
+        wrapper(incoming)
+    assert contract.events == []
+    assert owner.tolist() == list(range(6))
+
+
+def test_borrowed_source_source_overlap_rejected_before_copy(contract):
+    first, second = _Tensor(contract), _Tensor(contract)
+    wrapper = contract.wrapper()
+    wrapper(first, second)
+    owner = cpu_torch.tensor([7.0, 8.0])
+    incoming_first = _Tensor(contract, payload=_borrow_payload(owner))
+    incoming_second = _Tensor(contract, payload=_borrow_payload(owner))
+    assert not cpu_torch._C._is_alias_of(
+        incoming_first.payload, incoming_second.payload
+    )
+    contract.events.clear()
+    with pytest.raises(ValueError, match="alias relationship"):
+        wrapper(incoming_first, incoming_second)
+    assert contract.events == []
+    assert first.payload.tolist() == second.payload.tolist() == [1.0, 2.0]
+
+
+def test_borrowed_cross_destination_overlap_rejected_before_copy(contract):
+    first, second = _Tensor(contract), _Tensor(contract)
+    wrapper = contract.wrapper()
+    wrapper(first, second)
+    incoming = _Tensor(contract, payload=_borrow_payload(second.payload))
+    assert not cpu_torch._C._is_alias_of(incoming.payload, second.payload)
+    contract.events.clear()
+    with pytest.raises(ValueError, match="staging destination"):
+        wrapper(incoming, _Tensor(contract, (8.0, 9.0)))
+    assert contract.events == []
+
+
+def test_borrowed_distinct_captured_aliases_rejected_before_copy(contract):
+    owner = cpu_torch.tensor([1.0, 2.0])
+    first = _Tensor(contract, payload=_borrow_payload(owner))
+    second = _Tensor(contract, payload=_borrow_payload(owner))
+    assert not cpu_torch._C._is_alias_of(first.payload, second.payload)
+    wrapper = contract.wrapper()
+    wrapper(first, second)
+    incoming_owner = cpu_torch.tensor([8.0, 9.0])
+    incoming_first = _Tensor(contract, payload=_borrow_payload(incoming_owner))
+    incoming_second = _Tensor(contract, payload=_borrow_payload(incoming_owner))
+    contract.events.clear()
+    with pytest.raises(ValueError, match="another captured input"):
+        wrapper(incoming_first, incoming_second)
+    assert contract.events == []
+    assert owner.tolist() == [1.0, 2.0]
+
+
+def test_borrowed_same_address_replay_does_not_copy(contract):
+    owner = cpu_torch.tensor([1.0, 2.0])
+    captured = _Tensor(contract, payload=_borrow_payload(owner))
+    wrapper = contract.wrapper()
+    wrapper(captured)
+    contract.events.clear()
+    wrapper(_Tensor(contract, payload=owner))
+    assert contract.event_names() == ["replay"]
+
+
+def test_ordinary_external_input_remains_strongly_owned(contract):
+    captured = _Tensor(contract)
+    payload_ref = weakref.ref(captured.payload)
+    storage_ref = captured.payload.untyped_storage()._weak_ref()
+    wrapper = contract.wrapper()
+    wrapper(captured)
+    contract.events.clear()
+    del captured
+    import gc
+
+    gc.collect()
+    assert payload_ref() is not None
+    assert not cpu_torch.UntypedStorage._expired(storage_ref)
+    assert (
+        wrapper.concrete_graph_entries["batch"].musa_input_leaves[0].payload
+        is payload_ref()
+    )
+    wrapper.clear_graphs()
+    gc.collect()
+    assert payload_ref() is None
+    assert cpu_torch.UntypedStorage._expired(storage_ref)
+    cpu_torch.UntypedStorage._free_weak_ref(storage_ref)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda", "npu"])
+def test_physical_alias_extension_is_musa_only(contract, device):
+    owner = cpu_torch.ones(2)
+    a = _Tensor(contract, payload=owner)
+    b = _Tensor(contract, payload=_borrow_payload(owner))
+    a.overrides["device"] = b.overrides["device"] = SimpleNamespace(
+        type=device, index=0
+    )
+    assert not contract.wrapper_type._musa_tensors_alias(a, b)
+
+
+def test_physical_alias_extension_respects_device_index(contract):
+    owner = cpu_torch.ones(2)
+    a = _Tensor(contract, payload=owner)
+    b = _Tensor(contract, payload=_borrow_payload(owner))
+    b.overrides["device"] = SimpleNamespace(type="musa", index=1)
+    assert not contract.wrapper_type._musa_tensors_alias(a, b)
