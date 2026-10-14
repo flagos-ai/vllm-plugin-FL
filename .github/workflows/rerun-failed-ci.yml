@@ -29,10 +29,26 @@ jobs:
   rerun-failed-jobs:
     if: |
       github.event.issue.pull_request &&
-      github.event.comment.body == '/rerun-failed-ci'
+      contains(github.event.comment.body, '/rerun-failed-ci')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Validate command (trim-tolerant)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.comment.body }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          EXPECTED: '/rerun-failed-ci'
+        run: |
+          set -euo pipefail
+          trimmed="$(printf '%s' "$BODY" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          if [ "$trimmed" != "$EXPECTED" ]; then
+            echo "::notice::ignored malformed command: '$trimmed'"
+            gh api -X POST "repos/${{ github.repository }}/issues/comments/$COMMENT_ID/reactions" \
+              -f content='confused' || true
+            exit 1
+          fi
+
       - name: Check commenter authorization
         id: auth
         env:
