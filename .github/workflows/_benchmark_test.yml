@@ -53,7 +53,17 @@ on:
 
 jobs:
   benchmark-test:
-    name: "Benchmark Smoke (${{ inputs.platform }})"
+    # DEBUG PROBE (PR #588, round 2): metax hardware jobs get a fresh runner
+    # pod per job which may land on any backing machine with its own /data.
+    # Round 1 (10 full instances) verified test-green on 3 machines but never
+    # sampled the failing one — round 2 goes lightweight (fingerprint +
+    # idempotent download only, full test kept on instance 1) so more machines
+    # are sampled per hour.
+    name: "Benchmark Smoke (${{ inputs.platform }}) [sweep ${{ matrix.sweep }}]"
+    strategy:
+      fail-fast: false
+      matrix:
+        sweep: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
     container:
@@ -78,10 +88,41 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      # DEBUG PROBE (PR #588): identify the backing machine behind this pod.
+      # Device id + mount source + directory mtimes distinguish "multiple
+      # machines with per-machine /data" from "one machine, model repeatedly
+      # deleted" — and catch a mid-sweep deletion in the act.
+      - name: Machine fingerprint
+        run: |
+          echo "pod=$(hostname)"
+          echo "--- /data mount ---"
+          grep -E " /data" /proc/mounts || true
+          df -h /data 2>/dev/null | tail -1 || true
+          echo "--- /data identity ---"
+          stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
+          echo "--- ls /data/models ---"
+          ls -la /data/models/ || true
+          echo "--- ls /data/models/Qwen (first 30) ---"
+          ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
+
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
+      # DEBUG PROBE (PR #588): fetch the benchmark smoke model (Qwen3-0.6B)
+      # that vanished from the node's /data/models straight from HF, with an
+      # hf-mirror fallback chain for the proxied runner network.
+      - name: Download benchmark model (debug)
+        run: |
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3-0.6B \
+            --dest /data/models/Qwen/Qwen3-0.6B
+          ls -la /data/models/Qwen/Qwen3-0.6B | head -20
+
+      # DEBUG PROBE (PR #588, round 2): full benchmark smoke only on instance
+      # 1 — instances 2+ are pure machine-coverage samples (fingerprint +
+      # download) to maximize machines seen per hour.
       - name: Run benchmark smoke tests
+        if: matrix.sweep == 1
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
@@ -92,7 +133,7 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: benchmark-${{ inputs.platform }}
+          name: benchmark-${{ inputs.platform }}-${{ matrix.sweep }}
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
