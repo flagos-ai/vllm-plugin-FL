@@ -211,8 +211,13 @@ def test_capture_failure_does_not_register_or_hide_exception():
     cache, device, _, _ = _fixture()
     graph = _Graph(device)
     error = ValueError("original capture failed")
-    with pytest.raises(ValueError) as caught, cache.capture(graph):
-        raise error
+
+    def capture_then_fail():
+        with cache.capture(graph):
+            raise error
+
+    with pytest.raises(ValueError) as caught:
+        capture_then_fail()
     assert caught.value is error
     assert not cache._states and not cache._live
 
@@ -398,8 +403,13 @@ def test_hot_replay_remains_available_with_open_capture_reservation():
 
 def test_capture_failure_closes_reservation_for_later_capture():
     cache, device, _, _ = _fixture(cap=1)
-    with pytest.raises(ValueError), cache.capture(_Graph(device)):
-        raise ValueError("capture failed")
+
+    def capture_then_fail():
+        with cache.capture(_Graph(device)):
+            raise ValueError("capture failed")
+
+    with pytest.raises(ValueError):
+        capture_then_fail()
     assert not cache._capture_reserved
     graph = _capture(cache, device)
     assert graph.executable
