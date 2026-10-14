@@ -1,0 +1,129 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Debug-only install validation. Activates when the PR title contains
+# "[install-smoke]"; ci.yml's discover job skips the platform test matrix
+# for the same marker, so one push costs a few minutes per platform instead
+# of the full unit/functional/e2e/benchmark matrix.
+#
+# Per platform it runs the real "Install project" step (setup.sh) N times
+# in fresh shells (GITHUB_ENV writes discarded), reporting each iteration
+# and flagging retry-rescued transient failures. Nothing else runs here.
+name: Install Smoke (debug)
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: install-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    if: contains(github.event.pull_request.title, '[install-smoke]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      entries: ${{ steps.gen.outputs.entries }}
+      has_entries: ${{ steps.gen.outputs.has_entries }}
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs
+            .github/scripts
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - id: gen
+        run: python3 .github/scripts/install_smoke_matrix.py
+
+  install-smoke:
+    needs: matrix
+    if: needs.matrix.result == 'success' && needs.matrix.outputs.has_entries == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.entries) }}
+    name: Install smoke (${{ matrix.platform }})
+    runs-on: ${{ fromJson(matrix.runner_labels) }}
+    timeout-minutes: 30
+    container:
+      image: ${{ matrix.ci_image }}
+      volumes: ${{ fromJson(matrix.container_volumes) }}
+      options: ${{ matrix.container_options }}
+    env:
+      INSTALL_SMOKE_ITERATIONS: 4
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+
+      - name: Install project (repeat)
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        # Job containers default to sh (dash); the loop needs bash.
+        shell: bash
+        run: |
+          set -uo pipefail
+          iter="${INSTALL_SMOKE_ITERATIONS}"
+          fails=0
+          rescued=0
+          for i in $(seq 1 "$iter"); do
+            log="${RUNNER_TEMP}/install_iter${i}.log"
+            if GITHUB_ENV=/dev/null GITHUB_PATH=/dev/null \
+               bash ".github/scripts/${PLATFORM}/setup.sh" >"${log}" 2>&1; then
+              echo "iteration ${i}/${iter}: PASS"
+              if grep -q '::warning::fl_net_retry' "${log}"; then
+                rescued=$((rescued + 1))
+                echo "iteration ${i}: transient failure RETRY-RESCUED by fl_net_retry:"
+                grep '::warning::fl_net_retry' "${log}"
+              fi
+            else
+              rc=$?
+              fails=$((fails + 1))
+              echo "::error::iteration ${i}/${iter} FAILED (rc=${rc}); log tail:"
+              tail -n 40 "${log}"
+            fi
+          done
+          echo "install-smoke summary: platform=${PLATFORM} iterations=${iter} failures=${fails} retry_rescued=${rescued}"
+          [ "${fails}" -eq 0 ]

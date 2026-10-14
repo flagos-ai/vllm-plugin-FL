@@ -97,7 +97,17 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml
       - id: detect
-        run: python3 .github/scripts/detect_platforms.py
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Debug PRs marked "[install-smoke]" run only the cheap install
+          # smoke workflow; emit no platforms so the full test matrix skips.
+          if [[ "${PR_TITLE:-}" == *"[install-smoke]"* ]]; then
+            echo "[install-smoke] debug PR: skipping platform test matrix."
+            echo "platforms=[]" >> "$GITHUB_OUTPUT"
+          else
+            python3 .github/scripts/detect_platforms.py
+          fi
 
   # ============================================================
   # Job 4a: CUDA platform testing
