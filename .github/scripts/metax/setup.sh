@@ -3,6 +3,10 @@
 # Setup script for MetaX C550 CI environment.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 export PATH="/opt/conda/bin:${PATH}"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
@@ -21,7 +25,7 @@ fi
 
 # vLLM, FlagGems, and test dependencies are provided by the CI image.
 # Only install the checked-out plugin source for this workflow run.
-python -m pip install --no-build-isolation --no-deps -e .
+fl_net_retry python -m pip install --no-build-isolation --no-deps -e .
 
 # Patch FlagGems LibTuner to fall back to best_config on cache KeyError.
 # TODO: remove when FlagGems fixes kernel hash stability in LibTuner.

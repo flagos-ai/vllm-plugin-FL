@@ -3,13 +3,14 @@
 # Setup script for Ascend NPU CI environment.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 git config --global --add safe.directory "$(pwd)"
 
-pip install --upgrade pip "setuptools>=77.0.3"
-pip install \
-    --no-build-isolation \
-    --no-deps \
-    -e .
+fl_net_retry pip install --upgrade pip "setuptools>=77.0.3"
+fl_net_retry pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import numpy

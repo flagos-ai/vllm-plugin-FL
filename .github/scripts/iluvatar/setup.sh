@@ -3,6 +3,10 @@
 # Setup script for the Iluvatar CoreX CI environment.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 git config --global --add safe.directory "$(pwd)"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
@@ -12,7 +16,7 @@ git config --global --add safe.directory "$(pwd)"
 # CoreX exposes a CUDA-compatible runtime, but its nvcc is not NVIDIA CUDA
 # and cannot be parsed by CMake's CUDA compiler detection.  Install the
 # Python package without requesting the optional native extension build.
-python -m pip install --no-build-isolation --no-deps -e .
+fl_net_retry python -m pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import flag_gems

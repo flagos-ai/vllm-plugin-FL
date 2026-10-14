@@ -3,6 +3,10 @@
 # Setup script for T-Head PPU CI environment.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 
@@ -18,7 +22,7 @@ fi
 
 # vLLM, FlagGems, and test dependencies are provided by the CI image.
 # Only install the checked-out plugin source for this workflow run.
-pip install --no-build-isolation --no-deps -e .
+fl_net_retry pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import flag_gems

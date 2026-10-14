@@ -3,6 +3,10 @@
 # Setup script for Kunlunxin P800 CI environment.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 if [[ -d /root/miniconda/envs/python310_torch29_cuda/bin ]]; then
   export PATH="/root/miniconda/envs/python310_torch29_cuda/bin:${PATH}"
 fi
@@ -36,7 +40,7 @@ fi
 
 # vLLM, FlagGems, FlagCX, and vendor runtime dependencies are provided by the
 # Kunlunxin image. Install only the checked-out plugin source for this run.
-python -m pip install --no-build-isolation --no-deps -e .
+fl_net_retry python -m pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import os

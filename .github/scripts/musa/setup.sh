@@ -3,13 +3,17 @@
 # Setup script for Moore Threads MUSA CI environment.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 git config --global --add safe.directory "$(pwd)"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${MTHREADS_VISIBLE_DEVICES:?MTHREADS_VISIBLE_DEVICES is not set}"
 
-python -m pip install --no-build-isolation --no-deps -e .
+fl_net_retry python -m pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import flag_gems

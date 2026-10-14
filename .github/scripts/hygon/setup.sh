@@ -3,6 +3,10 @@
 # Setup script for Hygon DCU CI environment.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 git config --global --add safe.directory "$(pwd)"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
@@ -22,7 +26,7 @@ echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 test -e "${HIP_PATH}/lib/libgalaxyhip.so.5"
 test -e "${DTK_HOME}/llvm/lib/libomp.so"
 
-python -m pip install --no-build-isolation --no-deps -e .
+fl_net_retry python -m pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import flag_gems

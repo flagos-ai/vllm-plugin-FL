@@ -3,6 +3,10 @@
 # Setup script for Enflame S60 CI.
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/network.sh"
+fl_net_hardening
+
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
 : "${TOPS_VISIBLE_DEVICES:?TOPS_VISIBLE_DEVICES is not set}"
 
@@ -21,7 +25,7 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
 fi
 
 # The vendor runtime, vLLM, and FlagGems come from the pinned base image.
-python -m pip install --no-build-isolation --no-deps -e .
+fl_net_retry python -m pip install --no-build-isolation --no-deps -e .
 
 python - <<'PY'
 import flag_gems
