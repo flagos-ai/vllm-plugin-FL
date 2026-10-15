@@ -93,6 +93,11 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      # This H20 runner fails NVLS multicast binding with CUDA error 401.
+      - name: Disable NVLS on H20
+        if: inputs.platform == 'cuda' && inputs.device == 'h20'
+        run: echo 'NCCL_NVLS_ENABLE=0' >> "$GITHUB_ENV"
+
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
