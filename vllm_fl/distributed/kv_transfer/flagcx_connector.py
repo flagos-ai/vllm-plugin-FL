@@ -35,9 +35,9 @@ from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
     PromMetricT,
 )
 from vllm.distributed.parallel_state import (
-    get_pp_group,
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
+    get_tp_group,
 )
 from vllm.forward_context import ForwardContext
 from vllm.logger import init_logger
@@ -59,6 +59,12 @@ from vllm.v1.request import RequestStatus
 from vllm.v1.worker.block_table import BlockTable
 from vllm.v1.worker.utils import select_common_block_size
 
+from vllm_fl.distributed.kv_transfer.flagcx_discovery import (
+    GET_TP_ADDRESSES,
+    PeerDiscovery,
+    TPAddresses,
+    build_addresses,
+)
 from vllm_fl.distributed.kv_transfer.flagcx_stats import (
     FlagCXKVConnectorStats,
     FlagCXPromMetrics,
@@ -390,7 +396,7 @@ class FlagCXConnectorScheduler:
 
         self._reqs_need_recv: dict[ReqId, tuple[Request, list[list[int]]]] = {}
         self._reqs_need_send: dict[
-            ReqId, tuple["Request", list[list[int]]]
+            ReqId, tuple[Request, list[list[int]]]
         ] = {}
 
     def get_sw_clipped_blocks(
@@ -705,6 +711,8 @@ class FlagCXConnectorWorker:
 
         self.zmq_ctx = zmq.Context()
         self.async_zmq_ctx = zmq.asyncio.Context()
+        self._peer_discovery = PeerDiscovery(self.async_zmq_ctx)
+        self._discovery_error: Exception | None = None
         self._encoder = msgspec.msgpack.Encoder()
         self._decoder = msgspec.msgpack.Decoder(FlagCXAgentMetadata)
 
@@ -824,6 +832,18 @@ class FlagCXConnectorWorker:
 
         # Launch Prefill sender thread (ROUTER socket for Decode requests)
         if self.kv_role != "kv_consumer":
+            # Each node's VLLM_HOST_IP can differ within a multi-node TP group.
+            # Gather real addresses over the already-initialized TP CPU group;
+            # rank zero can then answer discovery without an external proxy.
+            registrations: list[Any] = [None] * self.tp_size
+            torch.distributed.all_gather_object(
+                registrations,
+                (self.tp_rank, self.hostname, self.side_channel_port + self.tp_rank),
+                group=get_tp_group().cpu_group,
+            )
+            self._tp_addresses = self._encoder.encode(
+                build_addresses(self.engine_id, registrations)
+            )
             ready_event = threading.Event()
             self._sender_t = threading.Thread(
                 target=self._sender_thread,
@@ -857,12 +877,15 @@ class FlagCXConnectorWorker:
 
                 if frontend in sockets:
                     identity, _, metadata_bytes = frontend.recv_multipart()
-                    self._sender_executor.submit(
-                        self._sender_worker,
-                        identity,
-                        metadata_bytes,
-                        backend_path,
-                    )
+                    if metadata_bytes == GET_TP_ADDRESSES:
+                        frontend.send_multipart((identity, b"", self._tp_addresses))
+                    else:
+                        self._sender_executor.submit(
+                            self._sender_worker,
+                            identity,
+                            metadata_bytes,
+                            backend_path,
+                        )
 
                 if backend in sockets:
                     identity, status = backend.recv_multipart()
@@ -1323,27 +1346,62 @@ class FlagCXConnectorWorker:
     ) -> None:
         """Fan out each request to every Prefill TP rank it must pull from.
 
-        With D_TP > P_TP one Decode rank gathers its slice from several Prefill
+        With P_TP > D_TP one Decode rank gathers its slice from several Prefill
         ranks (``handshake_target_ranks``); it finishes recving only after all
         of them respond (tracked via ``_pull_pending``). Runs on the receiver
-        loop; populates ``_pull_pending`` and launches the per-peer pulls
-        without an intervening await, so it is atomic w.r.t. other coroutines.
+        loop. Discover addresses before registering each request's pending
+        pulls, then launch transfers using the producer's actual rank hosts.
         """
         kv_pulls: dict[
             str, dict[ReqId, tuple[TransferId, list[list[int]]]]
         ] = defaultdict(dict)
-        for req_id, meta in reqs_to_recv.items():
-            remote_tp_size = meta.remote_tp_size or self.tp_size
-            target_p_ranks = self.kv_topo.handshake_target_ranks(remote_tp_size)
-            self._pull_pending[req_id] = len(target_p_ranks)
-            for p_rank in target_p_ranks:
-                path = make_zmq_path(
-                    "tcp", meta.remote_host, meta.remote_port + p_rank
-                )
-                kv_pulls[path][req_id] = (
-                    meta.transfer_id,
-                    meta.local_block_ids,
-                )
+        peer_addresses: dict[tuple[str, int], TPAddresses | None] = {}
+        pending: dict[ReqId, int] = {}
+        try:
+            for meta in reqs_to_recv.values():
+                peer = (meta.remote_host, meta.remote_port)
+                if peer not in peer_addresses:
+                    peer_addresses[peer] = await self._peer_discovery.get(*peer)
+
+            for req_id, meta in reqs_to_recv.items():
+                addresses = peer_addresses[(meta.remote_host, meta.remote_port)]
+                if addresses is None:
+                    logger.warning_once(
+                        "Prefill does not support FlagCX TP address discovery; "
+                        "using legacy single-host side-channel addresses. "
+                        "Upgrade both P and D for multi-node Prefill without a proxy."
+                    )
+                    remote_tp_size = meta.remote_tp_size or self.tp_size
+                else:
+                    remote_tp_size = len(addresses.ranks)
+                    if meta.remote_tp_size and meta.remote_tp_size != remote_tp_size:
+                        raise ValueError(
+                            "FlagCX Prefill TP size differs from discovery: "
+                            f"request={meta.remote_tp_size}, discovered={remote_tp_size}"
+                        )
+                target_p_ranks = self.kv_topo.handshake_target_ranks(remote_tp_size)
+                pending[req_id] = len(target_p_ranks)
+                for p_rank in target_p_ranks:
+                    host = meta.remote_host
+                    port = meta.remote_port + p_rank
+                    if addresses is not None:
+                        host = addresses.ranks[p_rank].host
+                        port = addresses.ranks[p_rank].port
+                    path = make_zmq_path("tcp", host, port)
+                    kv_pulls[path][req_id] = (
+                        meta.transfer_id,
+                        meta.local_block_ids,
+                    )
+        except Exception as exc:
+            # Surface discovery failure to the engine instead of leaving
+            # requests waiting indefinitely for a pull that never started.
+            self._discovery_error = exc
+            self.xfer_stats.record_failed_recv()
+            logger.exception("Could not discover FlagCX Prefill TP addresses")
+            return
+
+        # No awaits between registering pending pulls and launching transfers.
+        self._pull_pending.update(pending)
         for path, req_blocks in kv_pulls.items():
             asyncio.ensure_future(self._receive_kv(path, req_blocks))
 
@@ -1354,6 +1412,10 @@ class FlagCXConnectorWorker:
         return result
 
     def get_finished(self) -> tuple[set[str] | None, set[str] | None]:
+        if self._discovery_error is not None:
+            raise RuntimeError(
+                "FlagCX Prefill TP discovery failed"
+            ) from self._discovery_error
         fut = None
         if self.kv_role != "kv_producer":
             fut = asyncio.run_coroutine_threadsafe(

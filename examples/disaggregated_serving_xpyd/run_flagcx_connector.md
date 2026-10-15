@@ -147,6 +147,7 @@ python3 router.py \
 
 - The second argument after the Prefill URL is the **ZMQ side-channel base port** (`FLAGCX_BOOTSTRAP_PORT`, default `8998`).
 - You can specify multiple `--prefill` / `--decode` for xPyD topologies.
+- For a Prefill instance whose TP group spans several nodes, pass only the first node's URL. Set `VLLM_HOST_IP` on every Prefill node; Decode asks Prefill rank 0 for each rank's real host/port, so no extra forwarding proxy is needed.
 
 ## 6. Send Requests
 
