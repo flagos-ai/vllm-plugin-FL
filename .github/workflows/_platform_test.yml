@@ -143,11 +143,13 @@ jobs:
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-      timeout: ${{ matrix.test.timeout || 60 }}
+      # DEBUG PROBE (PR #594): padded from 60/180 so a cold machine can pull
+      # ~125GB of models from the mirror before running the 27B/35B cases.
+      timeout: ${{ matrix.test.timeout || 240 }}
 
   # Validates vllm bench throughput/latency/serve entrypoints.
   benchmark:
-    needs: [setup, e2e]
+    needs: setup
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}

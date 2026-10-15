@@ -78,6 +78,15 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      # DEBUG PROBE (PR #594): census only — see _unit_test.yml note.
+      - name: Machine fingerprint and model census
+        run: |
+          echo "pod=$(hostname)"
+          grep -E " /data" /proc/mounts || true
+          df -h /data || true
+          stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
+          ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
+
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 

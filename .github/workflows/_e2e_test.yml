@@ -93,6 +93,30 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      # DEBUG PROBE (PR #594): fingerprint the backing machine and self-heal
+      # its local /data — the metax pool hides a machine missing 0.6B/27B/35B
+      # (PR #593 run 38700972319 job 116328356263). Downloads are idempotent
+      # and flock-protected; healthy machines pay a df + stat each. df before
+      # and after also exposes a disk-space-limited deletion mechanism if
+      # space runs out mid-download.
+      - name: Machine fingerprint and model prefetch
+        run: |
+          echo "pod=$(hostname)"
+          echo "--- /data mount ---"
+          grep -E " /data" /proc/mounts || true
+          echo "--- df before ---"
+          df -h /data || true
+          stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
+          ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-27B \
+            --dest /data/models/Qwen/Qwen3.6-27B
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-35B-A3B \
+            --dest /data/models/Qwen/Qwen3.6-35B-A3B
+          echo "--- df after ---"
+          df -h /data || true
+
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 

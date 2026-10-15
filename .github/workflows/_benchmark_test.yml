@@ -53,7 +53,20 @@ on:
 
 jobs:
   benchmark-test:
-    name: "Benchmark Smoke (${{ inputs.platform }})"
+    # DEBUG PROBE (PR #588, round 3 — staging blitz): 22 samples across two
+    # rounds never hit the machine that keeps failing other PRs' benchmark
+    # jobs (3 failures: 10-13 11:20, 10-14 08:14 and 10:57). Scheduling is
+    # not uniform, so volume is the answer: 40 instances of fingerprint +
+    # idempotent download only (no install, no tests — python and
+    # huggingface_hub ship with the CI image), aiming to land on the missing
+    # machine at least once and stage Qwen3-0.6B onto its local /data.
+    # Instance 40 additionally runs the full benchmark smoke as end-to-end
+    # verification.
+    name: "Benchmark Smoke (${{ inputs.platform }}) [sweep ${{ matrix.sweep }}]"
+    strategy:
+      fail-fast: false
+      matrix:
+        sweep: [1]
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
     container:
@@ -75,6 +88,31 @@ jobs:
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
 
+      # DEBUG PROBE (PR #588): identify the backing machine behind this pod.
+      # Device id + mount source + directory mtimes distinguish machines and
+      # catch deletion/restoration events in the act.
+      - name: Machine fingerprint
+        run: |
+          echo "pod=$(hostname)"
+          echo "--- /data mount ---"
+          grep -E " /data" /proc/mounts || true
+          df -h /data 2>/dev/null | tail -1 || true
+          echo "--- /data identity ---"
+          stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
+          echo "--- ls /data/models/Qwen (first 30) ---"
+          ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
+
+      # DEBUG PROBE (PR #588): stage Qwen3-0.6B onto this machine's local
+      # /data from HF (hf-mirror fallback for the proxied runner network);
+      # idempotent — machines that already have it pay one stat() call.
+      # Runs before Install so instances stay ~1-2 minutes each.
+      - name: Download benchmark model (debug)
+        run: |
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3-0.6B \
+            --dest /data/models/Qwen/Qwen3-0.6B
+          ls -la /data/models/Qwen/Qwen3-0.6B | head -20
+
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
@@ -92,7 +130,7 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: benchmark-${{ inputs.platform }}
+          name: benchmark-${{ inputs.platform }}-${{ matrix.sweep }}
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json

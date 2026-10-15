@@ -60,7 +60,7 @@ c550:
           - "27b_tp4_graph"
     timeouts:
       e2e:
-        serving: 180
+        serving: 300
     functional:
       include: "*"
       exclude: []
