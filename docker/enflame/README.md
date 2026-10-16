@@ -24,6 +24,14 @@ ordinary dense models, reaching sampler kernels that the current GCU stack
 does not support. Explicit `VLLM_USE_V2_MODEL_RUNNER=1` requests fail during
 configuration; V2-only features are unavailable on this backend.
 
+Hybrid models with speculative decoding and `mamba_cache_mode="align"`
+are rejected during configuration. vLLM 0.28 uses fused speculative Mamba
+pre/post-copy kernels for that combination; their indirect state and block-table
+pointers are not yet translated to GCU device addresses. Disable speculative
+decoding for hybrid align-mode serving. Other speculative/cache combinations
+still require their own validation; accepting a configuration is not evidence
+of device support.
+
 The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
 The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
 The original Qwen3.6-27B inference and Qwen3.6-35B-A3B serving cases passed in
@@ -103,6 +111,43 @@ FlagGems 5.4's Python wheel has no native C++ extension bundled. The optional
 source commit; source builds require the TOPS SDK and a C++20 toolchain.
 Install it only when a required operator path needs it, then test that path
 separately. Python operator/device smoke is independent of C++ coverage.
+
+The runtime `index_fill` adapter validates the supported FlagGems version and
+private launcher/kernel API. Exact release-byte verification runs separately in
+`docker/enflame/verify_index_fill.py` during CI setup. Setup executes that script
+from the tested checkout, so this separation does not require a new dependency
+image.
+
+## Temporary vendor compatibility adapters
+
+The adapters in
+[`inductor.py`](../../vllm_fl/dispatch/backends/vendor/gcu/impl/inductor.py)
+apply to the fixed vendor stack above. Matching a private API signature alone
+does not establish support for another TorchGCU or FlagTree release. Vendor
+integration follow-ups are tracked in the
+[PR #582 review](https://github.com/flagos-ai/vllm-plugin-FL/pull/582#pullrequestreview-5544802336);
+no separate upstream issue or PR has been filed by this adaptation.
+
+| Adapter | Upstream removal condition |
+|---|---|
+| Persistent-reduction signature bridge | TorchGCU natively accepts `size_hints`, `reduction_hint`, `inductor_meta` and `triton_meta`, preserves that interface through initial/repeated lazy registration in both GCU module namespaces, and defines `native_matmul` behavior. |
+| Integer compile-option forwarding | TorchGCU/Inductor forwards `enable_i64`/`ENABLE_I64` at `_create_compile_options`, preserving explicit choices, and FlagTree correctly lowers integer and pointer `i64`/`u64` signatures. |
+| Register-resource exception normalization | The vendor compiler raises compatible `OutOfResources` for register exhaustion, so the stock autotuner skips the exhausted tile and completes a valid tile while propagating unrelated failures. |
+
+Before removing an adapter, convert the corresponding
+[`test_gcu_inductor.py`](../../tests/unit_tests/dispatch/test_gcu_inductor.py)
+cases into native-provider contract tests and run the affected cold-cache
+compilation paths on S60 with the adapter disabled. Include initial and repeated
+registration, dynamic integer/pointer signatures, and exhausted plus valid
+autotune configurations as applicable; metadata or mock-only checks are
+insufficient evidence for removal.
+
+The cache writer keeps per-call layout, stride and address-range checks.
+Attention creates new cache views, and hybrid allocation can change their
+layout; sharing and reinitialization also change the binding lifecycle.
+Moving these checks to initialization requires a binding contract that covers
+those paths and direct wrapper calls. An object-identity cache or a check before
+the final layout is established would weaken the safety boundary.
 
 ## Validate on an S60 host
 
