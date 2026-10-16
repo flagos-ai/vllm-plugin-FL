@@ -611,7 +611,16 @@ class Glm5NextMLAAttention(DeepseekV2MLAAttention):
         from vllm_fl.activation import PendingPatch, temporary_patches
 
         construction_patches = []
-        if current_platform.is_cuda() and not use_nvidia_reference():
+        # PlatformFL.is_cuda() means "vendor == nvidia" (see vllm_fl/platform.py),
+        # so the original guard `is_cuda() and not use_nvidia_reference()` was never
+        # true on any platform: NVIDIA took vLLM's native FLASH_ATTN prefill path,
+        # while every non-NVIDIA accelerator ended up with no MLA prefill backend
+        # registered at all.  MetaX C550 then aborts model construction with
+        #   No valid MLA prefill backend found with MLAPrefillSelectorConfig(...)
+        #     Reasons: {FLASH_ATTN: [required dependencies not available]}
+        # Gate on the missing reference kernels alone, so the portable FlagGems
+        # prefill backend is installed wherever the native one is unavailable.
+        if not use_nvidia_reference():
             from vllm.model_executor.layers import sparse_attn_indexer
             from vllm.model_executor.layers.attention import mla_attention
 
