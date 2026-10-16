@@ -39,6 +39,7 @@ fi
 # vLLM, FlagGems, FlagCX, and vendor runtime dependencies are provided by the
 # Kunlunxin image. Install only the checked-out plugin source for this run.
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import os

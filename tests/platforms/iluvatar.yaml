@@ -38,13 +38,38 @@ bi-v150:
   name: "bi-v150"
   tests:
     e2e:
-      inference:
-        qwen2_5: ["7b_tp1", "7b_tp2"]
-      serving:
-        qwen2_5: ["7b_tp2"]
+      # This line stages qwen2.5 7B on iluvatar nodes, not qwen3.6 27B/35B.
+      pr:
+        inference:
+          qwen2_5:
+            - 7b_tp1
+            - 7b_tp2
+        serving:
+          qwen2_5:
+            - 7b_tp2
+      nightly:
+        inference:
+          qwen2_5:
+            - 7b_tp1
+            - 7b_tp2
+        serving:
+          qwen2_5:
+            - 7b_tp2
+        concurrent:
+          qwen2_5:
+            - 7b_tp2
+    timeouts:
+      e2e:
+        inference: 180
+        serving: 180
+        concurrent: 180
     functional:
       include: "*"
       exclude: []
     unit:
       include: "*"
-      exclude: []
+    benchmark:
+      pr:
+        enabled: false
+      nightly:
+        enabled: false

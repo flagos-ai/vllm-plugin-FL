@@ -24,7 +24,7 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: "Platform name (e.g., cuda, ascend)"
+        description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
       ci_image:

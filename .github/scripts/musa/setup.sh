@@ -10,6 +10,7 @@ git config --global --add safe.directory "$(pwd)"
 : "${MTHREADS_VISIBLE_DEVICES:?MTHREADS_VISIBLE_DEVICES is not set}"
 
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install "pytest-xdist>=3.0.0"
 
 python - <<'PY'
 import flag_gems
