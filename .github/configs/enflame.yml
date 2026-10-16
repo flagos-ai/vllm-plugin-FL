@@ -15,6 +15,13 @@
 # Enflame S60 hardware configuration.
 platform: enflame
 
+paths_watch:
+  - "tests/**/*enflame*"
+  - "tests/platforms/enflame.yaml"
+  - ".github/configs/enflame.yml"
+  - ".github/scripts/enflame/**"
+  - "docker/enflame/**"
+
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-enflame-ci
 
 # Replace this with the exact label configured on the Enflame S60 runner.

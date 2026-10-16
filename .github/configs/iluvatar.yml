@@ -15,6 +15,14 @@
 # Iluvatar BI-V150 hardware configuration.
 platform: iluvatar
 
+paths_watch:
+  - "vllm_fl/dispatch/backends/vendor/iluvatar/**"
+  - "tests/**/*iluvatar*"
+  - "tests/platforms/iluvatar.yaml"
+  - ".github/configs/iluvatar.yml"
+  - ".github/scripts/iluvatar/**"
+  - "docker/iluvatar/**"
+
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-iluvatar-ci
 
 runner_labels:

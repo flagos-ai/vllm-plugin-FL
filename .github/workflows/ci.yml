@@ -12,186 +12,292 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# CI Workflow for VLLM Plugin FL
-# This workflow defines the CI process for the VLLM Plugin FL project.
-# It includes linting and platform-specific testing stages.
 name: CI
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "examples/**"
-      - "docker/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Comma/space-separated platforms, or all"
+        required: false
+        default: "all"
+        type: string
+      pr_number:
+        description: "Open PR number whose immutable head SHA should be tested"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}-${{ inputs.platforms || 'auto' }}
   cancel-in-progress: true
 
 jobs:
-  # ============================================================
-  # Job 1: Lint (ruff check, ruff format, typos)
-  # Runs on every push/PR. Fast, no special requirements.
-  # ============================================================
+  resolve:
+    name: Resolve source
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ steps.source.outputs.repository }}
+      ref: ${{ steps.source.outputs.ref }}
+      pr_number: ${{ steps.source.outputs.pr_number }}
+      labels: ${{ steps.source.outputs.labels }}
+      route_event: ${{ steps.source.outputs.route_event }}
+    steps:
+      - id: source
+        name: Resolve immutable test source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR: ${{ github.event.pull_request.number }}
+          DISPATCH_PR: ${{ inputs.pr_number }}
+          EVENT_REPOSITORY: ${{ github.repository }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          pr_number="$EVENT_PR"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            pr_number="$DISPATCH_PR"
+          fi
+          if [ -n "$pr_number" ]; then
+            pr=$(gh api "repos/${{ github.repository }}/pulls/$pr_number")
+            test "$(jq -r '.state' <<<"$pr")" = "open"
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "repository=$(jq -r '.head.repo.full_name' <<<"$pr")" >> "$GITHUB_OUTPUT"
+              echo "ref=$(jq -r '.head.sha' <<<"$pr")" >> "$GITHUB_OUTPUT"
+            else
+              echo "repository=$EVENT_REPOSITORY" >> "$GITHUB_OUTPUT"
+              echo "ref=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+            fi
+            echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+            echo "labels=$(jq -c '[.labels[].name]' <<<"$pr")" >> "$GITHUB_OUTPUT"
+            echo "route_event=pull_request" >> "$GITHUB_OUTPUT"
+          else
+            echo "repository=$EVENT_REPOSITORY" >> "$GITHUB_OUTPUT"
+            echo "ref=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            echo "labels=[]" >> "$GITHUB_OUTPUT"
+            echo "route_event=$EVENT_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
-    # Skip: fork-internal PRs, draft PRs, PRs with WIP/wip in title
+    needs: resolve
     if: |
       github.event_name != 'pull_request' ||
-      (
-        github.repository == 'flagos-ai/vllm-plugin-FL' &&
-        !github.event.pull_request.draft &&
-        !contains(github.event.pull_request.title, 'WIP') &&
-        !contains(github.event.pull_request.title, 'wip')
-      )
+      (!github.event.pull_request.draft &&
+       !contains(github.event.pull_request.title, 'WIP') &&
+       !contains(github.event.pull_request.title, 'wip'))
     uses: ./.github/workflows/_lint.yml
+    with:
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
 
-  # ============================================================
-  # Job 2: Build & install check
-  # Verify the package can be built and installed cleanly.
-  # ============================================================
   build:
-    needs: lint
+    needs: [resolve, lint]
     uses: ./.github/workflows/_build_wheel.yml
+    with:
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
 
-  # ============================================================
-  # Job 3: Discover which platforms to test
-  # ============================================================
   discover:
-    needs: build
+    needs: [resolve, build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       platforms: ${{ steps.detect.outputs.platforms }}
     steps:
-      - name: Checkout (attempt 1)
+      - name: Checkout source (attempt 1)
         id: checkout1
         uses: actions/checkout@v4
         with:
-          sparse-checkout: |
-            .github/configs
-            .github/scripts
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.ref }}
+          fetch-depth: 1
         continue-on-error: true
-      - name: Checkout (attempt 2)
+      - name: Checkout source (attempt 2)
         id: checkout2
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
         with:
-          sparse-checkout: |
-            .github/configs
-            .github/scripts
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.ref }}
+          fetch-depth: 1
         continue-on-error: true
-      - name: Checkout (attempt 3)
+      - name: Checkout source (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
         with:
-          sparse-checkout: |
-            .github/configs
-            .github/scripts
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.ref }}
+          fetch-depth: 1
       - name: Install PyYAML
         run: pip install pyyaml
+      - id: changes
+        name: Read PR changed files
+        if: needs.resolve.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/pulls/$PR_NUMBER/files" \
+            --jq '.[].filename' > /tmp/changed-files.txt
+          echo "file=/tmp/changed-files.txt" >> "$GITHUB_OUTPUT"
+          cat /tmp/changed-files.txt
       - id: detect
-        run: python3 .github/scripts/detect_platforms.py
+        env:
+          REQUESTED_PLATFORMS: ${{ inputs.platforms }}
+          LABELS_JSON: ${{ needs.resolve.outputs.labels }}
+          ROUTE_EVENT: ${{ needs.resolve.outputs.route_event }}
+          CHANGED_FILE: ${{ steps.changes.outputs.file }}
+        run: |
+          python .github/scripts/detect_platforms.py \
+            --event-name "$ROUTE_EVENT" \
+            --labels-json "$LABELS_JSON" \
+            --platforms "$REQUESTED_PLATFORMS" \
+            ${CHANGED_FILE:+--changed-files "$CHANGED_FILE"}
 
-  # ============================================================
-  # Job 4a: CUDA platform testing
-  # ============================================================
   test-cuda:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'cuda')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: cuda
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
 
-  # ============================================================
-  # Job 4b: Ascend platform testing
-  # ============================================================
   test-ascend:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: ascend
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
 
-  # ============================================================
-  # Job 4c: Hygon platform testing
-  # ============================================================
   test-hygon:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: hygon
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
 
-  # ============================================================
-  # Job 4d: MetaX platform testing
-  # ============================================================
   test-metax:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: metax
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
 
-  # ============================================================
-  # Job 4e: MUSA platform testing
-  # ============================================================
   test-musa:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: musa
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
 
-  # ============================================================
-  # Job 4f: Enflame platform testing
-  # ============================================================
   test-enflame:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: enflame
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
 
-  # ============================================================
-  # Job 4g: Kunlunxin platform testing
-  # ============================================================
   test-kunlunxin:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: kunlunxin
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
 
- # ============================================================
-  # Job 4h: THead platform testing
-  # ============================================================
   test-thead:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: thead
-  # ============================================================
-  # Job 4h: Iluvatar platform testing
-  # ============================================================
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
+    secrets: inherit
+
   test-iluvatar:
-    needs: discover
+    needs: [resolve, discover]
     if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: iluvatar
+      source_repository: ${{ needs.resolve.outputs.repository }}
+      source_ref: ${{ needs.resolve.outputs.ref }}
     secrets: inherit
+
+  ci-complete:
+    name: CI Complete
+    needs:
+      - resolve
+      - lint
+      - build
+      - discover
+      - test-cuda
+      - test-ascend
+      - test-hygon
+      - test-metax
+      - test-musa
+      - test-enflame
+      - test-kunlunxin
+      - test-thead
+      - test-iluvatar
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      RESULTS: ${{ toJson(needs) }}
+      SELECTED: ${{ needs.discover.outputs.platforms }}
+      SKIP_CI: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft || contains(github.event.pull_request.title, 'WIP') || contains(github.event.pull_request.title, 'wip')) }}
+    steps:
+      - name: Verify required CI results
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          if os.environ.get("SKIP_CI") == "true":
+              print("CI gate passed: draft or WIP pull request")
+              raise SystemExit(0)
+
+          results = json.loads(os.environ["RESULTS"])
+          selected = json.loads(os.environ.get("SELECTED") or "[]")
+          failures = []
+          for name in ("resolve", "lint", "build", "discover"):
+              if results[name]["result"] != "success":
+                  failures.append(f"{name}={results[name]['result']}")
+          for platform in selected:
+              name = f"test-{platform}"
+              if results.get(name, {}).get("result") != "success":
+                  failures.append(f"{name}={results.get(name, {}).get('result', 'missing')}")
+          if failures:
+              print("CI gate failed: " + ", ".join(failures))
+              sys.exit(1)
+          print("CI gate passed for: " + (", ".join(selected) or "shared checks only"))
+          PY

@@ -17,6 +17,14 @@
 
 platform: musa
 
+paths_watch:
+  - "vllm_fl/dispatch/backends/vendor/musa/**"
+  - "tests/**/*musa*"
+  - "tests/platforms/musa.yaml"
+  - ".github/configs/musa.yml"
+  - ".github/scripts/musa/**"
+  - "docker/musa/**"
+
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-musa-ci
 
 runner_labels:

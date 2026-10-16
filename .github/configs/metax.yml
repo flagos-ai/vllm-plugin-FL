@@ -17,6 +17,14 @@
 
 platform: metax
 
+paths_watch:
+  - "vllm_fl/dispatch/backends/vendor/metax/**"
+  - "tests/**/*metax*"
+  - "tests/platforms/metax.yaml"
+  - ".github/configs/metax.yml"
+  - ".github/scripts/metax/**"
+  - "docker/metax/**"
+
 # Docker image for this hardware.
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-metax-ci
 
