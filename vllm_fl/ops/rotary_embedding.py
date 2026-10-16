@@ -1,11 +1,21 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 from typing import Optional
+
 import torch
+
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
 from vllm_fl.dispatch import CachedOp
 
 _rotary_embedding = CachedOp("rotary_embedding")
+_apply_rotary_emb = CachedOp("apply_rotary_emb")
+
+
+def apply_rotary_emb_dispatch(
+    self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> torch.Tensor:
+    """Route vLLM's single-tensor RoPE through the FL backend policy."""
+    return _apply_rotary_emb(self, x, cos, sin)
 
 
 class RotaryEmbeddingFL(RotaryEmbedding):

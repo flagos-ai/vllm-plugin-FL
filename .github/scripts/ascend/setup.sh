@@ -12,6 +12,8 @@ pip install \
     -e .
 pip install "pytest-xdist>=3.0.0"
 
+python .github/scripts/install_flaggems_vllm.py
+
 python - <<'PY'
 import numpy
 

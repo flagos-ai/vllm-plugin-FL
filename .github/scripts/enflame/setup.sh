@@ -24,6 +24,8 @@ fi
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install --extra-index-url https://pypi.org/simple "pytest-xdist>=3.0.0"
 
+python .github/scripts/install_flaggems_vllm.py
+
 python - <<'PY'
 import flag_gems
 import torch

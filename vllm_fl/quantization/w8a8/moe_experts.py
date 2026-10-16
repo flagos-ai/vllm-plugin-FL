@@ -25,12 +25,17 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
     fused_experts as _vllm_fused_experts,
 )
 
+import vllm_fl.envs as fl_envs
+
 
 def _flaggems_fused_experts_impl(**kwargs) -> torch.Tensor:
     """Resolve FlagGems lazily after the platform runtime is initialized."""
-    import flag_gems
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        import flaggems_vllm as fused_ops
+    else:
+        import flag_gems as fused_ops
 
-    return flag_gems.fused_experts_impl(**kwargs)
+    return fused_ops.fused_experts_impl(**kwargs)
 
 
 def _validate_w8a8_contract(

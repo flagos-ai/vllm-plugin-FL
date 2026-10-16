@@ -27,6 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 UV_VERSION="${UV_VERSION:-0.7.12}"
 CUDA_VERSION="${CUDA_VERSION:-12.8.1}"
+CUDA_FLAGGEMS_VERSION="${CUDA_FLAGGEMS_VERSION:-v5.4.0}"
 UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 VLLM_VERSION="${VLLM_VERSION:-0.19.0}"
 CANN_VERSION="${CANN_VERSION:-8.5.1}"
@@ -232,7 +233,8 @@ VERSIONS (override via environment variables):
     HYGON_PYTHON_VERSION Python version in Hygon base image tag (default: ${HYGON_PYTHON_VERSION})
     HYGON_RUNTIME_LIB_DIR Hygon runtime library source dir (default: ${HYGON_RUNTIME_LIB_DIR})
     HYGON_RUNTIME_ROOTS  Colon-separated roots for Hygon runtime overlay files (default: ${HYGON_RUNTIME_ROOTS})
-    FLAGGEMS_VERSION     FlagGems git ref (default: ${FLAGGEMS_VERSION})
+    CUDA_FLAGGEMS_VERSION FlagGems git ref for CUDA (default: ${CUDA_FLAGGEMS_VERSION})
+    FLAGGEMS_VERSION     FlagGems git ref for Hygon (default: ${FLAGGEMS_VERSION})
     VLLM_PLUGIN_FL_VERSION vllm-plugin-FL git ref (default: ${VLLM_PLUGIN_FL_VERSION})
 
 EXAMPLES:
@@ -335,6 +337,7 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
     BUILD_ARGS+=(
         --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
+        --build-arg "FLAGGEMS_VERSION=${CUDA_FLAGGEMS_VERSION}"
         --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
         --build-arg "VLLM_VERSION=${VLLM_VERSION}"
         --build-arg "UV_VERSION=${UV_VERSION}"
@@ -458,6 +461,7 @@ msg "  Platform:       ${PLATFORM}"
 msg "  Target:         ${TARGET}"
 if [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
+    msg "  FlagGems:       ${CUDA_FLAGGEMS_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
     msg "  FlagGems:       ${ASCEND_FLAGGEMS_VERSION}"

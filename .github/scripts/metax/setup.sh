@@ -24,6 +24,8 @@ fi
 python -m pip install --no-build-isolation --no-deps -e .
 python -m pip install "pytest-xdist>=3.0.0"
 
+python .github/scripts/install_flaggems_vllm.py
+
 # Patch FlagGems LibTuner to fall back to best_config on cache KeyError.
 # TODO: remove when FlagGems fixes kernel hash stability in LibTuner.
 python - <<'PATCH'
