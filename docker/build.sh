@@ -152,7 +152,7 @@ VERSIONS (override via environment variables):
     HYGON_VLLM_VERSION   vLLM version installed in empty mode (default: ${HYGON_VLLM_VERSION})
     HYGON_DTK_VERSION    DTK version used in generated image tag (default: ${HYGON_DTK_VERSION})
     HYGON_PYTHON_VERSION Python version in Hygon base image tag (default: ${HYGON_PYTHON_VERSION})
-    PLUGIN_SOURCE_SHA   Plugin Git revision (default: current repository HEAD)
+    PLUGIN_SOURCE_SHA   Git commit to archive for Hygon (default: repository HEAD)
     HYGON_GIT_CONFIG    Optional Git-only proxy config mounted as a BuildKit secret
     HYGON_VLLM_WHEEL_DIR Optional directory containing one validated empty vLLM wheel
     HYGON_VLLM_WHEEL_SHA256 SHA256 required with HYGON_VLLM_WHEEL_DIR
@@ -278,6 +278,17 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     BUILD_CONTEXT="$(cd "${SCRIPT_DIR}/.." && pwd)"
     PLUGIN_SOURCE_SHA="${PLUGIN_SOURCE_SHA:-$(git -C "${BUILD_CONTEXT}" rev-parse HEAD)}"
     [[ "${PLUGIN_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || err "PLUGIN_SOURCE_SHA must be a full Git revision."
+    resolved_source_sha="$(git -C "${BUILD_CONTEXT}" rev-parse --verify "${PLUGIN_SOURCE_SHA}^{commit}")" \
+        || err "PLUGIN_SOURCE_SHA must identify an existing Git commit."
+    [[ "${resolved_source_sha}" == "${PLUGIN_SOURCE_SHA}" ]] || err "PLUGIN_SOURCE_SHA must identify a commit, not a tag object."
+    # Use the selected commit's Dockerfile and COPY inputs, never working-tree files.
+    DOCKERFILE="docker/hygon/Dockerfile"
+    for build_arg in "${EXTRA_BUILD_ARGS[@]+"${EXTRA_BUILD_ARGS[@]}"}"; do
+        case "${build_arg}" in
+            PLUGIN_SOURCE_SHA|PLUGIN_SOURCE_SHA=*)
+                err "Set PLUGIN_SOURCE_SHA in the environment; do not override it with --build-arg." ;;
+        esac
+    done
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
     fi
@@ -406,14 +417,22 @@ fi
 msg "  vLLM:           ${VLLM_VERSION}"
 msg ""
 
-docker build \
-    -f "${DOCKERFILE}" \
-    --target "${TARGET}" \
-    "${BUILD_ARGS[@]}" \
-    "${BUILD_SECRET_ARGS[@]}" \
-    ${NO_CACHE} \
-    "${EXTRA_BUILD_ARGS[@]+"${EXTRA_BUILD_ARGS[@]}"}" \
-    -t "${FULL_IMAGE}" \
-    "${BUILD_CONTEXT}"
+docker_build() {
+    docker build \
+        -f "${DOCKERFILE}" \
+        --target "${TARGET}" \
+        "${BUILD_ARGS[@]}" \
+        "${BUILD_SECRET_ARGS[@]+"${BUILD_SECRET_ARGS[@]}"}" \
+        ${NO_CACHE} \
+        "${EXTRA_BUILD_ARGS[@]+"${EXTRA_BUILD_ARGS[@]}"}" \
+        -t "${FULL_IMAGE}" \
+        "$1"
+}
+
+if [[ "${PLATFORM}" == "hygon" ]]; then
+    git -C "${BUILD_CONTEXT}" archive --format=tar "${PLUGIN_SOURCE_SHA}" | docker_build -
+else
+    docker_build "${BUILD_CONTEXT}"
+fi
 
 msg "Build complete: ${FULL_IMAGE}"

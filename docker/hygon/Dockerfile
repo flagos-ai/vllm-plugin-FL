@@ -114,8 +114,8 @@ RUN --mount=type=secret,id=git_config,target=/run/secrets/git_config,required=fa
 
 COPY pyproject.toml setup.py README.md LICENSE /opt/vllm-src/vllm-plugin-fl/
 COPY vllm_fl /opt/vllm-src/vllm-plugin-fl/vllm_fl
-# The version is explicitly bound to the build wrapper's actual Git HEAD;
-# no source tree or editable finder is used by the installed package.
+# docker/build.sh supplies an archive of PLUGIN_SOURCE_SHA for these COPY inputs.
+# The installed package uses ordinary wheels, without an editable finder.
 RUN [[ "$PLUGIN_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] \
     && env -u VLLM_VENDOR -u SETUPTOOLS_SCM_PRETEND_VERSION \
         SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="0.0.0+g${PLUGIN_SOURCE_SHA}" \

@@ -1,55 +1,36 @@
 # Hygon Deployment Guide
 
-This guide starts an OpenAI-compatible vLLM service on Hygon DCUs. Use the
-prebuilt image to keep the vendor DTK/PyTorch, FlagTree, FlagGems, and plugin
-on compatible versions. vLLM, FlagGems, and vLLM-Plugin-FL are ordinary
-installed packages; serving does not require a source checkout or editable install.
+Run an OpenAI-compatible service with the pinned image below. The image contains
+ordinary installed vLLM, FlagGems, and plugin packages; no source checkout or
+editable installation is required. The recipe uses two Hygon BW1000 64 GiB DCUs.
 
-## Validated software stack
+## Deployment stack
 
-| Component | Validated version or configuration |
+| Component | Version or configuration |
 |---|---|
-| Deployment image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d` |
-| Image manifest | `sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d` (Linux AMD64) |
+| Image (Linux AMD64) | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d` |
 | Vendor base | DTK 26.04 / Ubuntu 22.04 / Python 3.10.12 |
-| vLLM distribution | `0.28.0+empty`, upstream commit `2cf0a6915ce544dc493a0990f2ea38d81601128a` |
-| vLLM runtime version | `0.28.0` |
-| Vendor PyTorch distribution | `2.10.0+das.opt1.dtk2604.20260325.g6b060a` |
-| PyTorch runtime version | `2.10.0` |
+| vLLM | Distribution `0.28.0+empty`; runtime `0.28.0` |
+| PyTorch | Distribution `2.10.0+das.opt1.dtk2604.20260325.g6b060a`; runtime `2.10.0` |
 | FlagGems distribution | `0.1.0` |
 | FlagGems source commit | [e12a220a0d54b40d90d0549ff83ffabedb01f6dd](https://github.com/flagos-ai/FlagGems/commit/e12a220a0d54b40d90d0549ff83ffabedb01f6dd) |
 | FlagTree distribution | `0.6.0+hcu3.6` |
 | FlagTree wheel SHA256 | `0fd81f0e691486dfaf85f6a196f9f09d66118b7d2064b4f8c70b6c8bfdb4d52c` |
-| Triton distribution | `3.6.0+gitc73250c4.staging`, coexists with FlagTree in the vendor baseline |
-| Image build source | `544e9cb2484d6bd0d679dcbedb7c9d9621730a09` |
-| Image plugin wheel | `0.0.0+g544e9cb2484d6bd0d679dcbedb7c9d9621730a09` |
+| Triton distribution | `3.6.0+gitc73250c4.staging`, coexists with FlagTree |
 | Model runner | `ModelRunnerFL`, `VLLM_USE_V2_MODEL_RUNNER=0` |
 | Communication | Vendor HIP/RCCL, TP2; `FLAGCX_PATH` unset |
-| Hardware | Two Hygon BW1000 DCUs, 64 GiB each |
 
-FlagGems distribution metadata reports `0.1.0`, which does not identify its
-source revision. All 1,944 installed source/package files match the official
-commit above after accounting for CRLF/LF line-ending differences. The installed
-`direct_url.json` contains no VCS revision; the commit identifies the matching
-package source content rather than a recorded installation revision.
-FlagTree is identified by its distribution version and wheel SHA256 above;
-its full Git commit was not recorded. Triton's `gitc73250c4` is not a FlagTree
-commit.
+The FlagGems commit identifies matching installed source content (1,944 files,
+with CRLF/LF differences), not a VCS revision recorded in package metadata.
+FlagTree's full Git commit was not recorded; its wheel hash identifies the
+artifact. The Triton Git suffix is not a FlagTree commit.
 
-The vendor PyTorch version is intentional. The empty vLLM wheel is built
-without resolving upstream PyTorch dependencies, which would replace this
-vendor stack. Keep the image's existing FlagTree/Triton combination; do not
-replace it with an unrelated Triton wheel. The empty wheel does not include `vllm._C` or
-`vllm._C_stable_libtorch`; this deployment uses the FL backend and does not copy native
-extensions from an older vLLM installation.
-
-The Hygon dispatch policy is loaded from
-[`vllm_fl/dispatch/config/hygon.yaml`](../../vllm_fl/dispatch/config/hygon.yaml).
-Keep the image's policy and operator fixes together. The tested configuration
-uses `USE_FLAGGEMS=1`, `GEMS_VENDOR=hygon`, and `VLLM_PLUGINS=fl`, with the
-repository's existing blacklist.
-The image selects `VLLM_USE_V2_MODEL_RUNNER=0` because the upstream V2 runner
-requires a UVA tensor interface that this Hygon backend does not provide.
+Keep the image's vendor Torch, FlagTree/Triton, and
+[Hygon dispatch policy](../../vllm_fl/dispatch/config/hygon.yaml) together.
+The empty vLLM wheel omits `vllm._C` and `vllm._C_stable_libtorch`; do not copy
+extensions from an older installation. The image enables `USE_FLAGGEMS=1`,
+`GEMS_VENDOR=hygon`, and `VLLM_PLUGINS=fl`. It selects ModelRunnerFL because
+the upstream V2 runner requires a UVA interface unavailable on this backend.
 
 ## 1. Check the host and select two idle DCUs
 
@@ -204,80 +185,14 @@ and successful server startup alone do not verify model generation.
 For image requests, send an OpenAI `image_url` content item containing a data
 URI, or explicitly configure a local media path mounted into the container.
 
-## Published-image CI validation
-
-The published image above was built and tested from commit
-`544e9cb2484d6bd0d679dcbedb7c9d9621730a09`. CI setup rebuilt and replaced
-the image's plugin wheel with an ordinary wheel from that same commit. Its SCM
-metadata is `0.0.0+g544e9cb24`; the image build uses the full-SHA version listed
-above. These are different wheel artifacts. The results below validate the
-environment after setup, rather than byte-for-byte acceptance of the original
-image plugin wheel. Setup preserved the vendor runtime, and the verified
-packages were noneditable. A separate ordinary import loaded `WorkerFL` from
-the image's Python environment with the V2 model runner disabled.
-
-| CI scope | Actual result |
-|---|---|
-| Unit | 550 passed, 16 skipped |
-| Functional | 23 passed, 0 skipped |
-| Benchmark smoke | 1 pytest test passed, 0 skipped; 5 requests completed, 0 failed |
-
-All setup and test commands exited successfully. Unit JUnit serializes 566
-`<testcase>` nodes. Its suite count is 586 because it also counts 20 passing
-`unittest.subTest` reports. Skipped tests are not counted as passed.
-
-Distributed unit checks use CPU references and mocks. These CI results verify
-the stated test scopes; they do not establish a complete collective ABI or
-performance result. The benchmark uses TP1, eager execution, and
-`--load-format dummy` for five requests; it establishes no model-quality or
-performance conclusion. The historical 104-request model matrix below is a
-separate validation run.
-
-## Shared-runner model validation
-
-A separate shared-runner run used source commit
-`672191c7bf73158272a03c82be60332a7c61c959` and image manifest
-`sha256:c697e7b71e5924c434503e26bce415241965aad1a7b5e03eda4b0b07466f5a35`.
-The committed production files under `vllm_fl`, plus `pyproject.toml` and
-`setup.py`, have no differences from commit `544e9cb2484d6bd0d679dcbedb7c9d9621730a09`.
-The image and wheel artifacts differ, so these TP2 results are not an exact-artifact
-model test of the final published image. Both groups exited successfully with
-two passed cases and no failed cases. For each serving model, `model_list`
-and `chat` were the two pytest items; chat covered a Paris text assertion and
-generated-image assertions for `Hello VLM` and a blue rectangle.
-
-| Group | Model | Mode | Result |
-|---|---|---|---|
-| Inference | Qwen3.6-35B-A3B | Graph, TP2 | Passed |
-| Inference | Qwen3.6-27B | Eager, TP2 | Passed |
-| Serving | Qwen3.6-27B | Graph, TP2 | Passed |
-| Serving | Qwen3.6-35B-A3B | Eager, TP2 | Passed |
-
-## Historical model validation
-
-The model matrix below was completed before the CI image was published, using
-plugin commit `04ae0f0906e97d11a4d1f5a9d4a01e87487416d5`. On that two-card
-stack, both Qwen3.6 models passed the original text,
-image, concurrent text/image, and mixed-request cases in eager and graph modes:
-
-| Model | Eager | Graph |
-|---|---|---|
-| Qwen3.6-27B | 26/26 requests | 26/26 requests |
-| Qwen3.6-35B-A3B | 26/26 requests | 26/26 requests |
-
-The four historical runs cover 20 scenarios and 104 requests. Eager runs used the exact
-committed attention source; graph runs used the ordinary plugin wheel
-`0.0.0+g04ae0f090`. Native HIP capture begin/end and graph launches were verified
-in profiler traces, including replay on both TP ranks. These checks establish
-this model/configuration scope; they are not a throughput benchmark or a
-complete operator/collective ABI test. This historical matrix does not report
-the separate unit, functional, or E2E CI acceptance results for the published image.
-
-## Build the CI image from this repository
+## Build the CI image
 
 Build on a Linux host from a clean committed checkout. Docker BuildKit and the
-buildx plugin are required. The build wrapper records the current Git revision;
-use the same committed source for the wheel and image.
+buildx plugin are required. The build wrapper records the selected Git revision;
+use the same committed source for the wheel and image. The wrapper archives the
+selected committed Git revision (default: `HEAD`) as the build context;
+uncommitted files are not included. Set `PLUGIN_SOURCE_SHA` to select another
+existing 40-character commit SHA.
 
 ```bash
 docker buildx version
@@ -299,11 +214,20 @@ For an offline upstream install, set `HYGON_VLLM_WHEEL_DIR` to a directory
 containing exactly one previously built `vllm-0.28.0+empty-*.whl`, and set
 `HYGON_VLLM_WHEEL_SHA256` to its verified SHA256. The build checks that digest
 and installs the wheel normally; it does not copy old native vLLM extensions.
-Use a wheel built from the upstream revision listed above. Leave these variables
-unset to build vLLM from the official Git source.
+Use a wheel built from the [recorded upstream revision](hygon-validation.md#published-image-and-package-provenance).
+Leave these variables unset to build vLLM from the official Git source.
 
 The existing Hygon CI runner label is `hg-cicd-vllm-plugin-0240`; its name is
 an infrastructure label and does not specify the vLLM version inside the image.
+
+## Validation scope
+
+The Hygon unit, functional, inference/serving E2E, and benchmark jobs passed in
+[CI run 38841537036](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38841537036)
+for revision `f83325b8`. The [validation record](hygon-validation.md) separates
+that CI run from earlier image/wheel, model, and native graph evidence.
+Coverage applies to the stated configurations; it does not establish complete
+operator/collective ABI coverage or performance.
 
 ## Troubleshooting
 
