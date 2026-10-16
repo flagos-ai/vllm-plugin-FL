@@ -101,6 +101,7 @@ jobs:
 
   unit:
     needs: setup
+    if: false  # probe: h20 e2e verdict only (cuda130 pool dead, skip queue)
     uses: ./.github/workflows/_unit_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -114,6 +115,7 @@ jobs:
   # Runs once per platform (not per device) — functional tests are device-agnostic.
   functional:
     needs: [setup, unit]
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_functional_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -127,7 +129,7 @@ jobs:
   # Grouped by (task, device) — all model/case combos for the same task
   # run inside a single job to avoid repeated container startup.
   e2e:
-    needs: [setup, functional]
+    needs: [setup]  # probe: unit/functional gated off; a skipped need would skip e2e
     if: needs.setup.outputs.e2e_matrix != '[]'
     strategy:
       fail-fast: false
@@ -143,11 +145,13 @@ jobs:
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      env: ${{ toJson(fromJson(needs.setup.outputs.config).device_env[matrix.test.device] || fromJson('{}')) }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
   # Validates vllm bench throughput/latency/serve entrypoints.
   benchmark:
     needs: [setup, e2e]
+    if: false  # probe: benchmark uses the dead cuda130 pool, would hold the run open
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}

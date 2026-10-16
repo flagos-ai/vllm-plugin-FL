@@ -87,14 +87,8 @@ env_defaults:
 a100:
   name: "a100"
   tests:
-    e2e:
-      # Add or remove test cases per model
-      inference:
-        qwen3: ["4b_tp2", "next_tp8"]
-        qwen3_5: ["35b_tp4"]
-        minicpm: ["o45_tp4"]
-      serving:
-        qwen3: ["next_tp8"]
+    # probe: a100 e2e entries removed — its jobs would queue on the dead
+    # cuda130 pool forever and hold the run open. h20 verdict needs h20 only.
     functional:
       include: "*"
       exclude: []
