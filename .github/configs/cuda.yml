@@ -34,6 +34,13 @@ device_runner_labels:
   h20:
     - vllm-plugin-ci-h20
 
+# Device-specific environment variables injected into E2E jobs.
+# NCCL 2.30.7 fails NVLS multicast memory binding with CUDA error 401 on H20;
+# disabling NVLS keeps the P2P/CUMEM transports working (A/B evidence in #598).
+device_env:
+  h20:
+    NCCL_NVLS_ENABLE: "0"
+
 # Runner labels for this hardware (Platform hosted)
 # runner_labels:
 #   - ci-vllm-plugin-fl

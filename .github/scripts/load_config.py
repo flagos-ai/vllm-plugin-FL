@@ -46,6 +46,7 @@ def load_platform_config(platform: str) -> dict:
     # Ensure the platform key is present
     config.setdefault("platform", platform)
     config.setdefault("device_runner_labels", {})
+    config.setdefault("device_env", {})
     return config
 
 
