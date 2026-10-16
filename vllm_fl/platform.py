@@ -380,6 +380,27 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
 
+            # B-tier metax graph defaults: a bare serve (no --compilation-config)
+            # must still capture CUDA graphs. Otherwise cudagraph_mode stays
+            # None and vllm resolves it to NONE => zero graphs captured.
+            _fl_cc = getattr(vllm_config, "compilation_config", None)
+            if _fl_cc is not None:
+                if (
+                    _fl_cc.cudagraph_mode is None
+                    or _fl_cc.cudagraph_mode == CUDAGraphMode.NONE
+                ):
+                    _fl_cc.cudagraph_mode = CUDAGraphMode.PIECEWISE
+                if not getattr(_fl_cc, "cudagraph_capture_sizes", None):
+                    _fl_cc.cudagraph_capture_sizes = [
+                        1, 2, 4, 8, 16, 32, 64, 128, 256
+                    ]
+                if hasattr(_fl_cc, "cudagraph_mm_encoder"):
+                    _fl_cc.cudagraph_mm_encoder = False
+                _fl_pc = getattr(_fl_cc, "pass_config", None)
+                if _fl_pc is not None:
+                    _fl_pc.fuse_rope_kvcache_cat_mla = False
+                # use_inductor_graph_partition stays None/False (torch 2.8.0).
+
         # GCU relies on ECCL for collectives; custom all-reduce kernels are
         # not available.
         if cls.vendor_name in ("gcu", "enflame"):

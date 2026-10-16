@@ -174,22 +174,33 @@ def _patch_fused_moe_factory() -> None:
     import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
     import vllm.model_executor.layers.fused_moe.layer as _fused_moe_layer
 
-    if (
-        getattr(_fused_moe_layer, "FusedMoEFactory", None) is FusedMoEFactoryFL  # noqa: F405
+    # vLLM 0.28 API compatibility (NOT MetaX-specific): 0.28 renamed this
+    # factory to FusedMoEFactory and kept FusedMoE as a deprecated alias, so
+    # patch both names.  This is a backend-agnostic rename shim -- every
+    # vendor goes through it, not just metax.
+    _names = ("FusedMoE", "FusedMoEFactory")
+    if any(
+        getattr(_fused_moe_layer, _n, None) in (FusedMoEFL, FusedMoEFactoryFL)
+        for _n in _names
     ):
         # Already patched — idempotent.
         return
-
-    original = _fused_moe_layer.FusedMoEFactory
-    _fused_moe_layer.FusedMoEFactory = FusedMoEFactoryFL  # noqa: F405
-    _fused_moe_pkg.FusedMoEFactory = FusedMoEFactoryFL  # noqa: F405
+    originals = {_n: getattr(_fused_moe_layer, _n, None) for _n in _names}
+    for _mod in (_fused_moe_layer, _fused_moe_pkg):
+        for _n in _names:
+            if hasattr(_mod, _n):
+                setattr(_mod, _n, FusedMoEFactoryFL)
 
     # Model modules can import the factory before worker initialization. Patch
     # those cached module globals as well, but only when they still point to
     # the exact upstream object. Inspect stored globals directly: getattr on
     # lazy modules (for example transformers) can import unrelated models.
     for module in tuple(sys.modules.values()):
-        if module is not None and vars(module).get("FusedMoEFactory") is original:
-            module.FusedMoEFactory = FusedMoEFactoryFL  # noqa: F405
+        if module is None:
+            continue
+        for _n in _names:
+            _orig = originals.get(_n)
+            if _orig is not None and vars(module).get(_n) is _orig:
+                setattr(module, _n, FusedMoEFactoryFL)
 
-    logger.info("Monkey-patched FusedMoEFactory -> FusedMoEFactoryFL")
+    logger.info("Monkey-patched FusedMoE/FusedMoEFactory -> FusedMoEFL")
