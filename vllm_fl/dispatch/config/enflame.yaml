@@ -24,3 +24,9 @@ op_backends:
 
 flagos_blacklist:
   - scaled_dot_product_attention
+  # The in-place wrapper delegates to the implementation op; keep both native.
+  - index_put_
+  - _index_put_impl_
+  # FlagGems 5.4 exports only functional GCU mm. Its generic mm_out cannot
+  # consume the Enflame SPLIT_K tuning config used by Inductor's out variant.
+  - mm_out
