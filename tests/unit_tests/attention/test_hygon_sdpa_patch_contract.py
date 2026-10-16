@@ -28,7 +28,7 @@ def wrapper_source():
         source = Path(location) / "v1/attention/ops/vit_attn_wrappers.py"
         if source.is_file():
             return source.read_text(encoding="utf-8")
-    pytest.skip("vLLM source unavailable; supply VLLM_SDPA_SOURCE_WHEEL")
+    return pytest.skip("vLLM source unavailable; supply VLLM_SDPA_SOURCE_WHEEL")
 
 
 @pytest.fixture
