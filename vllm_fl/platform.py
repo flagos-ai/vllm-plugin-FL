@@ -40,6 +40,7 @@ else:
 
 from vllm_fl.utils import (
     DeviceInfo,
+    _env_vendor_name,
     get_device_control_env_var,
     get_device_name,
     get_device_type,
@@ -49,6 +50,31 @@ logger = init_logger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+
+def _safe_device_name(vendor: str) -> str:
+    """Device-family alias for ``vendor``, or ``""`` when unresolvable."""
+    if not vendor:
+        return ""
+    try:
+        return get_device_name(vendor)
+    except ValueError:
+        logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
+        return ""
+
+
+def _safe_device_type(device_info, vendor: str) -> str:
+    """Resolve device_type so an empty runtime probe can never abort import."""
+    detected = device_info.device_type
+    if detected:
+        return detected
+    if not vendor:
+        return ""
+    try:
+        return get_device_type(vendor)
+    except ValueError:
+        logger.warning("[vllm_fl] vendor %r is not in VENDOR_DEVICE_MAP", vendor)
+        return ""
 
 dist_backend_dict = {
     "npu": "hccl",
@@ -61,20 +87,25 @@ dist_backend_dict = {
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
-    vendor_name = device_info.vendor_name
-    device_type = get_device_type(vendor_name)
-    device_name = get_device_name(vendor_name)
+    # The runtime probe (FlagGems DeviceDetector) reports nothing on some
+    # runtimes, e.g. CI containers where vendor detection is not wired up.
+    # GEMS_VENDOR is the vendor override FlagGems itself honours, so consult it
+    # before giving up: an empty vendor makes get_device_type() raise while this
+    # class body is evaluated, which aborts the module import and makes vLLM
+    # silently fall back to UnspecifiedPlatform (device_type "", no
+    # vendor_name) instead of ever using this plugin.
+    vendor_name = device_info.vendor_name or _env_vendor_name()
+    # Resolve device_type once and reuse the result below. An empty probe must
+    # never overwrite the static VENDOR_DEVICE_MAP entry resolved here.
+    device_type = _safe_device_type(device_info, vendor_name)
+    device_name = _safe_device_name(vendor_name)
     # cuda_alike (nvidia/metax): device_name = vendor_name (not used in torch.device)
     # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
     device_name = (
-        device_info.vendor_name
-        if (
-            device_info.device_type == "cuda"
-            and device_info.vendor_name not in ("iluvatar", "hygon")
-        )
-        else device_info.device_type
+        vendor_name
+        if (device_type == "cuda" and vendor_name not in ("iluvatar", "hygon"))
+        else device_type
     )
-    device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
@@ -99,6 +130,26 @@ class PlatformFL(Platform):
     # the wrong GPU whenever a launcher isolates devices per worker (Ray
     # multi-node in particular).
     device_control_env_var: str = get_device_control_env_var(device_info.vendor_name)
+
+    # Emitted while the class body is evaluated, i.e. as soon as vLLM resolves
+    # this platform plugin. If a later CI run still reports UnspecifiedPlatform,
+    # this line proves whether PlatformFL was built at all and with which
+    # vendor/device_type, instead of leaving it to inference from current_platform.
+    logger.info(
+        "[vllm_fl] PlatformFL resolved: vendor_name=%r device_type=%r "
+        "device_name=%r detector=%s GEMS_VENDOR=%r",
+        vendor_name,
+        device_type,
+        device_name,
+        type(device_info.device).__name__,
+        _env_vendor_name(),
+    )
+    if not vendor_name or not device_type:
+        logger.error(
+            "[vllm_fl] No vendor/device_type resolved (FlagGems detector empty "
+            "and GEMS_VENDOR unset). Set GEMS_VENDOR to the accelerator vendor; "
+            "the platform plugin cannot bind a vendor backend otherwise."
+        )
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""

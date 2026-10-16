@@ -1,13 +1,13 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import logging
+from typing import Optional, List
 
 from vllm.model_executor.custom_op import CustomOp, PluggableLayer
-
-from .activation import *  # noqa F403 F401
-from .fused_moe import *  # noqa F403 F401
 from .layernorm import *  # noqa F403 F401
+from .activation import *  # noqa F403 F401
 from .rotary_embedding import *  # noqa F403 F401
+from .fused_moe import *  # noqa F403 F401
 
 logger = logging.getLogger(__name__)
 
@@ -23,15 +23,14 @@ OOT_OPS = {
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
     # NOTE: fused_moe is NOT registered via PluggableLayer/CustomOp.register_oot.
-    # In vLLM 0.28.0, FusedMoEFactory is a function (not a class), so the
+    # In vllm >= 0.24.0, FusedMoE is a factory function (not a class), so the
     # PluggableLayer OOT path is incompatible.  Instead, FusedMoEFL is injected
     # via monkey-patch in register_oot_ops() below.
-    # "fused_moe": (FusedMoEFactoryFL, "FusedMoEFactory"),
+    # "fused_moe": (FusedMoEFL, "FusedMoE"),
     # unquantized_fused_moe_method is also handled via FusedMoEFL factory —
     # no separate registration needed.
     # "unquantized_fused_moe_method": (UnquantizedFusedMoEMethodFL, "UnquantizedFusedMoEMethod"),
 }
-
 
 def _patch_unquantized_moe_oracle() -> None:
     """
@@ -45,18 +44,15 @@ def _patch_unquantized_moe_oracle() -> None:
     would get (OOT, None), skip _setup_kernel, and crash at inference time.
     """
     import vllm.model_executor.layers.fused_moe.oracle.unquantized as _oracle_mod
-
     from vllm_fl.ops.fused_moe.fused_moe_utils import select_unquantized_moe_backend_oot
-
     _oracle_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
     # Also patch the import in unquantized_fused_moe_method module
     import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as _method_mod
-
     _method_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
     logger.info("Patched select_unquantized_moe_backend to bypass OOT short-circuit")
 
 
-def register_oot_ops(whitelist: list[str] | None = None) -> None:
+def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     """
     Register OOT (out-of-tree) custom operators.
 
@@ -72,12 +68,7 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
     the upstream select_unquantized_moe_backend oracle is monkey-patched
     so it picks native CUDA backends instead of returning (OOT, None).
     """
-    from vllm_fl.utils import (
-        get_oot_blacklist,
-        get_oot_whitelist,
-        is_oot_enabled,
-        use_flaggems_op,
-    )
+    from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
 
     # Check if OOT registration is enabled
     if not is_oot_enabled():
@@ -118,36 +109,32 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         op_cls, registration_name = OOT_OPS[op_name]
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
         if issubclass(op_cls, PluggableLayer):
-            PluggableLayer.register_oot(
-                _decorated_layer_cls=op_cls, name=registration_name
-            )
+            PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)
         else:
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
-        # Apply Ascend NPU monkey-patches if running on NPU.
-        # These replace upstream module-level functions (e.g. in qwen3_next) with
-        # Ascend implementations that bypass the CustomOp/dispatch path.
-        from vllm.platforms import current_platform
 
-        if current_platform.device_type == "npu":
-            from vllm_fl.dispatch.backends.vendor.ascend.patch import (
-                apply_ascend_patches,
-            )
+    # Apply platform-specific monkey-patches unconditionally (outside the OOT
+    # registration loop) so they run even when the whitelist is empty or all ops
+    # are excluded. Each patch function is idempotent.
+    from vllm.platforms import current_platform
 
-            apply_ascend_patches()
+    # Apply Ascend NPU monkey-patches if running on NPU.
+    # These replace upstream module-level functions (e.g. in qwen3_next) with
+    # Ascend implementations that bypass the CustomOp/dispatch path.
+    if current_platform.device_type == "npu":
+        from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
+        apply_ascend_patches()
 
-        # Apply Sunrise/PTPU monkey-patches if running on PTPU.
-        if current_platform.device_type == "ptpu":
-            from vllm_fl.dispatch.backends.vendor.sunrise.patch import (
-                apply_sunrise_patches,
-            )
+    # Apply Sunrise/PTPU monkey-patches if running on PTPU.
+    if current_platform.device_type == "ptpu":
+        from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
+        apply_sunrise_patches()
 
-            apply_sunrise_patches()
+    # Apply GCU monkey-patches (Triton grid limits, etc.).
+    if getattr(current_platform, "vendor_name", None) in ("gcu", "enflame"):
+        from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+        apply_gcu_patches()
 
-        # Apply GCU monkey-patches (Triton grid limits, etc.).
-        if getattr(current_platform, "vendor_name", None) in ("gcu", "enflame"):
-            from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
-
-            apply_gcu_patches()
     # Kunlunxin patches must run even when no OOT operator was selected.
     from vllm_fl.dispatch.config.utils import get_platform_name
 
@@ -158,8 +145,8 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
 
         apply_kunlunxin_patches()
 
-    # --- FusedMoEFactory monkey-patch (vLLM 0.28.0) ---
-    # FusedMoEFactory is a function, not a PluggableLayer
+    # --- FusedMoE monkey-patch (vllm >= 0.24.0) ---
+    # FusedMoE is a factory function in vllm 0.24.0+, not a PluggableLayer
     # subclass, so it cannot be registered via CustomOp/PluggableLayer.register_oot.
     # Instead we replace the factory function in the two places vllm imports it
     # from, so all model code transparently gets FusedMoEFL.
@@ -168,28 +155,31 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
 
 
 def _patch_fused_moe_factory() -> None:
-    """Replace ``FusedMoEFactory`` without losing target-version semantics."""
-    import sys
-
+    """Replace the FusedMoE factory function with FusedMoEFL in all relevant
+    vllm modules so that model code picks up the FL version automatically."""
+    import inspect
     import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
     import vllm.model_executor.layers.fused_moe.layer as _fused_moe_layer
 
-    if (
-        getattr(_fused_moe_layer, "FusedMoEFactory", None) is FusedMoEFactoryFL  # noqa: F405
+    # vLLM >= 0.28 exposes the factory as ``FusedMoEFactory`` while <= 0.24
+    # exposes ``FusedMoE``.  Patch every spelling that exists so the OOT
+    # factory is picked up on both, and keep this call idempotent.
+    _factory_names = [
+        name
+        for name in ("FusedMoE", "FusedMoEFactory")
+        if hasattr(_fused_moe_layer, name) or hasattr(_fused_moe_pkg, name)
+    ]
+    if all(
+        getattr(_fused_moe_layer, name, None) is FusedMoEFL  # noqa F405
+        for name in _factory_names
     ):
         # Already patched — idempotent.
         return
 
-    original = _fused_moe_layer.FusedMoEFactory
-    _fused_moe_layer.FusedMoEFactory = FusedMoEFactoryFL  # noqa: F405
-    _fused_moe_pkg.FusedMoEFactory = FusedMoEFactoryFL  # noqa: F405
-
-    # Model modules can import the factory before worker initialization. Patch
-    # those cached module globals as well, but only when they still point to
-    # the exact upstream object. Inspect stored globals directly: getattr on
-    # lazy modules (for example transformers) can import unrelated models.
-    for module in tuple(sys.modules.values()):
-        if module is not None and vars(module).get("FusedMoEFactory") is original:
-            module.FusedMoEFactory = FusedMoEFactoryFL  # noqa: F405
-
-    logger.info("Monkey-patched FusedMoEFactory -> FusedMoEFactoryFL")
+    # Patch at the module level so `from vllm...fused_moe import <name>` picks it up.
+    for name in _factory_names:
+        setattr(_fused_moe_layer, name, FusedMoEFL)  # noqa F405
+        setattr(_fused_moe_pkg, name, FusedMoEFL)   # noqa F405
+    logger.info(
+        "Monkey-patched FusedMoE factory (%s) -> FusedMoEFL", ", ".join(_factory_names)
+    )

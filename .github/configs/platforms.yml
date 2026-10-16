@@ -23,7 +23,7 @@ platforms:
   cuda:
     enabled: true
   ascend:
-    enabled: true
+    enabled: false
   hygon:
     enabled: false
   metax:
@@ -32,8 +32,11 @@ platforms:
     enabled: false
   enflame:
     enabled: false
-  kunlunxin:
-    enabled: false
-  # Image published; needs a self-hosted runner with labels in configs/iluvatar.yml.
   iluvatar:
+    enabled: false
+  # Image published; needs a self-hosted runner with labels in configs/kunlunxin.yml.
+  # Scoped like #566: only cuda + target vendor enabled for this adaptation PR.
+  kunlunxin:
     enabled: true
+  thead:
+    enabled: false

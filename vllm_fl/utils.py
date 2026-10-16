@@ -1,17 +1,56 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
+import importlib
 import json
+import logging
 import os
 
 import flag_gems
-
-try:
-    # FlagGems<=5.0.2: DeviceDetector lives in device.
-    from flag_gems.runtime.backend.device import DeviceDetector
-except (ImportError, FileNotFoundError):
-    # FlagGems>5.0.2: DeviceDetector lives in device_finder.
-    from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend
+
+logger = logging.getLogger(__name__)
+
+# FlagGems has moved DeviceDetector between releases: <=5.0.2 keeps it in
+# ``flag_gems.runtime.backend.device``, later releases moved it to
+# ``flag_gems.runtime.backend.device_finder``. Some images ship builds where
+# neither path exists, so the runtime probe is optional: when it cannot be
+# imported the vendor must come from GEMS_VENDOR instead of aborting the
+# import of this module (that would take the whole platform plugin down and
+# make vLLM silently fall back to UnspecifiedPlatform).
+_DEVICE_DETECTOR_MODULES = (
+    "flag_gems.runtime.backend.device",
+    "flag_gems.runtime.backend.device_finder",
+    "flag_gems.runtime.device_finder",
+    "flag_gems.runtime.device",
+)
+
+
+def _load_device_detector():
+    """Return FlagGems' DeviceDetector class, or None when unavailable."""
+    for module_name in _DEVICE_DETECTOR_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+        except (ImportError, FileNotFoundError, AttributeError):
+            continue
+        detector = getattr(module, "DeviceDetector", None)
+        if detector is not None:
+            return detector
+    return None
+
+
+# ``None`` means "this runtime exposes no device-finder probe".
+DeviceDetector = _load_device_detector()
+
+
+def _env_vendor_name() -> str:
+    """Vendor explicitly requested through ``GEMS_VENDOR`` (FlagGems override).
+
+    Deployments set it exactly where the runtime probe cannot identify the
+    accelerator (for example the Kunlunxin CI container). Honouring it keeps
+    the plugin bound to the right vendor backend instead of collapsing to
+    UnspecifiedPlatform.
+    """
+    return os.environ.get("GEMS_VENDOR", "").strip().lower()
 
 _OP_CONFIG: dict[str, str] | None = None
 
@@ -275,7 +314,7 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
-        self.device = DeviceDetector()
+        self.device = self._probe_device()
         self.supported_device = [
             "nvidia",
             "ascend",
@@ -287,19 +326,75 @@ class DeviceInfo:
             "enflame",
             "kunlunxin",
         ]
-        backend.set_torch_backend_device_fn(self.device.vendor_name)
+        try:
+            backend.set_torch_backend_device_fn(self.vendor_name)
+        except Exception as exc:  # pragma: no cover - runtime dependent
+            logger.warning(
+                "[vllm_fl] FlagGems backend probe failed for vendor %r: %s",
+                self.vendor_name,
+                exc,
+            )
+
+    @staticmethod
+    def _probe_device():
+        """Instantiate FlagGems' device detector, or None when unavailable.
+
+        A missing/broken runtime probe must not prevent ``vllm_fl.utils`` from
+        importing: this module is imported by ``vllm_fl.platform`` at class-body
+        time, so an exception here aborts the platform plugin and vLLM
+        silently degrades to ``UnspecifiedPlatform``.
+        """
+        if DeviceDetector is None:
+            logger.warning(
+                "[vllm_fl] FlagGems exposes no DeviceDetector; falling back to "
+                "GEMS_VENDOR (%r) for vendor resolution.",
+                _env_vendor_name(),
+            )
+            return None
+        try:
+            return DeviceDetector()
+        except Exception as exc:  # pragma: no cover - runtime dependent
+            logger.warning("[vllm_fl] FlagGems DeviceDetector() failed: %s", exc)
+            return None
+
+    def _detected(self, attribute: str) -> str:
+        """Read a non-empty attribute off the optional runtime probe."""
+        if self.device is None:
+            return ""
+        value = getattr(self.device, attribute, "") or ""
+        return value.strip() if isinstance(value, str) else ""
 
     @property
     def dispatch_key(self):
-        return self.device.dispatch_key
+        # Preserve the probe's own value (including "" when it reports nothing);
+        # only guarantee no AttributeError when the probe is unavailable.
+        return self._detected("dispatch_key")
 
     @property
     def vendor_name(self):
-        return self.device.vendor_name
+        # The runtime probe is authoritative when it reports something. Where
+        # it does (CI containers whose FlagGems build cannot see the
+        # accelerator), GEMS_VENDOR -- the override FlagGems itself honours --
+        # decides, so the plugin still binds the correct vendor backend
+        # instead of collapsing to UnspecifiedPlatform.
+        return self._detected("vendor_name") or _env_vendor_name()
 
     @property
     def device_type(self):
-        return self.device.name
+        # FlagGems DeviceDetector().name may be empty on some runtimes (for
+        # example CI containers where vendor detection is not wired up).
+        # Fall back to the static VENDOR_DEVICE_MAP entry so that the
+        # reported device_type stays meaningful.
+        detected = self._detected("name")
+        if detected:
+            return detected
+        vendor = self.vendor_name
+        if not vendor:
+            return ""
+        try:
+            return get_device_type(vendor)
+        except ValueError:
+            return ""
 
     @property
     def torch_device_fn(self):
