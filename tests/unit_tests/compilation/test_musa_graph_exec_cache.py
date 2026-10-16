@@ -578,9 +578,11 @@ def test_public_replay_wrapper_preserves_decision_and_callback():
     module._cache = module._MusaGraphExecCache(device, lambda: _Ops(device), cap=1)
     graph = _capture(module._cache, device)
     staged = []
-    assert module.musa_graph_replay(graph, lambda: staged.append("staged")) is True
+    replayed = module.musa_graph_replay(graph, lambda: staged.append("staged"))
+    assert replayed is True
     assert staged == ["staged"] and graph.replays == 1
-    assert module.musa_graph_replay(graph, lambda: False) is False
+    replayed = module.musa_graph_replay(graph, lambda: False)
+    assert replayed is False
     assert graph.replays == 1
 
 
