@@ -65,6 +65,11 @@ on:
         required: false
         type: string
         default: ""
+      env:
+        description: "JSON object of environment variables for the job (per-device platform config, e.g. device_env in .github/configs/)"
+        required: false
+        type: string
+        default: "{}"
 
 jobs:
   e2e-test:
@@ -75,6 +80,7 @@ jobs:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
       options: ${{ inputs.container_options }}
+    env: ${{ fromJson(inputs.env) }}
 
     steps:
       - name: Checkout (attempt 1)
@@ -92,11 +98,6 @@ jobs:
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
-
-      # This H20 runner fails NVLS multicast binding with CUDA error 401.
-      - name: Disable NVLS on H20
-        if: inputs.platform == 'cuda' && inputs.device == 'h20'
-        run: echo 'NCCL_NVLS_ENABLE=0' >> "$GITHUB_ENV"
 
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh

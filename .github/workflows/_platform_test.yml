@@ -143,6 +143,7 @@ jobs:
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+      env: ${{ toJson(fromJson(needs.setup.outputs.config).device_env[matrix.test.device] || fromJson('{}')) }}
       timeout: ${{ matrix.test.timeout || 60 }}
 
   # Validates vllm bench throughput/latency/serve entrypoints.
