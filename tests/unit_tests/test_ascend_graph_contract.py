@@ -331,19 +331,22 @@ def test_capture_replay_orders_updates_after_enqueue(monkeypatch):
 
 
 def test_failed_capture_and_replay_restore_state(monkeypatch):
+    def fail_in_scope(scope, message):
+        with scope:
+            raise RuntimeError(message)
+
     calls = []
     runtime, _ = _runtime(monkeypatch, calls)
     controller = runtime.GraphRuntimeController(vllm_config="config")
     context = NS(batch_descriptor=NS(num_tokens=4), capturing=False)
-    # Keep the exception assertion visibly outside the runtime scope for CodeQL.
-    with pytest.raises(RuntimeError, match="capture failed"):  # noqa: SIM117
-        with controller.capture_scope(context):
-            raise RuntimeError("capture failed")
+    pytest.raises(
+        RuntimeError, fail_in_scope, controller.capture_scope(context), "capture failed"
+    ).match("capture failed")
     assert not context.capturing and not controller._active
     calls.clear()
-    with pytest.raises(RuntimeError, match="replay failed"):  # noqa: SIM117
-        with controller.replay_scope(context):
-            raise RuntimeError("replay failed")
+    pytest.raises(
+        RuntimeError, fail_in_scope, controller.replay_scope(context), "replay failed"
+    ).match("replay failed")
     assert calls == ["synchronize"]  # Failed enqueue must not release update events.
     assert not controller._active
 
