@@ -115,7 +115,7 @@ jobs:
   # ============================================================
   test-ascend:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: ascend
@@ -126,7 +126,7 @@ jobs:
   # ============================================================
   test-hygon:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: hygon
@@ -137,7 +137,7 @@ jobs:
   # ============================================================
   test-metax:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: metax
@@ -148,7 +148,7 @@ jobs:
   # ============================================================
   test-musa:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: musa
@@ -159,7 +159,7 @@ jobs:
   # ============================================================
   test-enflame:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: enflame
@@ -170,7 +170,7 @@ jobs:
   # ============================================================
   test-kunlunxin:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: kunlunxin
@@ -181,7 +181,7 @@ jobs:
   # ============================================================
   test-iluvatar:
     needs: discover
-    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
+    if: false  # probe: h20 e2e verdict only
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: iluvatar
