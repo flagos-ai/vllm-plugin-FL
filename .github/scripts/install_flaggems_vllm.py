@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the same FlagGems-vllm release in every platform's CI interpreter."""
+"""Install FlagGems-vllm main in every platform's CI interpreter."""
 
 import json
 import os
@@ -7,8 +7,7 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, distribution, version
 
-RELEASE = "v0.2.0"
-COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
+SOURCE_REF = "main"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
 RUNTIME_PACKAGES = ("torch", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
@@ -21,16 +20,13 @@ def package_version(name):
         return None
 
 
-def release_is_installed():
+def installed_source():
     try:
         text = distribution("flaggems-vllm").read_text("direct_url.json")
         source = json.loads(text or "{}")
     except (PackageNotFoundError, ValueError):
-        return False
-    return (
-        source.get("url", "").removesuffix(".git") == REPOSITORY.removesuffix(".git")
-        and source.get("vcs_info", {}).get("commit_id") == COMMIT
-    )
+        return {}
+    return source if isinstance(source, dict) else {}
 
 
 def pip_install(*args):
@@ -43,22 +39,27 @@ def main():
     missing = [name for name in PACKAGE_DEPENDENCIES if package_version(name) is None]
     if missing:
         pip_install(*missing)
-    if not release_is_installed():
-        # Metadata still says 0.1.0; force replacement of another 0.1.0 source.
-        # Reuse the build tools already used by this platform's plugin setup.
-        pip_install(
-            "--no-deps",
-            "--no-build-isolation",
-            "--force-reinstall",
-            f"flaggems-vllm @ git+{REPOSITORY}@{COMMIT}",
-        )
-    if not release_is_installed():
-        raise RuntimeError(f"FlagGems-vllm must come from {RELEASE} commit {COMMIT}")
+    # Branch contents can change without a package-version change. Refresh main
+    # even when the image already contains an installation from that branch.
+    pip_install(
+        "--no-deps",
+        "--no-build-isolation",
+        "--force-reinstall",
+        f"flaggems-vllm @ git+{REPOSITORY}@{SOURCE_REF}",
+    )
+    source = installed_source()
+    vcs = source.get("vcs_info", {})
+    if (
+        source.get("url", "").removesuffix(".git") != REPOSITORY.removesuffix(".git")
+        or vcs.get("requested_revision") != SOURCE_REF
+        or not vcs.get("commit_id")
+    ):
+        raise RuntimeError(f"FlagGems-vllm must come from {REPOSITORY}@{SOURCE_REF}")
     after = {name: package_version(name) for name in RUNTIME_PACKAGES}
     if after != before:
         raise RuntimeError(f"CI runtime dependencies changed: {before} -> {after}")
     print(
-        f"FlagGems-vllm: {RELEASE}, commit {COMMIT}, "
+        f"FlagGems-vllm: {SOURCE_REF}, commit {vcs['commit_id']}, "
         f"package metadata {package_version('flaggems-vllm')}"
     )
 

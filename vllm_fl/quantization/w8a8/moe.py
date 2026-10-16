@@ -16,8 +16,8 @@ from importlib import import_module
 
 from vllm.logger import init_logger
 
-_ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe_v024"
-_CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config_v024"
+_ADAPTER_MARKER = "_vllm_fl_w8a8_int8_moe_adapter"
+_CONFIG_BUILDER_MARKER = "_vllm_fl_dynamic_w8a8_config"
 _ORACLE_MODULE = "vllm.model_executor.layers.fused_moe.oracle.int8"
 _SCHEME_MODULE = (
     "vllm.model_executor.layers.quantization.compressed_tensors."

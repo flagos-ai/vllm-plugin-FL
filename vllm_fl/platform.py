@@ -349,6 +349,11 @@ class PlatformFL(Platform):
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
 
+        # GLM guards run after vLLM resolves its final configuration.
+        from vllm_fl.models.glm5.runtime import validate_glm5_config
+
+        validate_glm5_config(vllm_config)
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -361,6 +366,20 @@ class PlatformFL(Platform):
 
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
+
+        # A model activation plan may override the attention backend (for
+        # example GLM5's portable MLA path).  Only a plan activated for the
+        # model being loaded is consulted, so a process-level GLM provider
+        # variable no longer rewrites the generic path of other MLA models.
+        from vllm_fl.activation import get_active_plan
+
+        plan = get_active_plan()
+        if use_mla and plan is not None and plan.attention_backend is not None:
+            override = plan.attention_backend(
+                use_mla=use_mla, use_sparse=use_sparse
+            )
+            if override:
+                return override
 
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse

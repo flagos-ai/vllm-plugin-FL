@@ -41,6 +41,17 @@ from vllm_fl.utils import VENDOR_DEVICE_MAP
 _CONFIG_DIR = Path(__file__).parent
 
 
+def _is_nvidia_hopper() -> bool:
+    try:
+        from vllm.platforms import current_platform
+
+        capability = current_platform.get_device_capability()
+    except Exception:
+        # API-only processes may not have a device available for discovery.
+        return False
+    return capability is not None and capability.major == 9
+
+
 def _get_arch_config_name(platform: str) -> Optional[str]:
     """Return an architecture-specific config name when one is available."""
     if platform != "nvidia":
@@ -51,16 +62,7 @@ def _get_arch_config_name(platform: str) -> Optional[str]:
     ):
         return None
 
-    try:
-        from vllm.platforms import current_platform
-
-        capability = current_platform.get_device_capability()
-    except Exception:
-        # Device discovery is not guaranteed to be available in API-only or
-        # model-inspection processes. Fall back to the vendor-wide defaults.
-        return None
-
-    if capability is not None and capability.major == 9:
+    if _is_nvidia_hopper():
         return "nvidia_hopper"
     return None
 
@@ -123,6 +125,8 @@ def load_platform_config(platform: Optional[str] = None) -> Optional[dict[str, A
     Returns:
         Configuration dictionary, or None if no config found.
     """
+    if platform is None:
+        platform = get_platform_name()
     config_path = get_config_path(platform)
     if config_path is None:
         return None
@@ -130,7 +134,18 @@ def load_platform_config(platform: Optional[str] = None) -> Optional[dict[str, A
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        return config if isinstance(config, dict) else None
+        if not isinstance(config, dict):
+            return None
+        if platform == "nvidia" and _is_nvidia_hopper():
+            # Hopper's small BF16 GEMM uses unordered split-K atomic writes.
+            # Keep CUDA GEMM in the ordinary public blacklist even when the
+            # separate long-context performance profile is disabled.
+            blacklist = list(config.get("flagos_blacklist", []))
+            for op in ("mm", "mm_out"):
+                if op not in blacklist:
+                    blacklist.append(op)
+            config["flagos_blacklist"] = blacklist
+        return config
     except Exception:
         return None
 
