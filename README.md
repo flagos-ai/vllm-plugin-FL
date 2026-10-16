@@ -186,9 +186,26 @@ If there are multiple plugins in the current environment, you can specify use vl
     export TRITON_ALL_BLOCKS_PARALLEL=1
     ```
 
-3. Enable eager execution
+3. Select eager or full-decode graph execution
 
-    Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
+    For eager execution, add `enforce_eager=True` to the `LLM` constructor or
+    pass `--enforce-eager` on the command line. For `FULL_DECODE_ONLY`, use:
+
+    ```sh
+    export VLLM_PLUGINS=fl
+    export USE_FLAGGEMS=0
+
+    vllm serve Qwen/Qwen3-0.6B \
+        --dtype bfloat16 --tensor-parallel-size 1 \
+        --max-model-len 2048 --max-num-batched-tokens 1024 --max-num-seqs 4 \
+        --gpu-memory-utilization 0.3 \
+        --no-enable-prefix-caching --no-async-scheduling \
+        --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4]}'
+    ```
+
+    This path uses the eager FX backend with NPU graph capture/replay. The
+    standard Python-only FL installation above is sufficient. Use a compatible
+    FlagGems/FlagTree installation when setting `USE_FLAGGEMS=1`.
 
 
 ### Run a Task

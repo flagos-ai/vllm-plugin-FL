@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 
-
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.
@@ -201,8 +200,25 @@ def _register_gdn_packed_decode_patch() -> bool:
     return patch_fn()
 
 
+def _patch_ascend_torch_accelerator() -> None:
+    """Install the Ascend memory shim in every general-plugin process."""
+    from vllm.platforms import current_platform
+
+    if (
+        current_platform.device_type == "npu"
+        and getattr(current_platform, "vendor_name", None) == "ascend"
+    ):
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_torch_accelerator import (
+            patch_torch_accelerator,
+        )
+
+        patch_torch_accelerator()
+
+
 def register_model():
     """Register FL-specific models not yet upstream."""
+    _patch_ascend_torch_accelerator()
+
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches

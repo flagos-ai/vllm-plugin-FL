@@ -153,6 +153,11 @@ if current_platform.dist_backend == "flagcx" or current_platform.device_type == 
             yield graph_capture_context
 else:
     from vllm.distributed.parallel_state import graph_capture
+
+if current_platform.device_type == "npu":
+    from vllm_fl.compilation.graph_runtime import get_graph_capture
+
+    graph_capture = get_graph_capture(graph_capture)
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
@@ -511,6 +516,18 @@ class ModelRunnerFL(
         scheduler_config = self.scheduler_config
         parallel_config = self.parallel_config
         self.device = device
+        self.use_ascend_attention = (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+        )
+        self._ascend_attn_state = None
+        self.graph_runtime = None
+        if self.use_ascend_attention:
+            from vllm_fl.compilation.graph_runtime import GraphRuntimeController
+
+            self.graph_runtime = GraphRuntimeController(
+                vllm_config=vllm_config,
+                full_graph_wrapper_type=GraphWrapper,
+            )
         self.pin_memory = is_pin_memory_available()
         self.dtype = self.model_config.dtype
 
@@ -1990,6 +2007,24 @@ class ModelRunnerFL(
         # E.g., [2, 5, 3] -> [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
         req_indices = np.repeat(self.arange_np[:num_reqs], num_scheduled_tokens)
 
+        if self.use_ascend_attention:
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                classify_ascend_attention_state,
+            )
+
+            num_valid_tokens = num_scheduled_tokens.copy()
+            for req_idx, req_id in enumerate(self.input_batch.req_ids):
+                num_valid_tokens[req_idx] -= len(
+                    scheduler_output.scheduled_spec_decode_tokens.get(req_id, [])
+                )
+            self._ascend_attn_state = classify_ascend_attention_state(
+                self.input_batch.num_computed_tokens_cpu[:num_reqs],
+                num_scheduled_tokens,
+                num_valid_tokens,
+                self.scheduler_config.enable_chunked_prefill,
+                self.speculative_config.method if self.speculative_config else None,
+            )
+
         # cu_num_tokens: [2, 5, 3] -> [2, 7, 10]
         # self.query_pos.np[:10]: [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
         cu_num_tokens = self._get_cumsum_and_arange(
@@ -2308,6 +2343,7 @@ class ModelRunnerFL(
         cascade_attn_prefix_lens: list[list[int]] | None = None,
         slot_mappings: dict[int, torch.Tensor] | None = None,
         block_table_rows_are_current: bool = False,
+        ascend_attn_state: Any | None = None,
     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
         """
         :return: tuple[attn_metadata, spec_decode_common_attn_metadata]
@@ -2438,6 +2474,16 @@ class ModelRunnerFL(
             positions=self.positions[:num_tokens_padded],
             mm_req_doc_ranges=req_doc_ranges,
         )
+
+        if self.use_ascend_attention:
+            phase = (
+                ascend_attn_state
+                if ascend_attn_state is not None else self._ascend_attn_state
+            )
+            assert phase is not None, (
+                "Ascend metadata requires an explicit attention state"
+            )
+            cm_base.attn_state = phase
 
         if self.dcp_world_size > 1:
             self.dcp_local_seq_lens.cpu[:num_reqs] = get_dcp_local_seq_lens(
@@ -3517,6 +3563,49 @@ class ModelRunnerFL(
             return round_up(num_scheduled_tokens, tp_size)
         return num_scheduled_tokens
 
+    def _pad_query_start_loc_for_fia(
+        self,
+        query_start_loc: CpuGpuBuffer,
+        num_tokens_padded: int,
+        num_reqs_padded: int,
+        num_reqs: int,
+        cudagraph_runtime_mode: CUDAGraphMode | None = None,
+        batch_desc_num_reqs: int | None = None,
+    ) -> int:
+        """Make FIA query starts end at the TP/graph-padded token count."""
+        if (
+            cudagraph_runtime_mode == CUDAGraphMode.FULL
+            and self.compilation_config.cudagraph_mode == CUDAGraphMode.FULL
+        ):
+            num_reqs_padded = num_reqs
+        else:
+            num_reqs_padded = (
+                batch_desc_num_reqs
+                if batch_desc_num_reqs is not None
+                else num_reqs
+            )
+
+        if (
+            num_tokens_padded
+            == num_reqs_padded * self.uniform_decode_query_len
+            and self.compilation_config.cudagraph_mode != CUDAGraphMode.FULL
+        ):
+            assert num_reqs <= num_reqs_padded
+            last_loc = query_start_loc.np[num_reqs]
+            query_start_loc.np[num_reqs + 1 : num_reqs_padded + 1] = (
+                self.arange_np[1 : num_reqs_padded + 1 - num_reqs]
+                * self.uniform_decode_query_len
+                + last_loc
+            )
+        else:
+            assert num_reqs == num_reqs_padded
+            if query_start_loc.np[num_reqs_padded] < num_tokens_padded:
+                query_start_loc.np[num_reqs_padded + 1] = num_tokens_padded
+                num_reqs_padded += 1
+
+        query_start_loc.copy_to_gpu()
+        return num_reqs_padded
+
     def _prepare_mm_inputs(
         self, num_tokens: int
     ) -> tuple[torch.Tensor | None, torch.Tensor]:
@@ -4380,6 +4469,11 @@ class ModelRunnerFL(
             use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
             ubatch_slices_attn = ubatch_slices_padded if pad_attn else ubatch_slices
 
+            if self.use_ascend_attention and cudagraph_mode == CUDAGraphMode.FULL:
+                num_reqs_padded = self._pad_query_start_loc_for_fia(
+                    self.query_start_loc, num_tokens_padded, num_reqs_padded,
+                    num_reqs, cudagraph_mode, batch_desc.num_reqs,
+                )
             self._run_common_attention_metadata(num_reqs_padded, cudagraph_mode)
             slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
                 num_tokens_padded=num_tokens_padded
@@ -5464,7 +5558,8 @@ class ModelRunnerFL(
             and not self.parallel_config.use_ubatching
         ):
             self.model = GraphWrapper(
-                self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
+                self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL,
+                graph_runtime=self.graph_runtime,
             )
         elif self.parallel_config.use_ubatching:
             if cudagraph_mode.has_full_cudagraphs():
@@ -6018,6 +6113,15 @@ class ModelRunnerFL(
                 )
                 self.query_start_loc.copy_to_gpu()
 
+                if (
+                    self.use_ascend_attention
+                    and cudagraph_runtime_mode == CUDAGraphMode.FULL
+                ):
+                    num_reqs_padded = self._pad_query_start_loc_for_fia(
+                        self.query_start_loc, num_tokens_padded, num_reqs_padded,
+                        num_reqs, cudagraph_runtime_mode, batch_desc.num_reqs,
+                    )
+
                 # Sync block table CPU->GPU so cleared rows from
                 # remove_request() are visible to the attention metadata
                 # builder. Without this, stale block IDs from finished
@@ -6030,6 +6134,20 @@ class ModelRunnerFL(
                 )
 
             if build_attention:
+                ascend_dummy_attn_state = None
+                if self.use_ascend_attention:
+                    from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                        get_ascend_dummy_attention_state,
+                    )
+
+                    ascend_dummy_attn_state = get_ascend_dummy_attention_state(
+                        create_mixed_batch,
+                        speculative_method=(
+                            self.speculative_config.method
+                            if self.speculative_config else None
+                        ),
+                        use_mla=self.model_config.use_mla,
+                    )
                 pad_attn = cudagraph_runtime_mode == CUDAGraphMode.FULL
                 attn_metadata, _ = self._build_attention_metadata(
                     num_tokens=num_tokens_unpadded,
@@ -6041,6 +6159,7 @@ class ModelRunnerFL(
                     slot_mappings=slot_mappings_by_group,
                     use_spec_decode=self.speculative_config is not None,
                     block_table_rows_are_current=self.common_attention_metadata_graph is not None,
+                    ascend_attn_state=ascend_dummy_attn_state,
                 )
 
             # Dummy forwards must not update real KV-cache slots. Capture the
@@ -6530,6 +6649,8 @@ class ModelRunnerFL(
         from vllm.v1.worker.workspace import reset_workspace_manager
 
         # Calls torch.accelerator.synchronize()
+        if self.graph_runtime is not None:
+            self.graph_runtime.clear_decoder_graphs()
         self._cleanup_profiling_kv_cache()
         if current_platform.is_rocm():
             # Drop captured graphs before distributed teardown. On ROCm, delayed
@@ -6765,7 +6886,10 @@ class ModelRunnerFL(
                     )
         finally:
             set_cudagraph_capturing_enabled(False)
-            GraphWrapper.clear_all_graphs()
+            if self.graph_runtime is not None:
+                self.graph_runtime.clear_decoder_graphs()
+            else:
+                GraphWrapper.clear_all_graphs()
             BreakableCUDAGraphWrapper.clear_all_graphs()
             if encoder_cudagraph_manager is not None:
                 encoder_cudagraph_manager.clear()
@@ -7609,6 +7733,8 @@ class ModelRunnerFL(
 
         # create metadata builders
         self.initialize_metadata_builders(kv_cache_config, kernel_block_sizes)
+        if self.graph_runtime is not None:
+            self.graph_runtime.bind_attention_groups(self.attn_groups)
 
         # Reinitialize need to after initialize_attn_backend
         self.may_reinitialize_input_batch(kv_cache_config, kernel_block_sizes)

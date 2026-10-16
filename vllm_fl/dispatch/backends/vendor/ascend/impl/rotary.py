@@ -10,6 +10,18 @@ from __future__ import annotations
 import torch
 
 
+def initialize_rotary_embedding_ascend() -> None:
+    """Resolve torch_npu's lazy ATB registration before model tracing.
+
+    Merely reading _npu_rotary_embedding returns a lazy wrapper. Its first
+    call patches torch_npu/ATB module globals, which must happen outside
+    forward. The matching torch_npu registration entrypoint is cached.
+    """
+    from torch_npu.op_plugin.atb._atb_ops import _register_atb_extensions
+
+    _register_atb_extensions()
+
+
 def rotary_embedding_ascend(
     obj,
     query: torch.Tensor,
