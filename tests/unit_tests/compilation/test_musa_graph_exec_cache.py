@@ -1,5 +1,10 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""CPU lifetime controls; no MUSA installation or device access is required."""
+"""CPU lifetime and replay-operation controls; no MUSA device access.
+
+Capture/profiler rotation is retained. Runtime replay never rotates the resident
+set; callers execute the original runnable when replay returns False. Operation
+counts below are CPU controls, not GPU throughput or model quality measurements.
+"""
 
 import gc
 import importlib.util
@@ -136,6 +141,13 @@ def _capture(cache, device):
     return graph
 
 
+def _maintenance_counts(device):
+    return {
+        name: sum(call[0] == name for call in device.calls)
+        for name in ("sync", "free", "instantiate")
+    }
+
+
 def test_old_unbounded_51_by_121_capture_hits_native_limit():
     device = _Device()
     graphs = []
@@ -147,7 +159,7 @@ def test_old_unbounded_51_by_121_capture_hits_native_limit():
     assert len(graphs) == 2043
 
 
-def test_51_by_121_templates_and_replay_survive_rotation():
+def test_51_by_121_double_cycle_replays_residents_without_runtime_rotation():
     cache, device, _, loads = _fixture(cap=1900)
     graphs = [_capture(cache, device) for _ in range(51 * 121)]
     identities = [
@@ -157,10 +169,25 @@ def test_51_by_121_templates_and_replay_survive_rotation():
     assert device.live == len(cache._live) == 1900
     assert len(cache._states) == len(graphs) == 6171
     assert loads == ["load"]
-    for graph in graphs:
-        cache.replay(graph)
-        assert device.live <= 1900
-    assert all(graph.replays == 1 for graph in graphs)
+    setup_counts = _maintenance_counts(device)
+    assert setup_counts == {"sync": 4271, "free": 4271, "instantiate": 0}
+    resident_ids = set(cache._live)
+    for cycle in range(2):
+        replayed = 0
+        fallback = 0
+        for graph in graphs:
+            if cache.replay(graph):
+                replayed += 1
+            else:
+                fallback += 1
+        assert replayed == 1900 and fallback == 4271
+        assert device.live == 1900
+        assert set(cache._live) == resident_ids
+        assert _maintenance_counts(device) == setup_counts
+        assert sum(graph.replays for graph in graphs) == (cycle + 1) * 1900
+    assert all(
+        graph.replays == (2 if id(graph) in resident_ids else 0) for graph in graphs
+    )
     assert identities == [
         (graph.template, graph.inputs, graph.outputs, graph.pool, graph.rng)
         for graph in graphs
@@ -177,15 +204,19 @@ def test_below_cap_never_builds_or_synchronizes():
     assert not [call for call in device.calls if call[0] == "sync"]
 
 
-def test_replay_updates_lru_and_preserves_original_native_replay():
+def test_hot_replay_updates_lru_while_cold_replay_requests_original_runnable():
     cache, device, _, _ = _fixture()
     first, second = _capture(cache, device), _capture(cache, device)
     cache.replay(first)
     third = _capture(cache, device)
     assert first.executable and third.executable and not second.executable
-    cache.replay(second)
-    assert second.executable and second.replays == 1
-    assert not first.executable
+    before_cold = list(device.calls)
+    assert cache.replay(second) is False
+    assert device.calls == before_cold
+    assert first.executable and third.executable and not second.executable
+    assert second.replays == 0
+    assert cache.replay(first) is True
+    assert first.replays == 2
     assert device.calls[-1] == ("native_replay", 0)
 
 
@@ -246,27 +277,30 @@ def test_reservation_failure_blocks_next_capture_with_honest_accounting(failure)
     )
 
 
-def test_instantiation_failure_blocks_replay_and_does_not_mark_live():
+def test_profiler_instantiation_failure_propagates_and_does_not_mark_live():
     cache, device, ops, _ = _fixture(cap=1)
     first, second = _capture(cache, device), _capture(cache, device)
     ops.fail_inst = True
     with pytest.raises(RuntimeError, match="instantiate failed"):
-        cache.replay(first)
+        cache.reinstantiate(first, lambda: pytest.fail("native update entered"))
     assert not first.executable and not second.executable
     assert not cache._live and len(cache._states) == 2
     assert first.replays == 0
 
 
-def test_eviction_syncs_victim_device_and_restores_current_device():
+def test_profiler_restore_syncs_victim_device_and_restores_current_device():
     cache, device, _, _ = _fixture(cap=1)
     first = _capture(cache, device)
     device.current = 1
     second = _capture(cache, device)
     assert not first.executable and second.executable
     assert ("sync", 0) in device.calls and device.current == 1
-    cache.replay(first)
+    before_cold = list(device.calls)
+    assert cache.replay(first) is False
+    assert device.calls == before_cold and device.current == 1
+    cache.reinstantiate(first, lambda: "native update")
     assert ("sync", 1) in device.calls and device.current == 1
-    assert first.replays == 1 and not second.executable
+    assert first.replays == 0 and first.executable and not second.executable
 
 
 @pytest.mark.parametrize("cap", [1, 3])
@@ -310,12 +344,12 @@ def test_silent_native_free_failure_is_rejected():
     assert first.executable and list(cache._live) == [id(first)]
 
 
-def test_silent_native_instantiation_failure_is_rejected():
+def test_profiler_silent_native_instantiation_failure_is_rejected():
     cache, device, ops, _ = _fixture(cap=1)
     first, second = _capture(cache, device), _capture(cache, device)
     ops.inst_exec = lambda graph: None
     with pytest.raises(RuntimeError, match="not instantiated"):
-        cache.replay(first)
+        cache.reinstantiate(first, lambda: pytest.fail("native update entered"))
     assert not first.executable and not second.executable
     assert not cache._live and first.replays == 0
 
@@ -446,3 +480,152 @@ def test_profiler_rejects_reentrant_update_with_open_reservation():
             cache.reinstantiate(graph, lambda: pytest.fail("native update entered"))
         outer.capture()
     assert graph.executable and device.live == 2
+
+
+def test_cold_replay_does_not_stage_or_touch_native_maintenance():
+    cache, device, ops, _ = _fixture(cap=1)
+    cold, resident = _capture(cache, device), _capture(cache, device)
+    device.fail_sync = True
+    ops.fail_free = True
+    ops.fail_inst = True
+    before = list(device.calls)
+    assert cache.replay(cold, lambda: pytest.fail("cold graph staged inputs")) is False
+    assert device.calls == before
+    assert cold.replays == 0 and resident.executable
+    assert list(cache._live) == [id(resident)]
+
+
+@pytest.mark.parametrize("decision", [None, True])
+def test_resident_callback_runs_once_before_native_replay_on_recorded_device(decision):
+    cache, device, _, _ = _fixture()
+    graph = _capture(cache, device)
+    device.current = 1
+    calls = []
+
+    def stage():
+        assert device.current == graph.ordinal
+        assert graph.replays == 0
+        calls.append("stage")
+        return decision
+
+    assert cache.replay(graph, stage) is True
+    assert calls == ["stage"]
+    assert graph.replays == 1 and device.current == 1
+    assert device.calls[-1] == ("native_replay", graph.ordinal)
+
+
+def test_resident_callback_can_request_runnable_without_staging_or_native_replay():
+    cache, device, _, _ = _fixture()
+    graph = _capture(cache, device)
+    before = list(device.calls)
+    assert cache.replay(graph, lambda: False) is False
+    assert graph.replays == 0 and graph.executable
+    assert device.calls == before
+    assert cache._replay_reserved == 0
+    assert cache.replay(graph) is True
+    assert graph.replays == 1
+
+
+def test_callback_exception_is_propagated_without_replay_and_restores_device():
+    cache, device, _, _ = _fixture()
+    graph = _capture(cache, device)
+    device.current = 1
+    error = ValueError("input validation failed")
+
+    def stage():
+        raise error
+
+    with pytest.raises(ValueError) as caught:
+        cache.replay(graph, stage)
+    assert caught.value is error
+    assert graph.replays == 0 and graph.executable and device.current == 1
+    assert cache._replay_reserved == 0
+    assert cache.replay(graph) is True
+
+
+def test_native_replay_exception_is_propagated_unchanged():
+    cache, device, _, _ = _fixture()
+    graph = _capture(cache, device)
+    device.current = 1
+    error = ValueError("native replay failed")
+
+    def fail_replay():
+        raise error
+
+    graph.replay = fail_replay
+    with pytest.raises(ValueError) as caught:
+        cache.replay(graph)
+    assert caught.value is error
+    assert graph.executable and graph.replays == 0 and device.current == 1
+    assert cache._replay_reserved == 0
+
+
+def test_cold_replay_rejects_capture_on_recorded_device_without_native_upkeep():
+    cache, device, _, _ = _fixture(cap=1)
+    cold, resident = _capture(cache, device), _capture(cache, device)
+    device.current = 1
+    device.capturing_by_device[0] = True
+    before = list(device.calls)
+    with pytest.raises(RuntimeError, match="during capture"):
+        cache.replay(cold)
+    assert device.calls == before and device.current == 1
+    assert cold.replays == 0 and resident.executable
+
+
+def test_public_replay_wrapper_preserves_decision_and_callback():
+    module = _load_cache_module()
+    device = _Device()
+    module._cache = module._MusaGraphExecCache(device, lambda: _Ops(device), cap=1)
+    graph = _capture(module._cache, device)
+    staged = []
+    assert module.musa_graph_replay(graph, lambda: staged.append("staged")) is True
+    assert staged == ["staged"] and graph.replays == 1
+    assert module.musa_graph_replay(graph, lambda: False) is False
+    assert graph.replays == 1
+
+
+@pytest.mark.parametrize("operation", ["capture", "profiler", "restore", "cold_replay"])
+def test_replay_callback_rejects_reentrant_native_rotation_and_resets(operation):
+    cache, device, _, _ = _fixture(cap=1)
+    cold, resident = _capture(cache, device), _capture(cache, device)
+    before = list(device.calls)
+
+    def stage():
+        assert cache._replay_reserved == 1
+        with pytest.raises(RuntimeError, match="during replay"):
+            if operation == "capture":
+                _capture(cache, device)
+            elif operation == "profiler":
+                cache.reinstantiate(cold, lambda: pytest.fail("native update entered"))
+            elif operation == "restore":
+                cache._ensure_live(cold, cache._state_for(cold))
+            else:
+                cache.replay(cold)
+
+    assert cache.replay(resident, stage) is True
+    assert device.calls == before + [("native_replay", 0)]
+    assert resident.replays == 1 and resident.executable and not cold.executable
+    assert not cache._capture_reserved and cache._replay_reserved == 0
+    replacement = _capture(cache, device)
+    assert replacement.executable and not resident.executable
+    cache.reinstantiate(cold, lambda: "native update")
+    assert cold.executable and cache._replay_reserved == 0
+
+
+def test_nested_hot_replay_keeps_outer_reservation_until_native_enqueue():
+    cache, device, _, _ = _fixture(cap=2)
+    first, second = _capture(cache, device), _capture(cache, device)
+
+    def inner_stage():
+        assert cache._replay_reserved == 2
+
+    def outer_stage():
+        assert cache._replay_reserved == 1
+        assert cache.replay(second, inner_stage) is True
+        assert cache._replay_reserved == 1
+        with pytest.raises(RuntimeError, match="during replay"):
+            _capture(cache, device)
+
+    assert cache.replay(first, outer_stage) is True
+    assert first.replays == second.replays == 1
+    assert cache._replay_reserved == 0 and not cache._capture_reserved

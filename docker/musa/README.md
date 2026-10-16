@@ -34,6 +34,15 @@ disabled, and LibEntry native illegal-memory rethrow. The validated current
 wheel, with five changed wheel members and 5588 unchanged bodies; it is not a
 new FlagGems source build or an upstream compiler fix.
 
+[FlagGems PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894) merged
+on 2026-10-16 at
+[`317b763204391d530d6024b52b6235de150443d8`](https://github.com/flagos-ai/FlagGems/commit/317b763204391d530d6024b52b6235de150443d8).
+Its three split-KV changes are now upstream; the separate MUSA corrections
+above remain outside that PR's scope. This status update leaves the published
+image, embedded dependency manifest, bfc6 source lineage and wheel digests
+unchanged. The fixed archive still needs its carried patch for reproduction;
+a new upstream-based stack requires separately recorded builds and validation.
+
 FlagTree lineage must name
 `69148faf5cc03edb0a5737abd4b75b691132cea9`, the single header `#else` to
 `#elif defined(__PROTON__)` change and explicit MUSA build profile
