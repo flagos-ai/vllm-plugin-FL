@@ -244,6 +244,10 @@ def register_model():
         install_arm_cpu_packed_w4a8()
         return
 
+    from vllm_fl.models.hy4.registration import register_hy_v4_support
+
+    register_hy_v4_support()
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them

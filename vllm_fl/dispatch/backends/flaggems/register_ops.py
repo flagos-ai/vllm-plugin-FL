@@ -195,3 +195,7 @@ def register_builtins(registry) -> None:
         )
     ]
     registry.register_many(filtered)
+
+    from .impl.mla_ops import register_mla_operators
+
+    register_mla_operators(registry, allow=use_flaggems_op)
