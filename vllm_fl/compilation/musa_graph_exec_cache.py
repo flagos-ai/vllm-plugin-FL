@@ -1,5 +1,12 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Bound MUSA executable handles while retaining every captured graph template."""
+"""Bound MUSA executables during capture; never restore a cold runtime replay.
+
+Capture and native profiler updates may rotate executables while retaining every
+captured template. Ordinary replay uses only the resident set. A nonresident
+piece returns False so GraphWrapper can execute its original runnable, instead
+of synchronizing, destroying and instantiating one executable for every piece.
+The 1900-executable budget is unchanged, and every configured bucket is captured.
+"""
 
 import threading
 import weakref
@@ -32,6 +39,7 @@ class _MusaGraphExecCache:
         self._live = OrderedDict()
         self._lock = threading.RLock()
         self._capture_reserved = False
+        self._replay_reserved = 0
 
     def _forget(self, key, reference):
         with self._lock:
@@ -81,6 +89,8 @@ class _MusaGraphExecCache:
                 raise RuntimeError("Cannot start MUSA graph capture during capture")
             if self._capture_reserved:
                 raise RuntimeError("MUSA graph capture reservation is already open")
+            if self._replay_reserved:
+                raise RuntimeError("Cannot start MUSA graph capture during replay")
             key = id(graph)
             if key in self._states:
                 raise RuntimeError("MUSA graph is already registered")
@@ -107,6 +117,8 @@ class _MusaGraphExecCache:
     def _ensure_live(self, graph, state):
         key = id(graph)
         if key not in self._live:
+            if self._replay_reserved:
+                raise RuntimeError("Cannot restore MUSA graph during replay")
             if self._capture_reserved:
                 raise RuntimeError(
                     "Cannot restore MUSA graph during capture reservation"
@@ -121,20 +133,51 @@ class _MusaGraphExecCache:
             self._live[key] = state
         self._live.move_to_end(key)
 
-    def replay(self, graph):
+    def replay(self, graph, before_replay=None):
+        """Replay a resident executable, or return False without native upkeep.
+
+        The callback runs only for resident pieces, under the same reservation
+        lock and device guard as replay. It can stage supported inputs, or return
+        False to request the original runnable when staging is unsafe. Cold
+        pieces never stage into their captured input storage.
+        """
         with self._lock:
             state = self._state_for(graph)
             # Native MUSAGraph.replay accepts a different current device and
-            # restores it afterwards. Keep that behavior for cold restores too.
+            # restores it afterwards. Keep that behavior for both decisions.
             with self._device_api.device(state.device):
-                self._ensure_live(graph, state)
-                # Keep native replay's RNG prologue and lock through enqueue.
-                graph.replay()
+                if id(graph) not in self._live:
+                    if self._replay_reserved:
+                        raise RuntimeError("Cannot restore MUSA graph during replay")
+                    if self._capture_reserved:
+                        raise RuntimeError(
+                            "Cannot restore MUSA graph during capture reservation"
+                        )
+                    if self._device_api.is_current_stream_capturing():
+                        raise RuntimeError(
+                            "Cannot instantiate MUSA graphs during capture"
+                        )
+                    return False
+                # RLock prevents other threads from rotating the live set. A
+                # reservation also rejects same-thread capture/profiler/cold
+                # restore from a staging callback, which could evict this graph.
+                self._replay_reserved += 1
+                try:
+                    if before_replay is not None and before_replay() is False:
+                        return False
+                    self._live.move_to_end(id(graph))
+                    # Keep native replay's RNG prologue and lock through enqueue.
+                    graph.replay()
+                    return True
+                finally:
+                    self._replay_reserved -= 1
 
     def reinstantiate(self, graph, native_reinstantiate):
         # torch_musa's profiler revisits every captured graph and requires a
         # live executable. Restore evicted FL graphs before its native update.
         with self._lock:
+            if self._replay_reserved:
+                raise RuntimeError("Cannot update MUSA graph profiler during replay")
             if self._capture_reserved:
                 raise RuntimeError(
                     "Cannot update MUSA graph profiler during capture reservation"
@@ -171,8 +214,8 @@ def musa_graph_capture(graph):
     return _get_cache().capture(graph)
 
 
-def musa_graph_replay(graph):
-    _get_cache().replay(graph)
+def musa_graph_replay(graph, before_replay=None):
+    return _get_cache().replay(graph, before_replay)
 
 
 def musa_graph_class(native_graph_class):

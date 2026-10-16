@@ -214,26 +214,38 @@ C-extension, gradient-enabled and other-platform calls retain their original
 paths. Dynamo no longer has to trace their Python device guards or dtype
 promotion helpers. Native graph capture and piecewise splitting stay enabled.
 
-FL's MUSA graph wrappers retain every captured graph template and input, together
-with non-owning output tensor descriptors, while keeping at most 1900 executable
-handles live per process. The native graph pool owns captured output allocations.
-The descriptors use TorchMUSA's storage/metadata reconstruction API so holding an
-output does not keep each shape's allocation live in the shared pool. Ordinary
-external captured inputs remain strongly owned. Tensor identity, view aliases,
-storage offsets, strides, dtype and device are preserved; staging validates both
-StorageImpl aliases and overlapping MUSA storage spans before any copy. Missing
-native reconstruction APIs and unsupported tensor metadata fail explicitly. Before an
-executable is evicted, its device is synchronized; replay restores that same
-template's executable and uses native replay, including RNG handling. No graph
-bucket is removed and no model forward is repeated to restore an executable.
-This addresses the documented [MUSA executable limit](https://github.com/MooreThreads/torchada#cuda-graphs);
-its role in the observed 35B failure still requires real CI validation.
-The small host C++ helper builds only when rotation is needed, against installed
-TorchMUSA/PyTorch 2.9 headers and the MUSA SDK. Linux, a C++ compiler and Ninja
-are required for that path; build or lifecycle errors propagate. The helper
-includes only its pybind, c10 and native graph dependencies, avoiding mixed
-generated and original Torch frontend headers. Shallow models
-retain the original path without building the helper.
+FL's MUSA graph wrappers retain all captured templates and strong input owners,
+with non-owning output descriptors, while limiting live executables to 1900 per
+process. Output descriptors use TorchMUSA's storage/metadata reconstruction API;
+tensor identity, view aliases, offsets, strides, dtype and device are preserved.
+Missing native APIs and unsupported metadata fail explicitly.
+
+The execution contract is stable-buffer replay. Captured addresses and metadata
+must remain unchanged. For a resident graph, a fresh allocation passes the existing structure, metadata
+and alias checks, then executes the original runnable with the caller's actual
+arguments. It is not copied into a captured input or copied back afterwards, so
+in-place input mutations and output aliases remain visible to the caller. Stable
+objects use linear metadata/address checks and reuse validated alias facts;
+replacement descriptors are remembered weakly after full validation.
+
+The executable policy separates initialization from serving. Capture and native
+profiler updates may synchronize and rotate executables while preserving every
+configured capture bucket. Runtime replay uses only resident executables. A cold
+piece executes the original runnable without synchronizing, freeing or
+instantiating an executable. Residency is held through input validation and native
+enqueue; reentrant capture/profiler rotation is rejected during that interval.
+The existing 1900 cap, all capture sizes, native RNG handling and error propagation
+remain in effect. The small C++ helper is still built lazily for capture/profiler
+rotation against the installed TorchMUSA/PyTorch 2.9 and MUSA SDK headers; Linux,
+a C++ compiler and Ninja are required for that initialization path.
+
+A CPU control using 51 buckets of 121 pieces preserves all 6171 captures and the
+initial 4271 evictions. In each of two subsequent full bucket-switching cycles,
+1900 resident pieces replay and 4271 cold pieces request the original runnable,
+with zero runtime synchronization/free/instantiation operations. The previous
+runtime LRU performed 6171 of each maintenance operation per cycle. These are
+production-cache operation counts with CPU doubles, not GPU throughput or model
+acceptance measurements. The changed policy still requires its own MUSA CI.
 
 Earlier functional-stage success records describe command exit status. In CI
 runs `38405604174` and `38423620853`, all 23 GPU-marked functional cases were
@@ -275,8 +287,19 @@ pin alone does not include these modifications. Install the verified wheels
 and retain their actual hashes and source/repack lineage; do not label the
 modified wheels as unpatched upstream builds.
 
-FlagGems starts from `bfc6c49d2c4d06e5deac9784f203730c8372a84a` and changes
-exactly six original source files:
+[FlagGems PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894) merged
+on 2026-10-16 at
+[`317b763204391d530d6024b52b6235de150443d8`](https://github.com/flagos-ai/FlagGems/commit/317b763204391d530d6024b52b6235de150443d8).
+Its three split-KV production changes are now upstream. The separate device,
+pin-memory, NDmul and native-error changes below are outside that PR's scope.
+
+The published image and its recorded wheel remain the fixed bfc6-based
+`musafix2` artifacts; this status update does not replace their source pin,
+wheel version, digest or validation evidence. Reproducing those artifacts still
+requires the carried split-KV patch because their pinned archive predates the
+merge. That fixed FlagGems profile starts from
+`bfc6c49d2c4d06e5deac9784f203730c8372a84a` and changes exactly six original
+source files:
 
 | Source file | Modification |
 | --- | --- |
@@ -287,10 +310,12 @@ exactly six original source files:
 | `src/flag_gems/ops/mul.py` | Restrict MUSA's shared `mul_generic_nd_kernel` to block 512, four warps and three stages, with FlagTune expansion disabled for this entry. Preserve its kernel body and other backend configurations. |
 | `src/flag_gems/utils/libentry.py` | Reraise native MUSA `illegal memory access` before the compile-failure fallback benchmarks another configuration. |
 
-The three reviewed production changes from
-[PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894) are pinned at
+For historical reproduction, the three carried production postimages from
+[PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894) remain pinned at
 `4e330227564ccc7f6a373be2d48a5d2cb7f2823e`; the entire PR head is not installed.
-The shared `flash_api.py` also carries the separate device correction.
+The merged kernel and Enflame files match those carried postimages exactly.
+The merged shared `flash_api.py` matches after applying the separate `q.device`
+property-query correction, which was not part of PR #6894.
 [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973) tracks the
 device literals and is not an extra Gate prerequisite.
 [FlagGems #7005](https://github.com/flagos-ai/FlagGems/issues/7005) tracks native
@@ -352,7 +377,7 @@ export MUSA_CI_DEPENDENCY_MANIFEST_SHA256="$(sha256sum "$MUSA_CI_DEPENDENCY_MANI
 
 The setup step builds current FL and observer ordinary wheels, installs the
 three manifest wheels into its fresh venv and verifies their installed payloads.
-Keep the current FL capture-input staging and collective split, and the
+Keep the current FL stable-input/fallback contract and collective split, and the
 observer's strict semantic joins. Optional diagnostics remain disabled and
 excluded from the Gate plugin allowlist.
 

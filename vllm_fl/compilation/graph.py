@@ -207,10 +207,12 @@ class GraphEntry:
     # during capture, and check if they are the same during replay
     input_addresses: list[int] | None = None
 
-    # Keep MUSA PIECEWISE inputs alive and stage fresh inter-piece allocations.
+    # Keep MUSA PIECEWISE capture inputs alive for stable-buffer replay.
     musa_input_leaves: list[Any] | None = None
     musa_input_spec: Any | None = None
     musa_input_metadata: list[Any] | None = None
+    musa_input_addresses: list[int | None] | None = None
+    musa_last_input_tensor_refs: list[Any] | None = None
 
 
 @dataclasses.dataclass
@@ -322,6 +324,15 @@ class GraphWrapper:
         )
 
     def _stage_musa_inputs(self, entry, args, kwargs):
+        """Validate the call and report whether captured buffers can be replayed.
+
+        An arbitrary runnable may mutate inputs or return aliases of them.
+        Replaying after copying a fresh allocation into captured storage would
+        hide those mutations from the caller and return aliases of the wrong
+        allocation. Without a functionalization contract, changed addresses
+        therefore execute the runnable with its original incoming arguments.
+        """
+
         def require(condition, message):
             if not condition:
                 raise ValueError(message)
@@ -332,12 +343,18 @@ class GraphWrapper:
             len(leaves) == len(entry.musa_input_leaves),
             "MUSA graph input count changed",
         )
+        stable_inputs = True
+        distinct_empty_input = False
         copies = []
         captured_tensors = []
         incoming_tensors = []
         incoming_by_destination = {}
-        for captured, incoming, metadata in zip(
-            entry.musa_input_leaves, leaves, entry.musa_input_metadata
+        for captured, incoming, metadata, address, previous_ref in zip(
+            entry.musa_input_leaves,
+            leaves,
+            entry.musa_input_metadata,
+            entry.musa_input_addresses,
+            entry.musa_last_input_tensor_refs,
         ):
             if isinstance(captured, torch.Tensor):
                 require(
@@ -348,9 +365,30 @@ class GraphWrapper:
                     self._musa_tensor_metadata(captured) == metadata,
                     "Captured MUSA graph input metadata was mutated",
                 )
+                if incoming is not captured:
+                    require(
+                        self._musa_tensor_metadata(incoming) == metadata,
+                        "MUSA graph input tensor metadata changed",
+                    )
+                captured_address = captured.data_ptr()
+                incoming_address = incoming.data_ptr()
                 require(
-                    self._musa_tensor_metadata(incoming) == metadata,
-                    "MUSA graph input tensor metadata changed",
+                    captured_address == address,
+                    "Captured MUSA graph input address changed",
+                )
+                # Empty tensors all report address zero, even when they have
+                # unrelated StorageImpls. Only the original captured object has
+                # a known identity/alias contract in that case.
+                distinct_empty = incoming is not captured and incoming_address == 0
+                distinct_empty_input = distinct_empty_input or distinct_empty
+                stable_inputs = (
+                    stable_inputs
+                    and not distinct_empty
+                    and incoming_address == address
+                    and (
+                        incoming is captured
+                        or (previous_ref is not None and previous_ref() is incoming)
+                    )
                 )
                 captured_tensors.append(captured)
                 incoming_tensors.append(incoming)
@@ -359,7 +397,7 @@ class GraphWrapper:
                     previous.data_ptr() == incoming.data_ptr(),
                     "A repeated MUSA graph input changed its alias relationship",
                 )
-                if captured.data_ptr() != incoming.data_ptr():
+                if captured_address != incoming_address:
                     require(
                         not self._musa_tensors_alias(captured, incoming),
                         "MUSA graph staging source overlaps its destination",
@@ -376,7 +414,13 @@ class GraphWrapper:
                     "MUSA graph non-tensor input changed",
                 )
 
-        # Validate the complete call before writing any captured storage.
+        # Unchanged objects, addresses and metadata preserve the alias facts
+        # already checked at capture or the last stable-buffer call. Keep this
+        # normal path linear, without storage-span queries or pairwise scans.
+        if stable_inputs:
+            return True
+
+        # Validate the complete changed call before selecting graph or eager.
         for index, captured in enumerate(captured_tensors):
             for other_index in range(index):
                 require(
@@ -399,13 +443,16 @@ class GraphWrapper:
                     not self._musa_tensors_alias(incoming, other),
                     "MUSA graph input aliases another staging destination",
                 )
-        copied = set()
-        for captured, incoming in copies:
-            identity = id(captured)
-            if identity in copied:
-                continue
-            captured.copy_(incoming)
-            copied.add(identity)
+        # Keep all metadata and alias checks above active even for calls that
+        # cannot replay. Do not stage or copy mutations back across allocations.
+        if copies or distinct_empty_input:
+            return False
+        # A different descriptor can still refer to the same captured buffer.
+        # Remember validated identities weakly, without retaining new owners.
+        entry.musa_last_input_tensor_refs = [
+            weakref.ref(x) if isinstance(x, torch.Tensor) else None for x in leaves
+        ]
+        return True
 
     def __call__(self, *args, **kwargs):
         if not is_forward_context_available():
@@ -458,7 +505,11 @@ class GraphWrapper:
                     else None
                     for x in leaves
                 ]
-                musa_inputs = (leaves, spec, metadata)
+                addresses = [
+                    x.data_ptr() if isinstance(x, torch.Tensor) else None
+                    for x in leaves
+                ]
+                musa_inputs = (leaves, spec, metadata, addresses)
             graph = Graph.graph()
 
             with ExitStack() as stack:
@@ -516,7 +567,12 @@ class GraphWrapper:
                     entry.musa_input_leaves,
                     entry.musa_input_spec,
                     entry.musa_input_metadata,
+                    entry.musa_input_addresses,
                 ) = musa_inputs
+                entry.musa_last_input_tensor_refs = [
+                    weakref.ref(x) if isinstance(x, torch.Tensor) else None
+                    for x in entry.musa_input_leaves
+                ]
 
             compilation_counter.num_cudagraph_captured += 1
 
@@ -524,9 +580,6 @@ class GraphWrapper:
             # the weak ref of the output, so that pytorch can correctly
             # manage the memory during graph capture
             return output
-
-        if entry.musa_input_leaves is not None:
-            self._stage_musa_inputs(entry, args, kwargs)
 
         if self.is_debugging_mode and entry.musa_input_leaves is None:
             # check if the input addresses are the same
@@ -539,18 +592,32 @@ class GraphWrapper:
                 f"got {new_input_addresses}"
             )
 
-        # Sync offloader before replay if available
+        if current_platform.device_type == "musa":
+            from vllm_fl.compilation.musa_graph_exec_cache import musa_graph_replay
+
+            def prepare_replay():
+                # The cache holds residency through validation and enqueue.
+                # A nonresident graph never stages inputs or restores an exec.
+                if entry.musa_input_leaves is not None and not self._stage_musa_inputs(
+                    entry, args, kwargs
+                ):
+                    return False
+                with suppress(ImportError, RuntimeError):
+                    from vllm.model_executor.offloader.base import get_offloader
+
+                    get_offloader().sync_prev_onload()
+                return True
+
+            if not musa_graph_replay(entry.graph, before_replay=prepare_replay):
+                return self.runnable(*args, **kwargs)
+            return entry.output
+
+        # Sync offloader before replay if available.
         with suppress(ImportError, RuntimeError):
             from vllm.model_executor.offloader.base import get_offloader
 
             get_offloader().sync_prev_onload()
-
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
-        if current_platform.device_type == "musa":
-            from vllm_fl.compilation.musa_graph_exec_cache import musa_graph_replay
-
-            musa_graph_replay(entry.graph)
-        else:
-            entry.graph.replay()
+        entry.graph.replay()
         return entry.output

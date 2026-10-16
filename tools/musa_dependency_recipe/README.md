@@ -1,8 +1,30 @@
 # Pinned ordinary-wheel source recipe
 
-This bundle prepares reviewed FlagGems source in new private trees. It supports `latest-bfc6` and opt-in `latest-bfc6-ndsafe512` (Gems HEAD `bfc6c49d2c4d06e5deac9784f203730c8372a84a`) and retains `historical-cf174` as the source-preparation script default. CI uses its separate `latest` software profile. It does not edit installed FlagGems, Torch, TorchMUSA or FlagTree files.
+This bundle prepares reviewed FlagGems source in new private trees. It supports `latest-bfc6` and opt-in `latest-bfc6-ndsafe512` (fixed Gems source `bfc6c49d2c4d06e5deac9784f203730c8372a84a`) and retains `historical-cf174` as the source-preparation script default. CI uses its separate `latest` software profile. It does not edit installed FlagGems, Torch, TorchMUSA or FlagTree files.
 
 The replacements carry the three production changes from [PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894), replace the shared public MHA property-query argument with `q.device`, and use the active runtime accelerator in `_pin_memory` while retaining explicit CPU rejection. The shared `flash_api.py` is the PR postimage plus the device-query correction, rather than an exact PR postimage. The enflame file is retained because it belongs to the reviewed PR; this does not claim that its backend was tested on MUSA. The entire PR head is not installed. The ineffective masked-Q padding experiment is excluded. The public-source accelerator checks are tracked in [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973); issue state is not a Gate prerequisite, and the issue does not identify a cause of the model graph fault.
+
+## Upstream split-KV status
+
+[FlagGems PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894) merged
+on 2026-10-16 at
+[`317b763204391d530d6024b52b6235de150443d8`](https://github.com/flagos-ai/FlagGems/commit/317b763204391d530d6024b52b6235de150443d8).
+The merged `flash_kernel.py` and Enflame `flash_api.py` are byte-identical to
+this bundle's carried postimages. The shared `flash_api.py` matches after the
+bundle's separate `q.device` correction; that correction, pin-memory, NDmul
+and native-error handling were not merged by this PR.
+
+These recipe profiles are fixed archive snapshots, including profiles named
+`latest-bfc6`; their manifests, preimages, patches and assigned versions remain
+unchanged. Reproduction from bfc6 or cf174 still applies the split-KV changes.
+The published image, embedded dependency manifest and verified wheel digests
+also remain unchanged. Their historical lineage is not a claim that PR #6894
+is still open.
+
+A future profile based on this merge or a descendant can omit the already
+merged split-KV hunks, but must bind its new source archive, review the remaining
+MUSA corrections, and record new wheel/image digests and validation evidence.
+This update does not provide or validate such a new dependency stack.
 
 ## File-by-file modification inventory
 

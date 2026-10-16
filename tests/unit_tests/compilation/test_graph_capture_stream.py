@@ -11,6 +11,9 @@ import __future__
 import ast
 import builtins
 import dataclasses
+import gc
+import importlib.util
+import sys
 import weakref
 from contextlib import ExitStack, contextmanager, suppress
 from enum import IntEnum
@@ -84,6 +87,7 @@ class _Contract:
         self.errors = {}
         self.cache_calls = []
         self.cached_graph_ids = set()
+        self.nonresident_graph_ids = set()
         self.initial_stream = object()
         self.active_stream = self.initial_stream
         self.cached_stream = object()
@@ -161,13 +165,18 @@ class _Contract:
         finally:
             self.cache_calls.append(("capture-exit", graph))
 
-    def cache_replay(self, graph):
+    def cache_replay(self, graph, before_replay=None):
         assert self.platform.device_type == "musa"
         assert id(graph) in self.cached_graph_ids
-        self.cache_calls.append(("replay", graph))
         if "cache-replay" in self.errors:
             raise self.errors["cache-replay"]
-        return graph.replay()
+        if id(graph) in self.nonresident_graph_ids:
+            return False
+        if before_replay is not None and before_replay() is False:
+            return False
+        self.cache_calls.append(("replay", graph))
+        graph.replay()
+        return True
 
     def synchronize(self):
         self.events.append(("synchronize",))
@@ -396,7 +405,7 @@ def test_musa_retains_capture_inputs_then_releases_them_on_clear(contract):
     assert reference() is None
 
 
-def test_musa_fresh_interpiece_input_is_copied_before_replay(contract):
+def test_musa_fresh_interpiece_input_uses_original_runnable(contract):
     wrapper = contract.wrapper()
     captured = _Tensor(contract, (1.0, 2.0))
     wrapper(captured)
@@ -406,9 +415,11 @@ def test_musa_fresh_interpiece_input_is_copied_before_replay(contract):
     incoming = _Tensor(contract, (11.0, 29.0))
     assert incoming.data_ptr() != address
     assert wrapper(incoming) is contract.output
-    assert cpu_torch.equal(captured.payload, cpu_torch.tensor([11.0, 29.0]))
+    assert captured.payload.tolist() == [1.0, 2.0]
+    assert incoming.payload.tolist() == [11.0, 29.0]
     assert captured.data_ptr() == address == entry.input_addresses[0]
-    assert contract.event_names() == ["copy", "replay"]
+    assert contract.event_names() == ["runnable"]
+    assert contract.events[0][2] == (incoming,)
     assert entry.graph is wrapper.concrete_graph_entries["batch"].graph
     assert contract.counter.num_cudagraph_captured == 1
 
@@ -422,15 +433,20 @@ def test_musa_same_input_pointer_does_not_copy_or_recapture(contract):
     assert contract.event_names() == ["replay"]
 
 
-def test_musa_nested_keyword_inputs_stage_with_unchanged_static_leaves(contract):
+def test_musa_nested_keyword_inputs_fallback_with_unchanged_static_leaves(contract):
     wrapper = contract.wrapper()
     captured = _Tensor(contract)
     wrapper([captured], scale=3, options={"tag": "same"})
     contract.events.clear()
     incoming = _Tensor(contract, (8.0, 17.0))
     wrapper([incoming], scale=3, options={"tag": "same"})
-    assert cpu_torch.equal(captured.payload, incoming.payload)
-    assert contract.event_names() == ["copy", "replay"]
+    assert captured.payload.tolist() == [1.0, 2.0]
+    assert incoming.payload.tolist() == [8.0, 17.0]
+    assert contract.event_names() == ["runnable"]
+    assert contract.events[0][2:] == (
+        ([incoming],),
+        {"scale": 3, "options": {"tag": "same"}},
+    )
 
 
 @pytest.mark.parametrize(
@@ -508,15 +524,17 @@ def test_distinct_captured_views_require_separate_policy(contract):
     assert contract.events == []
 
 
-def test_repeated_tensor_copies_once_and_preserves_alias_relationship(contract):
+def test_repeated_tensor_fallback_preserves_original_alias_relationship(contract):
     wrapper = contract.wrapper()
     captured = _Tensor(contract)
     wrapper(captured, captured)
     incoming = _Tensor(contract, (7.0, 13.0))
     contract.events.clear()
     wrapper(incoming, incoming)
-    assert contract.event_names() == ["copy", "replay"]
-    assert captured.payload.tolist() == [7.0, 13.0]
+    assert contract.event_names() == ["runnable"]
+    assert contract.events[0][2] == (incoming, incoming)
+    assert captured.payload.tolist() == [1.0, 2.0]
+    assert incoming.payload.tolist() == [7.0, 13.0]
     contract.events.clear()
     with pytest.raises(ValueError, match="repeated MUSA graph input"):
         wrapper(_Tensor(contract), _Tensor(contract))
@@ -551,7 +569,7 @@ def test_staging_does_not_change_other_backend_or_full_replay(contract, device, 
     assert captured.payload.tolist() == [1.0, 2.0]
 
 
-def test_staged_replay_error_preserves_exception_and_adds_no_fence(contract):
+def test_stable_replay_error_preserves_exception_and_adds_no_fence(contract):
     wrapper = contract.wrapper()
     captured = _Tensor(contract)
     wrapper(captured)
@@ -559,10 +577,10 @@ def test_staged_replay_error_preserves_exception_and_adds_no_fence(contract):
     contract.errors["replay"] = error
     contract.events.clear()
     with pytest.raises(RuntimeError) as raised:
-        wrapper(_Tensor(contract, (5.0, 8.0)))
+        wrapper(captured)
     assert raised.value is error
-    assert captured.payload.tolist() == [5.0, 8.0]
-    assert contract.event_names() == ["copy", "replay"]
+    assert captured.payload.tolist() == [1.0, 2.0]
+    assert contract.event_names() == ["replay"]
 
 
 def test_staging_validation_is_active_with_optimized_python_code(contract):
@@ -797,3 +815,539 @@ def test_physical_alias_extension_respects_device_index(contract):
     b = _Tensor(contract, payload=_borrow_payload(owner))
     b.overrides["device"] = SimpleNamespace(type="musa", index=1)
     assert not contract.wrapper_type._musa_tensors_alias(a, b)
+
+
+def _numeric_replay_wrapper(contract, function, replay):
+    """Use the production wrapper and CPU kernels for captured native replay."""
+    wrapper = contract.wrapper()
+    calls = []
+
+    def runnable(*args, **kwargs):
+        calls.append((args, kwargs))
+        return function(*args, **kwargs)
+
+    wrapper.runnable = runnable
+
+    def capture(*args, **kwargs):
+        output = wrapper(*args, **kwargs)
+        entry = wrapper.concrete_graph_entries["batch"]
+
+        def native_replay():
+            contract.events.append(("numeric-replay",))
+            replay(entry, args, kwargs)
+
+        entry.graph.replay = native_replay
+        contract.events.clear()
+        return output
+
+    return wrapper, capture, calls
+
+
+def test_fresh_mutating_input_keeps_caller_visible_state_and_output_alias(contract):
+    def mutate(value):
+        value.payload.add_(10)
+        return value
+
+    def replay(entry, args, kwargs):
+        args[0].payload.add_(10)
+
+    wrapper, capture, calls = _numeric_replay_wrapper(contract, mutate, replay)
+    captured = _Tensor(contract, (1.0, 2.0))
+    assert capture(captured) is captured
+    assert captured.payload.tolist() == [11.0, 12.0]
+    incoming = _Tensor(contract, (3.0, 4.0))
+    output = wrapper(incoming)
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert output is incoming
+    assert cpu_torch._C._is_alias_of(output.payload, incoming.payload)
+    assert captured.payload.tolist() == [11.0, 12.0]
+    assert len(calls) == 2
+    assert contract.events == []
+    assert contract.counter.num_cudagraph_captured == 1
+
+
+def test_fresh_mutating_view_output_aliases_incoming_not_capture(contract):
+    def mutate(value):
+        value.payload.mul_(2)
+        return _Tensor(contract, payload=value.payload.view(2))
+
+    def replay(entry, args, kwargs):
+        args[0].payload.mul_(2)
+
+    wrapper, capture, calls = _numeric_replay_wrapper(contract, mutate, replay)
+    captured = _Tensor(contract, (1.0, 2.0))
+    captured_output = capture(captured)
+    incoming = _Tensor(contract, (3.0, 4.0))
+    output = wrapper(incoming)
+    assert incoming.payload.tolist() == output.payload.tolist() == [6.0, 8.0]
+    assert cpu_torch._C._is_alias_of(output.payload, incoming.payload)
+    assert not cpu_torch._C._is_alias_of(output.payload, captured_output.payload)
+    assert captured.payload.tolist() == [2.0, 4.0]
+    assert len(calls) == 2
+    assert contract.events == []
+
+
+@pytest.mark.parametrize("output_kind", ["identity", "view", "nested"])
+def test_fresh_readonly_alias_output_preserves_caller_allocation(contract, output_kind):
+    def readonly(value):
+        if output_kind == "identity":
+            return value
+        view = _Tensor(contract, payload=value.payload.view(2))
+        return view if output_kind == "view" else {"result": [view, value]}
+
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract, readonly, lambda entry, args, kwargs: None
+    )
+    captured = _Tensor(contract)
+    capture(captured)
+    incoming = _Tensor(contract, (7.0, 9.0))
+    output = wrapper(incoming)
+    result = output["result"][0] if output_kind == "nested" else output
+    assert result.payload.tolist() == incoming.payload.tolist() == [7.0, 9.0]
+    assert cpu_torch._C._is_alias_of(result.payload, incoming.payload)
+    assert not cpu_torch._C._is_alias_of(result.payload, captured.payload)
+    if output_kind == "identity":
+        assert output is incoming
+    if output_kind == "nested":
+        assert output["result"][1] is incoming
+    assert captured.payload.tolist() == [1.0, 2.0]
+    assert len(calls) == 2
+    assert contract.events == []
+
+
+def test_fresh_readonly_fresh_output_uses_original_callable(contract):
+    def readonly(value):
+        return _Tensor(contract, payload=value.payload + 10)
+
+    def replay(entry, args, kwargs):
+        entry.output.payload.copy_(args[0].payload + 10)
+
+    wrapper, capture, calls = _numeric_replay_wrapper(contract, readonly, replay)
+    captured = _Tensor(contract)
+    first_output = capture(captured)
+    incoming = _Tensor(contract, (3.0, 4.0))
+    output = wrapper(incoming)
+    assert output.payload.tolist() == [13.0, 14.0]
+    assert incoming.payload.tolist() == [3.0, 4.0]
+    assert first_output.payload.tolist() == [11.0, 12.0]
+    assert not cpu_torch._C._is_alias_of(output.payload, incoming.payload)
+    assert len(calls) == 2
+    assert contract.events == []
+
+
+def test_unknown_callable_cannot_infer_mutation_safety_from_capture(contract):
+    class UnknownCallable:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, value):
+            self.calls += 1
+            if self.calls == 1:
+                return _Tensor(contract, payload=value.payload + 10)
+            value.payload.add_(10)
+            return value
+
+    function = UnknownCallable()
+
+    def replay(entry, args, kwargs):
+        entry.output.payload.copy_(args[0].payload + 10)
+
+    wrapper, capture, calls = _numeric_replay_wrapper(contract, function, replay)
+    captured = _Tensor(contract)
+    capture(captured)
+    incoming = _Tensor(contract, (3.0, 4.0))
+    output = wrapper(incoming)
+    assert function.calls == len(calls) == 2
+    assert output is incoming
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert captured.payload.tolist() == [1.0, 2.0]
+    assert contract.events == []
+
+
+def test_stable_mutating_input_still_uses_native_graph_replay(contract):
+    def mutate(value):
+        value.payload.add_(10)
+        return value
+
+    def replay(entry, args, kwargs):
+        args[0].payload.add_(10)
+
+    wrapper, capture, calls = _numeric_replay_wrapper(contract, mutate, replay)
+    value = _Tensor(contract)
+    assert capture(value) is value
+    assert value.payload.tolist() == [11.0, 12.0]
+    assert wrapper(value) is value
+    assert value.payload.tolist() == [21.0, 22.0]
+    assert len(calls) == 1
+    assert contract.event_names() == ["numeric-replay"]
+    assert contract.counter.num_cudagraph_captured == 1
+
+
+def test_fresh_mutation_fallback_does_not_invalidate_stable_graph(contract):
+    def mutate(value):
+        value.payload.add_(10)
+        return value
+
+    def replay(entry, args, kwargs):
+        args[0].payload.add_(10)
+
+    wrapper, capture, calls = _numeric_replay_wrapper(contract, mutate, replay)
+    captured = _Tensor(contract)
+    capture(captured)
+    incoming = _Tensor(contract, (3.0, 4.0))
+    assert wrapper(incoming) is incoming
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert wrapper(captured) is captured
+    assert captured.payload.tolist() == [21.0, 22.0]
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert len(calls) == 2
+    assert contract.event_names() == ["numeric-replay"]
+
+
+def test_fresh_mutation_fallback_preserves_exception_and_partial_state(contract):
+    error = RuntimeError("runnable mutation sentinel")
+    failed = False
+
+    def mutate(value):
+        value.payload.add_(10)
+        if failed:
+            raise error
+        return value
+
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract, mutate, lambda entry, args, kwargs: args[0].payload.add_(10)
+    )
+    captured = _Tensor(contract)
+    capture(captured)
+    failed = True
+    incoming = _Tensor(contract, (3.0, 4.0))
+    with pytest.raises(RuntimeError) as actual:
+        wrapper(incoming)
+    assert actual.value is error
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert captured.payload.tolist() == [11.0, 12.0]
+    assert len(calls) == 2
+    assert contract.events == []
+
+
+def test_fresh_mutation_fallback_retains_nested_argument_identity(contract):
+    def mutate(values, *, options):
+        values[0].payload.add_(options["increment"])
+        return values[0]
+
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract,
+        mutate,
+        lambda entry, args, kwargs: args[0][0].payload.add_(
+            kwargs["options"]["increment"]
+        ),
+    )
+    captured = _Tensor(contract)
+    capture([captured], options={"increment": 10})
+    incoming = _Tensor(contract, (3.0, 4.0))
+    values = [incoming]
+    options = {"increment": 10}
+    assert wrapper(values, options=options) is incoming
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert calls[-1][0][0] is values
+    assert calls[-1][1]["options"] is options
+    assert captured.payload.tolist() == [11.0, 12.0]
+    assert contract.events == []
+
+
+@pytest.mark.parametrize(
+    "device,mode",
+    [("cuda", _Mode.PIECEWISE), ("npu", _Mode.PIECEWISE), ("musa", _Mode.FULL)],
+)
+def test_non_piecewise_musa_mutating_replay_policy_is_unchanged(contract, device, mode):
+    contract.platform.device_type = device
+    contract.context.cudagraph_runtime_mode = mode
+
+    def mutate(value):
+        value.payload.add_(10)
+        return value
+
+    wrapper = contract.wrapper_type(
+        mutate,
+        SimpleNamespace(compilation_config=object()),
+        mode,
+        contract.options_type(debug_log_enable=False, weak_ref_output=False),
+    )
+    captured = _Tensor(contract)
+    assert wrapper(captured) is captured
+    entry = wrapper.concrete_graph_entries["batch"]
+    assert entry.musa_input_leaves is None
+    entry.graph.replay = lambda: captured.payload.add_(10)
+    incoming = _Tensor(contract, (3.0, 4.0))
+    assert wrapper(incoming) is captured
+    assert incoming.payload.tolist() == [3.0, 4.0]
+    assert captured.payload.tolist() == [21.0, 22.0]
+
+
+@pytest.mark.parametrize("count", [1, 16, 32])
+def test_stable_inputs_skip_pairwise_alias_and_storage_queries(
+    contract, monkeypatch, count
+):
+    wrapper = contract.wrapper()
+    inputs = [_Tensor(contract) for _ in range(count)]
+    wrapper(*inputs)
+    checks, storage_queries = [], []
+    original_alias = wrapper._musa_tensors_alias
+    original_storage = _Tensor.untyped_storage
+
+    def alias(left, right):
+        checks.append((left, right))
+        return original_alias(left, right)
+
+    def storage(value):
+        storage_queries.append(value)
+        return original_storage(value)
+
+    monkeypatch.setattr(
+        contract.wrapper_type, "_musa_tensors_alias", staticmethod(alias)
+    )
+    monkeypatch.setattr(_Tensor, "untyped_storage", storage)
+    contract.events.clear()
+    for _ in range(3):
+        assert wrapper(*inputs) is contract.output
+    assert checks == storage_queries == []
+    assert contract.event_names() == ["replay"] * 3
+    assert contract.counter.num_cudagraph_captured == 1
+
+
+def test_validated_stable_descriptors_skip_the_next_alias_scan(contract, monkeypatch):
+    wrapper = contract.wrapper()
+    captured = [_Tensor(contract), _Tensor(contract)]
+    wrapper(*captured)
+    incoming = [_Tensor(contract, payload=x.payload.view(2)) for x in captured]
+    checks = []
+    original_alias = wrapper._musa_tensors_alias
+
+    def alias(left, right):
+        checks.append((left, right))
+        return original_alias(left, right)
+
+    monkeypatch.setattr(
+        contract.wrapper_type, "_musa_tensors_alias", staticmethod(alias)
+    )
+    contract.events.clear()
+    assert wrapper(*incoming) is contract.output
+    assert checks
+    checks.clear()
+    assert wrapper(*incoming) is contract.output
+    assert checks == []
+    assert contract.event_names() == ["replay", "replay"]
+
+
+def test_stable_fast_path_checks_captured_addresses(contract):
+    wrapper = contract.wrapper()
+    captured = _Tensor(contract)
+    owner = captured.payload
+    wrapper(captured)
+    captured.payload = owner.clone()
+    contract.events.clear()
+    with pytest.raises(ValueError, match="Captured MUSA graph input address changed"):
+        wrapper(captured)
+    assert contract.events == []
+    assert owner.tolist() == captured.payload.tolist() == [1.0, 2.0]
+
+
+def test_stable_fast_path_checks_metadata_and_static_arguments(contract):
+    wrapper = contract.wrapper()
+    captured = _Tensor(contract)
+    wrapper(captured, scale=2)
+    captured.overrides["shape"] = (1, 2)
+    contract.events.clear()
+    with pytest.raises(ValueError, match="Captured MUSA graph input metadata"):
+        wrapper(captured, scale=2)
+    captured.overrides.clear()
+    with pytest.raises(ValueError, match="non-tensor input changed"):
+        wrapper(captured, scale=3)
+    assert contract.events == []
+
+
+def test_validated_descriptor_cache_does_not_retain_new_owners(contract):
+    wrapper = contract.wrapper()
+    captured = _Tensor(contract)
+    wrapper(captured)
+    incoming = _Tensor(contract, payload=captured.payload.view(2))
+    wrapper(incoming)
+    reference = weakref.ref(incoming)
+    del incoming
+    gc.collect()
+    assert reference() is None
+    assert wrapper(captured) is contract.output
+
+
+def test_nonresident_graph_runs_original_inputs_without_preparing_capture(
+    contract, monkeypatch
+):
+    def mutate(value):
+        value.payload.add_(10)
+        return value
+
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract, mutate, lambda entry, args, kwargs: args[0].payload.add_(10)
+    )
+    captured = _Tensor(contract)
+    assert capture(captured) is captured
+    entry = wrapper.concrete_graph_entries["batch"]
+    contract.nonresident_graph_ids.add(id(entry.graph))
+    incoming = _Tensor(contract, (3.0, 4.0))
+
+    def unexpected_validation(*args):
+        raise AssertionError("nonresident graph must not prepare captured inputs")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(wrapper, "_stage_musa_inputs", unexpected_validation)
+        assert wrapper(incoming) is incoming
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert captured.payload.tolist() == [11.0, 12.0]
+    assert contract.events == []
+    assert len(calls) == 2
+    contract.nonresident_graph_ids.clear()
+    assert wrapper(captured) is captured
+    assert captured.payload.tolist() == [21.0, 22.0]
+    assert contract.event_names() == ["numeric-replay"]
+    assert contract.counter.num_cudagraph_captured == 1
+
+
+def test_nonresident_fallback_keeps_runnable_exception_and_mutation(contract):
+    error = RuntimeError("cold runnable sentinel")
+    failed = False
+
+    def mutate(value):
+        value.payload.add_(10)
+        if failed:
+            raise error
+        return value
+
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract, mutate, lambda entry, args, kwargs: args[0].payload.add_(10)
+    )
+    captured = _Tensor(contract)
+    capture(captured)
+    entry = wrapper.concrete_graph_entries["batch"]
+    contract.nonresident_graph_ids.add(id(entry.graph))
+    failed = True
+    incoming = _Tensor(contract, (3.0, 4.0))
+    with pytest.raises(RuntimeError) as caught:
+        wrapper(incoming)
+    assert caught.value is error
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert captured.payload.tolist() == [11.0, 12.0]
+    assert len(calls) == 2
+    assert contract.events == []
+
+
+def test_production_cache_and_wrapper_preserve_cold_and_hot_semantics(
+    contract, monkeypatch
+):
+    support_path = Path(__file__).with_name("test_musa_graph_exec_cache.py")
+    spec = importlib.util.spec_from_file_location(
+        "_musa_cache_wrapper_support", support_path
+    )
+    support = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, support)
+    spec.loader.exec_module(support)
+    cache, device, _, _ = support._fixture(cap=1)
+    namespace = contract.cpu_namespace
+    original_import = namespace["__builtins__"]["__import__"]
+    cache_api = SimpleNamespace(
+        musa_graph_class=contract.cache_graph_class,
+        musa_graph_capture=cache.capture,
+        musa_graph_replay=cache.replay,
+    )
+
+    def import_cache(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "vllm_fl.compilation.musa_graph_exec_cache" and fromlist:
+            assert set(fromlist) <= set(vars(cache_api))
+            return cache_api
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setitem(namespace["__builtins__"], "__import__", import_cache)
+    monkeypatch.setattr(namespace["Graph"], "graph", lambda: support._Graph(device))
+    original_capture = contract.platform.torch_device_fn.graph
+
+    @contextmanager
+    def native_capture(graph, *, pool, stream):
+        with original_capture(graph, pool=pool, stream=stream):
+            yield
+        graph.capture()
+
+    monkeypatch.setattr(contract.platform.torch_device_fn, "graph", native_capture)
+
+    def mutate(value):
+        value.payload.add_(10)
+        return value
+
+    wrapper = contract.wrapper()
+    wrapper.runnable = mutate
+    captured = _Tensor(contract)
+    assert wrapper(captured) is captured
+    cold = wrapper.concrete_graph_entries["batch"]
+    contract.context.batch_descriptor = "hot"
+    hot_input = _Tensor(contract, (5.0, 6.0))
+    assert wrapper(hot_input) is hot_input
+    hot = wrapper.concrete_graph_entries["hot"]
+    assert not cold.graph.executable and hot.graph.executable
+    assert len(cache._live) == 1
+    native_replay = hot.graph.replay
+
+    def replay_hot():
+        native_replay()
+        hot_input.payload.add_(10)
+
+    hot.graph.replay = replay_hot
+    contract.context.batch_descriptor = "batch"
+    incoming = _Tensor(contract, (3.0, 4.0))
+    before = list(device.calls)
+    assert wrapper(incoming) is incoming
+    assert incoming.payload.tolist() == [13.0, 14.0]
+    assert captured.payload.tolist() == [11.0, 12.0]
+    assert device.calls == before
+    assert not cold.graph.executable and hot.graph.executable
+    contract.context.batch_descriptor = "hot"
+    assert wrapper(hot_input) is hot_input
+    assert hot_input.payload.tolist() == [25.0, 26.0]
+    assert device.calls[len(before) :] == [("native_replay", 0)]
+    assert len(cache._live) == 1 and not cache._replay_reserved
+
+
+@pytest.mark.parametrize("output_kind", ["identity", "view", "nested"])
+def test_fresh_empty_inputs_preserve_output_identity_and_storage(contract, output_kind):
+    def readonly(value):
+        if output_kind == "identity":
+            return value
+        view = _Tensor(contract, payload=value.payload.view(0))
+        return view if output_kind == "view" else {"result": [view, value]}
+
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract, readonly, lambda entry, args, kwargs: None
+    )
+    captured = _Tensor(contract, ())
+    capture(captured)
+    incoming = _Tensor(contract, ())
+    assert captured.data_ptr() == incoming.data_ptr() == 0
+    assert not cpu_torch._C._is_alias_of(captured.payload, incoming.payload)
+    output = wrapper(incoming)
+    result = output["result"][0] if output_kind == "nested" else output
+    assert cpu_torch._C._is_alias_of(result.payload, incoming.payload)
+    assert not cpu_torch._C._is_alias_of(result.payload, captured.payload)
+    if output_kind == "identity":
+        assert output is incoming
+    if output_kind == "nested":
+        assert output["result"][1] is incoming
+    assert len(calls) == 2
+    assert contract.events == []
+
+
+def test_original_empty_input_keeps_native_replay(contract):
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract, lambda value: value, lambda entry, args, kwargs: None
+    )
+    captured = _Tensor(contract, ())
+    assert capture(captured) is captured
+    assert wrapper(captured) is captured
+    assert len(calls) == 1
+    assert contract.event_names() == ["numeric-replay"]
