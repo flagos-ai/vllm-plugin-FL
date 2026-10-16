@@ -6,7 +6,6 @@ import hashlib
 import importlib
 import importlib.metadata as metadata
 import json
-import subprocess
 import sys
 import sysconfig
 from contextlib import redirect_stdout
@@ -19,37 +18,6 @@ STACK = json.loads((HERE / "stack.json").read_text())
 def file_fact(path):
     raw = Path(path).read_bytes()
     return {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
-
-
-def verify_files(root, phase):
-    for row in STACK["files"]:
-        actual = file_fact(Path(root) / row["path"])
-        if actual != row[phase]:
-            raise RuntimeError(f"FlagGems {phase} binding failed: {row['path']}")
-    return {"phase": phase, "files": STACK["files"]}
-
-
-def apply_patch(source):
-    source = Path(source)
-    head = subprocess.check_output(
-        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
-    ).strip()
-    if head != STACK["flaggems_commit"]:
-        raise RuntimeError("FlagGems source is not the reviewed base commit")
-    tracked = subprocess.check_output(
-        ["git", "-C", str(source), "status", "--porcelain", "-uno"], text=True
-    )
-    if tracked.strip():
-        raise RuntimeError("FlagGems source must have no tracked changes before patch")
-    verify_files(source / "src", "before")
-    patch = HERE / "flaggems-6894.patch"
-    if file_fact(patch)["sha256"] != STACK["patch_sha256"]:
-        raise RuntimeError("Reviewed three-file patch changed")
-    subprocess.run(
-        ["git", "-C", str(source), "apply", "--check", str(patch)], check=True
-    )
-    subprocess.run(["git", "-C", str(source), "apply", str(patch)], check=True)
-    verify_files(source / "src", "after")
 
 
 def vendor_snapshot():
@@ -110,8 +78,15 @@ def check_stack():
     )
     if Path(triton.__file__).resolve() != Path(expected_triton).resolve():
         raise RuntimeError("Active Triton must be supplied by the reviewed FlagTree")
-    if not metadata.version("flag-gems").startswith("5.4.0rc2.post1+gb4b37a751"):
-        raise RuntimeError("FlagGems base version does not match the reviewed commit")
+    gems_distribution = metadata.distribution("flag-gems")
+    if gems_distribution.version != STACK["flaggems"]["version"]:
+        raise RuntimeError(
+            "FlagGems wheel version does not match the pinned upstream commit: "
+            + gems_distribution.version
+        )
+    expected_gems = gems_distribution.locate_file("flag_gems/__init__.py")
+    if Path(flag_gems.__file__).resolve() != Path(expected_gems).resolve():
+        raise RuntimeError("Active FlagGems must come from the installed wheel")
     if triton.__version__ != "3.6.0":
         raise RuntimeError("Active Triton module must come from PPU FlagTree 3.6")
     vllm_distribution = metadata.distribution("vllm")
@@ -130,19 +105,14 @@ def check_stack():
         != Path(sysconfig.get_path("purelib")).resolve()
     ):
         raise RuntimeError("Plugin must be an ordinary wheel in this CI venv")
-    gems_root = Path(flag_gems.__file__).resolve().parent.parent
-    verify_files(gems_root, "after")
-    # Versions alone cannot distinguish pristine b4b37 from PR6894's fix.
     return {
         "vendor": vendor_snapshot(),
         "flagtree_version": metadata.version("flagtree"),
         "triton_version": triton.__version__,
         "triton_origin": triton.__file__,
-        "flaggems_version": metadata.version("flag-gems"),
+        "flaggems_version": gems_distribution.version,
         "flaggems_origin": flag_gems.__file__,
-        "flaggems_base": STACK["flaggems_commit"],
-        "fix_commit": STACK["fix_commit"],
-        "patched_files": STACK["files"],
+        "flaggems_commit": STACK["flaggems"]["commit"],
         "vllm_triton_utils_origin": triton_utils.__file__,
         "vllm_version": vllm.__version__,
         **vllm_provider,
@@ -159,15 +129,9 @@ def check_stack():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["apply-patch", "snapshot", "check"])
-    parser.add_argument("--source", type=Path)
+    parser.add_argument("action", choices=["snapshot", "check"])
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
-    if args.action == "apply-patch":
-        if args.source is None:
-            parser.error("apply-patch requires --source")
-        apply_patch(args.source)
-        return
     # Keep ordinary import logs in stderr so stdout remains one JSON document.
     with redirect_stdout(sys.stderr):
         facts = vendor_snapshot() if args.action == "snapshot" else check_stack()

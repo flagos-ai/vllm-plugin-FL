@@ -1,26 +1,28 @@
 # T-Head PPU Deployment Guide
 
 This guide runs vLLM with the FL plugin on T-Head PPU hardware using the
-published prepared runtime below. It contains the pinned ordinary Python stack
-and repaired FlagGems sources. The host driver must still match its vendor PPU
-runtime. For a custom image, preserve the vendor PyTorch/SDK and follow the
-self-build path in section 3; ordinary CUDA wheels do not reproduce this stack.
+prepared runtime below. FlagGems is installed as a complete ordinary wheel from
+the pinned upstream commit, which includes merged
+[PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894). The host driver must
+match the vendor PPU runtime. For a custom image, preserve the vendor
+PyTorch/SDK and follow section 3; ordinary CUDA wheels do not reproduce this stack.
 
-## Validated software stack
+## Software stack
 
-The following stack passed the T-Head acceptance matrix on 2026-10-09.
+The updated image uses the following stack. Acceptance of the complete upstream
+FlagGems wheel is pending the T-Head CI run; earlier results are recorded
+separately below.
 
-| Component | Validated version or configuration |
+| Component | Version or configuration |
 |---|---|
 | Accelerator | T-Head PPU-ZW810E; four visible cards for model tests |
 | Python | `3.12.3` |
 | PyTorch | Vendor PPU build, version `2.10.0` |
 | vLLM | `0.28.0+empty`, source `2cf0a6915ce544dc493a0990f2ea38d81601128a` |
-| FL plugin | Installed source `a0752c3a70158df1e6de953eae33d4338fe193a4`; metadata `0.0.0+ga0752c3a7` |
+| FL plugin | CI installs the tested checkout as an ordinary wheel |
 | FlagTree | `0.7.0+ppu3.6` |
 | Imported Triton | `3.6.0`, supplied by the FlagTree PPU wheel |
-| FlagGems base | `b4b37a7518d511548ed562277e1972a0b5d9986d`; metadata `5.4.0rc2.post1+gb4b37a751` |
-| Required FlagGems fix | Three production files from merged [PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894), commit `317b763204391d530d6024b52b6235de150443d8`, applied to the base above |
+| FlagGems | Complete upstream commit `317b763204391d530d6024b52b6235de150443d8`; wheel metadata `5.5.0.dev0+g317b76320` |
 | Model execution | BF16, TP=4, eager and graph; maximum model length 32768, maximum sequences 8, memory utilization 0.85 |
 
 The vLLM distribution version is `0.28.0+empty`, while its generated module
@@ -29,12 +31,11 @@ wheel metadata. Verify both versions and confirm that the imported module
 belongs to that distribution; checking the module string for `+empty` rejects
 this valid build.
 
-The tested FlagGems code is **the pinned base plus the three-file fix**.
-PR #6894 was merged on 2026-10-16 as `317b763204391d530d6024b52b6235de150443d8`.
-Its three production files are byte-identical to the validated repair from
-`4e330227564ccc7f6a373be2d48a5d2cb7f2823e`. The published image retains those
-sources and its base distribution metadata; CI verifies their hashes separately.
-The commands below reproduce this stack using the merged commit as the fix source.
+The upstream commit contains the split-KV combine correction. Install its
+complete wheel; no post-install source replacement is needed. Preserve the
+source revision and wheel metadata with the image build record. The packaged
+`flag_gems-5.5.0.dev0+g317b76320-py3-none-any.whl` has SHA256
+`fdbbc9b6afa7b8ef8ca4bcdf832d69622162db9b067b1bec4ef8ef3779ed8a95`.
 
 The T-Head policy is loaded from
 [`vllm_fl/dispatch/config/thead.yaml`](../../vllm_fl/dispatch/config/thead.yaml).
@@ -52,10 +53,10 @@ Use the published runtime image:
 export PPU_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-thead-ci"
 ```
 
-For reproducibility, the accepted image was recorded as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb`.
+The published image digest is
+`sha256:1ec87ed25bce8a523bd9a24f20695821363b385f7b58a878bb87df7bef58c414`.
 The image includes vendor PyTorch, the PPU SDK and `flash_attn_3`, plus the
-repaired stack in the table.
+ordinary Python stack in the table.
 The following versions were confirmed on 2026-10-14 on the same host and
 container used for model acceptance. SDK/runtime versions come from the
 container; VBIOS was checked on all four reserved host cards (12–15).
@@ -77,12 +78,6 @@ versions or a kernel/firmware compatibility range. The exact vendor base build
 and PyTorch/FA3 build identities are recorded in section 3. Keep that SDK,
 PyTorch backend, and FA3 build together; obtain the hardware provider's
 compatibility matrix before using a different combination.
-
-The packaged payload passed normal imports and a nine-call numerical smoke in
-a separate container without the old build-workspace mounts. The published
-digest and anonymous registry metadata were verified. The
-[T-Head CI run on this digest](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38226266996/job/114735108252)
-passed package verification, GPU unit tests, and all four model Gate modes.
 
 ```bash
 docker version
@@ -186,8 +181,6 @@ version strings:
 
 Use the prepared image digest in section 1 to reproduce these vendor artifacts,
 or obtain the matching base image and packages from the hardware provider.
-Rebuild only when creating a new environment; the repair script intentionally
-rejects already changed preimages.
 
 For a fresh installation, create a private environment that can read the
 vendor's system packages. The path below is an example, not a required
@@ -240,112 +233,50 @@ cp -a /workspace/vllm-plugin-FL /work/sources/vllm-plugin-FL
 VLLM_VENDOR= python -m pip install --no-build-isolation --no-deps /work/sources/vllm-plugin-FL
 ```
 
-The test record used the plugin commit in the software table. Keep a record of
-your installed plugin revision and re-run the acceptance matrix after changing
-it. Upstream vLLM's generic dependency declarations target a different PyTorch
-version; they are not permission to replace the vendor PPU build. A successful
+Keep a record of your installed plugin revision and re-run the acceptance
+matrix after changing it. Upstream vLLM's generic dependency declarations target
+a different PyTorch version; they are not permission to replace the vendor PPU build. A successful
 `--no-deps` install alone does not prove that all runtime dependencies or vendor
 ABI requirements have been met.
 
-### Apply the pinned FlagGems repair
+### Install the complete upstream FlagGems wheel
 
-Build and install FlagGems from the base commit in a private environment. Keep
-a pristine copy before applying the fix. Apply only these production files
-from the merged commit, with their preimage and postimage checksums verified:
-
-| Relative path under `flag_gems/` | Repaired SHA256 |
-|---|---|
-| `ops/flash_api.py` | `bd6e3daec6af0d72f5eec25168d1e09cbd7c8ee577896086f6650c800c782485` |
-| `ops/flash_kernel.py` | `dfb99850150f9c734373247ea005ed3957109347dbc1ce9f5472b3eef8ecb850` |
-| `runtime/backend/_enflame/gcu400/ops/flash_api.py` | `52a2d999ef981349542229bf599c9003740bbb63524302bec9e27dccddd4dce6` |
-
-Use a separate build environment for the ordinary FlagGems wheel, then install
-it into the active private runtime. The wheel directory below should be new
-and contain only this build's wheel.
+Build the pinned upstream commit in a separate environment, then install its
+ordinary wheel into the active runtime. Keep Git history and tags: the project
+uses `setuptools-scm` to generate its version, so a source archive or a shallow
+checkout without reachable tags cannot reproduce the version metadata.
 
 ```bash
 git clone https://github.com/flagos-ai/FlagGems.git /work/sources/FlagGems
-git -C /work/sources/FlagGems checkout --detach b4b37a7518d511548ed562277e1972a0b5d9986d
+git -C /work/sources/FlagGems checkout --detach 317b763204391d530d6024b52b6235de150443d8
 python3 -m venv /work/flaggems-build
 /work/flaggems-build/bin/python -m pip install \
     'setuptools>=64,<77' 'setuptools-scm>=8,<10' 'wheel==0.46.2'
 /work/flaggems-build/bin/python -m pip wheel --no-deps --no-build-isolation \
     --wheel-dir /work/flaggems-wheels /work/sources/FlagGems
 python -m pip install --no-deps --ignore-installed /work/flaggems-wheels/*.whl
+python -c "from importlib.metadata import version; print(version('flag-gems'))"
 ```
 
-Apply the three pinned source changes after the base wheel is installed. This
-checks every preimage and downloaded postimage before writing; it saves the
-original files and a manifest outside `site-packages`. It fails if the active
-FlagGems package is inherited from outside the private environment.
-
-```bash
-python -I -B - <<'PY'
-from pathlib import Path
-from importlib.util import find_spec
-import hashlib
-import json
-import sys
-import urllib.request
-
-head = '317b763204391d530d6024b52b6235de150443d8'
-files = {
-    'ops/flash_api.py': (
-        '9d6f1e1ec802d132b074a618c173a9ea424f4d5793fd0cbcead687796155a70f',
-        'bd6e3daec6af0d72f5eec25168d1e09cbd7c8ee577896086f6650c800c782485'),
-    'ops/flash_kernel.py': (
-        'eef0202e6c0ed08bef8098adede1a603c63354c54b54a19414e210b675157265',
-        'dfb99850150f9c734373247ea005ed3957109347dbc1ce9f5472b3eef8ecb850'),
-    'runtime/backend/_enflame/gcu400/ops/flash_api.py': (
-        'df6d4e554b04f6bf06a57346ac5c613f07db2fbf3703328c66920abfe68c39ec',
-        '52a2d999ef981349542229bf599c9003740bbb63524302bec9e27dccddd4dce6'),
-}
-root = Path(find_spec('flag_gems').origin).resolve().parent
-assert root.is_relative_to(Path(sys.prefix).resolve()), root
-prepared = []
-for name, (before_sha, after_sha) in files.items():
-    path = root / name
-    before = path.read_bytes()
-    assert hashlib.sha256(before).hexdigest() == before_sha, name
-    url = f'https://raw.githubusercontent.com/flagos-ai/FlagGems/{head}/src/flag_gems/{name}'
-    with urllib.request.urlopen(url, timeout=60) as response:
-        after = response.read(131073)
-    assert hashlib.sha256(after).hexdigest() == after_sha, name
-    prepared.append((name, before, after))
-backup = Path('/work/flaggems-source-repair')
-backup.mkdir(exist_ok=False)
-manifest = {'base_commit': 'b4b37a7518d511548ed562277e1972a0b5d9986d',
-            'fix_head': head, 'files': []}
-for name, before, after in prepared:
-    original = backup / name
-    original.parent.mkdir(parents=True, exist_ok=True)
-    original.write_bytes(before)
-    (root / name).write_bytes(after)
-    assert (root / name).read_bytes() == after
-    manifest['files'].append({'path': name, 'before_sha256': files[name][0],
-                              'after_sha256': files[name][1]})
-(backup / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-print(json.dumps(manifest, indent=2))
-PY
-```
-
-The third file keeps the other caller compatible with the shared kernel's new
-arguments; its presence does not mean GCU was tested. These are Python/Triton
-sources, so this repair does not require rebuilding vendor Torch or the PPU
-SDK. Retain the base commit, patch, and source-hash manifest with the environment.
+Use a new wheel directory containing only this build's wheel. `--ignore-installed`
+places the wheel in the private environment while preserving inherited system
+packages. Do not use the `[thead]` extra or run `flaggems-setup`: this upstream
+revision's extra pins an older FlagTree version. Keep the installed PPU
+FlagTree `0.7.0+ppu3.6` and vendor PyTorch stack unchanged.
 
 ### Package a reusable runtime image
 
 A distributable image must contain the ordinary installed Python packages,
-vendor runtime, and the repaired FlagGems sources in its own filesystem.
+including the complete FlagGems wheel, and the vendor runtime in its own
+filesystem.
 Install the plugin non-editably; an editable checkout or a `.pth` path into a
 host-only source directory is not a self-contained deployment.
 
 A plain `docker commit` does not capture files in mounted volumes, including a
 bind-mounted `/work` environment. Copy the required installed package trees
 into the image filesystem, resolve any inherited paths, and verify imports and
-patch hashes in a new container without the build workspace mount before
-publishing the image. This follows the
+installed package integrity in a new container without the build workspace
+mount before publishing the image. This follows the
 [Docker commit behavior](https://docs.docker.com/reference/cli/docker/container/commit/).
 Keep model weights in a separate read-only mount and use writable caches at
 runtime. Record the resulting image digest with the software/source manifest.
@@ -425,9 +356,8 @@ PY
 ```
 
 Confirm that Torch is still the vendor package, Triton comes from the private
-FlagTree installation, and FlagGems resolves to the repaired ordinary package.
-Also verify the three source hashes above. Metadata can remain unchanged when
-Python source is patched.
+FlagTree installation, and FlagGems resolves to the installed ordinary wheel.
+Check its distribution version against the image's build record.
 
 ## 5. Start eager and graph services serially
 
@@ -486,11 +416,9 @@ python -I -B -m pytest -o addopts= -p no:cacheprovider -ra \
 ```
 
 A missing PPU vendor wheel or a skipped GPU test is not an acceptance pass.
-The full recorded unit result was 74/74: 5 CPU cases, 36 GPU cache cases,
-9 attention cases, and an additional 24-case FA3 numerical oracle. The two
-pytest files above cover the first 50 cases. Additional regressions passed
-72 packed-GDN calls and 36 public vision SDPA calls across four layout/head
-profiles; these counts are separate from model requests.
+The two files above cover 5 CPU cache cases and 45 GPU cache/attention cases.
+The CI unit runner also includes the shared reference operator tests, as
+described below.
 
 For each running service, use the
 [adaptation Gate cases](../../tools/adaptation-gate-cases/README.md). Set
@@ -551,23 +479,24 @@ same validation:
 | `THEAD_CI_CONTAINER_VOLUMES` | JSON array of Docker volume specifications; mount the two models read-only |
 | `THEAD_CI_CONTAINER_OPTIONS` | Optional Docker options overriding the explicit device grants and shared-memory settings |
 
-The published image provides `/opt/thead/venv` and the complete repaired
-ordinary stack. Ensure that the runner can pull this image and access the
+The published image provides `/opt/thead/venv` and the complete ordinary
+stack. Ensure that the runner can pull this image and access the
 configured model mounts. Keep any registry authentication in the runner/CI
 secret configuration. The workflow accepts explicit v-version tags or SHA256
 digests and rejects missing or invalid image references, invalid
 card selection, and privileged container options, including invalid explicit
 overrides instead of silently using defaults.
 
-The image must contain the complete repaired ordinary stack: vendor PyTorch
-2.10.0 and SDK/extensions, vLLM 0.28.0+empty, FlagTree 0.7.0+ppu3.6, the pinned
-FlagGems base plus the three-file fix, and runtime/test/build dependencies.
+The image must contain vendor PyTorch 2.10.0 and SDK/extensions, vLLM
+0.28.0+empty, FlagTree 0.7.0+ppu3.6, the complete FlagGems wheel from
+`317b763204391d530d6024b52b6235de150443d8`, and runtime/test/build dependencies.
 The [setup script](../../.github/scripts/thead/setup.sh) creates a fresh child
 venv, inherits the image-owned package directory, and builds/installs this
 checkout as an ordinary plugin wheel with `--no-deps --no-build-isolation`.
 It does not download accelerator packages or replace the vendor stack.
-[The check script](../../.github/scripts/thead/check.sh) validates actual
-providers and patch bytes against the vendor snapshot before and after tests.
+[The check script](../../.github/scripts/thead/check.sh) validates installed
+package identities, providers, and package integrity against the runtime
+snapshot before and after tests.
 
 To exercise the same scripts manually inside a prepared image, keep setup
 and tests in one Bash session. Set `CUDA_VISIBLE_DEVICES` to the reserved
@@ -598,13 +527,19 @@ suite for shared reference operators, plus 5 CPU cache tests and 45 native PPU
 cache/attention tests, with zero skips. Reference tensors run on CPU using the
 normal package imports and the test suite's existing device fixture. Retain the
 JUnit reports, per-request JSON results, source/provider snapshots, and logs.
-The manual 24-case FA3 oracle and 72 packed-GDN calls are additional numerical
-probes outside the CI unit suite.
 
 ## Recorded acceptance
 
-The repaired stack above passed the following serial TP4 matrix on
-2026-10-09 with the original shared Gate checks:
+Acceptance of the complete upstream FlagGems wheel at `317b7632` is pending
+T-Head CI. The following results belong to the earlier repaired runtime,
+with FlagGems metadata `5.4.0rc2.post1+gb4b37a751` and image digest
+`sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb`.
+The earlier CI run passed all 93 unit tests (43 shared reference, 5 CPU cache,
+and 45 PPU cache/attention cases) and all four model Gate modes. These historical
+results do not validate the updated wheel.
+
+That earlier runtime passed the serial TP4 matrix on 2026-10-09 with the
+original shared Gate checks:
 
 | Model | Eager requests | Graph requests |
 |---|---:|---:|
@@ -618,8 +553,9 @@ models, and TP4 configuration, not a blanket result for every PPU/model setup.
 
 ## Troubleshooting
 
-- **Images produce wrong answers or repeated punctuation:** check the actual
-  FlagGems source hashes. The diagnosed bug in split-KV combine treated scratch
+- **Images produce wrong answers or repeated punctuation:** verify that the
+  installed FlagGems wheel includes upstream commit `317b7632`. The diagnosed
+  bug in split-KV combine treated scratch
   rows flattened as `[batch, head, query]` as if they had the output tensor's
   storage order. The fix decodes all three indices, uses the real output
   strides, and passes the head stride rather than the channel stride. See

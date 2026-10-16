@@ -1,7 +1,6 @@
 # Copyright 2026 FlagOS Contributors
 """CPU-only regressions for CI acceptance boundaries; no vendor imports."""
 
-import hashlib
 import io
 import json
 import os
@@ -394,21 +393,6 @@ class AcceptanceTests(unittest.TestCase):
                     facts["graph_capture_observed"]
                     and facts["graph_runtime_dispatch_observed"]
                 )
-
-    def test_three_file_fix_required_not_version_only(self):
-        self.assertEqual(len(stack.STACK["files"]), 3)
-        self.assertEqual(
-            hashlib.sha256((HERE / "flaggems-6894.patch").read_bytes()).hexdigest(),
-            stack.STACK["patch_sha256"],
-        )
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            for row in stack.STACK["files"]:
-                p = root / row["path"]
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_bytes(b"unpatched or changed body")
-            with self.assertRaisesRegex(RuntimeError, "binding failed"):
-                stack.verify_files(root, "after")
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ jobs:
       - name: Install this plugin as an ordinary wheel
         id: install
         run: bash .github/scripts/thead/setup.sh
-      - name: Check normal PPU imports and the three-file upstream fix
+      - name: Check normal PPU imports and the pinned upstream stack
         id: check
         run: bash .github/scripts/thead/check.sh
       - name: Shared reference and native PPU unit tests (zero skips)
