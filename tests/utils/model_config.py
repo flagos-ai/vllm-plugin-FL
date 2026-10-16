@@ -44,6 +44,7 @@ from __future__ import annotations
 import copy
 import itertools
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -90,7 +91,26 @@ def _apply_device_case_overrides(
         active_platform,
         active_device or None,
     )
-    return _deep_merge(config, platform_config.get_device_case_overrides(model, case))
+    config = _deep_merge(config, platform_config.get_device_case_overrides(model, case))
+    if active_platform == "musa" and model == "qwen3_6":
+        path_variable = {
+            "27b_tp4_eager": "MUSA_GATE_MODEL_27B",
+            "27b_tp4_graph": "MUSA_GATE_MODEL_27B",
+            "35b_a3b_tp4_eager": "MUSA_GATE_MODEL_35B_A3B",
+            "35b_a3b_tp4_graph": "MUSA_GATE_MODEL_35B_A3B",
+        }.get(case)
+        model_path = os.environ.get(path_variable, "") if path_variable else ""
+        if model_path:
+            if (
+                not model_path.startswith("/data/")
+                or ".." in model_path.split("/")
+                or not re.fullmatch(r"[/A-Za-z0-9_.+-]+", model_path)
+            ):
+                raise ValueError(
+                    f"{path_variable} must use an approved absolute /data path"
+                )
+            config.setdefault("llm", {})["model"] = model_path
+    return config
 
 
 # ---------------------------------------------------------------------------

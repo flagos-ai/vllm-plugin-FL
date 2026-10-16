@@ -96,6 +96,7 @@ include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
 "vllm_fl.dispatch.config" = ["*.yaml"]
+"vllm_fl.compilation" = ["musa_graph_exec.cpp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -178,7 +179,13 @@ docstring-code-format = true
 
 [tool.typos.files]
 # these files may be written in non english words
-extend-exclude = ["tests/**", "vllm_fl/**"]
+# Verbatim public upstream dependency patches are integrity inputs.
+# Their original spelling must remain byte-for-byte reproducible.
+extend-exclude = [
+    "tests/**",
+    "vllm_fl/**",
+    "tools/musa_dependency_recipe/*.patch",
+]
 ignore-hidden = true
 ignore-files = true
 ignore-dot = true

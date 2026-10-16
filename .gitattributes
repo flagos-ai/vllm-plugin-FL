@@ -1,0 +1,2 @@
+# A unified-diff blank context line must retain its leading space.
+tools/musa_dependency_recipe/*.patch whitespace=-blank-at-eol

@@ -158,7 +158,17 @@ def _init_vendor_device():
     """Apply compatibility hooks that must run before vLLM model imports."""
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "kunlunxin":
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "mthreads":
+        # The parent process also calls accelerator cleanup when engine startup
+        # fails before workers initialize their model/kernel compatibility hooks.
+        from vllm_fl.dispatch.backends.vendor.musa.patch import (
+            patch_accelerator_missing_attrs,
+        )
+
+        if not patch_accelerator_missing_attrs():
+            raise RuntimeError("Failed to initialize MUSA accelerator allocator APIs")
+    elif vendor_name == "kunlunxin":
         from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
             _patch_xpu_get_device,
         )
@@ -192,9 +202,9 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
-    if vendor_name == "ascend":
+    if vendor_name in {"ascend", "mthreads"}:
         # v0.28 defaults some models to the upstream CUDA/UVA runner. Ascend
-        # uses ModelRunnerFL, so select it before VllmConfig reads the default.
+        # and MUSA use ModelRunnerFL; select it before VllmConfig reads the default.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"

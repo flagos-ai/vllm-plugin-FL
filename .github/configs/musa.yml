@@ -17,19 +17,50 @@
 
 platform: musa
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+
+# Job 4e uses the registered MUSA runner and four explicit cards by default.
+# Repository variables or workflow_dispatch allocation can override these.
+musa_defaults:
+  MUSA_CI_RUNTIME: mthreads
+  MUSA_CI_PHYSICAL_DEVICES: 4,5,6,7
+  MUSA_CI_LOGICAL_DEVICES: 0,1,2,3
+  MUSA_CI_PCI_BUS_IDS: 0000:83:00.0,0000:a3:00.0,0000:c3:00.0,0000:e3:00.0
+  MUSA_GATE_MODEL_27B: /data/models/Qwen/Qwen3.6-27B
+  MUSA_GATE_MODEL_35B_A3B: /data/models/Qwen/Qwen3.6-35B-A3B
+  MUSA_CI_EMPTY_WHEEL: /opt/musa/wheelhouse/vllm-0.28.0+empty-cp310-cp310-linux_x86_64.whl
+  MUSA_CI_EMPTY_WHEEL_SHA256: 2306c2ea119182a5690eb05776cdffa4ba097a92ba13114a6cb49722d0b53fec
+  MUSA_CI_DEPENDENCY_PROFILE: latest
+  MUSA_CI_DEPENDENCY_MANIFEST: /opt/musa/dependency-manifest.json
+  MUSA_CI_DEPENDENCY_MANIFEST_SHA256: cd5b1e7a1c232c60df49c1384278a924e17e2a0bc71f9546fe4f8516ad9d5cf2
 
 runner_labels:
   - mt-cicd-vllm-plugin
 
+# Published CPU-verified ordinary stack; its full GPU suite/Gate is still required.
+# MUSA_CI_IMAGE may select a separately validated image/digest.
 container_volumes:
-  - /data:/data
+  - /data:/data:ro
 
+# load_config.py validates defaults and any explicit per-run overrides.
+# check.sh requires the selected four cards to be idle before Torch starts.
 container_options: >-
   --hostname vllm-plugin-fl
-  --privileged
-  --ipc=host
-  --shm-size=64g
+  --ipc=private
+  --shm-size=16g
+  --cpus=24
+  --memory=256g
+  --pids-limit=4096
+  --tmpfs /root/.cache:rw,exec,nosuid,nodev,size=8g
   --env GEMS_VENDOR=mthreads
   --env VLLM_PLUGINS=fl
-  --env MTHREADS_VISIBLE_DEVICES=all
+  --env USE_FLAGGEMS=1
+  --env VLLM_NO_USAGE_STATS=1
+  --env PYTHONDONTWRITEBYTECODE=1
+  --env TRITON_CACHE_DIR=/root/.cache/triton
+  --env FLAGGEMS_CACHE_DIR=/root/.cache/flaggems
+  --env TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
+
+# latest uses the image's SHA-bound /opt/musa dependency manifest; setup installs
+# only its three verified ordinary FlagGems/FlagTree/PyYAML wheels in the fresh venv.
+# Torch, TorchMUSA and the SDK remain the selected image's protected baseline.

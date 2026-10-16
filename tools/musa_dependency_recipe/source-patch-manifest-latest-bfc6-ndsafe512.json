@@ -1,0 +1,175 @@
+{
+  "MUSA_only_ND_safe_configuration": {
+    "BLOCK_SIZE": 512,
+    "FlagTune_expansion_enabled": false,
+    "LibEntry_first_compile_lock_retained": true,
+    "num_stages": 3,
+    "num_warps": 4
+  },
+  "PR6894_head": "4e330227564ccc7f6a373be2d48a5d2cb7f2823e",
+  "PR_whole_head_installed": false,
+  "Q_padding_patch_included": false,
+  "actual_CPU_ordinary_repack_and_install": {
+    "GPU_executed": false,
+    "base_wheel": {
+      "bytes": 12057042,
+      "sha256": "9226df1ca704fa76e10f5abc3145d7b20f6f4c1b6c8e9d69b97bcf8e0d46b9e8",
+      "version": "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix1"
+    },
+    "changed_member_bodies": 5,
+    "corrected_wheel": {
+      "bytes": 12057216,
+      "sha256": "0bdf03d1730885a502c05995ba0d16f89b0f0a6fe8584d24de76dc6e58c69e71",
+      "version": "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2"
+    },
+    "full_receipt": {
+      "bytes": 8826908,
+      "sha256": "122dd395e2925f21610fe06ee2098bd70465bae3d68e828c23fc9ceb7c361672"
+    },
+    "member_change_scope": [
+      "flag_gems/ops/mul.py",
+      "flag_gems/utils/libentry.py",
+      "flag_gems/_version.py",
+      "dist-info/METADATA",
+      "dist-info/RECORD"
+    ],
+    "model_Gate_passed": false,
+    "normalized_regular_members": 5593,
+    "scope": "CPU07 ordinary-wheel repack and private static installation; no source rebuild or GPU execution",
+    "six_other_ordinary_wheels_unchanged": true,
+    "summary_receipt": {
+      "bytes": 6697747,
+      "sha256": "fec79ffd362120ff096e181ca86c5b8b385eb19e5d7205f96e83d4c6654c8ab0"
+    },
+    "unchanged_other_member_bodies": 5588
+  },
+  "actual_base_CPU_build": {
+    "GPU_executed": false,
+    "SCM_version_is_true_Git_version": false,
+    "corrected_wheel": {
+      "bytes": 12057042,
+      "sha256": "9226df1ca704fa76e10f5abc3145d7b20f6f4c1b6c8e9d69b97bcf8e0d46b9e8",
+      "version": "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix1"
+    },
+    "fresh_master_wheel": {
+      "bytes": 12056408,
+      "sha256": "4e097db6f1c1785fad02bd0bd73d3f846340323de858c1dece17400254d44457",
+      "version": "5.4.0+archive.gbfc6c49d2c4d"
+    },
+    "full_receipt": {
+      "bytes": 14814755,
+      "sha256": "92a92588e78408fd5abe0a0cf3db8d74cb37b166d767a879648db8943b1d847c"
+    },
+    "model_Gate_passed": false,
+    "scope": "Historical musafix1 source build; not the current musafix2 wheel",
+    "unchanged_original_file_count": 6355
+  },
+  "archive": {
+    "bytes": 14003066,
+    "expanded_bytes": 53856950,
+    "members": 6606,
+    "regular_files": 6359,
+    "root": "flagos-ai-FlagGems-bfc6c49",
+    "sha256": "1c84a39d25e5cf2650e5c82218eeccb863ffa9465ad114e03b2a59809b497868",
+    "url": "https://api.github.com/repos/flagos-ai/FlagGems/tarball/bfc6c49d2c4d06e5deac9784f203730c8372a84a"
+  },
+  "compiler_root_cause_fixed": false,
+  "nd_safe512_fix_proven": false,
+  "newly_built_wheel_bytes_are_not_promised_reproducible": true,
+  "prepared_source_unchanged_original_file_count": 6353,
+  "schema_version": 1,
+  "scope": "Fixed public bfc6 archive plus six private-source production replacements; opt-in MUSA NDmul safe512 workaround",
+  "six_production_replacements": [
+    {
+      "after": {
+        "bytes": 44577,
+        "sha256": "8d51a06b65f60357f318e13ab9dba4c8ab35a0cae8e1bc017f045531f031e191"
+      },
+      "input_name": "production-0.py.raw",
+      "installed_path": "flag_gems/ops/flash_api.py",
+      "preimage": {
+        "bytes": 44341,
+        "sha256": "9d6f1e1ec802d132b074a618c173a9ea424f4d5793fd0cbcead687796155a70f"
+      },
+      "scope": "PR6894 plus q.device property-query fix",
+      "source_path": "src/flag_gems/ops/flash_api.py"
+    },
+    {
+      "after": {
+        "bytes": 51454,
+        "sha256": "dfb99850150f9c734373247ea005ed3957109347dbc1ce9f5472b3eef8ecb850"
+      },
+      "input_name": "production-1.py.raw",
+      "installed_path": "flag_gems/ops/flash_kernel.py",
+      "preimage": {
+        "bytes": 50891,
+        "sha256": "eef0202e6c0ed08bef8098adede1a603c63354c54b54a19414e210b675157265"
+      },
+      "scope": "Exact PR6894 production postimage",
+      "source_path": "src/flag_gems/ops/flash_kernel.py"
+    },
+    {
+      "after": {
+        "bytes": 44479,
+        "sha256": "52a2d999ef981349542229bf599c9003740bbb63524302bec9e27dccddd4dce6"
+      },
+      "input_name": "production-2.py.raw",
+      "installed_path": "flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py",
+      "preimage": {
+        "bytes": 44245,
+        "sha256": "df6d4e554b04f6bf06a57346ac5c613f07db2fbf3703328c66920abfe68c39ec"
+      },
+      "scope": "Exact PR6894 production postimage",
+      "source_path": "src/flag_gems/runtime/backend/_enflame/gcu400/ops/flash_api.py"
+    },
+    {
+      "after": {
+        "bytes": 1631,
+        "sha256": "56bd360ccf0e3f97231d7343e4738efc1bf1d7fb4bbd3582b5429a550bd1d67d"
+      },
+      "input_name": "production-3.py.raw",
+      "installed_path": "flag_gems/ops/_pin_memory.py",
+      "preimage": {
+        "bytes": 1500,
+        "sha256": "25b53a6321baaa806e2ef8ca4bd07a69dac2feda2f54992a4724e31cba72f5c7"
+      },
+      "scope": "MUSA pin-memory candidate revision02, explicit CPU rejection",
+      "source_path": "src/flag_gems/ops/_pin_memory.py"
+    },
+    {
+      "after": {
+        "bytes": 24601,
+        "sha256": "7ed1254213d3f6435b3ec2188bd75cb9bf8aa22b9e6c7f4a58ea023c54d42eb2"
+      },
+      "input_name": "production-4.py.raw",
+      "installed_path": "flag_gems/ops/mul.py",
+      "preimage": {
+        "bytes": 24318,
+        "sha256": "df1d9068fbe35596b74bad406446b39901deb6777e2439cc09bb2b6d1de0f348"
+      },
+      "scope": "MUSA shared NDmul singleton512 with FlagTune expansion disabled",
+      "source_path": "src/flag_gems/ops/mul.py"
+    },
+    {
+      "after": {
+        "bytes": 67442,
+        "sha256": "ebf63164572658845d5be11d7d8be6b0efff5906c4067703608a13cbd0dbf5b2"
+      },
+      "input_name": "production-5.py.raw",
+      "installed_path": "flag_gems/utils/libentry.py",
+      "preimage": {
+        "bytes": 67215,
+        "sha256": "5ab5397d48d9c1a07f39f538644138348e8f61cee03e6feb9b8e0a7ae714e1b4"
+      },
+      "scope": "Rethrow known MUSA illegal-memory RuntimeError before compile-failure fallback",
+      "source_path": "src/flag_gems/utils/libentry.py"
+    }
+  ],
+  "source_commit": "bfc6c49d2c4d06e5deac9784f203730c8372a84a",
+  "tolerances_changed": false,
+  "versions": {
+    "corrected": "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2",
+    "master": "5.4.0+archive.gbfc6c49d2c4d"
+  },
+  "whole_model_gate_acceptance": false
+}
