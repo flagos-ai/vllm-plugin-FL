@@ -20,7 +20,7 @@ The following stack passed the T-Head acceptance matrix on 2026-10-09.
 | FlagTree | `0.7.0+ppu3.6` |
 | Imported Triton | `3.6.0`, supplied by the FlagTree PPU wheel |
 | FlagGems base | `b4b37a7518d511548ed562277e1972a0b5d9986d`; metadata `5.4.0rc2.post1+gb4b37a751` |
-| Required FlagGems fix | Three production files from [PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894), fixed head `4e330227564ccc7f6a373be2d48a5d2cb7f2823e`, applied to the base above |
+| Required FlagGems fix | Three production files from merged [PR #6894](https://github.com/flagos-ai/FlagGems/pull/6894), commit `317b763204391d530d6024b52b6235de150443d8`, applied to the base above |
 | Model execution | BF16, TP=4, eager and graph; maximum model length 32768, maximum sequences 8, memory utilization 0.85 |
 
 The vLLM distribution version is `0.28.0+empty`, while its generated module
@@ -30,10 +30,11 @@ belongs to that distribution; checking the module string for `+empty` rejects
 this valid build.
 
 The tested FlagGems code is **the pinned base plus the three-file fix**.
-Checking out the entire PR head, installing a moving `master`, or relying on
-package version strings alone does not identify the tested code. The repaired
-installation retains its base distribution metadata and records the changed
-source hashes separately.
+PR #6894 was merged on 2026-10-16 as `317b763204391d530d6024b52b6235de150443d8`.
+Its three production files are byte-identical to the validated repair from
+`4e330227564ccc7f6a373be2d48a5d2cb7f2823e`. The published image retains those
+sources and its base distribution metadata; CI verifies their hashes separately.
+The commands below reproduce this stack using the merged commit as the fix source.
 
 The T-Head policy is loaded from
 [`vllm_fl/dispatch/config/thead.yaml`](../../vllm_fl/dispatch/config/thead.yaml).
@@ -250,7 +251,7 @@ ABI requirements have been met.
 
 Build and install FlagGems from the base commit in a private environment. Keep
 a pristine copy before applying the fix. Apply only these production files
-from the fixed PR head, with their preimage and postimage checksums verified:
+from the merged commit, with their preimage and postimage checksums verified:
 
 | Relative path under `flag_gems/` | Repaired SHA256 |
 |---|---|
@@ -287,7 +288,7 @@ import json
 import sys
 import urllib.request
 
-head = '4e330227564ccc7f6a373be2d48a5d2cb7f2823e'
+head = '317b763204391d530d6024b52b6235de150443d8'
 files = {
     'ops/flash_api.py': (
         '9d6f1e1ec802d132b074a618c173a9ea424f4d5793fd0cbcead687796155a70f',
