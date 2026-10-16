@@ -129,10 +129,6 @@ def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
     from vllm_fl.ops.custom_ops import register_oot_ops
 
-    logger.debug("=== ENVIRONMENT VARIABLES ===")
-    for key, value in sorted(os.environ.items()):
-        logger.debug("%s=%r", key, value)
-
     # CustomOp caches its selected forward method in __init__, so the
     # multimodal attention patch must run before model construction.
     patch_mm_encoder_attention()

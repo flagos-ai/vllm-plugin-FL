@@ -37,3 +37,5 @@ platforms:
   # Image published; needs a self-hosted runner with labels in configs/iluvatar.yml.
   iluvatar:
     enabled: true
+  thead:
+    enabled: true

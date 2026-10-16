@@ -52,16 +52,22 @@ def rotary_embedding_torch(
             raise ValueError(
                 "query, key, and position_ids must have equal token counts"
             )
-    elif (
-        position_ids.dim() != 2
-        or query.shape[0] != key.shape[0]
-        or query.shape[2] != key.shape[2]
-        or position_ids.shape != (query.shape[0], query.shape[2])
-    ):
-        raise ValueError(
-            "4D BCHD query and key require matching batch/sequence dimensions "
-            "and [batch, sequence] position_ids"
+    else:
+        if query.shape[0] != key.shape[0] or query.shape[2] != key.shape[2]:
+            raise ValueError(
+                "4D query and key require matching batch/sequence dimensions"
+            )
+        shared_positions = (
+            position_ids.dim() == 1 and position_ids.numel() == query.shape[2]
         )
+        batched_positions = position_ids.dim() == 2 and position_ids.shape == (
+            query.shape[0],
+            query.shape[2],
+        )
+        if not (shared_positions or batched_positions):
+            raise ValueError(
+                "4D query and key require [sequence] or [batch, sequence] position_ids"
+            )
     if cos.dim() != 2 or sin.shape != cos.shape:
         raise ValueError("cos and sin must be same-shaped 2D caches")
     if cos.shape[-1] not in (query.shape[-1], query.shape[-1] // 2):
@@ -74,27 +80,14 @@ def rotary_embedding_torch(
     sin = sin.to(device=query.device, dtype=query.dtype)
     position_ids = position_ids.to(device=query.device, dtype=torch.long)
 
-    # Get cos/sin for the positions
-    # position_ids can be [batch, seq_len] or [seq_len]
-    if position_ids.dim() == 1:
-        # [seq_len] -> [seq_len, rotary_dim]
-        cos_selected = cos[position_ids]
-        sin_selected = sin[position_ids]
+    cos_selected = cos[position_ids]
+    sin_selected = sin[position_ids]
+    if query.dim() == 4 and position_ids.dim() == 1:
+        # Shared positions broadcast over both batch and heads.
+        cos_selected = cos_selected.unsqueeze(0).unsqueeze(0)
+        sin_selected = sin_selected.unsqueeze(0).unsqueeze(0)
     else:
-        # [batch, seq_len] -> [batch, seq_len, rotary_dim]
-        cos_selected = cos[position_ids]
-        sin_selected = sin[position_ids]
-
-    # Expand dimensions to match query/key shape
-    # query/key: [batch, num_heads, seq_len, head_dim] or [seq_len, num_heads, head_dim]
-    if query.dim() == 4:
-        # [batch, num_heads, seq_len, head_dim]
-        # cos_selected: [batch, seq_len, rotary_dim] -> [batch, 1, seq_len, rotary_dim]
-        cos_selected = cos_selected.unsqueeze(1)
-        sin_selected = sin_selected.unsqueeze(1)
-    elif query.dim() == 3:
-        # [seq_len, num_heads, head_dim]
-        # cos_selected: [seq_len, rotary_dim] -> [seq_len, 1, rotary_dim]
+        # Insert heads for [tokens, dim] or [batch, sequence, dim] caches.
         cos_selected = cos_selected.unsqueeze(1)
         sin_selected = sin_selected.unsqueeze(1)
 
