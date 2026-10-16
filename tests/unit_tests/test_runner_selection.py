@@ -139,6 +139,52 @@ def test_enflame_rejects_v2_only_features_with_v1_override(
         PlatformFL.check_and_update_config(config)
 
 
+@pytest.mark.parametrize("vendor", ["enflame", "gcu", "iluvatar"])
+@pytest.mark.parametrize("is_hybrid", [False, True])
+@pytest.mark.parametrize("has_speculative_config", [False, True])
+@pytest.mark.parametrize("mamba_cache_mode", ["none", "all", "align"])
+def test_enflame_rejects_only_hybrid_speculative_align_cache(
+    monkeypatch, vendor, is_hybrid, has_speculative_config, mamba_cache_mode
+):
+    from types import SimpleNamespace
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(
+        PlatformFL, "device_type", "cuda" if vendor == "iluvatar" else "gcu"
+    )
+    # Encoder registration is unrelated to config acceptance and requires
+    # importing device-specific attention modules.
+    monkeypatch.setattr(
+        "vllm_fl.attention.utils.patch_mm_encoder_attention", lambda: None
+    )
+    config = _make_ascend_vllm_config()
+    config.model_config.is_hybrid = is_hybrid
+    config.speculative_config = (
+        SimpleNamespace(method="ngram") if has_speculative_config else None
+    )
+    config.cache_config.mamba_cache_mode = mamba_cache_mode
+
+    if (
+        vendor in ("enflame", "gcu")
+        and is_hybrid
+        and has_speculative_config
+        and mamba_cache_mode == "align"
+    ):
+        with pytest.raises(ValueError, match="fused Mamba state copy kernels"):
+            PlatformFL.check_and_update_config(config)
+        assert config.parallel_config.worker_cls is None
+    else:
+        PlatformFL.check_and_update_config(config)
+        assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+    # Validation must not silently disable speculative decoding or change the
+    # requested Mamba cache policy to avoid the unsupported fused-copy path.
+    assert (config.speculative_config is not None) == has_speculative_config
+    assert config.cache_config.mamba_cache_mode == mamba_cache_mode
+
+
 def test_ascend_accepts_non_eager_and_downgrades_full_graphs(monkeypatch):
     from vllm.config import CUDAGraphMode
 

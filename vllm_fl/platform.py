@@ -250,6 +250,21 @@ class PlatformFL(Platform):
                     "Enflame ModelRunnerFL does not support these V2-only features: "
                     + ", ".join(v2_only_features)
                 )
+            if (
+                getattr(model_config, "is_hybrid", False)
+                and speculative_config is not None
+                and getattr(vllm_config.cache_config, "mamba_cache_mode", None)
+                == "align"
+            ):
+                # vLLM's speculative align path fuses Mamba state copies on
+                # device, bypassing the GCU address translation in
+                # do_mamba_copy_block. Reject it before allocating cache state.
+                raise ValueError(
+                    "Enflame does not support speculative decoding for hybrid "
+                    "models with mamba_cache_mode='align': the fused Mamba state "
+                    "copy kernels do not translate GCU addresses. Disable "
+                    "speculative decoding for this configuration."
+                )
         if cls.vendor_name in ("gcu", "enflame"):
             from vllm_fl.attention.utils import patch_mm_encoder_attention
 

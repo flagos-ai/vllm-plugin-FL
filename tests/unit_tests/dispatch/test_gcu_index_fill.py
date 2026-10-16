@@ -2,7 +2,6 @@
 
 """CPU-only launch geometry and compatibility checks for the GCU adapter."""
 
-import hashlib
 import importlib.util
 from itertools import product
 from math import prod
@@ -84,6 +83,10 @@ class Kernel:
     def __init__(self, simulate=False):
         self.calls = []
         self.simulate = simulate
+        self.arg_names = index_fill._KERNEL_PARAMETERS
+        self.jit_function = SimpleNamespace(
+            arg_names=self.arg_names, constexprs=index_fill._KERNEL_CONSTEXPRS
+        )
 
     def __getitem__(self, grid):
         def call(*args, **kwargs):
@@ -319,10 +322,10 @@ def test_int64_full_block_partition_exhaustive_small_geometry():
 def source_provider(tmp_path, monkeypatch):
     module, _, _ = provider()
     source = tmp_path / "official_index_fill.py"
-    raw = b"test-provider-raw-bytes\n"
+    raw = b"# Test provider; source formatting is not an API contract.\n"
     source.write_bytes(raw)
     module.__file__ = str(source)
-    monkeypatch.setattr(index_fill, "_SOURCE_SHA256", hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(index_fill, "version", lambda name: "5.4.0")
     return module
 
 
@@ -349,19 +352,148 @@ def test_patch_rejects_generic_kernel_replacement(tmp_path, monkeypatch):
         index_fill._install_index_fill_gcu_patch(module)
 
 
-@pytest.mark.parametrize("change", ["source", "signature", "rank", "block"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "version",
+        "signature",
+        "keyword_only",
+        "missing_launcher",
+        "rank",
+        "block",
+        "kernel_arguments",
+        "jit_arguments",
+        "constexprs",
+        "missing_kernel",
+        "nonlaunchable_kernel",
+    ],
+)
 def test_unsupported_provider_fails_before_mutation(tmp_path, monkeypatch, change):
     module = source_provider(tmp_path, monkeypatch)
-    if change == "source":
-        Path(module.__file__).write_bytes(b"unexpected provider")
+    if change == "version":
+        monkeypatch.setattr(index_fill, "version", lambda name: "5.5.0")
     elif change == "signature":
         module._index_fill_contiguous_launch = lambda unexpected: None
+    elif change == "keyword_only":
+
+        def incompatible(*, out, dim, index, value, value_is_tensor, fill_numel):
+            pass
+
+        module._index_fill_contiguous_launch = incompatible
+    elif change == "missing_launcher":
+        del module._index_fill_contiguous_launch
     elif change == "rank":
         module._MAX_RANK = 4
-    else:
+    elif change == "block":
         module._BLOCK_SIZE = 1024
+    elif change == "kernel_arguments":
+        module.index_fill_kernel.arg_names = ("unexpected",)
+    elif change == "jit_arguments":
+        module.index_fill_kernel.jit_function.arg_names = ("unexpected",)
+    elif change == "constexprs":
+        module.index_fill_kernel.jit_function.constexprs = (23, 24, 25)
+    elif change == "missing_kernel":
+        del module.index_fill_kernel
+    else:
+        module.index_fill_kernel = SimpleNamespace(
+            arg_names=index_fill._KERNEL_PARAMETERS,
+            jit_function=module.index_fill_kernel.jit_function,
+        )
+    original = getattr(module, "_index_fill_contiguous_launch", None)
+    with pytest.raises(RuntimeError, match="Unsupported FlagGems"):
+        index_fill._install_index_fill_gcu_patch(module)
+    assert getattr(module, "_index_fill_contiguous_launch", None) is original
+    assert not hasattr(module, index_fill._PATCH_STATE)
+
+
+@pytest.mark.parametrize("source_change", ["comment", "formatting", "missing_source"])
+def test_source_layout_does_not_change_supported_runtime_api(
+    tmp_path, monkeypatch, source_change
+):
+    module = source_provider(tmp_path, monkeypatch)
+    source = Path(module.__file__)
+    if source_change == "comment":
+        source.write_bytes(source.read_bytes() + b"# Downstream comment.\n")
+    elif source_change == "formatting":
+        source.write_bytes(source.read_bytes().replace(b"\n", b"\r\n\r\n"))
+    else:
+        source.unlink()
+    assert index_fill._install_index_fill_gcu_patch(module) is True
+
+
+def test_missing_distribution_version_fails_before_mutation(tmp_path, monkeypatch):
+    module = source_provider(tmp_path, monkeypatch)
+
+    def missing(name):
+        raise index_fill.PackageNotFoundError(name)
+
+    monkeypatch.setattr(index_fill, "version", missing)
     original = module._index_fill_contiguous_launch
-    with pytest.raises(RuntimeError, match="Unsupported FlagGems index_fill"):
+    with pytest.raises(RuntimeError, match="version is unavailable"):
         index_fill._install_index_fill_gcu_patch(module)
     assert module._index_fill_contiguous_launch is original
     assert not hasattr(module, index_fill._PATCH_STATE)
+
+
+def release_verifier(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "enflame_index_fill_verifier_under_test",
+        Path(__file__).parents[3] / "docker/enflame/verify_index_fill.py",
+    )
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    package = tmp_path / "flag_gems/__init__.py"
+    package.parent.mkdir()
+    package.write_text("# Must not import the provider in a setup check.\n")
+    source = tmp_path / verifier.SOURCE_PATH
+    source.parent.mkdir()
+    raw = b"# A test release fixture.\n"
+    source.write_bytes(raw)
+    import hashlib
+
+    monkeypatch.setattr(verifier, "EXPECTED_BYTES", len(raw))
+    monkeypatch.setattr(verifier, "EXPECTED_SHA256", hashlib.sha256(raw).hexdigest())
+    distribution = SimpleNamespace(
+        version="5.4.0", locate_file=lambda path: tmp_path / path
+    )
+    monkeypatch.setattr(
+        verifier.importlib.metadata, "distribution", lambda name: distribution
+    )
+    monkeypatch.setattr(
+        verifier.importlib.util,
+        "find_spec",
+        lambda name: SimpleNamespace(origin=str(package)),
+    )
+    return verifier, distribution, source
+
+
+def test_release_byte_guard_succeeds_for_exact_setup_provider(tmp_path, monkeypatch):
+    verifier, _, source = release_verifier(tmp_path, monkeypatch)
+    result = verifier.verify_index_fill()
+    assert result["passed"] is True
+    assert result["bytes"] == source.stat().st_size
+    assert result["sha256"] == verifier.EXPECTED_SHA256
+    assert result["stable_during_read"] is True
+
+
+@pytest.mark.parametrize(
+    "change", ["comment", "crlf", "same_size", "version", "origin"]
+)
+def test_release_byte_guard_remains_strict_in_setup(tmp_path, monkeypatch, change):
+    verifier, distribution, source = release_verifier(tmp_path, monkeypatch)
+    if change == "source":
+        source.write_bytes(
+            source.read_bytes() + b"# Nonsemantic, but not the release.\n"
+        )
+    elif change == "version":
+        distribution.version = "5.5.0"
+    else:
+        shadow = tmp_path / "shadow.py"
+        shadow.write_text("# Shadowed provider.\n")
+        monkeypatch.setattr(
+            verifier.importlib.util,
+            "find_spec",
+            lambda name: SimpleNamespace(origin=str(shadow)),
+        )
+    with pytest.raises(RuntimeError):
+        verifier.verify_index_fill()

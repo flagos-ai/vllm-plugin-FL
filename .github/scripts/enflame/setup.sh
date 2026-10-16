@@ -48,8 +48,9 @@ for package, wanted in expected.items():
 print("Enflame CI package versions match the vLLM 0.28 recipe")
 PY
 
-# Verify the active compiler files, not only the surviving wheel metadata.
+# Verify release bytes at setup time, not at every engine startup.
 python docker/enflame/verify_compiler.py
+python docker/enflame/verify_index_fill.py
 
 # The vendor runtime, vLLM, and FlagGems come from the pinned base image.
 python -m pip install --no-build-isolation --no-deps -e .

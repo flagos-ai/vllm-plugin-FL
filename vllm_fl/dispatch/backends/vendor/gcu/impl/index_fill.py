@@ -4,21 +4,35 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 import inspect
 from functools import wraps
+from importlib.metadata import PackageNotFoundError, version
 from math import prod
-from pathlib import Path
 
-# Raw installed FlagGems 5.4 source verified with the supported Enflame stack.
-# Fail closed when upgrading its private kernel API instead of silently adapting
-# a different implementation. No installed package files are modified.
-_SOURCE_SHA256 = "37aacdee85e497881f47a813b5489d26972b335ba89df312dbd74be5b1a2e07c"
+# The private launcher/kernel contract is supported for this release only.
+# CI verifies exact release bytes separately in docker/enflame/verify_index_fill.py;
+# comments, formatting and source paths are not runtime API requirements.
+_SUPPORTED_VERSION = "5.4.0"
 _MAX_GRID_X = 65535
 _MAX_GRID_Y = 255
 _PATCH_STATE = "_fl_gcu_index_fill_patch"
 _LAUNCH_PARAMETERS = ("out", "dim", "index", "value", "value_is_tensor", "fill_numel")
+_KERNEL_PARAMETERS = (
+    "out",
+    "index",
+    "value",
+    "N",
+    "index_len",
+    "dim_size",
+    *(f"shape_{i}" for i in range(8)),
+    *(f"stride_{i}" for i in range(8)),
+    "DIM",
+    "RANK",
+    "VALUE_IS_TENSOR",
+    "BLOCK_SIZE",
+)
+_KERNEL_CONSTEXPRS = (22, 23, 24, 25)
 
 
 def _tiles(outer: int, inner: int, index_len: int, capacity: int):
@@ -148,7 +162,7 @@ def _make_contiguous_launch(module, original):
 
 
 def _install_index_fill_gcu_patch(module) -> bool:
-    original = module._index_fill_contiguous_launch
+    original = getattr(module, "_index_fill_contiguous_launch", None)
     previous = getattr(module, _PATCH_STATE, None)
     if previous is not None:
         if original is not previous[0] or module.index_fill_kernel is not previous[1]:
@@ -157,21 +171,38 @@ def _install_index_fill_gcu_patch(module) -> bool:
             )
         return False
 
-    source = Path(module.__file__)
-    before = source.stat()
-    raw = source.read_bytes()
-    after = source.stat()
+    try:
+        installed_version = version("flag-gems")
+    except PackageNotFoundError as exc:
+        raise RuntimeError(
+            "FlagGems version is unavailable for Enflame adapter"
+        ) from exc
+    if installed_version != _SUPPORTED_VERSION:
+        raise RuntimeError(
+            f"Unsupported FlagGems version {installed_version} for Enflame adapter; "
+            f"expected {_SUPPORTED_VERSION}"
+        )
+
+    kernel = getattr(module, "index_fill_kernel", None)
+    jit = getattr(kernel, "jit_function", None)
+    try:
+        parameters = inspect.signature(original).parameters
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Unsupported FlagGems index_fill launcher API for Enflame"
+        ) from exc
     if (
-        (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
-        or len(raw) != after.st_size
-        or hashlib.sha256(raw).hexdigest() != _SOURCE_SHA256
-    ):
-        raise RuntimeError("Unsupported FlagGems index_fill source for Enflame adapter")
-    if (
-        tuple(inspect.signature(original).parameters) != _LAUNCH_PARAMETERS
-        or module._MAX_RANK != 8
-        or module._BLOCK_SIZE != 512
-        or not hasattr(module.index_fill_kernel, "__getitem__")
+        tuple(parameters) != _LAUNCH_PARAMETERS
+        or any(
+            parameter.kind != inspect.Parameter.POSITIONAL_OR_KEYWORD
+            for parameter in parameters.values()
+        )
+        or getattr(module, "_MAX_RANK", None) != 8
+        or getattr(module, "_BLOCK_SIZE", None) != 512
+        or not callable(getattr(kernel, "__getitem__", None))
+        or tuple(getattr(kernel, "arg_names", ())) != _KERNEL_PARAMETERS
+        or tuple(getattr(jit, "arg_names", ())) != _KERNEL_PARAMETERS
+        or tuple(getattr(jit, "constexprs", ())) != _KERNEL_CONSTEXPRS
     ):
         raise RuntimeError("Unsupported FlagGems index_fill kernel API for Enflame")
 
