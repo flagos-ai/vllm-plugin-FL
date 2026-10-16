@@ -9,12 +9,12 @@ harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base
 
 The base provides MUSA 4.3.5, torch 2.9.0 + torch_musa 2.9.0, vLLM 0.24.0
 (empty-device build), FlagGems 5.3.2.post1.dev22 (`b1f939eb5`), FlagTree
-`b97f8214` with the MUSA graph-capture fixes, and the plugin 0.3.0 runtime;
-`Dockerfile` adds build tooling and the CI test dependencies on top and fails
-the build if the base does not carry the
-expected stack. The v0.20.2 image that wrapped Moore Threads' own registry
-image (`registry.mthreads.com/mcconline/inference/vllm:v0.20.2-...`) directly
-is kept as `Dockerfile.v0.20.2`.
+`b97f8214` with the MUSA graph-capture fixes. `Dockerfile` replaces any plugin
+from the base with the repository's `vllm-plugin-fl` package, adds build
+tooling and CI test dependencies, and fails the build if the base does not
+carry the expected vendor stack. The resulting dev, CI, and release images
+work without mounting a source checkout. The v0.20.2 image that wrapped Moore
+Threads' own registry image directly is kept as `Dockerfile.v0.20.2`.
 
 ## Build and push
 
@@ -36,7 +36,8 @@ is enabled in `.github/configs/platforms.yml`.
 # 1. Hardware check (mthreads-gmi must be on PATH inside the container).
 bash .github/scripts/musa/check.sh
 
-# 2. Install the checked-out plugin and verify the stack imports.
+# 2. Verify the preinstalled plugin and stack imports. In CI, setup.sh also
+#    installs the checkout editable so pull-request changes override it.
 GEMS_VENDOR=mthreads VLLM_PLUGINS=fl MTHREADS_VISIBLE_DEVICES=all \
   bash .github/scripts/musa/setup.sh
 

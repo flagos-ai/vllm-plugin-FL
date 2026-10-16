@@ -15,8 +15,8 @@
 # vLLM 0.24 image for Enflame S60. The base is the vendor-delivered
 # torch_gcu 2.11.0 stack (torch 2.11 / triton_gcu 3.6 / FlagGems 5.4.0.dev0,
 # validated against host driver 1.9.10); this Dockerfile replaces its vLLM
-# with the official 0.24.0 empty-device build so the FL plugin registers the
-# GCU platform itself. The previous thin wrapper around the 0.20.2 vendor
+# with the official 0.24.0 empty-device build and bakes the checked-out FL
+# plugin into the image. The previous thin wrapper around the 0.20.2 vendor
 # image is kept as Dockerfile.v0.20.2.
 ARG ENFLAME_BASE_IMAGE=harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853
 # Override with a mirror (e.g. https://gh-proxy.com/https://github.com/...) on
@@ -35,6 +35,7 @@ ARG VCS_REF=unknown
 ARG IMAGE_VERSION=unknown
 ARG IMAGE_STAGE=dev
 ARG SOURCE_URL=https://github.com/flagos-ai/vllm-plugin-FL
+ARG VLLM_PLUGIN_FL_PACKAGE_VERSION=0.0.0
 
 LABEL org.opencontainers.image.title="vllm-plugin-fl" \
       org.opencontainers.image.description="Enflame S60 image for vllm-plugin-FL (vLLM 0.24)" \
@@ -79,6 +80,19 @@ RUN python -m pip install --no-cache-dir \
         pybind11 \
         ninja \
         cmake
+
+# Install this checkout into site-packages so every target (dev/ci/release)
+# works without a bind-mounted source tree or editable install. Enflame uses
+# the Python fallback path, so no vendor extension is compiled here.
+COPY pyproject.toml setup.py README.md LICENSE /tmp/vllm-plugin-fl/
+COPY vllm_fl /tmp/vllm-plugin-fl/vllm_fl
+RUN python -m pip uninstall -y vllm-plugin-fl || true \
+    && cd /tmp/vllm-plugin-fl \
+    && SETUPTOOLS_SCM_PRETEND_VERSION="${VLLM_PLUGIN_FL_PACKAGE_VERSION}" \
+       python -m pip install --no-cache-dir \
+        --no-build-isolation --no-deps . \
+    && python -m pip show vllm-plugin-fl \
+    && rm -rf /tmp/vllm-plugin-fl
 
 # Replace the vendor vLLM with the official empty-device build; the plugin
 # registers the GCU platform via the vLLM platform_plugins entry point.

@@ -13,7 +13,8 @@
 # limitations under the License.
 
 # vLLM 0.24 image, layered on the FlagOS-packaged MUSA stack
-# (MUSA 4.3.5 / torch 2.9.0 / torch_musa / vLLM 0.24.0 / plugin 0.3.0).
+# (MUSA 4.3.5 / torch 2.9.0 / torch_musa / vLLM 0.24.0). This Dockerfile
+# replaces any packaged plugin with the checked-out vllm-plugin-FL source.
 # The v0.20.2 image that wrapped Moore Threads' own registry image directly
 # is kept as Dockerfile.v0.20.2.
 ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base:08281629
@@ -30,6 +31,7 @@ ARG VCS_REF=unknown
 ARG IMAGE_VERSION=unknown
 ARG IMAGE_STAGE=dev
 ARG SOURCE_URL=https://github.com/flagos-ai/vllm-plugin-FL
+ARG VLLM_PLUGIN_FL_PACKAGE_VERSION=0.0.0
 
 LABEL org.opencontainers.image.title="vllm-plugin-fl" \
       org.opencontainers.image.description="Moore Threads MUSA image for vllm-plugin-FL (vLLM 0.24)" \
@@ -100,6 +102,19 @@ RUN python -m pip install --no-cache-dir \
         pybind11 \
         ninja \
         cmake
+
+# Install this checkout as a regular site-packages distribution so every
+# target (dev/ci/release) is usable without the CI repository mount. MUSA
+# uses the Python fallback path, so no vendor extension is compiled here.
+COPY pyproject.toml setup.py README.md LICENSE /tmp/vllm-plugin-fl/
+COPY vllm_fl /tmp/vllm-plugin-fl/vllm_fl
+RUN python -m pip uninstall -y vllm-plugin-fl || true \
+    && cd /tmp/vllm-plugin-fl \
+    && SETUPTOOLS_SCM_PRETEND_VERSION="${VLLM_PLUGIN_FL_PACKAGE_VERSION}" \
+       python -m pip install --no-cache-dir \
+        --no-build-isolation --no-deps . \
+    && python -m pip show vllm-plugin-fl \
+    && rm -rf /tmp/vllm-plugin-fl
 
 WORKDIR /workspace
 

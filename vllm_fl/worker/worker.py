@@ -248,10 +248,14 @@ class WorkerFL(WorkerBase):
         for k, v in sorted(os.environ.items()):
             logger.debug("%s=%r", k, v)
 
-        # Apply the NVIDIA MM encoder dispatch fix before model construction:
-        # CustomOp caches its selected forward method in __init__.
-        from vllm_fl.attention.utils import patch_mm_encoder_attention
+        # Apply the MM encoder / partial-RoPE dispatch fixes before model
+        # construction: CustomOp caches its selected forward method in __init__.
+        from vllm_fl.attention.utils import (
+            patch_mm_encoder_attention,
+            patch_oot_apply_rotary_emb,
+        )
         patch_mm_encoder_attention()
+        patch_oot_apply_rotary_emb()
 
         register_oot_ops()
 
@@ -612,7 +616,10 @@ class WorkerFL(WorkerBase):
             # runtime activations and fail with OOM.
             cudagraph_memory_estimate = 0
             if (
-                current_platform.is_cuda()
+                (
+                    current_platform.is_cuda()
+                    or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+                )
                 and self.vllm_config.compilation_config.cudagraph_mode
                 != CUDAGraphMode.NONE
             ):

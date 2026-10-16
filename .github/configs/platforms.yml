@@ -35,6 +35,6 @@ platforms:
   iluvatar:
     enabled: true
   kunlunxin:
-    enabled: false
+    enabled: true
   thead:
     enabled: true

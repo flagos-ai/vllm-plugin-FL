@@ -11,6 +11,8 @@ pip install \
     --no-deps \
     -e .
 
+python .github/scripts/install_flaggems_vllm.py
+
 python - <<'PY'
 import numpy
 

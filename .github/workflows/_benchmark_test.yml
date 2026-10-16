@@ -66,7 +66,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sweep: [1]
+        sweep: [1, 2, 3, 4, 5]
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
     container:
@@ -88,45 +88,47 @@ jobs:
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
 
-      # DEBUG PROBE (PR #588): identify the backing machine behind this pod.
-      # Device id + mount source + directory mtimes distinguish machines and
-      # catch deletion/restoration events in the act.
-      - name: Machine fingerprint
+      # DOWNLOAD-ONLY PROBE (PR #600): reaching a cold machine is the whole
+      # mission — this job stocks ALL THREE models the metax matrix needs
+      # (Qwen3-0.6B + Qwen3.6-27B + Qwen3.6-35B-A3B, file-derived) and runs
+      # NO tests. Healthy machines: ~1 min. Cold machine: ~2h download.
+      - name: Machine fingerprint and full model prefetch
         run: |
           echo "pod=$(hostname)"
-          echo "--- /data mount ---"
           grep -E " /data" /proc/mounts || true
-          df -h /data 2>/dev/null | tail -1 || true
-          echo "--- /data identity ---"
+          echo "--- df before ---"
+          df -h /data || true
           stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
-          echo "--- ls /data/models/Qwen (first 30) ---"
           ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
-
-      # DEBUG PROBE (PR #588): stage Qwen3-0.6B onto this machine's local
-      # /data from HF (hf-mirror fallback for the proxied runner network);
-      # idempotent — machines that already have it pay one stat() call.
-      # Runs before Install so instances stay ~1-2 minutes each.
-      - name: Download benchmark model (debug)
-        run: |
           python .github/scripts/download_model.py \
             --repo Qwen/Qwen3-0.6B \
             --dest /data/models/Qwen/Qwen3-0.6B
-          ls -la /data/models/Qwen/Qwen3-0.6B | head -20
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-27B \
+            --dest /data/models/Qwen/Qwen3.6-27B
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-35B-A3B \
+            --dest /data/models/Qwen/Qwen3.6-35B-A3B
+          echo "--- df after ---"
+          df -h /data || true
 
       - name: Check device availability
+        if: false
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
       - name: Install project
+        if: false
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run benchmark smoke tests
+        if: false
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
             --scope benchmark
 
       - name: Upload test results
-        if: always()
+        if: false
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:

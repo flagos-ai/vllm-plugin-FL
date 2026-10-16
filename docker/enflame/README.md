@@ -11,8 +11,10 @@ The base provides torch 2.11.0 + torch_gcu 2.11.0, triton_gcu 3.6.0,
 FlagGems 5.4.0.dev0, and the S60 runtime; `Dockerfile` replaces its vLLM
 with the official 0.24.0 empty-device build (vLLM 0.24 needs
 `setuptools>=77` and `setuptools-rust`, both added here) and installs the CI
-test dependencies. The v0.20.2 thin wrapper around the old vendor image is
-kept as `Dockerfile.v0.20.2`.
+test dependencies. It also installs the repository's `vllm-plugin-fl`
+package into site-packages, so the resulting dev, CI, and release images work
+without mounting a source checkout. The v0.20.2 thin wrapper around the old
+vendor image is kept as `Dockerfile.v0.20.2`.
 
 Notes validated on `vm-dhrj-gd-zone7-d-s60-48g-1-5` (S60 x8, driver
 1.9.10): the image's topstx 1.9.29 userspace runs fine against the 1.9.10
@@ -38,7 +40,8 @@ runner.
 #    in the container — the torch_gcu 2.11 bundle does not ship it).
 bash .github/scripts/enflame/check.sh
 
-# 2. Install the checked-out plugin and verify the stack imports.
+# 2. Verify the preinstalled plugin and stack imports. In CI, setup.sh also
+#    installs the checkout editable so pull-request changes override it.
 TOPS_VISIBLE_DEVICES=2,3 bash .github/scripts/enflame/setup.sh
 
 # 3. Run the same suites CI would run.

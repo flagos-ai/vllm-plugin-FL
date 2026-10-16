@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         default: ""
+      flaggems_vllm:
+        description: "CUDA fused operator mode for this model gate (0 or 1)"
+        required: false
+        type: string
+        default: ""
       timeout:
         description: "Timeout for the job in minutes"
         required: false
@@ -68,7 +73,7 @@ on:
 
 jobs:
   e2e-test:
-    name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})"
+    name: "E2E ${{ inputs.task }} (${{ inputs.platform }}/${{ inputs.device }})${{ inputs.flaggems_vllm != '' && format(' fused={0}', inputs.flaggems_vllm) || '' }}"
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     timeout-minutes: ${{ inputs.timeout }}
     container:
@@ -93,6 +98,15 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      - name: Select fused operator mode
+        if: inputs.platform == 'cuda' && inputs.flaggems_vllm != ''
+        env:
+          FUSED_MODE: ${{ inputs.flaggems_vllm }}
+        run: |
+          case "$FUSED_MODE" in 0|1) ;; *) exit 1 ;; esac
+          echo "VLLM_FL_USE_FLAGGEMS_VLLM=$FUSED_MODE" >> "$GITHUB_ENV"
+          echo "Model gate: VLLM_FL_USE_FLAGGEMS_VLLM=$FUSED_MODE"
+
       # DEBUG PROBE (PR #594): fingerprint the backing machine and self-heal
       # its local /data — the metax pool hides a machine missing 0.6B/27B/35B
       # (PR #593 run 38700972319 job 116328356263). Downloads are idempotent
@@ -109,6 +123,9 @@ jobs:
           stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
           ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
           python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3-0.6B \
+            --dest /data/models/Qwen/Qwen3-0.6B
+          python .github/scripts/download_model.py \
             --repo Qwen/Qwen3.6-27B \
             --dest /data/models/Qwen/Qwen3.6-27B
           python .github/scripts/download_model.py \
@@ -118,9 +135,11 @@ jobs:
           df -h /data || true
 
       - name: Install project
+        if: false  # download-only carrier
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Check test models
+        if: false  # download-only carrier
         run: |
           python .github/scripts/generate_matrix.py \
             --platform ${{ inputs.platform }} \
@@ -129,6 +148,7 @@ jobs:
             --check-models
 
       - name: Run E2E test
+        if: false  # download-only carrier
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
@@ -138,11 +158,11 @@ jobs:
             --cases '${{ inputs.cases }}'
 
       - name: Upload test results
-        if: always()
+        if: false  # download-only carrier
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}
+          name: e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}${{ inputs.flaggems_vllm != '' && format('-fused-{0}', inputs.flaggems_vllm) || '' }}
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json

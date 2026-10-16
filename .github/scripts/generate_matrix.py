@@ -354,6 +354,14 @@ def main(argv: list[str] | None = None) -> int:
         if changed:
             e2e_matrix = filter_e2e_by_changes(e2e_matrix, changed)
 
+    # The user default is off; preserve the same model gates in both modes.
+    if args.platform == "cuda":
+        e2e_matrix = [
+            {**entry, "flaggems_vllm": mode}
+            for entry in e2e_matrix
+            for mode in ("0", "1")
+        ]
+
     e2e_json = json.dumps(e2e_matrix, separators=(",", ":"))
     unit_json = json.dumps(unit_matrix, separators=(",", ":"))
 
