@@ -150,7 +150,12 @@ def _resolve_fg_scaled_mm():
     global _FG_MM_FN
     if _FG_MM_FN is not None:
         return _FG_MM_FN
-    from flag_gems.ops.scaled_mm import scaled_mm as _fg
+    import vllm_fl.envs as fl_envs
+
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm import triton_scaled_mm as _fg
+    else:
+        from flag_gems.ops.scaled_mm import scaled_mm as _fg
     _FG_MM_FN = _fg
     return _fg
 
