@@ -125,10 +125,6 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
-    elif vendor_name in {"metax", "maca"}:
-        from vllm_fl.patches.flaggems_vllm_metax import prepare_flaggems_vllm_metax
-
-        prepare_flaggems_vllm_metax()
 
 
 def register():
@@ -206,8 +202,12 @@ def register_model():
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
+    from vllm_fl.patches.qwen3_8_flash_next import (
+        apply_qwen3_8_flash_next_patches,
+    )
 
     apply_qwen3_5_text_patches()
+    apply_qwen3_8_flash_next_patches()
 
     from vllm.platforms import current_platform
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:

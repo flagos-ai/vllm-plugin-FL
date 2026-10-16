@@ -131,6 +131,7 @@ def test_worker_reserves_graph_budget(
         vendor_name=vendor,
         device_type="cuda" if vendor != "musa" else "musa",
         is_cuda=lambda: vendor == "nvidia",
+        is_rocm=lambda: vendor in ("amd", "hygon"),
         empty_cache=lambda: None,
         torch_device_fn=SimpleNamespace(
             reset_peak_memory_stats=lambda: None,

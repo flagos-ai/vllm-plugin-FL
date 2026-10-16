@@ -7,22 +7,17 @@ registration and RMS normalization continue to use FlagGems. Existing attention
 backend selection is preserved: the default service paths use upstream Triton
 or DeepSeek sparse attention unless FlagGems attention is explicitly selected.
 
-Install the pinned release source along with the plugin:
+Install FlagGems-vllm main along with the plugin. It includes the public
+HC, PLE and QSA operators used by Qwen3.8-Flash-Next / Qwen4:
 
 ```bash
 python3 -m pip install --no-deps --force-reinstall \
-  'flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@b5c2c2249319277ccda4d41aa0f65164bd9b2a19'
+  'flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@main'
 python3 -m pip install --no-build-isolation -e .
 ```
 
-CI installs the v0.2.0 release commit
-`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`. That release still declares
-`0.1.0` in its package metadata and `__version__`; verify its source commit or
-pip's `direct_url.json` instead of interpreting the metadata as the release tag.
-The release is https://github.com/flagos-ai/FlagGems-vllm/releases/tag/v0.2.0.
-
 Every hardware platform's CI setup calls the shared installer with its selected
-Python interpreter. It verifies the source commit in `direct_url.json` and keeps
+Python interpreter. It installs main and keeps
 the existing Torch, Triton, FlagGems, vLLM, and NumPy versions. NVIDIA CI alone
 requires FlagGems 5.4.0 and sets `VLLM_FL_USE_FLAGGEMS_VLLM=1` by default.
 CUDA model gates run the same inference/serving cases in both `0` and `1`
@@ -66,7 +61,7 @@ vLLM version. The validation used tensor parallel size 4. Add `--enforce-eager`
 for eager mode and omit it for the default graph mode.
 
 GDN migration is deferred: model GDN paths and the existing plugin adapters
-remain unchanged. The pinned release has kernel-dependent state layouts;
+remain unchanged. The operator library has kernel-dependent state layouts;
 converging that public contract belongs in the operator library before a future
 plugin migration.
 
@@ -76,11 +71,8 @@ replacement also accepts `SiluAndMulWithClamp` as an alias. Unsupported alpha
 and beta values retain the upstream native formula before fused execution.
 MetaX fused FA2 receives no descales for unquantized `auto` KV cache; quantized
 KV cache remains unsupported. A separate MetaX opt-in check validates this path.
-When MetaX's existing Triton lacks the optional TLE API, the plugin omits the
-release's `persistent_topk` vendor export from its eager operator collection.
-The compatibility loader verifies the pinned release's initializer hash;
-attention and all remaining vendor imports execute unchanged. Installed package
-files and the platform's Triton version are not modified.
+FlagGems-vllm main handles MetaX's optional TLE capability in its vendor
+exports. The plugin uses that implementation directly.
 
 NVIDIA compatibility exclusions are loaded automatically from `nvidia.yaml`.
 No deployment blacklist append or CUDA/NCCL workaround is required. Validate
