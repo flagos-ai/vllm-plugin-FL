@@ -810,6 +810,8 @@ class FlashAttentionImpl(AttentionImpl):
                     if (
                         self.contiguous_single_prefill
                         and attn_metadata.num_prefills == 1
+                        # Amortize the KV gather cost for short contexts.
+                        and prefill_seq_lens[0] >= 2048
                         and get_kv_quant_mode(self.kv_cache_dtype) == KVQuantMode.NONE
                     ):
                         seq_len = prefill_seq_lens[0]
