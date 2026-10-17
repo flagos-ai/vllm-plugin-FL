@@ -162,7 +162,14 @@ jobs:
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-      timeout: 30
+      # DOWNLOAD-ONLY PROBE: a cold machine can need hours of model download;
+      # tests are gated off so the whole budget belongs to healing.
+      timeout: 300
+      # TARGETED CARRIER (cuda only): baai-sailing-h20-1 grabbed the a100
+      # e2e job and failed on 4 missing models (PR #597) but the default-label
+      # draws never reach it (sticky scheduling); the h20 device label does
+      # (8/8). Dock there and stock the a100-case models (~240GB, 350min).
+      dock_sweeps: ${{ inputs.platform == 'cuda' && '[{"sweep":"h20dock","runs_on":"vllm-plugin-ci-h20","timeout_min":350}]' || '[]' }}
 
   # ============================================================
   # Feishu notification — per-platform status
