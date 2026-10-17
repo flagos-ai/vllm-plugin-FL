@@ -51,7 +51,7 @@ tests/
 │       └── o45_tp4.yaml
 │
 ├── platforms/                      # Platform-specific test configs
-│   ├── cuda.yaml                   # NVIDIA GPU: device types, tolerance, test matrix
+│   ├── nvidia.yaml                  # NVIDIA GPU: device types, tolerance, test matrix
 │   ├── ascend.yaml                 # Huawei NPU: device types, tolerance, test matrix
 │   └── template.yaml               # Template for adding new platforms
 │

@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 import pytest
 import requests
 
+from tests.utils.device_utils import get_visible_device_env_var
+
 # Bypass HTTP proxies for local server connections.
 _NO_PROXY = {"http": None, "https": None}
 
@@ -75,15 +77,26 @@ class VllmServer:
             "--port",
             str(self.port),
         ]
+        # display_cmd mirrors cmd but never receives the api-key value,
+        # so the printed command cannot leak it (CodeQL: clear-text logging).
+        display_cmd = list(cmd)
         if self.api_key:
             cmd.extend(["--api-key", self.api_key])
+            display_cmd.extend(["--api-key", "***"])
         if self.served_model_name:
             cmd.extend(["--served-model-name", self.served_model_name])
+            display_cmd.extend(["--served-model-name", self.served_model_name])
         cmd.extend(self.extra_args)
+        display_cmd.extend(self.extra_args)
 
         model_short = os.path.basename(self.model)
-        print(f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size})")
-        print(f"[Setup] Command: {' '.join(cmd)}")
+        visible_env_var = get_visible_device_env_var()
+        visible_devices = os.environ.get(visible_env_var, "(not set)")
+        print(
+            f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size},"
+            f" {visible_env_var}={visible_devices})"
+        )
+        print(f"[Setup] Command: {' '.join(display_cmd)}")
 
         self._log_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
             prefix=f"vllm_{model_short}_",
@@ -155,14 +168,24 @@ class VllmServer:
                 detail = ""
                 with contextlib.suppress(Exception):
                     detail = f" body={resp.text[:200]}"
-                print(
-                    f"[Setup] Waiting ({i + 1}/{self.max_retries})"
-                    f" status={resp.status_code}{detail}"
+                # Only print every ~1 min (every 6 polls at poll_interval=10s)
+                # plus the first and last attempt to avoid log spam.
+                should_print = (
+                    (i == 0) or ((i + 1) % 6 == 0) or (i == self.max_retries - 1)
                 )
+                if should_print:
+                    print(
+                        f"[Setup] Waiting ({i + 1}/{self.max_retries})"
+                        f" status={resp.status_code}{detail}"
+                    )
             except requests.exceptions.RequestException as exc:
-                print(
-                    f"[Setup] Waiting ({i + 1}/{self.max_retries}) {type(exc).__name__}"
+                should_print = (
+                    (i == 0) or ((i + 1) % 6 == 0) or (i == self.max_retries - 1)
                 )
+                if should_print:
+                    print(
+                        f"[Setup] Waiting ({i + 1}/{self.max_retries}) {type(exc).__name__}"
+                    )
 
             time.sleep(self.poll_interval)
 

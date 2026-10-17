@@ -25,14 +25,25 @@ def registered_clamp(monkeypatch):
     monkeypatch.setattr(SiluAndMulWithClampFL, "name", SiluAndMulWithClampFL.name)
     monkeypatch.setattr(custom_ops, "_patch_unquantized_moe_oracle", lambda: None)
     monkeypatch.setattr(custom_ops, "_patch_fused_moe_factory", lambda: None)
+    # The dispatch world (policy, vendor autodiscovery, OpManager) is rebuilt
+    # lazily long after the registration context below exits. Pin the
+    # vllm_fl-side platform identity for the WHOLE test so the rebuild cannot
+    # pick up the real host platform (vendor backends + platform yaml), which
+    # varies per CI host and per xdist worker process history. vllm.platforms
+    # itself stays real outside registration: VllmConfig() and
+    # CustomOp.dispatch_forward call real methods on it.
+    monkeypatch.setattr(
+        "vllm_fl.dispatch.config.utils.get_platform_name", lambda: "cuda"
+    )
+    monkeypatch.setattr(
+        "vllm_fl.dispatch.builtin_ops._get_current_vendor_backend_dirs",
+        lambda available_dirs: None,
+    )
     with monkeypatch.context() as registration:
         registration.setattr(
             vllm.platforms,
             "current_platform",
             SimpleNamespace(device_type="cuda", vendor_name="nvidia"),
-        )
-        registration.setattr(
-            "vllm_fl.dispatch.config.utils.get_platform_name", lambda: "cuda"
         )
         custom_ops.register_oot_ops(whitelist=["silu_and_mul_with_clamp"])
 
@@ -48,6 +59,18 @@ def registered_clamp(monkeypatch):
     monkeypatch.setitem(sys.modules, "flaggems_vllm", package)
     reset_global_policy()
     reset_default_manager()
+    # Warm the dispatch stack NOW with every mock above active, and drain any
+    # sticky fallback state an earlier test left on the process-global clamp
+    # CachedOp — otherwise first-use work (backend discovery, policy load,
+    # lazy imports) happens mid-assertion.
+    from vllm_fl.dispatch import get_default_manager, get_policy
+    from vllm_fl.ops.activation import _silu_and_mul_with_clamp
+
+    get_policy()
+    get_default_manager().ensure_initialized()
+    _silu_and_mul_with_clamp._impl = None
+    _silu_and_mul_with_clamp._frozen = False
+    _silu_and_mul_with_clamp._use_manager_call = False
     yield calls
     reset_global_policy()
     reset_default_manager()

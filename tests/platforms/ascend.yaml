@@ -84,10 +84,36 @@ env_defaults: {}
   tests:
     e2e:
       # Add or remove test cases per model
-      inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
-      serving:
-        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_graph
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
@@ -100,5 +126,11 @@ env_defaults: {}
       # Exclude patterns: empty list or list paths to exclude
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

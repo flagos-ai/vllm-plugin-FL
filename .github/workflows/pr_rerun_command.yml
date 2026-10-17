@@ -1,35 +1,33 @@
-# Re-run failed or cancelled CI jobs when a PR author comments /rerun-failed-ci.
-# PR authors without write access cannot use GitHub's native "re-run failed
-# jobs" button; this workflow runs in the base repo context (issue_comment)
-# and performs the re-run on their behalf after verifying authorship.
+# Copyright 2026 FlagOS Contributors
 #
-# Safety model:
-# - Never checks out or executes PR code; it only orchestrates existing
-#   workflow runs via the Actions API.
-# - Only the PR author and collaborators with write/maintain/admin are
-#   honored; comments from anyone else are rejected on the PR.
-# - The comment must be exactly "/rerun-failed-ci" (no extra text), so bot
-#   replies and quoted commands never re-trigger.
-name: Rerun Failed CI
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Handler for /rerun slash command.
+# Re-runs all failed CI jobs for the PR at the time the command was issued.
+# Authorized users: PR author or collaborators with write/maintain/admin.
+name: PR /rerun Command
 
 on:
-  issue_comment:
-    types: [created]
+  repository_dispatch:
+    types: [rerun-command]
 
 permissions:
   actions: write
   contents: read
   pull-requests: write
 
-concurrency:
-  group: rerun-failed-ci-${{ github.event.comment.id }}
-  cancel-in-progress: false
-
 jobs:
   rerun-failed-jobs:
-    if: |
-      github.event.issue.pull_request &&
-      github.event.comment.body == '/rerun-failed-ci'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -37,33 +35,36 @@ jobs:
         id: auth
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMENTER: ${{ github.event.comment.user.login }}
-          PR_URL: ${{ github.event.issue.pull_request.url }}
+          COMMENTER: ${{ github.event.client_payload.github.actor }}
+          PR_URL: ${{ github.event.client_payload.pull_request.html_url }}
         run: |
           set -euo pipefail
-          # Allow PR authors and anyone with write access to the repo.
           pr_author=$(gh api "$PR_URL" --jq '.user.login')
           if [ "$COMMENTER" = "$pr_author" ]; then
             echo "authorized=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if gh api "repos/${{ github.repository }}/collaborators/$COMMENTER/permission" --jq '.permission' | grep -qE 'admin|write|maintain'; then
+          perm=$(gh api "repos/${{ github.repository }}/collaborators/$COMMENTER/permission" --jq '.permission' 2>/dev/null || echo "none")
+          if echo "$perm" | grep -qE '^(admin|write|maintain|triage)$'; then
             echo "authorized=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::error::$COMMENTER is neither the PR author nor a collaborator with write access."
+          echo "::error::$COMMENTER is not authorized (need PR author or write+)"
           exit 1
 
       - name: React to comment (ack)
         if: always() && steps.auth.outputs.authorized == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X POST repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions -f content='rocket'
+        run: |
+          gh api -X POST \
+            repos/${{ github.repository }}/issues/comments/${{ github.event.client_payload.github.payload.comment.id }}/reactions \
+            -f content='rocket'
 
       - name: Re-run failed and cancelled jobs
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.issue.pull_request.url }}
+          PR_URL: ${{ github.event.client_payload.pull_request.html_url }}
         run: |
           set -euo pipefail
           head_sha=$(gh api "$PR_URL" --jq '.head.sha')
@@ -71,6 +72,7 @@ jobs:
           # commit (e.g. the main CI run and CodeQL), capped to avoid runaway
           # loops. A cancelled workflow can contain both failed and cancelled
           # jobs, so select the jobs below rather than rerunning the whole run.
+          # (Ported from rerun-failed-ci.yml #559 when this file replaced it.)
           run_ids=$(gh run list --repo "${{ github.repository }}" \
             --commit "$head_sha" --limit 30 \
             --json databaseId,conclusion,createdAt \
@@ -97,18 +99,19 @@ jobs:
             exit 1
           fi
 
-      - name: Report result on PR
-        if: always() && steps.auth.outcome != 'cancelled'
+      - name: Report result
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.issue.number }}
-          COMMENTER: ${{ github.event.comment.user.login }}
+          PR_URL: ${{ github.event.client_payload.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.client_payload.github.payload.issue.number }}
+          COMMENTER: ${{ github.event.client_payload.github.actor }}
         run: |
           if [ "${{ steps.auth.outcome }}" = "failure" ]; then
-            body="⛔ @$COMMENTER is not authorized to use this command (only the PR author or collaborators with write access)."
+            body="⛔ @$COMMENTER is not authorized (PR author or collaborators with write access only)."
           elif [ "${{ job.status }}" = "success" ]; then
             body="🚀 Re-triggered failed/cancelled CI jobs for this PR (requested by @$COMMENTER)."
           else
-            body="❌ Failed to re-run CI for this PR (requested by @$COMMENTER). See [workflow log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+            body="❌ Failed to re-run CI (requested by @$COMMENTER). See [workflow log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           fi
           gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body "$body"

@@ -15,7 +15,10 @@ def require_nvidia_release_runtime(request):
     if request.node.path.name not in CUDA_RELEASE_TESTS:
         return
     platform = request.config.getoption("--platform")
-    if platform and platform != "cuda":
+    # "nvidia" is this branch's platform key for the NVIDIA pipeline (renamed
+    # from "cuda"); keeping the old key here skipped these release checks on
+    # every platform with a green CI.
+    if platform and platform != "nvidia":
         pytest.skip("These fused release checks require NVIDIA CUDA")
     from vllm.platforms import current_platform
 
