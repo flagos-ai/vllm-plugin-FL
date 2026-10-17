@@ -49,7 +49,7 @@ on:
         description: "Timeout for the job in minutes"
         required: false
         type: number
-        default: 15
+        default: 240  # DEBUG PROBE (PR #600): padded so a cold-machine job can carry ~125GB of models
 
 jobs:
   functional-test:
@@ -77,6 +77,28 @@ jobs:
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
+
+      # DEBUG PROBE (PR #600, full-payload doctrine): every job stocks
+      # EVERYTHING the metax matrix needs — see _unit_test.yml note.
+      - name: Machine fingerprint and full model prefetch
+        run: |
+          echo "pod=$(hostname)"
+          grep -E " /data" /proc/mounts || true
+          echo "--- df before ---"
+          df -h /data || true
+          stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
+          ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3-0.6B \
+            --dest /data/models/Qwen/Qwen3-0.6B
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-27B \
+            --dest /data/models/Qwen/Qwen3.6-27B
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-35B-A3B \
+            --dest /data/models/Qwen/Qwen3.6-35B-A3B
+          echo "--- df after ---"
+          df -h /data || true
 
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh

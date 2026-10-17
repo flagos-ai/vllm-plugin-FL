@@ -77,6 +77,32 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      # DEBUG PROBE (PR #600, full-payload doctrine): reaching a cold machine
+      # is rare (D was hit once in 160+ draws) — every job that lands anywhere
+      # stocks EVERYTHING the metax matrix needs (Qwen3-0.6B + Qwen3.6-27B +
+      # Qwen3.6-35B-A3B, file-derived from tests/platforms/metax.yaml and the
+      # case yamls). Timeouts are padded so a cold-machine unit job can carry
+      # the ~125GB; healthy machines pay three stat() calls.
+      - name: Machine fingerprint and full model prefetch
+        run: |
+          echo "pod=$(hostname)"
+          grep -E " /data" /proc/mounts || true
+          echo "--- df before ---"
+          df -h /data || true
+          stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
+          ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3-0.6B \
+            --dest /data/models/Qwen/Qwen3-0.6B
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-27B \
+            --dest /data/models/Qwen/Qwen3.6-27B
+          python .github/scripts/download_model.py \
+            --repo Qwen/Qwen3.6-35B-A3B \
+            --dest /data/models/Qwen/Qwen3.6-35B-A3B
+          echo "--- df after ---"
+          df -h /data || true
+
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 

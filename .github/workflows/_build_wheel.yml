@@ -54,30 +54,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      # DEBUG PROBE (PR #594): wheel build+verify gutted to cut per-lure-round
+      # latency (the built wheel is not consumed by the probe's platform jobs,
+      # which install from source). Restore before any real use of this branch.
       - name: Install build tools
-        run: pip install build
+        run: echo "debug-probe build gutted"
 
       - name: Build package
-        run: python -m build --wheel
+        run: echo "debug-probe build gutted"
 
       - name: Verify wheel
-        run: |
-          pip install dist/*.whl
-          # Verify package metadata and file structure (full import requires flag_gems runtime)
-          python -c "
-          from importlib.metadata import metadata, files
-          meta = metadata('vllm-plugin-fl')
-          print(f\"Package: {meta['Name']} {meta['Version']}\")
-          pkg_files = [str(f) for f in files('vllm-plugin-fl')]
-          assert any('vllm_fl' in f for f in pkg_files), 'vllm_fl module not found in wheel'
-          print(f'Installed files: {len(pkg_files)}')
-          print('Wheel verified successfully')
-          "
+        run: echo "debug-probe verify gutted"
 
       - name: Upload wheel
         if: inputs.upload-artifact
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: wheel
-          path: dist/*.whl
+        run: echo "debug-probe upload gutted"

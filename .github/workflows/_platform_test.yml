@@ -101,6 +101,7 @@ jobs:
 
   unit:
     needs: setup
+    if: false  # download-only probe: no test jobs
     uses: ./.github/workflows/_unit_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -114,6 +115,7 @@ jobs:
   # Runs once per platform (not per device) — functional tests are device-agnostic.
   functional:
     needs: [setup, unit]
+    if: false  # download-only probe
     uses: ./.github/workflows/_functional_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -127,8 +129,10 @@ jobs:
   # Grouped by (task, device) — all model/case combos for the same task
   # run inside a single job to avoid repeated container startup.
   e2e:
-    needs: [setup, functional]
-    if: needs.setup.outputs.e2e_matrix != '[]'
+    # download-only probe: functional is gated off above, and a skipped need
+    # would skip this job too — e2e is the only carrier shape D ever accepts.
+    needs: [setup]
+    if: needs.setup.outputs.e2e_matrix != '[]'  # download-only carrier (tests gated off in _e2e_test.yml)
     strategy:
       fail-fast: false
       matrix:
@@ -144,11 +148,13 @@ jobs:
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-      timeout: ${{ matrix.test.timeout || 60 }}
+      # DEBUG PROBE (PR #594): padded from 60/180 so a cold machine can pull
+      # ~125GB of models from the mirror before running the 27B/35B cases.
+      timeout: ${{ matrix.test.timeout || 240 }}
 
   # Validates vllm bench throughput/latency/serve entrypoints.
   benchmark:
-    needs: [setup, e2e]
+    needs: setup
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
@@ -156,7 +162,14 @@ jobs:
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-      timeout: 30
+      # DOWNLOAD-ONLY PROBE: a cold machine can need hours of model download;
+      # tests are gated off so the whole budget belongs to healing.
+      timeout: 300
+      # TARGETED CARRIER (cuda only): baai-sailing-h20-1 grabbed the a100
+      # e2e job and failed on 4 missing models (PR #597) but the default-label
+      # draws never reach it (sticky scheduling); the h20 device label does
+      # (8/8). Dock there and stock the a100-case models (~240GB, 350min).
+      dock_sweeps: ${{ inputs.platform == 'cuda' && '[{"sweep":"h20dock","runs_on":"vllm-plugin-ci-h20","timeout_min":350}]' || '[]' }}
 
   # ============================================================
   # Feishu notification — per-platform status
