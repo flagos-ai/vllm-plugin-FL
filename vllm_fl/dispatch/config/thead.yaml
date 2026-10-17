@@ -45,5 +45,69 @@ op_backends:
     - reference
 
 # FlagOS operator blacklist
+#
+# These are cheap memory-movement / elementwise ops where FlagGems' triton
+# kernel costs far more in host-side dispatch (Python + JIT cache lookup +
+# launch) than the work itself, while native ATen issues a plain memcpy or a
+# fused elementwise kernel. On DeepSeek-V4 decode this host cost does not
+# overlap with compute — it shows up directly as GPU idle.
+#
+# Measured on PPU-ZW810E, ONE OP PER PROCESS (a batched sweep is contaminated by
+# launch-queue backpressure from a faster neighbouring case), 200-call warmup,
+# median of 7 batches of 200 (us/call, FlagGems -> native):
+#   copy_         58.44 -> 4.24   (13.8x)
+#   clamp_        55.06 -> 4.19   (13.1x)
+#   clamp_min     69.43 -> 6.17   (11.3x)
+#   clamp_max     73.45 -> 5.16   (14.2x)
+#   clamp_tensor  73.71 -> 4.74   (15.6x)
+#   cat           41.11 -> 6.66   ( 6.2x)
+#   cat_out       36.07 -> 5.43   ( 6.6x)
+#   arange        25.10 -> 9.07   ( 2.8x)
+#   arange_start  25.01 -> 9.04   ( 2.8x)
+#
+# Deliberately NOT blacklisted:
+#   zero_      15.42 -> 55.97  FlagGems is 3.6x FASTER here; PPU's native
+#                              zero_ path is slow, so keep the triton kernel.
+#   zeros      27.17 -> 20.34  only 1.34x, and native zeros = empty + zero_,
+#   zeros_like 20.24 -> 24.71  which drags in the slow native zero_ above.
+#   _to_copy   62.27 -> 64.81  no difference; its cost is not FlagGems.
+#
+# Correctness: each blacklisted op was checked 28/28 against CPU references —
+# non-contiguous strided sources, dtype-converting copies, 0-element tensors,
+# tensor-valued clamp bounds, every in-place variant, cat.out, and strided
+# arange.
+# The T-Head reference stack ran with FlagGems absent entirely, so these native
+# paths are the proven-correct baseline on this hardware.
+#
+# Override at runtime with VLLM_FL_FLAGOS_BLACKLIST (or VLLM_FL_FLAGOS_WHITELIST).
+#
+# NOTE on key names — CORRECTED 09-03. An earlier version of this comment had it
+# backwards and claimed dotted overload names were required. They are not, and
+# the dotted entries it listed were silently inert.
+#
+# The match is on the registered FUNCTION's __name__, not the aten op name.
+# flag_gems/runtime/op_registrar.py:121 filters with:
+#     item[1].__name__ not in self.exclude_ops
+# where item[0] is the aten op name and item[1] is the function. So for
+#     ("arange.start", arange_start)  ("arange.start_step", arange_start)
+#     ("clamp.Tensor", clamp_tensor)  ("cat.out", cat_out)
+# the keys are arange_start / clamp_tensor / cat_out. A dotted spelling matches
+# no __name__ and is dropped without warning, which is the real silent-failure
+# mode. Verified at runtime by inspecting flag_gems._FULL_CONFIG.
+#
+# One function can serve several overloads (arange_start covers both
+# arange.start and arange.start_step), so 13 keys cover 14 registrations.
 flagos_blacklist:
-
+  - copy_
+  - clamp
+  - clamp_tensor
+  - clamp_
+  - clamp_tensor_
+  - clamp_max
+  - clamp_max_
+  - clamp_min
+  - clamp_min_
+  - cat
+  - cat_out
+  - arange
+  - arange_start
