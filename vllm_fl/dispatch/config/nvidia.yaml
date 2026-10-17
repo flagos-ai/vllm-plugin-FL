@@ -58,7 +58,8 @@ flagos_blacklist:
   # --- DeepSeek-V4 regression ops (measured on 4xH800, 4k/1k, c64) ---
   # flash_mla_with_kvcache: -3.3% throughput regression
   - flash_mla_with_kvcache
-  # hc_head_fused_kernel + mhc_post + mhc_pre: -2.0% regression (MoE dispatch/combine)
+  # mHC FlagGems implementations: ~2% throughput regression. Keep the
+  # CUDA vendor implementations as the NVIDIA defaults.
   - hc_head_fused_kernel
   - mhc_post
   - mhc_pre

@@ -32,6 +32,7 @@ from vllm.v1.attention.backends.utils import (
     split_decodes_and_prefills,
 )
 from vllm.v1.attention.backend import (
+    AttentionCGSupport,
     AttentionLayer,
     AttentionType,
     AttentionMetadataBuilder,
@@ -301,9 +302,9 @@ class KunlunxinMetadata:
             block_tables = (None if self.block_tables is None else
                         self.block_tables)
             query_start_loc = (None if self.query_start_loc is None else
-                               self.query_start_loc[:-self.num_prefills])
+                               self.query_start_loc)
             query_start_loc_host = (None if self.query_start_loc_host is None else
-                                    self.query_start_loc_host[:-self.num_prefills])
+                                    self.query_start_loc_host)
 
         # Construct & cache decode-phase attention metadata structure
         self._cached_decode_metadata = KunlunxinMetadata(
@@ -335,7 +336,9 @@ class KunlunxinAttentionMetadataBuilder(AttentionMetadataBuilder):
     """Builder for Kunlunxin attention metadata."""
 
     reorder_batch_threshold: ClassVar[int] = 1
-    # _cudagraph_support removed: AttentionCGSupport not available in vllm 0.20.2
+    _cudagraph_support: ClassVar[AttentionCGSupport] = (
+        AttentionCGSupport.UNIFORM_BATCH
+    )
 
     def __init__(self, kv_cache_spec: AttentionSpec,
                  layer_names: list[str],
@@ -892,9 +895,9 @@ class KunlunxinAttentionBackendImpl(AttentionImpl[KunlunxinMetadata]):
                     key_cache,
                     value_cache,
                     tmp_block_tables,
-                    attn_metadata.seq_lens_tensor,
-                    attn_metadata.seq_lens_tensor_host,
-                    attn_metadata.max_decode_seq_len,
+                    decode_meta.seq_lens_tensor,
+                    decode_meta.seq_lens_tensor_host,
+                    decode_meta.max_decode_seq_len,
                     num_decode_tokens,
                     self.kv_cache_dtype,
                     self.num_kv_heads,

@@ -40,6 +40,11 @@ from vllm.v1.attention.backend import AttentionCGSupport
 from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.attention.backends.utils import CommonAttentionMetadata
 
+from vllm_fl.compilation.graph import (
+    get_ascend_graph_params,
+    is_ascend_graph_capturing,
+    weak_ref_tensors,
+)
 from vllm_fl.dispatch.backends.vendor.ascend.impl.attention_mask import (
     AttentionMaskBuilder,
 )
@@ -73,6 +78,37 @@ def is_torch_npu_available() -> bool:
 
 # Ascend platform specific configurations
 ASCEND_SAMPLED_TOKEN_IDS_DTYPE = torch.int32  # NPU uses int32, CUDA uses int64
+_SWA_INT_MAX = 2147483647
+
+
+@dataclass
+class PagedAttentionGraphParam:
+    layer_name: str
+    query: torch.Tensor
+    key_cache: torch.Tensor
+    value_cache: torch.Tensor
+    num_kv_heads: int
+    num_heads: int
+    scale: float
+    output: torch.Tensor
+
+
+@dataclass
+class FusedInferAttentionGraphParam:
+    layer_name: str
+    query: torch.Tensor
+    key: torch.Tensor
+    value: torch.Tensor
+    attn_mask: torch.Tensor | None
+    block_size: int
+    num_kv_heads: int
+    num_heads: int
+    scale: float
+    output: torch.Tensor
+    softmax_lse: torch.Tensor
+    sparse_mode: int
+    pre_tokens: int
+    next_tokens: int
 
 
 class AscendAttentionState(Enum):
@@ -237,6 +273,7 @@ class AscendAttentionMetadataBuilder:
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.device = device
+        self.sliding_window = getattr(kv_cache_spec, "sliding_window", None)
         self.max_num_blocks_per_req = cdiv(
             self.model_config.max_model_len,
             AscendAttentionBackend.get_supported_block_size()[0]
@@ -270,10 +307,11 @@ class AscendAttentionMetadataBuilder:
             attn_state: Current attention state.
 
         Returns:
-            Attention mask tensor, or None for decode-only.
+            Attention mask tensor, or None for ordinary PA decode.
         """
-        # Decode-only doesn't need mask (uses paged attention)
-        if attn_state == AscendAttentionState.DecodeOnly:
+        # Ordinary decode uses PA; sliding-window decode uses masked FIA.
+        if (attn_state == AscendAttentionState.DecodeOnly
+                and self.sliding_window is None):
             return None
 
         mask_builder = self._get_mask_builder()
@@ -510,8 +548,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
     Ascend attention implementation using native torch_npu operators.
 
     Core operators:
-    - torch_npu.npu_fused_infer_attention_score: For prefill attention
-    - torch_npu._npu_paged_attention: For decode attention
+    - torch_npu.npu_fused_infer_attention_score: For prefill and sliding-window decode
+    - torch_npu._npu_paged_attention: For ordinary decode attention
     - torch_npu._npu_reshape_and_cache: For KV cache updates
     """
 
@@ -557,6 +595,90 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
         self.key_cache = None
         self.value_cache = None
+
+    @staticmethod
+    def update_graph_params(
+        update_stream: Any,
+        forward_context: Any,
+        num_tokens: int,
+    ) -> None:
+        graph_params = get_ascend_graph_params()
+        if (
+            graph_params is None
+            or num_tokens not in graph_params.attention_params
+            or not graph_params.attention_params[num_tokens]
+        ):
+            return
+
+        attn_metadata = forward_context.attn_metadata
+        if not isinstance(attn_metadata, dict):
+            raise RuntimeError("Ascend graph update requires layer-keyed metadata")
+
+        params = graph_params.attention_params[num_tokens]
+        if not (len(params) == len(graph_params.handles[num_tokens])
+                == len(graph_params.events[num_tokens])
+                == len(graph_params.workspaces[num_tokens])):
+            raise RuntimeError("Incomplete Ascend attention graph task state")
+
+        with torch.npu.stream(update_stream):
+            for param, handle, event, captured_workspace in zip(
+                params,
+                graph_params.handles[num_tokens],
+                graph_params.events[num_tokens],
+                graph_params.workspaces[num_tokens],
+            ):
+                metadata = attn_metadata.get(param.layer_name)
+                if not isinstance(metadata, AscendMetadata):
+                    raise RuntimeError(
+                        f"Missing Ascend graph metadata for {param.layer_name!r}"
+                    )
+                if isinstance(param, FusedInferAttentionGraphParam):
+                    torch.npu.graph_task_update_begin(update_stream, handle)
+                    torch_npu.npu_fused_infer_attention_score.out(
+                        query=param.query, key=param.key, value=param.value,
+                        atten_mask=param.attn_mask,
+                        block_table=metadata.block_tables,
+                        input_layout="TND", block_size=param.block_size,
+                        actual_seq_lengths=metadata.actual_seq_lengths_q,
+                        actual_seq_lengths_kv=metadata.seq_lens_list,
+                        num_key_value_heads=param.num_kv_heads,
+                        num_heads=param.num_heads, scale=param.scale,
+                        sparse_mode=param.sparse_mode,
+                        pre_tokens=param.pre_tokens, next_tokens=param.next_tokens,
+                        workspace=captured_workspace,
+                        out=[param.output, param.softmax_lse],
+                    )
+                    torch.npu.graph_task_update_end(update_stream)
+                    event.record(update_stream)
+                    continue
+                if not isinstance(param, PagedAttentionGraphParam):
+                    raise RuntimeError("Unknown Ascend attention graph task type")
+                workspace = torch_npu._npu_paged_attention_get_workspace(
+                    query=param.query,
+                    key_cache=param.key_cache,
+                    value_cache=param.value_cache,
+                    num_kv_heads=param.num_kv_heads,
+                    num_heads=param.num_heads,
+                    scale_value=param.scale,
+                    block_table=metadata.block_tables,
+                    context_lens=metadata.seq_lens,
+                    out=param.output,
+                )
+                torch.npu.graph_task_update_begin(update_stream, handle)
+                torch_npu._npu_paged_attention(
+                    query=param.query,
+                    key_cache=param.key_cache,
+                    value_cache=param.value_cache,
+                    num_kv_heads=param.num_kv_heads,
+                    num_heads=param.num_heads,
+                    scale_value=param.scale,
+                    block_table=metadata.block_tables,
+                    context_lens=metadata.seq_lens,
+                    out=param.output,
+                    workspace=workspace,
+                )
+                torch.npu.graph_task_update_end(update_stream)
+                event.record(update_stream)
 
     def _get_fia_params(
         self,
@@ -626,10 +748,66 @@ class AscendAttentionBackendImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AscendMetadata,
         output: torch.Tensor,
+        layer_name: str = "",
     ) -> torch.Tensor:
         """Forward pass using fused_infer_attention_score."""
         key, value, block_size, block_table, actual_seq_lengths_kv = \
             self._get_fia_params(key, value, attn_metadata)
+
+        sparse_mode = (4 if self.sliding_window is not None else
+                       3 if attn_metadata.attn_mask is not None else 0)
+        pre_tokens = (self.sliding_window if self.sliding_window is not None
+                      else _SWA_INT_MAX)
+        next_tokens = 0 if self.sliding_window is not None else _SWA_INT_MAX
+        if is_ascend_graph_capturing():
+            graph_params = get_ascend_graph_params()
+            assert graph_params is not None
+            num_tokens = query.shape[0]
+            softmax_lse = torch.empty(1, dtype=query.dtype, device=query.device)
+            kwargs = dict(
+                query=query, key=key, value=value,
+                atten_mask=attn_metadata.attn_mask, block_table=block_table,
+                input_layout="TND", block_size=block_size,
+                actual_seq_lengths=attn_metadata.actual_seq_lengths_q,
+                actual_seq_lengths_kv=actual_seq_lengths_kv,
+                num_key_value_heads=self.num_kv_heads, num_heads=self.num_heads,
+                scale=self.scale, sparse_mode=sparse_mode,
+                pre_tokens=pre_tokens, next_tokens=next_tokens,
+            )
+            workspace = (
+                torch_npu._npu_fused_infer_attention_score_get_max_workspace(
+                    **kwargs
+                )
+            )
+            graph_params.workspaces[num_tokens].append(workspace)
+            stream = torch.npu.current_stream()
+            event = torch.npu.ExternalEvent()
+            event.wait(stream)
+            event.reset(stream)
+            graph_params.events[num_tokens].append(event)
+            graph_params.attention_params[num_tokens].append(
+                FusedInferAttentionGraphParam(
+                    layer_name=layer_name,
+                    query=weak_ref_tensors(query), key=weak_ref_tensors(key),
+                    value=weak_ref_tensors(value),
+                    attn_mask=(weak_ref_tensors(attn_metadata.attn_mask)
+                               if attn_metadata.attn_mask is not None else None),
+                    block_size=block_size, num_kv_heads=self.num_kv_heads,
+                    num_heads=self.num_heads, scale=self.scale,
+                    output=weak_ref_tensors(output),
+                    softmax_lse=weak_ref_tensors(softmax_lse),
+                    sparse_mode=sparse_mode, pre_tokens=pre_tokens,
+                    next_tokens=next_tokens,
+                )
+            )
+            torch.npu.graph_task_group_begin(stream)
+            torch_npu.npu_fused_infer_attention_score.out(
+                **kwargs, workspace=workspace, out=[output, softmax_lse]
+            )
+            graph_params.handles[num_tokens].append(
+                torch.npu.graph_task_group_end(stream)
+            )
+            return output
 
         num_tokens = attn_metadata.actual_seq_lengths_q[-1]
         query = query[:num_tokens]
@@ -637,9 +815,6 @@ class AscendAttentionBackendImpl(AttentionImpl):
         if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
             key = key[:num_tokens]
             value = value[:num_tokens]
-
-        # sparse_mode: 3 = causal with mask, 0 = no mask
-        sparse_mode = 3 if attn_metadata.attn_mask is not None else 0
 
         attn_output, _ = torch_npu.npu_fused_infer_attention_score(
             query=query,
@@ -655,6 +830,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
             num_heads=self.num_heads,
             scale=self.scale,
             sparse_mode=sparse_mode,
+            pre_tokens=pre_tokens,
+            next_tokens=next_tokens,
         )
 
         attn_output = attn_output.view(num_tokens, self.num_heads, self.head_size)
@@ -666,8 +843,60 @@ class AscendAttentionBackendImpl(AttentionImpl):
         query: torch.Tensor,
         attn_metadata: AscendMetadata,
         output: Optional[torch.Tensor] = None,
+        layer_name: str = "",
     ) -> torch.Tensor:
         """Forward pass using paged attention for decode."""
+        if is_ascend_graph_capturing():
+            graph_params = get_ascend_graph_params()
+            assert graph_params is not None
+            num_tokens = query.shape[0]
+            workspace = torch_npu._npu_paged_attention_get_workspace(
+                query=query,
+                key_cache=self.key_cache,
+                value_cache=self.value_cache,
+                num_kv_heads=self.num_kv_heads,
+                num_heads=self.num_heads,
+                scale_value=self.scale,
+                block_table=attn_metadata.block_tables,
+                context_lens=attn_metadata.seq_lens,
+                out=output,
+            )
+            graph_params.workspaces[num_tokens].append(workspace)
+
+            stream = torch.npu.current_stream()
+            event = torch.npu.ExternalEvent()
+            event.wait(stream)
+            event.reset(stream)
+            graph_params.events[num_tokens].append(event)
+            graph_params.attention_params[num_tokens].append(
+                PagedAttentionGraphParam(
+                    layer_name=layer_name,
+                    query=weak_ref_tensors(query),
+                    key_cache=weak_ref_tensors(self.key_cache),
+                    value_cache=weak_ref_tensors(self.value_cache),
+                    num_kv_heads=self.num_kv_heads,
+                    num_heads=self.num_heads,
+                    scale=self.scale,
+                    output=weak_ref_tensors(output),
+                )
+            )
+            torch.npu.graph_task_group_begin(stream)
+            torch_npu._npu_paged_attention(
+                query=query,
+                key_cache=self.key_cache,
+                value_cache=self.value_cache,
+                num_kv_heads=self.num_kv_heads,
+                num_heads=self.num_heads,
+                scale_value=self.scale,
+                block_table=attn_metadata.block_tables,
+                context_lens=attn_metadata.seq_lens,
+                out=output,
+                workspace=workspace,
+            )
+            handle = torch.npu.graph_task_group_end(stream)
+            graph_params.handles[num_tokens].append(handle)
+            return output
+
         torch_npu._npu_paged_attention(
             query=query,
             key_cache=self.key_cache,
@@ -727,6 +956,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         kv_cache: Tuple[torch.Tensor],
         attn_metadata: AscendMetadata,
         output: torch.Tensor,
+        layer_name: str,
     ):
         """Forward implementation dispatching to appropriate attention method."""
         num_tokens = query.shape[0]
@@ -734,10 +964,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
         # Use paged attention for decode-only state
         if (attn_metadata.attn_state == AscendAttentionState.DecodeOnly
                 and self.sliding_window is None):
-            output = self.forward_paged_attention(query, attn_metadata, output)
+            output = self.forward_paged_attention(
+                query, attn_metadata, output, layer_name
+            )
         else:
             output = self.forward_fused_infer_attention(
-                query, key, value, attn_metadata, output)
+                query, key, value, attn_metadata, output, layer_name)
 
         return output
 
@@ -809,7 +1041,14 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         # Standard forward
         output = self.forward_impl(
-            query, key, value, kv_cache, attn_metadata, output)
+            query,
+            key,
+            value,
+            kv_cache,
+            attn_metadata,
+            output,
+            layer.layer_name,
+        )
         return output
 
 

@@ -72,6 +72,10 @@ def get_config_path(platform: Optional[str] = None) -> Optional[Path]:
     Returns:
         Path to the config file, or None if not found.
     """
+    config_path = os.environ.get("VLLM_FL_CONFIG", "").strip()
+    if config_path:
+        return Path(config_path)
+
     if platform is None:
         platform = get_platform_name()
 
@@ -152,6 +156,21 @@ def get_flagos_blacklist(config: Optional[dict] = None) -> Optional[list[str]]:
     blacklist = config.get('flagos_blacklist', [])
     if isinstance(blacklist, list):
         return [str(op) for op in blacklist]
+    return None
+
+
+def get_flagos_whitelist(
+    config: Optional[dict] = None,
+) -> Optional[list[str]]:
+    """Extract the FlagOS operator whitelist from a config."""
+    if config is None:
+        config = load_platform_config()
+    if config is None:
+        return None
+
+    whitelist = config.get('flagos_whitelist', [])
+    if isinstance(whitelist, list):
+        return [str(op) for op in whitelist]
     return None
 
 

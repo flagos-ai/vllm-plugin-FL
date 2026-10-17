@@ -135,6 +135,68 @@ def cpu_device():
 
 
 @pytest.fixture
+def ascend_attention_module():
+    """Lazily isolate Ascend imports; callers may mock hardware before loading.
+
+    Real dependencies are loaded before the unit caller replaces torch_npu.
+    Import-time patches are undone before restoring the original module tree.
+    Functional callers request this fixture only after their NPU skip gates.
+    """
+    import importlib
+    import sys
+    from unittest.mock import Mock
+
+    import vllm.model_executor.models.config as model_config
+    import vllm.v1.attention.backends.registry as registry
+
+    import vllm_fl.compilation.graph  # noqa: F401
+
+    prefix = "vllm_fl.dispatch.backends.vendor.ascend"
+    before = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == prefix or name.startswith(prefix + ".")
+    }
+    parent = importlib.import_module("vllm_fl.dispatch.backends.vendor")
+    missing = object()
+    old_parent = getattr(parent, "ascend", missing)
+
+    def load(*, fresh=False):
+        if fresh:
+            for name in list(sys.modules):
+                if name == prefix or name.startswith(prefix + "."):
+                    del sys.modules[name]
+        return importlib.import_module(prefix + ".impl.attention")
+
+    try:
+        with pytest.MonkeyPatch.context() as import_patch:
+            cls = model_config.HybridAttentionMambaModelConfig
+            # Retain the descriptor, not a bound method.
+            import_patch.setattr(
+                cls,
+                "verify_and_update_config",
+                cls.__dict__["verify_and_update_config"],
+            )
+            import_patch.setattr(registry, "register_backend", Mock())
+            for owner, name in (
+                (torch, "Event"),
+                (torch.cuda, "Event"),
+                (torch.cuda, "Stream"),
+            ):
+                import_patch.setattr(owner, name, getattr(owner, name))
+            yield load
+    finally:
+        for name in list(sys.modules):
+            if name == prefix or name.startswith(prefix + "."):
+                del sys.modules[name]
+        sys.modules.update(before)
+        if old_parent is missing:
+            vars(parent).pop("ascend", None)
+        else:
+            parent.ascend = old_parent
+
+
+@pytest.fixture
 def mock_tensor(device):
     """Create a simple tensor on the test device."""
     return torch.randn(2, 4, 8, device=device)

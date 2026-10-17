@@ -67,6 +67,22 @@ class CudaBackend(Backend):
         from vllm.model_executor.layers.fused_moe.fused_marlin_moe import fused_marlin_moe
         return fused_marlin_moe(*args, **kwargs)
 
+    def cutlass_scaled_mm(
+        self,
+        a: torch.Tensor,
+        b: torch.Tensor,
+        scale_a: torch.Tensor,
+        scale_b: torch.Tensor,
+        out_dtype: torch.dtype,
+        bias: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Run vLLM's native CUTLASS scaled GEMM."""
+        from vllm import _custom_ops as ops
+
+        return ops.cutlass_scaled_mm(
+            a, b, scale_a, scale_b, out_dtype, bias
+        )
+
     def router_gemm_bf16_fp32(
         self, x: torch.Tensor, weight: torch.Tensor
     ) -> torch.Tensor:

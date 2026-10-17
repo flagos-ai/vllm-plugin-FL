@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import runpy
 import textwrap
+from pathlib import Path
 
 from tests.utils import platform_config
 from tests.utils.model_config import ModelConfig
@@ -136,3 +139,22 @@ def test_load_without_matching_device_case_override_uses_base_config(
 
     assert cfg.engine["tensor_parallel_size"] == 2
     assert cfg.engine["gpu_memory_utilization"] == 0.95
+
+
+def test_hygon_ci_matrix_preserves_release_cases_and_timeouts():
+    root = Path(__file__).resolve().parents[2]
+    matrix_module = runpy.run_path(str(root / ".github/scripts/generate_matrix.py"))
+    config = matrix_module["load_platform"]("hygon")
+    entries = matrix_module["build_e2e_matrix"](config, ["bw1000"], [])
+    serving = next(entry for entry in entries if entry["task"] == "serving")
+    inference = next(entry for entry in entries if entry["task"] == "inference")
+    assert serving["timeout"] == 60
+    assert inference["timeout"] == 60
+    assert json.loads(serving["cases"]) == [
+        {"model": "qwen3_6", "case": "27b_tp4_graph"},
+        {"model": "qwen3_6", "case": "35b_a3b_tp2_eager"},
+    ]
+    assert json.loads(inference["cases"]) == [
+        {"model": "qwen3_6", "case": "35b_a3b_tp4_graph"},
+        {"model": "qwen3_6", "case": "27b_tp2_eager"},
+    ]
