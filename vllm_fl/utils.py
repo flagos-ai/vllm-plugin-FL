@@ -99,6 +99,16 @@ def use_flaggems(default: bool = True) -> bool:
     return value.lower() in ("true", "1")
 
 
+def use_deepgemm_moe() -> bool:
+    """Opt-in switch to route the unquantized BF16 MoE experts through the
+    PPU-native DeepGEMM grouped GEMM (``deep_gemm``) instead of the default
+    FlagGems/Triton fused_moe. Enabled with ``VLLM_FL_MOE=deepgemm``.
+
+    When unset, behavior is identical to the previous default path.
+    """
+    return os.environ.get("VLLM_FL_MOE", "").strip().lower() == "deepgemm"
+
+
 def get_flag_gems_whitelist_blacklist() -> Tuple[
     Optional[list[str]], Optional[list[str]]
 ]:

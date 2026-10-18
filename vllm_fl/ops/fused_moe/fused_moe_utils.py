@@ -95,7 +95,10 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
     elif current_platform.is_cpu():
         _AVAILABLE_BACKENDS = [UnquantizedMoeBackend.CPU]
     else:
-        # Out-of-tree platforms (e.g. Kunlunxin): fallback to TRITON
+        # Out-of-tree platforms (e.g. the FL plugin backends). When FlagGems is
+        # disabled (USE_FLAGGEMS=0) we still need a native fallback, otherwise
+        # _AVAILABLE_BACKENDS would be unbound. Native Triton MoE kernels work
+        # on these CUDA-like devices.
         _AVAILABLE_BACKENDS = [
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
@@ -120,6 +123,12 @@ def select_unquantized_moe_backend_oot(
         return UnquantizedMoeBackend.TPU, None
 
     if current_platform.is_out_of_tree() and use_flaggems():
+        # Opt-in (VLLM_FL_MOE=deepgemm): route BF16 experts through the
+        # PPU-native DeepGEMM grouped GEMM instead of FlagGems Triton fused_moe.
+        from vllm_fl.utils import use_deepgemm_moe
+        if use_deepgemm_moe():
+            from vllm_fl.ops.fused_moe.deepgemm_experts import DeepGemmExpertsFL
+            return UnquantizedMoeBackend.TRITON, DeepGemmExpertsFL
         return UnquantizedMoeBackend.TRITON, TritonExpertsFL
 
     if moe_config.is_lora_enabled:
