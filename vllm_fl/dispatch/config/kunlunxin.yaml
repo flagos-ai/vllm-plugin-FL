@@ -27,9 +27,8 @@ strict: false
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:kunlunxin : Kunlunxin-specific vendor backend
 op_backends:
-  # attention_backend: prioritize flagos (FlagGems Triton) implementation
+  # attention_backend: vendor first (kunlunxin XPU_MLA_SPARSE for MLA)
   attention_backend:
-    - flagos
     - vendor
     - reference
 
@@ -81,6 +80,23 @@ op_backends:
 flagos_blacklist:
   # --- FlagGems ATen ops known broken on this platform ---
   - argmax
+  - max
+  - max_dim
+  - amax
+  - bmm
+  - grouped_topk
+  - mm
+  - mm_out
+  - sort
+  - stable_sort
+  - masked_fill
+  - masked_fill_
+  - log_softmax
+  - log_softmax_out
+  - log_softmax_backward
+  - log_softmax_backward_out
+  - pad
+  - constant_pad_nd
   - index_put_
   - normal_
   - copy_
@@ -93,7 +109,6 @@ flagos_blacklist:
   - slice_scatter
   - softmax
   - topk_softmax
-  - attention_backend
   # --- OOT ops never registered through FlagGems ---
   - chunk_gated_delta_rule_fwd
   - fused_recurrent_gated_delta_rule_fwd
