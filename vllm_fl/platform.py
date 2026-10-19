@@ -302,6 +302,21 @@ class PlatformFL(Platform):
             compilation_config.compile_sizes = []
 
         if (
+            cls.vendor_name == "metax"
+            and compilation_config.cudagraph_mode.has_full_cudagraphs()
+            and os.environ.get("VLLM_FL_METAX_ALLOW_FULL_GRAPH", "0") != "1"
+        ):
+            logger.info(
+                "METAX: Downgrading cudagraph_mode from %s to PIECEWISE. "
+                "MetaX runs MCCL, whose collectives cannot be captured into a "
+                "CUDA graph (a captured all_gather never completes), so FULL "
+                "decode graphs are not usable. PIECEWISE graphs still capture "
+                "the non-communication regions.",
+                compilation_config.cudagraph_mode,
+            )
+            compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+
+        if (
             cls.device_type == "musa"
             and compilation_config.cudagraph_mode.has_full_cudagraphs()
         ):
@@ -316,10 +331,28 @@ class PlatformFL(Platform):
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
+        # SPLITTING_OPS is keyed by device_type for MUSA/PTPU, but MetaX
+        # shares device_type "cuda" with other vendors, so it is keyed by
+        # vendor name there.
+        splitting_key = (
+            cls.vendor_name
+            if cls.vendor_name == "metax"
+            else cls.device_type
+        )
+        # ``cudagraph_mode`` is still None here: vLLM resolves it in
+        # ``resolve_cudagraph_mode`` during engine initialization, so gate on
+        # the mode only where it is known. MetaX applies the splitting
+        # unconditionally under TP, which is also what decides the default
+        # mode later.
+        mode_is_piecewise = (
+            splitting_key not in SPLITTING_OPS
+            or cls.vendor_name == "metax"
+            or compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+        )
         if (
-            cls.device_type in ("musa", "ptpu")
+            splitting_key in SPLITTING_OPS
             and parallel_config.tensor_parallel_size > 1
-            and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+            and mode_is_piecewise
         ):
             effective_dp_size = (
                 parallel_config.data_parallel_size
@@ -330,7 +363,7 @@ class PlatformFL(Platform):
                 compilation_config,
                 all2all_backend=parallel_config.all2all_backend,
                 data_parallel_size=effective_dp_size,
-                device_type=cls.device_type,
+                device_type=splitting_key,
             )
             logger.info(
                 "%s: Keeping TP collective ops outside PIECEWISE graph "
