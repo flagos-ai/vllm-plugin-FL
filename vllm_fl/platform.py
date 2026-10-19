@@ -117,6 +117,18 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
+    # MetaX: keep Ray from pinning each worker actor to a single visible
+    # device via CUDA_VISIBLE_DEVICES. interface.Platform defaults to [],
+    # so without this the device-control mapping degenerates to a no-op
+    # and torch.cuda.set_device(physical_id) is out of range because only
+    # one device is visible -> "CUDA error: invalid device ordinal" on
+    # every Ray worker (multi-node especially). Same fix metax needed for
+    # earlier models (v0.3.0-dev-ray f541006, minimax-m3 25b8d44).
+    ray_noset_device_env_vars: list[str] = (
+        ["RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES"]
+        if device_info.device_type == "cuda"
+        else []
+    )
     dist_backend: str = (
         "flagcx"
         if "FLAGCX_PATH" in os.environ
