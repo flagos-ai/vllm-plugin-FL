@@ -45,3 +45,73 @@ build:
   - changed-files:
       - any-glob-to-any-file:
           - 'pyproject.toml'
+
+platform:ascend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'vllm_fl/dispatch/backends/vendor/ascend/**'
+          - '.github/configs/ascend.yml'
+          - '.github/scripts/ascend/**'
+          - 'docker/ascend/**'
+
+platform:cuda:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'vllm_fl/dispatch/backends/vendor/cuda/**'
+          - '.github/configs/cuda.yml'
+          - '.github/scripts/cuda/**'
+          - 'docker/cuda/**'
+
+platform:kunlunxin:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'vllm_fl/dispatch/backends/vendor/kunlunxin/**'
+          - '.github/configs/kunlunxin.yml'
+          - '.github/scripts/kunlunxin/**'
+          - 'docker/kunlunxin/**'
+
+platform:metax:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'vllm_fl/dispatch/backends/vendor/metax/**'
+          - '.github/configs/metax.yml'
+          - '.github/scripts/metax/**'
+          - 'docker/metax/**'
+
+platform:musa:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'vllm_fl/dispatch/backends/vendor/musa/**'
+          - '.github/configs/musa.yml'
+          - '.github/scripts/musa/**'
+          - 'docker/musa/**'
+
+platform:iluvatar:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'vllm_fl/dispatch/backends/vendor/iluvatar/**'
+          - '.github/configs/iluvatar.yml'
+          - '.github/scripts/iluvatar/**'
+          - 'docker/iluvatar/**'
+
+platform:hygon:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/configs/hygon.yml'
+          - '.github/scripts/hygon/**'
+          - 'docker/hygon/**'
+
+platform:enflame:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/configs/enflame.yml'
+          - '.github/scripts/enflame/**'
+          - 'docker/enflame/**'
+
+platform:thead:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'vllm_fl/dispatch/backends/vendor/thead/**'
+          - '.github/configs/thead.yml'
+          - '.github/scripts/thead/**'
+          - 'docker/thead/**'

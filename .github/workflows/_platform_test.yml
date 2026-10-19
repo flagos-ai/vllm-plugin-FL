@@ -41,6 +41,14 @@ on:
       platform:
         required: true
         type: string
+      source_repository:
+        required: false
+        type: string
+        default: ""
+      source_ref:
+        required: false
+        type: string
+        default: ""
     secrets:
       FEISHU_APP_ID:
         required: false
@@ -61,6 +69,8 @@ jobs:
         id: checkout1
         uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
         continue-on-error: true
       - name: Checkout (attempt 2)
@@ -68,12 +78,16 @@ jobs:
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
       - id: load
         run: python .github/scripts/load_config.py --platform ${{ inputs.platform }}
@@ -104,6 +118,8 @@ jobs:
     uses: ./.github/workflows/_unit_test.yml
     with:
       platform: ${{ inputs.platform }}
+      source_repository: ${{ inputs.source_repository }}
+      source_ref: ${{ inputs.source_ref }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
@@ -117,6 +133,8 @@ jobs:
     uses: ./.github/workflows/_functional_test.yml
     with:
       platform: ${{ inputs.platform }}
+      source_repository: ${{ inputs.source_repository }}
+      source_ref: ${{ inputs.source_ref }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
@@ -136,6 +154,8 @@ jobs:
     uses: ./.github/workflows/_e2e_test.yml
     with:
       platform: ${{ inputs.platform }}
+      source_repository: ${{ inputs.source_repository }}
+      source_ref: ${{ inputs.source_ref }}
       task: ${{ matrix.test.task }}
       device: ${{ matrix.test.device }}
       cases: ${{ matrix.test.cases }}
@@ -152,6 +172,8 @@ jobs:
     uses: ./.github/workflows/_benchmark_test.yml
     with:
       platform: ${{ inputs.platform }}
+      source_repository: ${{ inputs.source_repository }}
+      source_ref: ${{ inputs.source_ref }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}

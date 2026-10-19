@@ -24,6 +24,14 @@ name: E2E Test
 on:
   workflow_call:
     inputs:
+      source_repository:
+        required: false
+        type: string
+        default: ""
+      source_ref:
+        required: false
+        type: string
+        default: ""
       platform:
         description: "Platform name (e.g., cuda, ascend)"
         required: true
@@ -85,15 +93,24 @@ jobs:
       - name: Checkout (attempt 1)
         id: checkout1
         uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
@@ -119,7 +136,7 @@ jobs:
 
       - name: Run E2E test
         run: |
-          python tests/run.py \
+          python .github/scripts/run_with_retry.py -- python tests/run.py \
             --platform ${{ inputs.platform }} \
             --device "${{ inputs.device }}" \
             --scope e2e \

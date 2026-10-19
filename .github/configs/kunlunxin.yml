@@ -15,6 +15,14 @@
 # Kunlunxin P800 OAM hardware configuration.
 platform: kunlunxin
 
+paths_watch:
+  - "vllm_fl/dispatch/backends/vendor/kunlunxin/**"
+  - "tests/**/*kunlunxin*"
+  - "tests/platforms/kunlunxin.yaml"
+  - ".github/configs/kunlunxin.yml"
+  - ".github/scripts/kunlunxin/**"
+  - "docker/kunlunxin/**"
+
 ci_image: harbor.baai.ac.cn/plugin/kunlunxin001-gems5.4.0-tree0.7.0rc2-triton3.6.0-cx0.13.0-plugin0.3.0-vllm0.24.0-cp310-pt29-x64-v5.0.21.47:202610110945
 
 runner_labels:

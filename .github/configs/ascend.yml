@@ -17,6 +17,14 @@
 
 platform: ascend
 
+paths_watch:
+  - "vllm_fl/dispatch/backends/vendor/ascend/**"
+  - "tests/**/*ascend*"
+  - "tests/platforms/ascend.yaml"
+  - ".github/configs/ascend.yml"
+  - ".github/scripts/ascend/**"
+  - "docker/ascend/**"
+
 # Docker image for this hardware
 ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:ascend-vllm0.20.2-a3-ci
 

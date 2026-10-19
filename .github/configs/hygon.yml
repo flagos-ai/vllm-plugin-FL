@@ -17,6 +17,13 @@
 
 platform: hygon
 
+paths_watch:
+  - "tests/**/*hygon*"
+  - "tests/platforms/hygon.yaml"
+  - ".github/configs/hygon.yml"
+  - ".github/scripts/hygon/**"
+  - "docker/hygon/**"
+
 # Docker image for this hardware.
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-hygon-ci
 
