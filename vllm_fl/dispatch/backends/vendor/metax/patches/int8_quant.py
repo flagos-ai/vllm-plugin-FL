@@ -14,6 +14,13 @@ not register it, so a W8A8 checkpoint fails during
 Route the dynamic case to the FlagGems per-token Triton kernel that the
 dispatch backend already uses for ``dynamic_per_token_quant_int8``.  The static
 per-tensor case has no portable equivalent here and keeps the vendor wrapper.
+
+The kernel is wrapped in a ``torch.library.custom_op`` with a fake
+implementation, the same pattern ``dispatch/backends/flaggems/impl/query_quant``
+uses.  Calling the Triton launcher directly is not Dynamo-traceable (FlagGems'
+``libentry`` wrapper indexes ``jit_function.params``, which raises
+``Unsupported method call ... __getitem__ of class <unknown type>``), so graph
+mode failed while tracing the first W8A8 projection.
 """
 
 from __future__ import annotations
@@ -27,6 +34,28 @@ logger = logging.getLogger(__name__)
 _APPLIED = False
 
 
+@torch.library.custom_op(
+    "vllm_fl::metax_dynamic_per_token_int8", mutates_args=()
+)
+def dynamic_per_token_int8_op(
+    input: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantize ``input[M, H]`` to symmetric per-token INT8 (FlagGems Triton)."""
+    from vllm_fl.dispatch.backends.flaggems.impl.quantization import (
+        dynamic_per_token_quant_int8_flaggems_triton,
+    )
+
+    return dynamic_per_token_quant_int8_flaggems_triton(input)
+
+
+@dynamic_per_token_int8_op.register_fake
+def _fake_dynamic_per_token_int8_op(input):
+    return (
+        torch.empty_like(input, dtype=torch.int8),
+        torch.empty((input.shape[0], 1), device=input.device, dtype=torch.float32),
+    )
+
+
 def _dynamic_per_token_int8(
     input: torch.Tensor, symmetric: bool
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
@@ -35,16 +64,12 @@ def _dynamic_per_token_int8(
             "MetaX dynamic asymmetric INT8 quantization is not implemented; "
             "compressed-tensors W8A8 checkpoints use the symmetric scheme."
         )
-    from vllm_fl.dispatch.backends.flaggems.impl.quantization import (
-        dynamic_per_token_quant_int8_flaggems_triton,
-    )
-
     orig_shape = input.shape
     if input.ndim == 1:
         input = input.reshape(1, -1)
     elif input.ndim > 2:
         input = input.reshape(-1, input.shape[-1])
-    quantized, scale = dynamic_per_token_quant_int8_flaggems_triton(input)
+    quantized, scale = dynamic_per_token_int8_op(input)
     return quantized.view(orig_shape), scale, None
 
 
