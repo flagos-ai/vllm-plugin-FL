@@ -23,6 +23,8 @@ fi
 # Only install the checked-out plugin source for this workflow run.
 python -m pip install --no-build-isolation --no-deps -e .
 
+python .github/scripts/install_flaggems_vllm.py
+
 # Patch FlagGems LibTuner to fall back to best_config on cache KeyError.
 # TODO: remove when FlagGems fixes kernel hash stability in LibTuner.
 python - <<'PATCH'

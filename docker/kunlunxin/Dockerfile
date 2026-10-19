@@ -52,7 +52,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GEMS_VENDOR=kunlunxin \
     VLLM_PLUGINS=fl \
     FLAGCX_PATH=/workspace/FlagCX \
-    USE_RESHAPE_AND_CACHE_FLASH=1 \
     VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800 \
     PATH="/root/miniconda/envs/python310_torch29_cuda/bin:${PATH}" \

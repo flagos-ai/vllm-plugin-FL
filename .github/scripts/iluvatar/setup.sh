@@ -14,6 +14,8 @@ git config --global --add safe.directory "$(pwd)"
 # Python package without requesting the optional native extension build.
 python -m pip install --no-build-isolation --no-deps -e .
 
+python .github/scripts/install_flaggems_vllm.py
+
 python - <<'PY'
 import flag_gems
 import torch

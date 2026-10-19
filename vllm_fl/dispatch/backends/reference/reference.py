@@ -67,6 +67,11 @@ class ReferenceBackend(Backend):
 
         return silu_and_mul_torch(obj, x)
 
+    def silu_and_mul_with_clamp(self, obj, x: torch.Tensor) -> torch.Tensor:
+        from .impl.activation import silu_and_mul_with_clamp_torch
+
+        return silu_and_mul_with_clamp_torch(obj, x)
+
     def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         GELU activation followed by element-wise multiplication.
@@ -142,6 +147,13 @@ class ReferenceBackend(Backend):
             rotary_interleaved=rotary_interleaved,
             inplace=inplace,
         )
+
+    def apply_rotary_emb(
+        self, obj, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+    ) -> torch.Tensor:
+        from .impl.rotary import apply_rotary_emb_torch
+
+        return apply_rotary_emb_torch(obj, x, cos, sin)
 
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """

@@ -9,6 +9,7 @@ decode batch size 512 with HV=1).
 
 from __future__ import annotations
 
+import importlib
 import logging
 
 import torch
@@ -281,10 +282,11 @@ def apply_fused_recurrent_packed_decode_gcu_patch() -> None:
     if gcu is None or not gcu.is_available():
         return
 
+    patched: list[str] = []
+
+    # The module that defines the kernel object and the launcher that calls it.
     try:
-        import vllm.model_executor.layers.fla.ops as fla_ops
         import vllm.model_executor.layers.fla.ops.fused_recurrent as fused_recurrent
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as gdn_linear_attn
 
         fused_recurrent.fused_recurrent_gated_delta_rule_packed_decode_kernel = (
             fused_recurrent_gated_delta_rule_packed_decode_kernel_gcu
@@ -292,22 +294,45 @@ def apply_fused_recurrent_packed_decode_gcu_patch() -> None:
         fused_recurrent.fused_recurrent_gated_delta_rule_packed_decode = (
             fused_recurrent_gated_delta_rule_packed_decode_gcu
         )
-        # gdn_linear_attn imports the launcher at module load time.
-        fla_ops.fused_recurrent_gated_delta_rule_packed_decode = (
-            fused_recurrent_gated_delta_rule_packed_decode_gcu
-        )
-        gdn_linear_attn.fused_recurrent_gated_delta_rule_packed_decode = (
-            fused_recurrent_gated_delta_rule_packed_decode_gcu
-        )
-        _patched = True
-        logger.info(
-            "Patched fused_recurrent_gated_delta_rule_packed_decode for GCU "
-            "(grid.x <= %d, grid.y <= %d)",
-            GCU_MAX_GRID_X,
-            GCU_MAX_GRID_YZ,
-        )
+        patched.append("vllm.model_executor.layers.fla.ops.fused_recurrent")
     except Exception as exc:
         logger.warning(
-            "Failed to patch fused_recurrent_gated_delta_rule_packed_decode for GCU: %s",
-            exc,
+            "Failed to patch the fused_recurrent module for GCU: %s", exc
         )
+
+    # Callers bind the launcher into their own namespace at module load time,
+    # so each of them has to be rebound here.  The GDN attention layer moved
+    # from ``mamba/gdn_linear_attn.py`` to ``mamba/gdn/qwen_gdn_linear_attn.py``;
+    # every candidate is tried independently so that a missing one can no longer
+    # abort the remaining rebinds (or the patch as a whole).
+    for module_name in (
+        "vllm.model_executor.layers.fla.ops",
+        "vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn",
+        "vllm.model_executor.layers.mamba.gdn_linear_attn",
+    ):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        if not hasattr(module, "fused_recurrent_gated_delta_rule_packed_decode"):
+            continue
+        module.fused_recurrent_gated_delta_rule_packed_decode = (
+            fused_recurrent_gated_delta_rule_packed_decode_gcu
+        )
+        patched.append(module_name)
+
+    if not patched:
+        logger.warning(
+            "Failed to patch fused_recurrent_gated_delta_rule_packed_decode for "
+            "GCU: no target module could be imported"
+        )
+        return
+
+    _patched = True
+    logger.info(
+        "Patched fused_recurrent_gated_delta_rule_packed_decode for GCU "
+        "(grid.x <= %d, grid.y <= %d) in %s",
+        GCU_MAX_GRID_X,
+        GCU_MAX_GRID_YZ,
+        ", ".join(patched),
+    )

@@ -139,6 +139,7 @@ jobs:
       task: ${{ matrix.test.task }}
       device: ${{ matrix.test.device }}
       cases: ${{ matrix.test.cases }}
+      flaggems_vllm: ${{ matrix.test.flaggems_vllm || '' }}
       ci_image: ${{ matrix.test.image || fromJson(needs.setup.outputs.config).ci_image }}
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.test.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}

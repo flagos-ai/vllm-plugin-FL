@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -ne 2 ]]; then
-  echo "usage: $0 <served-model-name> <run-dir>" >&2
+if [[ "$#" -lt 2 || "$#" -gt 3 ]]; then
+  echo "usage: $0 <served-model-name> <run-dir> [eager-results-dir]" >&2
   exit 2
 fi
 
@@ -70,10 +70,14 @@ python3 "$TOOL_DIR/run_concurrent_requests.py" \
   --metrics "$RUN_DIR/profiled_metrics.json"
 stop_profile 0
 
+reference_args=()
+if [[ "$#" -eq 3 ]]; then
+  reference_args=(--eager-reference "$3")
+fi
 python3 "$TOOL_DIR/extract_operator_shapes.py" \
-  --runtime "$PROFILE_DIR" \
-  --rank 0 \
-  --output-dir "$RESULT_DIR"
+  --trace-dir "$PROFILE_DIR" \
+  --output-dir "$RESULT_DIR" \
+  "${reference_args[@]}"
 
 if [[ -f "$FLAGGEMS_OPLIST" ]]; then
   mv "$FLAGGEMS_OPLIST" "$RESULT_DIR/flaggems_enable_oplist.txt"

@@ -32,6 +32,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
+| HY4-Preview | Merging (NVIDIA) | [installation](#hy4-on-nvidia) |
 
 ### Supported Chips
 
@@ -127,6 +128,12 @@ Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
 
+On Iluvatar with vLLM 0.24, the FlagOS GPU runner binds all attention caches
+within each decoder layer, including separate main and index caches. Binding
+preserves layer order, cache order within a layer, tensor identity and shared
+aliases. This cache initialization fix does not enable graph capture or establish
+model or operator support; validate those separately in the target environment.
+
 ### Operator profiling
 
 See the [operator profiling tools](./tools/operator_profile/README.md) for a
@@ -184,6 +191,56 @@ If there are multiple plugins in the current environment, you can specify use vl
 
     Ascend requires eager execution. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line.
 
+
+### HY4 on NVIDIA
+
+HY4 is paired with this branch's vLLM 0.24.0 environment and the shared
+[FlagGems-vllm integration](./docs/flaggems-vllm.md). Its MLA query concatenation
+and graph-safe paged MQA logits APIs are now merged into upstream FlagGems-vllm.
+They are newer than the v0.2.0 release used by the shared CI installer, so install
+the current upstream main after the framework and FlagGems setup described above:
+
+```sh
+python3 -m pip install --no-deps --no-build-isolation --force-reinstall \
+  'flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git'
+```
+
+HY4 uses the public `flaggems_vllm` sparse indexer, cache and attention APIs;
+query quantization uses general FlagGems. No model-specific dependency extra or
+fork revision is required. The shared fused-operator rollout switch and its
+default behavior are described in the integration documentation.
+Runtime selection checks callable APIs, device kernels and the shared dispatch
+policy before allocating model weights. A selected operator's execution error
+propagates without retrying another implementation.
+
+Use `hy4_safetensors` to load the preview checkpoint with expert slicing. The
+portable path requires BF16 KV (`auto` with a BF16 model, or `bfloat16`); FP8 KV
+requires the complete native sparse/cache/prefill path. Shared indexers require
+pipeline parallel size 1. The [manual checkpoint smoke configuration](./tests/models/hy4/fp8_tp16.yaml)
+requires 16 NVIDIA GPUs; the single-GPU dummy smoke checks model integration.
+HY4-Preview currently targets NVIDIA H100, vLLM 0.24.0, the MXFP8 preview
+checkpoint, BF16 activations and BF16 portable KV. Other chips, multimodal serving and portable FP8 KV
+are not validated. Sparse indexer providers use explicit entry points while
+preserving the real CUDA platform identity.
+The portable sparse indexer checks the selected paged MQA logits provider's
+graph capability before loading weights. Upstream FlagGems-vllm exposes
+`fp8_fp4_paged_mqa_logits_graph` for static-grid CUDA Graph capture, reading
+lengths and page mappings on the GPU on every replay. The shared dispatch
+selects that public entry point when available; older operator builds without
+the capability require `--enforce-eager`.
+
+With the graph-safe operator build, use `FULL_DECODE_ONLY` with compilation
+mode `NONE`, for example:
+
+```bash
+--compilation-config '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4],"max_cudagraph_capture_size":4}'
+```
+
+The shared CachedOp prewarming from
+[vllm-plugin-FL #552](https://github.com/flagos-ai/vllm-plugin-FL/pull/552) is
+used after model loading. Whole-model Dynamo compilation remains limited
+by the current FlagGems `libentry` implementation; CUDA Graph mode `NONE`
+and eager execution remain available.
 
 ### Run a Task
 

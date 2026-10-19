@@ -268,13 +268,13 @@ from vllm.v1.worker.utils import (
     AttentionGroup,
     KVBlockZeroer,
     add_kv_sharing_layers_to_kv_cache_groups,
-    bind_kv_cache,
     prepare_kernel_block_sizes,
     sanity_check_mm_encoder_outputs,
 )
 
 # FL-specific imports
 from vllm_fl.compilation.graph import GraphWrapper
+from vllm_fl.dispatch import prewarm_cached_ops
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.dispatch.io_dumper import (
     advance_io_step,
@@ -286,6 +286,7 @@ from vllm_fl.worker.common_attention_metadata import (
     common_attention_metadata_enabled,
     compute_common_attention_metadata,
 )
+from vllm_fl.worker.kv_cache_utils import bind_kv_cache
 
 GraphWrapper = GraphWrapper
 
@@ -5394,6 +5395,11 @@ class ModelRunnerFL(
             format_gib(self.model_memory_usage),
             time_after_load - time_before_load,
         )
+
+        # All model modules are loaded now, while compilation and CUDA Graph
+        # capture have not started yet. Resolve CachedOps outside either graph.
+        prewarm_cached_ops()
+
         if not load_dummy_weights:
             prepare_communication_buffer_for_model(self.model)
             # FL: register IO dumper module hooks
@@ -6665,12 +6671,20 @@ class ModelRunnerFL(
         all_wrappers = list(GraphWrapper._all_instances) + list(
             BreakableCUDAGraphWrapper._all_instances
         )
+        private_breakable_graphs = any(
+            instance.graph_pool is None
+            for instance in BreakableCUDAGraphWrapper._all_instances
+        )
         for instance in all_wrappers:
             original_pools[id(instance)] = instance.graph_pool
-            instance.graph_pool = profiling_pool
+            # None requests independent pools, including every breakable segment.
+            # Profiling must preserve the runtime allocation policy.
+            if instance.graph_pool is not None:
+                instance.graph_pool = profiling_pool
 
         shared_memory_estimate = {}
         per_graph_estimate = {}
+        private_memory_estimate = 0
         encoder_memory_estimate = 0
         # Cleanup-only guard: CUDA graph capture errors should still propagate
         # because encoder graph capture is opt-in.
@@ -6681,7 +6695,15 @@ class ModelRunnerFL(
                 torch.accelerator.empty_cache()
 
                 for mode, descs in capture_descs:
-                    profile_descs = descs[:2]
+                    if not descs:
+                        continue
+                    # Native Breakable PIECEWISE also owns private pools when
+                    # no compiled runner exists. Measure every descriptor;
+                    # extrapolating a shared-pool sample can under-budget it.
+                    private_pools = private_breakable_graphs
+                    # Private pools cannot overlay allocations across sizes or
+                    # segments. Capture every descriptor and add its full cost.
+                    profile_descs = descs if private_pools else descs[:2]
                     mem_samples: list[int] = []
 
                     for i, desc in enumerate(profile_descs):
@@ -6701,6 +6723,17 @@ class ModelRunnerFL(
                         _accelerator_synchronize()
                         free_after = current_platform.torch_device_fn.mem_get_info()[0]
                         mem_samples.append(mem_before - free_after)
+
+                    if private_pools:
+                        private_memory_estimate += sum(
+                            max(sample, 1 << 20) for sample in mem_samples
+                        )
+                        logger.debug(
+                            "Measured private graph memory: %.2f MiB for %d graphs",
+                            private_memory_estimate / (1 << 20),
+                            len(descs),
+                        )
+                        continue
 
                     first_capture = mem_samples[0]
                     # Use at least 1 MiB per graph for driver overhead
@@ -6749,11 +6782,12 @@ class ModelRunnerFL(
             self._cleanup_profiling_kv_cache()
             compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
 
-        # FULL and PIECEWISE graphs share the global pool at runtime and are
-        # never replayed concurrently, so the pool overlays their memory.
-        # Take the max to avoid double-counting the overlap.
-        decoder_estimate = max(shared_memory_estimate.values(), default=0) + sum(
-            per_graph_estimate.values()
+        # Overlay shared-pool modes, but add private Breakable pools: neither their
+        # sizes nor their breakable segments can share activation storage.
+        decoder_estimate = (
+            private_memory_estimate
+            + max(shared_memory_estimate.values(), default=0)
+            + sum(per_graph_estimate.values())
         )
         # Encoder graphs use a manager-local pool at runtime, separate from the
         # decoder pool, so add their estimate instead of overlaying it.

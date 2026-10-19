@@ -248,10 +248,14 @@ class WorkerFL(WorkerBase):
         for k, v in sorted(os.environ.items()):
             logger.debug("%s=%r", k, v)
 
-        # Apply the NVIDIA MM encoder dispatch fix before model construction:
-        # CustomOp caches its selected forward method in __init__.
-        from vllm_fl.attention.utils import patch_mm_encoder_attention
+        # Apply the MM encoder / partial-RoPE dispatch fixes before model
+        # construction: CustomOp caches its selected forward method in __init__.
+        from vllm_fl.attention.utils import (
+            patch_mm_encoder_attention,
+            patch_oot_apply_rotary_emb,
+        )
         patch_mm_encoder_attention()
+        patch_oot_apply_rotary_emb()
 
         register_oot_ops()
 
@@ -366,6 +370,23 @@ class WorkerFL(WorkerBase):
                 import logging as _lg
                 _lg.getLogger(__name__).warning(
                     "iluvatar worker patch failed: %s", _e
+                )
+
+        # PTPU: register the Inductor/Dynamo/Triton wiring in EVERY worker
+        # process (torch.compile runs here, not in EngineCore, and the
+        # Inductor/Dynamo registries are per-process). Mirrors the iluvatar
+        # GPUTarget remap above; idempotent + no-op on other devices.
+        if getattr(current_platform, "device_type", "") == "ptpu":
+            try:
+                from vllm_fl.compilation.inductor_backend import (
+                    register_ptpu_inductor_backend,
+                )
+
+                register_ptpu_inductor_backend()
+            except Exception as _e:
+                import logging as _lg
+                _lg.getLogger(__name__).warning(
+                    "ptpu inductor backend registration failed: %s", _e
                 )
         # This env var set by Ray causes exceptions with graph building.
         if (
@@ -595,7 +616,10 @@ class WorkerFL(WorkerBase):
             # runtime activations and fail with OOM.
             cudagraph_memory_estimate = 0
             if (
-                current_platform.is_cuda()
+                (
+                    current_platform.is_cuda()
+                    or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+                )
                 and self.vllm_config.compilation_config.cudagraph_mode
                 != CUDAGraphMode.NONE
             ):

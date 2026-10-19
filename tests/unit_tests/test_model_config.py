@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
+
 from tests.utils import platform_config
 from tests.utils.model_config import ModelConfig
 
@@ -136,3 +138,20 @@ def test_load_without_matching_device_case_override_uses_base_config(
 
     assert cfg.engine["tensor_parallel_size"] == 2
     assert cfg.engine["gpu_memory_utilization"] == 0.95
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp4_eager", "27b_tp4_graph", "35b_a3b_tp4_eager", "35b_a3b_tp4_graph"],
+)
+def test_kunlunxin_ci_uses_validated_batch_capacity(case):
+    """Keep serving and offline CI aligned with the 1..256 regression profile."""
+    cfg = ModelConfig.load("qwen3_6", case, platform="kunlunxin", device="p800")
+
+    assert cfg.engine_kwargs()["max_num_seqs"] == 256
+    args = cfg.serve_args(**cfg.serve.extra_engine)
+    assert args.count("--max-num-seqs") == 1
+    assert args[args.index("--max-num-seqs") + 1] == "256"
+    assert cfg.engine["enforce_eager"] is case.endswith("_eager")
+    assert ("--enforce-eager" in args) is case.endswith("_eager")
+    assert "--compilation-config" not in args

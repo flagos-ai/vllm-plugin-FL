@@ -30,6 +30,7 @@ def _install_flaggems_vllm_quant_module(monkeypatch, quant_fn):
 
 
 def test_dynamic_per_token_quant_prefers_flaggems_vllm(monkeypatch):
+    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "1")
     x = torch.ones((2, 4), dtype=torch.bfloat16)
     expected_q = torch.ones_like(x, dtype=torch.int8)
     expected_scale = torch.full((2, 1), 0.25, dtype=torch.float32)
@@ -51,6 +52,8 @@ def test_dynamic_per_token_quant_prefers_flaggems_vllm(monkeypatch):
 def test_dynamic_per_token_quant_propagates_failure_for_dispatch_fallback(
     monkeypatch,
 ):
+    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "1")
+
     def unavailable(_value, *, scale, azp, symmetric):
         raise RuntimeError("FlagGems-vLLM kernel is unavailable")
 

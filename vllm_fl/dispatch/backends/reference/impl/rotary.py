@@ -9,6 +9,17 @@ from __future__ import annotations
 import torch
 
 
+def apply_rotary_emb_torch(
+    obj, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> torch.Tensor:
+    """Apply partial RoPE with vLLM's native math on the rotary slice."""
+    rotary_dim = cos.shape[-1] * 2
+    rotated = obj.forward_native(x[..., :rotary_dim], cos, sin)
+    if rotary_dim == x.shape[-1]:
+        return rotated
+    return torch.cat((rotated, x[..., rotary_dim:]), dim=-1)
+
+
 def rotary_embedding_torch(
     obj,
     query: torch.Tensor,

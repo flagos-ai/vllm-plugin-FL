@@ -46,6 +46,7 @@ container_volumes:
 container_options: >-
   --privileged
   --gpus all
+  --env VLLM_FL_USE_FLAGGEMS_VLLM=1
   --ipc=host
   --hostname vllm-plugin-fl
   --user root
