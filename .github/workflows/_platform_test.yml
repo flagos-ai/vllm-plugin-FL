@@ -21,9 +21,9 @@
 #   nightly — functional + e2e main cases + benchmark
 #   weekly  — functional + e2e full cases + benchmark
 #
-# On PRs the caller additionally tier-selects jobs by label via run_e2e /
-# run_benchmark: ci-functional runs functional only, ci-e2e adds e2e smoke,
-# ci-full adds benchmark.
+# On PRs the caller tier-selects jobs via run_e2e / run_benchmark derived
+# from labels: no tier label (or ci-full) runs the full stack;
+# ci-functional runs functional only; ci-e2e adds e2e smoke.
 #
 # Main steps:
 # 1. setup:      Load platform config and generate test matrices

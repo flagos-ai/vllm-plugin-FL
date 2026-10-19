@@ -14,11 +14,12 @@
 
 # PR CI Workflow
 #
-# Stage design (PR label tiers gate the hardware stages):
+# Stage design (PR labels narrow the hardware stages; default is full):
 #   lint + build  — always run, no hardware required
-#   functional    — unit + functional (GPU), requires ci-functional/ci-e2e/ci-full label
-#   e2e smoke     — lightweight E2E (text + multimodal), requires ci-e2e/ci-full label
-#   benchmark     — bench entrypoint validation, requires ci-full label
+#   no label      — full: functional + e2e + benchmark on routed platforms
+#   ci-functional — functional only
+#   ci-e2e        — functional + e2e smoke
+#   ci-full       — full (explicit form of the default)
 #
 # Platform routing: diff-based — only platforms whose trigger_paths match the
 # PR diff are tested. Changes to shared code (see global_trigger_paths in
@@ -80,11 +81,12 @@ jobs:
     timeout-minutes: 5
     outputs:
       platforms: ${{ steps.detect.outputs.platforms }}
-      # Stage selection from PR labels: ci-functional = functional only,
-      # ci-e2e adds e2e smoke, ci-full adds benchmark. workflow_dispatch
-      # runs everything.
-      run_e2e: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
-      run_benchmark: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
+      # Stage selection from PR labels. Default (no tier label) and
+      # workflow_dispatch run the full stack; tier labels narrow it:
+      # ci-functional = functional only, ci-e2e adds e2e smoke, ci-full
+      # keeps the full stack (explicit).
+      run_e2e: ${{ github.event_name == 'workflow_dispatch' || !(contains(github.event.pull_request.labels.*.name, 'ci-functional') || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full')) || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
+      run_benchmark: ${{ github.event_name == 'workflow_dispatch' || !(contains(github.event.pull_request.labels.*.name, 'ci-functional') || contains(github.event.pull_request.labels.*.name, 'ci-e2e') || contains(github.event.pull_request.labels.*.name, 'ci-full')) || contains(github.event.pull_request.labels.*.name, 'ci-full') }}
     steps:
       - name: Checkout (attempt 1)
         id: checkout1
@@ -146,14 +148,7 @@ jobs:
   # ============================================================
   test-nvidia:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'nvidia') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'nvidia')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: nvidia
@@ -164,14 +159,7 @@ jobs:
 
   test-ascend:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'ascend') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'ascend')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: ascend
@@ -182,14 +170,7 @@ jobs:
 
   test-hygon:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'hygon') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'hygon')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: hygon
@@ -200,14 +181,7 @@ jobs:
 
   test-metax:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'metax') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'metax')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: metax
@@ -218,14 +192,7 @@ jobs:
 
   test-musa:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'musa') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'musa')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: musa
@@ -236,14 +203,7 @@ jobs:
 
   test-enflame:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'enflame') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'enflame')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: enflame
@@ -254,14 +214,7 @@ jobs:
 
   test-kunlunxin:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'kunlunxin')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: kunlunxin
@@ -272,14 +225,7 @@ jobs:
 
   test-thead:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'thead') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: thead
@@ -290,14 +236,7 @@ jobs:
 
   test-iluvatar:
     needs: discover
-    if: |
-      contains(fromJson(needs.discover.outputs.platforms), 'iluvatar') &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci-functional') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-e2e') ||
-        contains(github.event.pull_request.labels.*.name, 'ci-full')
-      )
+    if: contains(fromJson(needs.discover.outputs.platforms), 'iluvatar')
     uses: ./.github/workflows/_platform_test.yml
     with:
       platform: iluvatar
