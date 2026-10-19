@@ -34,7 +34,7 @@ from .int8_mode import (
 )
 from .reference import unpack_uint8b128_int32
 
-_PATCH_MARKER = "_vllm_fl_packed_w8a8_v024"
+_PATCH_MARKER = "_vllm_fl_packed_w8a8_adapter"
 
 
 class CompressedTensorsPackedW8A8Int8(CompressedTensorsW8A8Int8):
