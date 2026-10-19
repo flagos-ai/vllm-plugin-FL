@@ -50,6 +50,13 @@ on:
         required: false
         type: number
         default: 30
+      dock_sweeps:
+        description: >
+          Extra matrix entries (JSON array) docking on specific runner
+          labels, e.g. a carrier aimed at one known half-stocked machine.
+        required: false
+        type: string
+        default: "[]"
 
 jobs:
   benchmark-test:
@@ -66,9 +73,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sweep: [1, 2, 3, 4, 5]
-    runs-on: ${{ fromJson(inputs.runner_labels) }}
-    timeout-minutes: ${{ inputs.timeout }}
+        sweep: [1, 2, 3]
+        # TARGETED CARRIER: caller (cuda only) injects a "h20dock" entry that
+        # docks on the h20 label to reach the half-stocked runner which grabs
+        # a100-shaped jobs (PR #597, baai-sailing-h20-1) and stock the
+        # a100-case models it is missing (~240GB).
+        include: ${{ fromJson(inputs.dock_sweeps) }}
+    runs-on: ${{ matrix.runs_on && matrix.runs_on || fromJson(inputs.runner_labels) }}
+    timeout-minutes: ${{ matrix.timeout_min || inputs.timeout }}
     container:
       image: ${{ inputs.ci_image }}
       volumes: ${{ fromJson(inputs.container_volumes) }}
@@ -88,10 +100,10 @@ jobs:
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
 
-      # DOWNLOAD-ONLY PROBE (PR #600): reaching a cold machine is the whole
-      # mission — this job stocks ALL THREE models the metax matrix needs
-      # (Qwen3-0.6B + Qwen3.6-27B + Qwen3.6-35B-A3B, file-derived) and runs
-      # NO tests. Healthy machines: ~1 min. Cold machine: ~2h download.
+      # DOWNLOAD-ONLY PROBE (all-platform heal): reaching a cold machine is
+      # the whole mission — this job stocks every model the platform's own
+      # case files demand (platform_models.py, no hardcoded list) and runs NO
+      # tests. Healthy machines: ~1 min. Cold machine: hours of download.
       - name: Machine fingerprint and full model prefetch
         run: |
           echo "pod=$(hostname)"
@@ -100,15 +112,28 @@ jobs:
           df -h /data || true
           stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
           ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
-          python .github/scripts/download_model.py \
-            --repo Qwen/Qwen3-0.6B \
-            --dest /data/models/Qwen/Qwen3-0.6B
-          python .github/scripts/download_model.py \
-            --repo Qwen/Qwen3.6-27B \
-            --dest /data/models/Qwen/Qwen3.6-27B
-          python .github/scripts/download_model.py \
-            --repo Qwen/Qwen3.6-35B-A3B \
-            --dest /data/models/Qwen/Qwen3.6-35B-A3B
+          python .github/scripts/platform_models.py \
+            --platform ${{ inputs.platform }} \
+            > /tmp/model-plan.tsv
+          cat /tmp/model-plan.tsv
+          TAB=$(printf "\t")
+          # col2: DL=repo id / SCAN=model path; col3: DL=dest / SCAN=note text
+          while IFS="$TAB" read -r action col2 col3; do
+            case "$action" in
+              DL)
+                python .github/scripts/download_model.py --repo "$col2" --dest "$col3"
+                ;;
+              SCAN)
+                if [ -f "$col2/config.json" ]; then
+                  echo "[scan] $col2 PRESENT ($col3)"
+                  head -c 300 "$col2/config.json" || true
+                  echo
+                else
+                  echo "[scan] $col2 MISSING — scan-only, no download ($col3)"
+                fi
+                ;;
+            esac
+          done < /tmp/model-plan.tsv
           echo "--- df after ---"
           df -h /data || true
 

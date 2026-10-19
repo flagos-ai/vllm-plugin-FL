@@ -70,6 +70,13 @@ on:
         required: false
         type: string
         default: ""
+      run_tests:
+        description: >
+          Download-only carriers leave this false (tests gated off). The
+          verification carrier sets it true to execute the real e2e steps.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   e2e-test:
@@ -107,12 +114,12 @@ jobs:
           echo "VLLM_FL_USE_FLAGGEMS_VLLM=$FUSED_MODE" >> "$GITHUB_ENV"
           echo "Model gate: VLLM_FL_USE_FLAGGEMS_VLLM=$FUSED_MODE"
 
-      # DEBUG PROBE (PR #594): fingerprint the backing machine and self-heal
-      # its local /data — the metax pool hides a machine missing 0.6B/27B/35B
-      # (PR #593 run 38700972319 job 116328356263). Downloads are idempotent
-      # and flock-protected; healthy machines pay a df + stat each. df before
-      # and after also exposes a disk-space-limited deletion mechanism if
-      # space runs out mid-download.
+      # DEBUG PROBE (all-platform heal): fingerprint the backing machine and
+      # self-heal its local /data. Model list is derived from this platform's
+      # own case files (platform_models.py) — no hardcoded model names, so it
+      # cannot drift from what check-models will demand. Downloads are
+      # idempotent and flock-protected; healthy machines pay a df + stat each.
+      # SCAN lines report-only (shared mounts / unclear repo identity).
       - name: Machine fingerprint and model prefetch
         run: |
           echo "pod=$(hostname)"
@@ -122,24 +129,38 @@ jobs:
           df -h /data || true
           stat -c 'dev=%d ino=%i mtime=%y' /data /data/models /data/models/Qwen 2>/dev/null || true
           ls -la /data/models/Qwen/ 2>/dev/null | head -30 || true
-          python .github/scripts/download_model.py \
-            --repo Qwen/Qwen3-0.6B \
-            --dest /data/models/Qwen/Qwen3-0.6B
-          python .github/scripts/download_model.py \
-            --repo Qwen/Qwen3.6-27B \
-            --dest /data/models/Qwen/Qwen3.6-27B
-          python .github/scripts/download_model.py \
-            --repo Qwen/Qwen3.6-35B-A3B \
-            --dest /data/models/Qwen/Qwen3.6-35B-A3B
+          python .github/scripts/platform_models.py \
+            --platform ${{ inputs.platform }} \
+            ${{ inputs.device != '' && format('--device {0}', inputs.device) || '' }} \
+            > /tmp/model-plan.tsv
+          cat /tmp/model-plan.tsv
+          TAB=$(printf "\t")
+          # col2: DL=repo id / SCAN=model path; col3: DL=dest / SCAN=note text
+          while IFS="$TAB" read -r action col2 col3; do
+            case "$action" in
+              DL)
+                python .github/scripts/download_model.py --repo "$col2" --dest "$col3"
+                ;;
+              SCAN)
+                if [ -f "$col2/config.json" ]; then
+                  echo "[scan] $col2 PRESENT ($col3)"
+                  head -c 300 "$col2/config.json" || true
+                  echo
+                else
+                  echo "[scan] $col2 MISSING — scan-only, no download ($col3)"
+                fi
+                ;;
+            esac
+          done < /tmp/model-plan.tsv
           echo "--- df after ---"
           df -h /data || true
 
       - name: Install project
-        if: false  # download-only carrier
+        if: inputs.run_tests == true
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Check test models
-        if: false  # download-only carrier
+        if: inputs.run_tests == true
         run: |
           python .github/scripts/generate_matrix.py \
             --platform ${{ inputs.platform }} \
@@ -148,7 +169,7 @@ jobs:
             --check-models
 
       - name: Run E2E test
-        if: false  # download-only carrier
+        if: inputs.run_tests == true
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
@@ -158,7 +179,7 @@ jobs:
             --cases '${{ inputs.cases }}'
 
       - name: Upload test results
-        if: false  # download-only carrier
+        if: ${{ inputs.run_tests == true && always() }}
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:

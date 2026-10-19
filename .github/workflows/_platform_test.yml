@@ -152,6 +152,48 @@ jobs:
       # ~125GB of models from the mirror before running the 27B/35B cases.
       timeout: ${{ matrix.test.timeout || 240 }}
 
+  # VERIFICATION CARRIER (cuda only): execute the REAL a100 e2e inference
+  # cases — the exact set PR #597 failed on (check-models MISSING ×4) — on
+  # the healed cold machine, docking via its reliable h20 label. Closes the
+  # loop: healing proved the models present; this proves the tests run green
+  # on that machine.
+  verify-cold-a100:
+    needs: [setup]
+    if: inputs.platform == 'cuda'
+    uses: ./.github/workflows/_e2e_test.yml
+    with:
+      platform: ${{ inputs.platform }}
+      task: inference
+      device: a100
+      cases: '[{"model":"qwen3","case":"4b_tp2"},{"model":"qwen3","case":"next_tp8"},{"model":"qwen3_5","case":"35b_tp4"},{"model":"minicpm","case":"o45_tp4"}]'
+      flaggems_vllm: '0'
+      run_tests: true
+      timeout: 360
+      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: '["vllm-plugin-ci-h20"]'
+      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
+      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+
+  # CONTROL for verify-cold-a100: the minicpm case hit a CUDA IMA on the
+  # healed cold machine; run it alone on the default a100 pool to attribute
+  # (machine-specific flake vs case-level failure).
+  verify-minicpm-ctrl:
+    needs: [setup]
+    if: inputs.platform == 'cuda'
+    uses: ./.github/workflows/_e2e_test.yml
+    with:
+      platform: ${{ inputs.platform }}
+      task: inference
+      device: a100
+      cases: '[{"model":"minicpm","case":"o45_tp4"}]'
+      flaggems_vllm: '0'
+      run_tests: true
+      timeout: 90
+      ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
+      container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+
   # Validates vllm bench throughput/latency/serve entrypoints.
   benchmark:
     needs: setup
@@ -162,7 +204,14 @@ jobs:
       runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
-      timeout: 30
+      # DOWNLOAD-ONLY PROBE: a cold machine can need hours of model download;
+      # tests are gated off so the whole budget belongs to healing.
+      timeout: 300
+      # TARGETED CARRIER (cuda only): baai-sailing-h20-1 grabbed the a100
+      # e2e job and failed on 4 missing models (PR #597) but the default-label
+      # draws never reach it (sticky scheduling); the h20 device label does
+      # (8/8). Dock there and stock the a100-case models (~240GB, 350min).
+      dock_sweeps: ${{ inputs.platform == 'cuda' && '[{"sweep":"h20dock","runs_on":"vllm-plugin-ci-h20","timeout_min":350}]' || '[]' }}
 
   # ============================================================
   # Feishu notification — per-platform status
