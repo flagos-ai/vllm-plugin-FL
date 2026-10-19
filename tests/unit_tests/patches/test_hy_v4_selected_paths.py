@@ -181,7 +181,7 @@ def native_prefill(monkeypatch):
 
     backend = SimpleNamespace(is_available=lambda: True, get_name=lambda: "NATIVE")
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True, is_cuda_alike=lambda: True)
     )
     monkeypatch.setattr(mla, "get_mla_prefill_backend", lambda cfg: backend)
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
@@ -252,7 +252,11 @@ def _native_capabilities(monkeypatch, missing, hopper=True):
     monkeypatch.setattr(
         platforms,
         "current_platform",
-        SimpleNamespace(is_cuda=lambda: True, has_device_capability=lambda cap: hopper),
+        SimpleNamespace(
+            is_cuda=lambda: True,
+            is_cuda_alike=lambda: True,
+            has_device_capability=lambda cap: hopper,
+        ),
     )
     monkeypatch.setattr(deep_gemm, "has_deep_gemm", lambda: True)
     monkeypatch.setattr(flashmla, "is_flashmla_sparse_supported", lambda: (True, None))
