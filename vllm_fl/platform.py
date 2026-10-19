@@ -359,6 +359,69 @@ class PlatformFL(Platform):
             return "eager"
         return super().get_compile_backend()
 
+    def update_block_size_for_backend(cls, vllm_config: "VllmConfig") -> None:
+        """Runs in the worker, after attention backends are known.
+
+        Super sets block_size to the backend's preferred value and aligns
+        hybrid models with their mamba page sizes. That happens *after*
+        the model-config hook which sizes block_size for GLM5's compressed
+        indexer, so re-apply that constraint here as the last word.
+        """
+        super().update_block_size_for_backend(vllm_config)
+        cls._align_block_size_for_glm5_compressed_indexer(vllm_config)
+
+    @classmethod
+    def _align_block_size_for_glm5_compressed_indexer(cls, vllm_config: "VllmConfig") -> None:
+        """Keep block_size a multiple of ``index_kpool * indexer_page``.
+
+        GLM5-Next stores its sparse indexer in compressed pages:
+        ``storage_block_size = block_size // index_kpool``. The indexer
+        backend requires that storage block to be a whole number of kernel
+        pages, but the value super() picks (64 on the FlagGems MLA backend)
+        is not necessarily divisible by ``index_kpool * page`` -- 64 // 4 =
+        16 with a 64-entry page fails and aborts startup. Rounding
+        block_size up keeps the layout valid without weakening the check.
+        """
+        model_config = getattr(vllm_config, "model_config", None)
+        cache_config = getattr(vllm_config, "cache_config", None)
+        if model_config is None or cache_config is None:
+            return
+        text_config = getattr(model_config, "hf_text_config", None)
+        if getattr(text_config, "model_type", None) != "glm5_next_text":
+            return
+        if not getattr(text_config, "index_kpool_compress", False):
+            return
+        kpool = int(getattr(text_config, "index_kpool", 1) or 1)
+        if kpool <= 1:
+            return
+        block_size = cache_config.block_size
+        if not block_size:
+            return
+
+        from vllm_fl.models.glm5.kpool import glm5_indexer_page_alignment
+
+        page = glm5_indexer_page_alignment(cls.get_device_capability())
+        required = kpool * page
+        if block_size % required == 0:
+            return
+
+        aligned = ((block_size + required - 1) // required) * required
+        logger.info(
+            "GLM5-Next: raising kv cache block_size from %d to %d so the "
+            "compressed indexer keeps %d-entry pages (index_kpool=%d).",
+            block_size,
+            aligned,
+            page,
+            kpool,
+        )
+        cache_config.block_size = aligned
+        if cache_config.mamba_cache_mode == "align":
+            cache_config.mamba_block_size = aligned
+        padded = cache_config.mamba_page_size_padded
+        if padded is not None and padded % block_size == 0:
+            # Keep the padded mamba page consistent with the new block size.
+            cache_config.mamba_page_size_padded = padded // block_size * aligned
+
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
         parallel_config = vllm_config.parallel_config
