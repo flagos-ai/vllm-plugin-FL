@@ -31,6 +31,7 @@ container_volumes:
 
 # Container options (hardware-specific settings).
 container_options: >-
+  --env VLLM_FL_USE_FLAGGEMS_VLLM=1
   --hostname vllm-plugin-fl
   --ipc=host
   --shm-size=64g

@@ -9,7 +9,12 @@ from typing import Callable, Optional, Union
 
 import torch
 
-from flag_gems import concat_and_cache_mla, flash_mla
+import vllm_fl.envs as fl_envs
+
+if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+    from flaggems_vllm import concat_and_cache_mla, flash_mla
+else:
+    from flag_gems import concat_and_cache_mla, flash_mla
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention.mla_attention import (
     MLACommonBackend,

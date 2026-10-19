@@ -99,7 +99,12 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        from flag_gems import scaled_mm
+        import vllm_fl.envs as fl_envs
+
+        if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+            from flaggems_vllm import triton_scaled_mm as scaled_mm
+        else:
+            from flag_gems import scaled_mm
 
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape

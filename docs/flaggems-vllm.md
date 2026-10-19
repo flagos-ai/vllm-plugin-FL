@@ -24,11 +24,19 @@ The release is https://github.com/flagos-ai/FlagGems-vllm/releases/tag/v0.2.0.
 Every hardware platform's CI setup calls the shared installer with its selected
 Python interpreter. It verifies the source commit in `direct_url.json` and keeps
 the existing Torch, Triton, FlagGems, vLLM, and NumPy versions. NVIDIA CI alone
-requires FlagGems 5.4.0 and sets `VLLM_FL_USE_FLAGGEMS_VLLM=1` by default.
-CUDA model gates run the same inference/serving cases in both `0` and `1`
-modes with the same dependencies, retaining the default serving regression.
-The release kernel checks are scoped to NVIDIA CUDA; installing the package does
-not enable these kernels on the other platforms.
+requires FlagGems 5.4.0. Eight active platforms (CUDA, Hygon, MetaX, MUSA,
+Enflame, Iluvatar, Kunlunxin, and T-Head) set `VLLM_FL_USE_FLAGGEMS_VLLM=1`
+in their test containers. Ascend retains its original disabled CI configuration
+pending adaptation to the current version. CUDA model gates run the same
+inference/serving cases in both `0` and `1` modes with the same dependencies.
+The release kernel checks remain scoped to NVIDIA CUDA.
+
+Only existing, compatible release operators replace direct FlagGems imports.
+Sunrise attention/MLA and W8A8 scaled-mm imports use the same switch; scaled-mm
+uses the existing `triton_scaled_mm` export under the caller's original name.
+No new operator adapters, state transformations, or composite kernels are added.
+Unsupported or incompatible imports retain their original implementations; see
+[Unsupported direct replacements](flaggems-vllm-unsupported-ops.md).
 
 FlagGems-vllm integration is disabled by default, even when the package is
 installed. Set `VLLM_FL_USE_FLAGGEMS_VLLM=1` before starting vLLM to enable it.

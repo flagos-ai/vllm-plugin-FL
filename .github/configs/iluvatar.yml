@@ -30,6 +30,7 @@ container_volumes:
   - /mnt/share/user_homes/models:/data/models/Qwen
 
 container_options: >-
+  --env VLLM_FL_USE_FLAGGEMS_VLLM=1
   --hostname vllm-plugin-fl
   --privileged
   --ipc=host

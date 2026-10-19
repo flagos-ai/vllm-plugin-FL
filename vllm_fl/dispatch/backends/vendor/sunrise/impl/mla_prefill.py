@@ -19,7 +19,12 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from flag_gems import flash_attn_varlen_func
+import vllm_fl.envs as fl_envs
+
+if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+    from flaggems_vllm import flash_attn_varlen_func
+else:
+    from flag_gems import flash_attn_varlen_func
 from vllm.logger import init_logger
 from vllm.v1.attention.backends.mla.prefill.base import MLAPrefillBackend
 
