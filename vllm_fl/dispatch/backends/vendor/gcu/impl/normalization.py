@@ -13,7 +13,10 @@ Semantics
 * ``RMSNorm``: ``vllm.model_executor.layers.layernorm.RMSNorm.forward_static``
   (f32 accumulate, residual stored in the original dtype, optional weight).
 * ``GemmaRMSNorm``: ``forward_native`` -- weight is ``(1 + w).float()`` and the
-  whole math stays in f32 before the final cast.
+  whole math stays in f32 before the final cast.  For fp16 the residual add is
+  kept in f32 and the **fp32 sum is returned as the residual** (fresh fp32
+  buffer, never written back into the fp16 input); bf16 keeps the in-place
+  store (upstream: plain ``x + residual``).
 
 Both differ from upstream by at most 1 bf16 ULP because the weight multiply is
 done in f32 instead of "cast then multiply".
@@ -52,6 +55,7 @@ def _rms_norm_fwd_kernel_gcu(
     w_ptr,
     y_ptr,
     res_ptr,
+    res_out_ptr,
     num_rows,
     row_stride,
     eps,
@@ -76,7 +80,11 @@ def _rms_norm_fwd_kernel_gcu(
             r = tl.load(res_ptr + base + offs, mask=m, other=0.0).to(tl.float32)
             x = x + r
             if STORE_RESIDUAL:
-                tl.store(res_ptr + base + offs, x.to(res_ptr.dtype.element_ty), mask=m)
+                tl.store(
+                    res_out_ptr + base + offs,
+                    x.to(res_out_ptr.dtype.element_ty),
+                    mask=m,
+                )
         var = tl.sum(x * x, axis=0) / N
         x = x * tl.rsqrt(var + eps)
         if HAS_W:
@@ -109,9 +117,22 @@ def _launch(x, weight, eps, residual=None, gemma=False):
 
     add_res = residual is not None
     res2 = None
+    res_out2 = None
     if add_res:
         res2 = residual if residual.is_contiguous() else residual.contiguous()
         res2 = res2.view(rows, n)
+        # Upstream GemmaRMSNorm.forward_native keeps the fp16 residual add in
+        # fp32 and returns the fp32 sum as the residual
+        # (``x.float() + residual.float(); residual = x``).  Storing back into
+        # the fp16 buffer would truncate the accumulator every layer and lose
+        # precision cumulatively, so the fused path materialises a fresh fp32
+        # residual instead.  bf16 (plain ``x + residual`` upstream) and plain
+        # RMSNorm (which casts the residual back to the original dtype) keep
+        # the in-place store.
+        if gemma and x.dtype == torch.float16:
+            res_out2 = torch.empty_like(res2, dtype=torch.float32)
+        else:
+            res_out2 = res2
 
     block = triton.next_power_of_2(n)
     nspc = min(max(rows, 1), GCU_NUM_GRID)
@@ -120,6 +141,7 @@ def _launch(x, weight, eps, residual=None, gemma=False):
         weight if weight is not None else x2,
         y2,
         res2 if res2 is not None else x2,
+        res_out2 if res_out2 is not None else x2,
         rows,
         x2.stride(0),
         float(eps),
@@ -135,6 +157,10 @@ def _launch(x, weight, eps, residual=None, gemma=False):
     if y2.data_ptr() != out.data_ptr():
         out.copy_(y2.view_as(out))
     if add_res:
+        if res_out2.data_ptr() != residual.data_ptr():
+            # Kernel wrote into a separate buffer (fp32 Gemma residual, or the
+            # contiguous copy made for a non-contiguous input): return that.
+            return out, res_out2.view(residual.shape)
         return out, residual
     return out
 

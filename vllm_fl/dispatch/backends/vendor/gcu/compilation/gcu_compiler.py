@@ -45,6 +45,12 @@ def lowering():
     Inside this context, inductor will NOT decompose any operator into
     lower-level IR.  Instead every operator is treated as an opaque
     external call, which GCU executes via tops_extension / torch_gcu.
+
+    ``make_fallback`` rewrites the *global* inductor lowering table, so the
+    original lowerings of every recorded op (aten **and** prims) are restored
+    on exit.  The restore runs in a ``finally`` block: a compile failure
+    inside the context must not leak fallback lowerings into the global
+    state of the next compilation.
     """
     import torch._inductor.lowering as til
 
@@ -55,11 +61,9 @@ def lowering():
     origin_lowerings = {}
     skip_lowerings = []
 
-    for name in dir(torch.ops.aten):
-        if name in BLACK_LIST:
-            continue
-        op = getattr(torch.ops.aten, name)
-
+    def record_lowerings(op) -> None:
+        """Remember the current lowerings of ``op`` before make_fallback
+        overwrites them (same bookkeeping for aten and prims)."""
         if isinstance(op, torch._ops.OpOverloadPacket):
             for ol in op.overloads():
                 op_overload = til.get_overloads(getattr(op, ol))
@@ -68,7 +72,7 @@ def lowering():
                         dict.fromkeys(op_overload, til.lowerings[op_overload[0]])
                     )
                 else:
-                    skip_lowerings.append(op_overload[0])
+                    skip_lowerings.extend(op_overload)
         elif isinstance(
             op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
         ):
@@ -78,23 +82,33 @@ def lowering():
                     dict.fromkeys(op_overload, til.lowerings[op_overload[0]])
                 )
             else:
-                skip_lowerings.append(op_overload[0])
+                skip_lowerings.extend(op_overload)
 
-        til.make_fallback(op, warn=False, override_decomp=True)
-
-    for name in dir(torch.ops.prims):
-        if name not in BLACK_LIST:
-            op = getattr(torch.ops.prims, name)
+    try:
+        for name in dir(torch.ops.aten):
+            if name in BLACK_LIST:
+                continue
+            op = getattr(torch.ops.aten, name)
+            record_lowerings(op)
             til.make_fallback(op, warn=False, override_decomp=True)
 
-    yield
+        for name in dir(torch.ops.prims):
+            if name not in BLACK_LIST:
+                op = getattr(torch.ops.prims, name)
+                record_lowerings(op)
+                til.make_fallback(op, warn=False, override_decomp=True)
 
-    for op_overload, _ in origin_lowerings.items():
-        til.register_lowering(op_overload, type_promotion_kind=None)(
-            origin_lowerings[op_overload]
-        )
-    for op_overload in skip_lowerings:
-        til.lowerings.pop(op_overload)
+        yield
+    finally:
+        # Exact restore: ``make_fallback`` writes into the global
+        # ``til.lowerings`` dict (via register_lowering), so restoring the
+        # saved entries by direct assignment puts back the *original*
+        # lowering objects.  Re-registering through ``register_lowering``
+        # would wrap them again and silently change the table.
+        for op_overload, lowering_fn in origin_lowerings.items():
+            til.lowerings[op_overload] = lowering_fn
+        for op_overload in skip_lowerings:
+            til.lowerings.pop(op_overload, None)
 
 
 @contextmanager
