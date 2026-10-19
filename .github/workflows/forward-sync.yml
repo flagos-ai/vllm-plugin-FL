@@ -1,0 +1,63 @@
+# Copyright 2026 FlagOS Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Forward sync 0.4 to 0.5
+
+on:
+  push:
+    branches: [0.4.0-dev]
+  pull_request:
+    branches: [0.4.0-dev, 0.5.0-dev]
+    paths:
+      - .github/workflows/forward-sync.yml
+      - .github/scripts/forward-sync.cjs
+      - .github/scripts/tests/forward-sync.test.cjs
+  # GitHub enables manual dispatch only after this file also exists on main.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Forward sync tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test reconciliation without GitHub writes
+        run: node --test .github/scripts/tests/forward-sync.test.cjs
+
+  sync:
+    name: Create or update forward-sync PR
+    needs: test
+    if: >-
+      github.repository == 'flagos-ai/vllm-plugin-FL' &&
+      github.ref == 'refs/heads/0.4.0-dev' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      !github.event.deleted
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: forward-sync-0.4-to-0.5
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Reconcile source branch into one reviewable PR
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          # Intentionally GITHUB_TOKEN only: no PAT, auto-merge, or PR merge call.
+          script: |
+            const sync = require('./.github/scripts/forward-sync.cjs');
+            const result = await sync({github, context, core});
+            await core.summary
+              .addHeading('Forward sync 0.4 to 0.5')
+              .addCodeBlock(JSON.stringify(result, null, 2), 'json')
+              .write();
