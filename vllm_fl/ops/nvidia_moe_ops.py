@@ -98,6 +98,60 @@ def _topk_softmax(
             topk_indices.masked_fill_(is_padding[:, None], -1)
 
 
+def _moe_align_block_size(
+    topk_ids,
+    num_experts,
+    block_size,
+    sorted_token_ids,
+    experts_ids,
+    num_tokens_post_pad,
+    maybe_expert_map,
+    scatter_idx=None,
+) -> None:
+    from vllm_fl.ops.nvidia_moe_align import moe_align_block_size_nvidia
+
+    buffers = (sorted_token_ids, experts_ids, num_tokens_post_pad)
+    if any(
+        t.device != topk_ids.device or t.dtype != torch.int32 or not t.is_contiguous()
+        for t in buffers
+    ):
+        raise ValueError("MoE alignment outputs must be contiguous CUDA int32 buffers")
+    if (
+        sorted_token_ids.ndim != 1
+        or experts_ids.ndim != 1
+        or num_tokens_post_pad.shape != (1,)
+    ):
+        raise ValueError("MoE alignment output buffer shapes are invalid")
+    if scatter_idx is not None and (
+        scatter_idx.device != topk_ids.device
+        or scatter_idx.dtype != torch.int32
+        or scatter_idx.shape != (topk_ids.numel(), 1)
+    ):
+        raise ValueError("MoE scatter indices must be a CUDA int32 route column")
+
+    aligned = moe_align_block_size_nvidia(
+        topk_ids, block_size, num_experts, maybe_expert_map
+    )
+    if (
+        sorted_token_ids.numel() < aligned[0].numel()
+        or experts_ids.numel() < aligned[1].numel()
+    ):
+        raise ValueError("MoE alignment output buffer capacity is too small")
+    sorted_token_ids.fill_(topk_ids.numel())
+    experts_ids.fill_(-1)
+    sorted_token_ids[: aligned[0].numel()].copy_(aligned[0])
+    experts_ids[: aligned[1].numel()].copy_(aligned[1])
+    num_tokens_post_pad.copy_(aligned[2])
+    if scatter_idx is not None:
+        ids = topk_ids.reshape(-1).long()
+        valid = (ids >= 0) & (ids < num_experts)
+        if maybe_expert_map is not None:
+            local_ids = maybe_expert_map[ids.clamp(0, num_experts - 1)]
+            valid &= (local_ids >= 0) & (local_ids < num_experts)
+        rows = torch.arange(ids.numel(), device=ids.device, dtype=torch.int32)
+        scatter_idx.copy_(torch.where(valid, rows, -1)[:, None])
+
+
 def register_nvidia_moe_ops() -> bool:
     """Supply the missing CUDA op without overriding full native vLLM wheels."""
     global _lib
@@ -116,5 +170,15 @@ def register_nvidia_moe_ops() -> bool:
         "_moe_C::topk_softmax", "CUDA"
     ):
         lib.impl("topk_softmax", _topk_softmax, "CUDA")
+    if not hasattr(torch.ops._moe_C, "moe_align_block_size"):
+        lib.define(
+            "moe_align_block_size(Tensor topk_ids, int num_experts, int block_size, "
+            "Tensor! sorted_token_ids, Tensor! experts_ids, Tensor! num_tokens_post_pad, "
+            "Tensor? maybe_expert_map, Tensor(a!)? scatter_idx=None) -> ()"
+        )
+    if not torch._C._dispatch_has_kernel_for_dispatch_key(
+        "_moe_C::moe_align_block_size", "CUDA"
+    ):
+        lib.impl("moe_align_block_size", _moe_align_block_size, "CUDA")
     _lib = lib
     return True
