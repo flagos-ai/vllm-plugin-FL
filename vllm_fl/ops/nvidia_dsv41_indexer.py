@@ -1,0 +1,233 @@
+# Copyright (c) 2026 BAAI. All rights reserved.
+
+"""Hopper FP8 indexer operations for DeepSeek-V4.1 on an EMPTY wheel.
+
+The adapters preserve vLLM's output buffers and reject formats that the
+selected FlagGems kernels do not implement. They do not change native
+DeepGEMM/FlashMLA availability checks.
+"""
+
+import torch
+import triton
+import triton.language as tl
+
+
+def _same_cuda(*tensors):
+    if not tensors or any(
+        not tensor.is_cuda or tensor.device != tensors[0].device for tensor in tensors
+    ):
+        raise ValueError("DSV4.1 tensors must share a CUDA device")
+
+
+def fp8_mqa_logits(q, kv, weights, row_starts, row_ends, clean_logits=False):
+    from flag_gems.fused.fp8_fp4_mqa_logits import fp8_fp4_mqa_logits
+
+    values, scales = q
+    keys, key_scales = kv
+    if scales is not None or values.dtype != torch.float8_e4m3fn:
+        raise NotImplementedError(
+            "DSV4.1 indexer requires FP8 Q without separate scales"
+        )
+    if keys.dtype != torch.float8_e4m3fn or key_scales.dtype != torch.float32:
+        raise NotImplementedError("DSV4.1 indexer requires FP8 K with FP32 scales")
+    _same_cuda(values, keys, key_scales, weights, row_starts, row_ends)
+    rows, heads, dim = values.shape
+    if dim != 128 or heads not in (32, 64) or keys.shape[1:] != (dim,):
+        raise ValueError("DSV4.1 indexer requires head dimension 128 and 32/64 heads")
+    if weights.dtype != torch.float32 or weights.shape != (rows, heads):
+        raise ValueError("Indexer weights must be FP32 [rows, heads]")
+    if key_scales.shape != (keys.shape[0],):
+        raise ValueError("Indexer key scales must contain one FP32 scale per token")
+    if any(
+        t.dtype != torch.int32 or t.shape != (rows,) for t in (row_starts, row_ends)
+    ):
+        raise ValueError("Indexer ranges must be int32 [rows]")
+    return fp8_fp4_mqa_logits(q, kv, weights, row_starts, row_ends, clean_logits)
+
+
+@triton.jit
+def _paged_fp8_logits_kernel(
+    Q,
+    CACHE,
+    SCALES,
+    WEIGHTS,
+    LENGTHS,
+    TABLE,
+    OUT,
+    Q_ROW: tl.constexpr,
+    CACHE_PAGE: tl.constexpr,
+    SCALE_PAGE: tl.constexpr,
+    TABLE_ROW: tl.constexpr,
+    OUT_ROW: tl.constexpr,
+    HEADS: tl.constexpr,
+    BLOCK: tl.constexpr,
+    MAX_LEN: tl.constexpr,
+):
+    # Same weighted FP8 dot/ReLU reduction as FlagGems' paged MQA kernel,
+    # reading the packed page in place. A fixed grid and device-side lengths
+    # avoid its public wrapper's context_lens.max().item() during graph replay.
+    logical_page, row = tl.program_id(0), tl.program_id(1)
+    length = tl.load(LENGTHS + row)
+    start = logical_page * BLOCK
+    if start >= length:
+        return
+    physical_page = tl.load(TABLE + row * TABLE_ROW + logical_page)
+    heads = tl.arange(0, HEADS)
+    dims = tl.arange(0, 128)
+    positions = tl.arange(0, BLOCK)
+    query = tl.load(Q + row * Q_ROW + heads[:, None] * 128 + dims[None, :])
+    key_bytes = tl.load(
+        CACHE
+        + physical_page.to(tl.int64) * CACHE_PAGE
+        + positions[:, None] * 128
+        + dims[None, :]
+    )
+    keys = key_bytes.to(tl.float8e4nv, bitcast=True)
+    scales = tl.load(SCALES + physical_page.to(tl.int64) * SCALE_PAGE + positions)
+    weights = tl.load(WEIGHTS + row * HEADS + heads)
+    dot = tl.dot(query, tl.trans(keys))
+    scores = tl.sum(tl.maximum(dot * scales[None, :], 0) * weights[:, None], axis=0)
+    token = start + positions
+    tl.store(OUT + row * OUT_ROW + token, scores, (token < length) & (token < MAX_LEN))
+
+
+def fp8_paged_mqa_logits(
+    q,
+    kv_cache,
+    weights,
+    context_lens,
+    block_tables,
+    schedule_metadata,
+    max_model_len,
+    clean_logits=False,
+    indices=None,
+):
+    if indices is not None:
+        raise NotImplementedError(
+            "DSV4.1 FP8 indexer does not implement varlen indices"
+        )
+    values, scales = q
+    if scales is not None or values.dtype != torch.float8_e4m3fn:
+        raise NotImplementedError(
+            "DSV4.1 indexer requires FP8 Q without separate scales"
+        )
+    if values.ndim == 3:
+        values = values.unsqueeze(1)
+    if values.ndim != 4 or values.shape[1] != 1:
+        raise NotImplementedError("DSV4.1 FP8 indexer currently requires next_n=1")
+    batch, _, heads, dim = values.shape
+    if dim != 128 or heads not in (32, 64):
+        raise ValueError("DSV4.1 indexer requires head dimension 128 and 32/64 heads")
+    if (
+        kv_cache.dtype != torch.uint8
+        or kv_cache.ndim != 4
+        or kv_cache.shape[2:] != (1, 132)
+    ):
+        raise ValueError("FP8 indexer cache must be uint8 [pages, block, 1, 132]")
+    block = kv_cache.shape[1]
+    if block not in (32, 64, 128):
+        raise NotImplementedError("FP8 indexer supports cache blocks 32, 64, or 128")
+    if not kv_cache.is_contiguous() or not values.is_contiguous():
+        raise ValueError("FP8 indexer cache and queries must be contiguous")
+    if (
+        weights.dtype != torch.float32
+        or weights.shape != (batch, heads)
+        or not weights.is_contiguous()
+    ):
+        raise ValueError("Indexer weights must be contiguous FP32 [batch, heads]")
+    if (
+        context_lens.dtype != torch.int32
+        or context_lens.numel() != batch
+        or not context_lens.is_contiguous()
+    ):
+        raise ValueError("Indexer lengths must be contiguous int32 [batch, 1]")
+    if (
+        block_tables.dtype != torch.int32
+        or block_tables.shape[0] != batch
+        or block_tables.stride(-1) != 1
+    ):
+        raise ValueError("Indexer block table must be int32 with contiguous rows")
+    if max_model_len <= 0 or block_tables.shape[1] < triton.cdiv(max_model_len, block):
+        raise ValueError("Indexer block table cannot cover max_model_len")
+    _same_cuda(values, kv_cache, weights, context_lens, block_tables)
+    output = torch.full(
+        (batch, max_model_len),
+        float("-inf") if clean_logits else 0,
+        dtype=torch.float32,
+        device=values.device,
+    )
+    # Physical pages contain all FP8 values followed by all FP32 scales.
+    page_bytes = kv_cache.view(kv_cache.shape[0], -1)
+    page_scales = page_bytes[:, block * 128 :].view(torch.float32)
+    if batch:
+        _paged_fp8_logits_kernel[(triton.cdiv(max_model_len, block), batch)](
+            values,
+            kv_cache,
+            page_scales,
+            weights,
+            context_lens,
+            block_tables,
+            output,
+            values.stride(0),
+            page_bytes.stride(0),
+            page_scales.stride(0),
+            block_tables.stride(0),
+            output.stride(0),
+            heads,
+            block,
+            max_model_len,
+        )
+    return output
+
+
+def get_paged_mqa_logits_metadata(context_lens, block_size, num_sms, indices=None):
+    from flag_gems.ops.get_paged_mqa_logits_metadata import (
+        get_paged_mqa_logits_metadata as gems_metadata,
+    )
+
+    if indices is not None:
+        raise NotImplementedError(
+            "DSV4.1 FP8 indexer does not implement varlen indices"
+        )
+    if context_lens.ndim == 2 and context_lens.shape[1] != 1:
+        raise NotImplementedError("DSV4.1 FP8 indexer currently requires next_n=1")
+    return gems_metadata(context_lens, block_size, num_sms)
+
+
+def fp8_einsum(equation, a, b, out, recipe=(1, 128, 128)):
+    from flag_gems.runtime.backend._nvidia.hopper.ops.fp8_einsum import (
+        fp8_einsum as gems_einsum,
+    )
+
+    x, xs = a
+    y, ys = b
+    if equation != "bhr,hdr->bhd" or tuple(recipe) != (1, 128, 128):
+        raise NotImplementedError(
+            "Hopper DSV4.1 WO-A requires bhr,hdr->bhd with recipe (1,128,128)"
+        )
+    if x.dtype != torch.float8_e4m3fn or y.dtype != torch.float8_e4m3fn:
+        raise NotImplementedError("Hopper DSV4.1 WO-A requires E4M3 FP8 operands")
+    if xs.dtype != torch.float32 or ys.dtype != torch.float32:
+        raise NotImplementedError("Hopper DSV4.1 WO-A requires FP32 scales")
+    _same_cuda(x, xs, y, ys, out)
+    batch, heads, width = x.shape
+    if width % 128 or y.shape[0] != heads or y.shape[2] != width or y.shape[1] % 128:
+        raise ValueError(
+            "WO-A operands must have matching heads and dimensions divisible by 128"
+        )
+    if xs.shape != (batch, heads, width // 128) or ys.shape != (
+        heads,
+        y.shape[1] // 128,
+        width // 128,
+    ):
+        raise ValueError("WO-A scale shapes do not match the block-128 operands")
+    if out.dtype != torch.bfloat16 or out.shape != (batch, heads, y.shape[1]):
+        raise ValueError("WO-A output must be BF16 [tokens, heads, output_dim]")
+    # The pinned Hopper kernel uses split-K for the model's TP8 shape. Its
+    # BF16 output accumulates separately rounded partial sums with atomic_add.
+    # Keep the supported FP32 accumulator and round only once into vLLM's out.
+    out.copy_(
+        gems_einsum(
+            equation, x, xs, y, ys, block_size=[128, 128], output_dtype=torch.float32
+        )
+    )

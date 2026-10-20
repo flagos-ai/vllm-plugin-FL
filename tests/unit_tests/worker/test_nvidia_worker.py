@@ -596,3 +596,34 @@ def test_nvidia_empty_rejects_explicit_native_cache_backend(monkeypatch, backend
         NvidiaPlatformFL.get_attn_backend_cls(
             AttentionBackendEnum[backend_name], object()
         )
+
+
+@pytest.mark.parametrize("load_dummy_weights", [False, True])
+def test_nvidia_worker_installs_model_kernels_before_native_loading(
+    monkeypatch, load_dummy_weights
+):
+    from types import SimpleNamespace
+
+    from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
+
+    from vllm_fl.ops import nvidia_dsv41
+    from vllm_fl.worker.nvidia_worker import NvidiaWorkerFL
+
+    worker = object.__new__(NvidiaWorkerFL)
+    config = SimpleNamespace()
+    worker.vllm_config = config
+    calls = []
+
+    def install(actual_config):
+        assert actual_config is config
+        calls.append("install")
+
+    def load(actual_worker, *, load_dummy_weights):
+        assert actual_worker is worker
+        assert calls == ["install"]
+        calls.append(load_dummy_weights)
+
+    monkeypatch.setattr(nvidia_dsv41, "install_dsv41_empty_adapters", install)
+    monkeypatch.setattr(NativeGPUWorker, "load_model", load)
+    worker.load_model(load_dummy_weights=load_dummy_weights)
+    assert calls == ["install", load_dummy_weights]
