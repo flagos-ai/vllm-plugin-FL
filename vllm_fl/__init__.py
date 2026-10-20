@@ -125,10 +125,6 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
-    elif vendor_name in {"metax", "maca"}:
-        from vllm_fl.patches.flaggems_vllm_metax import prepare_flaggems_vllm_metax
-
-        prepare_flaggems_vllm_metax()
 
 
 def register():

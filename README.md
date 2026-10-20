@@ -197,13 +197,8 @@ If there are multiple plugins in the current environment, you can specify use vl
 HY4 is paired with this branch's vLLM 0.24.0 environment and the shared
 [FlagGems-vllm integration](./docs/flaggems-vllm.md). Its MLA query concatenation
 and graph-safe paged MQA logits APIs are now merged into upstream FlagGems-vllm.
-They are newer than the v0.2.0 release used by the shared CI installer, so install
-the current upstream main after the framework and FlagGems setup described above:
-
-```sh
-python3 -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git'
-```
+The shared CI dependency now includes both APIs. Install the same pinned upstream
+source using the integration instructions above; no separate HY4 upgrade is needed.
 
 HY4 uses the public `flaggems_vllm` sparse indexer, cache and attention APIs;
 query quantization uses general FlagGems. No model-specific dependency extra or

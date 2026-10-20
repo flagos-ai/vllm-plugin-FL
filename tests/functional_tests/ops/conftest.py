@@ -24,6 +24,7 @@ _PLATFORM = os.environ.get("FL_TEST_PLATFORM", "nvidia").lower()
 _HY4_FUNCTIONAL_TESTS = (
     "test_hy4_runtime.py",
     "test_portable_sparse_indexer.py",
+    "test_portable_indexer_fp8_cache.py",
 )
 
 if _PLATFORM != "nvidia":

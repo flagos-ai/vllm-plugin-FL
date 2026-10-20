@@ -14,7 +14,7 @@ import os
 
 import pytest
 
-from tests.utils.device_utils import get_visible_device_env_var
+from tests.utils.device_utils import get_backend, get_visible_device_env_var
 
 # ---------------------------------------------------------------------------
 # xdist: assign one physical device per worker (controller side)
@@ -77,6 +77,9 @@ def pytest_sessionfinish(session, exitstatus):
     because xdist workers communicate results via a socket before sessionfinish,
     so all data has already been sent to the controller by this point.
     """
+    if get_backend() != "ascend":
+        return
+
     import contextlib
     import threading
 
