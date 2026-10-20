@@ -1,6 +1,7 @@
 # Copyright 2026 FlagOS Contributors
 """CPU regressions for rejecting a full or shadowed vLLM in NVIDIA EMPTY CI."""
 
+import copy
 import importlib.util
 import tempfile
 import unittest
@@ -75,6 +76,41 @@ class EmptyProviderTests(unittest.TestCase):
             self.assertEqual(len(found), 3)
             self.assertTrue(any("_vllm_fa2_C" in path for path in found))
             self.assertTrue(any("_C_stable_libtorch" in path for path in found))
+
+
+class SourceProvenanceTests(unittest.TestCase):
+    def setUp(self):
+        self.provenance = {
+            name: {**source, "wheel_sha256": "a" * 64}
+            for name, source in stack.FL_SOURCES.items()
+        }
+        self.installed = {
+            name: {"version": source["version"], "wheel_sha256": "a" * 64}
+            for name, source in stack.FL_SOURCES.items()
+        }
+
+    def test_pinned_source_and_installed_wheel_are_accepted(self):
+        stack.validate_fl_provenance(self.provenance, self.installed)
+
+    def test_same_version_from_different_source_is_rejected(self):
+        self.provenance["flagtree"]["commit"] = "b" * 40
+        with self.assertRaisesRegex(RuntimeError, "source provenance"):
+            stack.validate_fl_provenance(self.provenance, self.installed)
+
+    def test_replaced_or_editable_installation_is_rejected(self):
+        for replacement in ({"wheel_sha256": "b" * 64}, {"editable": True}):
+            installed = copy.deepcopy(self.installed)
+            installed["flag-gems"].update(replacement)
+            with (
+                self.subTest(replacement=replacement),
+                self.assertRaisesRegex(RuntimeError, "not the wheel"),
+            ):
+                stack.validate_fl_provenance(self.provenance, installed)
+
+    def test_release_wheel_cannot_impersonate_fixed_development_commit(self):
+        self.installed["flagtree"]["version"] = "0.7.0"
+        with self.assertRaisesRegex(RuntimeError, "not the wheel"):
+            stack.validate_fl_provenance(self.provenance, self.installed)
 
 
 if __name__ == "__main__":
