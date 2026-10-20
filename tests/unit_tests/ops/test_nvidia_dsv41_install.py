@@ -27,10 +27,14 @@ def _config():
 
 @pytest.fixture
 def adapter_state(monkeypatch):
+    from vllm.model_executor.custom_op import op_registry_oot
+
     from vllm_fl.ops import nvidia_dsv41
 
+    monkeypatch.delitem(op_registry_oot, "SparseAttnIndexer", raising=False)
     monkeypatch.setattr(nvidia_dsv41, "_installed", False)
-    return nvidia_dsv41
+    yield nvidia_dsv41
+    op_registry_oot.pop("SparseAttnIndexer", None)
 
 
 @pytest.mark.parametrize("architectures", [[], ["Qwen4ExpForCausalLM"]])
