@@ -87,6 +87,7 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
     assert path.name == "nvidia.yaml"
     assert config["op_backends"]["attention_backend"][0] == "flagos"
     assert config["flagos_blacklist"] == [
+        "arange_start",
         "topk",
         "_scaled_dot_product_attention_math",
         "maximum",
