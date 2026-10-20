@@ -2,8 +2,6 @@
 
 """HY V4's 576-wide, sink-aware sparse MLA on real FlagGems kernels."""
 
-import torch
-
 from vllm.models.hy_v4.nvidia.flashmla_sparse import (
     HYV4FlashMLASparseBackend,
     HYV4FlashMLASparseImpl,
@@ -44,71 +42,3 @@ def flash_mla_sparse_fwd(
         out.copy_(result)
         result = out
     return result, max_logits, lse
-
-
-def flash_mla_with_kvcache(
-    q,
-    k_cache,
-    block_table,
-    cache_seqlens,
-    head_dim_v,
-    tile_scheduler_metadata,
-    num_splits=None,
-    softmax_scale=None,
-    causal=False,
-    is_fp8_kvcache=False,
-    indices=None,
-    attn_sink=None,
-    extra_k_cache=None,
-    extra_indices_in_kvcache=None,
-    topk_length=None,
-    extra_topk_length=None,
-    out=None,
-):
-    from flag_gems.fused.flash_mla_with_kvcache import (
-        flash_mla_with_kvcache as gems_decode,
-    )
-
-    if (
-        q.ndim != 4
-        or q.shape[1] != 1
-        or q.shape[-1] != 576
-        or head_dim_v != 512
-        or k_cache.ndim != 4
-        or k_cache.shape[2:] != (1, 656)
-        or k_cache.dtype != torch.uint8
-    ):
-        raise NotImplementedError(
-            "HY V4 sparse FP8 decode requires Q 576 and 656-byte KV records"
-        )
-    if not is_fp8_kvcache or indices is None or causal:
-        raise NotImplementedError("HY V4 MLA requires sparse, indexed FP8 decode")
-    if any(
-        x is not None
-        for x in (
-            extra_k_cache,
-            extra_indices_in_kvcache,
-            topk_length,
-            extra_topk_length,
-        )
-    ):
-        raise NotImplementedError(
-            "HY V4 656-byte decode does not use extra caches or dynamic top-k"
-        )
-    # Upstream supplies dummy paging arguments for sparse decode. The actual
-    # physical cache slots are in indices; Gems, like FlashMLA, ignores these.
-    return gems_decode(
-        q,
-        k_cache,
-        block_table,
-        cache_seqlens,
-        head_dim_v,
-        tile_scheduler_metadata,
-        num_splits,
-        softmax_scale,
-        causal,
-        is_fp8_kvcache,
-        indices,
-        attn_sink,
-        out=out,
-    )

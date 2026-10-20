@@ -32,7 +32,6 @@ def installed(monkeypatch):
     from vllm.model_executor.custom_op import op_registry_oot
     from vllm.model_executor.layers import sparse_attn_indexer
     from vllm.models.hy_v4.nvidia import attention, flashmla_sparse
-    from vllm.v1.attention.backends.mla import flashmla_sparse as backend
 
     from vllm_fl.ops import nvidia_hy4
 
@@ -50,9 +49,7 @@ def installed(monkeypatch):
         (sparse_attn_indexer, "fp8_fp4_paged_mqa_logits"),
         (attention, "per_token_group_quant_fp8"),
         (flashmla_sparse, "flash_mla_sparse_fwd"),
-        (flashmla_sparse, "flash_mla_with_kvcache"),
         (flashmla_sparse, "HYV4FlashMLASparseBackend"),
-        (backend, "get_mla_metadata"),
     ):
         monkeypatch.setattr(obj, name, getattr(obj, name))
     with set_current_vllm_config(config):
@@ -308,86 +305,6 @@ def test_bf16_mla_sink_prefill_decode_and_graph(heads, graph, gems_mode):
     torch.testing.assert_close(result.float().cpu(), expected, rtol=0.015, atol=0.002)
     torch.testing.assert_close(lse.cpu(), expected_lse, rtol=2e-4, atol=2e-4)
     assert not result[:, 1].float().cpu().any()
-
-
-@pytest.mark.gpu
-@pytest.mark.parametrize("graph", [False, True])
-def test_packed_656_decode_sink_and_graph(graph, gems_mode):
-    from flag_gems.fused.flash_mla_with_kvcache import get_mla_metadata
-
-    from vllm_fl.ops.nvidia_hy4_mla import flash_mla_with_kvcache
-
-    q = (_values((2, 1, 64, 576), 18) * 0.25).cuda()
-    original = _values((128, 576), 19) * 0.25
-    nope = original[:, :512].reshape(128, 4, 128)
-    scales = nope.float().abs().amax(-1).clamp_min(1e-4) / 448
-    packed_nope = (
-        (nope.float() / scales[..., None]).to(torch.float8_e4m3fn).reshape(128, 512)
-    )
-    records = torch.cat(
-        (
-            packed_nope.view(torch.uint8),
-            scales.contiguous().view(torch.uint8),
-            original[:, 512:].contiguous().view(torch.uint8),
-        ),
-        dim=-1,
-    )
-    cache = records.reshape(2, 64, 1, 656).cuda()
-    decoded = torch.cat(
-        (
-            (packed_nope.float().reshape(128, 4, 128) * scales[..., None]).reshape(
-                128, 512
-            ),
-            original[:, 512:].float(),
-        ),
-        -1,
-    ).to(torch.bfloat16)
-    indices = (
-        torch.arange(128, dtype=torch.int32, device="cuda").repeat(2, 1).unsqueeze(1)
-    )
-    indices[:, :, 7] = -1
-    sink = torch.linspace(-3, 3, 64, device="cuda")
-    sink[0], sink[1] = -float("inf"), float("inf")
-    metadata, splits = get_mla_metadata()
-    table = torch.empty(2, 1, dtype=torch.int32, device="cuda")
-    lengths = torch.full((2,), 128, dtype=torch.int32, device="cuda")
-
-    def run():
-        return flash_mla_with_kvcache(
-            q,
-            cache,
-            table,
-            lengths,
-            512,
-            metadata,
-            splits,
-            576**-0.5,
-            is_fp8_kvcache=True,
-            indices=indices,
-            attn_sink=sink,
-        )
-
-    result, lse = run()
-    if graph:
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
-            run()
-        stream.synchronize()
-        captured = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(captured):
-            result, lse = run()
-        q.mul_(0.5)
-        sink[2:].add_(1)
-        indices[:, :, :5] = -1
-        captured.replay()
-    expected, expected_lse = _attention_reference(
-        q[:, 0], decoded[:, None], indices, sink
-    )
-    torch.testing.assert_close(
-        result[:, 0].float().cpu(), expected, rtol=0.02, atol=0.003
-    )
-    torch.testing.assert_close(lse[:, :, 0].cpu(), expected_lse, rtol=2e-4, atol=2e-4)
-    assert not result[:, :, 1].float().cpu().any()
 
 
 @pytest.mark.gpu
