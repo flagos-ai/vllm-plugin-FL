@@ -28,6 +28,7 @@ def config(tmp_path, monkeypatch):
     from vllm.model_executor.custom_op import op_registry_oot
     from vllm.model_executor.layers import sparse_attn_indexer
     from vllm.models.deepseek_v4.nvidia.ops import o_proj
+    from vllm.models.deepseek_v41 import attention as dsv41_attention
     from vllm.models.deepseek_v41.nvidia import flashmla
     from vllm.transformers_utils.configs.deepseek_v41 import DeepseekV41Config
 
@@ -96,6 +97,7 @@ def config(tmp_path, monkeypatch):
         (sparse_attn_indexer, "fp8_fp4_mqa_logits"),
         (sparse_attn_indexer, "fp8_fp4_paged_mqa_logits"),
         (o_proj, "fp8_einsum"),
+        (dsv41_attention, "fused_indexer_q_rope_quant"),
         (flashmla, "flash_mla_sparse_fwd"),
         (flashmla, "flash_mla_with_kvcache"),
         (flashmla.DeepseekSparseSWAFlashMLAMetadataBuilder, "build_tile_scheduler"),
@@ -279,6 +281,35 @@ def test_real_dsv41_attention_constructs_compressed_and_candidate_indexers(
             )
             assert layer.swa_bytes_per_token == 584
             assert layer.kv_cache_dtype == "fp8_ds_mla"
+        from tests.unit_tests.ops.test_nvidia_dsv41_indexer_q import (
+            assert_query_equal,
+            query_reference,
+        )
+
+        # Exercise the actual upstream forward_q, including its real replicated
+        # projection and the installer's scoped module binding. Identity blocks
+        # make the linear result independently exact at BF16 precision.
+        qr_cpu = torch.linspace(-2, 2, 3 * 128).reshape(3, 128).bfloat16()
+        qr = qr_cpu.cuda()
+        positions = torch.tensor([0, 7, 511], dtype=torch.int64, device="cuda")
+        scores = torch.linspace(-1, 1, 3 * 32).reshape(3, 32).bfloat16().cuda()
+        for layer in layers:
+            indexer = layer.indexer
+            with torch.no_grad():
+                indexer.wq_b.weight.copy_(torch.eye(128).repeat(32, 1))
+                query, scale, weights = indexer.forward_q(
+                    qr, None, scores, positions, layer.indexer_rotary_emb
+                )
+            assert scale is None
+            reference = query_reference(
+                positions,
+                qr_cpu[:, None, :].expand(3, 32, 128),
+                layer.indexer_rotary_emb.cos_sin_cache,
+                scores,
+                indexer.softmax_scale,
+                indexer.n_head**-0.5,
+            )
+            assert_query_equal((query, weights), reference)
         assert layers[2].indexer.k_cache is layers[1].indexer.k_cache
         assert (has_deep_gemm(), is_flashmla_sparse_supported()) == before
     finally:
