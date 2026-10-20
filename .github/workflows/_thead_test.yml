@@ -12,6 +12,7 @@ permissions:
 concurrency:
   group: thead-ppu-ci
   cancel-in-progress: false
+  queue: max
 
 jobs:
   setup:
