@@ -23,7 +23,7 @@ SUITES = (
     ("shared-reference", 43, ["tests/unit_tests/ops/test_numerical.py"]),
     (
         "cpu-cache",
-        5,
+        12,  # Five cache checks and seven backend-selection cases.
         [
             "tests/unit_tests/dispatch/test_thead_cache.py",
             "-m",
@@ -94,7 +94,7 @@ def main():
             "only_owned_cleanup_complete": cleanup_complete,
             "suites": results,
             "gpu_pytest_expected": 45,
-            "cpu_cache_expected": 5,
+            "cpu_cache_expected": 12,
             "shared_reference_expected": 43,
             "tensor_aot_metadata_required": False,
             "external_fa3_oracle_24_and_gdn_72_included": False,
