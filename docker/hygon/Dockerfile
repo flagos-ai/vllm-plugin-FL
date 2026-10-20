@@ -50,6 +50,7 @@ ENV VIRTUAL_ENV=/opt/vllm-fl/venv \
 
 # Repository-root context; copy only build inputs, never local credentials or .git.
 COPY .github/scripts/hygon/verify_install.py /opt/hygon/verify_install.py
+COPY .github/scripts/install_flaggems_vllm.py /opt/hygon/install_flaggems_vllm.py
 RUN /usr/bin/python3.10 -I -B /opt/hygon/verify_install.py \
         --static-only --write-vendor-snapshot /opt/hygon/vendor-base.json \
     && /usr/bin/python3.10 -I -B -m pip uninstall -y vllm vllm-plugin-fl \
@@ -116,13 +117,17 @@ COPY pyproject.toml setup.py README.md LICENSE /opt/vllm-src/vllm-plugin-fl/
 COPY vllm_fl /opt/vllm-src/vllm-plugin-fl/vllm_fl
 # docker/build.sh supplies an archive of PLUGIN_SOURCE_SHA for these COPY inputs.
 # The installed package uses ordinary wheels, without an editable finder.
-RUN [[ "$PLUGIN_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] \
+RUN --mount=type=secret,id=git_config,target=/run/secrets/git_config,required=false \
+    [[ "$PLUGIN_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] \
     && env -u VLLM_VENDOR -u SETUPTOOLS_SCM_PRETEND_VERSION \
         SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL="0.0.0+g${PLUGIN_SOURCE_SHA}" \
         python -I -B -m pip wheel --no-deps --no-build-isolation --no-cache-dir \
         --wheel-dir /opt/hygon/wheels /opt/vllm-src/vllm-plugin-fl \
     && python -I -B -m pip install --no-deps --no-index --no-compile \
         /opt/hygon/wheels/vllm_plugin_fl-*.whl \
+    && GIT_CONFIG_GLOBAL=/run/secrets/git_config \
+        PIP_INDEX_URL="${INDEX_URL}" PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL:-}" \
+        python -I -B /opt/hygon/install_flaggems_vllm.py \
     && python -I -B /opt/hygon/verify_install.py --static-only \
         --compare-vendor-snapshot /opt/hygon/vendor-base.json
 LABEL org.opencontainers.image.revision=${PLUGIN_SOURCE_SHA}

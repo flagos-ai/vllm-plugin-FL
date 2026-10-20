@@ -205,6 +205,11 @@ bash docker/build.sh --platform hygon --target ci \
 The Hygon Dockerfile retains the vendor DTK/PyTorch base and its noneditable
 FlagGems/FlagTree installation, then builds and installs ordinary wheels for
 the empty vLLM and this plugin.
+Current source builds and CI also install **FlagGems-vllm v0.2.0**, commit
+[`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19),
+through the shared installer, alongside the vendor FlagGems package. Its
+package metadata still reports `0.1.0`; the commit identifies the release.
+The pinned image and historical test results above predate this integration.
 Builds use `--no-deps --no-build-isolation` to preserve the vendor runtime.
 Do not apply the upstream CUDA PyTorch requirements to this Hygon image.
 If Git needs a proxy, set `HYGON_GIT_CONFIG` to a local Git configuration file.
