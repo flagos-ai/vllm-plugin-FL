@@ -1,0 +1,4 @@
+logs/
+results/
+__pycache__/
+.server.pid

@@ -7,7 +7,7 @@ This test file is driven by two environment variables set by ``tests/run.py``:
 
 - ``FL_TEST_MODEL``: Model family (e.g. ``qwen3``, ``minicpm``)
 - ``FL_TEST_CASE``:  Case name within the family (e.g. ``06b_tp2``, ``o45_tp2``)
-
+- ``FL_TEST_PLATFORM``/``FL_TEST_DEVICE``: Apply platform device overrides
 It loads ``tests/models/<model>/<case>.yaml``, constructs the LLM engine,
 runs generation for each prompt (with optional parametrize combos), and
 asserts that outputs are non-empty.
@@ -16,6 +16,7 @@ Supports both text-only and multimodal (audio/image/video) models via the
 ``generate.modality`` field in the YAML config.
 """
 
+import contextlib
 import os
 
 import pytest
@@ -30,6 +31,8 @@ from vllm.distributed import cleanup_dist_env_and_memory
 
 _MODEL = os.environ.get("FL_TEST_MODEL", "")
 _CASE = os.environ.get("FL_TEST_CASE", "")
+_PLATFORM = os.environ.get("FL_TEST_PLATFORM", "")
+_DEVICE = os.environ.get("FL_TEST_DEVICE", "")
 
 if not _MODEL or not _CASE:
     pytest.skip(
@@ -37,7 +40,7 @@ if not _MODEL or not _CASE:
         allow_module_level=True,
     )
 
-_CFG = ModelConfig.load(_MODEL, _CASE)
+_CFG = ModelConfig.load(_MODEL, _CASE, platform=_PLATFORM, device=_DEVICE)
 
 if not os.path.exists(_CFG.model):
     pytest.fail(
@@ -49,6 +52,19 @@ if not os.path.exists(_CFG.model):
 # ---------------------------------------------------------------------------
 # Multimodal helpers
 # ---------------------------------------------------------------------------
+
+
+def _prepare_cleanup_for_platform() -> None:
+    """Apply test-scope cleanup compatibility hooks."""
+    if _PLATFORM != "ascend":
+        return
+
+    import torch
+
+    npu = getattr(torch, "npu", None)
+    accelerator = getattr(torch, "accelerator", None)
+    if npu is not None and accelerator is not None and hasattr(npu, "empty_cache"):
+        accelerator.empty_cache = npu.empty_cache
 
 
 def _load_assets(modality: str, asset_names: list[str], count: int) -> dict:
@@ -255,8 +271,9 @@ def test_inference(combo: dict) -> None:
     print(f"\n[{_MODEL}/{_CASE}] combo: {combo_desc}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")
 
-    llm = LLM(**llm_kwargs)
+    llm = None
     try:
+        llm = LLM(**llm_kwargs)
         sampling_params = SamplingParams(**gen.sampling)
 
         if gen.modality == "text":
@@ -264,5 +281,14 @@ def test_inference(combo: dict) -> None:
         else:
             _run_multimodal_test(llm, sampling_params)
     finally:
-        del llm
+        if llm is not None:
+            # Explicitly shut down the engine core so that the executor calls
+            # waitpid() on all worker processes before we return.  Relying on
+            # `del llm` alone is not sufficient: Python's GC does not guarantee
+            # that __del__ fires immediately, which leaves worker processes as
+            # zombies parented by init when the test runner exits.
+            with contextlib.suppress(Exception):
+                llm.llm_engine.engine_core.shutdown()
+            del llm
+        _prepare_cleanup_for_platform()
         cleanup_dist_env_and_memory()

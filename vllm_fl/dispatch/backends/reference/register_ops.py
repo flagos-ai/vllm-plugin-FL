@@ -36,157 +36,67 @@ def register_builtins(registry) -> None:
     backend = ReferenceBackend()
     is_avail = backend.is_available
 
-    impls = [
-        # DeepSeek-V4
-        OpImpl(
-            op_name="deepseek_v4_inv_rope_quant_int8",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(
-                backend.deepseek_v4_inv_rope_quant_int8,
-                is_avail,
-            ),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        *[
-            OpImpl(
-                op_name=f"deepseek_v4_{op_name}",
-                impl_id="reference.torch",
-                kind=BackendImplKind.REFERENCE,
-                fn=_bind_is_available(
-                    getattr(backend, f"deepseek_v4_{op_name}"),
-                    is_avail,
-                ),
-                vendor=None,
-                priority=BackendPriority.REFERENCE,
-            )
-            for op_name in (
-                "inv_rope_quant_fp8",
-                "int8_scaled_mm",
-                "mhc_pre",
-                "mhc_fused_post_pre",
-                "mhc_post",
-                "hc_head",
-                "fused_q_kv_rmsnorm",
-                "fused_q_kv_rmsnorm_int8",
-                "qnorm_rope_kv_quant_insert",
-                "qnorm_rope_kv_bf16_insert",
-                "qnorm_rope_kv_fp8_insert",
-                "compute_global_topk_indices_and_lens",
-                "flash_mla_with_kvcache",
-                "dequantize_and_gather_k_cache",
-                "combine_topk_swa_indices",
-                "flash_mla_sparse_fwd",
-                "fused_indexer_q_rope_quant",
-                "fused_indexer_q_rope_quant_int8",
-                "compress_int8_indexer_k_cache",
-                "int8_mqa_logits",
-                "int8_paged_mqa_logits",
-            )
-        ],
-        *[
+    # ReferenceBackend implements only part of the dispatch surface on some
+    # vLLM 0.24 builds. One absent optional MoE helper must not prevent all
+    # available PyTorch fallbacks from registering.
+    op_names = (
+        "deepseek_v4_inv_rope_quant_int8",
+        "deepseek_v4_inv_rope_quant_fp8",
+        "deepseek_v4_int8_scaled_mm",
+        "deepseek_v4_mhc_pre",
+        "deepseek_v4_mhc_fused_post_pre",
+        "deepseek_v4_mhc_post",
+        "deepseek_v4_hc_head",
+        "deepseek_v4_fused_q_kv_rmsnorm",
+        "deepseek_v4_fused_q_kv_rmsnorm_int8",
+        "deepseek_v4_qnorm_rope_kv_quant_insert",
+        "deepseek_v4_qnorm_rope_kv_bf16_insert",
+        "deepseek_v4_qnorm_rope_kv_fp8_insert",
+        "deepseek_v4_compute_global_topk_indices_and_lens",
+        "deepseek_v4_flash_mla_with_kvcache",
+        "deepseek_v4_dequantize_and_gather_k_cache",
+        "deepseek_v4_combine_topk_swa_indices",
+        "deepseek_v4_flash_mla_sparse_fwd",
+        "deepseek_v4_fused_indexer_q_rope_quant",
+        "deepseek_v4_fused_indexer_q_rope_quant_int8",
+        "deepseek_v4_compress_int8_indexer_k_cache",
+        "deepseek_v4_int8_mqa_logits",
+        "deepseek_v4_int8_paged_mqa_logits",
+        "indexer_k_quant_and_cache",
+        "cp_gather_indexer_k_quant_cache",
+        "top_k_per_row_prefill",
+        "top_k_per_row_decode",
+        "pack_seq_triton",
+        "unpack_seq_triton",
+        "dynamic_per_token_quant_int8",
+        "silu_and_mul",
+        "silu_and_mul_with_clamp",
+        "gelu_and_mul",
+        "rms_norm",
+        "rotary_embedding",
+        "apply_rotary_emb",
+        "attention_backend",
+        "moe_align_block_size",
+        "moe_sum",
+        "topk_softmax",
+        "invoke_fused_moe_triton_kernel",
+        "grouped_topk",
+        "fused_marlin_moe",
+    )
+    impls = []
+    for op_name in op_names:
+        fn = getattr(backend, op_name, None)
+        if fn is None:
+            continue
+        impls.append(
             OpImpl(
                 op_name=op_name,
                 impl_id="reference.torch",
                 kind=BackendImplKind.REFERENCE,
-                fn=_bind_is_available(getattr(backend, op_name), is_avail),
+                fn=_bind_is_available(fn, is_avail),
                 vendor=None,
                 priority=BackendPriority.REFERENCE,
             )
-            for op_name in (
-                "indexer_k_quant_and_cache",
-                "cp_gather_indexer_k_quant_cache",
-                "top_k_per_row_prefill",
-                "top_k_per_row_decode",
-                "pack_seq_triton",
-                "unpack_seq_triton",
-            )
-        ],
-        # Quantization
-        OpImpl(
-            op_name="dynamic_per_token_quant_int8",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(
-                backend.dynamic_per_token_quant_int8,
-                is_avail,
-            ),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Activation
-        OpImpl(
-            op_name="silu_and_mul",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.silu_and_mul, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        OpImpl(
-            op_name="gelu_and_mul",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.gelu_and_mul, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Normalization
-        OpImpl(
-            op_name="rms_norm",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.rms_norm, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Rotary Embedding
-        OpImpl(
-            op_name="rotary_embedding",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.rotary_embedding, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Attention Backend
-        OpImpl(
-            op_name="attention_backend",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.attention_backend, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # invoke fused moe triton kernel
-        OpImpl(
-            op_name="invoke_fused_moe_triton_kernel",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.invoke_fused_moe_triton_kernel, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Native vLLM implementation is the correctness reference for the
-        # packed Marlin layout.
-        OpImpl(
-            op_name="fused_marlin_moe",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.fused_marlin_moe, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-        # Pure PyTorch reduction used as a graph-safe fallback for fused MoE.
-        OpImpl(
-            op_name="moe_sum",
-            impl_id="reference.torch",
-            kind=BackendImplKind.REFERENCE,
-            fn=_bind_is_available(backend.moe_sum, is_avail),
-            vendor=None,
-            priority=BackendPriority.REFERENCE,
-        ),
-    ]
+        )
 
     registry.register_many(impls)

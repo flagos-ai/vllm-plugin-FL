@@ -4,13 +4,13 @@
 FlagGems fused moe operator implementations.
 """
 
-from typing import Optional
-
 import torch
+
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
 from vllm_fl.dispatch import CachedOp
+import vllm_fl.envs as fl_envs
 
 
 _marlin_moe_sum = CachedOp("moe_sum")
@@ -44,7 +44,10 @@ def _dispatch_marlin_moe_align(
 )
 def _flaggems_moe_sum_op(inp: torch.Tensor, out: torch.Tensor) -> None:
     """Opaque compile boundary around FlagGems' in-place Triton reduction."""
-    from flag_gems import moe_sum
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm import moe_sum
+    else:
+        from flag_gems import moe_sum
 
     moe_sum(inp, out)
 
@@ -111,11 +114,14 @@ def moe_align_block_size_flaggems(
     topk_ids: torch.Tensor,
     block_size: int,
     num_experts: int,
-    expert_map: Optional[torch.Tensor] = None,
+    expert_map: torch.Tensor | None = None,
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    from flag_gems import moe_align_block_size_triton
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm import moe_align_block_size_triton
+    else:
+        from flag_gems import moe_align_block_size_triton
 
     max_num_tokens_padded = topk_ids.numel() + num_experts * (block_size - 1)
     if pad_sorted_ids:
@@ -156,6 +162,14 @@ def moe_align_block_size_flaggems(
 def topk_softmax_flaggems(
     topk_weights, topk_indices, token_expert_indices, gating_output, renormalize=False
 ):
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm import topk_softmax
+
+        topk_softmax(
+            topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
+        )
+        return topk_weights, topk_indices
+
     from flag_gems import topk_softmax
 
     try:
@@ -195,7 +209,10 @@ def invoke_fused_moe_triton_kernel_flaggems(
     block_shape=None,
     B_bias=None,
 ):
-    from flag_gems import invoke_fused_moe_triton_kernel
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm import invoke_fused_moe_triton_kernel
+    else:
+        from flag_gems import invoke_fused_moe_triton_kernel
 
     invoke_fused_moe_triton_kernel(
         A,
@@ -231,7 +248,10 @@ def grouped_topk_flaggems(
     bias,
     scoring_func=0,
 ):
-    from flag_gems import grouped_topk
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm import grouped_topk
+    else:
+        from flag_gems import grouped_topk
 
     return grouped_topk(
         scores,

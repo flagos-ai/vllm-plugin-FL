@@ -4,21 +4,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import os
-from typing import TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
-
-import torch
-
 # Import custom ops and trigger registration on both legacy and stable-ABI
 # vLLM wheels. Keep the attempts independent: official vLLM 0.24 wheels have
 # only the stable-ABI module, so failure of the legacy import must not skip it.
 import importlib
+import os
+from contextlib import suppress
+from typing import TYPE_CHECKING, TypeVar
+
+import torch
+from typing_extensions import ParamSpec
+
 for _extension in ("vllm._C", "vllm._C_stable_libtorch"):
-    try:
+    with suppress(ImportError, OSError):
         importlib.import_module(_extension)
-    except (ImportError, OSError):
-        pass  # Non-CUDA platforms may not ship either extension.
 
 from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
@@ -34,6 +33,7 @@ else:
     CacheDType = None
 
 from vllm_fl.utils import (
+    SPLITTING_OPS,
     DeviceInfo,
     get_device_control_env_var,
     get_device_name,
@@ -49,7 +49,52 @@ dist_backend_dict = {
     "npu": "hccl",
     "cuda": "nccl",
     "musa": "mccl",
+    "gcu": "eccl",
 }
+
+
+def _configure_musa_tp_piecewise_graph(
+    compilation_config,
+    *,
+    all2all_backend: str,
+    data_parallel_size: int,
+    device_type: str = "musa",
+) -> None:
+    """Keep TP collectives outside stream-captured graph segments.
+
+    Shared by MUSA (MCCL) and PTPU (PCCL/FlagCX): neither vendor's collective
+    library can run while a device stream is being captured, so the TP
+    communication ops must be split out of the piecewise cudagraph.
+    """
+    if device_type == "musa":
+        # ProcessGroupMCCL's watchdog may call MUSA APIs while another thread is
+        # capturing a graph. Blocking wait avoids creating that watchdog thread.
+        # This must be set before the process group is constructed.
+        os.environ.setdefault("TORCH_MCCL_BLOCKING_WAIT", "1")
+
+    # Do not enable vLLM's global input-copy wrapper here. Full-model inputs
+    # have dynamic shapes and strides, while only the PIECEWISE segments after
+    # eager MCCL collectives need capture-buffer copies. GraphWrapper handles
+    # those segment inputs locally and still honors an explicit global setting.
+
+    # Keep the conservative torch_musa 2.9 platform default for pointwise
+    # autotuning. This is independent of the input-stride fix above; an
+    # explicit user setting still takes precedence.
+    compilation_config.inductor_compile_config.setdefault(
+        "triton.autotune_pointwise", False
+    )
+
+    # This normally runs immediately after Platform.check_and_update_config.
+    # Initialize vLLM's default attention/KV-cache splitting ops first so
+    # adding device-specific ops does not replace those defaults.
+    compilation_config.set_splitting_ops_for_v1(
+        all2all_backend=all2all_backend,
+        data_parallel_size=data_parallel_size,
+    )
+    assert compilation_config.splitting_ops is not None
+    for op in SPLITTING_OPS.get(device_type, ()):
+        if op not in compilation_config.splitting_ops:
+            compilation_config.splitting_ops.append(op)
 
 
 class PlatformFL(Platform):
@@ -60,16 +105,22 @@ class PlatformFL(Platform):
     device_name = get_device_name(vendor_name)
     # cuda_alike (nvidia/metax): device_name = vendor_name (not used in torch.device)
     # non-cuda_alike (iluvatar/ascend): device_name = device_type (used in torch.device)
-    device_name = device_info.vendor_name if (
-        device_info.device_type == "cuda"
-        and device_info.vendor_name not in ("iluvatar", "hygon")
-    ) else device_info.device_type
+    device_name = (
+        device_info.vendor_name
+        if (
+            device_info.device_type == "cuda"
+            and device_info.vendor_name not in ("iluvatar", "hygon")
+        )
+        else device_info.device_type
+    )
     device_type = device_info.device_type
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     dist_backend: str = (
-        "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
+        "flagcx"
+        if "FLAGCX_PATH" in os.environ
+        else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
     # translated into the ordinal visible to this process. Leaving the
@@ -86,16 +137,30 @@ class PlatformFL(Platform):
             return True
         if self.vendor_name == "hygon":
             return False
+        if self.vendor_name in ("gcu", "enflame"):
+            return True
         return self.device_type == "cuda"
 
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
 
+    @classmethod
+    def is_arch_support_pdl(cls) -> bool:
+        if cls.vendor_name != "nvidia":
+            return False
+        try:
+            major, _ = cls.torch_device_fn.get_device_capability()
+        except Exception:
+            return False
+        return major >= 9
+
     def is_musa(self) -> bool:
-        if hasattr(torch, 'musa') and torch.musa.is_available():
-            return True
-        return False
+        return bool(hasattr(torch, "musa") and torch.musa.is_available())
+
+    def is_gcu(self) -> bool:
+        return bool(hasattr(torch, "gcu") and torch.gcu.is_available())
+
     @property
     def supported_dtypes(self) -> list[torch.dtype]:
         return [torch.bfloat16, torch.float16, torch.float32]
@@ -133,9 +198,7 @@ class PlatformFL(Platform):
     ### TODO(lms): change pin_memory depend device
     @classmethod
     def is_pin_memory_available(cls):
-        if cls.device_type in ["cuda", "xpu", "npu", "musa"]:
-            return True
-        return False
+        return cls.device_type in ["cuda", "xpu", "npu", "musa", "gcu"]
 
     @classmethod
     def import_kernels(cls) -> None:
@@ -162,7 +225,10 @@ class PlatformFL(Platform):
 
         if cls.device_type == "musa":
             try:
-                from vllm_fl.dispatch.backends.vendor.musa.patch import apply_musa_patches
+                from vllm_fl.dispatch.backends.vendor.musa.patch import (
+                    apply_musa_patches,
+                )
+
                 apply_musa_patches()
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
@@ -186,6 +252,9 @@ class PlatformFL(Platform):
             if cls.device_type == "npu":
                 cache_config.block_size = 128
                 logger.info("Setting kv cache block size to 128 for Ascend NPU.")
+            elif cls.vendor_name == "kunlunxin":
+                cache_config.block_size = 128
+                logger.info("Setting kv cache block size to 128 for Kunlunxin.")
             elif cls.device_type == "musa":
                 cache_config.block_size = 64
                 logger.info("Setting kv cache block size to 64 for MUSA.")
@@ -206,15 +275,17 @@ class PlatformFL(Platform):
             model_config is not None
             and model_config.use_mla
             and cache_config.block_size is not None
-        ):
-            if cache_config.block_size % 64 != 0:
-                cache_config.block_size = 64
-                logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
+        ) and cache_config.block_size % 64 != 0:
+            cache_config.block_size = 64
+            logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
 
         # lazy import to avoid circular import
         from vllm.config import CUDAGraphMode
 
         compilation_config = vllm_config.compilation_config
+        from vllm_fl.ops.activation import enable_fused_activations_for_compile
+
+        enable_fused_activations_for_compile(compilation_config)
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
@@ -223,13 +294,38 @@ class PlatformFL(Platform):
             and compilation_config.cudagraph_mode.has_full_cudagraphs()
         ):
             logger.info(
-                "MUSA: Downgrading cudagraph_mode from %s to PIECEWISE because "
-                "FULL cudagraphs require musaStreamCaptureModeThreadLocal which "
-                "is not yet supported by torch_musa. PIECEWISE graphs still "
-                "provide graph capture benefits for non-TP-communication regions.",
+                "%s: Downgrading cudagraph_mode from %s to PIECEWISE because "
+                "FULL cudagraphs require thread-local stream capture which is "
+                "not yet supported by this vendor backend. PIECEWISE graphs "
+                "still provide graph capture benefits for non-TP-communication "
+                "regions.",
+                cls.device_type.upper(),
                 compilation_config.cudagraph_mode,
             )
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+
+        if (
+            cls.device_type in ("musa", "ptpu")
+            and parallel_config.tensor_parallel_size > 1
+            and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+        ):
+            effective_dp_size = (
+                parallel_config.data_parallel_size
+                if model_config is None or model_config.is_moe
+                else 1
+            )
+            _configure_musa_tp_piecewise_graph(
+                compilation_config,
+                all2all_backend=parallel_config.all2all_backend,
+                data_parallel_size=effective_dp_size,
+                device_type=cls.device_type,
+            )
+            logger.info(
+                "%s: Keeping TP collective ops outside PIECEWISE graph "
+                "capture because the vendor collective library (MCCL/PCCL) "
+                "does not support stream capture.",
+                cls.device_type.upper(),
+            )
 
         if (
             parallel_config.all2all_backend == "deepep_high_throughput"
@@ -260,6 +356,11 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
 
+        # GCU relies on ECCL for collectives; custom all-reduce kernels are
+        # not available.
+        if cls.vendor_name in ("gcu", "enflame"):
+            parallel_config.disable_custom_all_reduce = True
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -273,7 +374,9 @@ class PlatformFL(Platform):
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
 
-        backend_path = call_op("attention_backend", use_mla=use_mla, use_sparse=use_sparse)
+        backend_path = call_op(
+            "attention_backend", use_mla=use_mla, use_sparse=use_sparse
+        )
 
         logger.info_once(
             "Using attention backend via dispatch (use_mla=%s, use_sparse=%s): %s",
@@ -283,8 +386,9 @@ class PlatformFL(Platform):
             scope="local",
         )
         logger.info(
-            "Using attention backend via dispatch (use_mla=%s): %s"
-            % (use_mla, backend_path)
+            "Using attention backend via dispatch (use_mla=%s): %s",
+            use_mla,
+            backend_path,
         )
         return backend_path
 
@@ -314,6 +418,15 @@ class PlatformFL(Platform):
             return backend
 
         # Try FlashAttention first
+        if cls.vendor_name == "kunlunxin":
+            from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.mm_encoder_attention import (
+                supports_native_mm_attention,
+            )
+
+            if supports_native_mm_attention(head_size, dtype):
+                return AttentionBackendEnum.FLASH_ATTN
+            return AttentionBackendEnum.TORCH_SDPA
+
         if (cc := cls.get_device_capability()) and cc.major >= 8:
             try:
                 backend_class = AttentionBackendEnum.FLASH_ATTN.get_class()
@@ -346,9 +459,25 @@ class PlatformFL(Platform):
 
     @classmethod
     def support_static_graph_mode(cls) -> bool:
-        if cls.vendor_name in ["nvidia", "ascend", "metax", "hygon", "mthreads", "iluvatar"]:
-            return True
-        return False
+        return cls.vendor_name in [
+            "nvidia",
+            "ascend",
+            "metax",
+            "hygon",
+            "mthreads",
+            "iluvatar",
+            "thead",
+            "gcu",
+            "enflame",
+            "kunlunxin",
+            "biren",
+            # sunrise/PTPU: opt in to the static-graph path so VllmConfig
+            # resolves a non-NONE cudagraph_mode (defaults to PIECEWISE) instead
+            # of hard-forcing NONE in the else branch (vllm/config/vllm.py).
+            # TP 集合通信的拆分配置在 check_and_update_config 与
+            # SPLITTING_OPS["ptpu"] 里。
+            "sunrise",
+        ]
 
     @classmethod
     def insert_blocks_to_device(
@@ -387,14 +516,12 @@ class PlatformFL(Platform):
     def use_custom_allreduce(cls) -> bool:
         if cls.vendor_name == "hygon":
             return False
-        if cls.dist_backend == "flagcx":
-            return False
-        return True
+        return cls.dist_backend != "flagcx"
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
         if cls.device_name == "npu":
-            import vllm_fl.dispatch.backends.vendor.ascend
+            import vllm_fl.dispatch.backends.vendor.ascend  # noqa: F401
         if cls.vendor_name == "iluvatar":
             # Patches are applied at module import time in iluvatar.py.
             # Also call chained-or patch here explicitly from the main process,
@@ -402,12 +529,11 @@ class PlatformFL(Platform):
             from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
                 patch_triton_chained_or_for_iluvatar,
             )
+
             patch_triton_chained_or_for_iluvatar()
 
     def supports_fp8(cls) -> bool:
-        if cls.vendor_name == "nvidia":
-            return True
-        return False
+        return cls.vendor_name == "nvidia"
 
     @classmethod
     def get_device_uuid(cls, device_id: int = 0) -> str:
@@ -417,6 +543,7 @@ class PlatformFL(Platform):
             return f"ILUVATAR-{device_id}"
         if cls.device_type == "cuda":
             import pynvml
+
             pynvml.nvmlInit()
             physical_device_id = cls.device_id_to_physical_device_id(device_id)
             handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
@@ -433,18 +560,41 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_total_memory(cls, device_id: int = 0) -> int:
-        return cls.torch_device_fn.get_device_properties(
-            device_id
-        ).total_memory
+        return cls.torch_device_fn.get_device_properties(device_id).total_memory
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
+        # PTPU: route collectives through torch.ops.vllm.* custom ops so that
+        # Dynamo treats FlagCX/PCCL all-reduce as an opaque op (traced via its
+        # fake impl only) instead of stepping into the real communicator, whose
+        # `with self._device_ctx:` and lazy init are untraceable (gb0142). This
+        # also lets the ops be split out of piecewise cudagraphs (SPLITTING_OPS
+        # "ptpu"), keeping PCCL off the captured stream. Mirrors MUSA/CUDA.
+        #
+        # Gate on graph mode: this custom-op wrapping is only needed when
+        # torch.compile actually traces the collectives. Under enforce-eager
+        # (cudagraph_mode == NONE) there is no Dynamo tracing, so keep the
+        # stock direct-communicator path to avoid changing eager behaviour.
+        if cls.device_type == "ptpu":
+            from vllm.config import CUDAGraphMode, get_current_vllm_config_or_none
+
+            vllm_config = get_current_vllm_config_or_none()
+            if vllm_config is None:
+                # Config not resolved yet (early probe); default to the eager
+                # path — the GroupCoordinator that matters is built after
+                # check_and_update_config has finalized cudagraph_mode.
+                return False
+            return (
+                vllm_config.compilation_config.cudagraph_mode
+                != CUDAGraphMode.NONE
+            )
         return cls.vendor_name in ("nvidia", "thead", "iluvatar")
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:
-        return cls.torch_device_fn.get_device_properties(device_id).multi_processor_count
-
+        return cls.torch_device_fn.get_device_properties(
+            device_id
+        ).multi_processor_count
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
@@ -457,6 +607,15 @@ class PlatformFL(Platform):
         # TODO: For PTPU/Sunrise devices, return None
         if cls.device_type == "ptpu":
             return None
+        # Non-CUDA devices (e.g. txda/tsingmicro) have no CUDA-style capability
+        if cls.device_type == "txda":
+            return None
+        if cls.device_type == "gcu":
+            gcu = getattr(torch, "gcu", None)
+            if gcu is None:
+                return None
+            major, minor = gcu.get_device_capability(device_id)
+            return DeviceCapability(major=major, minor=minor)
         major, minor = torch.cuda.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 
@@ -504,15 +663,19 @@ class PlatformFL(Platform):
     def manual_seed_all(cls, seed: int) -> None:
         """Set RNG seed across all devices for the current platform."""
         # torch_ptpu.ptpu doesn't have manual_seed_all, implement it manually
-        if hasattr(cls.torch_device_fn, 'manual_seed_all'):
+        if hasattr(cls.torch_device_fn, "manual_seed_all"):
             cls.torch_device_fn.manual_seed_all(seed)
         else:
             # Fallback for devices without manual_seed_all (e.g., ptpu)
             torch.manual_seed(seed)
-            if hasattr(cls.torch_device_fn, 'device_count') and hasattr(cls.torch_device_fn, '_get_or_create_default_generator'):
+            if hasattr(cls.torch_device_fn, "device_count") and hasattr(
+                cls.torch_device_fn, "_get_or_create_default_generator"
+            ):
                 # Set seed for each device's default generator
                 for device_id in range(cls.torch_device_fn.device_count()):
-                    generator = cls.torch_device_fn._get_or_create_default_generator(device_id)
+                    generator = cls.torch_device_fn._get_or_create_default_generator(
+                        device_id
+                    )
                     generator.manual_seed(seed)
 
     @classmethod

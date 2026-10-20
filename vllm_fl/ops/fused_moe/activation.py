@@ -1,6 +1,11 @@
 import torch
 import torch.nn.functional as F
-from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+
+from vllm.model_executor.layers.fused_moe.activation import (
+    MoEActivation,
+    apply_moe_activation as upstream_apply_moe_activation,
+)
+
 from vllm_fl.dispatch import CachedOp
 
 _silu_and_mul = CachedOp("silu_and_mul")
@@ -11,6 +16,10 @@ def apply_moe_activation(
     activation: MoEActivation,
     output: torch.Tensor,
     input: torch.Tensor,
+    *,
+    clamp_limit: float | None = None,
+    alpha: float = 1.0,
+    beta: float = 0.0,
 ) -> torch.Tensor:
     """Apply MoE activation function."""
     assert input.dim() == 2, "Input must be 2D"
@@ -28,11 +37,26 @@ def apply_moe_activation(
 
     # Activations with gated multiplication (gate × activation(up))
     if activation == MoEActivation.SILU:
+        if clamp_limit is not None:
+            return upstream_apply_moe_activation(
+                activation,
+                output,
+                input,
+                clamp_limit=clamp_limit,
+            )
         output.copy_(_silu_and_mul(None, input))
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.SWIGLUOAI:
         torch.ops._C.swigluoai_and_mul(output, input)
+    elif activation == getattr(MoEActivation, "SWIGLUOAI_UNINTERLEAVE", None):
+        if clamp_limit is None:
+            raise ValueError("SWIGLUOAI_UNINTERLEAVE requires clamp_limit")
+        # This kernel supports the packed [all gates; all ups] layout used by
+        # MiniMax-M3 and preserves its configurable alpha/beta/limit math.
+        from vllm.models.minimax_m3.amd.ops.swiglu_oai import swiglu_oai_split
+
+        output.copy_(swiglu_oai_split(input, alpha, beta, clamp_limit))
     elif activation == MoEActivation.SWIGLUSTEP:
         from vllm.model_executor.layers.activation import swiglustep_and_mul_triton
 

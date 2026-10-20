@@ -11,6 +11,7 @@ This module follows a layered testing strategy:
 Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -36,6 +37,54 @@ def has_vllm_model_runner():
 pytestmark = pytest.mark.skipif(
     not has_vllm_model_runner(), reason="vllm_fl.worker.model_runner not available"
 )
+
+
+def test_musa_piecewise_capture_sizes_respect_live_graph_limit(monkeypatch):
+    from vllm.config import CUDAGraphMode
+
+    import vllm_fl.worker.model_runner as model_runner_module
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+    capture_sizes = [1, 2, 4] + list(range(8, 256, 8)) + list(range(256, 513, 16))
+    compilation_config = SimpleNamespace(
+        cudagraph_mode=CUDAGraphMode.PIECEWISE,
+        cudagraph_capture_sizes=capture_sizes,
+        max_cudagraph_capture_size=512,
+    )
+    dispatcher = MagicMock()
+    dispatcher.cudagraph_mode = CUDAGraphMode.PIECEWISE
+    dispatcher.cudagraph_keys = {
+        CUDAGraphMode.PIECEWISE: set(),
+        CUDAGraphMode.FULL: set(),
+    }
+    dispatcher.get_capture_descs.return_value = [
+        (CUDAGraphMode.PIECEWISE, [object()] * len(capture_sizes))
+    ]
+    runner = SimpleNamespace(
+        compilation_config=compilation_config,
+        parallel_config=SimpleNamespace(tensor_parallel_size=2),
+        cudagraph_dispatcher=dispatcher,
+        uniform_decode_query_len=1,
+    )
+
+    monkeypatch.setattr(
+        model_runner_module,
+        "current_platform",
+        SimpleNamespace(device_type="musa"),
+    )
+    monkeypatch.setattr(
+        model_runner_module.GraphWrapper,
+        "_all_instances",
+        [SimpleNamespace(runtime_mode=CUDAGraphMode.PIECEWISE) for _ in range(86)],
+    )
+
+    ModelRunnerFL._limit_musa_piecewise_capture_sizes(runner)
+
+    assert compilation_config.cudagraph_capture_sizes == capture_sizes[:23]
+    assert compilation_config.max_cudagraph_capture_size == 160
+    dispatcher.initialize_cudagraph_keys.assert_called_once_with(
+        CUDAGraphMode.PIECEWISE, 1
+    )
 
 
 # =============================================================================

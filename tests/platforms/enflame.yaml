@@ -1,0 +1,67 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+platform: enflame
+vendor: gcu
+
+device_types:
+  s60:
+    memory_gb: 42
+    tags: [enflame, gcu, bf16, fp16, fp32]
+
+tolerance:
+  inference:
+    default:
+      rtol: 1e-3
+      atol: 1e-3
+    bfloat16:
+      rtol: 1e-2
+      atol: 1e-2
+
+device_overrides:
+  s60:
+    cases:
+      - qwen3_6/27b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_eager
+    llm:
+      gpu_memory_utilization: 0.90
+      disable_custom_all_reduce: false
+    serve:
+      startup_retries: 240
+
+env_defaults:
+  VLLM_PLUGINS: "fl"
+  TOPS_VISIBLE_DEVICES: "2,3"
+  VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "99999"
+  TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
+  ENABLE_I64_CHECK: "0"
+  TORCHGCU_INDUCTOR_ENABLE: "1"
+
+s60:
+  name: "s60"
+  tests:
+    e2e:
+      inference:
+        qwen3_6: ["27b_tp2_eager"]
+      serving:
+        qwen3_6: ["35b_a3b_tp2_eager"]
+    functional:
+      include: "*"
+      exclude: []
+    unit:
+      include: "*"
+      exclude: []
+    benchmark:
+      enabled: true
+      smoke: ["serve"]

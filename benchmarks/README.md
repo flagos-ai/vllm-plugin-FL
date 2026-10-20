@@ -52,7 +52,7 @@ All arguments are passed directly to `vllm bench throughput`.
 Example:
 ```bash
 python benchmarks/benchmark_throughput_autotune.py \
-  --model /models/Qwen3-Next-80B-A3B-Instruct \
+  --model /data/models/Qwen/Qwen3-Next-80B-A3B-Instruct \
   --tensor-parallel-size 4 \
   --dataset-name random \
   --input-len 6144 \

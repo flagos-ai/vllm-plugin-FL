@@ -205,6 +205,18 @@ class WorkerFL(WorkerBase):
         is_driver_worker: bool = False,
     ):
 
+        # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
+        # kernels inside spawned workers; when every rank shares the default
+        # Triton cache directory, concurrent compilation of the same kernel
+        # can deadlock on the cache file locks. Give each rank its own cache
+        # directory unless the operator overrode it.
+        if current_platform.device_type == "gcu" and not os.environ.get(
+            "TRITON_CACHE_DIR"
+        ):
+            os.environ["TRITON_CACHE_DIR"] = (
+                f"/tmp/triton-cache-fl-rank-{rank}"
+            )
+
         if (
             vllm_config.num_speculative_tokens == 1
             and vllm_config.scheduler_config.async_scheduling
@@ -239,11 +251,14 @@ class WorkerFL(WorkerBase):
         for k, v in sorted(os.environ.items()):
             logger.debug("%s=%r", k, v)
 
-        # Apply the NVIDIA MM encoder dispatch fix before model construction:
-        # CustomOp caches its selected forward method in __init__.
-        from vllm_fl.attention.utils import patch_mm_encoder_attention
-
+        # Apply the MM encoder / partial-RoPE dispatch fixes before model
+        # construction: CustomOp caches its selected forward method in __init__.
+        from vllm_fl.attention.utils import (
+            patch_mm_encoder_attention,
+            patch_oot_apply_rotary_emb,
+        )
         patch_mm_encoder_attention()
+        patch_oot_apply_rotary_emb()
 
         register_oot_ops()
 
@@ -359,8 +374,26 @@ class WorkerFL(WorkerBase):
                 patch_sampler_compile_for_iluvatar()
             except Exception as _e:
                 import logging as _lg
+                _lg.getLogger(__name__).warning(
+                    "iluvatar worker patch failed: %s", _e
+                )
 
-                _lg.getLogger(__name__).warning("iluvatar worker patch failed: %s", _e)
+        # PTPU: register the Inductor/Dynamo/Triton wiring in EVERY worker
+        # process (torch.compile runs here, not in EngineCore, and the
+        # Inductor/Dynamo registries are per-process). Mirrors the iluvatar
+        # GPUTarget remap above; idempotent + no-op on other devices.
+        if getattr(current_platform, "device_type", "") == "ptpu":
+            try:
+                from vllm_fl.compilation.inductor_backend import (
+                    register_ptpu_inductor_backend,
+                )
+
+                register_ptpu_inductor_backend()
+            except Exception as _e:
+                import logging as _lg
+                _lg.getLogger(__name__).warning(
+                    "ptpu inductor backend registration failed: %s", _e
+                )
         # This env var set by Ray causes exceptions with graph building.
         if (
             self.parallel_config.distributed_executor_backend
@@ -427,6 +460,10 @@ class WorkerFL(WorkerBase):
             f"{current_platform.device_type}:{visible_device_index}"
         )
         current_platform.set_device(self.device)
+        if current_platform.device_type == "musa":
+            # The loader uses DeviceConfig as its allocation context. Keep it
+            # aligned with this worker's rank-local device, not the frontend's.
+            self.device_config.device = self.device
 
         current_platform.check_if_supports_dtype(self.model_config.dtype)
 
@@ -489,8 +526,31 @@ class WorkerFL(WorkerBase):
     # to hijack tensor allocation.
     def load_model(self, *, load_dummy_weights: bool = False) -> None:
         ### TODO(lms): support manages a memory pool for device tensors.
+        from vllm_fl.patches.moe_sum import patch_vllm_moe_sum
+
+        # Importing vllm._custom_ops can initialize accelerator kernels. Do
+        # this only in a worker after init_device has bound its local device
+        # and initialized the distributed environment.
+        patch_vllm_moe_sum()
         with set_current_vllm_config(self.vllm_config):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
+        if current_platform.device_type == "musa":
+            mismatched = [
+                (name, param.device)
+                for name, param in self.model_runner.model.named_parameters()
+                if param.device.type == "musa" and param.device != self.device
+            ]
+            if mismatched:
+                raise RuntimeError(
+                    f"Rank {self.rank} expected model parameters on {self.device}, "
+                    f"got {mismatched[:3]}"
+                )
+            logger.info(
+                "MUSA rank %d: DeviceConfig=%s, model parameters on %s",
+                self.rank,
+                self.device_config.device,
+                self.device,
+            )
         # with self._maybe_get_memory_pool_context(tag="weights"):
         #     self.model_runner.load_model(eep_scale_up=eep_scale_up)
 
@@ -513,6 +573,14 @@ class WorkerFL(WorkerBase):
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
         """
+        if current_platform.device_type == "txda":
+            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
+            # e.g., 20 GiB or similar default cache memory size.
+            fallback_val = int(os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024))
+            logger.info("txda platform detected. Skipping memory profiling to avoid OOM. "
+                        f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB.")
+            return fallback_val
+
         GiB = lambda b: b / GiB_bytes
         if kv_cache_memory_bytes := self.cache_config.kv_cache_memory_bytes:
             # still need a profile run which compiles the model for
@@ -569,7 +637,10 @@ class WorkerFL(WorkerBase):
             # runtime activations and fail with OOM.
             cudagraph_memory_estimate = 0
             if (
-                current_platform.is_cuda()
+                (
+                    current_platform.is_cuda()
+                    or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+                )
                 and self.vllm_config.compilation_config.cudagraph_mode
                 != CUDAGraphMode.NONE
             ):
@@ -738,15 +809,27 @@ class WorkerFL(WorkerBase):
         ### NOTE(lms): can add gems kernel pretune here
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
-        try:
-            kernel_warmup(self)
-        except ImportError as e:
-            # vllm 0.24.0's kernel_warmup unconditionally imports
-            # minimax_m3_msa_warmup, whose chain reaches torchvision.
-            # torchvision is not installed on OOT runtimes (installing it
-            # would overwrite the vendor-matched torch matrix); the warmup
-            # is a no-op for any model other than MiniMaxM3, so skip it.
-            logger.warning("kernel_warmup skipped: %s", e)
+        if current_platform.device_type == "txda" or getattr(
+            current_platform, "vendor_name", None
+        ) == "kunlunxin":
+            logger.warning(
+                "Detected %s device, skipping generic kernel_warmup",
+                getattr(
+                    current_platform,
+                    "vendor_name",
+                    current_platform.device_type,
+                ),
+            )
+        else:
+            try:
+                kernel_warmup(self)
+            except ImportError as e:
+                # vllm 0.24.0's kernel_warmup unconditionally imports
+                # minimax_m3_msa_warmup, whose chain reaches torchvision.
+                # torchvision is not installed on OOT runtimes (installing it
+                # would overwrite the vendor-matched torch matrix); the warmup
+                # is a no-op for any model other than MiniMaxM3, so skip it.
+                logger.warning("kernel_warmup skipped: %s", e)
 
         cuda_graph_memory_bytes = 0
         if self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:

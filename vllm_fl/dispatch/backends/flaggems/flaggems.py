@@ -195,6 +195,11 @@ class FlagGemsBackend(Backend):
 
         return silu_and_mul_flaggems(obj, x)
 
+    def silu_and_mul_with_clamp(self, obj, x: torch.Tensor) -> torch.Tensor:
+        from .impl.activation import silu_and_mul_with_clamp_flaggems
+
+        return silu_and_mul_with_clamp_flaggems(obj, x)
+
     def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         GELU activation followed by element-wise multiplication.
@@ -270,6 +275,13 @@ class FlagGemsBackend(Backend):
             rotary_interleaved=rotary_interleaved,
             inplace=inplace,
         )
+
+    def apply_rotary_emb(
+        self, obj, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+    ) -> torch.Tensor:
+        from .impl.rotary import apply_rotary_emb_flaggems
+
+        return apply_rotary_emb_flaggems(obj, x, cos, sin)
 
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """

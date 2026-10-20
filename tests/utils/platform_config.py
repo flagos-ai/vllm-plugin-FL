@@ -297,6 +297,39 @@ class PlatformConfig:
 
         return Tolerance()
 
+    def get_device_case_overrides(self, model: str, case: str) -> dict[str, Any]:
+        """Return model config overrides for a model case on the active device.
+
+        Expected YAML shape::
+
+            device_overrides:
+              a100:
+                cases:
+                  - model_name/e2e_test_case_name
+                llm:
+                  gpu_memory_utilization: 0.9
+
+        The ``tolerance`` key under the same device remains reserved for
+        numerical tolerance overrides and is not treated as a model override.
+        """
+        dev_override = self.device_overrides.get(self.device, {})
+        if not isinstance(dev_override, dict):
+            return {}
+
+        cases = dev_override.get("cases", []) or []
+        if not isinstance(cases, list):
+            raise TypeError(f"device_overrides.{self.device}.cases must be a list")
+
+        case_key = f"{model}/{case}"
+        if case_key not in cases:
+            return {}
+
+        return {
+            key: value
+            for key, value in dev_override.items()
+            if key not in {"cases", "tolerance"}
+        }
+
     def get_e2e_tests(self) -> FunctionalTests:
         """Return e2e test configuration (inference/serving) for the active device."""
         dt = self.device_tests.get(self.device, {})

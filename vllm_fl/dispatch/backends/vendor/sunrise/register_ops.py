@@ -46,6 +46,47 @@ def register_builtins(registry) -> None:
             vendor="sunrise",
             priority=BackendPriority.VENDOR,
         ),
+        OpImpl(
+            op_name="silu_and_mul",
+            impl_id="vendor.sunrise",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.silu_and_mul, is_avail),
+            vendor="sunrise",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="rotary_embedding",
+            impl_id="vendor.sunrise",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.rotary_embedding, is_avail),
+            vendor="sunrise",
+            priority=BackendPriority.VENDOR,
+        ),
+        # MoE helper fallbacks.
+        OpImpl(
+            op_name="topk_softmax",
+            impl_id="vendor.sunrise",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.topk_softmax, is_avail),
+            vendor="sunrise",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="moe_sum",
+            impl_id="vendor.sunrise",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_sum, is_avail),
+            vendor="sunrise",
+            priority=BackendPriority.VENDOR,
+        ),
+        OpImpl(
+            op_name="moe_align_block_size",
+            impl_id="vendor.sunrise",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.moe_align_block_size, is_avail),
+            vendor="sunrise",
+            priority=BackendPriority.VENDOR,
+        ),
     ]
 
     registry.register_many(impls)

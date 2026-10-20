@@ -12,7 +12,8 @@ Usage::
 
     # Between test cases:
     device_cleanup("cuda")  # NVIDIA GPU cleanup
-    device_cleanup("ascend")  # Huawei NPU cleanup
+    device_cleanup("ascend")  # Huawei Ascend NPU cleanup
+    device_cleanup("hygon")  # Hygon DCU cleanup
 """
 
 from __future__ import annotations
@@ -29,36 +30,50 @@ def device_cleanup(platform: str, wait: float = 3.0) -> None:
     """Run platform-specific cleanup between E2E test cases.
 
     1. Kill stale vllm/model-serving processes
-    2. Wait briefly for resources to be released
-    3. Log device memory state
+    2. Clear framework allocator cache to reclaim held memory
+    3. Wait briefly for device resources to be released
+    4. Log device memory state
 
     Args:
-        platform: Platform name (e.g. ``"cuda"``, ``"ascend"``).
-        wait: Seconds to wait after killing processes.
+        platform: Platform name (e.g. ``"cuda"``, ``"ascend"``, ``"hygon"``).
+        wait: Seconds to wait after killing processes before logging memory.
     """
     _kill_stale_processes()
 
-    # Clear framework cache to reclaim memory held by PyTorch allocator
+    # On PPU, driver crashes can leave processes holding device handles that
+    # pgrep-based cleanup misses. fuser on the device files catches them.
+    if platform == "thead":
+        _kill_stale_ppu_processes()
+
+    # Clear framework cache to reclaim memory held by the PyTorch allocator
     cache_fn = _PLATFORM_CACHE_CLEAR.get(platform, _cache_clear_noop)
     cache_fn()
 
     if wait > 0:
         time.sleep(wait)
 
-    cleanup_fn = _PLATFORM_CLEANUP.get(platform, _cleanup_noop)
-    cleanup_fn()
+    # Log current device memory state for diagnostic purposes
+    log_fn = _PLATFORM_MEMORY_LOG.get(platform, _log_memory_noop)
+    log_fn()
 
 
 # ---------------------------------------------------------------------------
 # Stale process cleanup (platform-agnostic)
 # ---------------------------------------------------------------------------
 
-# Process name patterns that indicate a stale serving process
-_STALE_PATTERNS = ["vllm serve", "vllm.entrypoints"]
+# Process name patterns that indicate a stale vllm process.
+# Includes both serving processes (vllm.entrypoints) and inference worker
+# processes that rename themselves via prctl (VLLM::Worker, VLLM::EngineCore).
+_STALE_PATTERNS = [
+    "vllm serve",
+    "vllm.entrypoints",
+    "VLLM::Worker",
+    "VLLM::EngineCore",
+]
 
 
 def _kill_stale_processes() -> None:
-    """Kill any leftover vllm serving processes."""
+    """Kill any leftover vllm serving or inference worker processes."""
     for pattern in _STALE_PATTERNS:
         try:
             result = subprocess.run(
@@ -79,13 +94,49 @@ def _kill_stale_processes() -> None:
             pass
 
 
+def _kill_stale_ppu_processes() -> None:
+    """Kill processes holding T-Head PPU device handles via fuser.
+
+    PPU driver crashes (e.g. Hggc failure) can leave worker processes in
+    uninterruptible sleep. Pattern-based pgrep may miss them. fuser on the
+    PPU device files gives a definitive list of processes with open handles.
+    """
+    import glob
+
+    ppu_devs = sorted(glob.glob("/dev/alixpu_ppu*"))
+    if not ppu_devs:
+        return
+
+    pids: set[str] = set()
+    for dev in ppu_devs:
+        try:
+            result = subprocess.run(
+                ["fuser", dev],
+                capture_output=True,
+                text=True,
+            )
+            for pid in result.stdout.split():
+                pid = pid.strip()
+                if pid and pid != str(os.getpid()):
+                    pids.add(pid)
+        except FileNotFoundError:
+            # fuser not available — fall back to pattern-based kill only
+            return
+
+    if pids:
+        print(f"[cleanup] Killing stale PPU processes (fuser): {sorted(pids)}")
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid), signal.SIGKILL)
+
+
 # ---------------------------------------------------------------------------
-# Platform-specific cleanup
+# Platform-specific memory logging
 # ---------------------------------------------------------------------------
 
 
-def _cleanup_cuda() -> None:
-    """Log NVIDIA GPU memory state."""
+def _log_memory_cuda() -> None:
+    """Log NVIDIA GPU memory state via nvidia-smi."""
     try:
         result = subprocess.run(
             [
@@ -109,8 +160,8 @@ def _cleanup_cuda() -> None:
         pass
 
 
-def _cleanup_ascend() -> None:
-    """Log Huawei Ascend NPU memory state."""
+def _log_memory_ascend() -> None:
+    """Log Huawei Ascend NPU memory state via npu-smi."""
     try:
         result = subprocess.run(
             ["npu-smi", "info"],
@@ -129,15 +180,62 @@ def _cleanup_ascend() -> None:
         pass
 
 
-def _cleanup_noop() -> None:
-    """No-op cleanup for unknown platforms."""
+def _log_memory_hygon() -> None:
+    """Log Hygon DCU memory state via hy-smi."""
+    try:
+        result = subprocess.run(
+            ["hy-smi", "--showmeminfo", "vram"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            print("[cleanup] DCU memory (MiB):")
+            for line in result.stdout.strip().split("\n"):
+                # Lines look like: HCU[0]  : vram Total Memory (MiB): 65520
+                #                  HCU[0]  : vram Total Used Memory (MiB): 51920
+                if "Total Memory" in line or "Total Used Memory" in line:
+                    print(f"  {line.strip()}")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # hy-smi not available or timed out — skip memory logging
+        pass
+
+
+def _log_memory_thead() -> None:
+    """Log T-Head PPU memory state via ppu-smi (symlinked as nvidia-smi)."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,memory.used,memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            print("[cleanup] PPU memory (MiB):")
+            for line in result.stdout.strip().split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) == 4:
+                    idx, used, free, total = parts
+                    print(f"  PPU {idx}: {used}/{total} MiB used, {free} MiB free")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
+def _log_memory_noop() -> None:
+    """No-op memory log for unknown platforms."""
     pass
 
 
-# Registry: platform name → cleanup function
-_PLATFORM_CLEANUP = {
-    "cuda": _cleanup_cuda,
-    "ascend": _cleanup_ascend,
+# Registry: platform name → memory logging function
+_PLATFORM_MEMORY_LOG: dict[str, Callable[[], None]] = {
+    "cuda": _log_memory_cuda,
+    "ascend": _log_memory_ascend,
+    "hygon": _log_memory_hygon,
+    "thead": _log_memory_thead,
 }
 
 
@@ -177,9 +275,45 @@ def _mem_info_noop() -> list[tuple[int, int]]:
     return []
 
 
+def _mem_info_thead() -> list[tuple[int, int]]:
+    """Return [(free_bytes, total_bytes), ...] for each T-Head PPU.
+
+    Uses ppu-smi (symlinked as nvidia-smi) rather than torch.cuda.mem_get_info
+    because the PPU CUDA-compat layer only reports the current process's
+    allocations. ppu-smi queries the device driver directly and sees memory
+    held by ALL processes, which is what we need for the memory guard.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        entries = []
+        for line in result.stdout.strip().split("\n"):
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 2:
+                free_mb, total_mb = int(parts[0]), int(parts[1])
+                entries.append((free_mb * 1024 * 1024, total_mb * 1024 * 1024))
+        return entries
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        return []
+
+
 _PLATFORM_MEMORY_INFO: dict[str, Callable[[], list[tuple[int, int]]]] = {
     "cuda": _mem_info_cuda,
     "ascend": _mem_info_ascend,
+    # Hygon DCUs are exposed to PyTorch as CUDA devices.
+    "hygon": _mem_info_cuda,
+    # T-Head PPU: use ppu-smi for device-wide visibility across all processes.
+    "thead": _mem_info_thead,
 }
 
 
@@ -214,6 +348,9 @@ def _cache_clear_noop() -> None:
 _PLATFORM_CACHE_CLEAR: dict[str, Callable[[], None]] = {
     "cuda": _cache_clear_cuda,
     "ascend": _cache_clear_ascend,
+    # Hygon DCUs and T-Head PPUs are exposed to PyTorch as CUDA devices.
+    "hygon": _cache_clear_cuda,
+    "thead": _cache_clear_cuda,
 }
 
 
@@ -256,10 +393,12 @@ def wait_for_memory(
 
         # Kill stale vllm processes from previous e2e tests
         _kill_stale_processes()
+        if platform == "thead":
+            _kill_stale_ppu_processes()
         # Clear framework cache
         cache_fn()
         # Brief pause for resources to be released
-        time.sleep(1)
+        time.sleep(5)
 
         mem_info = mem_fn()
         if not mem_info:

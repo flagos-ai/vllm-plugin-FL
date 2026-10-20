@@ -241,7 +241,7 @@ def save_gold_mode(request):
 
 
 @pytest.fixture(scope="session")
-def model_config():
+def model_config(platform_config):
     """Return a helper to load shared model configs.
 
     Usage::
@@ -252,4 +252,10 @@ def model_config():
     """
     from tests.utils.model_config import ModelConfig
 
-    return ModelConfig.load
+    def _load(*args, **kwargs):
+        if platform_config is not None:
+            kwargs.setdefault("platform", platform_config.platform)
+            kwargs.setdefault("device", platform_config.device)
+        return ModelConfig.load(*args, **kwargs)
+
+    return _load

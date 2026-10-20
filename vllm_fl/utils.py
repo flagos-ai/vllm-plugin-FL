@@ -2,7 +2,6 @@
 
 import json
 import os
-from typing import Optional, Tuple
 
 import flag_gems
 
@@ -14,7 +13,7 @@ except (ImportError, FileNotFoundError):
     from flag_gems.runtime.backend.device_finder import DeviceDetector
 from flag_gems.runtime import backend
 
-_OP_CONFIG: Optional[dict[str, str]] = None
+_OP_CONFIG: dict[str, str] | None = None
 
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
@@ -49,12 +48,55 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
+    # Registered backend: vendor/thead (tsingmicro)
+    "tsingmicro": {"device_type": "tsingmicro", "device_name": "txda"},
+    # Registered backend: vendor/gcu (Enflame GCU / torch_gcu).
+    # FlagGems >= 5.4 reports vendor_name "enflame"; older images report
+    # "gcu" — keep both aliases.
+    "gcu": {"device_type": "gcu", "device_name": "gcu"},
+    "enflame": {"device_type": "gcu", "device_name": "gcu"},
+    # Registered backend: vendor/kunlunxin
+    "kunlunxin": {"device_type": "cuda", "device_name": "kunlunxin"},
+    # Registered backend: vendor/supa
+    "biren": {"device_type": "cuda", "device_name": "supa"},
+}
+
+# Extra graph-partition boundaries required by a device runtime. vLLM's
+# default attention/KV-cache splitting ops are still installed first.
+SPLITTING_OPS: dict[str, tuple[str, ...]] = {
+    # MCCL collectives cannot run while a MUSA stream is being captured.
+    "musa": (
+        "vllm::all_reduce",
+        "vllm::all_gather",
+        "vllm::reduce_scatter",
+        "vllm::patched_fused_scaled_matmul_reduce_scatter",
+        "_c10d_functional::all_reduce",
+        "_c10d_functional::all_gather_into_tensor",
+        "_c10d_functional::reduce_scatter_tensor",
+        "_c10d_functional::wait_tensor",
+    ),
+    # PCCL collectives (FlagCX/tang) likewise cannot run while a PTPU stream
+    # is being captured, so the TP communication ops must be split out of the
+    # piecewise cudagraph (same set as MUSA above).
+    "ptpu": (
+        "vllm::all_reduce",
+        "vllm::all_gather",
+        "vllm::reduce_scatter",
+        "vllm::patched_fused_scaled_matmul_reduce_scatter",
+        "_c10d_functional::all_reduce",
+        "_c10d_functional::all_gather_into_tensor",
+        "_c10d_functional::reduce_scatter_tensor",
+        "_c10d_functional::wait_tensor",
+    ),
 }
 
 # Keep the vLLM base-class no-op for platforms not validated by this change.
 # Operators can opt a platform in without a code change via the override below.
 _DEVICE_CONTROL_ENV_VAR_PLACEHOLDER = "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER"
-_VALIDATED_DEVICE_CONTROL_ENV_VARS = {"nvidia": "CUDA_VISIBLE_DEVICES"}
+_VALIDATED_DEVICE_CONTROL_ENV_VARS = {
+    "nvidia": "CUDA_VISIBLE_DEVICES",
+    "kunlunxin": "CUDA_VISIBLE_DEVICES",
+}
 
 
 def _get_vendor_device_field(vendor_name: str, field: str) -> str:
@@ -115,9 +157,7 @@ def use_flaggems(default: bool = True) -> bool:
     return value.lower() in ("true", "1")
 
 
-def get_flag_gems_whitelist_blacklist() -> Tuple[
-    Optional[list[str]], Optional[list[str]]
-]:
+def get_flag_gems_whitelist_blacklist() -> tuple[list[str] | None, list[str] | None]:
     """
     Get FlagGems operator whitelist and blacklist.
 
@@ -125,9 +165,11 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     1. VLLM_FL_FLAGOS_WHITELIST env var: Only these ops use FlagGems
     2. VLLM_FL_FLAGOS_BLACKLIST env var: These ops don't use FlagGems
     3. Platform config flagos_blacklist: Default blacklist from config file
+    4. VLLM_FL_FLAGOS_BLACKLIST_APPEND: Ops appended to the selected blacklist
 
     Note: VLLM_FL_FLAGOS_WHITELIST and VLLM_FL_FLAGOS_BLACKLIST cannot be set
-    simultaneously. If whitelist is set, it completely overrides any blacklist.
+    simultaneously. If whitelist is set, it completely overrides any blacklist,
+    including VLLM_FL_FLAGOS_BLACKLIST_APPEND.
 
     Returns:
         Tuple[Optional[list[str]], Optional[list[str]]]:
@@ -139,6 +181,7 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     """
     whitelist_str = os.environ.get("VLLM_FL_FLAGOS_WHITELIST", "")
     blacklist_str = os.environ.get("VLLM_FL_FLAGOS_BLACKLIST", "")
+    blacklist_append_str = os.environ.get("VLLM_FL_FLAGOS_BLACKLIST_APPEND", "")
 
     # Check if both env vars are set (conflict)
     if whitelist_str and blacklist_str:
@@ -158,17 +201,28 @@ def get_flag_gems_whitelist_blacklist() -> Tuple[
     # Priority 2: Blacklist from env var
     if blacklist_str:
         blacklist = [op.strip() for op in blacklist_str.split(",") if op.strip()]
-        return None, blacklist
+    else:
+        # Priority 3: Blacklist from platform config
+        try:
+            from vllm_fl.dispatch.config import get_flagos_blacklist
 
-    # Priority 3: Blacklist from platform config
-    try:
-        from vllm_fl.dispatch.config import get_flagos_blacklist
+            config_blacklist = get_flagos_blacklist()
+            if config_blacklist:
+                blacklist = list(config_blacklist)
+        except Exception:
+            pass
 
-        config_blacklist = get_flagos_blacklist()
-        if config_blacklist:
-            blacklist = config_blacklist
-    except Exception:
-        pass
+    # Add deployment exclusions without replacing platform safety defaults.
+    # Preserve insertion order so startup logs and dispatch policy stay stable.
+    if blacklist_append_str:
+        if blacklist is None:
+            blacklist = []
+        seen = set(blacklist)
+        for op in blacklist_append_str.split(","):
+            op = op.strip()
+            if op and op not in seen:
+                blacklist.append(op)
+                seen.add(op)
 
     return whitelist, blacklist
 
@@ -227,7 +281,7 @@ def _load_op_config_from_env() -> None:
     _OP_CONFIG = normalized
 
 
-def get_op_config() -> Optional[dict[str, str]]:
+def get_op_config() -> dict[str, str] | None:
     return _OP_CONFIG
 
 
@@ -237,7 +291,18 @@ _load_op_config_from_env()
 class DeviceInfo:
     def __init__(self):
         self.device = DeviceDetector()
-        self.supported_device = ["nvidia", "ascend", "metax", "mthreads", "sunrise", "thead"]
+        self.supported_device = [
+            "nvidia",
+            "ascend",
+            "metax",
+            "mthreads",
+            "sunrise",
+            "thead",
+            "gcu",
+            "enflame",
+            "kunlunxin",
+            "biren",
+        ]
         backend.set_torch_backend_device_fn(self.device.vendor_name)
 
     @property
@@ -284,6 +349,7 @@ def get_flaggems_all_ops() -> list[str]:
 # OOT operator names as registered in custom_ops.py (op_name lowercase)
 OOT_OP_NAMES = [
     "silu_and_mul",
+    "silu_and_mul_with_clamp",
     "gelu_and_mul",
     "rms_norm",
     "rotary_embedding",
@@ -292,7 +358,7 @@ OOT_OP_NAMES = [
 ]
 
 
-def get_oot_whitelist() -> Optional[list[str]]:
+def get_oot_whitelist() -> list[str] | None:
     """
     Get OOT operator whitelist from VLLM_FL_OOT_WHITELIST environment variable.
 
@@ -308,7 +374,7 @@ def get_oot_whitelist() -> Optional[list[str]]:
     return [op.strip() for op in whitelist_str.split(",") if op.strip()]
 
 
-def get_oot_blacklist() -> Optional[list[str]]:
+def get_oot_blacklist() -> list[str] | None:
     """
     Get OOT operator blacklist from environment variable or platform config.
 
