@@ -606,7 +606,7 @@ def test_nvidia_worker_installs_model_kernels_before_native_loading(
 
     from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
 
-    from vllm_fl.ops import nvidia_dsv41
+    from vllm_fl.ops import nvidia_dsv41, nvidia_qsa
     from vllm_fl.worker.nvidia_worker import NvidiaWorkerFL
 
     worker = object.__new__(NvidiaWorkerFL)
@@ -618,12 +618,17 @@ def test_nvidia_worker_installs_model_kernels_before_native_loading(
         assert actual_config is config
         calls.append("install")
 
+    def install_qsa(actual_config):
+        assert actual_config is config
+        calls.append("qsa")
+
     def load(actual_worker, *, load_dummy_weights):
         assert actual_worker is worker
-        assert calls == ["install"]
+        assert calls == ["install", "qsa"]
         calls.append(load_dummy_weights)
 
     monkeypatch.setattr(nvidia_dsv41, "install_dsv41_empty_adapters", install)
+    monkeypatch.setattr(nvidia_qsa, "install_nvidia_qsa", install_qsa)
     monkeypatch.setattr(NativeGPUWorker, "load_model", load)
     worker.load_model(load_dummy_weights=load_dummy_weights)
-    assert calls == ["install", load_dummy_weights]
+    assert calls == ["install", "qsa", load_dummy_weights]
