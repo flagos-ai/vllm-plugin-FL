@@ -1,19 +1,17 @@
 #!/bin/bash
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Setup script for CUDA CI environment.
+# Install this checkout without changing the image's vLLM EMPTY/FL runtime.
 set -euo pipefail
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 git config --global --add safe.directory "$(pwd)"
 
-# Keep the image's Torch/FlagTree/vLLM stack; replace only FlagGems.
-if ! python .github/scripts/cuda/check_flaggems.py; then
-    uv pip install --system --break-system-packages --no-build-isolation --no-deps \
-        "flag-gems @ git+https://github.com/flagos-ai/FlagGems.git@v5.4.0"
-fi
-python .github/scripts/cuda/check_flaggems.py
+python -I -B "$HERE/stack.py" --runtime-only
 
-uv pip install \
-    --system \
+# EMPTY vLLM ships no CUDA extension. Build the plugin-owned extension needed
+# by its custom operators and graph paths instead.
+VLLM_VENDOR=cuda MAX_JOBS="${MAX_JOBS:-4}" uv pip install \
+    --python "$(python -c 'import sys; print(sys.executable)')" \
     --break-system-packages \
     --no-build-isolation \
     --no-deps \
@@ -21,27 +19,14 @@ uv pip install \
 
 python .github/scripts/install_flaggems_vllm.py
 
-python - <<'PY'
-from importlib.metadata import PackageNotFoundError, version
+python -I -B "$HERE/stack.py"
 
+python - <<'PY'
 import av
-import flag_gems
 import soundfile
 import soxr
-import triton
-import vllm
 from vllm.assets.audio import AudioAsset
 from xgboost import XGBRanker
-
-assert vllm.__version__.startswith("0.28.0"), vllm.__version__
-assert version("flagtree") == "0.6.2a1", version("flagtree")
-assert triton.__version__.startswith("3.6.0"), triton.__version__
-try:
-    standalone_triton = version("triton")
-except PackageNotFoundError:
-    standalone_triton = None
-assert standalone_triton is None, standalone_triton
-assert version("xgboost") == "3.3.0", version("xgboost")
 
 XGBRanker()
 for asset_name in ("mary_had_lamb", "winning_call"):
@@ -49,11 +34,6 @@ for asset_name in ("mary_had_lamb", "winning_call"):
     assert audio.size > 0, asset_name
     assert sample_rate > 0, asset_name
 
-print(f"vLLM: {vllm.__version__}")
-print(f"FlagTree: {version('flagtree')}")
-print(f"Triton: {triton.__version__} (provided by FlagTree)")
-print(f"FlagGems: {flag_gems.__version__}")
-print(f"XGBoost: {version('xgboost')}")
 print(
     "Audio: "
     f"av={av.__version__}, soundfile={soundfile.__version__}, "

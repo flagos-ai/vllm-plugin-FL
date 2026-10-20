@@ -161,6 +161,9 @@ EXAMPLES:
     # Build CUDA dev image
     ./build.sh --target dev
 
+    # Build the NVIDIA vLLM 0.32 EMPTY CI image
+    ./build.sh --platform cuda --target ci
+
     # Build the validated Ascend CI image
     ./build.sh --platform ascend --target ci
 
@@ -234,6 +237,9 @@ if ! command -v docker &>/dev/null; then
 fi
 
 DOCKERFILE="${SCRIPT_DIR}/${PLATFORM}/Dockerfile"
+if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
+    DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.empty"
+fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
 fi
@@ -248,7 +254,22 @@ BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 # Platform-specific build args and auto-tag
 BUILD_ARGS=()
 
-if [[ "${PLATFORM}" == "cuda" ]]; then
+if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
+    # The EMPTY recipe supplies the verified 0.32 stack. Other CUDA targets
+    # retain their existing toolkit-based Dockerfile and version defaults.
+    VLLM_VERSION="0.32.0"
+    BUILD_CONTEXT="${SCRIPT_DIR}/.."
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+    fi
+    BUILD_ARGS+=(
+        --build-arg "INDEX_URL=${INDEX_URL}"
+        --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
+    )
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${VLLM_VERSION}-cuda-empty-ci"
+    fi
+elif [[ "${PLATFORM}" == "cuda" ]]; then
     BUILD_ARGS+=(
         --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
@@ -377,7 +398,9 @@ FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
 msg "Building image: ${FULL_IMAGE}"
 msg "  Platform:       ${PLATFORM}"
 msg "  Target:         ${TARGET}"
-if [[ "${PLATFORM}" == "cuda" ]]; then
+if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
+    msg "  Stack:          official vLLM 0.32.0 CUDA 12.9 / EMPTY wheel / FlagTree 0.7.0 / FlagGems 5.4.0"
+elif [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     msg "  Base image:     ${ASCEND_BASE_IMAGE}"
@@ -410,7 +433,7 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  FlagCX:         ${KUNLUNXIN_FLAGCX_REF}"
     msg "  Plugin:         ${KUNLUNXIN_PLUGIN_FL_REF}"
 fi
-if [[ "${PLATFORM}" != "ascend" ]]; then
+if [[ "${PLATFORM}" != "ascend" && !( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"
     msg "  Python:         ${PYTHON_VERSION}"
 fi

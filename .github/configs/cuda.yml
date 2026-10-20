@@ -52,6 +52,7 @@ container_options: >-
   --hostname vllm-plugin-fl
   --user root
   --env VLLM_PLUGINS=fl
+  --env VLLM_USE_V2_MODEL_RUNNER=1
   --env USE_FLAGGEMS=1
   --env GEMS_VENDOR=nvidia
   --env USE_FLAGTUNE=0
