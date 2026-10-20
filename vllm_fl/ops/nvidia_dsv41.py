@@ -57,6 +57,7 @@ def install_dsv41_empty_adapters(vllm_config) -> bool:
     from vllm.logger import init_logger
     from vllm.model_executor.layers import sparse_attn_indexer
     from vllm.models.deepseek_v4.nvidia.ops import o_proj
+    from vllm.models.deepseek_v41 import attention as dsv41_attention
     from vllm.models.deepseek_v41.nvidia import flashmla
 
     from vllm_fl.dispatch.backends.flaggems.impl import dsv41_mla
@@ -74,6 +75,9 @@ def install_dsv41_empty_adapters(vllm_config) -> bool:
         nvidia_dsv41_indexer.fp8_paged_mqa_logits
     )
     o_proj.fp8_einsum = nvidia_dsv41_indexer.fp8_einsum
+    dsv41_attention.fused_indexer_q_rope_quant = (
+        nvidia_dsv41_indexer.fused_indexer_q_rope_quant
+    )
     _installed = True
     init_logger(__name__).info(
         "Using FlagGems DSV4.1 sparse MLA and FP8 indexer on Hopper; "

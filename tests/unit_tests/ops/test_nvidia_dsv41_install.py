@@ -111,6 +111,7 @@ def test_dsv41_installs_real_kernels_without_advertising_native_libraries(
 ):
     from vllm.model_executor.layers import sparse_attn_indexer
     from vllm.models.deepseek_v4.nvidia.ops import o_proj
+    from vllm.models.deepseek_v41 import attention as dsv41_attention
     from vllm.models.deepseek_v41.nvidia import flashmla
     from vllm.platforms import current_platform
     from vllm.utils.import_utils import has_deep_gemm
@@ -144,6 +145,11 @@ def test_dsv41_installs_real_kernels_without_advertising_native_libraries(
             nvidia_dsv41_indexer.fp8_paged_mqa_logits,
         ),
         (o_proj, "fp8_einsum", nvidia_dsv41_indexer.fp8_einsum),
+        (
+            dsv41_attention,
+            "fused_indexer_q_rope_quant",
+            nvidia_dsv41_indexer.fused_indexer_q_rope_quant,
+        ),
     ]
     # Record every original module attribute before the real installer mutates
     # it, so pytest restores these bindings even when an assertion fails.

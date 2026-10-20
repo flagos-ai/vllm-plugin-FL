@@ -19,6 +19,77 @@ def _same_cuda(*tensors):
         raise ValueError("DSV4.1 tensors must share a CUDA device")
 
 
+def fused_indexer_q_rope_quant(
+    positions,
+    index_q,
+    index_q_cos_sin_cache,
+    index_weights,
+    index_weights_softmax_scale,
+    index_weights_head_scale,
+    use_fp4=False,
+    weights_out_dtype=torch.float32,
+):
+    """Select vLLM's real Triton FP8 query kernel without the bundled FA package.
+
+    The upstream CuTe dispatcher checks the installed DSL, but its kernel also
+    imports utilities from vLLM's omitted FlashAttention package. Call the
+    upstream Triton launcher directly; RoPE and scale folding stay upstream.
+    """
+    from vllm.models.deepseek_v4.common.ops.fused_indexer_q import (
+        _FUSED_INDEXER_Q_ROPE_QUANT_TRITON_KERNEL,
+    )
+
+    if use_fp4 or weights_out_dtype != torch.float32:
+        raise NotImplementedError(
+            "DSV4.1 EMPTY indexer Q requires FP8 and FP32 weights"
+        )
+    _same_cuda(positions, index_q, index_q_cos_sin_cache, index_weights)
+    if (
+        index_q.ndim != 3
+        or index_q.shape[1] not in (32, 64)
+        or index_q.shape[2] != 128
+        or index_q.dtype != torch.bfloat16
+        or index_q.stride(-1) != 1
+    ):
+        raise ValueError(
+            "Indexer Q must be BF16 [tokens, 32/64 heads, 128] with contiguous head elements"
+        )
+    tokens, heads, _ = index_q.shape
+    if (
+        positions.dtype != torch.int64
+        or positions.shape != (tokens,)
+        or not positions.is_contiguous()
+        or index_weights.shape != (tokens, heads)
+        or index_weights.dtype not in (torch.bfloat16, torch.float32)
+        or index_weights.stride(-1) != 1
+        or index_q_cos_sin_cache.ndim != 2
+        or index_q_cos_sin_cache.shape[1] != 64
+        or index_q_cos_sin_cache.dtype != torch.float32
+        or index_q_cos_sin_cache.stride(-1) != 1
+    ):
+        raise ValueError(
+            "Indexer Q requires contiguous int64 positions, FP32 64-dim RoPE cache, and BF16/FP32 per-head weights"
+        )
+    query = torch.empty(index_q.shape, dtype=torch.float8_e4m3fn, device=index_q.device)
+    weights = torch.empty(
+        index_weights.shape, dtype=torch.float32, device=index_q.device
+    )
+    if tokens:
+        _FUSED_INDEXER_Q_ROPE_QUANT_TRITON_KERNEL(
+            positions,
+            index_q,
+            index_q_cos_sin_cache,
+            index_weights,
+            index_weights_softmax_scale,
+            index_weights_head_scale,
+            query,
+            weights,
+            fp8_max=448.0,
+            use_fnuz=False,
+        )
+    return query, weights
+
+
 def fp8_mqa_logits(q, kv, weights, row_starts, row_ends, clean_logits=False):
     from flag_gems.fused.fp8_fp4_mqa_logits import fp8_fp4_mqa_logits
 
