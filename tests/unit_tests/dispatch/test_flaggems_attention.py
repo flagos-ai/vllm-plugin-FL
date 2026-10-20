@@ -24,8 +24,6 @@ def attention():
 
 
 def _cache(layout, blocks, heads, block_size, head_size, *, device="cpu"):
-    if layout == "legacy":
-        return torch.zeros(2, blocks, block_size, heads, head_size, device=device)
     if layout == "LBNHC":
         return torch.zeros(
             blocks, block_size, heads, 2 * head_size, device=device
@@ -33,19 +31,15 @@ def _cache(layout, blocks, heads, block_size, head_size, *, device="cpu"):
     return torch.zeros(blocks, heads, block_size, 2 * head_size, device=device)
 
 
-@pytest.mark.parametrize("layout", ["LBHNC", "LBNHC", "legacy"])
+@pytest.mark.parametrize("layout", ["LBHNC", "LBNHC"])
 def test_kv_cache_views_preserve_upstream_storage(attention, layout):
     cache = _cache(layout, 3, 2, 16, 8)
     keys, values = attention._split_kv_cache(cache, 8)
     assert keys.shape == values.shape == (3, 16, 2, 8)
     keys[1, 5, 1, 3] = 11
     values[1, 5, 1, 3] = 29
-    if layout == "legacy":
-        assert cache[0, 1, 5, 1, 3].item() == 11
-        assert cache[1, 1, 5, 1, 3].item() == 29
-    else:
-        assert cache[1, 1, 5, 3].item() == 11
-        assert cache[1, 1, 5, 11].item() == 29
+    assert cache[1, 1, 5, 3].item() == 11
+    assert cache[1, 1, 5, 11].item() == 29
     assert cache.count_nonzero().item() == 2
 
 
@@ -114,7 +108,7 @@ def _scales():
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("layout", ["LBHNC", "LBNHC", "legacy"])
+@pytest.mark.parametrize("layout", ["LBHNC", "LBNHC"])
 def test_cache_write_handles_packed_strides_and_padding(attention, layout):
     impl = _impl(attention)
     cache = _cache(layout, 3, 2, 16, 64, device="cuda").to(torch.bfloat16)
@@ -134,7 +128,7 @@ def test_cache_write_handles_packed_strides_and_padding(attention, layout):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("layout", ["LBHNC", "LBNHC", "legacy"])
+@pytest.mark.parametrize("layout", ["LBHNC", "LBNHC"])
 @pytest.mark.parametrize("query_lens", [(3, 2), (1, 1)], ids=["prefill", "decode"])
 def test_paged_gqa_matches_sdpa_with_packed_cache(attention, layout, query_lens):
     head_size, block_size, heads_kv, heads_q = 64, 16, 2, 4
