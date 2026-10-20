@@ -67,6 +67,32 @@ def _in_cudagraph_capture() -> bool:
     except Exception:
         return False
 
+
+def _graph_or_compile_active() -> bool:
+    """True while running under torch.compile/Dynamo tracing or any non-NONE
+    cudagraph mode.
+
+    This patch's Python-side state (``ContextVar`` publish, ``dict.setdefault``)
+    is not traceable by Dynamo: tracing ``forward_cuda`` hits
+    ``self.__dict__.setdefault(...)`` and graph-breaks (gb0156), which aborts
+    EngineCore startup under PIECEWISE/FULL compilation. When a graph/compile
+    mode is active we therefore bypass the whole patch and fall back to the
+    stock upstream ``forward_cuda`` (a fresh ``torch.zeros`` per call).
+
+    This is the automatic equivalent of the previously-required
+    ``VLLM_FL_SUNRISE_BENCH_BASELINE_GDN_CORE_ATTN_ZEROS=1`` kill-switch, so a
+    plain ``vllm serve`` without ``--enforce-eager`` starts with no external
+    env var. The explicit env var is still honoured (see :func:`_is_disabled`).
+
+    Cheap and side-effect free; called at every entry point of the patch.
+    """
+    try:
+        if torch.compiler.is_compiling():
+            return True
+    except Exception:
+        pass
+    return _in_cudagraph_capture()
+
 # When ``forward_cuda`` is active, the wrapper publishes the expected
 # ``(shape, dtype, device, cached_buffer)`` tuple here. ``_intercepted_zeros``
 # checks this slot; if the next ``torch.zeros`` call originating from
@@ -99,7 +125,10 @@ class _GDNTorchProxy:
         object.__setattr__(self, "_real_torch", real_torch)
 
     def __getattr__(self, name: str) -> Any:
-        if name == "zeros":
+        # Under compile/graph mode expose the *real* torch.zeros so Dynamo
+        # never sees the interception (whose ContextVar/dict state is
+        # untraceable). The proxy stays installed but becomes transparent.
+        if name == "zeros" and not _graph_or_compile_active():
             return _intercepted_zeros
         return getattr(self._real_torch, name)
 
@@ -125,6 +154,12 @@ def _intercepted_zeros(*args: Any, **kwargs: Any) -> torch.Tensor:
     shape/dtype/device do not match the published target (e.g. the
     ``ChunkGatedDeltaRule`` allocations on the prefill path).
     """
+    # Belt-and-suspenders: if a caller still reaches this function under
+    # compile/graph mode (e.g. it captured a direct reference before the
+    # proxy was made transparent), go straight to the real ``torch.zeros``
+    # without touching the ContextVar.
+    if _graph_or_compile_active():
+        return torch.zeros(*args, **kwargs)
     target = _TARGET.get()
     if target is not None:
         target_shape, target_dtype, target_device, target_buf = target
@@ -179,7 +214,12 @@ def _make_forward_cuda_wrapper(orig_forward_cuda):
     def _patched_forward_cuda(self, hidden_states: torch.Tensor, output: torch.Tensor):
         # Per-call kill-switch (cheap env read; cached lookups are fine
         # because env vars are stable for the lifetime of the worker).
-        if _is_disabled():
+        #
+        # Under torch.compile/Dynamo tracing or any cudagraph mode the reuse
+        # path is bypassed automatically: its ``dict.setdefault`` /
+        # ContextVar state is untraceable and graph-breaks (gb0156), aborting
+        # startup. The explicit env var remains for back-compat / manual A-B.
+        if _is_disabled() or _graph_or_compile_active():
             return orig_forward_cuda(self, hidden_states, output)
 
         num_tokens = hidden_states.size(0)
@@ -230,6 +270,20 @@ def _make_forward_cuda_wrapper(orig_forward_cuda):
                 )
                 cache[big_key] = base
             buf = base[:num_tokens]
+
+        # Correctness (see vLLM PR #28182): upstream forward_cuda deliberately
+        # allocates core_attn_out with ``torch.zeros`` (NOT ``torch.empty``)
+        # because the core custom op only fills ``[:num_actual_tokens]``. Under
+        # cudagraph padding (num_actual_tokens < num_tokens) the tail rows are
+        # never written by the kernel and must stay zero, otherwise the
+        # subsequent per-row out_proj reads garbage from those rows -- upstream
+        # measured this as a gsm8k 0.84 -> 0.00 regression when the padded shape
+        # mix was diverse enough. Our reused buffer (cache hit or the shared
+        # grow-to-max view) still holds the previous forward's data, so we must
+        # re-zero it here to preserve that invariant. ``zero_()`` reuses the same
+        # storage (the whole point of the buffer reuse) and is captured as a
+        # memset under cudagraph.
+        buf.zero_()
 
         token = _TARGET.set((expected_shape, expected_dtype, expected_device, buf))
         try:

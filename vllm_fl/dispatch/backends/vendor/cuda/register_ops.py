@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 
-from vllm_fl.dispatch.types import OpImpl, BackendImplKind, BackendPriority
+from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
 
 def _bind_is_available(fn, is_available_fn):
@@ -137,3 +137,7 @@ def register_builtins(registry) -> None:
     ]
 
     registry.register_many(impls)
+
+    from .impl.mla import register_mla_operators
+
+    register_mla_operators(registry)

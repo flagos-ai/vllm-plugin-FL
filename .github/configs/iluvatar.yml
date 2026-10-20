@@ -36,7 +36,6 @@ container_options: >-
   --shm-size=64g
   --env GEMS_VENDOR=iluvatar
   --env VLLM_PLUGINS=fl
-  --env CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
   --env VLLM_ENGINE_ITERATION_TIMEOUT_S=72000
   --env VLLM_RPC_TIMEOUT=72000000
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=7200

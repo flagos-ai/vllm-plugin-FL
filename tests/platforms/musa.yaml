@@ -35,6 +35,11 @@ env_defaults:
   MTHREADS_VISIBLE_DEVICES: "all"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 
+# MCCL 2.11.4 cannot host two concurrently initializing TP groups on one
+# node: co-scheduled cases die with MUSA/MCCL "unhandled musa error"
+# while every case passes when run alone. Run e2e cases serially.
+e2e_serial: true
+
 s5000:
   name: "s5000"
   tests:

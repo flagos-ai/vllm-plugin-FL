@@ -394,16 +394,10 @@ def main(argv: list[str] | None = None) -> int:
         if changed:
             e2e_matrix = filter_e2e_by_changes(e2e_matrix, changed)
 
-    # The user default is off; preserve the same model gates in both modes.
-    # The NVIDIA pipeline's platform key is "nvidia" (renamed from "cuda" in
-    # this branch); matching the old key silently disabled the dual-mode
-    # expansion and the fused=0 regression gate with it.
-    if args.platform == "nvidia":
-        e2e_matrix = [
-            {**entry, "flaggems_vllm": mode}
-            for entry in e2e_matrix
-            for mode in ("0", "1")
-        ]
+    # The NVIDIA fused-operator dual-run (VLLM_FL_USE_FLAGGEMS_VLLM 0/1) is a
+    # case-level variant declared in tests/platforms/nvidia.yaml
+    # (e2e_variants) and expanded by tests/run.py — the matrix does not
+    # duplicate jobs per mode.
 
     e2e_json = json.dumps(e2e_matrix, separators=(",", ":"))
     unit_json = json.dumps(unit_matrix, separators=(",", ":"))

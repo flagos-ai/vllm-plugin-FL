@@ -82,7 +82,34 @@ def get_device(index: int = 0) -> torch.device:
 
 
 def get_device_count() -> int:
-    """Get the number of available accelerators."""
+    """Get the number of available accelerators.
+
+    Auto-detection only recognizes CUDA-shaped torch (which hygon/metax/
+    kunlunxin/iluvatar/thead stacks also expose) and torch_npu; vendor
+    stacks that attach their own device layer (torch_gcu, torch_musa)
+    would report zero. When FL_TEST_PLATFORM names such a platform, use
+    its vendor device API directly (same probes as the check.sh scripts).
+    """
+    platform = os.environ.get("FL_TEST_PLATFORM", "").lower()
+    if platform == "enflame":
+        try:
+            import torch_gcu  # noqa: F401
+
+            if getattr(torch, "gcu", None) and torch.gcu.is_available():
+                return torch.gcu.device_count()
+        except ImportError:
+            pass
+        return 0
+    if platform == "musa":
+        try:
+            import torch_musa  # noqa: F401
+
+            if getattr(torch, "musa", None) and torch.musa.is_available():
+                return torch.musa.device_count()
+        except ImportError:
+            pass
+        return 0
+
     backend = get_backend()
     if backend == "nvidia":
         return torch.cuda.device_count()

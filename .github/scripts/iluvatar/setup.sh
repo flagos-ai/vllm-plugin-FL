@@ -7,7 +7,6 @@ git config --global --add safe.directory "$(pwd)"
 
 : "${GEMS_VENDOR:?GEMS_VENDOR is not set}"
 : "${VLLM_PLUGINS:?VLLM_PLUGINS is not set}"
-: "${CUDA_VISIBLE_DEVICES:?CUDA_VISIBLE_DEVICES is not set}"
 
 # CoreX exposes a CUDA-compatible runtime, but its nvcc is not NVIDIA CUDA
 # and cannot be parsed by CMake's CUDA compiler detection.  Install the

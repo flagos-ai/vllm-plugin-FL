@@ -187,17 +187,63 @@ class TestRunner:
           - total_devices=8, tp=8  → 1 case at a time (serial)
         """
         total_devices = get_device_count()
-        if total_devices == 0:
-            # No accelerators detected — run serially without device pinning
-            print("[run] E2E parallel: no accelerators detected, running serially")
+        visible_env_var = get_visible_device_env_var()
+
+        def _run_serial() -> None:
             for tc in cases:
                 result = self._run_single(tc)
                 self.report.results.append(result)
                 device_cleanup(self.config.platform)
+
+        if self.config.e2e_serial:
+            # The platform declared its runtime cannot host concurrent
+            # engines (e.g. musa MCCL dies when two TP groups initialize
+            # at once) — serial execution with inherited visibility.
+            print(
+                f"[run] E2E parallel: platform '{self.config.platform}' "
+                "requests serial execution (e2e_serial); running serially"
+            )
+            _run_serial()
             return
 
+        if total_devices == 0:
+            # No accelerators detected — run serially without device pinning.
+            # In CI this usually means device counting is missing a vendor
+            # branch (the runner knows the platform, the counter guessed);
+            # surface it in the job's annotation summary instead of only
+            # in the log stream.
+            platform = os.environ.get("FL_TEST_PLATFORM", "")
+            print(
+                f"::warning::No accelerators detected for platform "
+                f"'{platform}' ({visible_env_var} is unset or the vendor "
+                "device layer is not wired into get_device_count); "
+                "e2e cases run serially without device pinning."
+            )
+            print("[run] E2E parallel: no accelerators detected, running serially")
+            _run_serial()
+            return
+
+        # A visible-devices mask naming a subset of the physical cards (e.g.
+        # a locally pinned run, or a host partition policy expressed as env)
+        # means the counted devices are subset-relative: re-pinning a case
+        # with slot indices could be reinterpreted against physical cards.
+        # Keep the inherited visibility and run serially instead.
+        mask = os.environ.get(visible_env_var, "").strip()
+        if mask and mask.lower() != "all":
+            try:
+                masked = {int(x) for x in mask.split(",") if x.strip()}
+            except ValueError:
+                masked = None
+            if masked is not None and masked != set(range(total_devices)):
+                print(
+                    f"[run] E2E parallel: {visible_env_var}={mask} pins a "
+                    f"subset of the {total_devices} counted devices; keeping "
+                    "inherited visibility and running serially"
+                )
+                _run_serial()
+                return
+
         scheduler = DeviceScheduler(total_devices)
-        visible_env_var = get_visible_device_env_var()
 
         # Max workers = total_devices (worst case: all tp=1 cases)
         max_workers = total_devices
@@ -476,18 +522,30 @@ class TestRunner:
                 pass
 
             name = f"{task}/{model}/{case}"
-            cases.append(
-                TestCase(
-                    name=name,
-                    pytest_path=pytest_path,
-                    task=task,
-                    model=model,
-                    case=case,
-                    extra_args=extra_args,
-                    extra_env=extra_env,
-                    num_devices=num_devices,
+            # Case-level variants (e.g. the NVIDIA fused-operator dual-run):
+            # every case runs once per declared platform variant, with the
+            # variant's env merged into the case's pytest subprocess and a
+            # suffix in the result name. Platforms without variants get one
+            # suffix-less, env-less pass — identical to the previous
+            # behavior. This keeps the job count fixed regardless of how
+            # many variant dimensions a platform declares.
+            variants = self.config.get_e2e_variants() or [{}]
+            for variant in variants:
+                suffix = variant.get("suffix", "")
+                merged_env = dict(extra_env)
+                merged_env.update(variant.get("env") or {})
+                cases.append(
+                    TestCase(
+                        name=f"{name}[{suffix}]" if suffix else name,
+                        pytest_path=pytest_path,
+                        task=task,
+                        model=model,
+                        case=case,
+                        extra_args=extra_args,
+                        extra_env=merged_env,
+                        num_devices=num_devices,
+                    )
                 )
-            )
 
         return cases
 

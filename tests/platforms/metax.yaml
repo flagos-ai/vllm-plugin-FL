@@ -45,7 +45,6 @@ device_overrides:
 env_defaults:
   GEMS_VENDOR: "metax"
   VLLM_PLUGINS: "fl"
-  MACA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 
 c550:

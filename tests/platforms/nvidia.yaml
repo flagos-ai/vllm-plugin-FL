@@ -83,6 +83,19 @@ env_defaults:
   CUDA_DEVICE_MAX_CONNECTIONS: "1"
   NCCL_ALGO: "Ring"
 
+# E2E case variants: every e2e case runs once per entry below, inside the same
+# job, with the entry's env injected into that case's pytest subprocess and the
+# suffix appended to its result name. Dual-mode coverage (FlagGems-vllm fused
+# operators on/off) therefore lives at case level; the CI matrix does not
+# duplicate jobs per mode.
+e2e_variants:
+  - suffix: ""
+    env:
+      VLLM_FL_USE_FLAGGEMS_VLLM: "0"
+  - suffix: "fused"
+    env:
+      VLLM_FL_USE_FLAGGEMS_VLLM: "1"
+
 # ---- Device-specific test configurations ------------------------------------
 a100:
   name: "a100"

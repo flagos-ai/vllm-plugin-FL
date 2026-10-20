@@ -205,6 +205,12 @@ class PlatformConfig:
     env_defaults: dict[str, str]
     # Per-device test configurations
     device_tests: dict[str, dict[str, Any]]
+    # Platform-level e2e case variants (see nvidia.yaml): each e2e case runs
+    # once per entry, with the entry's env merged into the case subprocess.
+    e2e_variants: list[dict[str, Any]] = field(default_factory=list)
+    # Platform declares its runtime cannot host concurrent engines
+    # (see musa.yaml): e2e cases run serially even with many devices.
+    e2e_serial: bool = False
 
     # --- Active device (set after load) ---
     device: str = ""
@@ -275,6 +281,8 @@ class PlatformConfig:
             unsupported_features=raw.get("unsupported_features") or [],
             env_defaults=raw.get("env_defaults") or {},
             device_tests=device_tests,
+            e2e_variants=raw.get("e2e_variants") or [],
+            e2e_serial=bool(raw.get("e2e_serial", False)),
             device=active_device,
         )
         return config
@@ -348,6 +356,16 @@ class PlatformConfig:
         dt = self.device_tests.get(self.device, {})
         e2e_raw = dt.get("tests", {}).get("e2e", {})
         return E2eTestConfig(tests=e2e_raw)
+
+    def get_e2e_variants(self) -> list[dict[str, Any]]:
+        """Return platform-level e2e case variants.
+
+        Each entry is ``{suffix: str, env: {name: value}}``; the runner
+        executes every e2e case once per entry. Platforms that declare none
+        get a single suffix-less pass (identical to the pre-variant
+        behavior).
+        """
+        return self.e2e_variants
 
     def get_benchmark_tests(self, stage: str = "nightly") -> dict[str, Any]:
         """Return benchmark test configuration for the active device and CI stage."""

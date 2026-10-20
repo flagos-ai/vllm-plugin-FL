@@ -136,7 +136,7 @@ class GraphWrapper:
         # enabling vLLM's full-model copy wrapper would clone dynamic views and
         # can change strides before Inductor sees them.
         self._copy_inputs = self.compilation_config.cudagraph_copy_inputs or (
-            current_platform.device_type == "musa"
+            current_platform.device_type in ("musa", "ptpu")
             and vllm_config.parallel_config.tensor_parallel_size > 1
             and runtime_mode == CUDAGraphMode.PIECEWISE
         )
