@@ -12,9 +12,10 @@ from vllm_fl.dispatch.backends.flaggems.impl.fused_moe import (
 
 
 def _install_topk_softmax(monkeypatch, kernel):
-    flag_gems = ModuleType("flag_gems")
-    flag_gems.topk_softmax = kernel
-    monkeypatch.setitem(sys.modules, "flag_gems", flag_gems)
+    provider = "flaggems_vllm"
+    module = ModuleType(provider)
+    module.topk_softmax = kernel
+    monkeypatch.setitem(sys.modules, provider, module)
 
 
 def test_topk_softmax_supports_legacy_signature(monkeypatch):

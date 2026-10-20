@@ -147,6 +147,9 @@ For hardware-specific deployment and validation, see the
     (`5.3.5+g34c6d2ce4`). Re-run the blacklist and model tests when moving to a
     newer FlagGems master revision.
 
+For optional explicit fused operators, see the [FlagGems-vllm guide](./docs/flaggems-vllm.md).
+The provider defaults to off; general ATen registration remains with FlagGems.
+
 ### Runtime compatibility hooks
 
 The plugin installs runtime compatibility hooks through vLLM's plugin entry

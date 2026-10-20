@@ -66,6 +66,8 @@ else:
     raise RuntimeError("FlagGems libentry.py patch target not found — check if upstream changed")
 PATCH
 
+python .github/scripts/install_flaggems_vllm.py
+
 python - <<'PY'
 import flag_gems
 import torch

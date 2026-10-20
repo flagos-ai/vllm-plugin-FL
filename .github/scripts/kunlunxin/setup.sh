@@ -40,6 +40,8 @@ fi
 # Kunlunxin image. Install only the checked-out plugin source for this run.
 python -m pip install --no-build-isolation --no-deps -e .
 
+python .github/scripts/install_flaggems_vllm.py
+
 python - <<'PY'
 import os
 import sys

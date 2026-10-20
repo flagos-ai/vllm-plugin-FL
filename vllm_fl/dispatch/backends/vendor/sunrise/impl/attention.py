@@ -9,29 +9,24 @@ from typing import ClassVar
 
 import numpy as np
 import torch
-
-from vllm import envs
-from vllm.v1.attention.backend import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionType,
-    MultipleOf,
-)
-from vllm.utils.torch_utils import is_quantized_kv_cache
-from vllm.model_executor.layers.attention.attention import Attention
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
-from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
-
+from flaggems_vllm import flash_attn_varlen_func, reshape_and_cache_flash
 
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
+from vllm.model_executor.layers.attention.attention import Attention
 from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
+from vllm.platforms.interface import DeviceCapability
 from vllm.utils.math_utils import cdiv
+from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.v1.attention.backend import (
+    AttentionBackend,
     AttentionCGSupport,
+    AttentionImpl,
     AttentionMetadataBuilder,
+    AttentionType,
+    MultipleOf,
 )
 from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.attention.backends.utils import (
@@ -39,14 +34,14 @@ from vllm.v1.attention.backends.utils import (
     get_dcp_local_seq_lens,
     get_kv_cache_layout,
 )
+from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
-from vllm.platforms.interface import DeviceCapability
-from flag_gems import flash_attn_varlen_func, reshape_and_cache_flash
+
 # from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash,
 # from flag_gems import reshape_and_cache_flash
 
 logger = init_logger(__name__)
-
 
 
 class AttentionFLBackend(AttentionBackend):
@@ -85,6 +80,7 @@ class AttentionFLBackend(AttentionBackend):
             AttentionType.ENCODER_ONLY,
             AttentionType.ENCODER_DECODER,
         )
+
     @staticmethod
     def get_impl_cls() -> type["AttentionFLImpl"]:
         return AttentionFLImpl
@@ -103,6 +99,7 @@ class AttentionFLBackend(AttentionBackend):
         if kv_cache_dtype is None:
             return True
         return kv_cache_dtype in ["auto"]
+
     @staticmethod
     def get_kv_cache_shape(
         num_blocks: int,
@@ -256,7 +253,7 @@ class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
         self.block_size = kv_cache_spec.block_size
 
         self.max_num_splits = 0  # No upper bound on the number of splits.
-        self.aot_schedule = False  #get_flash_attn_version() == 3
+        self.aot_schedule = False  # get_flash_attn_version() == 3
 
         try:
             from vllm.distributed.parallel_state import get_dcp_group
@@ -465,7 +462,7 @@ class AttentionFLImpl(AttentionImpl):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         self.attn_type = attn_type
-        self.vllm_flash_attn_version = 2 # 2 #get_flash_attn_version()
+        self.vllm_flash_attn_version = 2  # 2 #get_flash_attn_version()
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = _bi_mode
 
@@ -615,7 +612,7 @@ class AttentionFLImpl(AttentionImpl):
                     k_descale=layer._k_scale.expand(descale_shape),
                     v_descale=layer._v_scale.expand(descale_shape),
                     num_splits=attn_metadata.max_num_splits,
-                    s_aux=None, ### self.sinks is support in FA3
+                    s_aux=None,  ### self.sinks is support in FA3
                 )
                 return output
 
@@ -642,7 +639,7 @@ class AttentionFLImpl(AttentionImpl):
             suffix_scheduler_metadata=attn_metadata.scheduler_metadata,
             q_descale=layer._q_scale,
             k_descale=layer._k_scale,
-            v_descale=layer._v_scale
+            v_descale=layer._v_scale,
         )
         return output
 

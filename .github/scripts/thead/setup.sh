@@ -78,6 +78,7 @@ print(wheels[0])
 PY
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
   --ignore-installed --no-index --no-deps --no-compile "$(cat "$WORK/plugin-wheel.txt")"
+"$PY" -I -B "$HERE/../install_flaggems_vllm.py"
 "$PY" -I -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   for name in THEAD_CI_WORK_DIR THEAD_CI_PYTHON VIRTUAL_ENV PATH HOME XDG_CACHE_HOME \

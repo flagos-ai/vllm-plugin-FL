@@ -87,18 +87,13 @@ def _install_fake_flaggems(
 
     config = ModuleType("flag_gems.config")
     config.use_c_extension = use_c_extension
-    modules = ModuleType("flag_gems.modules")
-    modules.__path__ = []
-    rotary = ModuleType("flag_gems.modules.rotary_embedding")
-    rotary.gems_rope_forward = common_rotary
+    fused = ModuleType("flaggems_vllm")
+    fused.apply_rotary_pos_emb = common_rotary
 
     flag_gems.config = config
-    flag_gems.modules = modules
-    modules.rotary_embedding = rotary
     monkeypatch.setitem(sys.modules, "flag_gems", flag_gems)
     monkeypatch.setitem(sys.modules, "flag_gems.config", config)
-    monkeypatch.setitem(sys.modules, "flag_gems.modules", modules)
-    monkeypatch.setitem(sys.modules, "flag_gems.modules.rotary_embedding", rotary)
+    monkeypatch.setitem(sys.modules, "flaggems_vllm", fused)
 
 
 def test_reference_interleaved_rotary_repeats_adjacent_cache_values():
