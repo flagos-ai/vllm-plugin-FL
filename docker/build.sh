@@ -433,7 +433,7 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  FlagCX:         ${KUNLUNXIN_FLAGCX_REF}"
     msg "  Plugin:         ${KUNLUNXIN_PLUGIN_FL_REF}"
 fi
-if [[ "${PLATFORM}" != "ascend" && !( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
+if [[ "${PLATFORM}" != "ascend" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"
     msg "  Python:         ${PYTHON_VERSION}"
 fi
