@@ -2,10 +2,12 @@
 
 """Tests for DeepSeek-V4 operator dispatch."""
 
+from contextlib import nullcontext
 from unittest.mock import Mock
 
 import torch
 
+from vllm_fl.dispatch import CachedOp
 from vllm_fl.dispatch.backends.reference.impl.deepseek_v4 import (
     deepseek_v4_hc_head_torch,
     deepseek_v4_int8_scaled_mm_torch,
@@ -24,6 +26,7 @@ DSV4_OPS = {
     "deepseek_v4_mhc_post",
     "deepseek_v4_hc_head",
     "deepseek_v4_fused_q_kv_rmsnorm",
+    "deepseek_v4_fused_q_kv_rmsnorm_int8",
     "deepseek_v4_qnorm_rope_kv_quant_insert",
     "deepseek_v4_qnorm_rope_kv_bf16_insert",
     "deepseek_v4_qnorm_rope_kv_fp8_insert",
@@ -39,6 +42,11 @@ DSV4_OPS = {
     "deepseek_v4_int8_paged_mqa_logits",
 }
 
+DSV4_VENDOR_ONLY_OPS = {
+    "deepseek_v4_mhc_pre_int8",
+    "deepseek_v4_mhc_fused_post_pre_int8",
+}
+
 SPARSE_INDEXER_OPS = {
     "indexer_k_quant_and_cache",
     "cp_gather_indexer_k_quant_cache",
@@ -47,6 +55,32 @@ SPARSE_INDEXER_OPS = {
     "pack_seq_triton",
     "unpack_seq_triton",
 }
+
+
+def test_model_frontends_only_register_cached_ops_during_import():
+    from vllm_fl.ops import deepseek_v4 as deepseek_v4_ops, sparse_attn_indexer
+
+    assert set(deepseek_v4_ops._OPS) == {
+        op_name.removeprefix("deepseek_v4_")
+        for op_name in DSV4_OPS | DSV4_VENDOR_ONLY_OPS
+        if op_name != "deepseek_v4_inv_rope_quant_int8"
+    }
+    assert all(isinstance(op, CachedOp) for op in deepseek_v4_ops._OPS.values())
+    assert isinstance(
+        deepseek_v4_int8_woa._dispatch_inv_rope_quant_int8,
+        CachedOp,
+    )
+    assert all(
+        isinstance(op, CachedOp)
+        for op in (
+            sparse_attn_indexer._indexer_k_quant_and_cache,
+            sparse_attn_indexer._cp_gather_indexer_k_quant_cache,
+            sparse_attn_indexer._top_k_per_row_prefill,
+            sparse_attn_indexer._pack_seq_triton,
+            sparse_attn_indexer._top_k_per_row_decode,
+            sparse_attn_indexer._unpack_seq_triton,
+        )
+    )
 
 
 def test_reference_inv_rope_quant_int8():
@@ -202,6 +236,10 @@ def test_all_backends_register_all_deepseek_v4_ops(monkeypatch):
             "reference.torch",
         }
 
+    for op_name in DSV4_VENDOR_ONLY_OPS:
+        implementations = [impl for impl in registered if impl.op_name == op_name]
+        assert {impl.impl_id for impl in implementations} == {"vendor.cuda"}
+
     for op_name in SPARSE_INDEXER_OPS:
         implementations = [impl for impl in registered if impl.op_name == op_name]
         assert {impl.impl_id for impl in implementations} == {
@@ -211,8 +249,83 @@ def test_all_backends_register_all_deepseek_v4_ops(monkeypatch):
         }
 
 
+def test_flaggems_fused_post_pre_composes_fused_mhc_ops(monkeypatch):
+    import flag_gems
+    from flag_gems import fused
+
+    from vllm_fl.dispatch.backends.flaggems.impl import deepseek_v4
+
+    x = torch.zeros((2, 8), dtype=torch.bfloat16)
+    residual = torch.zeros((2, 4, 8), dtype=torch.bfloat16)
+    post_mix = torch.zeros((2, 4, 1), dtype=torch.float32)
+    comb_mix = torch.zeros((2, 4, 4), dtype=torch.float32)
+    fn = torch.zeros((24, 32), dtype=torch.float32)
+    hc_scale = torch.zeros(3, dtype=torch.float32)
+    hc_base = torch.zeros(24, dtype=torch.float32)
+    norm_weight = torch.ones(8, dtype=torch.bfloat16)
+
+    residual_cur = residual + 1
+    post_cur = post_mix + 2
+    comb_cur = comb_mix + 2
+    layer_input = x + 2
+
+    mhc_post = Mock(return_value=residual_cur)
+    mhc_pre = Mock(return_value=(post_cur, comb_cur, layer_input))
+    rms_norm = Mock(return_value=layer_input + 3)
+    monkeypatch.setattr(
+        deepseek_v4.torch_device_fn, "device", lambda _device: nullcontext()
+    )
+    monkeypatch.setattr(fused, "mhc_post", mhc_post)
+    monkeypatch.setattr(fused, "mhc_pre", mhc_pre)
+    monkeypatch.setattr(flag_gems, "rms_norm", rms_norm)
+
+    actual = deepseek_v4._flaggems_mhc_fused_post_pre_impl(
+        x,
+        residual,
+        post_mix,
+        comb_mix,
+        fn,
+        hc_scale,
+        hc_base,
+        1e-6,
+        1e-6,
+        1e-6,
+        2.0,
+        20,
+        1,
+        1,
+        norm_weight,
+        1e-5,
+    )
+
+    assert actual[0] is residual_cur
+    assert actual[1] is post_cur
+    assert actual[2] is comb_cur
+    torch.testing.assert_close(actual[3], layer_input + 3)
+    mhc_post.assert_called_once_with(x, residual, post_mix, comb_mix)
+    mhc_pre.assert_called_once_with(
+        residual_cur,
+        fn,
+        hc_scale,
+        hc_base,
+        1e-6,
+        1e-6,
+        1e-6,
+        2.0,
+        20,
+        1,
+    )
+    rms_norm.assert_called_once_with(
+        layer_input,
+        tuple(norm_weight.shape),
+        norm_weight,
+        1e-5,
+    )
+
+
 def test_sparse_indexer_overrides_upstream_cuda_entrypoint():
     from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
+
     from vllm_fl.ops.sparse_attn_indexer import SparseAttnIndexerFL
 
     assert SparseAttnIndexerFL.forward_cuda is not SparseAttnIndexer.forward_cuda

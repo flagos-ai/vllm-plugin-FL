@@ -10,6 +10,9 @@ from vllm.models.deepseek_v4.common.ops.fused_inv_rope_fp8_quant import (
     _fused_inv_rope_fp8_quant_per_head,
 )
 
+from vllm_fl.ops.deepseek_v4_int8_activation import (
+    fused_q_kv_rmsnorm_int8_triton,
+)
 from vllm_fl.ops.deepseek_v4_int8_woa import (
     fused_inv_rope_quant_int8_triton,
 )
@@ -27,7 +30,17 @@ def deepseek_v4_fused_q_kv_rmsnorm_cuda(*args, **kwargs):
     return _vllm_dsv4_op("fused_q_kv_rmsnorm", *args, **kwargs)
 
 
+def deepseek_v4_fused_q_kv_rmsnorm_int8_cuda(*args, **kwargs):
+    return fused_q_kv_rmsnorm_int8_triton(*args, **kwargs)
+
+
 def deepseek_v4_qnorm_rope_kv_quant_insert_cuda(*args, **kwargs):
+    if len(args) >= 10 or kwargs.get("q_out") is not None:
+        from vllm_fl.ops.deepseek_v4_qnorm_rope_kv_insert import (
+            qnorm_rope_kv_quant_insert_out,
+        )
+
+        return qnorm_rope_kv_quant_insert_out(*args, **kwargs)
     return _vllm_dsv4_op("qnorm_rope_kv_quant_insert", *args, **kwargs)
 
 
@@ -177,8 +190,20 @@ def deepseek_v4_mhc_pre_cuda(*args):
     return torch.ops.vllm.mhc_pre_tilelang(*args)
 
 
+def deepseek_v4_mhc_pre_int8_cuda(*args):
+    from vllm_fl.ops import mhc_int8_tilelang  # noqa: F401
+
+    return torch.ops.vllm.mhc_pre_int8_tilelang(*args)
+
+
 def deepseek_v4_mhc_fused_post_pre_cuda(*args):
     return torch.ops.vllm.mhc_fused_post_pre_tilelang(*args)
+
+
+def deepseek_v4_mhc_fused_post_pre_int8_cuda(*args):
+    from vllm_fl.ops import mhc_int8_tilelang  # noqa: F401
+
+    return torch.ops.vllm.mhc_fused_post_pre_int8_tilelang(*args)
 
 
 def deepseek_v4_mhc_post_cuda(*args):

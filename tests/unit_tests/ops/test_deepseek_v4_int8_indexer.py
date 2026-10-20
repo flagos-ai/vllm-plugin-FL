@@ -40,7 +40,8 @@ def test_int8_mqa_logits_matches_torch():
     expected = (dots * k_scale[None, None, :]).relu()
     expected = (expected * weights[:, :, None]).sum(dim=1)
 
-    torch.testing.assert_close(actual, expected, atol=2e-3, rtol=2e-3)
+    assert actual.shape == (num_queries, 512)
+    torch.testing.assert_close(actual[:, :num_keys], expected, atol=2e-3, rtol=2e-3)
 
 
 def test_int8_paged_mqa_logits_matches_torch():

@@ -22,6 +22,12 @@ def test_hopper_optimization_is_disabled_by_default(monkeypatch):
     assert path is not None
     assert path.name == "nvidia.yaml"
     assert config["op_backends"]["attention_backend"][0] == "flagos"
+    for op_name in (
+        "deepseek_v4_mhc_pre",
+        "deepseek_v4_mhc_fused_post_pre",
+        "deepseek_v4_mhc_post",
+    ):
+        assert config["op_backends"][op_name] == ["vendor:cuda"]
     assert "mm" not in config["flagos_blacklist"]
 
 

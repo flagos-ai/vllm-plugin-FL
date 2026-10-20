@@ -15,7 +15,11 @@ def fused_marlin_moe_cuda(*args, **kwargs):
 
     fn = marlin_moe.fused_marlin_moe
     native = getattr(fn, "_vllm_fl_original", fn)
-    return native(*args, **kwargs)
+    from vllm_fl.ops.deepseek_v4_int8_marlin import (
+        fused_marlin_moe_with_int8_activation,
+    )
+
+    return fused_marlin_moe_with_int8_activation(native, *args, **kwargs)
 
 
 def moe_align_block_size_cuda(

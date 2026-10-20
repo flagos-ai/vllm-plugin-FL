@@ -13,7 +13,26 @@ def deepseek_v4_fused_q_kv_rmsnorm_torch(*args, **kwargs):
     return fused_q_kv_rmsnorm(*args, **kwargs)
 
 
+def _dynamic_int8(x):
+    from vllm import _custom_ops as ops
+
+    q, scale, _ = ops.scaled_int8_quant(x, None, None, symmetric=True)
+    return q, scale
+
+
+def deepseek_v4_fused_q_kv_rmsnorm_int8_torch(*args, **kwargs):
+    qr, kv = deepseek_v4_fused_q_kv_rmsnorm_torch(*args, **kwargs)
+    qr_q, qr_scale = _dynamic_int8(qr)
+    return qr, kv, qr_q, qr_scale
+
+
 def deepseek_v4_qnorm_rope_kv_quant_insert_torch(*args, **kwargs):
+    if len(args) >= 10 or kwargs.get("q_out") is not None:
+        from vllm_fl.ops.deepseek_v4_qnorm_rope_kv_insert import (
+            qnorm_rope_kv_quant_insert_out,
+        )
+
+        return qnorm_rope_kv_quant_insert_out(*args, **kwargs)
     return torch.ops._C.fused_deepseek_v4_qnorm_rope_kv_rope_quant_insert(
         *args, **kwargs
     )

@@ -92,6 +92,9 @@ class FlagGemsBackend(Backend):
     def deepseek_v4_fused_q_kv_rmsnorm(self, *args, **kwargs):
         return self._deepseek_v4_call("fused_q_kv_rmsnorm", *args, **kwargs)
 
+    def deepseek_v4_fused_q_kv_rmsnorm_int8(self, *args, **kwargs):
+        return self._deepseek_v4_call("fused_q_kv_rmsnorm_int8", *args, **kwargs)
+
     def deepseek_v4_qnorm_rope_kv_quant_insert(self, *args, **kwargs):
         return self._deepseek_v4_call("qnorm_rope_kv_quant_insert", *args, **kwargs)
 
@@ -127,9 +130,7 @@ class FlagGemsBackend(Backend):
         )
 
     def deepseek_v4_compress_int8_indexer_k_cache(self, *args, **kwargs):
-        return self._deepseek_v4_call(
-            "compress_int8_indexer_k_cache", *args, **kwargs
-        )
+        return self._deepseek_v4_call("compress_int8_indexer_k_cache", *args, **kwargs)
 
     def deepseek_v4_int8_mqa_logits(self, *args, **kwargs):
         return self._deepseek_v4_call("int8_mqa_logits", *args, **kwargs)

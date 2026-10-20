@@ -3,23 +3,23 @@
 
 from __future__ import annotations
 
-from vllm_fl.dispatch import resolve_op
+from vllm_fl.dispatch import CachedOp
 
 _OPS = {
-    # Resolve once while the model module is imported.  These frontends are
-    # called from vLLM's full-graph compiled model; a lazy CachedOp lookup would
-    # make Dynamo trace OpManager's RLock on the first profile run.  Import-time
-    # resolution keeps backend selection in OpManager while exposing only the
-    # selected callable to torch.compile and CUDA graph capture.
-    name: resolve_op(f"deepseek_v4_{name}")
+    # Model construction only creates dispatch handles. The worker resolves and
+    # freezes them after loading, before torch.compile and CUDA Graph capture.
+    name: CachedOp(f"deepseek_v4_{name}")
     for name in (
         "inv_rope_quant_fp8",
         "int8_scaled_mm",
         "mhc_pre",
+        "mhc_pre_int8",
         "mhc_fused_post_pre",
+        "mhc_fused_post_pre_int8",
         "mhc_post",
         "hc_head",
         "fused_q_kv_rmsnorm",
+        "fused_q_kv_rmsnorm_int8",
         "qnorm_rope_kv_quant_insert",
         "qnorm_rope_kv_bf16_insert",
         "qnorm_rope_kv_fp8_insert",
@@ -49,8 +49,16 @@ def mhc_pre(*args, **kwargs):
     return _OPS["mhc_pre"](*args, **kwargs)
 
 
+def mhc_pre_int8(*args, **kwargs):
+    return _OPS["mhc_pre_int8"](*args, **kwargs)
+
+
 def mhc_fused_post_pre(*args, **kwargs):
     return _OPS["mhc_fused_post_pre"](*args, **kwargs)
+
+
+def mhc_fused_post_pre_int8(*args, **kwargs):
+    return _OPS["mhc_fused_post_pre_int8"](*args, **kwargs)
 
 
 def mhc_post(*args, **kwargs):
@@ -63,6 +71,10 @@ def hc_head(*args, **kwargs):
 
 def fused_q_kv_rmsnorm(*args, **kwargs):
     return _OPS["fused_q_kv_rmsnorm"](*args, **kwargs)
+
+
+def fused_q_kv_rmsnorm_int8(*args, **kwargs):
+    return _OPS["fused_q_kv_rmsnorm_int8"](*args, **kwargs)
 
 
 def qnorm_rope_kv_quant_insert(*args, **kwargs):

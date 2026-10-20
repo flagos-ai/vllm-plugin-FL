@@ -69,6 +69,7 @@ def register_builtins(registry) -> None:
                 "mhc_post",
                 "hc_head",
                 "fused_q_kv_rmsnorm",
+                "fused_q_kv_rmsnorm_int8",
                 "qnorm_rope_kv_quant_insert",
                 "qnorm_rope_kv_bf16_insert",
                 "qnorm_rope_kv_fp8_insert",

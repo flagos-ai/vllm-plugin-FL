@@ -26,6 +26,19 @@ allow_vendors:
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:cuda   : CUDA-specific vendor backend
 op_backends:
+  # DSV4 MHC requires the fused CUDA/TileLang implementation on NVIDIA.
+  # Do not hide vendor kernel failures behind the materially different
+  # FlagGems or PyTorch reference paths: fail at the vendor boundary instead.
+  deepseek_v4_mhc_pre:
+    - vendor:cuda
+  deepseek_v4_mhc_pre_int8:
+    - vendor:cuda
+  deepseek_v4_mhc_fused_post_pre:
+    - vendor:cuda
+  deepseek_v4_mhc_fused_post_pre_int8:
+    - vendor:cuda
+  deepseek_v4_mhc_post:
+    - vendor:cuda
   attention_backend:
     - flagos
     - vendor

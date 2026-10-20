@@ -23,9 +23,7 @@ def _round_to_int8(x):
     Written with plain arithmetic rather than libdevice ``rint`` to stay
     portable across the vendor backends this plugin targets.
     """
-    return tl.clamp(
-        x + tl.where(x >= 0, 0.5, -0.5), -127.0, 127.0
-    ).to(tl.int8)
+    return tl.clamp(x + tl.where(x >= 0, 0.5, -0.5), -127.0, 127.0).to(tl.int8)
 
 
 @triton.jit
@@ -77,9 +75,7 @@ def fused_compress_rope_int8_indexer_cache_kernel(
     history_valid = history_pos >= 0
     logical_blocks = history_pos // state_block_size
     physical_blocks = tl.load(
-        state_block_table
-        + request * state_block_table_stride
-        + logical_blocks,
+        state_block_table + request * state_block_table_stride + logical_blocks,
         mask=history_valid,
         other=0,
     ).to(tl.int64)
@@ -99,9 +95,7 @@ def fused_compress_rope_int8_indexer_cache_kernel(
         other=float("-inf"),
     )
     scores = tl.softmax(scores, dim=0)
-    values = tl.load(
-        rows[:, None] + dims[None, :], mask=valid, other=0.0
-    )
+    values = tl.load(rows[:, None] + dims[None, :], mask=valid, other=0.0)
     compressed = tl.sum(values * scores, axis=0)
 
     weight = tl.load(norm_weight + dims)
@@ -126,9 +120,7 @@ def fused_compress_rope_int8_indexer_cache_kernel(
         normalized * cos_v - partner * sin_v,
         normalized * cos_v + partner * sin_v,
     )
-    result = tl.where(is_rope, rotated, normalized).to(tl.bfloat16).to(
-        tl.float32
-    )
+    result = tl.where(is_rope, rotated, normalized).to(tl.bfloat16).to(tl.float32)
 
     absmax = tl.maximum(tl.max(tl.abs(result), axis=0), 1.0e-4)
     scale = absmax / 127.0
@@ -140,9 +132,7 @@ def fused_compress_rope_int8_indexer_cache_kernel(
     data_base = block_base + kv_pos * HEAD_SIZE
     tl.store(k_cache + data_base + dims, quant)
     scale_byte = block_base + kv_block_size * HEAD_SIZE + kv_pos * 4
-    tl.store(
-        k_cache.to(tl.pointer_type(tl.float32)) + scale_byte // 4, scale
-    )
+    tl.store(k_cache.to(tl.pointer_type(tl.float32)) + scale_byte // 4, scale)
 
 
 @triton.jit
@@ -176,9 +166,7 @@ def _indexer_q_rope_int8_kernel(
     cache = cos_sin + position * cos_sin_stride
     rope_local = offsets - nope_dim
     is_rope = offsets >= nope_dim
-    partner = tl.load(base + (offsets ^ 1), mask=is_rope, other=0.0).to(
-        tl.float32
-    )
+    partner = tl.load(base + (offsets ^ 1), mask=is_rope, other=0.0).to(tl.float32)
     cs_idx = tl.maximum(rope_local >> 1, 0)
     cos_v = tl.load(cache + cs_idx, mask=is_rope, other=1.0)
     sin_v = tl.load(cache + HALF_ROPE + cs_idx, mask=is_rope, other=0.0)
@@ -288,9 +276,7 @@ def compress_int8_indexer_k_cache(
 
     cos_sin_cache = rotary_emb.cos_sin_cache
     k_cache_metadata = attn_metadata[compressor.k_cache_prefix]
-    kv_cache = compressor._static_forward_context[
-        compressor.k_cache_prefix
-    ].kv_cache
+    kv_cache = compressor._static_forward_context[compressor.k_cache_prefix].kv_cache
     fused_compress_rope_int8_indexer_cache_kernel[(num_actual,)](
         state_cache,
         state_cache.stride(0),
@@ -335,8 +321,11 @@ def _int8_mqa_logits_h64_d128_kernel(
     logits,
     num_rows,
     num_keys,
+    local_num_keys,
     num_m_tiles,
     num_n_tiles,
+    CP_RANK: tl.constexpr,
+    CP_SIZE: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     PIPE_STAGES: tl.constexpr,
@@ -363,25 +352,33 @@ def _int8_mqa_logits_h64_d128_kernel(
         query_rows = pid_m * BLOCK_M + q_rows32 // 32
         query_heads = q_rows32 % 32
         q_tile0 = tl.load(
-            q + query_rows[:, None] * (64 * 128)
-            + query_heads[:, None] * 128 + dims[None, :],
-            mask=(query_rows < num_rows)[:, None], other=0,
+            q
+            + query_rows[:, None] * (64 * 128)
+            + query_heads[:, None] * 128
+            + dims[None, :],
+            mask=(query_rows < num_rows)[:, None],
+            other=0,
             eviction_policy="evict_last",
         )
         q_tile1 = tl.load(
-            q + query_rows[:, None] * (64 * 128)
-            + (query_heads[:, None] + 32) * 128 + dims[None, :],
-            mask=(query_rows < num_rows)[:, None], other=0,
+            q
+            + query_rows[:, None] * (64 * 128)
+            + (query_heads[:, None] + 32) * 128
+            + dims[None, :],
+            mask=(query_rows < num_rows)[:, None],
+            other=0,
             eviction_policy="evict_last",
         )
         head_weights0 = tl.load(
             weights + rows[:, None] * 64 + heads32[None, :],
-            mask=row_mask[:, None], other=0.0,
+            mask=row_mask[:, None],
+            other=0.0,
             eviction_policy="evict_last",
         )
         head_weights1 = tl.load(
             weights + rows[:, None] * 64 + (heads32[None, :] + 32),
-            mask=row_mask[:, None], other=0.0,
+            mask=row_mask[:, None],
+            other=0.0,
             eviction_policy="evict_last",
         )
         starts = tl.load(cu_ks + rows, mask=row_mask, other=0)
@@ -397,13 +394,20 @@ def _int8_mqa_logits_h64_d128_kernel(
         # occupy all SMs by itself.
         first_n_tile = starts_min // BLOCK_N
         last_n_tile = tl.minimum(tl.cdiv(ends_max, BLOCK_N), num_n_tiles)
-        for pid_n in tl.range(
-            first_n_tile + n_lane,
-            last_n_tile,
+        # Indexer-only context parallelism: rank r owns global key tiles
+        # r, r + CP_SIZE, ... . The output is compact, so neither MQA nor
+        # top-k materializes another rank's logits.
+        first_local_n_tile = tl.maximum(tl.cdiv(first_n_tile - CP_RANK, CP_SIZE), 0)
+        last_local_n_tile = tl.maximum(tl.cdiv(last_n_tile - CP_RANK, CP_SIZE), 0)
+        for local_pid_n in tl.range(
+            first_local_n_tile + n_lane,
+            last_local_n_tile,
             n_workers,
             num_stages=PIPE_STAGES,
         ):
+            pid_n = local_pid_n * CP_SIZE + CP_RANK
             keys = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+            local_keys = local_pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
             key_mask = keys < num_keys
             tile_min_key = pid_n * BLOCK_N
             tile_max_key = tl.minimum(tile_min_key + BLOCK_N, num_keys) - 1
@@ -411,38 +415,39 @@ def _int8_mqa_logits_h64_d128_kernel(
             # this M tile.  Reject wholly out-of-window tiles before loading K
             # or issuing the Tensor Core dot; the per-element mask below still
             # handles partial boundary tiles.
-            tile_overlaps_window = (
-                (tile_max_key >= starts_min) & (tile_min_key < ends_max)
+            tile_overlaps_window = (tile_max_key >= starts_min) & (
+                tile_min_key < ends_max
             )
             if tile_overlaps_window:
                 k_tile = _async_load(
                     k + keys[:, None] * 128 + dims[None, :],
-                    key_mask[:, None], 0,
+                    key_mask[:, None],
+                    0,
                 )
                 scales = _async_load(k_scale + keys, key_mask, 0.0)
                 dots0 = tl.dot(k_tile, tl.trans(q_tile0), out_dtype=tl.int32)
-                scores0 = tl.reshape(dots0, (BLOCK_N, BLOCK_M, 32)).to(
-                    tl.float32
-                )
+                scores0 = tl.reshape(dots0, (BLOCK_N, BLOCK_M, 32)).to(tl.float32)
                 values = tl.sum(
                     tl.maximum(scores0, 0.0) * head_weights0[None, :, :],
                     axis=2,
                 )
                 dots1 = tl.dot(k_tile, tl.trans(q_tile1), out_dtype=tl.int32)
-                scores1 = tl.reshape(dots1, (BLOCK_N, BLOCK_M, 32)).to(
-                    tl.float32
-                )
+                scores1 = tl.reshape(dots1, (BLOCK_N, BLOCK_M, 32)).to(tl.float32)
                 values += tl.sum(
                     tl.maximum(scores1, 0.0) * head_weights1[None, :, :],
                     axis=2,
                 )
                 values *= scales[:, None]
-                valid = (row_mask[:, None] & key_mask[None, :]
-                         & (keys[None, :] >= starts[:, None])
-                         & (keys[None, :] < ends[:, None]))
+                valid = (
+                    row_mask[:, None]
+                    & key_mask[None, :]
+                    & (keys[None, :] >= starts[:, None])
+                    & (keys[None, :] < ends[:, None])
+                )
                 tl.store(
-                    logits + rows[:, None] * num_keys + keys[None, :],
-                    tl.trans(values), mask=valid,
+                    logits + rows[:, None] * local_num_keys + local_keys[None, :],
+                    tl.trans(values),
+                    mask=valid,
                     eviction_policy="evict_first",
                 )
 
@@ -466,6 +471,8 @@ def _int8_mqa_logits_tensor_core_kernel(
     logits_stride_m,
     num_rows,
     num_keys,
+    CP_RANK: tl.constexpr,
+    CP_SIZE: tl.constexpr,
     NUM_HEADS: tl.constexpr,
     HEAD_DIM: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -475,9 +482,11 @@ def _int8_mqa_logits_tensor_core_kernel(
 ):
     """Stride-aware parameterized INT8 Tensor Core MQA fallback."""
     pid_m = tl.program_id(0)
-    pid_n = tl.program_id(1)
+    local_pid_n = tl.program_id(1)
+    pid_n = local_pid_n * CP_SIZE + CP_RANK
     rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     keys = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    local_keys = local_pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     row_mask = rows < num_rows
     key_mask = keys < num_keys
     dims = tl.arange(0, BLOCK_D)
@@ -508,21 +517,16 @@ def _int8_mqa_logits_tensor_core_kernel(
     scales = tl.load(k_scale + keys, mask=key_mask, other=0.0)
 
     dots = tl.dot(k_tile, tl.trans(q_tile), out_dtype=tl.int32)
-    scores = tl.reshape(dots, (BLOCK_N, BLOCK_M, BLOCK_H)).to(
-        tl.float32
-    )
+    scores = tl.reshape(dots, (BLOCK_N, BLOCK_M, BLOCK_H)).to(tl.float32)
     heads = tl.arange(0, BLOCK_H)
     head_weights = tl.load(
-        weights
-        + rows[:, None] * weights_stride_m
-        + heads[None, :] * weights_stride_h,
+        weights + rows[:, None] * weights_stride_m + heads[None, :] * weights_stride_h,
         mask=row_mask[:, None] & (heads < NUM_HEADS)[None, :],
         other=0.0,
         eviction_policy="evict_last",
     )
     values = tl.sum(
-        tl.maximum(scores * scales[:, None, None], 0.0)
-        * head_weights[None, :, :],
+        tl.maximum(scores * scales[:, None, None], 0.0) * head_weights[None, :, :],
         axis=2,
     )
 
@@ -535,9 +539,7 @@ def _int8_mqa_logits_tensor_core_kernel(
         & (keys[None, :] < ends[:, None])
     )
     tl.store(
-        logits
-        + rows[:, None] * logits_stride_m
-        + keys[None, :],
+        logits + rows[:, None] * logits_stride_m + local_keys[None, :],
         tl.trans(values),
         mask=valid,
         eviction_policy="evict_first",
@@ -551,12 +553,42 @@ def int8_mqa_logits(
     weights: torch.Tensor,
     cu_ks: torch.Tensor,
     cu_ke: torch.Tensor,
+    cp_rank: int = 0,
+    cp_size: int = 1,
+    logits_out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Contiguous INT8 indexer logits used by prefill."""
     num_keys = k.shape[0]
-    logits = torch.empty(
-        (q.shape[0], num_keys), dtype=torch.float32, device=q.device
+    block_n = 64
+    local_num_keys = max(
+        512,
+        triton.cdiv(triton.cdiv(num_keys, block_n), cp_size) * block_n,
     )
+    logits_shape = (q.shape[0], local_num_keys)
+    # CP=0 writes every position consumed by the length-aware prefill top-k,
+    # so clearing the complete logits workspace is unnecessary bandwidth.
+    # CP shards can leave holes in their compact workspace and must retain the
+    # -inf fill so those positions cannot become top-k candidates.
+    if logits_out is not None:
+        if (
+            logits_out.shape[0] < logits_shape[0]
+            or logits_out.shape[1] < logits_shape[1]
+        ):
+            raise ValueError("preallocated logits workspace is too small")
+        logits = logits_out[: logits_shape[0], : logits_shape[1]]
+        if cp_size > 1:
+            logits.fill_(-float("inf"))
+    elif cp_size == 1:
+        logits = torch.empty(logits_shape, dtype=torch.float32, device=q.device)
+    else:
+        logits = torch.full(
+            logits_shape, -float("inf"), dtype=torch.float32, device=q.device
+        )
+    local_num_n_tiles = max(
+        0, triton.cdiv(triton.cdiv(num_keys, block_n) - cp_rank, cp_size)
+    )
+    if local_num_n_tiles == 0:
+        return logits
     if (
         q.shape[1] == 64
         and q.shape[2] == 128
@@ -568,17 +600,17 @@ def int8_mqa_logits(
         # keep only one 8-warp CTA resident per SM.  Halving N preserves the
         # K/Q traffic while allowing two resident CTAs; the larger worker grid
         # then hides the long INT8 MMA/reduction latency on long prefills.
-        block_m, block_n = 4, 64
+        block_m = 4
         num_m_tiles = triton.cdiv(q.shape[0], block_m)
         num_n_tiles = triton.cdiv(num_keys, block_n)
         sm_count = torch.cuda.get_device_properties(q.device).multi_processor_count
-        total_tiles = num_m_tiles * num_n_tiles
+        total_tiles = num_m_tiles * local_num_n_tiles
         target_workers = min(2 * sm_count, total_tiles)
         # Every M lane must own the same number of N shards.  A partially
         # filled final group would make ``ceil(num_workers / m_workers)`` skip
         # one shard for the M lanes that do not have a corresponding CTA.
         m_workers = min(num_m_tiles, target_workers)
-        n_workers = min(max(target_workers // m_workers, 1), num_n_tiles)
+        n_workers = min(max(target_workers // m_workers, 1), local_num_n_tiles)
         num_workers = m_workers * n_workers
         _int8_mqa_logits_h64_d128_kernel[(num_workers,)](
             q,
@@ -590,8 +622,11 @@ def int8_mqa_logits(
             logits,
             q.shape[0],
             num_keys,
+            local_num_keys,
             num_m_tiles,
             num_n_tiles,
+            CP_RANK=cp_rank,
+            CP_SIZE=cp_size,
             BLOCK_M=block_m,
             BLOCK_N=block_n,
             PIPE_STAGES=1,
@@ -606,7 +641,13 @@ def int8_mqa_logits(
     block_m = max(1, 128 // block_h)
     block_n = 64
     _int8_mqa_logits_tensor_core_kernel[
-        (triton.cdiv(q.shape[0], block_m), triton.cdiv(num_keys, block_n))
+        (
+            triton.cdiv(q.shape[0], block_m),
+            max(
+                0,
+                triton.cdiv(triton.cdiv(num_keys, block_n) - cp_rank, cp_size),
+            ),
+        )
     ](
         q,
         q.stride(0),
@@ -625,6 +666,8 @@ def int8_mqa_logits(
         logits.stride(0),
         q.shape[0],
         num_keys,
+        CP_RANK=cp_rank,
+        CP_SIZE=cp_size,
         NUM_HEADS=q.shape[1],
         HEAD_DIM=q.shape[2],
         BLOCK_M=block_m,
@@ -649,9 +692,12 @@ def _int8_paged_mqa_logits_h64_d128_kernel(
     block_table,
     block_table_stride,
     logits,
+    local_max_model_len,
     max_model_len,
     NEXT_N: tl.constexpr,
     PAGES_PER_CTA: tl.constexpr,
+    CP_RANK: tl.constexpr,
+    CP_SIZE: tl.constexpr,
 ):
     """DSV4-specialized H=64, D=128, page=64 decode kernel.
 
@@ -661,17 +707,15 @@ def _int8_paged_mqa_logits_h64_d128_kernel(
     collapsing the two-dimensional page parallelism.
     """
     row = tl.program_id(0)
-    first_logical_block = tl.program_id(1) * PAGES_PER_CTA
     batch = row // NEXT_N
     next_idx = row % NEXT_N
     # Strides come from the caller: a compact (B, 1) ``context_lens`` passes a
     # zero column stride so the shared length broadcasts across next_n.
     context_len = tl.load(
-        context_lens
-        + batch * context_row_stride
-        + next_idx * context_col_stride
+        context_lens + batch * context_row_stride + next_idx * context_col_stride
     )
-    first_key_start = first_logical_block * 64
+    first_local_block = tl.program_id(1) * PAGES_PER_CTA
+    first_key_start = (first_local_block * CP_SIZE + CP_RANK) * 64
     if first_key_start >= context_len:
         return
 
@@ -684,13 +728,13 @@ def _int8_paged_mqa_logits_h64_d128_kernel(
         q + row * (64 * 128) + heads[:, None] * 128 + dims[None, :],
         eviction_policy="evict_last",
     )
-    head_weights = tl.load(
-        weights + row * 64 + heads, eviction_policy="evict_last"
-    )
+    head_weights = tl.load(weights + row * 64 + heads, eviction_policy="evict_last")
 
     for page_offset in tl.static_range(0, PAGES_PER_CTA):
-        logical_block = first_logical_block + page_offset
+        local_block = first_local_block + page_offset
+        logical_block = local_block * CP_SIZE + CP_RANK
         key_start = logical_block * 64
+        local_key_start = local_block * 64
         page_valid = key_start < context_len
         physical_block = tl.load(
             block_table + batch * block_table_stride + logical_block,
@@ -714,11 +758,9 @@ def _int8_paged_mqa_logits_h64_d128_kernel(
         )
 
         dots = tl.dot(k_tile, tl.trans(q_tile), out_dtype=tl.int32)
-        activated = tl.maximum(
-            dots.to(tl.float32) * k_scales[:, None], 0.0
-        )
+        activated = tl.maximum(dots.to(tl.float32) * k_scales[:, None], 0.0)
         result = tl.sum(activated * head_weights[None, :], axis=1)
-        output = logits + row * max_model_len + key_start + positions
+        output = logits + row * local_max_model_len + local_key_start + positions
         tl.store(
             output,
             result,
@@ -747,21 +789,22 @@ def _int8_paged_mqa_logits_kernel(
     logits_stride,
     max_model_len,
     NEXT_N: tl.constexpr,
+    CP_RANK: tl.constexpr,
+    CP_SIZE: tl.constexpr,
     NUM_HEADS: tl.constexpr,
     HEAD_DIM: tl.constexpr,
     BLOCK_KEYS: tl.constexpr,
     BLOCK_HEADS: tl.constexpr,
 ):
     row = tl.program_id(0)
-    key_block = tl.program_id(1)
+    local_key_block = tl.program_id(1)
+    key_block = local_key_block * CP_SIZE + CP_RANK
     batch = row // NEXT_N
     next_idx = row % NEXT_N
     # See int8_paged_mqa_logits: a compact (B, 1) ``context_lens`` passes a zero
     # column stride so the shared length broadcasts across next_n positions.
     context_len = tl.load(
-        context_lens
-        + batch * context_row_stride
-        + next_idx * context_col_stride
+        context_lens + batch * context_row_stride + next_idx * context_col_stride
     )
 
     # The logits buffer is deliberately not cleaned: the downstream top-k
@@ -773,6 +816,7 @@ def _int8_paged_mqa_logits_kernel(
     if key_start >= context_len:
         return
     keys = key_start + tl.arange(0, BLOCK_KEYS)
+    local_keys = local_key_block * BLOCK_KEYS + tl.arange(0, BLOCK_KEYS)
     key_mask = (keys < context_len) & (keys < max_model_len)
     logical_blocks = keys // block_size
     block_offsets = keys % block_size
@@ -789,9 +833,7 @@ def _int8_paged_mqa_logits_kernel(
         other=0,
     ).to(tl.int8)
     scale_offsets = (
-        physical_blocks * cache_block_stride
-        + block_size * HEAD_DIM
-        + block_offsets * 4
+        physical_blocks * cache_block_stride + block_size * HEAD_DIM + block_offsets * 4
     )
     k_scales = tl.load(
         cache.to(tl.pointer_type(tl.float32)) + scale_offsets // 4,
@@ -823,11 +865,9 @@ def _int8_paged_mqa_logits_kernel(
             mask=head_mask,
             other=0.0,
         )
-        activated = tl.maximum(
-            dots.to(tl.float32) * k_scales[:, None], 0.0
-        )
+        activated = tl.maximum(dots.to(tl.float32) * k_scales[:, None], 0.0)
         acc += tl.sum(activated * head_weights[None, :], axis=1)
-    tl.store(logits + row * logits_stride + keys, acc, mask=key_mask)
+    tl.store(logits + row * logits_stride + local_keys, acc, mask=key_mask)
 
 
 def int8_paged_mqa_logits(
@@ -837,12 +877,33 @@ def int8_paged_mqa_logits(
     context_lens: torch.Tensor,
     block_table: torch.Tensor,
     max_model_len: int,
+    cp_rank: int = 0,
+    cp_size: int = 1,
+    pages_per_cta: int = 2,
 ) -> torch.Tensor:
     """Paged INT8 indexer logits used by decode."""
     batch, next_n, num_heads, head_dim = q.shape
-    logits = torch.empty(
-        (batch * next_n, max_model_len), dtype=torch.float32, device=q.device
+    capacity_model_len = min(max_model_len, block_table.shape[1] * 64)
+    local_max_model_len = max(
+        512,
+        triton.cdiv(triton.cdiv(capacity_model_len, 64), cp_size) * 64,
+        triton.cdiv(triton.cdiv(capacity_model_len, 128), cp_size) * 128,
     )
+    logits_shape = (batch * next_n, local_max_model_len)
+    # Row CP keeps the complete K range on every rank (cp_size == 1), and the
+    # kernel writes every position below context_len.  The downstream decode
+    # top-k is length-masked, so clearing capacity-only positions is pure
+    # bandwidth overhead.  Retain the conservative fill for legacy key CP,
+    # whose compact output can contain holes.
+    if cp_size == 1:
+        logits = torch.empty(logits_shape, dtype=torch.float32, device=q.device)
+    else:
+        logits = torch.full(
+            logits_shape,
+            -float("inf"),
+            dtype=torch.float32,
+            device=q.device,
+        )
     flat = cache.view(torch.uint8)
 
     # ``context_lens`` is (B, next_n) under native spec decode but (B, 1)
@@ -867,10 +928,10 @@ def int8_paged_mqa_logits(
     ):
         # A context cannot address more pages than its block-table row. Avoid
         # launching capacity-only CTAs when metadata carries a compact table.
-        grid_blocks = min(
-            triton.cdiv(max_model_len, 64), block_table.shape[1]
-        )
-        pages_per_cta = 2
+        global_grid_blocks = min(triton.cdiv(max_model_len, 64), block_table.shape[1])
+        grid_blocks = max(0, triton.cdiv(global_grid_blocks - cp_rank, cp_size))
+        if grid_blocks == 0:
+            return logits
         _int8_paged_mqa_logits_h64_d128_kernel[
             (batch * next_n, triton.cdiv(grid_blocks, pages_per_cta))
         ](
@@ -884,16 +945,25 @@ def int8_paged_mqa_logits(
             block_table,
             block_table.stride(0),
             logits,
+            local_max_model_len,
             max_model_len,
             NEXT_N=next_n,
             PAGES_PER_CTA=pages_per_cta,
+            CP_RANK=cp_rank,
+            CP_SIZE=cp_size,
             num_warps=4,
             num_stages=1,
         )
         return logits
 
     _int8_paged_mqa_logits_kernel[
-        (batch * next_n, triton.cdiv(max_model_len, 128))
+        (
+            batch * next_n,
+            max(
+                0,
+                triton.cdiv(triton.cdiv(max_model_len, 128) - cp_rank, cp_size),
+            ),
+        )
     ](
         q,
         q.stride(0),
@@ -913,6 +983,8 @@ def int8_paged_mqa_logits(
         logits.stride(0),
         max_model_len,
         NEXT_N=next_n,
+        CP_RANK=cp_rank,
+        CP_SIZE=cp_size,
         NUM_HEADS=num_heads,
         HEAD_DIM=head_dim,
         BLOCK_KEYS=128,
