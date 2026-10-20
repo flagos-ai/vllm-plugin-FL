@@ -7,6 +7,7 @@ import torch
 from vllm.platforms import current_platform
 
 from vllm_fl.nvidia_compat import has_native_vllm_kernels
+from vllm_fl.ops.nvidia_dsv41_indexer import _validate_fp8_indexer_cache
 from vllm_fl.ops.nvidia_sparse_indexer import register_nvidia_sparse_indexer
 
 _libs: list[torch.library.Library] = []
@@ -62,23 +63,19 @@ def indexer_k_quant_and_cache(
 ):
     from flag_gems import indexer_k_quant_and_cache as gems_insert
 
+    _validate_fp8_indexer_cache(kv_cache)
     if (
         k.ndim != 2
         or k.shape[-1] != 128
         or quant_block_size != 128
         or kv_cache_dtype != "ue8m0"
-        or kv_cache.dtype != torch.uint8
-        or kv_cache.ndim not in (3, 4)
-        or kv_cache.shape[-1] != 132
-        or (kv_cache.ndim == 4 and kv_cache.shape[2] != 1)
-        or not kv_cache.is_contiguous()
         or slot_mapping.ndim != 1
         or slot_mapping.numel() > k.shape[0]
         or not slot_mapping.is_contiguous()
         or slot_mapping.dtype not in (torch.int32, torch.int64)
     ):
         raise ValueError(
-            "HY V4 indexer cache requires contiguous FP8/FP32 132-byte pages"
+            "HY V4 indexer cache requires 128-dim keys and contiguous integer slots"
         )
     if any(not t.is_cuda or t.device != k.device for t in (k, kv_cache, slot_mapping)):
         raise ValueError("HY V4 indexer cache inputs must share a CUDA device")

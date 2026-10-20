@@ -19,6 +19,25 @@ def _same_cuda(*tensors):
         raise ValueError("DSV4.1 tensors must share a CUDA device")
 
 
+def _validate_fp8_indexer_cache(kv_cache):
+    """Require dense page contents, allowing upstream interleaved page strides."""
+    if (
+        kv_cache.dtype != torch.uint8
+        or kv_cache.ndim not in (3, 4)
+        or kv_cache.shape[-1] != 132
+        or (kv_cache.ndim == 4 and kv_cache.shape[2] != 1)
+        or kv_cache.stride(-1) != 1
+        or kv_cache.stride(1) != 132
+        or kv_cache.stride(0) < kv_cache.shape[1] * 132
+        or kv_cache.stride(0) % 4
+        or kv_cache.storage_offset() % 4
+    ):
+        raise ValueError(
+            "Indexer cache requires packed uint8 FP8/FP32 pages with "
+            "contiguous page contents and aligned, non-overlapping page strides"
+        )
+
+
 def fused_indexer_q_rope_quant(
     positions,
     index_q,
@@ -198,8 +217,9 @@ def fp8_paged_mqa_logits(
     block = kv_cache.shape[1]
     if block not in (32, 64, 128):
         raise NotImplementedError("FP8 indexer supports cache blocks 32, 64, or 128")
-    if not kv_cache.is_contiguous() or not values.is_contiguous():
-        raise ValueError("FP8 indexer cache and queries must be contiguous")
+    _validate_fp8_indexer_cache(kv_cache)
+    if not values.is_contiguous():
+        raise ValueError("FP8 indexer queries must be contiguous")
     if (
         weights.dtype != torch.float32
         or weights.shape != (batch, heads)
