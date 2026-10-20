@@ -202,9 +202,11 @@ def register():
     if vendor_name == "nvidia":
         from vllm_fl.nvidia_compat import prepare_nvidia_empty_imports
         from vllm_fl.ops.nvidia_cache_ops import register_nvidia_cache_ops
+        from vllm_fl.ops.nvidia_embedding_ops import register_nvidia_embedding_ops
         from vllm_fl.ops.nvidia_topk_ops import register_nvidia_topk_ops
 
         register_nvidia_cache_ops()
+        register_nvidia_embedding_ops()
         register_nvidia_topk_ops()
         prepare_nvidia_empty_imports()
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
