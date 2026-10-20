@@ -1,14 +1,12 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-import inspect
 from types import SimpleNamespace
 
-import pytest
 import torch
 import torch.nn.functional as F
 
 
-def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch):
+def test_bias_router_preserves_hash_scaling_and_shared_experts(monkeypatch):
     import vllm_fl.ops.fused_moe.router as router_mod
 
     captured = {}
@@ -26,6 +24,8 @@ def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch)
     bias = torch.nn.Parameter(torch.zeros(6))
     router = SimpleNamespace(
         e_score_correction_bias=bias,
+        bias_vl=None,
+        image_sentinel_lo=0,
         top_k=2,
         renormalize=True,
         scoring_func="sqrtsoftplus",
@@ -47,8 +47,8 @@ def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch)
     assert captured["input_tokens"] is input_ids
     assert captured["hash_indices_table"] is hash_table
     assert captured["routed_scaling_factor"] == 0.5
-    assert "bias_vl" not in captured
-    assert "image_sentinel_lo" not in captured
+    assert captured["bias_vl"] is None
+    assert captured["image_sentinel_lo"] == 0
     assert torch.equal(ids, torch.tensor([[2, 4, 6, 7]], dtype=torch.int32))
     assert torch.equal(
         weights,
@@ -136,8 +136,6 @@ def test_bias_router_preserves_v032_image_routing_through_upstream(monkeypatch):
 
     import vllm_fl.ops.fused_moe.router as router_mod
 
-    if "bias_vl" not in inspect.signature(native.fused_topk_bias).parameters:
-        pytest.skip("Image-token router bias was introduced in vLLM 0.32")
     captured = {}
 
     def capture_kernel(*args, **kwargs):

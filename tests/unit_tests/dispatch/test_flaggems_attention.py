@@ -98,7 +98,9 @@ def _impl(attention, head_size=64):
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_batch_invariant_mode_uses_upstream_environment(attention, monkeypatch, enabled):
+def test_batch_invariant_mode_uses_upstream_environment(
+    attention, monkeypatch, enabled
+):
     monkeypatch.setenv("VLLM_BATCH_INVARIANT", str(int(enabled)))
     assert _impl(attention).batch_invariant_enabled is enabled
 
