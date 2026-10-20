@@ -175,7 +175,9 @@ def get_flagos_blacklist(config: Optional[dict] = None) -> Optional[list[str]]:
         List of blacklisted FlagOS operator names.
     """
     if config is None:
-        config = load_platform_config()
+        from vllm_fl.minimax_m3_config import dispatch_config, is_enabled
+
+        config = dispatch_config() if is_enabled() else load_platform_config()
     if config is None:
         return None
 
@@ -196,7 +198,9 @@ def get_oot_blacklist(config: Optional[dict] = None) -> Optional[list[str]]:
         List of blacklisted OOT operator names.
     """
     if config is None:
-        config = load_platform_config()
+        from vllm_fl.minimax_m3_config import dispatch_config, is_enabled
+
+        config = dispatch_config() if is_enabled() else load_platform_config()
     if config is None:
         return None
 

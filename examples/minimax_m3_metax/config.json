@@ -1,0 +1,341 @@
+{
+  "prefer": "flagos",
+  "strict": false,
+  "op_backends": {
+    "attention_backend": ["vendor:metax"],
+    "silu_and_mul": ["flagos", "reference"],
+    "rms_norm": ["flagos", "reference"],
+    "rotary_embedding": ["flagos", "reference"],
+    "topk_softmax": ["flagos", "reference"]
+  },
+  "flagos_blacklist": ["masked_fill"],
+  "oot_blacklist": ["masked_fill"],
+  "model_profile": "minimax_m3_metax",
+  "minimax_m3": {
+    "release": "minimax-m3-metax",
+    "framework": {
+      "tensor_parallel_size": 16,
+      "flagos_norm": true,
+      "flagos_swiglu": true,
+      "flagos_msa": true,
+      "exact_decode_fallback": true,
+      "vision_chunk_patches": 8192,
+      "graph_collective_boundary": true,
+      "max_context": 131072,
+      "long_prefill_query_lower": 4096,
+      "long_prefill_query_upper": 8192,
+      "long_index_min_context": 16384
+    },
+    "kernels": {"safe_topk": true, "safe_head_tile": true, "safe_stages": true, "moe_alignment_tle": false},
+    "service": {
+      "max_model_len": 131072,
+      "gpu_memory_utilization": 0.96,
+      "max_num_seqs": 64,
+      "max_num_batched_tokens": 8192,
+      "block_size": 128,
+      "kv_dtype": "bfloat16",
+      "index_kv_dtype": "bf16",
+      "prefix_caching": false,
+      "async_scheduling": false,
+      "scheduler": "vllm.v1.core.sched.scheduler.Scheduler",
+      "watermark": 0,
+      "compilation_config": {"cudagraph_num_of_warmups": 1},
+      "cpu_quota_cores_per_node": 32,
+      "cpu_memory_limit_gib_per_node": 850
+    },
+    "linear": {
+      "legacy": [
+        {"M": 16, "N": 6144, "K": 512, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 3, "N": 6144, "K": 512, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 16, "N": 6144, "K": 768, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 3, "N": 6144, "K": 768, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 32, "N": 6144, "K": 768, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 16, "N": 1536, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 3, "N": 1536, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 32, "N": 1536, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 64, "N": 1536, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 16, "N": 768, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 3, "N": 768, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 32, "N": 768, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 64, "N": 768, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 16, "N": 12504, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 3, "N": 12504, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 32, "N": 12504, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 16, "N": 128, "K": 6144, "dtype": "float32", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 32, "num_warps": 1, "num_stages": 2}},
+        {"M": 3, "N": 128, "K": 6144, "dtype": "float32", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 32, "num_warps": 1, "num_stages": 2}},
+        {"M": 32, "N": 128, "K": 6144, "dtype": "float32", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 32, "num_warps": 1, "num_stages": 2}},
+        {"M": 64, "N": 128, "K": 6144, "dtype": "float32", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 2}},
+        {"M": 8192, "N": 128, "K": 6144, "dtype": "float32", "config": {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32, "num_warps": 4, "num_stages": 4}},
+        {"M": 1024, "N": 6144, "K": 192, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32, "num_warps": 4, "num_stages": 2}},
+        {"M": 16, "N": 6144, "K": 192, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 3, "N": 6144, "K": 192, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 32, "BLOCK_SIZE_K": 32, "num_warps": 1, "num_stages": 2}},
+        {"M": 32, "N": 6144, "K": 192, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}},
+        {"M": 401, "N": 6144, "K": 192, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32, "num_warps": 4, "num_stages": 2}},
+        {"M": 8192, "N": 6144, "K": 192, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32, "num_warps": 4, "num_stages": 2}},
+        {"M": 16, "N": 384, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 3, "N": 384, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 32, "N": 384, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 64, "N": 384, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 16, "N": 1024, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 3, "N": 1024, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 32, "N": 1024, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}},
+        {"M": 64, "N": 1024, "K": 6144, "dtype": "bfloat16", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+      ],
+      "small": [
+        {
+          "M": 8,
+          "N": 768,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}}
+        },
+        {
+          "M": 8,
+          "N": 1024,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 8,
+          "N": 1536,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 8,
+          "N": 6144,
+          "K": 768,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 8,
+          "N": 384,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}}
+        },
+        {
+          "M": 8,
+          "N": 12504,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {"M": 8, "N": 128, "K": 6144, "dtype": "float32", "candidate": {"kind": "gemv", "config": {"BM": 4, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {"M": 16, "N": 128, "K": 6144, "dtype": "float32", "candidate": {"kind": "gemv", "config": {"BM": 4, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {"M": 1, "N": 768, "K": 6144, "dtype": "bfloat16", "candidate": {"kind": "gemv", "config": {"BM": 1, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {"M": 1, "N": 1024, "K": 6144, "dtype": "bfloat16", "candidate": {"kind": "gemv", "config": {"BM": 1, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {
+          "M": 1,
+          "N": 1536,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 1,
+          "N": 6144,
+          "K": 768,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}}
+        },
+        {"M": 1, "N": 384, "K": 6144, "dtype": "bfloat16", "candidate": {"kind": "gemv", "config": {"BM": 1, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {
+          "M": 1,
+          "N": 12504,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}}
+        },
+        {"M": 1, "N": 128, "K": 6144, "dtype": "float32", "candidate": {"kind": "gemv", "config": {"BM": 1, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {
+          "M": 2,
+          "N": 768,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 2,
+          "N": 1024,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 2,
+          "N": 1536,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 2,
+          "N": 6144,
+          "K": 768,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}}
+        },
+        {"M": 2, "N": 384, "K": 6144, "dtype": "bfloat16", "candidate": {"kind": "gemv", "config": {"BM": 2, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {
+          "M": 2,
+          "N": 12504,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {"M": 2, "N": 128, "K": 6144, "dtype": "float32", "candidate": {"kind": "gemv", "config": {"BM": 1, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {
+          "M": 4,
+          "N": 1024,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {
+          "M": 4,
+          "N": 1536,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 3}}
+        },
+        {
+          "M": 4,
+          "N": 6144,
+          "K": 768,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {"M": 4, "N": 384, "K": 6144, "dtype": "bfloat16", "candidate": {"kind": "gemv", "config": {"BM": 1, "BN": 4, "BK": 512, "num_warps": 4, "num_stages": 1}}},
+        {
+          "M": 4,
+          "N": 12504,
+          "K": 6144,
+          "dtype": "bfloat16",
+          "candidate": {"kind": "dot", "config": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "num_warps": 2, "num_stages": 4}}
+        },
+        {"M": 4, "N": 128, "K": 6144, "dtype": "float32", "candidate": {"kind": "gemv", "config": {"BM": 1, "BN": 1, "BK": 512, "num_warps": 4, "num_stages": 1}}}
+      ],
+      "ordered_config": {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32, "num_warps": 4, "num_stages": 4},
+      "ordered_shapes": [
+        {"M": 8192, "N": 1024, "K": 6144, "ORDER": 1, "GROUP_M": 8},
+        {"M": 8192, "N": 6144, "K": 512, "ORDER": 2, "GROUP_M": 16},
+        {"M": 8192, "N": 384, "K": 6144, "ORDER": 2, "GROUP_M": 16}
+      ],
+      "router_shape": [8192, 128, 6144],
+      "router_config": {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32, "num_warps": 4, "num_stages": 4}
+    },
+    "moe": {
+      "small": {
+        "1": {
+          "config1": {"BK": 1024, "BLOCK_SIZE_M": 16, "BN": 1, "kind": "naive_gemv", "num_warps": 4},
+          "config2": {"BK": 256, "BLOCK_SIZE_M": 16, "BN": 32, "kind": "naive_gemv", "num_warps": 4},
+          "assignment": "naive",
+          "extra_align": false
+        },
+        "2": {
+          "config1": {"BK": 1024, "BLOCK_SIZE_M": 16, "BN": 4, "kind": "naive_gemv", "num_warps": 4},
+          "config2": {"BLOCK_SIZE_K": 64, "BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "GROUP_SIZE_M": 1, "SWAP_AB": true, "num_stages": 1, "num_warps": 2},
+          "assignment": "naive",
+          "extra_align": false
+        },
+        "4": {
+          "config1": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 128, "GROUP_SIZE_M": 1, "SPLIT_K": 1, "num_warps": 4, "num_stages": 4},
+          "config2": {"BLOCK_SIZE_K": 64, "BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 128, "GROUP_SIZE_M": 1, "SWAP_AB": true, "num_stages": 1, "num_warps": 2},
+          "assignment": "naive",
+          "extra_align": false
+        },
+        "8": {
+          "config1": {"BK": 1024, "BLOCK_SIZE_M": 16, "BN": 4, "kind": "naive_gemv", "num_warps": 4},
+          "config2": {"BLOCK_SIZE_K": 64, "BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 128, "GROUP_SIZE_M": 1, "SWAP_AB": true, "num_stages": 1, "num_warps": 2},
+          "assignment": "naive",
+          "extra_align": false
+        },
+        "16": {
+          "config1": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 128, "GROUP_SIZE_M": 1, "SPLIT_K": 1, "num_warps": 4, "num_stages": 4},
+          "config2": {"BLOCK_SIZE_K": 64, "BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 128, "GROUP_SIZE_M": 1, "SWAP_AB": true, "num_stages": 1, "num_warps": 2},
+          "assignment": "aligned",
+          "extra_align": false
+        }
+      },
+      "g2_configs": {
+        "64": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE_M": 1, "num_warps": 2, "num_stages": 1},
+        "1024": {"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64, "GROUP_SIZE_M": 1, "num_warps": 4, "num_stages": 1},
+        "8192": {"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE_M": 1, "num_warps": 4, "num_stages": 1},
+        "32": {"BLOCK_SIZE_M": 16, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE_M": 1, "num_warps": 2, "num_stages": 1, "SWAP_AB": true},
+        "40": {"BLOCK_SIZE_M": 32, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 64, "GROUP_SIZE_M": 1, "num_warps": 4, "num_stages": 1, "SWAP_AB": true}
+      }
+    },
+    "attention": {
+      "base_prefill": {"qpack": 8, "ktile": 32, "warps": 2, "stages": 1},
+      "base_decode": {"ktile": 32, "warps": 2, "stages": 1, "split": null},
+      "index_q1_chunks": {"1": 256, "2": 128},
+      "decode_parts": {"1": 8, "2": 8, "4": 4, "8": 2, "16": 1},
+      "long_index": {"mode": "dot", "bq": 64, "ktile": 64, "chunks": 16, "warps": 2, "stages": 1},
+      "long_prefill": {"qpack": 4, "ktile": 16, "warps": 1, "stages": 1, "selected_union": true},
+      "base_index": {
+        "vector": {"mode": "vector", "ktile": 128, "warps": 4},
+        "small_query_max": 64,
+        "small_total_max": 512,
+        "small_bq": 16,
+        "small_chunks": 32,
+        "medium_query_max": 256,
+        "medium_total_max": 1024,
+        "medium_bq": 32,
+        "medium_chunks": 16,
+        "long_context_min_exclusive": 8192,
+        "long_chunks": 16,
+        "short_context_max": 2048,
+        "large_total_min": 4096,
+        "short_chunks": 4,
+        "default_bq": 64,
+        "default_chunks": 8,
+        "dot_ktile": 128,
+        "dot_warps": 4
+      }
+    },
+    "infrastructure_env": {
+      "TZ": "Asia/Shanghai",
+      "VLLM_PLUGINS": "fl",
+      "USE_FLAGGEMS": "1",
+      "GEMS_VENDOR": "metax",
+      "MAX_JOBS": "2",
+      "TORCHINDUCTOR_COMPILE_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "HF_HUB_OFFLINE": "1",
+      "TRANSFORMERS_OFFLINE": "1",
+      "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+      "GLOO_SOCKET_IFNAME": "inbond1",
+      "NCCL_SOCKET_IFNAME": "inbond1",
+      "MCCL_SOCKET_IFNAME": "inbond1",
+      "MACA_PATH": "/opt/maca",
+      "NCCL_BUFFSIZE": "1048576",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_IB_GID_INDEX": "3",
+      "NCCL_IB_HCA": "=bnxt_roce0:1,bnxt_roce1:1,bnxt_roce2:1,bnxt_roce3:1",
+      "NCCL_MAX_NCHANNELS": "4",
+      "NCCL_MIN_NCHANNELS": "4",
+      "NCCL_MAX_P2P_NCHANNELS": "4",
+      "NCCL_NET": "IB",
+      "MCCL_BUFFSIZE": "1048576",
+      "MCCL_DEBUG": "INFO",
+      "MCCL_IB_DISABLE": "0",
+      "MCCL_IB_GID_INDEX": "3",
+      "MCCL_IB_HCA": "=bnxt_roce0:1,bnxt_roce1:1,bnxt_roce2:1,bnxt_roce3:1",
+      "MCCL_MAX_NCHANNELS": "4",
+      "MCCL_MIN_NCHANNELS": "4",
+      "MCCL_MAX_P2P_NCHANNELS": "4",
+      "MCCL_NET": "IB",
+      "MCCL_USE_FILE_TUNING": "1",
+      "DNN_VENDOR": "metax",
+      "VLLM_FL_USE_FLAGGEMS_VLLM": "1",
+      "VLLM_FL_PLUGIN_MODULES": "vllm_fl.ops.minimax_m3.registration"
+    }
+  }
+}

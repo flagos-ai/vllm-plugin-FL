@@ -2,7 +2,13 @@
 # 2026 - Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from vllm.v1.attention.backends.fa_utils import logger
+from vllm_fl.minimax_m3_config import is_enabled
+
+if is_enabled():
+    from vllm.logger import init_logger
+    logger = init_logger(__name__)
+else:
+    from vllm.v1.attention.backends.fa_utils import logger
 from vllm.platforms import current_platform
 
 
@@ -22,7 +28,10 @@ if current_platform.is_out_of_tree():
             return None
 
     get_scheduler_metadata = _dummy_ops.get_scheduler_metadata
-    reshape_and_cache_flash = ops.reshape_and_cache_flash
+    if is_enabled():
+        from flag_gems import reshape_and_cache_flash
+    else:
+        reshape_and_cache_flash = ops.reshape_and_cache_flash
 
 
 def get_flash_attn_version(

@@ -82,6 +82,8 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
 ## Adopt from select_unquantized_moe_backend
 def select_unquantized_moe_backend_oot(
     moe_config: FusedMoEConfig,
+    *,
+    triton_experts_cls: type[mk.FusedMoEExperts] | None = None,
 ) -> tuple[UnquantizedMoeBackend, type[mk.FusedMoEExperts] | None]:
     """
     Select the primary Unquantized MoE backend.
@@ -96,7 +98,9 @@ def select_unquantized_moe_backend_oot(
         return UnquantizedMoeBackend.TPU, None
 
     if current_platform.is_out_of_tree() and use_flaggems():
-        return UnquantizedMoeBackend.TRITON, TritonExpertsFL
+        return UnquantizedMoeBackend.TRITON, (
+            TritonExpertsFL if triton_experts_cls is None else triton_experts_cls
+        )
 
     if moe_config.is_lora_enabled:
         return UnquantizedMoeBackend.TRITON, backend_to_kernel_cls(
@@ -245,6 +249,7 @@ def _prepare_expert_assignment(
     use_int4_w4a16: bool = False,
     block_shape: list[int] | None = None,
     ignore_invalid_experts: bool = False,
+    align_block_size=None,
 ) -> tuple[torch.Tensor | None, torch.Tensor, torch.Tensor]:
     """Prepare expert assignments for the aligned and low-latency Triton paths."""
     # SPARSITY_FACTOR is a heuristic margin ensuring tokens_in_chunk * top_k
@@ -273,7 +278,8 @@ def _prepare_expert_assignment(
             ),
         )
 
-    return _moe_align_block_size(
+    align = _moe_align_block_size if align_block_size is None else align_block_size
+    return align(
         topk_ids,
         config["BLOCK_SIZE_M"],
         global_num_experts,
@@ -283,6 +289,35 @@ def _prepare_expert_assignment(
 
 
 class TritonExpertsFL(TritonExperts):
+    def prepare_expert_assignment(self, *args, **kwargs):
+        return _prepare_expert_assignment(*args, **kwargs)
+
+    def make_launch_context(
+        self,
+        topk_ids,
+        config,
+        num_tokens,
+        top_k_num,
+        global_num_experts,
+        expert_map,
+        assignment,
+    ):
+        """Per-call state for a specialized two-GEMM implementation, if needed."""
+        return None
+
+    def invoke_gemm(self, context, stage, *args, **kwargs):
+        _invoke_fused_moe_triton_kernel(*args, **kwargs)
+
+    def apply_activation(self, activation, output, input):
+        apply_moe_activation(
+            activation,
+            output,
+            input,
+            clamp_limit=self.gemm1_clamp_limit,
+            alpha=self.gemm1_alpha,
+            beta=self.gemm1_beta,
+        )
+
     def apply(
         self,
         output: torch.Tensor,
@@ -444,7 +479,7 @@ class TritonExpertsFL(TritonExperts):
         intermediate_cache3 = _resize_cache(workspace2, (num_tokens, top_k_num, K))
 
         sorted_token_ids, expert_ids, num_tokens_post_padded = (
-            _prepare_expert_assignment(
+            self.prepare_expert_assignment(
                 topk_ids,
                 config,
                 num_tokens,
@@ -457,7 +492,18 @@ class TritonExpertsFL(TritonExperts):
             )
         )
 
-        _invoke_fused_moe_triton_kernel(
+        launch_context = self.make_launch_context(
+            topk_ids,
+            config,
+            num_tokens,
+            top_k_num,
+            global_num_experts,
+            expert_map,
+            (sorted_token_ids, expert_ids, num_tokens_post_padded),
+        )
+        self.invoke_gemm(
+            launch_context,
+            1,
             hidden_states,
             w1,
             intermediate_cache1,
@@ -507,13 +553,8 @@ class TritonExpertsFL(TritonExperts):
                 top_k_num=top_k_num,
             )
 
-        apply_moe_activation(
-            activation,
-            intermediate_cache2,
-            intermediate_cache1.view(-1, N),
-            clamp_limit=self.gemm1_clamp_limit,
-            alpha=self.gemm1_alpha,
-            beta=self.gemm1_beta,
+        self.apply_activation(
+            activation, intermediate_cache2, intermediate_cache1.view(-1, N)
         )
 
         a2q_scale: torch.Tensor | None = None
@@ -527,7 +568,9 @@ class TritonExpertsFL(TritonExperts):
             quantization_emulation=self.quantization_emulation,
         )
 
-        _invoke_fused_moe_triton_kernel(
+        self.invoke_gemm(
+            launch_context,
+            2,
             qintermediate_cache2,
             w2,
             intermediate_cache3,

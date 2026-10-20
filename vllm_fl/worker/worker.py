@@ -257,10 +257,12 @@ class WorkerFL(WorkerBase):
         patch_mm_encoder_attention()
         patch_oot_apply_rotary_emb()
 
-        register_oot_ops()
+        register_oot_ops(**self.oot_registration_kwargs())
 
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
+
+            registration_kwargs = self.flaggems_registration_kwargs()
 
             # Get whitelist and blacklist from environment variables
             whitelist, blacklist = get_flag_gems_whitelist_blacklist()
@@ -277,6 +279,7 @@ class WorkerFL(WorkerBase):
                     record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                    **registration_kwargs,
                 )
             elif blacklist:
                 logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
@@ -285,11 +288,13 @@ class WorkerFL(WorkerBase):
                     record=should_record,
                     once=True,
                     path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                    **registration_kwargs,
                 )
             else:
                 logger.info("[FlagGems] Enable all ops")
                 flag_gems.enable(
-                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
+                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+                    **registration_kwargs,
                 )
 
     # def sleep(self, level: int = 1) -> None:
@@ -346,9 +351,22 @@ class WorkerFL(WorkerBase):
     #         context = nullcontext()
     #     return context
 
+    def oot_registration_kwargs(self):
+        return {}
+
+    def flaggems_registration_kwargs(self):
+        return {}
+
     def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+
+    def model_runner_type(self):
+        from vllm_fl.worker.model_runner import ModelRunnerFL
+        return ModelRunnerFL
+
+    def warmup_kernels(self):
+        kernel_warmup(self)
 
     def init_device(self):
         # Iluvatar: patch sampler ops to disable torch.compile (flagtree triton
@@ -504,10 +522,8 @@ class WorkerFL(WorkerBase):
         num_ubatches = 2 if self.vllm_config.parallel_config.enable_dbo else 1
         init_workspace_manager(self.device, num_ubatches)
 
-        from vllm_fl.worker.model_runner import ModelRunnerFL
-
         # Construct the model runner
-        self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
+        self.model_runner = self.model_runner_type()(self.vllm_config, self.device)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -803,7 +819,7 @@ class WorkerFL(WorkerBase):
             )
         else:
             try:
-                kernel_warmup(self)
+                self.warmup_kernels()
             except ImportError as e:
                 # vllm 0.24.0's kernel_warmup unconditionally imports
                 # minimax_m3_msa_warmup, whose chain reaches torchvision.

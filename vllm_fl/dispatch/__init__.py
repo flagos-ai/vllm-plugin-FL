@@ -243,6 +243,34 @@ class CachedOp:
             self._use_manager_call = True
             return mgr.call(self._op_name, *args, **kwargs)
 
+    @property
+    def op_name(self):
+        return self._op_name
+
+    def inspect_binding(self):
+        """Read the current effective implementation without resetting fallback state."""
+        mgr = get_default_manager()
+        if (
+            self._impl is not None
+            and self._manager_id == id(mgr)
+            and self._manager_epoch == mgr.policy_epoch
+            and self._policy_epoch == get_policy_epoch()
+        ):
+            return self._impl
+        return mgr._resolve_impl(self._op_name)
+
+    def bind(self):
+        """Resolve this call site using the same policy epochs as __call__."""
+        mgr = get_default_manager()
+        impl = mgr._resolve_impl(self._op_name)
+        mgr._record_first_use(self._op_name, impl)
+        self._impl = impl
+        self._use_manager_call = False
+        self._manager_id = id(mgr)
+        self._manager_epoch = mgr.policy_epoch
+        self._policy_epoch = get_policy_epoch()
+        return impl
+
 
 def prewarm_cached_ops() -> int:
     """Resolve loaded CachedOps before torch.compile graph capture."""

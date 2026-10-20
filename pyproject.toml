@@ -96,6 +96,8 @@ include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
 "vllm_fl.dispatch.config" = ["*.yaml"]
+"vllm_fl.patches.minimax_m3_metax" = ["compatibility.json"]
+"vllm_fl.models.minimax_m3" = ["upstream.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
