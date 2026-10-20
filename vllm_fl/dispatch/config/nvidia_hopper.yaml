@@ -30,6 +30,10 @@ op_backends:
     - reference
 
 flagos_blacklist:
+  # FlagGems master (6fe7709e) infers int64 for floating arange arguments without an
+  # explicit dtype. NaViT position-bin boundaries then become all zeros,
+  # corrupting MiniCPM-V 4.7 image and video embeddings.
+  - arange_start
   - index_put_
   - index_put
   - _index_put_impl_
