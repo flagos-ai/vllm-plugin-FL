@@ -220,3 +220,76 @@ def test_other_alignment_paths_still_call_gems(monkeypatch, ignore, is_cuda, nat
     ids = torch.tensor([[0, 1]], device="cuda", dtype=torch.int32)
     moe_align_block_size_flaggems(ids, 16, 8, ignore_invalid_experts=ignore)
     assert len(called) == 1 and called[0][0] is ids
+
+
+def _check_scatter(ids, mapping, scatter):
+    expected = []
+    values = mapping.cpu().tolist() if mapping is not None else list(range(8))
+    for row, expert in enumerate(ids.cpu().long().reshape(-1).tolist()):
+        expected.append(row if 0 <= expert < 8 and 0 <= values[expert] < 8 else -1)
+    assert scatter.cpu().flatten().tolist() == expected
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.int32, torch.int64, torch.uint32])
+@pytest.mark.parametrize("pad", [False, True])
+@pytest.mark.parametrize("mapped", [False, True])
+@pytest.mark.parametrize("scatter", [False, True])
+def test_upstream_humming_alignment_entrypoint(dtype, pad, mapped, scatter):
+    from vllm.model_executor.layers.fused_moe.moe_align_block_size import (
+        moe_align_block_size,
+    )
+
+    from vllm_fl.nvidia_compat import has_native_vllm_kernels
+    from vllm_fl.ops.nvidia_moe_ops import register_nvidia_moe_ops
+
+    if has_native_vllm_kernels():
+        pytest.skip("Exercise the EMPTY CUDA alignment operation")
+    assert register_nvidia_moe_ops()
+    ids, mapping = _inputs(17, 8, dtype, mapped)
+    result = moe_align_block_size(
+        ids,
+        16,
+        8,
+        mapping,
+        pad,
+        ignore_invalid_experts=mapped,
+        return_scatter_idx=scatter,
+    )
+    _assert_alignment(ids, 16, 8, mapping, pad, result[:3])
+    if scatter:
+        _check_scatter(ids, mapping, result[3])
+
+
+@pytest.mark.gpu
+def test_upstream_alignment_graph_scatter_and_mapping_updates():
+    from vllm.model_executor.layers.fused_moe.moe_align_block_size import (
+        moe_align_block_size,
+    )
+
+    from vllm_fl.nvidia_compat import has_native_vllm_kernels
+    from vllm_fl.ops.nvidia_moe_ops import register_nvidia_moe_ops
+
+    if has_native_vllm_kernels():
+        pytest.skip("Exercise the EMPTY CUDA alignment operation")
+    assert register_nvidia_moe_ops()
+    ids, mapping = _inputs(17, 8, torch.int64, True)
+
+    def run():
+        return moe_align_block_size(
+            ids, 16, 8, mapping, True, True, return_scatter_idx=True
+        )
+
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        run()
+    torch.cuda.current_stream().wait_stream(stream)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        result = run()
+    ids.fill_(1)
+    mapping.fill_(-1)
+    graph.replay()
+    _assert_alignment(ids, 16, 8, mapping, True, result[:3])
+    _check_scatter(ids, mapping, result[3])
