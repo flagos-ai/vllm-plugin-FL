@@ -47,6 +47,10 @@ def install_dsv41_empty_adapters(vllm_config) -> bool:
         raise NotImplementedError(
             "FlagGems DSV4.1 EMPTY requires the 584-byte fp8_ds_mla cache"
         )
+    from vllm_fl.ops.nvidia_sparse_indexer import register_nvidia_sparse_indexer
+
+    if not register_nvidia_sparse_indexer():
+        return False
     if _installed:
         return True
 

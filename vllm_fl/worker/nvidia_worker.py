@@ -83,9 +83,11 @@ class NvidiaWorkerFL(NativeGPUWorker):
 
     def load_model(self, *, load_dummy_weights: bool = False) -> None:
         from vllm_fl.ops.nvidia_dsv41 import install_dsv41_empty_adapters
+        from vllm_fl.ops.nvidia_hy4 import install_hy4_empty_adapters
         from vllm_fl.ops.nvidia_qsa import install_nvidia_qsa
 
         install_dsv41_empty_adapters(self.vllm_config)
+        install_hy4_empty_adapters(self.vllm_config)
         install_nvidia_qsa(self.vllm_config)
         return super().load_model(load_dummy_weights=load_dummy_weights)
 
