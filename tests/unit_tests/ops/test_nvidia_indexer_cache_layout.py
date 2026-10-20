@@ -127,7 +127,6 @@ def test_upstream_allocated_pages_gather_decode_and_graph(gems, kind, layers, ra
     dst_storage = torch.full((total, 136), 90, dtype=torch.uint8, device="cuda")
     dst = dst_storage[:, :128].view(torch.float8_e4m3fn)
     dst_scale = torch.empty((total, 4), dtype=torch.uint8, device="cuda")
-    metadata = ops.get_paged_mqa_logits_metadata(lengths, block, 132)
 
     def run():
         torch.ops._C_cache_ops.cp_gather_indexer_k_quant_cache(
@@ -139,7 +138,7 @@ def test_upstream_allocated_pages_gather_decode_and_graph(gems, kind, layers, ra
             weights,
             lengths,
             table,
-            metadata,
+            None,
             2 * block,
             clean_logits=True,
         )

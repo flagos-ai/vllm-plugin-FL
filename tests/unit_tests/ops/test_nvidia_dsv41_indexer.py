@@ -81,7 +81,8 @@ def test_prefill_fp8_indexer_and_topk_beyond_budget(ops, clean):
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("block", [32, 64, 128])
-def test_paged_indexer_and_gather_packed_pages(ops, block):
+@pytest.mark.parametrize("heads", [32, 64])
+def test_paged_indexer_and_gather_packed_pages(ops, block, heads):
     pages, max_len = 12, block * 6
     keys = _fp8((pages * block, 128), 8)
     scales = torch.linspace(0.01, 0.05, pages * block, device="cuda")
@@ -96,12 +97,10 @@ def test_paged_indexer_and_gather_packed_pages(ops, block):
     lengths = torch.tensor(
         [[max_len - 7], [block + 3]], dtype=torch.int32, device="cuda"
     )
-    q = _fp8((2, 1, 32, 128), 9)
-    weights = torch.linspace(-0.3, 0.7, 64, device="cuda").reshape(2, 32)
-    metadata = ops.get_paged_mqa_logits_metadata(lengths, block, 132)
-    assert metadata.dtype == torch.int32 and metadata.shape == (133, 2)
+    q = _fp8((2, 1, heads, 128), 9)
+    weights = torch.linspace(-0.3, 0.7, 2 * heads, device="cuda").reshape(2, heads)
     actual = ops.fp8_paged_mqa_logits(
-        (q, None), cache, weights, lengths, table, metadata, max_len, clean_logits=True
+        (q, None), cache, weights, lengths, table, None, max_len, clean_logits=True
     )
     selected_keys, selected_scales = [], []
     for row, length in enumerate(lengths.flatten().tolist()):
@@ -142,15 +141,16 @@ def test_paged_indexer_and_gather_packed_pages(ops, block):
 
 
 @pytest.mark.gpu
-def test_paged_indexer_graph_replays_updated_lengths(ops):
-    block, max_len = 64, 1024
-    keys, q = _fp8((max_len, 128), 10), _fp8((1, 1, 32, 128), 11)
+@pytest.mark.parametrize("block, heads", [(32, 32), (64, 32), (128, 64)])
+@pytest.mark.parametrize("clean", [False, True])
+def test_paged_indexer_graph_replays_updated_lengths(ops, block, heads, clean):
+    max_len = 1024
+    keys, q = _fp8((max_len, 128), 10), _fp8((1, 1, heads, 128), 11)
     scales = torch.full((max_len,), 0.02, device="cuda")
     cache = _packed_cache(keys, scales, block)
-    weights = torch.ones(1, 32, device="cuda") / 32
+    weights = torch.linspace(-0.3, 0.7, heads, device="cuda").view(1, heads)
     lengths = torch.tensor([[max_len]], dtype=torch.int32, device="cuda")
     table = torch.arange(max_len // block, dtype=torch.int32, device="cuda").view(1, -1)
-    metadata = ops.get_paged_mqa_logits_metadata(lengths, block, 132)
 
     def run():
         return ops.fp8_paged_mqa_logits(
@@ -159,9 +159,9 @@ def test_paged_indexer_graph_replays_updated_lengths(ops):
             weights,
             lengths,
             table,
-            metadata,
+            None,
             max_len,
-            clean_logits=True,
+            clean_logits=clean,
         )
 
     stream = torch.cuda.Stream()
@@ -177,7 +177,10 @@ def test_paged_indexer_graph_replays_updated_lengths(ops):
     graph.replay()
     expected = _logits_reference(q[0], keys[:513], scales[:513], weights)
     torch.testing.assert_close(actual[0, :513].cpu(), expected[0], rtol=3e-4, atol=3e-4)
-    assert torch.isneginf(actual[0, 513:]).all()
+    if clean:
+        assert torch.isneginf(actual[0, 513:]).all()
+    else:
+        assert not actual[0, 513:].any()
 
 
 @pytest.mark.gpu
