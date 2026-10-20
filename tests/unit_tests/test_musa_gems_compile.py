@@ -183,6 +183,17 @@ def boundary():
         module.__dict__.update(attrs)
         module.__path__ = []
         fake_modules[name] = module
+    provider = ModuleType("flaggems_vllm")
+
+    def provider_export(name):
+        if name == "silu_and_mul":
+            return fake_modules["flag_gems.modules.activation"].gems_silu_and_mul
+        if name == "apply_rotary_pos_emb":
+            return fake_modules["flag_gems.modules.rotary_embedding"].gems_rope_forward
+        raise AttributeError(name)
+
+    provider.__getattr__ = provider_export
+    fake_modules["flaggems_vllm"] = provider
     # Restore only fake dependency keys; normal Torch modules imported during
     # compilation must survive alongside their persistent cache registrations.
     module_patch = pytest.MonkeyPatch()
