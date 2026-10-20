@@ -209,7 +209,8 @@ Current source builds and CI also install **FlagGems-vllm v0.2.0**, commit
 [`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19),
 through the shared installer, alongside the vendor FlagGems package. Its
 package metadata still reports `0.1.0`; the commit identifies the release.
-The pinned image and historical test results above predate this integration.
+The pinned image and the [historical validation in PR #576](https://github.com/flagos-ai/vllm-plugin-FL/pull/576)
+predate this integration.
 Builds use `--no-deps --no-build-isolation` to preserve the vendor runtime.
 Do not apply the upstream CUDA PyTorch requirements to this Hygon image.
 If Git needs a proxy, set `HYGON_GIT_CONFIG` to a local Git configuration file.
@@ -219,7 +220,8 @@ For an offline upstream install, set `HYGON_VLLM_WHEEL_DIR` to a directory
 containing exactly one previously built `vllm-0.28.0+empty-*.whl`, and set
 `HYGON_VLLM_WHEEL_SHA256` to its verified SHA256. The build checks that digest
 and installs the wheel normally; it does not copy old native vLLM extensions.
-Use a wheel built from the [recorded upstream revision](hygon-validation.md#published-image-and-package-provenance).
+Use a wheel built from upstream vLLM commit
+[`2cf0a6915ce544dc493a0990f2ea38d81601128a`](https://github.com/vllm-project/vllm/commit/2cf0a6915ce544dc493a0990f2ea38d81601128a).
 Leave these variables unset to build vLLM from the official Git source.
 
 The existing Hygon CI runner label is `hg-cicd-vllm-plugin-0240`; its name is
@@ -227,12 +229,10 @@ an infrastructure label and does not specify the vLLM version inside the image.
 
 ## Validation scope
 
-The Hygon unit, functional, inference/serving E2E, and benchmark jobs passed in
-[CI run 38841537036](https://github.com/flagos-ai/vllm-plugin-FL/actions/runs/38841537036)
-for revision `f83325b8`. The [validation record](hygon-validation.md) separates
-that CI run from earlier image/wheel, model, and native graph evidence.
-Coverage applies to the stated configurations; it does not establish complete
-operator/collective ABI coverage or performance.
+See [PR #576](https://github.com/flagos-ai/vllm-plugin-FL/pull/576) for CI status
+and validation details. Results apply to the recorded source and image
+artifacts; they do not establish complete operator/collective ABI coverage
+or performance.
 
 ## Troubleshooting
 
