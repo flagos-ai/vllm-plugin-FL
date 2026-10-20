@@ -40,6 +40,11 @@ def get_backend() -> str:
         return "enflame" if runtime is not None and runtime.is_available() else "cpu"
     if _BACKEND:
         return _BACKEND
+    # TorchGCU exposes CUDA-compatible aliases. Identify its native runtime
+    # first so NVIDIA-only tests cannot run on GCU through those aliases.
+    runtime = _gcu_runtime()
+    if runtime is not None and runtime.is_available():
+        return "enflame"
     if torch.cuda.is_available():
         # Hygon HIP uses Torch CUDA APIs, but remains a distinct test backend.
         return (
@@ -54,9 +59,6 @@ def get_backend() -> str:
             return "ascend"
     except ImportError:
         pass  # torch_npu not installed; ascend backend not available
-    runtime = _gcu_runtime()
-    if runtime is not None and runtime.is_available():
-        return "enflame"
     return "cpu"
 
 
