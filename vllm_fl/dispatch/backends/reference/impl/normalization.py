@@ -25,12 +25,15 @@ def rms_norm_torch(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
-    # Match the vLLM layer contract: accumulate residuals and variance in
-    # float32, then return both tensors in the input dtype.
+    # Accumulate low-precision inputs and residuals in float32, while
+    # preserving float64 for callers that require double precision.
     input_dtype = x.dtype
-    x_float = x.float()
+    accumulation_dtype = (
+        torch.float64 if input_dtype == torch.float64 else torch.float32
+    )
+    x_float = x.to(accumulation_dtype)
     if residual is not None:
-        x_float = x_float + residual.float()
+        x_float = x_float + residual.to(accumulation_dtype)
         residual = x_float.to(input_dtype)
 
     variance_size = getattr(obj, "variance_size_override", None)
