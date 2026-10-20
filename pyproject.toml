@@ -52,20 +52,7 @@ test = [
     "requests",
     "openai",
     "decorator",
-    "vllm[audio]==0.28.0",
-    "modelscope>=1.18.1",
-]
-test-cuda = [
-    "pytest",
-    "pytest-cov",
-    "pytest-timeout",
-    "pytest-json-report",
-    "numpy",
-    "requests",
-    "openai",
-    "decorator",
-    # Supply the upstream EMPTY wheel built by docker/cuda/Dockerfile.empty.
-    # A full CUDA wheel must not silently satisfy NVIDIA's EMPTY test extra.
+    # Install the ordinary upstream EMPTY wheel before the plugin test tools.
     "vllm[audio]==0.32.0+empty",
     "modelscope>=1.18.1",
 ]
