@@ -66,16 +66,20 @@ def _call_native_worker_with_managed_inference(
 class NvidiaWorkerFL(NativeGPUWorker):
     """Thin FL wrapper around vLLM's target-version NVIDIA worker.
 
-    NVIDIA uses the upstream v0.32 GPU worker and V2 model runner unchanged;
+    NVIDIA inherits the upstream v0.32 GPU worker and V1/V2 model runners;
     the plugin only installs its dispatch hooks before model construction.
-    Keeping this as a delegating wrapper prevents the copied multi-vendor
-    worker below from drifting from CUDA behavior in future vLLM releases.
+    Keeping this as a delegating wrapper prevents the plugin worker from
+    drifting from upstream CUDA behavior in future vLLM releases.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._fl_io_dump_initialized = False
         _initialize_fl_runtime(self.rank)
+
+        from vllm_fl.ops.nvidia_rotary_ops import register_nvidia_rotary_ops
+
+        register_nvidia_rotary_ops()
 
     def _ensure_io_dump_initialized(self) -> None:
         """Enable IO dumping on the first execution after model loading."""
