@@ -5,9 +5,41 @@ import argparse
 import importlib
 import importlib.metadata as metadata
 import json
+import os
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
+
+FL_SOURCES = {
+    "flagtree": {
+        "version": "0.7.0+git317a0249",
+        "commit": "317a0249ec25c6756e0aee3a87e8e3c92f154335",
+        "archive_sha256": "075eb5b382dc438e9a54b87d9de6895b5e22dd1c674c04379802cff6973501fb",
+    },
+    "flag-gems": {
+        "version": "5.4.0+g6fe7709e7717",
+        "commit": "6fe7709e7717e49cf12bb00346719a0885f505fa",
+        "archive_sha256": "1925bcf08657f011cc0aa1193ecf96742a7c18fa66121fb1ab36c8142d8107b7",
+    },
+}
+
+
+def validate_fl_provenance(provenance, installed):
+    """Bind installed ordinary wheels to the checksummed source build record."""
+    for name, expected in FL_SOURCES.items():
+        recorded = provenance.get(name, {})
+        actual = installed[name]
+        if any(recorded.get(key) != value for key, value in expected.items()):
+            raise RuntimeError(f"{name} source provenance does not match the CI pin")
+        wheel_hash = recorded.get("wheel_sha256", "")
+        if (
+            actual["version"] != expected["version"]
+            or len(wheel_hash) != 64
+            or actual.get("wheel_sha256") != wheel_hash
+            or actual.get("editable", False)
+        ):
+            raise RuntimeError(f"{name} is not the wheel recorded by the source build")
+    return provenance
 
 
 def validate_vllm_provider(
@@ -81,8 +113,7 @@ def check_stack(*, runtime_only=False):
     )
     expected_versions = {
         "torch": "2.13.0+cu129",
-        "flagtree": "0.7.0",
-        "flag-gems": "5.4.0",
+        **{name: source["version"] for name, source in FL_SOURCES.items()},
         "xgboost": "3.3.0",
         "humming-kernels": "0.1.17",
         "torchcodec": "0.16.0+cu129",
@@ -92,6 +123,23 @@ def check_stack(*, runtime_only=False):
         if actual != expected:
             raise RuntimeError(f"Expected {name}=={expected}, found {actual}")
         facts[name] = actual
+    installed = {}
+    for name in FL_SOURCES:
+        source_dist = metadata.distribution(name)
+        source_url = json.loads(source_dist.read_text("direct_url.json") or "{}")
+        installed[name] = {
+            "version": source_dist.version,
+            "wheel_sha256": source_url.get("archive_info", {})
+            .get("hashes", {})
+            .get("sha256"),
+            "editable": source_url.get("dir_info", {}).get("editable", False),
+        }
+    provenance_path = Path(
+        os.environ.get("FL_STACK_PROVENANCE", "/opt/fl-ci/provenance.json")
+    )
+    facts["fl_source_provenance"] = validate_fl_provenance(
+        json.loads(provenance_path.read_text()), installed
+    )
     if torch.version.cuda != "12.9" or triton.__version__ != "3.6.0":
         raise RuntimeError(
             f"Expected CUDA 12.9 and Triton 3.6.0, found "

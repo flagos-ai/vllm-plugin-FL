@@ -16,12 +16,28 @@ RUN python -m pip install --no-cache-dir \
         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
         -r /opt/fl-ci/requirements.txt
 
+FROM tools AS tree-wheels
+ARG INDEX_URL
+ARG FLAGTREE_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagTree/tar.gz/317a0249ec25c6756e0aee3a87e8e3c92f154335
+ARG FLAGCX_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagCX/tar.gz/c93438decaba8d935e7aa6ae8377e56fd3910b32
+ARG FLAGTREE_LLVM_URL=https://oaitriton.blob.core.windows.net/public/llvm-builds/llvm-f6ded0be-ubuntu-x64.tar.gz
+ARG GOOGLETEST_SOURCE_URL=https://codeload.github.com/google/googletest/tar.gz/refs/tags/v1.17.0
+ARG FLAGTREE_MAX_JOBS=12
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        zlib1g-dev libxml2-dev nlohmann-json3-dev clang llvm lld ccache \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-deps --no-cache-dir \
+        ${INDEX_URL:+--index-url ${INDEX_URL}} \
+        lit==18.1.8 pybind11-stubgen==2.5.5
+COPY docker/cuda/build-flagtree.sh /opt/fl-build/build-flagtree.sh
+RUN bash /opt/fl-build/build-flagtree.sh
+
 FROM tools AS wheels
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
 ARG VLLM_SOURCE_URL=https://codeload.github.com/vllm-project/vllm/tar.gz/5df63a7203cdb9328d824a27b682e77c7b9928be
-ARG FLAGGEMS_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagGems/tar.gz/6ed2f39071ef85db26b7e64f0652a162f434959c
-ARG FLAGTREE_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+ARG FLAGGEMS_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagGems/tar.gz/6fe7709e7717e49cf12bb00346719a0885f505fa
 
 WORKDIR /opt/fl-build
 # Source URL overrides may point to a cache; fixed checksums still enforce
@@ -35,15 +51,15 @@ RUN curl -fsSL --retry 5 "${VLLM_SOURCE_URL}" -o vllm.tar.gz \
     && VLLM_TARGET_DEVICE=empty SETUPTOOLS_SCM_PRETEND_VERSION=0.32.0 \
         python -m pip wheel --no-deps --no-build-isolation --wheel-dir /opt/fl-wheels .
 RUN curl -fsSL --retry 5 "${FLAGGEMS_SOURCE_URL}" -o flaggems.tar.gz \
-    && echo "1a68ed01f82caaeaeeb732a83bfa5e557cc5ca6566e1b5e174894aea1989c5b8  flaggems.tar.gz" | sha256sum -c - \
+    && echo "1925bcf08657f011cc0aa1193ecf96742a7c18fa66121fb1ab36c8142d8107b7  flaggems.tar.gz" | sha256sum -c - \
     && mkdir flaggems \
     && tar -xzf flaggems.tar.gz --strip-components=1 -C flaggems \
-    && SETUPTOOLS_SCM_PRETEND_VERSION=5.4.0 python -m pip wheel \
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_FLAG_GEMS=5.4.0+g6fe7709e7717 python -m pip wheel \
         ${INDEX_URL:+--index-url ${INDEX_URL}} \
         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
         --no-deps --wheel-dir /opt/fl-wheels ./flaggems
-RUN python -m pip download --no-deps --only-binary=:all: \
-        --index-url "${FLAGTREE_INDEX_URL}" --dest /opt/fl-wheels 'flagtree===0.7.0'
+
+COPY --from=tree-wheels /opt/fl-wheels/ /opt/fl-wheels/
 
 # The official cu129 base includes a default CUDA13 TorchCodec wheel. Use
 # the matching CUDA12.9 release (supported with torch>=2.11) so media/LLM
@@ -54,12 +70,15 @@ RUN python -m pip download --no-deps --only-binary=:all: \
 
 FROM tools AS ci
 COPY .github/scripts/cuda/stack.py /opt/fl-ci/stack.py
+COPY docker/cuda/record-provenance.py /opt/fl-ci/record-provenance.py
 COPY --from=wheels /opt/fl-wheels /opt/fl-wheels
 # CI dependencies are resolved before installing FlagTree, which deliberately
 # replaces PyTorch's standalone Triton provider. Never resolve the FL wheels
 # against torch's triton requirement after this point.
 RUN python -m pip uninstall -y vllm triton \
     && python -m pip install --no-cache-dir --no-deps /opt/fl-wheels/*.whl \
+    && python /opt/fl-ci/record-provenance.py /opt/fl-ci/stack.py \
+        /opt/fl-wheels /opt/fl-ci/provenance.json \
     && python -I -B /opt/fl-ci/stack.py --runtime-only \
     && rm -rf /opt/fl-wheels
 

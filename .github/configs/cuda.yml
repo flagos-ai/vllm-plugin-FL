@@ -18,7 +18,7 @@
 platform: cuda
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-empty-ci@sha256:58340489593457805f1929c3998e23df63b015f7bd7ece1d9561050e6bace889
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-empty-ci@sha256:28a000b21c00ba11b9ddd8e01f147cb3d18f24594b071295fcd4921cd30d58c0
 
 # Runner labels for this hardware (self-hosted)
 runner_labels:

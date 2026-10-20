@@ -21,7 +21,9 @@ soxr==1.1.0
 modelscope==1.37.1
 xgboost==3.3.0
 scikit-learn==1.9.1
-# FlagGems 5.4.0 direct dependencies; keep the base image's NumPy.
+# FlagGems master 6fe7709e7717 direct dependencies; keep the base image's NumPy.
+# FlagTree main 317a0249 still uses Triton 3.6 and XGBoost 3.3 above.
+# Both ordinary wheels are built from checksummed sources in Dockerfile.empty.
 packaging==26.3
 PyYAML==6.0.1
 SQLAlchemy==2.0.48
