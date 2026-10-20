@@ -160,7 +160,10 @@ def test_query_quantization_matches_fp8_reference(installed, rows, gems_mode):
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("graph", [False, True])
-def test_indexer_cache_insert_gather_and_slot_replay(installed, graph, gems_mode):
+@pytest.mark.parametrize("shared_pages", [False, True])
+def test_indexer_cache_insert_gather_and_slot_replay(
+    installed, graph, gems_mode, shared_pages
+):
     config, provider = installed
     assert provider.install_hy4_empty_adapters(config)
     from vllm import _custom_ops as ops
@@ -168,7 +171,30 @@ def test_indexer_cache_insert_gather_and_slot_replay(installed, graph, gems_mode
     cpu_keys = _values((4, 128), 8)
     keys = cpu_keys.cuda()
     slots = torch.tensor([0, 63, 64, -1], dtype=torch.int64, device="cuda")
-    cache = torch.zeros(3, 64, 132, dtype=torch.uint8, device="cuda")
+    if shared_pages:
+        from tests.unit_tests.ops.test_nvidia_indexer_cache_layout import (
+            _allocated_cache,
+        )
+
+        cache, raw, untouched = _allocated_cache("hy", 2)
+        assert not cache.is_contiguous() and cache.storage_offset() > 0
+    else:
+        cache = torch.zeros(3, 64, 132, dtype=torch.uint8, device="cuda")
+    num_pages = cache.shape[0]
+    num_slots = num_pages * 64
+
+    def clear_cache():
+        # Production zeroes the contiguous backing allocation. Initialize
+        # only our test layer's contiguous pages so other layers keep their
+        # sentinels; a global Gems zero_ on the strided view ignores its gaps.
+        for page in cache.unbind(0):
+            assert page.is_contiguous()
+            page.zero_()
+        assert not cache.cpu().any()
+        if shared_pages:
+            assert torch.all(raw.cpu()[untouched] == 165)
+
+    clear_cache()
 
     def insert():
         ops.indexer_k_quant_and_cache(keys, cache, slots, 128, "ue8m0")
@@ -184,16 +210,16 @@ def test_indexer_cache_insert_gather_and_slot_replay(installed, graph, gems_mode
             insert()
         slots.copy_(torch.tensor([129, 130, 128, -1], device="cuda"))
         keys.copy_((cpu_keys * 2).cuda())
-        cache.zero_()
+        clear_cache()
         captured.replay()
         cpu_keys = cpu_keys * 2
         target_slots = [129, 130, 128]
     else:
         target_slots = [0, 63, 64]
     expected_q, expected_scales = _fp8_reference(cpu_keys, 1e-4)
-    flat = cache.cpu().reshape(3, -1)
-    values = flat[:, : 64 * 128].reshape(192, 128).view(torch.float8_e4m3fn)
-    scales = flat[:, 64 * 128 :].contiguous().view(torch.float32).reshape(192)
+    flat = cache.cpu().reshape(num_pages, -1)
+    values = flat[:, : 64 * 128].reshape(num_slots, 128).view(torch.float8_e4m3fn)
+    scales = flat[:, 64 * 128 :].contiguous().view(torch.float32).reshape(num_slots)
     for row, slot in enumerate(target_slots):
         torch.testing.assert_close(
             values[slot].float(), expected_q[row].float(), rtol=0, atol=0
@@ -201,22 +227,24 @@ def test_indexer_cache_insert_gather_and_slot_replay(installed, graph, gems_mode
         torch.testing.assert_close(
             scales[slot], expected_scales[row, 0], rtol=0, atol=0
         )
-    unused = sorted(set(range(192)) - set(target_slots))
+    unused = sorted(set(range(num_slots)) - set(target_slots))
     assert not values[unused].float().any()
     assert not scales[unused].any()
-    gathered = torch.empty(192, 128, dtype=torch.float8_e4m3fn, device="cuda")
-    gathered_scales = torch.empty(192, 4, dtype=torch.uint8, device="cuda")
+    gathered = torch.empty(num_slots, 128, dtype=torch.float8_e4m3fn, device="cuda")
+    gathered_scales = torch.empty(num_slots, 4, dtype=torch.uint8, device="cuda")
     ops.cp_gather_indexer_k_quant_cache(
         cache,
         gathered,
         gathered_scales,
-        torch.tensor([[0, 1, 2]], dtype=torch.int32, device="cuda"),
-        torch.tensor([0, 192], dtype=torch.int32, device="cuda"),
+        torch.arange(num_pages, dtype=torch.int32, device="cuda").unsqueeze(0),
+        torch.tensor([0, num_slots], dtype=torch.int32, device="cuda"),
     )
     torch.testing.assert_close(gathered.float().cpu(), values.float(), rtol=0, atol=0)
     torch.testing.assert_close(
         gathered_scales.cpu().view(torch.float32).flatten(), scales, rtol=0, atol=0
     )
+    if shared_pages:
+        assert torch.all(raw.cpu()[untouched] == 165)
 
 
 def _attention_reference(q, kv, indices, sink, length=None):

@@ -5,7 +5,10 @@
 import torch
 
 from vllm_fl.nvidia_compat import has_native_vllm_kernels
-from vllm_fl.ops.nvidia_dsv41_indexer import _same_cuda
+from vllm_fl.ops.nvidia_dsv41_indexer import (
+    _same_cuda,
+    _validate_fp8_indexer_cache,
+)
 
 _libs: list[torch.library.Library] = []
 
@@ -45,15 +48,7 @@ def cp_gather_indexer_k_quant_cache(
     from flag_gems import cp_gather_indexer_k_quant_cache as gems_gather
 
     _same_cuda(kv_cache, dst_k, dst_scale, block_table, cu_seq_lens)
-    if (
-        kv_cache.dtype != torch.uint8
-        or kv_cache.ndim not in (3, 4)
-        or kv_cache.shape[-1] != 132
-        or not kv_cache.is_contiguous()
-    ):
-        raise ValueError("Indexer gather requires packed uint8 FP8/FP32 pages")
-    if kv_cache.ndim == 4 and kv_cache.shape[2] != 1:
-        raise ValueError("Indexer gather supports one KV head")
+    _validate_fp8_indexer_cache(kv_cache)
     if (
         dst_k.dtype != torch.float8_e4m3fn
         or dst_k.ndim != 2
