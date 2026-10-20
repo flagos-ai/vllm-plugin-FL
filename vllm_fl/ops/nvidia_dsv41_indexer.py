@@ -9,7 +9,6 @@ DeepGEMM/FlashMLA availability checks.
 
 import torch
 import triton
-import triton.language as tl
 
 
 def _same_cuda(*tensors):
@@ -135,52 +134,6 @@ def fp8_mqa_logits(q, kv, weights, row_starts, row_ends, clean_logits=False):
     return fp8_fp4_mqa_logits(q, kv, weights, row_starts, row_ends, clean_logits)
 
 
-@triton.jit
-def _paged_fp8_logits_kernel(
-    Q,
-    CACHE,
-    SCALES,
-    WEIGHTS,
-    LENGTHS,
-    TABLE,
-    OUT,
-    Q_ROW: tl.constexpr,
-    CACHE_PAGE: tl.constexpr,
-    SCALE_PAGE: tl.constexpr,
-    TABLE_ROW: tl.constexpr,
-    OUT_ROW: tl.constexpr,
-    HEADS: tl.constexpr,
-    BLOCK: tl.constexpr,
-    MAX_LEN: tl.constexpr,
-):
-    # Same weighted FP8 dot/ReLU reduction as FlagGems' paged MQA kernel,
-    # reading the packed page in place. A fixed grid and device-side lengths
-    # avoid its public wrapper's context_lens.max().item() during graph replay.
-    logical_page, row = tl.program_id(0), tl.program_id(1)
-    length = tl.load(LENGTHS + row)
-    start = logical_page * BLOCK
-    if start >= length:
-        return
-    physical_page = tl.load(TABLE + row * TABLE_ROW + logical_page)
-    heads = tl.arange(0, HEADS)
-    dims = tl.arange(0, 128)
-    positions = tl.arange(0, BLOCK)
-    query = tl.load(Q + row * Q_ROW + heads[:, None] * 128 + dims[None, :])
-    key_bytes = tl.load(
-        CACHE
-        + physical_page.to(tl.int64) * CACHE_PAGE
-        + positions[:, None] * 128
-        + dims[None, :]
-    )
-    keys = key_bytes.to(tl.float8e4nv, bitcast=True)
-    scales = tl.load(SCALES + physical_page.to(tl.int64) * SCALE_PAGE + positions)
-    weights = tl.load(WEIGHTS + row * HEADS + heads)
-    dot = tl.dot(query, tl.trans(keys))
-    scores = tl.sum(tl.maximum(dot * scales[None, :], 0) * weights[:, None], axis=0)
-    token = start + positions
-    tl.store(OUT + row * OUT_ROW + token, scores, (token < length) & (token < MAX_LEN))
-
-
 def fp8_paged_mqa_logits(
     q,
     kv_cache,
@@ -247,42 +200,50 @@ def fp8_paged_mqa_logits(
         dtype=torch.float32,
         device=values.device,
     )
-    # Physical pages contain all FP8 values followed by all FP32 scales.
-    page_bytes = kv_cache.view(kv_cache.shape[0], -1)
-    page_scales = page_bytes[:, block * 128 :].view(torch.float32)
     if batch:
-        _paged_fp8_logits_kernel[(triton.cdiv(max_model_len, block), batch)](
+        from vllm.v1.attention.ops.rocm_aiter_mla_sparse import (
+            _fp8_paged_mqa_logits_decode_kernel,
+        )
+
+        # This upstream Triton kernel also runs on Hopper without AITER. Its
+        # separate physical page strides preserve padding and shared allocations;
+        # its device-side lengths keep a fixed launch grid safe for CUDA graphs.
+        # The public ROCm launcher fixes BLOCK_KV=64, whereas compressed DS pages
+        # can have 32 tokens. Pass the actual page width to the shared kernel.
+        page_bytes = kv_cache.view(kv_cache.shape[0], -1)
+        page_values = page_bytes.view(torch.float8_e4m3fn)
+        page_scales = page_bytes.view(torch.float32)
+        splits = triton.cdiv(max_model_len, block)
+        _fp8_paged_mqa_logits_decode_kernel[(batch, splits)](
             values,
-            kv_cache,
+            page_values,
             page_scales,
             weights,
             context_lens,
             block_tables,
             output,
             values.stride(0),
-            page_bytes.stride(0),
+            values.stride(1),
+            values.stride(2),
+            weights.stride(0),
+            page_values.stride(0),
             page_scales.stride(0),
+            block * dim // 4,
             block_tables.stride(0),
             output.stride(0),
-            heads,
-            block,
+            block_tables.shape[1],
             max_model_len,
+            NUM_HEADS=heads,
+            HEAD_SIZE=dim,
+            BLOCK_SIZE=block,
+            BLOCK_KV=block,
+            N_SPLITS=splits,
+            NEXT_N=1,
+            CTX_PER_ROW=True,
+            num_warps=4,
+            num_stages=2,
         )
     return output
-
-
-def get_paged_mqa_logits_metadata(context_lens, block_size, num_sms, indices=None):
-    from flag_gems.ops.get_paged_mqa_logits_metadata import (
-        get_paged_mqa_logits_metadata as gems_metadata,
-    )
-
-    if indices is not None:
-        raise NotImplementedError(
-            "DSV4.1 FP8 indexer does not implement varlen indices"
-        )
-    if context_lens.ndim == 2 and context_lens.shape[1] != 1:
-        raise NotImplementedError("DSV4.1 FP8 indexer currently requires next_n=1")
-    return gems_metadata(context_lens, block_size, num_sms)
 
 
 def fp8_einsum(equation, a, b, out, recipe=(1, 128, 128)):
