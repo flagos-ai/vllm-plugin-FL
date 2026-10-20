@@ -9,14 +9,27 @@ from typing import ClassVar
 
 import numpy as np
 import torch
+
+from vllm import envs
+from vllm.model_executor.layers.attention.attention import Attention
+from vllm.utils.torch_utils import is_quantized_kv_cache
+from vllm.v1.attention.backend import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionType,
+    MultipleOf,
+)
+
+try:
+    from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
+except ImportError:  # vLLM 0.28 vendor environments
+    from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 from flaggems_vllm import flash_attn_varlen_func, reshape_and_cache_flash
 
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm.model_executor.layers.attention.attention import Attention
-from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
 from vllm.platforms.interface import DeviceCapability
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import is_quantized_kv_cache
@@ -31,9 +44,7 @@ from vllm.v1.attention.backend import (
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
-    get_kv_cache_layout,
 )
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
 
@@ -53,7 +64,9 @@ class AttentionFLBackend(AttentionBackend):
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
+    def get_supported_kernel_block_sizes(
+        kv_cache_spec: AttentionSpec | None = None,
+    ) -> list[int | MultipleOf]:
         vllm_config = get_current_vllm_config()
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
@@ -120,6 +133,10 @@ class AttentionFLBackend(AttentionBackend):
     def get_kv_cache_stride_order(
         include_num_layers_dimension: bool = False,
     ) -> tuple[int, ...]:
+        # This hook is used only by vLLM 0.28. Newer releases shape caches
+        # from AttentionSpec and pass logical [B, H, N, K+V] tensors instead.
+        from vllm.v1.attention.backends.utils import get_kv_cache_layout
+
         # `stride_order` indicates the permutation that gets
         # us from `get_kv_cache_shape` to the actual memory layout we want.
         cache_layout = get_kv_cache_layout()
@@ -151,10 +168,13 @@ class AttentionFLBackend(AttentionBackend):
         use_mla: bool,
         has_sink: bool,
         use_sparse: bool,
+        use_mm_prefix: bool,
         device_capability: DeviceCapability,
     ) -> str | None:
         if has_sink:
             return "not support sink"
+        if use_mm_prefix:
+            return "FlagGems FA2 does not support multimodal prefix attention"
         return None
 
 
@@ -421,6 +441,22 @@ class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
         return use_cascade_attention(*args, **kwargs)
 
 
+def _split_kv_cache(
+    kv_cache: torch.Tensor, head_size: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Expose strided K/V views without changing the upstream cache storage."""
+    if kv_cache.ndim == 4:
+        # vLLM 0.32 logical [B, H, N, K+V]. The physical stride order may be
+        # head-major or token-major; transpose/split preserve both layouts.
+        if kv_cache.shape[-1] != 2 * head_size:
+            raise ValueError("FlagGems attention requires equal K/V head sizes")
+        return kv_cache.transpose(1, 2).split(head_size, dim=-1)
+    if kv_cache.ndim == 5 and kv_cache.shape[0] == 2:
+        # Existing vLLM 0.28 vendor backends allocate [2, B, N, H, D].
+        return kv_cache.unbind(0)
+    raise ValueError(f"Unsupported FlagGems KV cache shape: {tuple(kv_cache.shape)}")
+
+
 class AttentionFLImpl(AttentionImpl):
     can_return_lse_for_decode: bool = True
 
@@ -462,7 +498,7 @@ class AttentionFLImpl(AttentionImpl):
         self.attn_type = attn_type
         self.vllm_flash_attn_version = 2  # FlagGems only supports FA2
         # Cache the batch invariant result for use in forward passes
-        self.batch_invariant_enabled = _bi_mode
+        self.batch_invariant_enabled = envs.VLLM_BATCH_INVARIANT
 
         if is_quantized_kv_cache(self.kv_cache_dtype):
             raise NotImplementedError(
@@ -487,8 +523,18 @@ class AttentionFLImpl(AttentionImpl):
         if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             return
 
-        key_cache, value_cache = kv_cache.unbind(0)
-        reshape_and_cache_flash(
+        key_cache, value_cache = _split_kv_cache(kv_cache, self.head_size)
+        # FlagGems 5.4.0's writer assumes contiguous [N,H,D] inside a page.
+        # Packed K/V views have larger token/head strides, so use vLLM's
+        # stride-aware Triton writer for the new cache layout (no CUDA C op).
+        cache_writer = reshape_and_cache_flash
+        if kv_cache.ndim == 4:
+            from vllm.v1.attention.ops.triton_reshape_and_cache_flash import (
+                triton_reshape_and_cache_flash,
+            )
+
+            cache_writer = triton_reshape_and_cache_flash
+        cache_writer(
             key,
             value,
             key_cache,
@@ -517,8 +563,9 @@ class AttentionFLImpl(AttentionImpl):
             query: shape = [num_tokens, num_heads, head_size]
             key: shape = [num_tokens, num_kv_heads, head_size]
             value: shape = [num_tokens, num_kv_heads, head_size]
-            kv_cache: shape =
-                [2, num_blocks, block_size, num_kv_heads, head_size]
+            kv_cache: logical [num_blocks, num_kv_heads, block_size, 2*head_size]
+                in vLLM 0.32; legacy [2, num_blocks, block_size, num_kv_heads,
+                head_size] remains supported for vLLM 0.28 vendor backends.
             attn_metadata: Metadata for attention.
         Returns:
             shape = [num_tokens, num_heads * head_size]
@@ -566,7 +613,7 @@ class AttentionFLImpl(AttentionImpl):
         # For decoder and cross-attention, use KV cache as before.
         # NOTE: KV cache write is handled by do_kv_cache_update() which is
         # called separately by vLLM's unified_kv_cache_update custom op.
-        key_cache, value_cache = kv_cache.unbind(0)
+        key_cache, value_cache = _split_kv_cache(kv_cache, self.head_size)
 
         if not attn_metadata.use_cascade:
             cu_seqlens_q = attn_metadata.query_start_loc

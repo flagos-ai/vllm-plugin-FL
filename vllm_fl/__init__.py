@@ -130,6 +130,7 @@ def _patch_flash_attn_import():
             "flash_attn C extensions not available"
         )
         stub.flash_attn_varlen_func = None
+        stub.compile_flash_attn_varlen_func_from_specs = None
         stub.get_scheduler_metadata = None
         stub.is_fa_version_supported = lambda *a, **kw: False
         sys.modules["vllm.vllm_flash_attn"] = stub
@@ -139,7 +140,9 @@ def _patch_custom_ops():
     """Register fallback schemas when neither vLLM extension ABI is present."""
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
-            importlib.import_module(module_name)
+            module = importlib.import_module(module_name)
+            if getattr(module, "_vllm_fl_empty_placeholder", False):
+                continue
             return
         except (ImportError, OSError):
             continue
@@ -197,6 +200,13 @@ def register():
         # uses ModelRunnerFL, so select it before VllmConfig reads the default.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
+        from vllm_fl.nvidia_compat import prepare_nvidia_empty_imports
+        from vllm_fl.ops.nvidia_cache_ops import register_nvidia_cache_ops
+        from vllm_fl.ops.nvidia_topk_ops import register_nvidia_topk_ops
+
+        register_nvidia_cache_ops()
+        register_nvidia_topk_ops()
+        prepare_nvidia_empty_imports()
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
 
     return "vllm_fl.platform.PlatformFL"

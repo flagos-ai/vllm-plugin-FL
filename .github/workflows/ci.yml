@@ -19,7 +19,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, 0.4.0-dev]
+    branches: [main, 0.4.0-dev, 0.5.0-dev]
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - "**.md"
@@ -96,6 +96,8 @@ jobs:
             .github/scripts
       - name: Install PyYAML
         run: pip install pyyaml
+      - name: Check NVIDIA EMPTY stack validation
+        run: python -I -B .github/scripts/cuda/test_stack.py
       - id: detect
         run: python3 .github/scripts/detect_platforms.py
 

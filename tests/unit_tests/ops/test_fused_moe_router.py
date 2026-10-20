@@ -1,7 +1,9 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
+import inspect
 from types import SimpleNamespace
 
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -45,6 +47,8 @@ def test_bias_router_preserves_v028_hash_scaling_and_shared_experts(monkeypatch)
     assert captured["input_tokens"] is input_ids
     assert captured["hash_indices_table"] is hash_table
     assert captured["routed_scaling_factor"] == 0.5
+    assert "bias_vl" not in captured
+    assert "image_sentinel_lo" not in captured
     assert torch.equal(ids, torch.tensor([[2, 4, 6, 7]], dtype=torch.int32))
     assert torch.equal(
         weights,
@@ -125,3 +129,46 @@ def test_sqrtsoftplus_fallback_honors_hash_table():
     expected = torch.sqrt(F.softplus(torch.tensor([2.0, 0.0]))) * 2.0
     assert torch.equal(ids, torch.tensor([[2, 0]], dtype=torch.int32))
     assert torch.allclose(weights[0], expected)
+
+
+def test_bias_router_preserves_v032_image_routing_through_upstream(monkeypatch):
+    import vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router as native
+
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    if "bias_vl" not in inspect.signature(native.fused_topk_bias).parameters:
+        pytest.skip("Image-token router bias was introduced in vLLM 0.32")
+    captured = {}
+
+    def capture_kernel(*args, **kwargs):
+        captured.update(kwargs)
+        # The real upstream function passes its allocated outputs first.
+        return args[0].fill_(0.5), args[1].fill_(2)
+
+    monkeypatch.setattr(native.rocm_aiter_ops, "is_fused_moe_enabled", lambda: False)
+    monkeypatch.setattr(native, "can_use_dsv4_topk", lambda *args: False)
+    monkeypatch.setattr(native, "vllm_topk_softplus_sqrt", capture_kernel)
+    monkeypatch.setattr(router_mod, "_is_ascend_npu_tensor", lambda value: False)
+    image_bias = torch.nn.Parameter(torch.tensor([0.0, 0.0, 10.0]))
+    router = SimpleNamespace(
+        e_score_correction_bias=torch.nn.Parameter(torch.zeros(3)),
+        bias_vl=image_bias,
+        image_sentinel_lo=10,
+        top_k=1,
+        renormalize=True,
+        scoring_func="sqrtsoftplus",
+        routed_scaling_factor=0.5,
+        _hash_indices_table=None,
+        num_fused_shared_experts=0,
+    )
+    weights, ids = router_mod.FusedTopKBiasRouterFL._compute_routing(
+        router,
+        torch.zeros((2, 4)),
+        torch.zeros((2, 3)),
+        torch.int32,
+        input_ids=torch.tensor([10, 20]),
+    )
+    assert captured["image_sentinel_lo"] == 10
+    assert captured["bias_vl"].data_ptr() == image_bias.data_ptr()
+    torch.testing.assert_close(weights, torch.full((2, 1), 0.5))
+    torch.testing.assert_close(ids, torch.full((2, 1), 2, dtype=torch.int32))

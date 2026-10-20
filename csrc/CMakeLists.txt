@@ -38,15 +38,41 @@ endif()
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 message(STATUS "Python: ${Python_EXECUTABLE} (${Python_VERSION})")
 
+# The extension wraps an existing Tensor; it does not compile CUDA kernels.
+# TorchConfig.cmake probes nvcc/NVRTC even for this C++-only target, which
+# fails in runtime images and in vendor CUDA-like builds without a toolkit.
+# Read the same CPU-side include/library paths used by CppExtension instead.
 execute_process(
-    COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.utils.cmake_prefix_path)"
-    OUTPUT_VARIABLE TORCH_CMAKE_PREFIX
+    COMMAND ${Python_EXECUTABLE} -c
+        "import json, torch; from torch.utils.cpp_extension import include_paths, library_paths; print(json.dumps({'version': torch.__version__, 'abi': int(torch._C._GLIBCXX_USE_CXX11_ABI), 'include_paths': include_paths(), 'library_paths': library_paths()}))"
+    OUTPUT_VARIABLE TORCH_CONFIG
     OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_VARIABLE TORCH_CONFIG_ERROR
+    RESULT_VARIABLE TORCH_CONFIG_RESULT
 )
-list(APPEND CMAKE_PREFIX_PATH ${TORCH_CMAKE_PREFIX})
-
-find_package(Torch REQUIRED)
-message(STATUS "PyTorch: ${Torch_VERSION}")
+if(NOT TORCH_CONFIG_RESULT EQUAL 0)
+    message(FATAL_ERROR "Cannot query the active PyTorch: ${TORCH_CONFIG_ERROR}")
+endif()
+string(JSON TORCH_VERSION GET "${TORCH_CONFIG}" version)
+string(JSON TORCH_CXX11_ABI GET "${TORCH_CONFIG}" abi)
+foreach(kind IN ITEMS INCLUDE LIBRARY)
+    string(TOLOWER "${kind}" key)
+    string(JSON path_count LENGTH "${TORCH_CONFIG}" "${key}_paths")
+    if(path_count EQUAL 0)
+        message(FATAL_ERROR "PyTorch returned no ${key} paths")
+    endif()
+    math(EXPR path_last "${path_count} - 1")
+    foreach(index RANGE ${path_last})
+        string(JSON torch_path GET "${TORCH_CONFIG}" "${key}_paths" ${index})
+        list(APPEND TORCH_${kind}_DIRS "${torch_path}")
+    endforeach()
+endforeach()
+foreach(name IN ITEMS torch torch_cpu c10)
+    find_library(TORCH_${name}_LIBRARY NAMES ${name}
+        PATHS ${TORCH_LIBRARY_DIRS} NO_DEFAULT_PATH REQUIRED)
+    list(APPEND TORCH_LIBRARIES "${TORCH_${name}_LIBRARY}")
+endforeach()
+message(STATUS "PyTorch: ${TORCH_VERSION} (C++ ABI ${TORCH_CXX11_ABI})")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 

@@ -5,10 +5,25 @@
 # is not compiled for this platform.
 
 import logging
+from contextlib import suppress
 
 import torch
 
 logger = logging.getLogger(__name__)
+
+# These optional kernels use schema presence as an upstream capability probe.
+# They are not needed by compilation pattern imports. Defining only a schema
+# would suppress the real Triton/Torch fallback despite having no CUDA kernel.
+_OPTIONAL_NATIVE_ONLY_OPS = frozenset(
+    {
+        "dsv3_fused_a_gemm",
+        "fused_gdn_decode_post_conv_mtp",
+        "fused_kda_decode",
+        "fused_kda_chunk",
+        "hadacore_transform",
+        "kimi_k3_attn_res",
+    }
+)
 
 
 # Fallback implementations for query ops
@@ -20,6 +35,20 @@ _QUERY_OP_IMPLS = [
     ("weak_ref_tensor", lambda t: t),
     ("get_cuda_view_from_cpu_tensor", lambda t: t),
 ]
+
+
+def _unavailable_cuda_view(tensor):
+    raise RuntimeError(
+        "vLLM empty builds do not provide a mapped CUDA view of CPU memory; "
+        "use the NVIDIA platform's NonUvaBuffer path"
+    )
+
+
+def _unavailable_weak_ref(tensor):
+    raise RuntimeError(
+        "CUDA graph weak references require the vllm_fl._C extension; "
+        "install the plugin with VLLM_VENDOR=cuda"
+    )
 
 
 def _apply_repetition_penalties_impl(
@@ -50,6 +79,7 @@ def register_op_schemas():
 
     try:
         import vllm._C  # noqa: F401
+
         return
     except (ImportError, OSError):
         pass
@@ -58,13 +88,22 @@ def register_op_schemas():
     # before our FRAGMENT definitions.  The hasattr check below will then
     # skip any ops already registered by mcoplib, avoiding c10::Error.
     import importlib.util
+
     if importlib.util.find_spec("mcoplib") is not None:
         try:
             import mcoplib._C  # noqa: F401
         except ImportError:
             logger.warning("Failed to import mcoplib._C")
 
-    from vllm_fl.ops._C_ops_schemas import SCHEMAS as schemas
+    from packaging.version import Version
+
+    from vllm import __version__
+
+    use_v032_schemas = Version(__version__).release >= (0, 32)
+    if use_v032_schemas:
+        from vllm_fl.ops._C_ops_schemas_v032 import SCHEMAS as schemas
+    else:
+        from vllm_fl.ops._C_ops_schemas import SCHEMAS as schemas
 
     if not schemas:
         logger.warning("No op schemas found; torch.compile may not work.")
@@ -75,6 +114,8 @@ def register_op_schemas():
     for schema in schemas:
         full_name = schema.split("(")[0]
         op_name = full_name.split(".")[0]
+        if use_v032_schemas and op_name in _OPTIONAL_NATIVE_ONLY_OPS:
+            continue
         overload = full_name.split(".")[1] if "." in full_name else "default"
         if hasattr(torch.ops._C, op_name) and hasattr(
             getattr(torch.ops._C, op_name), overload
@@ -83,18 +124,31 @@ def register_op_schemas():
         try:
             lib.define(schema)
         except Exception as e:
+            if use_v032_schemas:
+                raise RuntimeError(
+                    f"Failed to register the vLLM 0.32 schema _C::{full_name}"
+                ) from e
             logger.debug("Failed to register _C op schema '%s': %s", full_name, e)
 
-    for name, fn in _QUERY_OP_IMPLS:
-        try:
+    query_impls = _QUERY_OP_IMPLS
+    if use_v032_schemas:
+        # A capable GPU does not supply the absent CUTLASS kernels. Keep
+        # upstream selection on implementations that an empty wheel provides.
+        query_impls = [
+            (name, lambda cap: False)
+            for name, _ in _QUERY_OP_IMPLS
+            if name.startswith("cutlass_")
+        ] + [
+            ("weak_ref_tensor", _unavailable_weak_ref),
+            ("get_cuda_view_from_cpu_tensor", _unavailable_cuda_view),
+        ]
+
+    for name, fn in query_impls:
+        with suppress(RuntimeError):
             lib.impl(name, fn, "CompositeImplicitAutograd")
-        except Exception:
-            pass
 
     for name, fn in _CUDA_FALLBACK_IMPLS:
-        try:
+        with suppress(RuntimeError):
             lib.impl(name, fn, "CUDA")
-        except Exception:
-            pass
 
     register_op_schemas._lib = lib

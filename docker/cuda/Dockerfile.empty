@@ -1,0 +1,73 @@
+# Copyright 2026 FlagOS Contributors
+# Build with the repository root as context (docker/build.sh selects it).
+ARG CUDA_EMPTY_BASE_IMAGE=vllm/vllm-openai:v0.32.0-cu129@sha256:bc0445dac61accbf1c3b17fbb524a71eee0b1b32f55ba45952095e3be8991c3f
+FROM ${CUDA_EMPTY_BASE_IMAGE} AS tools
+# Repository CI entry points use python; the official image provides python3.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/python3 /usr/local/bin/python
+
+ARG INDEX_URL
+ARG EXTRA_INDEX_URL
+COPY docker/cuda/requirements-empty-ci.txt /opt/fl-ci/requirements.txt
+RUN python -m pip install --no-cache-dir \
+        ${INDEX_URL:+--index-url ${INDEX_URL}} \
+        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
+        -r /opt/fl-ci/requirements.txt
+
+FROM tools AS wheels
+ARG INDEX_URL
+ARG EXTRA_INDEX_URL
+ARG VLLM_SOURCE_URL=https://codeload.github.com/vllm-project/vllm/tar.gz/5df63a7203cdb9328d824a27b682e77c7b9928be
+ARG FLAGGEMS_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagGems/tar.gz/6ed2f39071ef85db26b7e64f0652a162f434959c
+ARG FLAGTREE_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+
+WORKDIR /opt/fl-build
+# Source URL overrides may point to a cache; fixed checksums still enforce
+# the exact official archives. Keep sources unmodified and install ordinary wheels. EMPTY skips
+# upstream CUDA/C++ kernels while retaining the official Python interfaces.
+RUN curl -fsSL --retry 5 "${VLLM_SOURCE_URL}" -o vllm.tar.gz \
+    && echo "b698d4ffe4c3694182964c11dd42ddd943a26a6cd24fe15de8aa5752d1296f47  vllm.tar.gz" | sha256sum -c - \
+    && mkdir vllm \
+    && tar -xzf vllm.tar.gz --strip-components=1 -C vllm \
+    && cd vllm \
+    && VLLM_TARGET_DEVICE=empty SETUPTOOLS_SCM_PRETEND_VERSION=0.32.0 \
+        python -m pip wheel --no-deps --no-build-isolation --wheel-dir /opt/fl-wheels .
+RUN curl -fsSL --retry 5 "${FLAGGEMS_SOURCE_URL}" -o flaggems.tar.gz \
+    && echo "1a68ed01f82caaeaeeb732a83bfa5e557cc5ca6566e1b5e174894aea1989c5b8  flaggems.tar.gz" | sha256sum -c - \
+    && mkdir flaggems \
+    && tar -xzf flaggems.tar.gz --strip-components=1 -C flaggems \
+    && SETUPTOOLS_SCM_PRETEND_VERSION=5.4.0 python -m pip wheel \
+        ${INDEX_URL:+--index-url ${INDEX_URL}} \
+        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
+        --no-deps --wheel-dir /opt/fl-wheels ./flaggems
+RUN python -m pip download --no-deps --only-binary=:all: \
+        --index-url "${FLAGTREE_INDEX_URL}" --dest /opt/fl-wheels 'flagtree===0.7.0'
+
+# The official cu129 base includes a default CUDA13 TorchCodec wheel. Use
+# the matching CUDA12.9 release (supported with torch>=2.11) so media/LLM
+# imports do not require CUDA13 libraries.
+RUN python -m pip download --no-deps --only-binary=:all: \
+        --index-url https://download.pytorch.org/whl/cu129 \
+        --dest /opt/fl-wheels 'torchcodec==0.16.0+cu129'
+
+FROM tools AS ci
+COPY .github/scripts/cuda/stack.py /opt/fl-ci/stack.py
+COPY --from=wheels /opt/fl-wheels /opt/fl-wheels
+# CI dependencies are resolved before installing FlagTree, which deliberately
+# replaces PyTorch's standalone Triton provider. Never resolve the FL wheels
+# against torch's triton requirement after this point.
+RUN python -m pip uninstall -y vllm triton \
+    && python -m pip install --no-cache-dir --no-deps /opt/fl-wheels/*.whl \
+    && python -I -B /opt/fl-ci/stack.py --runtime-only \
+    && rm -rf /opt/fl-wheels
+
+ENV VLLM_PLUGINS=fl \
+    VLLM_USE_V2_MODEL_RUNNER=1 \
+    USE_FLAGGEMS=1 \
+    GEMS_VENDOR=nvidia \
+    USE_FLAGTUNE=0
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["/bin/bash"]

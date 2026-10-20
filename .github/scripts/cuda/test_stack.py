@@ -1,0 +1,81 @@
+# Copyright 2026 FlagOS Contributors
+"""CPU regressions for rejecting a full or shadowed vLLM in NVIDIA EMPTY CI."""
+
+import importlib.util
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location("cuda_ci_stack", HERE / "stack.py")
+stack = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(stack)
+
+
+class EmptyProviderTests(unittest.TestCase):
+    def setUp(self):
+        self.origin = HERE / "site-packages/vllm/__init__.py"
+
+    def validate(self, **overrides):
+        args = {
+            "module_version": "0.32.0",
+            "distribution_version": "0.32.0+empty",
+            "module_origin": self.origin,
+            "distribution_origin": self.origin,
+        }
+        args.update(overrides)
+        return stack.validate_vllm_provider(**args)
+
+    def test_release_module_and_empty_distribution_are_accepted(self):
+        result = self.validate()
+        self.assertEqual(result["vllm_distribution_version"], "0.32.0+empty")
+
+    def test_full_cuda_wheel_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "ordinary vLLM"):
+            self.validate(distribution_version="0.32.0")
+
+    def test_old_and_dev_releases_are_rejected(self):
+        for version in ("0.28.0", "0.32.0.dev1", "0.32.0+empty"):
+            with self.subTest(version=version), self.assertRaises(RuntimeError):
+                self.validate(module_version=version)
+
+    def test_source_checkout_cannot_shadow_installed_wheel(self):
+        with self.assertRaisesRegex(RuntimeError, "shadowing"):
+            self.validate(module_origin=HERE / "source/vllm/__init__.py")
+
+    def test_missing_module_origin_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            self.validate(module_origin=None)
+
+    def test_editable_vllm_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "editable=True"):
+            self.validate(editable=True)
+
+    def test_leftover_native_extensions_are_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "_C_stable_libtorch"):
+            self.validate(native_libraries=["_C_stable_libtorch.abi3.so"])
+
+    def test_resolved_same_origin_is_accepted(self):
+        self.validate(distribution_origin=self.origin.parent / "../vllm/__init__.py")
+
+    def test_native_scan_finds_nested_and_unrecorded_payloads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in (
+                "_C_stable_libtorch.abi3.so",
+                "vllm_flash_attn/_vllm_fa2_C.abi3.so",
+                "libs/libcuda_payload.so.1",
+                "_rust_test.abi3.so",
+                "_custom_ops.py",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            found = stack.native_vllm_libraries(root)
+            self.assertEqual(len(found), 3)
+            self.assertTrue(any("_vllm_fa2_C" in path for path in found))
+            self.assertTrue(any("_C_stable_libtorch" in path for path in found))
+
+
+if __name__ == "__main__":
+    unittest.main()
