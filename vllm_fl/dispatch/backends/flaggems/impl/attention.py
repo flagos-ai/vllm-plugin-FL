@@ -9,27 +9,14 @@ from typing import ClassVar
 
 import numpy as np
 import torch
-
-from vllm import envs
-from vllm.model_executor.layers.attention.attention import Attention
-from vllm.utils.torch_utils import is_quantized_kv_cache
-from vllm.v1.attention.backend import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionType,
-    MultipleOf,
-)
-
-try:
-    from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
-except ImportError:  # vLLM 0.28 vendor environments
-    from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 from flaggems_vllm import flash_attn_varlen_func, reshape_and_cache_flash
 
+from vllm import envs
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
+from vllm.model_executor.layers.attention.attention import Attention
 from vllm.platforms.interface import DeviceCapability
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import is_quantized_kv_cache
@@ -45,6 +32,7 @@ from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
 )
+from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
 

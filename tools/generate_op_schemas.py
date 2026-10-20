@@ -29,7 +29,6 @@ otherwise pass the path explicitly:
     python tools/generate_op_schemas.py /path/to/vllm
 """
 
-import argparse
 import re
 import sys
 from pathlib import Path
@@ -66,12 +65,8 @@ def extract_schemas(vllm_root: Path) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("vllm_root", nargs="?", type=Path)
-    parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
-    if args.vllm_root is not None:
-        vllm_root = args.vllm_root
+    if len(sys.argv) > 1:
+        vllm_root = Path(sys.argv[1])
     else:
         import vllm
 
@@ -82,7 +77,7 @@ def main() -> None:
         print(f"ERROR: no schemas found under {vllm_root}/csrc/", file=sys.stderr)
         sys.exit(1)
 
-    out = args.output or (
+    out = (
         Path(__file__).resolve().parent.parent / "vllm_fl" / "ops" / "_C_ops_schemas.py"
     )
     lines = [

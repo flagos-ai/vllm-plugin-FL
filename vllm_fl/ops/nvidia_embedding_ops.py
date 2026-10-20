@@ -24,7 +24,9 @@ def _vocab_parallel_embedding(
         get_masked_input_and_mask,
     )
 
-    if any(not t.is_cuda or t.device != weight.device for t in (out, input_ids, weight)):
+    if any(
+        not t.is_cuda or t.device != weight.device for t in (out, input_ids, weight)
+    ):
         raise ValueError("TP embedding tensors must share one CUDA device")
     if input_ids.ndim != 1 or input_ids.dtype not in (torch.int32, torch.int64):
         raise ValueError("TP embedding input must be a 1D int32 or int64 tensor")

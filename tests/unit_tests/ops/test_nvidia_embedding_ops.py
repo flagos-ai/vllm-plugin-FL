@@ -77,4 +77,6 @@ def test_tp_embedding_graph_replay_observes_new_ids(embedding_op):
         run()
     ids.copy_(torch.tensor([35, 34, 17, 16, -1, 0], device="cuda", dtype=ids.dtype))
     graph.replay()
-    torch.testing.assert_close(output.cpu(), _expected(ids, weight, *indices), rtol=0, atol=0)
+    torch.testing.assert_close(
+        output.cpu(), _expected(ids, weight, *indices), rtol=0, atol=0
+    )

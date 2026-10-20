@@ -38,9 +38,7 @@ def test_absent_cutlass_kernels_are_not_advertised(name, capability):
 def test_weak_reference_uses_plugin_cuda_extension():
     import vllm_fl._C  # noqa: F401
 
-    assert torch._C._dispatch_has_kernel_for_dispatch_key(
-        "_C::weak_ref_tensor", "CUDA"
-    )
+    assert torch._C._dispatch_has_kernel_for_dispatch_key("_C::weak_ref_tensor", "CUDA")
     original = torch.arange(12, device="cuda").reshape(3, 4)
     weak = torch.ops._C.weak_ref_tensor(original)
     assert weak is not original
@@ -85,6 +83,8 @@ def test_eager_ir_defaults_use_executable_rms_norm():
     weight = torch.randn(128, device="cuda", dtype=torch.bfloat16)
     with priorities.set_priority():
         result = ir.ops.rms_norm(x, weight, 1e-6, None)
-    normalized = x.float() * torch.rsqrt(x.float().square().mean(-1, keepdim=True) + 1e-6)
+    normalized = x.float() * torch.rsqrt(
+        x.float().square().mean(-1, keepdim=True) + 1e-6
+    )
     expected = (normalized * weight.float()).to(x.dtype)
     torch.testing.assert_close(result, expected, atol=0.02, rtol=0.02)

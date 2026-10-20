@@ -13,6 +13,17 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(scope="module", autouse=True)
+def initialize_nvidia_platform():
+    # Resolve the real plugin entry point before importing CUDA internals.
+    # EMPTY wheels rely on this initialization just as engine startup does.
+    from vllm.platforms import current_platform
+
+    from vllm_fl.nvidia_platform import NvidiaPlatformFL
+
+    assert isinstance(current_platform, NvidiaPlatformFL)
+
+
 def test_nvidia_platform_keeps_native_cuda_semantics():
     from vllm.platforms import PlatformEnum
     from vllm.platforms.cuda import CudaPlatform
@@ -330,12 +341,7 @@ def test_nvidia_empty_v2_buffers_use_real_device_copies(monkeypatch):
 
     from vllm.platforms import current_platform
     from vllm.utils.platform_utils import is_pin_memory_available, is_uva_available
-    from vllm.v1.worker.gpu import buffer_utils
-
-    if not hasattr(buffer_utils, "NonUvaBuffer"):
-        pytest.skip("Non-UVA model runner V2 buffers were introduced in vLLM 0.32")
-    NonUvaBuffer = buffer_utils.NonUvaBuffer
-    UvaBufferPool = buffer_utils.UvaBufferPool
+    from vllm.v1.worker.gpu.buffer_utils import NonUvaBuffer, UvaBufferPool
 
     from vllm_fl.nvidia_platform import NvidiaPlatformFL
 

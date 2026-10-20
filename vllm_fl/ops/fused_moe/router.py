@@ -313,14 +313,6 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
                 routed_scaling_factor=self.routed_scaling_factor,
             )
         else:
-            # vLLM 0.32 adds image-token routing bias. Older router instances
-            # and fused_topk_bias functions do not accept these keywords.
-            image_routing = {}
-            if hasattr(self, "bias_vl"):
-                image_routing = {
-                    "bias_vl": self.bias_vl.data if self.bias_vl is not None else None,
-                    "image_sentinel_lo": self.image_sentinel_lo,
-                }
             topk_weights, topk_ids = fused_topk_bias(
                 hidden_states=hidden_states,
                 gating_output=router_logits,
@@ -332,7 +324,8 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
                 input_tokens=input_ids,
                 hash_indices_table=self._hash_indices_table,
                 routed_scaling_factor=self.routed_scaling_factor,
-                **image_routing,
+                bias_vl=self.bias_vl.data if self.bias_vl is not None else None,
+                image_sentinel_lo=self.image_sentinel_lo,
             )
 
         if self.num_fused_shared_experts > 0:

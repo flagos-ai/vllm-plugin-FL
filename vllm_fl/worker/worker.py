@@ -91,13 +91,6 @@ from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
 from vllm_fl.dispatch.io_common import managed_inference_mode
-
-# Compatibility exports for callers of the v0.28 worker module.
-from vllm_fl.worker.nvidia_worker import (
-    NvidiaWorkerFL as NvidiaWorkerFL,
-    _call_native_worker_with_managed_inference as _call_native_worker_with_managed_inference,
-    _install_native_runner_io_methods as _install_native_runner_io_methods,
-)
 from vllm_fl.worker.runtime import _initialize_fl_runtime
 
 logger = init_logger(__name__)
