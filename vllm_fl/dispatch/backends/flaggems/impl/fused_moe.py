@@ -161,6 +161,17 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    from flaggems_vllm import moe_sum
+    if inp.device.type == "gcu" and inp.is_contiguous() and out.is_contiguous():
+        # FlagGems-vllm's MT kernel puts the token count on grid.y, which can
+        # exceed GCU's 255-block limit. Keep its input contract before using
+        # the official GCU kernel; retain the stride-aware provider below.
+        # Remove this branch once the pinned provider supports GCU launch
+        # limits and passes large-token value and graph-replay checks.
+        from flaggems_vllm.ops.moe_sum import _check_moe_sum_inputs
+
+        _check_moe_sum_inputs(inp, out)
+        from flag_gems import moe_sum
+    else:
+        from flaggems_vllm import moe_sum
 
     moe_sum(inp, out)
