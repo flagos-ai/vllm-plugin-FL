@@ -11,7 +11,7 @@ from torch.utils._pytree import tree_flatten
 
 from vllm.config import CUDAGraphMode
 
-from vllm_fl.compilation.graph import GraphEntry, GraphWrapper
+from vllm_fl.compilation.graph_base import GraphEntry, GraphWrapper
 
 
 def _weak_ref_musa_tensors(value: Any) -> Any:

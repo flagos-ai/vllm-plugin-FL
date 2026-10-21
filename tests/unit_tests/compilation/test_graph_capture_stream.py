@@ -18,7 +18,7 @@ import weakref
 from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from enum import IntEnum
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 import torch as cpu_torch
@@ -219,7 +219,7 @@ class _Contract:
 
 @pytest.fixture
 def contract():
-    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
+    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph_base.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     names = {"GraphEntry", "GraphOptions", "GraphWrapper"}
     classes = [
@@ -308,6 +308,7 @@ def contract():
         ),
         namespace,
     )
+    namespace["GraphWrapper"]._platform_wrappers["musa"] = namespace["MUSAGraphWrapper"]
     state.cpu_namespace = namespace
     state.cpu_classes = classes
     state.wrapper_type = namespace["MUSAGraphWrapper"]
@@ -646,7 +647,7 @@ def test_staging_validation_is_active_with_optimized_python_code(contract):
 
 @pytest.mark.parametrize("device", ["cuda", "npu", "musa", "gcu", "ptpu", "txda"])
 def test_graph_factory_uses_only_the_explicit_cpu_cache_interface(contract, device):
-    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
+    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph_base.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     factory = next(
         node
@@ -1392,22 +1393,8 @@ def test_original_empty_input_keeps_native_replay(contract):
 
 
 @pytest.mark.parametrize("device", ["cuda", "musa"])
-def test_public_factory_selects_backend_and_preserves_shared_registry(
-    contract, monkeypatch, device
-):
+def test_public_factory_selects_backend_and_preserves_shared_registry(contract, device):
     namespace = contract.cpu_namespace
-    target = "vllm_fl.compilation.musa_graph"
-    module = ModuleType(target)
-    module.MUSAGraphWrapper = namespace["MUSAGraphWrapper"]
-    monkeypatch.setitem(sys.modules, target, module)
-    original_import = namespace["__builtins__"]["__import__"]
-
-    def import_backend(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == target and tuple(fromlist) == ("MUSAGraphWrapper",):
-            return builtins.__import__(name, globals, locals, fromlist, level)
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setitem(namespace["__builtins__"], "__import__", import_backend)
     contract.platform.device_type = device
     options = contract.options_type(debug_log_enable=False, weak_ref_output=False)
     wrapper = namespace["GraphWrapper"](
@@ -1418,6 +1405,7 @@ def test_public_factory_selects_backend_and_preserves_shared_registry(
     )
     expected = namespace["MUSAGraphWrapper" if device == "musa" else "GraphWrapper"]
     assert type(wrapper) is expected
+    assert isinstance(wrapper, namespace["GraphWrapper"])
     assert wrapper.cudagraph_options is options
     assert (
         namespace["GraphWrapper"]._all_instances
