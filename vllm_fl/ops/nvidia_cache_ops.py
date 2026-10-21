@@ -27,6 +27,8 @@ _FP8_DTYPES = {
     "fp8_e4m3": "fp8e4m3",
     "fp8_e5m2": "fp8e5m2",
 }
+# Keep the Library alive: its finalizer unregisters these operators.
+# The next registration call reads this handle to avoid duplicate registration.
 _lib: torch.library.Library | None = None
 
 

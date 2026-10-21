@@ -6,6 +6,11 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 git config --global --add safe.directory "$(pwd)"
 
+# Refresh uv before use: published images may predate GHSA-hq85-5cpj-mr62.
+# Install only this tool so the pinned EMPTY/FlagGems/FlagTree stack is preserved.
+UV_REQUIREMENT=$(grep '^uv==' "$HERE/../../../docker/cuda/requirements-empty-ci.txt")
+python -m pip install --break-system-packages --no-deps "$UV_REQUIREMENT"
+
 # Older EMPTY images need the newly required provider before strict checks.
 # The shared installer pins its Git source and preserves the runtime packages.
 python "$HERE/../install_flaggems_vllm.py"
@@ -14,7 +19,7 @@ python -I -B "$HERE/stack.py" --runtime-only
 
 # EMPTY vLLM ships no CUDA extension. Build the plugin-owned extension needed
 # by its custom operators and graph paths instead.
-VLLM_VENDOR=cuda MAX_JOBS="${MAX_JOBS:-4}" uv pip install \
+VLLM_VENDOR=cuda MAX_JOBS="${MAX_JOBS:-4}" python -m uv pip install \
     --python "$(python -c 'import sys; print(sys.executable)')" \
     --break-system-packages \
     --no-build-isolation \

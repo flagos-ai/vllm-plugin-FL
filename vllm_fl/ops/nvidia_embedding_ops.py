@@ -7,6 +7,8 @@ import torch.nn.functional as F
 
 from vllm_fl.nvidia_compat import has_native_vllm_kernels
 
+# Keep the Library alive: its finalizer unregisters these operators.
+# The next registration call reads this handle to avoid duplicate registration.
 _lib: torch.library.Library | None = None
 
 
