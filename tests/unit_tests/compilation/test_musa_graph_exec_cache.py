@@ -19,7 +19,7 @@ import pytest
 def _load_cache_module():
     source = (
         Path(__file__).resolve().parents[3]
-        / "vllm_fl/compilation/musa_graph_exec_cache.py"
+        / "vllm_fl/dispatch/backends/vendor/musa/compilation/musa_graph_exec_cache.py"
     )
     name = "_musa_graph_exec_cache_cpu_test"
     spec = importlib.util.spec_from_file_location(name, source)

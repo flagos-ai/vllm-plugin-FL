@@ -505,6 +505,11 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
+        if cls.device_type == "musa":
+            return (
+                "vllm_fl.dispatch.backends.vendor.musa.compilation.graph."
+                "MUSAGraphWrapper"
+            )
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod

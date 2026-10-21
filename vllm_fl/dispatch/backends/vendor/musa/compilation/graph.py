@@ -11,7 +11,10 @@ from torch.utils._pytree import tree_flatten
 
 from vllm.config import CUDAGraphMode
 
-from vllm_fl.compilation.graph_base import GraphEntry, GraphWrapper
+from vllm_fl.compilation.graph import GraphEntry, GraphWrapper
+from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
+    musa_graph_class,
+)
 
 
 def _weak_ref_musa_tensors(value: Any) -> Any:
@@ -104,6 +107,7 @@ class MUSAGraphWrapper(GraphWrapper):
     """Keep the MUSA capture/replay contract out of the shared wrapper."""
 
     entry_type = MUSAGraphEntry
+    _graph_type = musa_graph_class(torch.musa.MUSAGraph)
 
     @staticmethod
     def _musa_tensor_metadata(tensor):
@@ -298,7 +302,9 @@ class MUSAGraphWrapper(GraphWrapper):
         ]
 
     def _capture_context(self, graph):
-        from vllm_fl.compilation.musa_graph_exec_cache import musa_graph_capture
+        from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
+            musa_graph_capture,
+        )
 
         return musa_graph_capture(graph)
 
@@ -308,7 +314,9 @@ class MUSAGraphWrapper(GraphWrapper):
     def _replay_graph(self, entry, args, kwargs):
         if entry.musa_input_leaves is None:
             self._validate_replay_addresses(entry, args)
-        from vllm_fl.compilation.musa_graph_exec_cache import musa_graph_replay
+        from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
+            musa_graph_replay,
+        )
 
         def prepare_replay():
             # Residency is locked across validation and enqueue; cold pieces run

@@ -65,29 +65,31 @@ class _Intermediate:
 
 @pytest.fixture
 def contract():
-    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
+    root = Path(__file__).resolve().parents[3]
+    source = root / "vllm_fl/compilation/graph.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
-    names = {"_weak_ref_musa_tensors", "weak_ref_tensors"}
-    musa_source = source.with_name("musa_graph.py")
+    musa_source = root / "vllm_fl/dispatch/backends/vendor/musa/compilation/graph.py"
     musa_module = ast.parse(
         musa_source.read_text(encoding="utf-8"), filename=str(musa_source)
     )
-    base_source = source.with_name("graph_base.py")
-    base_module = ast.parse(
-        base_source.read_text(encoding="utf-8"), filename=str(base_source)
-    )
-    base_route = next(
+    backend_class = next(
         n
-        for n in base_module.body
-        if isinstance(n, ast.FunctionDef) and n.name == "weak_ref_tensors"
+        for n in musa_module.body
+        if isinstance(n, ast.ClassDef) and n.name == "MUSAGraphWrapper"
     )
-    base_route.name = "_base_weak_ref_tensors"
+    output_override = next(
+        n
+        for n in backend_class.body
+        if isinstance(n, ast.FunctionDef) and n.name == "_weak_ref_output"
+    )
+    names = {"_weak_ref_musa_tensors", "weak_ref_tensors"}
     funcs = [
         n
         for n in [*module.body, *musa_module.body]
         if isinstance(n, ast.FunctionDef) and n.name in names
     ]
     assert {n.name for n in funcs} == names
+    funcs.append(output_override)
     state = SimpleNamespace(
         storage_calls=[], native_calls=[], errors={}, platform="musa"
     )
@@ -143,15 +145,9 @@ def contract():
     exec(
         compile(ast.Module(body=funcs, type_ignores=[]), str(source), "exec"), namespace
     )
-    exec(
-        compile(
-            ast.Module(body=[base_route], type_ignores=[]), str(base_source), "exec"
-        ),
-        namespace,
-    )
-    namespace["_weak_ref_native_tensors"] = namespace["_base_weak_ref_tensors"]
     state.convert = namespace["_weak_ref_musa_tensors"]
-    state.route = namespace["weak_ref_tensors"]
+    state.route = namespace["_weak_ref_output"].__get__(SimpleNamespace())
+    state.common_route = namespace["weak_ref_tensors"]
     state.vendor = vendor
     state.platform = platform
     state.sentinel = sentinel
@@ -298,5 +294,8 @@ def test_non_musa_tensor_unchanged_even_on_musa_platform(contract, device):
 def test_non_musa_platform_delegation_unchanged(contract, platform):
     contract.platform.device_type = platform
     value = contract.sentinel
-    assert contract.route(value) == ("npu" if platform == "npu" else "upstream", value)
+    assert contract.common_route(value) == (
+        "npu" if platform == "npu" else "upstream",
+        value,
+    )
     assert contract.storage_calls == contract.native_calls == []

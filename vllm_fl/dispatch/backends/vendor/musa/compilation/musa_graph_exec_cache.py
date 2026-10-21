@@ -204,7 +204,9 @@ def _get_cache():
         if _cache is None:
             import torch
 
-            from vllm_fl.compilation.musa_graph_exec import load_musa_graph_exec_ops
+            from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec import (
+                load_musa_graph_exec_ops,
+            )
 
             _cache = _MusaGraphExecCache(torch.musa, load_musa_graph_exec_ops)
         return _cache

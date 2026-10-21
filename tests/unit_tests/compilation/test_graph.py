@@ -26,7 +26,7 @@ def test_npu_weak_refs_are_recursive(monkeypatch):
 
     monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
     monkeypatch.setattr(
-        import_module("vllm_fl.compilation.graph_base"),
+        import_module("vllm_fl.compilation.graph"),
         "_weak_ref_npu_tensor",
         fake_weak_ref,
     )
@@ -148,7 +148,7 @@ def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
         SimpleNamespace(current_stream=npu_current_stream),
     )
     monkeypatch.setattr(
-        import_module("vllm_fl.compilation.graph_base"),
+        import_module("vllm_fl.compilation.graph"),
         "current_stream",
         stale_vllm_stream,
     )
@@ -165,7 +165,7 @@ def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
     vllm_current_stream = MagicMock(return_value=expected_stream)
     monkeypatch.setattr(graph_module.current_platform, "device_type", "cuda")
     monkeypatch.setattr(
-        import_module("vllm_fl.compilation.graph_base"),
+        import_module("vllm_fl.compilation.graph"),
         "current_stream",
         vllm_current_stream,
     )
@@ -193,17 +193,17 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
         batch_descriptor=descriptor, cudagraph_runtime_mode=mode
     )
     monkeypatch.setattr(
-        import_module("vllm_fl.compilation.graph_base"),
+        import_module("vllm_fl.compilation.graph"),
         "is_forward_context_available",
         lambda: True,
     )
     monkeypatch.setattr(
-        import_module("vllm_fl.compilation.graph_base"),
+        import_module("vllm_fl.compilation.graph"),
         "get_forward_context",
         lambda: forward_context,
     )
     monkeypatch.setattr(
-        import_module("vllm_fl.compilation.graph_base"),
+        import_module("vllm_fl.compilation.graph"),
         "validate_cudagraph_capturing_enabled",
         lambda: None,
     )

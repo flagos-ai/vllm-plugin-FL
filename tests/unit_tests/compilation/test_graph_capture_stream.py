@@ -219,7 +219,7 @@ class _Contract:
 
 @pytest.fixture
 def contract():
-    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph_base.py"
+    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     names = {"GraphEntry", "GraphOptions", "GraphWrapper"}
     classes = [
@@ -228,7 +228,9 @@ def contract():
         if isinstance(node, ast.ClassDef) and node.name in names
     ]
     assert {node.name for node in classes} == names
-    musa_source = source.with_name("musa_graph.py")
+    musa_source = (
+        source.parents[2] / "vllm_fl/dispatch/backends/vendor/musa/compilation/graph.py"
+    )
     musa_module = ast.parse(
         musa_source.read_text(encoding="utf-8"), filename=str(musa_source)
     )
@@ -256,7 +258,8 @@ def contract():
 
     def deny_target_import(name, globals=None, locals=None, fromlist=(), level=0):
         if (
-            name == "vllm_fl.compilation.musa_graph_exec_cache"
+            name
+            == "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache"
             and level == 0
             and fromlist
             and set(fromlist) <= set(vars(cache_api))
@@ -283,9 +286,11 @@ def contract():
         "get_forward_context": lambda: state.context,
         "CUDAGraphMode": _Mode,
         "Graph": SimpleNamespace(graph=state.graph_factory),
+        "musa_graph_class": lambda native_class: native_class,
         "tree_flatten": tree_flatten,
         "torch": SimpleNamespace(
             Tensor=_Tensor,
+            musa=SimpleNamespace(MUSAGraph=state.graph_factory),
             _C=SimpleNamespace(
                 _is_alias_of=lambda a, b: cpu_torch._C._is_alias_of(
                     a.payload, b.payload
@@ -308,7 +313,37 @@ def contract():
         ),
         namespace,
     )
-    namespace["GraphWrapper"]._platform_wrappers["musa"] = namespace["MUSAGraphWrapper"]
+    platform_source = source.parents[1] / "platform.py"
+    platform_module = ast.parse(
+        platform_source.read_text(encoding="utf-8"), filename=str(platform_source)
+    )
+    platform_class = next(
+        n
+        for n in platform_module.body
+        if isinstance(n, ast.ClassDef) and n.name == "PlatformFL"
+    )
+    selector = next(
+        n
+        for n in platform_class.body
+        if isinstance(n, ast.FunctionDef) and n.name == "get_static_graph_wrapper_cls"
+    )
+    selector_class = ast.ClassDef(
+        name="_PlatformSelector",
+        bases=[],
+        keywords=[],
+        body=[selector],
+        decorator_list=[],
+    )
+    exec(
+        compile(
+            ast.fix_missing_locations(
+                ast.Module(body=[selector_class], type_ignores=[])
+            ),
+            str(platform_source),
+            "exec",
+        ),
+        namespace,
+    )
     state.cpu_namespace = namespace
     state.cpu_classes = classes
     state.wrapper_type = namespace["MUSAGraphWrapper"]
@@ -647,7 +682,7 @@ def test_staging_validation_is_active_with_optimized_python_code(contract):
 
 @pytest.mark.parametrize("device", ["cuda", "npu", "musa", "gcu", "ptpu", "txda"])
 def test_graph_factory_uses_only_the_explicit_cpu_cache_interface(contract, device):
-    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph_base.py"
+    source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     factory = next(
         node
@@ -668,6 +703,31 @@ def test_graph_factory_uses_only_the_explicit_cpu_cache_interface(contract, devi
         compile(ast.Module(body=[factory], type_ignores=[]), str(source), "exec"),
         namespace,
     )
+    if device == "musa":
+        backend_source = (
+            source.parents[2]
+            / "vllm_fl/dispatch/backends/vendor/musa/compilation/graph.py"
+        )
+        backend_module = ast.parse(
+            backend_source.read_text(encoding="utf-8"), filename=str(backend_source)
+        )
+        backend_class = next(
+            node
+            for node in backend_module.body
+            if isinstance(node, ast.ClassDef) and node.name == "MUSAGraphWrapper"
+        )
+        namespace["musa_graph_class"] = contract.cache_graph_class
+        exec(
+            compile(
+                ast.Module(body=[backend_class], type_ignores=[]),
+                str(backend_source),
+                "exec",
+                flags=__future__.annotations.compiler_flag,
+                dont_inherit=True,
+            ),
+            namespace,
+        )
+        assert namespace["MUSAGraphWrapper"]._graph_type is native_graph
     assert namespace["Graph"].graph is (None if device == "txda" else native_graph)
     assert contract.cache_calls == (
         [("factory", native_graph)] if device == "musa" else []
@@ -712,9 +772,15 @@ def test_cache_interface_errors_preserve_identity_and_do_not_run_native(
     "name,fromlist",
     [
         ("torch_musa", ("MUSAGraph",)),
-        ("vllm_fl.compilation.musa_graph_exec", ("load_musa_graph_exec_ops",)),
-        ("vllm_fl.compilation.musa_graph_exec_cache", ("_get_cache",)),
-        ("vllm_fl.compilation.musa_graph_exec_cache", ()),
+        (
+            "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec",
+            ("load_musa_graph_exec_ops",),
+        ),
+        (
+            "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache",
+            ("_get_cache",),
+        ),
+        ("vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache", ()),
     ],
 )
 def test_cpu_contract_still_rejects_native_and_unapproved_imports(
@@ -1299,13 +1365,21 @@ def test_production_cache_and_wrapper_preserve_cold_and_hot_semantics(
     )
 
     def import_cache(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "vllm_fl.compilation.musa_graph_exec_cache" and fromlist:
+        if (
+            name
+            == "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache"
+            and fromlist
+        ):
             assert set(fromlist) <= set(vars(cache_api))
             return cache_api
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setitem(namespace["__builtins__"], "__import__", import_cache)
-    monkeypatch.setattr(namespace["Graph"], "graph", lambda: support._Graph(device))
+    monkeypatch.setattr(
+        namespace["MUSAGraphWrapper"],
+        "_graph_type",
+        staticmethod(lambda: support._Graph(device)),
+    )
     original_capture = contract.platform.torch_device_fn.graph
 
     @contextmanager
@@ -1397,7 +1471,16 @@ def test_public_factory_selects_backend_and_preserves_shared_registry(contract, 
     namespace = contract.cpu_namespace
     contract.platform.device_type = device
     options = contract.options_type(debug_log_enable=False, weak_ref_output=False)
-    wrapper = namespace["GraphWrapper"](
+    selector = namespace["_PlatformSelector"]
+    selector.device_type = device
+    wrapper_name = selector.get_static_graph_wrapper_cls()
+    wrapper_types = {
+        "vllm_fl.compilation.graph.GraphWrapper": namespace["GraphWrapper"],
+        "vllm_fl.dispatch.backends.vendor.musa.compilation.graph.MUSAGraphWrapper": namespace[
+            "MUSAGraphWrapper"
+        ],
+    }
+    wrapper = wrapper_types[wrapper_name](
         contract.runnable,
         SimpleNamespace(compilation_config=object()),
         _Mode.PIECEWISE,

@@ -9,7 +9,10 @@ from unittest.mock import Mock
 
 import pytest
 
-SOURCE = Path(__file__).resolve().parents[2] / "vllm_fl/compilation/musa_graph_exec.py"
+SOURCE = (
+    Path(__file__).resolve().parents[2]
+    / "vllm_fl/dispatch/backends/vendor/musa/compilation/musa_graph_exec.py"
+)
 
 
 @pytest.fixture

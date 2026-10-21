@@ -123,6 +123,7 @@ from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.tracing import instrument
 from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.gpu_sync_debug import gpu_sync_allowed
+from vllm.utils.import_utils import resolve_obj_by_qualname
 from vllm.utils.math_utils import cdiv, round_up
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
@@ -5678,7 +5679,10 @@ class ModelRunnerFL(
             cudagraph_mode.has_full_cudagraphs()
             and not self.parallel_config.use_ubatching
         ):
-            self.model = GraphWrapper(
+            graph_wrapper_cls = resolve_obj_by_qualname(
+                current_platform.get_static_graph_wrapper_cls()
+            )
+            self.model = graph_wrapper_cls(
                 self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
             )
         elif self.parallel_config.use_ubatching:
