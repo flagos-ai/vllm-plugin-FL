@@ -18,7 +18,14 @@ def moe_align_block_size_flaggems(
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    from flaggems_vllm import moe_align_block_size_triton
+    if topk_ids.device.type == "gcu":
+        # FlagGems-vllm's generic four-stage kernel uses atomic RMW operations
+        # unsupported by the pinned GCU compiler. Keep the official FlagGems
+        # GCU implementation until the new provider has a native implementation
+        # that passes the align value/padding and graph replay regressions.
+        from flag_gems import moe_align_block_size_triton
+    else:
+        from flaggems_vllm import moe_align_block_size_triton
 
     max_num_tokens_padded = topk_ids.numel() + num_experts * (block_size - 1)
     if pad_sorted_ids:
