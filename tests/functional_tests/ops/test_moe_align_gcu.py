@@ -226,8 +226,11 @@ def _check_moe_align_gcu(
 
     assert calls, "The production adapter did not invoke an observed provider"
     assert {export for export, _ in calls} == {"flag_gems.moe_align_block_size_triton"}
+    # SpecOpRegistrar loads vendor modules under the short _enflame alias.
+    # Accept that official namespace as well as the fully qualified import.
     assert all(
-        module.startswith("flag_gems.runtime.backend._enflame.") for _, module in calls
+        module.startswith(("_enflame.", "flag_gems.runtime.backend._enflame."))
+        for _, module in calls
     )
 
 
