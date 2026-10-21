@@ -2,17 +2,17 @@
 
 Compatible, explicit FlagGems operator imports use FlagGems-vllm directly.
 No environment variable or opt-in is required. `flag_gems.enable()` continues
-to own ATen registration. The
-native vLLM 0.28 runner and graph mode are retained. NVIDIA CI uses FlagGems
-v5.4.0 at commit `6ed2f39071ef85db26b7e64f0652a162f434959c` and retains the
-baseline NVIDIA blacklist, without the migration's temporary `mm` exclusion.
+to own ATen registration. NVIDIA uses the upstream vLLM 0.32 V1/V2 runners
+with an ordinary EMPTY wheel. Its FlagGems development commit is
+`6fe7709e7717e49cf12bb00346719a0885f505fa`; the NVIDIA dispatch policy retains
+the EMPTY-specific exclusions. Other platforms keep their vendor settings.
 
-## Install in the validated NVIDIA image
+## Install in the NVIDIA CI image
 
 Start with the image and runtime checks in the [NVIDIA guide](usage/nvidia.md):
 
 ```text
-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
+harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-empty-ci
 ```
 
 In a container with this checkout mounted at `/workspace/vllm-plugin-FL`:
@@ -27,9 +27,10 @@ The installer pins FlagGems-vllm **v0.2.0**, commit
 metadata `0.1.0`; the installer checks the Git repository and commit in
 `direct_url.json`. It installs with `--no-deps --no-build-isolation` and
 checks that the existing Torch, FlagTree/Triton, FlagGems, vLLM, and NumPy
-versions are preserved by that installer. NVIDIA CI first upgrades only
-FlagGems to tag `v5.4.0` with `--no-deps --no-build-isolation` and verifies its
-Git provenance; the remaining image runtime packages are preserved.
+versions are preserved by that installer. The NVIDIA image preinstalls the
+package; CI setup verifies it without fetching or replacing a matching source.
+NVIDIA stack checks also verify the pinned FlagGems and FlagTree development
+wheels and the ordinary vLLM EMPTY wheel.
 
 The pinned FlagGems-vllm package is required for the migrated providers.
 
@@ -71,8 +72,8 @@ validated Ascend vendor paths retain their existing implementations.
 ## CI and local verification
 
 Every platform's setup installs the pinned package. Platform CI enable/disable
-settings are preserved; a disabled platform remains disabled. Only NVIDIA CI
-updates FlagGems to v5.4.0; other platforms retain their vendor runtime versions.
+settings are preserved; a disabled platform remains disabled. NVIDIA retains
+its pinned development dependencies; other platforms retain their vendor runtimes.
 CUDA E2E executes each original model/task/device group once with the direct
 FlagGems-vllm providers.
 

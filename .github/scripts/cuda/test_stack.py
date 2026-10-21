@@ -113,5 +113,63 @@ class SourceProvenanceTests(unittest.TestCase):
             stack.validate_fl_provenance(self.provenance, self.installed)
 
 
+class FlagGemsVllmProvenanceTests(unittest.TestCase):
+    def setUp(self):
+        self.source = {
+            "url": stack.FLAGGEMS_VLLM_SOURCE["repository"],
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": stack.FLAGGEMS_VLLM_SOURCE["commit"],
+            },
+        }
+
+    def test_exact_commit_is_accepted_despite_old_metadata_version(self):
+        facts = stack.validate_flaggems_vllm_provenance("0.1.0", self.source)
+        self.assertEqual(facts["release"], "v0.2.0")
+        self.assertEqual(facts["version"], "0.1.0")
+        self.source["url"] = self.source["url"].removesuffix(".git")
+        stack.validate_flaggems_vllm_provenance("0.1.0", self.source)
+
+    def test_metadata_without_git_provenance_is_rejected(self):
+        for source in ({}, {"url": "file:///tmp/flaggems_vllm-0.1.0.whl"}):
+            with self.subTest(source=source), self.assertRaises(RuntimeError):
+                stack.validate_flaggems_vllm_provenance("0.1.0", source)
+
+    def test_wrong_commit_repository_or_vcs_is_rejected(self):
+        for replacement in (
+            {"url": "https://example.com/FlagGems-vllm.git"},
+            {"vcs_info": {"vcs": "git", "commit_id": "b" * 40}},
+            {
+                "vcs_info": {
+                    "vcs": "hg",
+                    "commit_id": stack.FLAGGEMS_VLLM_SOURCE["commit"],
+                }
+            },
+        ):
+            source = {**self.source, **replacement}
+            with self.subTest(source=source), self.assertRaises(RuntimeError):
+                stack.validate_flaggems_vllm_provenance("0.1.0", source)
+
+    def test_editable_installation_is_rejected(self):
+        self.source["dir_info"] = {"editable": True}
+        with self.assertRaises(RuntimeError):
+            stack.validate_flaggems_vllm_provenance("0.1.0", self.source)
+
+    def test_checker_and_shared_installer_use_the_same_pin(self):
+        spec = importlib.util.spec_from_file_location(
+            "ci_install_flaggems_vllm", HERE.parent / "install_flaggems_vllm.py"
+        )
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        self.assertEqual(
+            stack.FLAGGEMS_VLLM_SOURCE,
+            {
+                "release": installer.RELEASE,
+                "commit": installer.COMMIT,
+                "repository": installer.REPOSITORY,
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

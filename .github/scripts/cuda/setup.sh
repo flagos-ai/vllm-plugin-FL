@@ -6,6 +6,10 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 git config --global --add safe.directory "$(pwd)"
 
+# Older EMPTY images need the newly required provider before strict checks.
+# The shared installer pins its Git source and preserves the runtime packages.
+python "$HERE/../install_flaggems_vllm.py"
+
 python -I -B "$HERE/stack.py" --runtime-only
 
 # EMPTY vLLM ships no CUDA extension. Build the plugin-owned extension needed
@@ -16,8 +20,6 @@ VLLM_VENDOR=cuda MAX_JOBS="${MAX_JOBS:-4}" uv pip install \
     --no-build-isolation \
     --no-deps \
     -e .
-
-python .github/scripts/install_flaggems_vllm.py
 
 python -I -B "$HERE/stack.py"
 

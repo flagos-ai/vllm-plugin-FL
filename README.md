@@ -123,6 +123,10 @@ is outside the NVIDIA adaptation. See also the
     pip install --no-build-isolation --no-deps -e .
     ```
 
+Compatible explicit fused operators also require the pinned
+[FlagGems-vllm package](./docs/flaggems-vllm.md). The NVIDIA CI image preinstalls it;
+general ATen registration remains with FlagGems.
+
 ### Runtime compatibility hooks
 
 The plugin installs runtime compatibility hooks through vLLM's plugin entry
