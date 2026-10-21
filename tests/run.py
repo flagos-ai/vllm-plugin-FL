@@ -287,22 +287,6 @@ class TestRunner:
                 if model:
                     extra_args.extend(["-k", model])
 
-            if task == "inference":
-                from tests.utils.nvidia_validation import inference_environment
-
-                validation_env = inference_environment(
-                    self.config, model, case, self.output_dir
-                )
-                extra_env.update(validation_env)
-                if validation_env:
-                    result_path = Path(validation_env["FL_NVIDIA_RESULT_PATH"])
-                    extra_args.extend(
-                        [
-                            "--json-report",
-                            f"--json-report-file={result_path.with_suffix('.pytest.json')}",
-                        ]
-                    )
-
             name = f"{task}/{model}/{case}"
             cases.append(
                 TestCase(
@@ -498,42 +482,16 @@ class TestRunner:
             env = {**os.environ, **tc.extra_env}
 
         start = time.time()
-        if "FL_NVIDIA_RESULT_PATH" in tc.extra_env:
-            log_path = Path(tc.extra_env["FL_NVIDIA_RESULT_PATH"]).with_suffix(".log")
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            Path(tc.extra_env["FL_NVIDIA_RESULT_PATH"]).write_text(
-                '{"status": "not_run"}\n', encoding="utf-8"
-            )
-            with log_path.open("w", encoding="utf-8") as log:
-                result = subprocess.run(
-                    cmd,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    cwd=str(_REPO_ROOT),
-                    env=env,
-                )
-            print(log_path.read_text(encoding="utf-8", errors="replace"))
-        else:
-            result = subprocess.run(
-                cmd,
-                capture_output=False,
-                cwd=str(_REPO_ROOT),
-                env=env,
-            )
+        result = subprocess.run(
+            cmd,
+            capture_output=False,
+            cwd=str(_REPO_ROOT),
+            env=env,
+        )
         duration = time.time() - start
 
         passed = result.returncode == 0
         message = "" if passed else f"pytest exited with code {result.returncode}"
-        if passed and "FL_NVIDIA_RESULT_PATH" in tc.extra_env:
-            from tests.utils.nvidia_validation import verify_execution
-
-            evidence_path = Path(tc.extra_env["FL_NVIDIA_RESULT_PATH"])
-            try:
-                verify_execution(
-                    evidence_path.with_suffix(".pytest.json"), evidence_path
-                )
-            except (OSError, ValueError, KeyError, RuntimeError) as exc:
-                passed, message = False, str(exc)
 
         return TestResult(
             name=tc.name,

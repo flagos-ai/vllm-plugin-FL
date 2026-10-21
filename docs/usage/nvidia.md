@@ -137,8 +137,8 @@ before starting another example.
 The following smoke tests were completed on plugin revision `0fbe20f9`
 (2026-10-20). They are not minimum hardware requirements or performance
 benchmarks. All four new-model runs used native V2, eager execution and the
-pinned development dependencies. The regression entry point below was added
-after these runs; its execution status is reported separately in the PR.
+pinned development dependencies. Current CI execution status is reported
+separately in the PR.
 
 | Model/checkpoint | Hardware and configuration | Validation scope |
 |---|---|---|
@@ -336,41 +336,20 @@ this a substantial build. Install the plugin checkout and run the same stack
 checks after starting the resulting image. Other CUDA build targets do not
 select this EMPTY recipe.
 
-## CI and local regression
+## CI
 
 The CUDA configuration pins the same image digest. CI setup uses
 [setup.sh](../../.github/scripts/cuda/setup.sh), which runs the runtime check,
 builds `vllm_fl._C` without dependency resolution, then runs the full stack check
-and audio dependency checks. Inside the prepared GPU container:
+and audio dependency checks. The setup requires access to the official vLLM
+audio fixtures, or a populated `VLLM_ASSETS_CACHE`.
 
-```bash
-bash .github/scripts/cuda/check.sh
-bash .github/scripts/cuda/setup.sh
-python tests/run.py --platform cuda --scope unit
-```
-
-Run a selected checkpoint regression in an independently allocated container:
-
-```bash
-python .github/scripts/cuda/run_regression.py --list
-python .github/scripts/cuda/run_regression.py \
-  --model qwen3 --case 4b_v2_eager \
-  --model-path /models/Qwen3-4B --output-dir /results/qwen3-v2
-```
-
-| `--model` | `--case` | Required checkpoint and devices |
-|---|---|---|
-| `qwen3` | `4b_v1_graph`, `4b_v2_eager` | Qwen3-4B; one GPU with at least 48 GiB |
-| `minicpm4_7` | `1b_multimodal`, `1b_paired_images` | MiniCPM-V-4.7-1B; one GPU with at least 24 GiB |
-| `qwen3_8` | `flash_next_tp8_eager` | Qwen3.8-Flash-Next; eight H100-class GPUs |
-| `deepseek_v4_1` | `flash_tp8_eager` | DeepSeek-V4.1-Flash; eight H100 GPUs |
-
-Add `--check-only` for preflight without model inference; it is not a generation
-pass. The runner preserves pytest reports, logs and result/worker facts under
-`--output-dir`. The new large-model cases are manual selections, not additions
-to the automatic H20 matrix. Hy4 remains the two-node procedure above. See
-[the test guide](../../tests/README.md) for CI details; unit-test success does
-not imply that a model regression was run.
+The existing CI runners execute the unit and model tests using this image.
+Runner labels, model mounts, test entry points and the four H20 Qwen3.6
+inference/serving cases remain unchanged. The image defaults to native V2;
+`VLLM_USE_V2_MODEL_RUNNER=0` selects native V1 when needed. See
+[the test guide](../../tests/README.md) for the existing workflow. The model
+commands above are usage examples, not additional automatic CI jobs.
 
 ## Troubleshooting
 
