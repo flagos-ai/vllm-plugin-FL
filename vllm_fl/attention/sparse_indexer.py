@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # Adapted from vLLM v0.24.0 sparse_attn_indexer.py; metadata orchestration only.
-"""Portable FP8 sparse indexer with explicit providers and real CUDA identity."""
+"""Portable FP8/INT8 sparse indexer with explicit providers and CUDA identity."""
 
 import torch
 from torch import nn
@@ -49,14 +49,16 @@ def portable_sparse_attn_indexer(
     use_fp4_cache: bool = False,
 ) -> torch.Tensor:
     if use_fp4_cache:
-        raise ValueError("Portable sparse indexer currently requires FP8 cache")
+        raise ValueError("Portable sparse indexer requires an FP8 or INT8 cache")
     attn_metadata = get_forward_context().attn_metadata
-    fp8_dtype = current_platform.fp8_dtype()
+    # The plan selects a matched query/cache/logits format before construction.
+    quant_dtype = q_quant.dtype
+    int8 = quant_dtype == torch.int8
     k_cache_prefix = _resolve_layer_name(k_cache_prefix)
     implementations = _LAYER_OPERATIONS[k_cache_prefix]
     if not isinstance(attn_metadata, dict):
         values_spec, scales_spec = _gather_workspace_shapes(
-            total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
+            total_seq_lens, head_dim, quant_dtype, use_fp4_cache
         )
         current_workspace_manager().get_simultaneous(
             values_spec, scales_spec, ((RADIX_TOPK_WORKSPACE_SIZE,), torch.uint8)
@@ -96,7 +98,7 @@ def portable_sparse_attn_indexer(
     if not skip_k_cache_insert:
         assert scale_fmt is not None
         assert not use_fp4_cache, "Unfused FP4 Insert is not supported yet"
-        implementations["indexer_k_quant_and_cache"](
+        implementations["indexer_k_quant_and_cache_int8" if int8 else "indexer_k_quant_and_cache"](
             k, kv_cache, slot_mapping, quant_block_size, scale_fmt
         )
     topk_indices_buffer[: hidden_states.shape[0]] = -1
@@ -105,7 +107,7 @@ def portable_sparse_attn_indexer(
         assert prefill_metadata is not None
         workspace_manager = current_workspace_manager()
         values_spec, scales_spec = _gather_workspace_shapes(
-            total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
+            total_seq_lens, head_dim, quant_dtype, use_fp4_cache
         )
         k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
             values_spec, scales_spec
@@ -119,7 +121,7 @@ def portable_sparse_attn_indexer(
                 )
             q_slice = q_quant[chunk.token_start : chunk.token_end]
             k_scale_cast = k_scale.view(torch.float32).squeeze(-1)
-            logits = implementations["fp8_fp4_mqa_logits"](
+            logits = implementations["int8_mqa_logits" if int8 else "fp8_fp4_mqa_logits"](
                 (q_slice, None),
                 (k_quant, k_scale_cast),
                 weights[chunk.token_start : chunk.token_end],
@@ -158,7 +160,7 @@ def portable_sparse_attn_indexer(
         next_n = padded_q_quant_decode_tokens.shape[1]
         num_padded_tokens = batch_size * next_n
         seq_lens = decode_metadata.seq_lens[:batch_size]
-        logits = implementations["fp8_fp4_paged_mqa_logits"](
+        logits = implementations["int8_paged_mqa_logits" if int8 else "fp8_fp4_paged_mqa_logits"](
             (padded_q_quant_decode_tokens, None),
             kv_cache,
             weights[:num_padded_tokens],

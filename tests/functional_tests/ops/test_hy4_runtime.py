@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """First execution of HY4 portable providers against independent Torch math."""
 
+from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
@@ -65,14 +66,15 @@ def test_portable_prefill_matches_torch_at_mla_dimensions(causal, qk_width, v_wi
 
 
 @pytest.mark.parametrize("ue8m0", [False, True])
-def test_planned_query_quantizer_matches_torch(ue8m0):
-    # FlagGems defaults to FP32 output before Hopper; that is not the HY4
-    # FP8 query path exercised by this numerical reference.
-    if not current_platform.has_device_capability(90):
-        pytest.skip("HY4 FP8 query quantization is validated on Hopper or newer")
+def test_planned_query_quantizer_matches_torch(monkeypatch, ue8m0):
+    if not current_platform.has_device_capability(89):
+        pytest.skip("HY4 FP8 query quantization requires NVIDIA SM89 or newer")
 
     import flag_gems
 
+    # The library default may be FP32 before Hopper; HY4 must request FP8.
+    module = import_module("flag_gems.ops.per_token_group_quant_fp8")
+    monkeypatch.setattr(module, "SUPPORTED_FP8_DTYPE", torch.float32)
     quantizer = _flaggems_query_quantizer(flag_gems.per_token_group_quant_fp8)
     torch.manual_seed(29)
     x = torch.randn(5, 256, dtype=torch.bfloat16, device="cuda")
@@ -92,9 +94,16 @@ def test_planned_query_quantizer_matches_torch(ue8m0):
 
 
 @pytest.mark.parametrize("ue8m0", [False, True])
-def test_query_quantizer_fullgraph_matches_eager_with_refreshed_inputs(ue8m0):
+def test_query_quantizer_fullgraph_matches_eager_with_refreshed_inputs(
+    monkeypatch, ue8m0
+):
+    if not current_platform.has_device_capability(89):
+        pytest.skip("HY4 FP8 query quantization requires NVIDIA SM89 or newer")
+
     import flag_gems
 
+    module = import_module("flag_gems.ops.per_token_group_quant_fp8")
+    monkeypatch.setattr(module, "SUPPORTED_FP8_DTYPE", torch.float32)
     quantizer = _flaggems_query_quantizer(flag_gems.per_token_group_quant_fp8)
     compiled = torch.compile(quantizer, backend="eager", fullgraph=True)
     for rows in (1, 7):
@@ -102,6 +111,7 @@ def test_query_quantizer_fullgraph_matches_eager_with_refreshed_inputs(ue8m0):
         original = x.clone()
         expected = quantizer(x.clone(), 128, use_ue8m0=ue8m0)
         actual = compiled(x, 128, use_ue8m0=ue8m0)
+        assert actual[0].dtype == expected[0].dtype == torch.float8_e4m3fn
         for a, b in zip(actual, expected):
             torch.testing.assert_close(a.float(), b.float(), rtol=0, atol=0)
         torch.testing.assert_close(x, original, rtol=0, atol=0)

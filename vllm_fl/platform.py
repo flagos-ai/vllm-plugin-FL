@@ -637,8 +637,10 @@ class PlatformFL(Platform):
 
             patch_triton_chained_or_for_iluvatar()
 
+    @classmethod
     def supports_fp8(cls) -> bool:
-        return cls.vendor_name == "nvidia"
+        # Match vLLM's CUDA capability check; a CUDA device alone is insufficient.
+        return cls.vendor_name == "nvidia" and cls.has_device_capability(89)
 
     @classmethod
     def get_device_uuid(cls, device_id: int = 0) -> str:

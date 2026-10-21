@@ -5,7 +5,10 @@ from functools import wraps
 
 import torch
 
-from .query_quant import flaggems_per_token_group_quant_fp8
+from .query_quant import (
+    flaggems_per_token_group_quant_fp8,
+    flaggems_per_token_group_quant_int8,
+)
 from vllm_fl.dispatch.capabilities import get_flaggems_vllm_operator
 from vllm_fl.utils import use_flaggems_op
 
@@ -22,6 +25,10 @@ MLA_OPERATORS = (
     "flash_attn_varlen_func",
     "per_token_group_quant_fp8",
     "mla_prefill_backend",
+    "per_token_group_quant_int8",
+    "indexer_k_quant_and_cache_int8",
+    "int8_mqa_logits",
+    "int8_paged_mqa_logits",
 )
 
 
@@ -30,12 +37,26 @@ def _flaggems_query_quantizer(implementation):
     def quantize(x, group_size, *, use_ue8m0):
         if torch.compiler.is_compiling():
             return flaggems_per_token_group_quant_fp8(x, group_size, use_ue8m0)
-        return implementation(x, group_size, scale_ue8m0=use_ue8m0)
+        return implementation(
+            x, group_size, dtype=torch.float8_e4m3fn, scale_ue8m0=use_ue8m0
+        )
 
     return quantize
 
 
 def get_operator(name):
+    if name == "per_token_group_quant_int8":
+        implementation = get_flaggems_vllm_operator(name)
+        if not callable(implementation):
+            return None
+
+        @wraps(implementation)
+        def quantize(x, group_size, *, use_ue8m0):
+            if torch.compiler.is_compiling():
+                return flaggems_per_token_group_quant_int8(x, group_size, use_ue8m0)
+            return implementation(x, group_size, use_ue8m0=use_ue8m0)
+
+        return quantize
     if name == "per_token_group_quant_fp8":
         import flag_gems
 

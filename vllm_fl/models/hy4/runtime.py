@@ -37,6 +37,12 @@ _FLAGGEMS_INDEXER_OPS = (
     "flash_mla_sparse_fwd",
 )
 
+_INT8_INDEXER_OPS = {
+    "indexer_k_quant_and_cache": "indexer_k_quant_and_cache_int8",
+    "fp8_fp4_mqa_logits": "int8_mqa_logits",
+    "fp8_fp4_paged_mqa_logits": "int8_paged_mqa_logits",
+}
+
 
 def _resolve_registered_operator(name, *, native_available=True):
     """Resolve once through the common registry; execution errors propagate."""
@@ -98,6 +104,7 @@ class HY4RuntimePlan:
     operations: Mapping[str, Callable]
     prefill_backend: type
     kv_cache_dtypes: tuple[str, ...]
+    indexer_dtype: torch.dtype = torch.float8_e4m3fn
 
 
 def _prefill_is_available(backend) -> bool:
@@ -133,16 +140,23 @@ def select_hy4_prefill_backend(vllm_config, native_selector):
     return None
 
 
-def _resolve_query_quantizer():
-    return _resolve_registered_operator("per_token_group_quant_fp8").fn
+def _resolve_query_quantizer(dtype=torch.float8_e4m3fn):
+    # Indexer precision is independent of Linear/MoE checkpoint quantization.
+    name = (
+        "per_token_group_quant_int8"
+        if dtype == torch.int8
+        else "per_token_group_quant_fp8"
+    )
+    return _resolve_registered_operator(name).fn
 
 
 def prepare_hy4_runtime(vllm_config) -> HY4RuntimePlan:
     plan = validate_hy4_runtime(vllm_config)
     install_hy4_flaggems_fallback(plan)
     logger.info_once(
-        "HY4 runtime: sparse_provider=%s, query_quantizer=%s, prefill=%s, KV=%s",
+        "HY4 runtime: sparse_provider=%s, indexer_dtype=%s, query_quantizer=%s, prefill=%s, KV=%s",
         plan.provider,
+        plan.indexer_dtype,
         f"{plan.query_quantizer.__module__}.{plan.query_quantizer.__name__}",
         plan.prefill_backend.get_name(),
         vllm_config.cache_config.cache_dtype,
@@ -158,15 +172,24 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
 
     if not current_platform.is_cuda():
         raise ValueError("HY4 currently requires an NVIDIA CUDA runtime")
+    fp8 = current_platform.supports_fp8()
+    if not fp8 and not current_platform.has_device_capability(80):
+        raise ValueError(
+            "HY4 INT8 indexer fallback requires NVIDIA SM80 or newer for BF16 execution"
+        )
+    indexer_dtype = torch.float8_e4m3fn if fp8 else torch.int8
     cache_dtype = vllm_config.cache_config.cache_dtype
     if cache_dtype not in ("auto", "bfloat16", "fp8", "fp8_e4m3"):
         raise ValueError(f"Unsupported HY4 KV cache dtype: {cache_dtype}")
     import vllm.model_executor.layers.attention.mla_attention as mla_attention
 
     config = vllm_config.model_config.hf_text_config
-    native_sparse = native_hy4_available(config.index_topk)
+    native_sparse = fp8 and native_hy4_available(config.index_topk)
     selected = {
-        name: _resolve_registered_operator(name, native_available=native_sparse)
+        name: _resolve_registered_operator(
+            name if fp8 else _INT8_INDEXER_OPS.get(name, name),
+            native_available=native_sparse,
+        )
         for name in _FLAGGEMS_INDEXER_OPS
     }
     native_indexer = all(
@@ -226,7 +249,12 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
             raise ValueError("HY4 FlagGems auto KV requires bfloat16 model dtype")
 
     implementations = (
-        {} if native_indexer else {name: impl.fn for name, impl in selected.items()}
+        {}
+        if native_indexer
+        else {
+            name if fp8 else _INT8_INDEXER_OPS.get(name, name): impl.fn
+            for name, impl in selected.items()
+        }
     )
     if not native_cache:
         implementations["concat_and_cache_mla"] = cache.fn
@@ -244,10 +272,11 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
         prefill_backend = _make_hy4_flaggems_mla_prefill_backend(implementation)
     return HY4RuntimePlan(
         "native" if native_indexer else "flaggems",
-        _resolve_query_quantizer(),
+        _resolve_query_quantizer(indexer_dtype),
         MappingProxyType(implementations),
         prefill_backend,
         ("auto", "bfloat16") if portable else ("auto", "bfloat16", "fp8", "fp8_e4m3"),
+        indexer_dtype=indexer_dtype,
     )
 
 

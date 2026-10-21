@@ -11,6 +11,129 @@ from vllm_fl.models.hy4 import model as hy_v4, runtime
 
 
 @pytest.mark.parametrize(
+    "vendor", ["ascend", "metax", "musa", "hygon", "thead", "kunlunxin", "enflame"]
+)
+def test_non_cuda_preflight_rejects_before_operator_resolution(monkeypatch, vendor):
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(vendor_name=vendor, is_cuda=lambda: False),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_resolve_registered_operator",
+        lambda *a, **k: pytest.fail("unsupported platform reached operator resolution"),
+    )
+    with pytest.raises(ValueError, match="requires an NVIDIA CUDA runtime"):
+        runtime.validate_hy4_runtime(_prefill_config())
+
+
+def test_pre_ampere_preflight_rejects_before_operator_resolution(monkeypatch):
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(
+            is_cuda=lambda: True,
+            supports_fp8=lambda: False,
+            has_device_capability=lambda cap: False,
+        ),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_resolve_registered_operator",
+        lambda *a, **k: pytest.fail(
+            "unsupported FP8 device reached operator resolution"
+        ),
+    )
+    config = _prefill_config()
+    with pytest.raises(ValueError, match="requires NVIDIA SM80"):
+        runtime.validate_hy4_runtime(config)
+
+
+@pytest.mark.parametrize("cache_dtype", ["auto", "bfloat16"])
+def test_no_fp8_selects_complete_int8_plan(monkeypatch, cache_dtype, native_prefill):
+    import torch
+
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(
+            is_cuda=lambda: True,
+            supports_fp8=lambda: False,
+            has_device_capability=lambda cap: cap <= 80,
+        ),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "native_hy4_available",
+        lambda *_: pytest.fail("INT8 path probed FP8 native kernels"),
+    )
+    config = _prefill_config()
+    config.cache_config.cache_dtype = cache_dtype
+    plan = runtime.validate_hy4_runtime(config)
+    assert plan.indexer_dtype == torch.int8
+    assert plan.provider == "flaggems"
+    assert plan.kv_cache_dtypes == ("auto", "bfloat16")
+    assert plan.query_quantizer.__name__ == "per_token_group_quant_int8"
+    for logical, actual in runtime._INT8_INDEXER_OPS.items():
+        assert plan.operations[actual].__name__ == actual
+        assert logical not in plan.operations
+    assert plan.operations["int8_paged_mqa_logits"]._supports_cuda_graph()
+
+
+def test_int8_plan_rejects_fp8_mla_cache(monkeypatch, native_prefill):
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(
+            is_cuda=lambda: True,
+            supports_fp8=lambda: False,
+            has_device_capability=lambda cap: cap <= 80,
+        ),
+    )
+    config = _prefill_config()
+    config.cache_config.cache_dtype = "fp8"
+    with pytest.raises(ValueError, match="FP8 KV requires a complete native path"):
+        runtime.validate_hy4_runtime(config)
+
+
+@pytest.mark.parametrize(
+    "name", ["per_token_group_quant_int8", *runtime._INT8_INDEXER_OPS.values()]
+)
+@pytest.mark.parametrize("absence", ["blacklisted", "missing"])
+def test_selected_int8_dependency_must_be_available(
+    monkeypatch, native_prefill, name, absence
+):
+    import flaggems_vllm as fused
+
+    from vllm import platforms
+
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(
+            is_cuda=lambda: True,
+            supports_fp8=lambda: False,
+            has_device_capability=lambda cap: cap <= 80,
+        ),
+    )
+    if absence == "blacklisted":
+        monkeypatch.setattr(runtime, "use_flaggems_op", lambda op: op != name)
+    else:
+        monkeypatch.setattr(fused, name, None)
+    with pytest.raises(RuntimeError, match=name):
+        runtime.validate_hy4_runtime(_prefill_config())
+
+
+@pytest.mark.parametrize(
     "options,selected",
     [
         ({}, "flagos"),
@@ -181,7 +304,9 @@ def native_prefill(monkeypatch):
 
     backend = SimpleNamespace(is_available=lambda: True, get_name=lambda: "NATIVE")
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda: True, supports_fp8=lambda: True),
     )
     monkeypatch.setattr(mla, "get_mla_prefill_backend", lambda cfg: backend)
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
@@ -252,7 +377,11 @@ def _native_capabilities(monkeypatch, missing, hopper=True):
     monkeypatch.setattr(
         platforms,
         "current_platform",
-        SimpleNamespace(is_cuda=lambda: True, has_device_capability=lambda cap: hopper),
+        SimpleNamespace(
+            is_cuda=lambda: True,
+            supports_fp8=lambda: True,
+            has_device_capability=lambda cap: hopper,
+        ),
     )
     monkeypatch.setattr(deep_gemm, "has_deep_gemm", lambda: True)
     monkeypatch.setattr(flashmla, "is_flashmla_sparse_supported", lambda: (True, None))

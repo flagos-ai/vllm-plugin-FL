@@ -269,3 +269,17 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
     @classmethod
     def supports_sink(cls) -> bool:
         return True
+
+
+class HYV4PortableFlashMLASparseBackend(HYV4FlashMLASparseBackend):
+    """BF16 MLA metadata/implementation with a pre-resolved FlagGems kernel.
+
+    Selected only by a portable HY4 runtime plan. Native FlashMLA's Hopper-only
+    capability declaration remains on the native backend.
+    """
+
+    supported_kv_cache_dtypes = ["auto", "bfloat16"]
+
+    @classmethod
+    def supports_compute_capability(cls, capability) -> bool:
+        return capability.major >= 8

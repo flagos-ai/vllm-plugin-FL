@@ -47,6 +47,47 @@ def test_sink_unavailable_is_fatal(monkeypatch, kind):
         layer._resolve_sink_backend("auto")
 
 
+def test_portable_sparse_backend_preserves_native_capability_boundary():
+    from vllm.platforms.interface import DeviceCapability
+
+    portable = sparse.HYV4PortableFlashMLASparseBackend
+    assert portable.supports_compute_capability(DeviceCapability(8, 0))
+    assert not sparse.HYV4FlashMLASparseBackend.supports_compute_capability(
+        DeviceCapability(8, 0)
+    )
+    assert not portable.supports_compute_capability(DeviceCapability(7, 5))
+    assert portable.supports_kv_cache_dtype("bfloat16")
+    assert not portable.supports_kv_cache_dtype("fp8_ds_mla")
+
+
+def test_int8_plan_selects_portable_bf16_sink_backend(monkeypatch):
+    from vllm.platforms.interface import DeviceCapability
+
+    layer = object.__new__(attention.HYV4MLAAttention)
+    layer.kv_lora_rank, layer.qk_rope_head_dim = 512, 64
+    layer.is_sparse, layer.num_local_heads = True, 4
+    layer.runtime_plan = SimpleNamespace(provider="flaggems")
+    monkeypatch.setattr(
+        attention,
+        "get_attn_backend",
+        lambda **kw: pytest.fail("portable plan called native sparse selector"),
+    )
+    monkeypatch.setattr(
+        attention,
+        "current_platform",
+        SimpleNamespace(
+            device_type="cuda", get_device_capability=lambda: DeviceCapability(8, 0)
+        ),
+    )
+    monkeypatch.setattr(
+        attention, "get_current_vllm_config", lambda: SimpleNamespace(cache_config=None)
+    )
+    monkeypatch.setattr(torch, "get_default_dtype", lambda: torch.bfloat16)
+    assert (
+        layer._resolve_sink_backend("auto") is sparse.HYV4PortableFlashMLASparseBackend
+    )
+
+
 @pytest.mark.parametrize("tokens", [1, 5])
 def test_sink_reaches_bf16_kernel_for_decode_and_prefill(monkeypatch, tokens):
     seen = []
@@ -220,7 +261,9 @@ def test_fallback_failure_rolls_back_real_module_attributes(monkeypatch):
 
     monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda: True, supports_fp8=lambda: True),
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
@@ -261,7 +304,9 @@ def test_fp8_kv_requires_native_metadata(monkeypatch):
     from vllm import platforms
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda: True, supports_fp8=lambda: True),
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(
@@ -355,7 +400,9 @@ def test_preflight_requires_callable_implementations(monkeypatch, name):
     from vllm import platforms
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True)
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda *_: True, supports_fp8=lambda: True),
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
@@ -378,7 +425,9 @@ def test_fallback_success_idempotence_and_prefill_selection(monkeypatch):
 
     monkeypatch.delattr(indexer, "_hy4_runtime_installed", raising=False)
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: True)
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda: True, supports_fp8=lambda: True),
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "has_device_kernel", lambda *a: False)
@@ -422,7 +471,9 @@ def test_native_core_without_prefill_is_not_a_complete_native_plan(
     from vllm.v1.attention.ops import flashmla
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True)
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda *_: True, supports_fp8=lambda: True),
     )
     from vllm.utils import deep_gemm
 
@@ -471,7 +522,9 @@ def test_portable_prefill_rejects_unsupported_dimensions_before_install(
     from vllm import platforms
 
     monkeypatch.setattr(
-        platforms, "current_platform", SimpleNamespace(is_cuda=lambda *_: True)
+        platforms,
+        "current_platform",
+        SimpleNamespace(is_cuda=lambda *_: True, supports_fp8=lambda: True),
     )
     monkeypatch.setattr(runtime, "native_hy4_available", lambda *_: False)
     monkeypatch.setattr(runtime, "use_flaggems_op", lambda name: True)
