@@ -1,0 +1,52 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# A100 line of the CUDA platform, isolated on its own runner pool.
+#
+# This is the TEMPORARY special one: the vllm-plugin-nv-k8s pool's
+# container hook is broken (see PR #562), so jobs run via the bypass
+# orchestrator (runner_mode: k8s-bypass).  e2e models are pre-staged
+# on the pool node's model store; case paths point at them via
+# device_overrides in tests/platforms/cuda-a100.yaml.  When the pool's
+# hook is fixed: flip runner_mode to 'container' - or fold this
+# platform back into 'cuda' and delete this file.
+#
+# The standard cuda line (old gpu-8 runners, container jobs, h20 e2e)
+# lives in cuda.yml / tests/platforms/cuda.yaml.
+
+platform: cuda-a100
+
+# Reuse the cuda platform's setup/check scripts (nvidia-smi + uv install);
+# only the runner pool and runner_mode differ between the two lines.
+script_platform: cuda
+
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
+
+runner_labels:
+  - vllm-plugin-nv-k8s
+
+runner_mode: k8s-bypass
+
+# Pool nodes observed healthy for mount-carrying pods (e2e ran green on
+# both; pods scheduled on prod-009 died - phase=Failed seconds after
+# ContainerCreating, root cause not yet captured).  e2e/benchmark pods
+# pin to these via --pin-nodes.  Drop this when the pool is homogeneous
+# (ops item).
+model_nodes:
+  - p-phy-dgx-a100-node-prod-172
+  - p-phy-dgx-a100-node-prod-174
+
+# No container_volumes / container_options: the bypass path does not use
+# container jobs, and the pool nodes have no /data layout anyway - e2e
+# reads the staged models through the read-only /flagcicd/model mount.
