@@ -4005,6 +4005,7 @@ class ModelRunnerFL(
         use_cascade_attn: bool,
         allow_microbatching: bool = True,
         force_eager: bool = False,
+        disable_full: bool = False,
         # For cudagraph capture TODO(lucas): Refactor how we capture cudagraphs (will
         # be improved in model runner v2)
         force_uniform_decode: bool | None = None,
@@ -4041,7 +4042,9 @@ class ModelRunnerFL(
 
         num_tokens_padded = self._pad_for_sequence_parallelism(num_tokens)
 
-        def dispatch_cudagraph(num_tokens, disable_full=False, valid_modes=None):
+        disable_full = disable_full or use_cascade_attn or has_encoder_output
+
+        def dispatch_cudagraph(num_tokens, valid_modes=None):
             return self.cudagraph_dispatcher.dispatch(
                 num_tokens=num_tokens,
                 has_lora=has_lora,
@@ -4051,9 +4054,7 @@ class ModelRunnerFL(
                 invalid_modes={CUDAGraphMode.FULL} if disable_full else None,
             )
 
-        cudagraph_mode, batch_descriptor = dispatch_cudagraph(
-            num_tokens_padded, disable_full=use_cascade_attn or has_encoder_output
-        )
+        cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
         if self.compilation_config.pass_config.enable_sp:
             assert (
@@ -4354,6 +4355,18 @@ class ModelRunnerFL(
                 num_scheduled_tokens_np,
             )
 
+            disable_full = False
+            if self.use_ascend_attention:
+                from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                    AscendAttentionState,
+                )
+
+                # A fresh one-token prompt also looks uniform to the dispatcher,
+                # but the captured attention tasks only support DecodeOnly.
+                disable_full = (
+                    self._ascend_attn_state != AscendAttentionState.DecodeOnly
+                )
+
             cascade_attn_prefix_lens = None
             # Disable cascade attention when using microbatching (DBO)
             if self.cascade_attn_enabled and not self.parallel_config.use_ubatching:
@@ -4376,6 +4389,7 @@ class ModelRunnerFL(
                 num_scheduled_tokens_np=num_scheduled_tokens_np,
                 max_num_scheduled_tokens=max_num_scheduled_tokens,
                 use_cascade_attn=cascade_attn_prefix_lens is not None,
+                disable_full=disable_full,
                 num_encoder_reqs=len(scheduler_output.scheduled_encoder_inputs),
             )
 
@@ -7913,7 +7927,9 @@ class ModelRunnerFL(
         if self.use_ascend_hybrid_cache:
             from vllm_fl.kv_cache.ascend.hybrid import pad_attention_specs
 
-            kv_cache_spec = pad_attention_specs(kv_cache_spec)
+            kv_cache_spec = pad_attention_specs(
+                kv_cache_spec, self.cache_config.mamba_page_size_padded
+            )
         return kv_cache_spec
 
     def _to_list(self, sampled_token_ids: torch.Tensor) -> list[list[int]]:

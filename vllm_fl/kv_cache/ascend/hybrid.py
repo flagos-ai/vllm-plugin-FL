@@ -13,7 +13,7 @@ from dataclasses import replace
 from vllm.model_executor.models import ModelRegistry
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE, get_dtype_size
-from vllm.v1.kv_cache_interface import AttentionSpec, MambaSpec
+from vllm.v1.kv_cache_interface import AttentionSpec
 
 
 def uses_dense_hybrid_cache(model_config) -> bool:
@@ -63,12 +63,8 @@ def align_hybrid_block_size(vllm_config) -> None:
     )
 
 
-def pad_attention_specs(specs):
-    """Account for convolution bytes before the shared-pool planner runs."""
-    page_size = max(
-        (s.page_size_bytes for s in specs.values() if isinstance(s, MambaSpec)),
-        default=0,
-    )
+def pad_attention_specs(specs, page_size: int):
+    """Use the global hybrid page size, including on attention-only PP stages."""
     return {
         name: replace(spec, page_size_padded=page_size)
         if isinstance(spec, AttentionSpec) and spec.page_size_bytes < page_size

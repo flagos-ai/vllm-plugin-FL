@@ -615,14 +615,14 @@ class AscendAttentionBackendImpl(AttentionImpl):
             )
 
         metadata = forward_context.attn_metadata
-        expected_type = type(params[0])
-        if expected_type not in {
-            PagedAttentionGraphParam,
-            FusedInferAttentionGraphParam,
-        } or any(type(param) is not expected_type for param in params):
+        if any(
+            not isinstance(
+                param, (PagedAttentionGraphParam, FusedInferAttentionGraphParam)
+            )
+            for param in params
+        ):
             raise RuntimeError(
-                "A single Ascend graph shape cannot mix paged and fused-infer "
-                f"attention task parameters (graph size {num_tokens})"
+                f"Unknown Ascend attention task parameters (graph size {num_tokens})"
             )
 
         with torch.npu.stream(update_stream):
@@ -983,20 +983,19 @@ class AscendAttentionBackendImpl(AttentionImpl):
         num_tokens = query.shape[0]
         graph_params = get_graph_params()
         graph_params.require_shape(num_tokens)
-        workspace = graph_params.workspaces[num_tokens]
-        if workspace is None:
-            workspace = torch_npu._npu_paged_attention_get_workspace(
-                query=query,
-                key_cache=self.key_cache,
-                value_cache=self.value_cache,
-                num_kv_heads=self.num_kv_heads,
-                num_heads=self.num_heads,
-                scale_value=self.scale,
-                block_table=attn_metadata.block_tables,
-                context_lens=attn_metadata.seq_lens,
-                out=output,
-            )
-            graph_params.workspaces[num_tokens] = workspace
+        # PA sizes its own workspace. Reserve the shared slot for FIA, which
+        # needs its maximum workspace retained for task updates after capture.
+        workspace = torch_npu._npu_paged_attention_get_workspace(
+            query=query,
+            key_cache=self.key_cache,
+            value_cache=self.value_cache,
+            num_kv_heads=self.num_kv_heads,
+            num_heads=self.num_heads,
+            scale_value=self.scale,
+            block_table=attn_metadata.block_tables,
+            context_lens=attn_metadata.seq_lens,
+            out=output,
+        )
 
         stream = torch.npu.current_stream()
         event = torch.npu.ExternalEvent()
