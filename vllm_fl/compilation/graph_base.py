@@ -114,7 +114,16 @@ class Graph:
 
 
 # Re-export CUDAGraphStat for compatibility
-from vllm.compilation.cuda_graph import CUDAGraphStat  # noqa: F401, E402
+from vllm.compilation.cuda_graph import CUDAGraphStat  # noqa: E402
+
+__all__ = [
+    "CUDAGraphStat",
+    "Graph",
+    "GraphEntry",
+    "GraphOptions",
+    "GraphWrapper",
+    "weak_ref_tensors",
+]
 
 
 @dataclasses.dataclass

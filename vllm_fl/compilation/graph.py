@@ -21,6 +21,19 @@ from vllm_fl.compilation.musa_graph import (
     _weak_ref_musa_tensors,
 )
 
+# Keep legacy NPU/stream helpers available alongside the public graph API.
+__all__ = [
+    "CUDAGraphStat",
+    "Graph",
+    "GraphEntry",
+    "GraphOptions",
+    "GraphWrapper",
+    "weak_ref_tensors",
+    "_graph_capture_stream",
+    "_weak_ref_npu_tensor",
+    "_weak_ref_npu_tensors",
+]
+
 GraphWrapper._platform_wrappers["musa"] = MUSAGraphWrapper
 
 
