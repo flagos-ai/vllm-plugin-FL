@@ -265,11 +265,10 @@ _load_op_config_from_env()
 
 class DeviceInfo:
     def __init__(self):
-        from flag_gems.runtime import backend
-        from flag_gems.runtime.backend.device_finder import DeviceDetector
+        from flag_gems.runtime import backend, device
 
         self._backend = backend
-        self.device = DeviceDetector()
+        self.device = device
         self.supported_device = [
             "nvidia",
             "ascend",
