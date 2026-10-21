@@ -5,7 +5,7 @@
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import get_backend, requires_cuda_fp8
 
 pytestmark = pytest.mark.skipif(get_backend() != "nvidia", reason="NVIDIA DSV4.1 cache")
 
@@ -83,6 +83,7 @@ def _reference(q, kv, storage, slots, positions, rope, block, padded, norm, rota
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 @pytest.mark.parametrize("norm", [True, False])
 @pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize("padded", [0, 3, 64])
@@ -122,6 +123,7 @@ def test_qkv_cache_matches_torch_bytes_and_query(norm, rotate, padded):
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 def test_kv_only_matches_qkv_insert_and_preserves_page_padding():
     from vllm_fl.ops.nvidia_dsv41_cache import kv_rope_insert
 
@@ -137,6 +139,7 @@ def test_kv_only_matches_qkv_insert_and_preserves_page_padding():
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 def test_qkv_cache_cuda_graph_updates_slots_and_positions():
     from vllm_fl.ops.nvidia_dsv41_ops import register_nvidia_dsv41_ops
 

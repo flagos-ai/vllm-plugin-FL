@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import get_backend, requires_cuda_hopper
 
 pytestmark = pytest.mark.skipif(
     get_backend() != "nvidia", reason="NVIDIA sparse indexer"
@@ -136,6 +136,7 @@ def test_constructor_signature_and_inherited_forward():
 
 
 @pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.usefixtures("mock_hopper_capability")
 def test_original_compilation_op_name_is_preserved(config, enabled):
     from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
 
@@ -171,6 +172,7 @@ def test_original_compilation_op_name_is_preserved(config, enabled):
         ("compress_ratio", 0, "separately inserted"),
     ],
 )
+@pytest.mark.usefixtures("mock_hopper_capability")
 def test_dsv41_rejects_unimplemented_indexer_contract(config, field, value, error):
     from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
 
@@ -181,6 +183,23 @@ def test_dsv41_rejects_unimplemented_indexer_contract(config, field, value, erro
     kwargs[field] = value
     with pytest.raises(NotImplementedError, match=error):
         SparseAttnIndexer(**kwargs)
+
+
+@pytest.mark.parametrize("major", [8, 10, None])
+def test_indexer_rejects_unsupported_hardware(config, monkeypatch, major):
+    from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
+    from vllm.platforms import current_platform
+    from vllm.platforms.interface import DeviceCapability
+
+    from vllm_fl.ops.nvidia_sparse_indexer import register_nvidia_sparse_indexer
+
+    capability = None if major is None else DeviceCapability(major, 0)
+    monkeypatch.setattr(
+        current_platform, "get_device_capability", lambda device_id=0: capability
+    )
+    assert register_nvidia_sparse_indexer()
+    with pytest.raises(NotImplementedError, match="Hopper FP8 128-dim"):
+        SparseAttnIndexer(**_kwargs())
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -206,6 +225,7 @@ def test_other_models_and_native_use_original_constructor(config, monkeypatch, n
     assert len(original_calls) == 1
 
 
+@pytest.mark.usefixtures("mock_hopper_capability")
 def test_user_provider_preserved(config, monkeypatch):
     from vllm.model_executor.custom_op import op_registry_oot
     from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
@@ -221,6 +241,7 @@ def test_user_provider_preserved(config, monkeypatch):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 def test_real_dsv41_attention_constructs_compressed_and_candidate_indexers(
     config, tmp_path
 ):

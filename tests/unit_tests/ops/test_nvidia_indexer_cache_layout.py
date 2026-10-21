@@ -5,7 +5,7 @@
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import get_backend, requires_cuda_fp8
 
 pytestmark = pytest.mark.skipif(
     get_backend() != "nvidia", reason="NVIDIA sparse indexer cache layouts"
@@ -102,6 +102,7 @@ def _selected(keys, scales, table, lengths, block):
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 @pytest.mark.parametrize(
     "kind,layers,ratio", [("ds", 1, 1), ("ds", 2, 2), ("hy", 2, 1)]
 )

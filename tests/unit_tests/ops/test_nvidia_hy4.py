@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import get_backend, requires_cuda_hopper
 
 pytestmark = pytest.mark.skipif(get_backend() != "nvidia", reason="NVIDIA HY V4 EMPTY")
 
@@ -57,6 +57,7 @@ def installed(monkeypatch):
     op_registry_oot.pop("SparseAttnIndexer", None)
 
 
+@pytest.mark.usefixtures("mock_hopper_capability")
 def test_real_upstream_indexer_constructor_and_capabilities(installed):
     from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
     from vllm.utils.import_utils import has_deep_gemm
@@ -91,6 +92,7 @@ def test_real_upstream_indexer_constructor_and_capabilities(installed):
     assert (has_deep_gemm(), is_flashmla_sparse_supported()) == before
 
 
+@pytest.mark.usefixtures("mock_hopper_capability")
 def test_user_provider_and_native_preserved(installed, monkeypatch):
     from vllm.model_executor.custom_op import op_registry_oot
     from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
@@ -118,10 +120,25 @@ def test_other_models_unchanged(installed, architecture):
 
 
 @pytest.mark.parametrize("dtype", ["fp8", "fp8_ds_mla", "nvfp4_ds_mla"])
+@pytest.mark.usefixtures("mock_hopper_capability")
 def test_model_rejects_unimplemented_cache_writer(installed, dtype):
     config, provider = installed
     config.cache_config.cache_dtype = dtype
     with pytest.raises(NotImplementedError, match="656-byte FP8 cache writer"):
+        provider.install_hy4_empty_adapters(config)
+
+
+@pytest.mark.parametrize("major", [8, 10, None])
+def test_model_rejects_unsupported_hardware(installed, monkeypatch, major):
+    from vllm.platforms import current_platform
+    from vllm.platforms.interface import DeviceCapability
+
+    config, provider = installed
+    capability = None if major is None else DeviceCapability(major, 0)
+    monkeypatch.setattr(
+        current_platform, "get_device_capability", lambda device_id=0: capability
+    )
+    with pytest.raises(NotImplementedError, match="Hopper SM90"):
         provider.install_hy4_empty_adapters(config)
 
 
@@ -142,6 +159,7 @@ def _fp8_reference(x, eps):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 @pytest.mark.parametrize("rows", [1, 32, 96])
 def test_query_quantization_matches_fp8_reference(installed, rows, gems_mode):
     config, provider = installed
@@ -156,6 +174,7 @@ def test_query_quantization_matches_fp8_reference(installed, rows, gems_mode):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 @pytest.mark.parametrize("graph", [False, True])
 @pytest.mark.parametrize("shared_pages", [False, True])
 def test_indexer_cache_insert_gather_and_slot_replay(
@@ -265,6 +284,7 @@ def _attention_reference(q, kv, indices, sink, length=None):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 @pytest.mark.parametrize("heads", [64, 128])
 @pytest.mark.parametrize("graph", [False, True])
 def test_bf16_mla_sink_prefill_decode_and_graph(heads, graph, gems_mode):
@@ -308,6 +328,7 @@ def test_bf16_mla_sink_prefill_decode_and_graph(heads, graph, gems_mode):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 @pytest.mark.parametrize("heads", [4, 64])
 def test_upstream_sink_impl_padding_and_live_graph(
     installed, tmp_path, heads, gems_mode

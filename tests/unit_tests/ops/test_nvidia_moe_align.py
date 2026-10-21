@@ -200,7 +200,7 @@ def test_padded_router_alignment_expert_gemm(dtype):
     [(False, True, False), (True, False, False), (True, True, True)],
 )
 def test_other_alignment_paths_still_call_gems(monkeypatch, ignore, is_cuda, native):
-    import flag_gems
+    import flaggems_vllm
 
     from vllm.platforms import current_platform
 
@@ -216,7 +216,7 @@ def test_other_alignment_paths_still_call_gems(monkeypatch, ignore, is_cuda, nat
 
     monkeypatch.setattr(current_platform, "is_cuda", lambda: is_cuda)
     monkeypatch.setattr(nvidia_compat, "has_native_vllm_kernels", lambda: native)
-    monkeypatch.setattr(flag_gems, "moe_align_block_size_triton", existing_gems)
+    monkeypatch.setattr(flaggems_vllm, "moe_align_block_size_triton", existing_gems)
     ids = torch.tensor([[0, 1]], device="cuda", dtype=torch.int32)
     moe_align_block_size_flaggems(ids, 16, 8, ignore_invalid_experts=ignore)
     assert len(called) == 1 and called[0][0] is ids

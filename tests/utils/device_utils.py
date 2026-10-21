@@ -121,3 +121,19 @@ def skip_if_not_nvidia(fn):
     return pytest.mark.skipif(get_backend() != "nvidia", reason="NVIDIA-specific test")(
         fn
     )
+
+
+def _cuda_capability():
+    if get_backend() == "nvidia" and torch.cuda.is_available():
+        return torch.cuda.get_device_capability()
+    return (0, 0)
+
+
+# E4M3 conversions are available from Ada; Hopper-only model adapters and
+# kernels have a stricter contract. Keep these separate from generic GPU tests.
+requires_cuda_fp8 = pytest.mark.skipif(
+    _cuda_capability() < (8, 9), reason="Triton FP8 E4M3 requires NVIDIA SM89+"
+)
+requires_cuda_hopper = pytest.mark.skipif(
+    _cuda_capability()[0] != 9, reason="This NVIDIA kernel path requires Hopper SM90"
+)

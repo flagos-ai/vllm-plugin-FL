@@ -5,7 +5,11 @@
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import (
+    get_backend,
+    requires_cuda_fp8,
+    requires_cuda_hopper,
+)
 
 pytestmark = pytest.mark.skipif(
     get_backend() != "nvidia", reason="NVIDIA DSV4.1 bridge"
@@ -45,6 +49,7 @@ def _logits_reference(q, keys, scales, weights):
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 @pytest.mark.parametrize("clean", [True, False])
 def test_prefill_fp8_indexer_and_topk_beyond_budget(ops, clean):
     q, keys = _fp8((4, 32, 128), 1), _fp8((1100, 128), 2)
@@ -80,6 +85,7 @@ def test_prefill_fp8_indexer_and_topk_beyond_budget(ops, clean):
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 @pytest.mark.parametrize("block", [32, 64, 128])
 @pytest.mark.parametrize("heads", [32, 64])
 def test_paged_indexer_and_gather_packed_pages(ops, block, heads):
@@ -141,6 +147,7 @@ def test_paged_indexer_and_gather_packed_pages(ops, block, heads):
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 @pytest.mark.parametrize("block, heads", [(32, 32), (64, 32), (128, 64)])
 @pytest.mark.parametrize("clean", [False, True])
 def test_paged_indexer_graph_replays_updated_lengths(ops, block, heads, clean):
@@ -184,6 +191,7 @@ def test_paged_indexer_graph_replays_updated_lengths(ops, block, heads, clean):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 @pytest.mark.parametrize("tokens", [1, 17])
 @pytest.mark.parametrize("heads, width, output_dim", [(2, 256, 256), (1, 4096, 1024)])
 def test_wo_a_fp8_einsum_out_buffer(ops, tokens, heads, width, output_dim):
@@ -220,6 +228,7 @@ def test_indexer_rejects_fp4_and_varlen(ops):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 def test_wo_a_fp8_einsum_graph_replay(ops):
     x, y = _fp8((1, 1, 4096), 23), _fp8((1, 1024, 4096), 24)
     xs = torch.full((1, 1, 32), 0.02, dtype=torch.float32, device="cuda")
