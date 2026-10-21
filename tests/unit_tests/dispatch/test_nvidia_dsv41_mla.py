@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import get_backend, requires_cuda_hopper
 
 pytestmark = pytest.mark.skipif(get_backend() != "nvidia", reason="NVIDIA DSV4.1 MLA")
 
@@ -90,6 +90,7 @@ def _cache_and_decoded_keys(pages, block, seed):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 @pytest.mark.parametrize("heads", [64, 128])
 def test_sparse_prefill_out_sink_lengths_and_invalid_indices(heads):
     from vllm_fl.dispatch.backends.flaggems.impl.dsv41_mla import flash_mla_sparse_fwd
@@ -118,6 +119,7 @@ def test_sparse_prefill_out_sink_lengths_and_invalid_indices(heads):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 @pytest.mark.parametrize("extra", [False, True])
 def test_sparse_decode_two_caches_and_real_metadata(extra):
     from vllm_fl.dispatch.backends.flaggems.impl import dsv41_mla as ops
@@ -180,6 +182,7 @@ def test_sparse_decode_two_caches_and_real_metadata(extra):
 
 
 @pytest.mark.gpu
+@requires_cuda_hopper
 def test_sparse_decode_cuda_graph_replays_indices():
     from vllm_fl.dispatch.backends.flaggems.impl import dsv41_mla as ops
 

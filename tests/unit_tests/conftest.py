@@ -85,6 +85,22 @@ def mock_process_group():
     return group
 
 
+@pytest.fixture
+def mock_hopper_capability(monkeypatch, request):
+    """Exercise constructor/config contracts without requiring Hopper kernels."""
+    assert request.node.get_closest_marker("gpu") is None, (
+        "Never mock hardware capability for a GPU execution test"
+    )
+    from vllm.platforms import current_platform
+    from vllm.platforms.interface import DeviceCapability
+
+    monkeypatch.setattr(
+        current_platform,
+        "get_device_capability",
+        lambda device_id=0: DeviceCapability(9, 0),
+    )
+
+
 # =============================================================================
 # Tensor Fixtures
 # =============================================================================

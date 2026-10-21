@@ -29,6 +29,10 @@ runner_labels:
   - gpu-8
   - cuda130
 
+# Keep the default runner and also exercise SM90-only kernels on Hopper.
+# An empty device selects the existing platform defaults.
+unit_devices: ["", h20]
+
 # Device-specific runner labels override the platform defaults for E2E jobs.
 device_runner_labels:
   h20:

@@ -101,11 +101,16 @@ jobs:
 
   unit:
     needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJson(needs.setup.outputs.config).unit_devices || fromJson('[""]') }}
     uses: ./.github/workflows/_unit_test.yml
     with:
       platform: ${{ inputs.platform }}
+      device: ${{ matrix.device }}
       ci_image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
-      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).runner_labels) }}
+      runner_labels: ${{ toJson(fromJson(needs.setup.outputs.config).device_runner_labels[matrix.device] || fromJson(needs.setup.outputs.config).runner_labels) }}
       container_volumes: ${{ toJson(fromJson(needs.setup.outputs.config).container_volumes) }}
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
 

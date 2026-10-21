@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import get_backend, requires_cuda_fp8
 
 pytestmark = pytest.mark.skipif(get_backend() != "nvidia", reason="NVIDIA QSA")
 
@@ -69,7 +69,14 @@ def _check(actual, expected, lengths):
 @pytest.mark.gpu
 @pytest.mark.parametrize("rows", [16, 64, 512])
 @pytest.mark.parametrize("strided", [False, True])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float8_e4m3fn])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        torch.bfloat16,
+        torch.float16,
+        pytest.param(torch.float8_e4m3fn, marks=requires_cuda_fp8),
+    ],
+)
 def test_prefill_scores_match_cpu(rows, strided, dtype):
     from vllm_fl.ops.nvidia_qsa import prefill_logits
 
@@ -108,7 +115,10 @@ def test_prefill_multiple_requests_and_partial_chunk():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("decode_len", [1, 2, 4])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float8_e4m3fn])
+@pytest.mark.parametrize(
+    "dtype",
+    [torch.bfloat16, pytest.param(torch.float8_e4m3fn, marks=requires_cuda_fp8)],
+)
 def test_decode_scores_match_cpu(decode_len, dtype):
     from vllm_fl.ops.nvidia_qsa import decode_logits
 

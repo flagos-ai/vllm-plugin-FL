@@ -5,7 +5,7 @@
 import pytest
 import torch
 
-from tests.utils.device_utils import get_backend
+from tests.utils.device_utils import get_backend, requires_cuda_fp8
 
 pytestmark = pytest.mark.skipif(get_backend() != "nvidia", reason="NVIDIA DSV4.1 query")
 
@@ -60,10 +60,10 @@ def assert_query_equal(actual, expected):
     "tokens,heads,strided,weights_dtype",
     [
         (0, 32, False, torch.bfloat16),
-        (1, 32, False, torch.bfloat16),
-        (7, 32, True, torch.bfloat16),
-        (33, 64, True, torch.float32),
-        (513, 32, False, torch.float32),
+        pytest.param(1, 32, False, torch.bfloat16, marks=requires_cuda_fp8),
+        pytest.param(7, 32, True, torch.bfloat16, marks=requires_cuda_fp8),
+        pytest.param(33, 64, True, torch.float32, marks=requires_cuda_fp8),
+        pytest.param(513, 32, False, torch.float32, marks=requires_cuda_fp8),
     ],
 )
 def test_query_rope_fp8_matches_cpu(tokens, heads, strided, weights_dtype):
@@ -79,6 +79,7 @@ def test_query_rope_fp8_matches_cpu(tokens, heads, strided, weights_dtype):
 
 
 @pytest.mark.gpu
+@requires_cuda_fp8
 def test_query_graph_replay_reads_updated_values_positions_and_weights():
     from vllm_fl.ops.nvidia_dsv41_indexer import fused_indexer_q_rope_quant
 
