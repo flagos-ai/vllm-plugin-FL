@@ -24,6 +24,31 @@ FL_SOURCES = {
 }
 
 
+FLAGGEMS_VLLM_SOURCE = {
+    "release": "v0.2.0",
+    "commit": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
+    "repository": "https://github.com/flagos-ai/FlagGems-vllm.git",
+}
+
+
+def validate_flaggems_vllm_provenance(version, source):
+    """Check the Git source; this release still reports metadata version 0.1.0."""
+    expected = FLAGGEMS_VLLM_SOURCE
+    vcs = source.get("vcs_info", {})
+    if (
+        source.get("url", "").removesuffix(".git")
+        != expected["repository"].removesuffix(".git")
+        or vcs.get("vcs") != "git"
+        or vcs.get("commit_id") != expected["commit"]
+        or source.get("dir_info", {}).get("editable", False)
+    ):
+        raise RuntimeError(
+            "FlagGems-vllm must be installed from "
+            f"{expected['release']} commit {expected['commit']} without editable mode"
+        )
+    return {**expected, "version": version, "direct_url": source}
+
+
 def validate_fl_provenance(provenance, installed):
     """Bind installed ordinary wheels to the checksummed source build record."""
     for name, expected in FL_SOURCES.items():
@@ -111,6 +136,11 @@ def check_stack(*, runtime_only=False):
         editable=direct.get("dir_info", {}).get("editable", False),
         native_libraries=native_vllm_libraries(Path(vllm.__file__).parent),
     )
+    fused_dist = metadata.distribution("flaggems-vllm")
+    facts["flaggems-vllm"] = validate_flaggems_vllm_provenance(
+        fused_dist.version,
+        json.loads(fused_dist.read_text("direct_url.json") or "{}"),
+    )
     expected_versions = {
         "torch": "2.13.0+cu129",
         **{name: source["version"] for name, source in FL_SOURCES.items()},
@@ -165,10 +195,14 @@ def check_stack(*, runtime_only=False):
     )
     if not runtime_only:
         import flag_gems
+        import flaggems_vllm
 
         from vllm import LLM
         from vllm.platforms import current_platform
 
+        fused_origin = fused_dist.locate_file("flaggems_vllm/__init__.py")
+        if Path(flaggems_vllm.__file__).resolve() != Path(fused_origin).resolve():
+            raise RuntimeError("FlagGems-vllm must come from the pinned installation")
         extension = importlib.import_module("vllm_fl._C")
         worker = importlib.import_module("vllm_fl.worker.nvidia_worker").NvidiaWorkerFL
         if getattr(current_platform, "vendor_name", None) != "nvidia":
@@ -179,6 +213,7 @@ def check_stack(*, runtime_only=False):
             platform=type(current_platform).__qualname__,
             llm_class=f"{LLM.__module__}.{LLM.__qualname__}",
             flaggems_origin=flag_gems.__file__,
+            flaggems_vllm_origin=flaggems_vllm.__file__,
             plugin_extension=extension.__file__,
             worker_class=f"{worker.__module__}.{worker.__qualname__}",
             device_count=torch.cuda.device_count(),

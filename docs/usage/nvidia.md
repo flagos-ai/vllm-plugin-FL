@@ -10,11 +10,12 @@ supplies its own extension and the required FlagGems/Triton operator adapters.
 | Component | Pinned configuration |
 |---|---|
 | Image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-empty-ci` |
-| Manifest digest | `sha256:28a000b21c00ba11b9ddd8e01f147cb3d18f24594b071295fcd4921cd30d58c0` |
+| Manifest digest | `sha256:9599608318d52f000e27a4f209c0008165a972ad37197bc16fb4069e183503b1` |
 | Official image base | `vllm/vllm-openai:v0.32.0-cu129` |
 | vLLM | Distribution `0.32.0+empty`; module `0.32.0` |
 | Python / PyTorch / CUDA runtime | `3.12.3` / `2.13.0+cu129` / `12.9` |
 | FlagGems | `5.4.0+g6fe7709e7717`, source `6fe7709e7717e49cf12bb00346719a0885f505fa` |
+| FlagGems-vllm | `v0.2.0`, source `b5c2c2249319277ccda4d41aa0f65164bd9b2a19`; package metadata remains `0.1.0` |
 | FlagTree | `0.7.0+git317a0249`, source `317a0249ec25c6756e0aee3a87e8e3c92f154335` |
 | Triton | `3.6.0`, supplied by FlagTree; no standalone `triton` distribution |
 | Humming / TorchCodec | `0.1.17` / `0.16.0+cu129` |
@@ -25,6 +26,9 @@ These FlagGems and FlagTree development revisions are fixed, not floating
 [NVIDIA dispatch policy](../../vllm_fl/dispatch/config/nvidia.yaml) together.
 Do not resolve or upgrade dependencies after installing the pinned FL wheels.
 The image records source and wheel provenance in `/opt/fl-ci/provenance.json`.
+Compatible explicit fused operators use the required FlagGems-vllm package;
+ATen registration remains with FlagGems. No provider-selection switch is
+required. The [provider guide](../flaggems-vllm.md) describes this integration.
 
 ## Prepare the host and container
 
@@ -44,7 +48,7 @@ export REPO_DIR="$PWD"
 export MODELS_DIR=/data/models
 export RUN_DIR=/data/vllm-fl-runs
 mkdir -p "$RUN_DIR"
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-empty-ci@sha256:28a000b21c00ba11b9ddd8e01f147cb3d18f24594b071295fcd4921cd30d58c0
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-empty-ci@sha256:9599608318d52f000e27a4f209c0008165a972ad37197bc16fb4069e183503b1
 
 docker pull "$IMAGE"
 docker run --rm -it --name vllm-fl-nvidia \
@@ -67,6 +71,7 @@ export USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
 export VLLM_USE_V2_MODEL_RUNNER=1
 export FL_STACK_PROVENANCE=/opt/fl-ci/provenance.json
 
+python .github/scripts/install_flaggems_vllm.py
 python -I -B .github/scripts/cuda/stack.py --runtime-only
 VLLM_VENDOR=cuda MAX_JOBS=4 python -m pip install \
   --break-system-packages --no-build-isolation --no-deps -e .
@@ -137,7 +142,9 @@ before starting another example.
 The following smoke tests were completed on plugin revision `0fbe20f9`
 (2026-10-20). They are not minimum hardware requirements or performance
 benchmarks. All four new-model runs used native V2, eager execution and the
-pinned development dependencies. Current CI execution status is reported
+pinned development dependencies, before the FlagGems-vllm provider integration
+was merged into the base branch. They are historical deployment examples, not
+validation of the rebased provider. Current CI execution status is reported
 separately in the PR.
 
 | Model/checkpoint | Hardware and configuration | Validation scope |
@@ -339,7 +346,8 @@ select this EMPTY recipe.
 ## CI
 
 The CUDA configuration pins the same image digest. CI setup uses
-[setup.sh](../../.github/scripts/cuda/setup.sh), which runs the runtime check,
+[setup.sh](../../.github/scripts/cuda/setup.sh), which checks the preinstalled
+FlagGems-vllm release with the shared installer, runs the runtime check,
 builds `vllm_fl._C` without dependency resolution, then runs the full stack check
 and audio dependency checks. The setup requires access to the official vLLM
 audio fixtures, or a populated `VLLM_ASSETS_CACHE`.

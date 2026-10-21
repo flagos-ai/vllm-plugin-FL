@@ -1,7 +1,8 @@
 # Interfaces retained from FlagGems
 
 This inventory targets FlagGems-vllm **v0.2.0**, commit
-`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`, on the vLLM 0.28 branch.
+`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`. It was inherited from the vLLM
+0.28 adaptation; NVIDIA now uses the 0.32 EMPTY runtime.
 An existing export is substituted only when it preserves the current call
 contract. The entries below retain their original providers. Missing interface requests are tracked in
 [FlagGems-vllm #932](https://github.com/flagos-ai/FlagGems-vllm/issues/932).
@@ -18,5 +19,7 @@ contract. The entries below retain their original providers. Missing interface r
 
 ATen registration (`flag_gems.enable()`), device detection, runtime utilities,
 and backend launch/configuration helpers retain their existing providers. The
-existing native CUDA attention selection is preserved. The NVIDIA policy retains its baseline ATen exclusions; `mm` and `mm_out`
-are enabled under the default policy with FlagGems v5.4.0.
+NVIDIA EMPTY attention/cache paths retain their 0.32 layout adaptations;
+the public cache writer still cannot replace the strided upstream writer.
+The NVIDIA policy keeps its existing ATen exclusions and pinned development
+FlagGems wheel. Other vendor policies remain unchanged.

@@ -79,8 +79,13 @@ RUN python -m pip uninstall -y vllm triton \
     && python -m pip install --no-cache-dir --no-deps /opt/fl-wheels/*.whl \
     && python /opt/fl-ci/record-provenance.py /opt/fl-ci/stack.py \
         /opt/fl-wheels /opt/fl-ci/provenance.json \
-    && python -I -B /opt/fl-ci/stack.py --runtime-only \
     && rm -rf /opt/fl-wheels
+
+# Retain pip's exact Git provenance and protect the pinned EMPTY/FL stack.
+# CI setup runs the same installer idempotently without fetching another copy.
+COPY .github/scripts/install_flaggems_vllm.py /opt/fl-ci/install_flaggems_vllm.py
+RUN python /opt/fl-ci/install_flaggems_vllm.py \
+    && python -I -B /opt/fl-ci/stack.py --runtime-only
 
 ENV VLLM_PLUGINS=fl \
     VLLM_USE_V2_MODEL_RUNNER=1 \
