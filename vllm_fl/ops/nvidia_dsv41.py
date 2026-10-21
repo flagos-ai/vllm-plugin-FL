@@ -8,6 +8,7 @@ Only the external kernel entry points of that model are replaced here.
 
 from vllm_fl.nvidia_compat import has_native_vllm_kernels
 
+# Read on later calls after config validation to avoid reapplying model hooks.
 _installed = False
 
 

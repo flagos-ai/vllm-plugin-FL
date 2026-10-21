@@ -1,7 +1,7 @@
 # Copyright 2026 FlagOS Contributors
 # Build and test tools for the NVIDIA 0.32 EMPTY image. The official base
 # supplies vLLM's CUDA/runtime dependency closure, including humming-kernels.
-uv==0.12.5
+uv==0.13.4
 setuptools==80.10.2
 setuptools-scm==10.2.1
 setuptools-rust==1.13.0
