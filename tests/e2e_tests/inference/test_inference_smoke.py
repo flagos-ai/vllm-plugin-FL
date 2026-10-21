@@ -144,7 +144,7 @@ def _get_max_asset_count() -> int:
     )
 
 
-def _run_text_test(llm: LLM, sampling_params: SamplingParams) -> None:
+def _run_text_test(llm: LLM, sampling_params: SamplingParams, evidence=None) -> None:
     """Run text-only generation test.
 
     Prompts can be plain strings or dicts with ``text`` and optional
@@ -164,6 +164,10 @@ def _run_text_test(llm: LLM, sampling_params: SamplingParams) -> None:
 
     prompt_texts = [p["text"] for p in prompt_cfgs]
     outputs = llm.generate(prompt_texts, sampling_params)
+    if evidence is not None:
+        repeat = llm.generate(prompt_texts, sampling_params)
+        expected = [[p["expected"]] if p.get("expected") else [] for p in prompt_cfgs]
+        evidence.outputs("text", outputs, repeat, expected)
     assert len(outputs) == len(prompt_cfgs), (
         f"Expected {len(prompt_cfgs)} outputs, got {len(outputs)}"
     )
@@ -271,15 +275,33 @@ def test_inference(combo: dict) -> None:
     print(f"\n[{_MODEL}/{_CASE}] combo: {combo_desc}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")
 
+    from tests.utils.nvidia_validation import evidence_from_environment
+
+    evidence = evidence_from_environment(_CFG)
+    if evidence is not None:
+        assert gen.sampling.get("temperature", 1.0) == 0, (
+            "Repeat checks require greedy sampling"
+        )
+        llm_kwargs["worker_extension_cls"] = (
+            "tests.utils.nvidia_validation.NvidiaWorkerEvidence"
+        )
     llm = None
     try:
         llm = LLM(**llm_kwargs)
+        if evidence is not None:
+            evidence.workers(llm)
         sampling_params = SamplingParams(**gen.sampling)
 
         if gen.modality == "text":
-            _run_text_test(llm, sampling_params)
+            _run_text_test(llm, sampling_params, evidence)
         else:
             _run_multimodal_test(llm, sampling_params)
+        if evidence is not None:
+            evidence.finish()
+    except Exception as exc:
+        if evidence is not None:
+            evidence.finish(exc)
+        raise
     finally:
         if llm is not None:
             # Explicitly shut down the engine core so that the executor calls

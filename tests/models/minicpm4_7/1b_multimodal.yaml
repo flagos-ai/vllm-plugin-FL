@@ -1,0 +1,39 @@
+# Copyright 2026 FlagOS Contributors
+# Manual only: run via .github/scripts/cuda/run_regression.py on reserved GPUs.
+llm:
+  tensor_parallel_size: 1
+  dtype: bfloat16
+  max_model_len: 4096
+  max_num_seqs: 4
+  max_num_batched_tokens: 1024
+  gpu_memory_utilization: 0.3
+  enforce_eager: true
+  seed: 0
+  trust_remote_code: false
+  compilation_config:
+    cudagraph_capture_sizes:
+    - 1
+    - 2
+    - 4
+    - 8
+  model: REQUIRED_LOCAL_MODEL_PATH
+  limit_mm_per_prompt:
+    image: 1
+    video: 1
+  media_io_kwargs:
+    video:
+      num_frames: 4
+generate:
+  sampling:
+    temperature: 0.0
+    max_tokens: 96
+nvidia_validation:
+  runner: v2
+  kind: multimodal
+  minimum_memory_gib: 24
+  chat_template_kwargs:
+    enable_thinking: false
+    thinking: false
+  expected_architectures:
+  - MiniCPMV4_7ForConditionalGeneration
+  expected_model_class: vllm.model_executor.models.minicpmv4_7.MiniCPMV4_7ForConditionalGeneration
