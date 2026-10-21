@@ -40,6 +40,34 @@ def register_builtins(registry) -> None:
     # vLLM 0.24 builds. One absent optional MoE helper must not prevent all
     # available PyTorch fallbacks from registering.
     op_names = (
+        "deepseek_v4_inv_rope_quant_int8",
+        "deepseek_v4_inv_rope_quant_fp8",
+        "deepseek_v4_int8_scaled_mm",
+        "deepseek_v4_mhc_pre",
+        "deepseek_v4_mhc_fused_post_pre",
+        "deepseek_v4_mhc_post",
+        "deepseek_v4_hc_head",
+        "deepseek_v4_fused_q_kv_rmsnorm",
+        "deepseek_v4_fused_q_kv_rmsnorm_int8",
+        "deepseek_v4_qnorm_rope_kv_quant_insert",
+        "deepseek_v4_qnorm_rope_kv_bf16_insert",
+        "deepseek_v4_qnorm_rope_kv_fp8_insert",
+        "deepseek_v4_compute_global_topk_indices_and_lens",
+        "deepseek_v4_flash_mla_with_kvcache",
+        "deepseek_v4_dequantize_and_gather_k_cache",
+        "deepseek_v4_combine_topk_swa_indices",
+        "deepseek_v4_flash_mla_sparse_fwd",
+        "deepseek_v4_fused_indexer_q_rope_quant",
+        "deepseek_v4_fused_indexer_q_rope_quant_int8",
+        "deepseek_v4_compress_int8_indexer_k_cache",
+        "deepseek_v4_int8_mqa_logits",
+        "deepseek_v4_int8_paged_mqa_logits",
+        "indexer_k_quant_and_cache",
+        "cp_gather_indexer_k_quant_cache",
+        "top_k_per_row_prefill",
+        "top_k_per_row_decode",
+        "pack_seq_triton",
+        "unpack_seq_triton",
         "dynamic_per_token_quant_int8",
         "silu_and_mul",
         "silu_and_mul_with_clamp",
@@ -53,6 +81,7 @@ def register_builtins(registry) -> None:
         "topk_softmax",
         "invoke_fused_moe_triton_kernel",
         "grouped_topk",
+        "fused_marlin_moe",
     )
     impls = []
     for op_name in op_names:

@@ -46,12 +46,26 @@ def _find_vendor_backend_dir(
     )
 
 
-def _get_current_vendor_backend_dirs(available_vendor_dirs: set[str]) -> set[str]:
-    """Detect current platform vendor name and return its backend directory."""
+def _get_current_vendor_backend_dirs(
+    available_vendor_dirs: set[str],
+) -> str | None:
+    """Detect the current platform and return its vendor backend directory.
+
+    In-tree vLLM CUDA platforms (for example ``NvmlCudaPlatform``) do not
+    expose ``vendor_name``.  ``Platform.is_cuda()`` is the canonical vLLM
+    discriminator for NVIDIA CUDA and, unlike matching ``device_name ==
+    "cuda"``, does not opt CUDA-alike out-of-tree platforms into the NVIDIA
+    backend.
+    """
     try:
         from vllm.platforms import current_platform
 
         vendor_name = getattr(current_platform, "vendor_name", None)
+        if (
+            (not isinstance(vendor_name, str) or not vendor_name)
+            and current_platform.is_cuda()
+        ):
+            vendor_name = "nvidia"
         if not isinstance(vendor_name, str) or not vendor_name:
             return None
         return _find_vendor_backend_dir(vendor_name, available_vendor_dirs)
@@ -163,5 +177,4 @@ def register_builtins(registry: OpRegistry) -> None:
             logger.debug(f"Registered {plugin_count} external plugins")
     except Exception as e:
         logger.debug(f"Plugin discovery failed: {e}")
-
 

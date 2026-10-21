@@ -10,6 +10,18 @@ from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
 
+def fused_marlin_moe_cuda(*args, **kwargs):
+    from vllm.model_executor.layers.fused_moe.experts import marlin_moe
+
+    fn = marlin_moe.fused_marlin_moe
+    native = getattr(fn, "_vllm_fl_original", fn)
+    from vllm_fl.ops.deepseek_v4_int8_marlin import (
+        fused_marlin_moe_with_int8_activation,
+    )
+
+    return fused_marlin_moe_with_int8_activation(native, *args, **kwargs)
+
+
 def moe_align_block_size_cuda(
     topk_ids: torch.Tensor,
     block_size: int,
@@ -31,7 +43,10 @@ def moe_align_block_size_cuda(
         (max_num_tokens_padded,), dtype=torch.int32, device=topk_ids.device
     )
     max_num_m_blocks = triton.cdiv(max_num_tokens_padded, block_size)
-    expert_ids = torch.empty(
+    # The CUDA op only writes the valid prefix. The EP mapping below indexes
+    # the whole capacity buffer, so initialize the unused tail to a valid
+    # global expert instead of indexing expert_map with uninitialized values.
+    expert_ids = torch.zeros(
         (max_num_m_blocks,), dtype=torch.int32, device=topk_ids.device
     )
     num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=topk_ids.device)
@@ -47,7 +62,11 @@ def moe_align_block_size_cuda(
     )
 
     if expert_map is not None and not ignore_invalid_experts:
-        expert_ids = expert_map[expert_ids]
+        # Preserve the -1 sentinel. Direct indexing would treat it as Python's
+        # last-element index, routing skipped blocks to rank 7's final expert.
+        valid_experts = expert_ids >= 0
+        mapped_experts = expert_map[expert_ids.clamp_min(0)]
+        expert_ids = torch.where(valid_experts, mapped_experts, -1)
 
     return sorted_ids, expert_ids, num_tokens_post_pad
 

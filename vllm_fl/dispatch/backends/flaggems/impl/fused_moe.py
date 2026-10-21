@@ -9,7 +9,105 @@ import torch
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
 
+from vllm_fl.dispatch import CachedOp
 import vllm_fl.envs as fl_envs
+
+
+_marlin_moe_sum = CachedOp("moe_sum")
+_marlin_moe_align = CachedOp("moe_align_block_size")
+
+
+def _dispatch_marlin_moe_align(
+    topk_ids,
+    block_size,
+    num_experts,
+    expert_map=None,
+    pad_sorted_ids=False,
+    ignore_invalid_experts=False,
+):
+    # PR #5437 documents expert_map as unsupported. Filter remote experts in
+    # vLLM's align kernel so its WNA16 GEMMs never receive -1 expert blocks.
+    return _marlin_moe_align(
+        topk_ids,
+        block_size,
+        num_experts,
+        expert_map,
+        pad_sorted_ids,
+        ignore_invalid_experts or expert_map is not None,
+    )
+
+
+@torch.library.custom_op(
+    "vllm_fl::flaggems_moe_sum",
+    mutates_args=("out",),
+    device_types="cuda",
+)
+def _flaggems_moe_sum_op(inp: torch.Tensor, out: torch.Tensor) -> None:
+    """Opaque compile boundary around FlagGems' in-place Triton reduction."""
+    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
+        from flaggems_vllm import moe_sum
+    else:
+        from flag_gems import moe_sum
+
+    moe_sum(inp, out)
+
+
+@_flaggems_moe_sum_op.register_fake
+def _flaggems_moe_sum_op_fake(inp: torch.Tensor, out: torch.Tensor) -> None:
+    return None
+
+
+@torch.library.custom_op(
+    "vllm_fl::dispatch_moe_sum",
+    mutates_args=("out",),
+    device_types="cuda",
+)
+def _dispatch_moe_sum_op(inp: torch.Tensor, out: torch.Tensor) -> None:
+    """Defer OpManager selection until execution outside the compiled graph."""
+    _marlin_moe_sum(inp, out)
+
+
+@_dispatch_moe_sum_op.register_fake
+def _dispatch_moe_sum_op_fake(inp: torch.Tensor, out: torch.Tensor) -> None:
+    return None
+
+
+def fused_marlin_moe_flaggems(*args, **kwargs):
+    """Call FlagGems' vLLM-compatible fused Marlin MoE implementation."""
+    # FlagGems PR #5437 follows the vLLM API except for the newer GLM-4
+    # activation coefficients. Falling back is safer than silently dropping a
+    # non-default coefficient for models that use them.
+    gemm1_alpha = kwargs.pop("gemm1_alpha", 1.0)
+    gemm1_beta = kwargs.pop("gemm1_beta", 0.0)
+    if gemm1_alpha != 1.0 or gemm1_beta != 0.0:
+        raise NotImplementedError(
+            "FlagGems fused_marlin_moe does not support gemm1_alpha/beta"
+        )
+
+    # FlagGems PR #5437 copied vLLM 0.20's small sequential scalar-type IDs.
+    # vLLM 0.24 encodes the scalar type properties into a stable integer, so
+    # translate the three formats implemented by that PR at the adapter edge.
+    from vllm.scalar_type import scalar_types
+
+    quant_type_id = kwargs.get("quant_type_id")
+    quant_type_map = {
+        scalar_types.uint4b8.id: 0,
+        scalar_types.uint8b128.id: 1,
+        scalar_types.float4_e2m1f.id: 6,
+    }
+    if quant_type_id in quant_type_map:
+        kwargs["quant_type_id"] = quant_type_map[quant_type_id]
+
+    import flag_gems.fused.fused_marlin_moe as flaggems_marlin
+
+    # PR #5437 accepts vLLM's callback in its public signature but its generic
+    # EP path calls the module-global FlagGems moe_sum directly.  Bind the
+    # callback selected by vLLM/OpManager so this inner op remains independently
+    # dispatchable and does not use the graph-unsafe TP8 implementation.
+    flaggems_marlin.moe_align_block_size = _dispatch_marlin_moe_align
+    flaggems_marlin.moe_sum = _dispatch_moe_sum_op
+
+    return flaggems_marlin.fused_marlin_moe(*args, **kwargs)
 
 
 def moe_align_block_size_flaggems(
@@ -36,7 +134,9 @@ def moe_align_block_size_flaggems(
         (max_num_tokens_padded,), dtype=torch.int32, device=topk_ids.device
     )
     max_num_m_blocks = triton.cdiv(max_num_tokens_padded, block_size)
-    expert_ids = torch.empty(
+    # Mapping the full capacity tensor is safe only when the unwritten tail
+    # contains valid global IDs. The kernel consumes just the valid prefix.
+    expert_ids = torch.zeros(
         (max_num_m_blocks,), dtype=torch.int32, device=topk_ids.device
     )
     num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=topk_ids.device)
@@ -52,7 +152,9 @@ def moe_align_block_size_flaggems(
         num_tokens_post_pad,
     )
     if expert_map is not None:
-        expert_ids = expert_map[expert_ids]
+        valid_experts = expert_ids >= 0
+        mapped_experts = expert_map[expert_ids.clamp_min(0)]
+        expert_ids = torch.where(valid_experts, mapped_experts, -1)
 
     return sorted_ids, expert_ids, num_tokens_post_pad
 
@@ -164,9 +266,4 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    if fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM:
-        from flaggems_vllm import moe_sum
-    else:
-        from flag_gems import moe_sum
-
-    moe_sum(inp, out)
+    _flaggems_moe_sum_op(inp, out)

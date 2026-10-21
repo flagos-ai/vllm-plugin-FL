@@ -93,26 +93,78 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         setattr(layer, i_zp_name, None)
         setattr(layer, azp_adj_name, None)
 
+        # DSV4 wo_a is logically a grouped BMM. Keep a group-major copy in
+        # CUTLASS column-major layout: selecting a contiguous [N, K] group
+        # and transposing it yields a zero-copy [K, N] view with stride
+        # (1, K). This makes the graph path use vLLM's registered CUDA op.
+        if getattr(layer, "is_bmm", False):
+            num_groups = int(getattr(layer, "bmm_batch_size", 0))
+            prepared_weight = getattr(layer, w_q_name)
+            prepared_scale = getattr(layer, w_s_name)
+            if num_groups <= 0:
+                raise ValueError(
+                    "FL W8A8 grouped linear requires bmm_batch_size"
+                )
+            if prepared_weight.shape[1] % num_groups:
+                raise ValueError(
+                    "FL W8A8 grouped output size must be divisible by "
+                    "bmm_batch_size"
+                )
+            output_per_group = prepared_weight.shape[1] // num_groups
+            grouped_weight = prepared_weight.t().view(
+                num_groups,
+                output_per_group,
+                prepared_weight.shape[0],
+            ).contiguous()
+            grouped_scale = prepared_scale.view(
+                num_groups, output_per_group
+            ).contiguous()
+            layer.register_buffer(
+                "_fl_w8a8_grouped_weight", grouped_weight, persistent=False
+            )
+            layer.register_buffer(
+                "_fl_w8a8_grouped_weight_scale",
+                grouped_scale,
+                persistent=False,
+            )
+
     def apply_weights(
         self,
         layer: torch.nn.Module,
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        from flag_gems import scaled_mm
-
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape
         x_2d = x.reshape(-1, original_shape[-1]).contiguous()
-        x_q, x_scale = _dynamic_per_token_quant_int8(x_2d)
-        output = scaled_mm(
-            x_q,
-            weight,
-            x_scale,
-            weight_scale,
-            bias=bias,
-            out_dtype=x.dtype,
-        )
+        if torch.compiler.is_compiling():
+            # Keep Dynamo away from the runtime policy manager and expose
+            # graph-safe registered CUDA ops to Inductor/CUDA Graph.
+            from vllm import _custom_ops as ops
+
+            x_q, x_scale, _ = ops.scaled_int8_quant(
+                x_2d, None, None, symmetric=True
+            )
+            output = ops.cutlass_scaled_mm(
+                x_q,
+                weight,
+                scale_a=x_scale,
+                scale_b=weight_scale,
+                bias=bias,
+                out_dtype=x.dtype,
+            )
+        else:
+            from flag_gems import scaled_mm
+
+            x_q, x_scale = _dynamic_per_token_quant_int8(x_2d)
+            output = scaled_mm(
+                x_q,
+                weight,
+                x_scale,
+                weight_scale,
+                bias=bias,
+                out_dtype=x.dtype,
+            )
         return output.reshape(*original_shape[:-1], weight.shape[1])
 
 

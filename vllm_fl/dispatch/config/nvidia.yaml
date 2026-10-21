@@ -26,6 +26,19 @@ allow_vendors:
 #   - vendor        : Any available vendor backend (auto-detected)
 #   - vendor:cuda   : CUDA-specific vendor backend
 op_backends:
+  # DSV4 MHC requires the fused CUDA/TileLang implementation on NVIDIA.
+  # Do not hide vendor kernel failures behind the materially different
+  # FlagGems or PyTorch reference paths: fail at the vendor boundary instead.
+  deepseek_v4_mhc_pre:
+    - vendor:cuda
+  deepseek_v4_mhc_pre_int8:
+    - vendor:cuda
+  deepseek_v4_mhc_fused_post_pre:
+    - vendor:cuda
+  deepseek_v4_mhc_fused_post_pre_int8:
+    - vendor:cuda
+  deepseek_v4_mhc_post:
+    - vendor:cuda
   attention_backend:
     - flagos
     - vendor
@@ -41,6 +54,42 @@ op_backends:
   rotary_embedding:
     - flagos
     - vendor
+    - reference
+  indexer_k_quant_and_cache:
+    - flagos
+    - vendor:cuda
+    - reference
+  cp_gather_indexer_k_quant_cache:
+    - flagos
+    - vendor:cuda
+    - reference
+  top_k_per_row_prefill:
+    - flagos
+    - vendor:cuda
+    - reference
+  top_k_per_row_decode:
+    - flagos
+    - vendor:cuda
+    - reference
+  pack_seq_triton:
+    - flagos
+    - vendor:cuda
+    - reference
+  unpack_seq_triton:
+    - flagos
+    - vendor:cuda
+    - reference
+  # PR #5437's align kernel does not preserve padded -1 expert IDs after the
+  # global-to-local EP map. Keep routing on vLLM CUDA for TP8/EP8.
+  moe_align_block_size:
+    - vendor:cuda
+    - reference
+  # Keep the reduction independently dispatchable. The vLLM CUDA wrapper
+  # reaches aten::sum.out through the stable ABI, which is not compatible with
+  # global FlagGems interception. Prefer FlagGems' Triton reduction here.
+  moe_sum:
+    - default.flagos
+    - vendor:cuda
     - reference
   apply_rotary_emb:
     - flagos
