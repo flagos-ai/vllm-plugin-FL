@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Validate the active FlagGems-vllm RoPE provider on GCU against CPU math."""
+"""Validate the production GCU RoPE adapter against independent CPU math."""
 
 import pytest
 import torch
@@ -37,14 +37,16 @@ def _assert_output(actual, expected, device, dtype, label):
     )
 
 
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
-@pytest.mark.parametrize(
-    "interleaved", [False, True], ids=["split-half", "interleaved"]
-)
-@pytest.mark.parametrize("inplace", [False, True], ids=["out-of-place", "inplace"])
-@pytest.mark.parametrize("packed_views", [False, True], ids=["contiguous", "packed"])
-def test_flaggems_vllm_rotary_gcu_values_and_mutation(
-    backend, device, dtype, interleaved, inplace, packed_views, record_property
+def _check_rotary_gcu_values_and_mutation(
+    backend,
+    device,
+    dtype,
+    interleaved,
+    inplace,
+    packed_views,
+    record_property,
+    *,
+    use_graph=False,
 ):
     if backend != "enflame":
         pytest.skip("Requires the Enflame GCU backend")
@@ -52,18 +54,23 @@ def test_flaggems_vllm_rotary_gcu_values_and_mutation(
     assert torch.gcu.is_available(), "The selected GCU runtime is unavailable"
 
     # Missing dependencies on GCU are failures, not successful skips. Test the
-    # exported provider used by the plugin, without using an old vendor kernel
-    # as the reference or patching the provider under test.
+    # production adapter, retaining an independent CPU reference rather than
+    # treating the known-broken raw provider's inplace path as a reference.
     from flaggems_vllm import apply_rotary_pos_emb
 
+    from vllm_fl.dispatch.backends.flaggems.impl.rotary import rotary_embedding_flaggems
+
     label = (
-        f"flaggems_vllm.apply_rotary_pos_emb dtype={dtype} "
-        f"interleaved={interleaved} inplace={inplace} packed_views={packed_views}"
+        f"rotary_embedding_flaggems via flaggems_vllm dtype={dtype} "
+        f"interleaved={interleaved} inplace={inplace} packed_views={packed_views} "
+        f"graph={use_graph}"
     )
     record_property(
         "gcu_rotary_provider",
         {
             "export": "flaggems_vllm.apply_rotary_pos_emb",
+            "adapter": "rotary_embedding_flaggems",
+            "graph": use_graph,
             "module": apply_rotary_pos_emb.__module__,
             "qualname": apply_rotary_pos_emb.__qualname__,
             "device": str(device),
@@ -89,15 +96,40 @@ def test_flaggems_vllm_rotary_gcu_values_and_mutation(
         query, key = query.contiguous(), key.contiguous()
     before = [query.clone(), key.clone()]
     original_strides = [query.stride(), key.stride()]
-    actual = apply_rotary_pos_emb(
-        query,
-        key,
-        cos_cpu.to(device),
-        sin_cpu.to(device),
-        position_ids=positions_cpu.to(device),
-        rotary_interleaved=interleaved,
-        inplace=inplace,
-    )
+    cos, sin = cos_cpu.to(device), sin_cpu.to(device)
+    positions = positions_cpu.to(device)
+
+    def apply():
+        return rotary_embedding_flaggems(
+            None,
+            query,
+            key,
+            cos,
+            sin,
+            position_ids=positions,
+            rotary_interleaved=interleaved,
+            inplace=inplace,
+        )
+
+    if use_graph:
+        # Compile before capture, then reset the same buffers before each replay.
+        # Since outputs alias these buffers, a no-op replay cannot pass the
+        # value assertions by retaining output from warmup or capture.
+        apply()
+        query.copy_(before[0])
+        key.copy_(before[1])
+        torch.gcu.synchronize()
+        graph = torch.gcu.GCUGraph()
+        with torch.gcu.graph(graph):
+            actual = apply()
+        for _ in range(2):
+            query.copy_(before[0])
+            key.copy_(before[1])
+            graph.replay()
+        torch.gcu.synchronize()
+        record_property("gcu_rotary_graph_replays", 2)
+    else:
+        actual = apply()
     assert isinstance(actual, tuple) and len(actual) == 2, label
     for name, output, value, saved, reference, stride in zip(
         ("query", "key"), actual, (query, key), before, expected, original_strides
@@ -136,3 +168,34 @@ def test_flaggems_vllm_rotary_gcu_values_and_mutation(
             atol=0,
             msg=lambda message: f"{label} packed input mutated\n{message}",
         )
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
+@pytest.mark.parametrize(
+    "interleaved", [False, True], ids=["split-half", "interleaved"]
+)
+@pytest.mark.parametrize("inplace", [False, True], ids=["out-of-place", "inplace"])
+@pytest.mark.parametrize("packed_views", [False, True], ids=["contiguous", "packed"])
+def test_flaggems_vllm_rotary_gcu_values_and_mutation(
+    backend, device, dtype, interleaved, inplace, packed_views, record_property
+):
+    _check_rotary_gcu_values_and_mutation(
+        backend, device, dtype, interleaved, inplace, packed_views, record_property
+    )
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
+@pytest.mark.parametrize("packed_views", [False, True], ids=["contiguous", "packed"])
+def test_rotary_gcu_split_half_inplace_graph(
+    backend, device, dtype, packed_views, record_property
+):
+    _check_rotary_gcu_values_and_mutation(
+        backend,
+        device,
+        dtype,
+        False,
+        True,
+        packed_views,
+        record_property,
+        use_graph=True,
+    )

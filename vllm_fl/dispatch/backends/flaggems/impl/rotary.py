@@ -84,6 +84,25 @@ def rotary_embedding_flaggems(
 
     from flaggems_vllm import apply_rotary_pos_emb as gems_rope_forward
 
+    # The pinned FlagGems-vllm GCU in-place split-half kernel corrupts values
+    # for both compact and packed Q/K views. Its out-of-place path preserves
+    # the same dtype and arithmetic, so copy those outputs back to retain the
+    # caller's storage/stride contract. Remove this adapter once the native
+    # GCU in-place provider passes the split-half value/mutation regression.
+    if query.device.type == "gcu" and inplace and not rotary_interleaved:
+        q_embed, k_embed = gems_rope_forward(
+            query,
+            key,
+            cos,
+            sin,
+            position_ids=position_ids,
+            rotary_interleaved=rotary_interleaved,
+            inplace=False,
+        )
+        query.copy_(q_embed)
+        key.copy_(k_embed)
+        return query, key
+
     return gems_rope_forward(
         query,
         key,
