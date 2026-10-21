@@ -42,7 +42,7 @@ pytestmark = pytest.mark.skipif(
 def test_musa_piecewise_capture_sizes_respect_live_graph_limit(monkeypatch):
     from vllm.config import CUDAGraphMode
 
-    import vllm_fl.worker.model_runner as model_runner_module
+    from vllm_fl.worker import model_runner as model_runner_module
     from vllm_fl.worker.model_runner import ModelRunnerFL
 
     capture_sizes = [1, 2, 4] + list(range(8, 256, 8)) + list(range(256, 513, 16))
@@ -94,7 +94,7 @@ def test_full_graph_exclusion_survives_dp_redispatch(
 ):
     from vllm.config import CUDAGraphMode
 
-    import vllm_fl.worker.model_runner as module
+    from vllm_fl.worker import model_runner as module
 
     dispatcher = MagicMock()
     mode = CUDAGraphMode.NONE if disable_full else CUDAGraphMode.FULL
