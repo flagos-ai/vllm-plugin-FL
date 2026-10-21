@@ -74,7 +74,7 @@ global_trigger_paths:
 
 platforms:
   nvidia:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/nvidia.yaml
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
@@ -92,14 +92,14 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/ascend.yaml
   hygon:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/hygon.yaml
       - tests/platforms/hygon.yaml
     exempt_from_global:
       - vllm_fl/dispatch/config/hygon.yaml
   metax:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
@@ -117,7 +117,7 @@ platforms:
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/
   enflame:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
@@ -126,7 +126,7 @@ platforms:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
   kunlunxin:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
@@ -135,7 +135,7 @@ platforms:
       - vllm_fl/dispatch/config/kunlunxin.yaml
       - vllm_fl/dispatch/backends/vendor/kunlunxin/
   thead:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
@@ -144,7 +144,7 @@ platforms:
       - vllm_fl/dispatch/config/thead.yaml
       - vllm_fl/dispatch/backends/vendor/thead/
   iluvatar:
-    enabled: true
+    enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/iluvatar.yaml
       - vllm_fl/dispatch/backends/vendor/iluvatar/

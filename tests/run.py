@@ -291,6 +291,18 @@ class TestRunner:
                 device_env["HCCL_NPU_SOCKET_PORT_RANGE"] = (
                     f"{port_base}-{port_base + 19}"
                 )
+                # Per-case compile caches: coexisting engines JIT-compiling
+                # into one shared triton/inductor cache can corrupt each
+                # other, surfacing as async device errors (musa runs die
+                # mid-run with MUSA/MCCL errors only when two engines
+                # coexist). Slot-keyed dirs are shared only by sequentially
+                # scheduled cases (warm reuse) and never by concurrent ones.
+                device_env["TRITON_CACHE_DIR"] = (
+                    f"/tmp/triton-cache-slot{slots[0]}"
+                )
+                device_env["TORCHINDUCTOR_CACHE_DIR"] = (
+                    f"/tmp/inductor-cache-slot{slots[0]}"
+                )
                 result = self._run_single(
                     tc, extra_env_override=device_env, _quiet=True
                 )
