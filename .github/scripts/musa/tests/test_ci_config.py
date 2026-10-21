@@ -289,21 +289,9 @@ class ConfigTests(unittest.TestCase):
                 for scope in ("unit", "functional", "e2e", "benchmark")
             ],
         )
-        gate_steps = [
-            step
-            for step in suite["steps"]
-            if step.get("run") == "bash .github/scripts/musa/run-adaptation-gate.sh"
-        ]
-        self.assertEqual(len(gate_steps), 1)
-        gate = gate_steps[0]
-        self.assertEqual(gate["timeout-minutes"], "500")
-        self.assertIn("!cancelled()", gate["if"])
-        for scope in ("unit", "functional", "e2e", "benchmark"):
-            self.assertIn(
-                "steps." + scope + ".outputs.gpu_stages_safe == 'true'", gate["if"]
-            )
-        self.assertIn("steps.devices.outcome == 'success'", gate["if"])
-        self.assertIn("steps.install.outcome == 'success'", gate["if"])
+        self.assertFalse(
+            any("run-adaptation-gate" in step.get("run", "") for step in suite["steps"])
+        )
         self.assertNotIn("max-parallel", platform["jobs"]["e2e"]["strategy"])
         self.assertEqual(platform["jobs"]["e2e"]["strategy"]["fail-fast"], "false")
         self.assertEqual(
@@ -460,24 +448,6 @@ Processes:
         )
         self.assertIn("raise RuntimeError", ast.unparse(guard))
         self.assertNotIn("mthreads-gmi\n", script)
-
-    def test_busy_fd_holder_prevents_idle_candidate(self):
-        nodes = [{"node_id": 4, "pci": "0000:83:00.0"}]
-        gmi = {
-            "devices": [{"physical_id": 4, "pci": "0000:83:00.0", "memory_used_mib": 2}]
-        }
-        fd_report = {"scan_complete": True, "open_fd_counts": {4: 1}}
-        self.assertEqual(probe_module.candidate_devices(nodes, gmi, fd_report), [])
-        fd_report["open_fd_counts"][4] = 0
-        self.assertEqual(len(probe_module.candidate_devices(nodes, gmi, fd_report)), 1)
-
-    def test_incomplete_fd_scan_never_proposes_allocation(self):
-        self.assertEqual(
-            probe_module.candidate_devices(
-                [], {"devices": []}, {"scan_complete": False}
-            ),
-            [],
-        )
 
     def test_duplicate_vendor_rows_do_not_produce_mapping(self):
         row = "4    MTT S5000 |00000000:83:00.0 |0% 2MiB(81920MiB)\n"

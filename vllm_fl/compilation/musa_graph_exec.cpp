@@ -31,6 +31,10 @@
 namespace {
 using Graph = at::musa::MUSAGraph;
 
+// TorchMUSA v2.9.0 has no public executable-only release/restore methods:
+// reset() destroys graph_ too, and reinstantiate_graph() requires a live exec.
+// Keep this compatibility access confined to the three operations below.
+// https://github.com/MooreThreads/torch_musa/blob/1dc78726ff84bb2da61697055be0d037a8a29170/torch_musa/csrc/aten/musa/MUSAGraph.h
 // Protected access is legal here. These are pointers to BASE-class members,
 // applied to the real registered MUSAGraph object: no offsets or downcast.
 struct Members : Graph {

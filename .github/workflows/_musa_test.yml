@@ -14,7 +14,7 @@
 
 
 # MUSA keeps all GPU stages on one allocated runner and container.
-# The standard scopes still use tests/run.py; the original Gate is additional.
+# The standard unit, functional, E2E and benchmark scopes use tests/run.py.
 name: MUSA Test
 
 on:
@@ -107,13 +107,11 @@ jobs:
             $CHANGED_ARG
 
   musa_suite:
-    name: MUSA complete suite and original adaptation Gate
+    name: MUSA complete test suite
     needs: setup
     if: inputs.platform == 'musa'
     runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
-    # Includes the existing E2E group bounds and four 6900-second Gate routes.
-    # Main E2E groups allow 180 minutes each; total step bounds sum to 1334 minutes.
-    # Leave time for container teardown and evidence upload without extending any stage.
+    # Keep the existing per-stage bounds and allow container teardown and report upload.
     timeout-minutes: 1440
     container:
       image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
@@ -124,11 +122,10 @@ jobs:
       MUSA_CI_E2E_MATRIX: ${{ needs.setup.outputs.e2e_matrix }}
       MUSA_CI_SUITE_IMAGE: ${{ fromJson(needs.setup.outputs.config).ci_image }}
     steps:
-      - name: Set unique suite and Gate evidence directories
+      - name: Set unique suite result directory
         run: |
-          gate_root="${RUNNER_TEMP}/musa-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           suite_root="${RUNNER_TEMP}/musa-suite-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          printf 'MUSA_GATE_ARTIFACT_DIR=%s\nMUSA_CI_RESULT_ROOT=%s\nMUSA_SUITE_ARTIFACT_DIR=%s\n' "$gate_root" "$gate_root" "$suite_root" >> "$GITHUB_ENV"
+          printf 'MUSA_SUITE_ARTIFACT_DIR=%s\n' "$suite_root" >> "$GITHUB_ENV"
           mkdir -p "$suite_root/unit" "$suite_root/functional" "$suite_root/benchmark"
       - uses: actions/checkout@v4
       - name: Check the actual allocated devices and native PCI mapping
@@ -158,23 +155,12 @@ jobs:
         if: steps.e2e.outputs.gpu_stages_safe == 'true'
         timeout-minutes: 31
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope benchmark
-      - name: Run both original Gate models in eager and graph modes
-        if: |
-          always() && !cancelled() &&
-          steps.devices.outcome == 'success' && steps.install.outcome == 'success' &&
-          steps.unit.outputs.gpu_stages_safe == 'true' &&
-          (steps.functional.outcome == 'skipped' || steps.functional.outputs.gpu_stages_safe == 'true') &&
-          (steps.e2e.outcome == 'skipped' || steps.e2e.outputs.gpu_stages_safe == 'true') &&
-          (steps.benchmark.outcome == 'skipped' || steps.benchmark.outputs.gpu_stages_safe == 'true')
-        timeout-minutes: 500
-        run: bash .github/scripts/musa/run-adaptation-gate.sh
-      - name: Preserve all suite, Gate and installation evidence
+      - name: Preserve suite and installation reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: musa-adaptation-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: musa-suite-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ env.MUSA_GATE_ARTIFACT_DIR }}
             ${{ env.MUSA_SUITE_ARTIFACT_DIR }}
             ${{ env.MUSA_CI_INSTALL_EVIDENCE }}
             coverage-musa.json

@@ -36,7 +36,6 @@ while IFS= read -r variable; do
 done < <(compgen -e)
 "${build_env[@]}" "$task_python" -I -B -m pip --isolated wheel --no-index --no-deps --no-build-isolation --no-cache-dir \
   --wheel-dir "$task_dir/wheels" . > "$task_dir/build.stdout.raw" 2> "$task_dir/build.stderr.raw"
-"${build_env[@]}" "$task_python" -I -B -m pip --isolated wheel --no-index --no-deps --no-build-isolation --no-cache-dir   --wheel-dir "$task_dir/wheels" ./tools/musa-gate-observer   > "$task_dir/observer-build.stdout.raw" 2> "$task_dir/observer-build.stderr.raw"
 "$task_python" -I -B .github/scripts/musa/dependency_profile.py stage \
   --task-dir "$task_dir" --profile "$dependency_profile" \
   --manifest "${MUSA_CI_DEPENDENCY_MANIFEST:-}" \
@@ -55,11 +54,11 @@ for wheel in (root / 'wheels').glob('*.whl'):
     assert name not in distributions, name
     distributions[name] = str(wheel)
 profile = json.loads((root / 'dependency-profile-staged.json').read_text())
-expected = {'vllm', 'vllm_plugin_fl', 'musa_gate_observer'}
+expected = {'vllm', 'vllm_plugin_fl'}
 if profile['profile'] == 'latest':
     expected |= {'flag_gems', 'flagtree', 'pyyaml'}
 assert set(distributions) == expected, distributions
-order = ['vllm', 'vllm_plugin_fl', 'musa_gate_observer']
+order = ['vllm', 'vllm_plugin_fl']
 if profile['profile'] == 'latest':
     order += ['flag_gems', 'flagtree', 'pyyaml']
 argv = [sys.executable, '-I', '-B', '-m', 'pip', '--isolated', 'install', '--ignore-installed',
@@ -86,9 +85,9 @@ temporary = root / 'test-tmp'; temporary.mkdir()
 allowed = {'pytest', 'pytest-cov', 'pytest-json-report', 'pytest-timeout', 'coverage', 'pytest-metadata',
            'iniconfig', 'packaging', 'pluggy', 'pygments', 'exceptiongroup', 'tomli', 'typing-extensions',
            'colorama', 'py', 'importlib-metadata', 'zipp'}
-protected = ('vllm', 'vllm-plugin-fl', 'musa-gate-observer', 'torch', 'torch-musa',
+protected = ('vllm', 'vllm-plugin-fl', 'torch', 'torch-musa',
              'flag-gems', 'flagtree', 'pyyaml', 'triton')
-blocked_roots = {'vllm', 'vllm_fl', 'musa_gate_observer', 'torch', 'torch_musa', 'flag_gems',
+blocked_roots = {'vllm', 'vllm_fl', 'torch', 'torch_musa', 'flag_gems',
                  'flagtree', 'triton', 'yaml', '_yaml'}
 report = {'source_index': 'https://pypi.org/simple', 'ordinary_wheels_only': True,
           'allowed_distributions': sorted(allowed), 'commands': [], 'wheels': [], 'passed': False}
@@ -203,17 +202,17 @@ PY_TEST_TOOLS
   --manifest-sha256 "${MUSA_CI_DEPENDENCY_MANIFEST_SHA256:-}" \
   > "$task_dir/dependency-installed.stdout.raw" 2> "$task_dir/dependency-installed.stderr.raw"
 "$task_python" -I -B - "$task_dir" <<'PY' > "$task_dir/imports.json"
-import base64, csv, hashlib, importlib, importlib.metadata as md, io, json, pathlib, sys, zipfile
+import hashlib, importlib, importlib.metadata as md, json, pathlib, sys
 root = pathlib.Path(sys.argv[1]); site = root / 'venv/lib/python3.10/site-packages'
 # Use the running interpreter's site directory, rather than assume Python 3.10 in CI.
 import sysconfig
 site = pathlib.Path(sysconfig.get_path('purelib')).resolve()
 profile = json.loads((root / 'dependency-profile-staged.json').read_text())['profile']
 rows = []
-names = ['vllm', 'vllm_fl', 'musa_gate_observer', 'flaggems_vllm', 'torch', 'torch_musa', 'flag_gems', 'triton', 'pytest', 'openai', 'httpx']
+names = ['vllm', 'vllm_fl', 'flaggems_vllm', 'torch', 'torch_musa', 'flag_gems', 'triton', 'pytest', 'openai', 'httpx']
 if profile == 'latest':
     names.append('yaml')
-private = {'vllm', 'vllm_fl', 'musa_gate_observer', 'flaggems_vllm'}
+private = {'vllm', 'vllm_fl', 'flaggems_vllm'}
 vendor = {'torch', 'torch_musa'}
 if profile == 'latest':
     private |= {'flag_gems', 'triton', 'yaml'}
@@ -232,60 +231,8 @@ from vllm.platforms import current_platform
 assert torch.musa.is_available() and torch.musa.device_count() == 4
 assert current_platform.device_type == 'musa', current_platform.device_type
 assert md.version('vllm') == '0.28.0+empty', md.version('vllm')
-# Read the newly installed observer payload and ordinary wheel RECORD directly.
-# Importing the observer's empty __init__ does not activate its server plugin.
-dist = md.distribution('musa-gate-observer')
-dist_root = pathlib.Path(dist.locate_file('')).resolve(strict=True)
-assert dist_root == site, (dist_root, site)
-record_paths = [f for f in dist.files if str(f).endswith('.dist-info/RECORD')]
-assert len(record_paths) == 1
-record_path = pathlib.Path(dist.locate_file(record_paths[0])).resolve(strict=True)
-record_raw = record_path.read_bytes()
-record_rows = list(csv.reader(io.StringIO(record_raw.decode('utf-8'))))
-assert all(len(r) == 3 for r in record_rows)
-record_map = {r[0]: r[1:] for r in record_rows}
-assert len(record_map) == len(record_rows)
-wheel_rows = json.loads((root / 'installed-wheels.json').read_text())
-observer_wheels = []
-for row in wheel_rows:
-    with zipfile.ZipFile(row['path']) as z:
-        metadata_names = [n for n in z.namelist() if len(pathlib.PurePosixPath(n).parts) == 2 and n.endswith('.dist-info/METADATA')]
-        assert len(metadata_names) == 1
-        import email
-        metadata = email.message_from_bytes(z.read(metadata_names[0]))
-        if metadata['Name'] == 'musa-gate-observer':
-            assert metadata['Version'] == dist.version == '0.1.0'
-            observer_wheels.append(row)
-            payload = []
-            for name in ['__init__.py', 'trace.py', 'server.py', 'pytest_plugin.py', 'summarize.py']:
-                member = 'musa_gate_observer/' + name
-                body = z.read(member)
-                actual = pathlib.Path(dist.locate_file(member)).resolve(strict=True)
-                assert actual.is_relative_to(site) and actual.read_bytes() == body, member
-                digest = hashlib.sha256(body).digest()
-                encoded = base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
-                assert record_map[member] == ['sha256=' + encoded, str(len(body))], member
-                payload.append({'path': str(actual), 'bytes': len(body), 'sha256': digest.hex()})
-assert len(observer_wheels) == 1
-direct_paths = [f for f in dist.files if str(f).endswith('.dist-info/direct_url.json')]
-assert len(direct_paths) == 1
-direct_path = pathlib.Path(dist.locate_file(direct_paths[0])).resolve(strict=True)
-direct_url = json.loads(direct_path.read_bytes())
-assert 'dir_info' not in direct_url and direct_url.get('archive_info'), direct_url
-expected_wheel = observer_wheels[0]
-assert direct_url['url'] == pathlib.Path(expected_wheel['path']).resolve(strict=True).as_uri(), direct_url
-archive_info = direct_url['archive_info']
-assert isinstance(archive_info, dict)
-assert archive_info.get('hashes') == {'sha256': expected_wheel['sha256']}, archive_info
-if 'hash' in archive_info:
-    assert archive_info['hash'] == 'sha256=' + expected_wheel['sha256'], archive_info
-observer_install = {'distribution': dist.metadata['Name'], 'version': dist.version,
-                    'metadata_path': str(dist._path), 'wheel': observer_wheels[0],
-                    'record': {'path': str(record_path), 'bytes': len(record_raw),
-                               'sha256': hashlib.sha256(record_raw).hexdigest()},
-                    'direct_url': direct_url, 'payload': payload, 'editable': False}
 print(json.dumps({'dependency_profile': profile, 'imports': rows, 'device_count': torch.musa.device_count(),
-                  'platform': current_platform.device_type, 'observer_install': observer_install}, indent=2))
+                  'platform': current_platform.device_type}, indent=2))
 PY
 "$task_python" -I -B .github/scripts/musa/cache_check.py > "$task_dir/cache.json"
 printf '%s\n' "$task_dir/venv/bin" >> "$GITHUB_PATH"

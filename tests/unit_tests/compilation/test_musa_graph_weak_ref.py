@@ -68,8 +68,14 @@ def contract():
     source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     names = {"_weak_ref_musa_tensors", "weak_ref_tensors"}
+    musa_source = source.with_name("musa_graph.py")
+    musa_module = ast.parse(
+        musa_source.read_text(encoding="utf-8"), filename=str(musa_source)
+    )
     funcs = [
-        n for n in module.body if isinstance(n, ast.FunctionDef) and n.name in names
+        n
+        for n in [*module.body, *musa_module.body]
+        if isinstance(n, ast.FunctionDef) and n.name in names
     ]
     assert {n.name for n in funcs} == names
     state = SimpleNamespace(
@@ -105,6 +111,11 @@ def contract():
     def importer(name, globals=None, locals=None, fromlist=(), level=0):
         if name == "torch_musa":
             return vendor
+        if name == "vllm_fl.compilation.musa_graph":
+            assert tuple(fromlist) == ("_weak_ref_musa_tensors",)
+            return SimpleNamespace(
+                _weak_ref_musa_tensors=namespace["_weak_ref_musa_tensors"]
+            )
         if name == "vllm.sequence":
             return SimpleNamespace(IntermediateTensors=_Intermediate)
         if name == "vllm.utils.torch_utils":

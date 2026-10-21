@@ -36,13 +36,12 @@ METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
 METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
-MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64@sha256:6f7c2209c76166c4033bf7693bf5164ed6aee96c1020307b1bd358993c69ac87}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
 MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
-MUSA_BUILD_CONTEXT="${MUSA_BUILD_CONTEXT:-}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
@@ -202,7 +201,6 @@ VERSIONS (override via environment variables):
     MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
     MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
     MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
-    MUSA_BUILD_CONTEXT   Private six-wheel context produced by docker/musa/prepare_context.py
   Enflame:
     ENFLAME_BASE_IMAGE     Base image (default: ${ENFLAME_BASE_IMAGE})
     ENFLAME_DRIVER_VERSION Driver version used in generated image tag (default: ${ENFLAME_DRIVER_VERSION})
@@ -303,26 +301,7 @@ if ! command -v docker &>/dev/null; then
     err "docker is not installed or not in PATH."
 fi
 
-# MUSA's ordinary runtime stack is supplied through a minimal private wheel context.
-# The public checkout itself is never copied into that image build context.
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
-MUSA_CONTEXT_BUILD_ARGS=()
-if [[ "${PLATFORM}" == "musa" ]]; then
-    [[ -n "${MUSA_BUILD_CONTEXT}" ]] || err "Set MUSA_BUILD_CONTEXT to a verified six-wheel private context."
-    [[ "${#EXTRA_BUILD_ARGS[@]}" -eq 0 ]] || err "MUSA build arguments are bound by the verified wheel context."
-    [[ "${MUSA_VLLM_VERSION}" == "0.28.0" && "${MUSA_PYTHON_VERSION}" == "3.10" && \
-       "${MUSA_TORCH_VERSION}" == "2.9.0" && "${MUSA_VERSION}" == "4.3.5" && \
-       "${MUSA_FLAGGEMS_VERSION}" == "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2" ]] || \
-        err "MUSA versions are bound by the validated ordinary-wheel profile."
-    BUILD_CONTEXT="${MUSA_BUILD_CONTEXT}"
-    musa_context_fields=$(python3 -I -B "${SCRIPT_DIR}/musa/verify_context.py" \
-        --context "${BUILD_CONTEXT}" --format build-args)
-    mapfile -t MUSA_CONTEXT_BUILD_ARGS <<< "${musa_context_fields}"
-    [[ "${#MUSA_CONTEXT_BUILD_ARGS[@]}" -eq 5 ]] || err "Invalid MUSA context build arguments."
-    MUSA_BASE_IMAGE="${MUSA_CONTEXT_BUILD_ARGS[0]#MUSA_BASE_IMAGE=}"
-    MUSA_SOURCE_COMMIT="${MUSA_CONTEXT_BUILD_ARGS[1]#PLUGIN_COMMIT=}"
-fi
-
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
@@ -396,12 +375,9 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
     fi
-    BUILD_ARGS+=(--pull=false --network=none)
-    for field in "${MUSA_CONTEXT_BUILD_ARGS[@]}"; do
-        BUILD_ARGS+=(--build-arg "${field}")
-    done
+    BUILD_ARGS+=(--build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="v${VLLM_VERSION}-musa-${TARGET}-${MUSA_SOURCE_COMMIT:0:12}"
+        IMAGE_TAG="musa${MUSA_VERSION}-vllm${VLLM_VERSION}-torch${MUSA_TORCH_VERSION}-py${MUSA_PYTHON_VERSION}-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     PYTHON_VERSION="${ENFLAME_PYTHON_VERSION}"

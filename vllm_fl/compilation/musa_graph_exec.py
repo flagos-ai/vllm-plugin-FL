@@ -1,9 +1,17 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Lazy, MUSA-only loading of executable lifecycle operations.
+"""TorchMUSA 2.9 executable-only compatibility shim, loaded lazily on MUSA.
 
-Build against the installed TorchMUSA 2.9 headers and SDK, using PyTorch's
-normal extension cache (including TORCH_EXTENSIONS_DIR when configured).
-No device kernels, global CUDA patches, or additional dependencies are used.
+The pinned vendor API cannot release an executable while retaining its template:
+``reset()`` destroys both, and ``reinstantiate_graph()`` requires both to be live.
+See the public API and implementations in MooreThreads/torch_musa v2.9.0,
+``torch_musa/csrc/aten/musa/MUSAGraph.{h,cpp}``.
+
+Compile the narrow host-only shim against the installed TorchMUSA 2.9 headers
+and SDK using PyTorch's extension cache (including TORCH_EXTENSIONS_DIR).
+Capture admission and native profiler updates can load it; ordinary runtime
+replay never compiles or reinstantiates a cold executable. Build/ABI errors
+propagate rather than silently reducing capture coverage. This requires a C++
+compiler and Ninja; it does not build device kernels or patch global CUDA APIs.
 """
 
 from __future__ import annotations

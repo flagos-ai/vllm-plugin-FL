@@ -26,8 +26,6 @@ extend-ignore-re = [
 rsqrt = "rsqrt"
 dout = "dout"
 bfloat = "bfloat"
-# ND denotes multidimensional tensor kernels and their recorded profile identifiers.
-nd = "nd"
 
 # Hardware / vendor terminology
 npu = "npu"
@@ -50,6 +48,4 @@ extend-exclude = [
     "vllm_fl/**",
     "tests/",
     "tests/**",
-    # Verbatim upstream dependency patches are SHA-bound inputs.
-    "tools/musa_dependency_recipe/*.patch",
 ]

@@ -15,10 +15,10 @@ import gc
 import importlib.util
 import sys
 import weakref
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from enum import IntEnum
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch as cpu_torch
@@ -187,6 +187,24 @@ class _Contract:
             raise self.errors["body"]
         return self.output
 
+    @property
+    def wrapper_type(self):
+        key = (
+            "MUSAGraphWrapper"
+            if self.platform.device_type == "musa"
+            else "GraphWrapper"
+        )
+        return self.cpu_namespace[key]
+
+    @wrapper_type.setter
+    def wrapper_type(self, value):
+        key = (
+            "MUSAGraphWrapper"
+            if self.platform.device_type == "musa"
+            else "GraphWrapper"
+        )
+        self.cpu_namespace[key] = value
+
     def wrapper(self):
         return self.wrapper_type(
             self.runnable,
@@ -210,6 +228,18 @@ def contract():
         if isinstance(node, ast.ClassDef) and node.name in names
     ]
     assert {node.name for node in classes} == names
+    musa_source = source.with_name("musa_graph.py")
+    musa_module = ast.parse(
+        musa_source.read_text(encoding="utf-8"), filename=str(musa_source)
+    )
+    musa_names = {"MUSAGraphEntry", "MUSAGraphWrapper"}
+    musa_classes = [
+        node
+        for node in musa_module.body
+        if isinstance(node, ast.ClassDef) and node.name in musa_names
+    ]
+    assert {node.name for node in musa_classes} == musa_names
+    classes += musa_classes
     helpers = [
         node
         for node in module.body
@@ -244,6 +274,7 @@ def contract():
         "dataclasses": dataclasses,
         "weakref": weakref,
         "ExitStack": ExitStack,
+        "nullcontext": nullcontext,
         "suppress": suppress,
         "envs": SimpleNamespace(VLLM_LOGGING_LEVEL="INFO"),
         "current_platform": state.platform,
@@ -264,6 +295,7 @@ def contract():
         "validate_cudagraph_capturing_enabled": lambda: None,
         "set_graph_pool_id": lambda pool: state.events.append(("pool", pool)),
         "weak_ref_tensors": lambda value: value,
+        "_weak_ref_musa_tensors": lambda value: value,
         "compilation_counter": state.counter,
     }
     exec(
@@ -278,7 +310,7 @@ def contract():
     )
     state.cpu_namespace = namespace
     state.cpu_classes = classes
-    state.wrapper_type = namespace["GraphWrapper"]
+    state.wrapper_type = namespace["MUSAGraphWrapper"]
     state.options_type = namespace["GraphOptions"]
     return state
 
@@ -560,7 +592,10 @@ def test_staging_does_not_change_other_backend_or_full_replay(contract, device, 
     )
     captured = _Tensor(contract)
     wrapper(captured)
-    assert wrapper.concrete_graph_entries["batch"].musa_input_leaves is None
+    if device == "musa":
+        assert wrapper.concrete_graph_entries["batch"].musa_input_leaves is None
+    else:
+        assert not hasattr(wrapper.concrete_graph_entries["batch"], "musa_input_leaves")
     contract.events.clear()
     wrapper(_Tensor(contract, (9.0, 9.0)))
     assert contract.event_names() == (
@@ -596,7 +631,7 @@ def test_staging_validation_is_active_with_optimized_python_code(contract):
         ),
         namespace,
     )
-    contract.wrapper_type = namespace["GraphWrapper"]
+    contract.wrapper_type = namespace["MUSAGraphWrapper"]
     wrapper = contract.wrapper()
     captured = _Tensor(contract)
     wrapper(captured)
@@ -1076,7 +1111,10 @@ def test_non_piecewise_musa_mutating_replay_policy_is_unchanged(contract, device
     captured = _Tensor(contract)
     assert wrapper(captured) is captured
     entry = wrapper.concrete_graph_entries["batch"]
-    assert entry.musa_input_leaves is None
+    if device == "musa":
+        assert entry.musa_input_leaves is None
+    else:
+        assert not hasattr(entry, "musa_input_leaves")
     entry.graph.replay = lambda: captured.payload.add_(10)
     incoming = _Tensor(contract, (3.0, 4.0))
     assert wrapper(incoming) is captured
@@ -1351,3 +1389,41 @@ def test_original_empty_input_keeps_native_replay(contract):
     assert wrapper(captured) is captured
     assert len(calls) == 1
     assert contract.event_names() == ["numeric-replay"]
+
+
+@pytest.mark.parametrize("device", ["cuda", "musa"])
+def test_public_factory_selects_backend_and_preserves_shared_registry(
+    contract, monkeypatch, device
+):
+    namespace = contract.cpu_namespace
+    target = "vllm_fl.compilation.musa_graph"
+    module = ModuleType(target)
+    module.MUSAGraphWrapper = namespace["MUSAGraphWrapper"]
+    monkeypatch.setitem(sys.modules, target, module)
+    original_import = namespace["__builtins__"]["__import__"]
+
+    def import_backend(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == target and tuple(fromlist) == ("MUSAGraphWrapper",):
+            return builtins.__import__(name, globals, locals, fromlist, level)
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setitem(namespace["__builtins__"], "__import__", import_backend)
+    contract.platform.device_type = device
+    options = contract.options_type(debug_log_enable=False, weak_ref_output=False)
+    wrapper = namespace["GraphWrapper"](
+        contract.runnable,
+        SimpleNamespace(compilation_config=object()),
+        _Mode.PIECEWISE,
+        options,
+    )
+    expected = namespace["MUSAGraphWrapper" if device == "musa" else "GraphWrapper"]
+    assert type(wrapper) is expected
+    assert wrapper.cudagraph_options is options
+    assert (
+        namespace["GraphWrapper"]._all_instances
+        is namespace["MUSAGraphWrapper"]._all_instances
+    )
+    assert wrapper in namespace["GraphWrapper"]._all_instances
+    wrapper.concrete_graph_entries["sentinel"] = object()
+    namespace["GraphWrapper"].clear_all_graphs()
+    assert wrapper.concrete_graph_entries == {}

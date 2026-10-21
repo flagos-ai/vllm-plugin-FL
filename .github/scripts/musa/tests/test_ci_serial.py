@@ -98,7 +98,7 @@ class SerialTests(unittest.TestCase):
             SERIAL.run_groups([group()], Path(directory), run, lambda: next(clocks))
         self.assertEqual(seconds, [3600, 3570])
 
-    def test_one_musa_job_preserves_gate_and_other_backend_paths(self):
+    def test_one_musa_job_preserves_required_scopes_and_other_backend_paths(self):
         workflow = yaml.safe_load(
             (ROOT / ".github/workflows/_musa_test.yml").read_text()
         )
@@ -141,16 +141,13 @@ class SerialTests(unittest.TestCase):
         steps = jobs["musa_suite"]["steps"]
         runs = [step.get("run", "") for step in steps]
         self.assertEqual(
-            sum(
-                "bash .github/scripts/musa/run-adaptation-gate.sh" in run
-                for run in runs
-            ),
-            1,
+            [run for run in runs if "run_ci_stage.py --scope " in run],
+            [
+                "python -I -B .github/scripts/musa/run_ci_stage.py --scope " + scope
+                for scope in ("unit", "functional", "e2e", "benchmark")
+            ],
         )
-        gate = next(
-            step for step in steps if "original Gate models" in step.get("name", "")
-        )
-        self.assertIn("always()", gate["if"])
+        self.assertFalse(any("run-adaptation-gate" in run for run in runs))
         self.assertNotIn("runner.temp", json.dumps(jobs["musa_suite"].get("env", {})))
         self.assertNotIn("MTHREADS_VISIBLE_DEVICES=all", json.dumps(workflow))
 

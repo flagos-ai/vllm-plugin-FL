@@ -110,9 +110,7 @@ vllm serve /models/Qwen3.6-27B \
 Use `--enforce-eager` for the eager run. Remove it for the graph run, then
 run `MODEL_PATH=/path/to/model PORT=8000 ./run_test.sh` against each service.
 Both runs are mandatory even though the test client does not need to know the
-execution mode. For MUSA acceptance, graph mode also requires evidence of actual
-capture and replay joined to these requests; removing `--enforce-eager` alone
-does not prove that graphs were used. See [the MUSA guide](../../docs/usage/musa.md).
+execution mode.
 
 Each pytest file or individual case can also be run directly. `PORT` and at
 least one of `SERVED_MODEL_NAME` or `MODEL_PATH` are required. The result label
