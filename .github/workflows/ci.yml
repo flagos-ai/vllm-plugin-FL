@@ -77,6 +77,7 @@ jobs:
           sparse-checkout: |
             .github/configs
             .github/scripts
+            tests
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
@@ -86,6 +87,7 @@ jobs:
           sparse-checkout: |
             .github/configs
             .github/scripts
+            tests
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
@@ -94,10 +96,13 @@ jobs:
           sparse-checkout: |
             .github/configs
             .github/scripts
+            tests
       - name: Install PyYAML
         run: pip install pyyaml
       - name: Check NVIDIA EMPTY stack validation
         run: python -I -B .github/scripts/cuda/test_stack.py
+      - name: Check NVIDIA regression selection and reports (CPU only)
+        run: python -B .github/scripts/cuda/test_regressions.py
       - id: detect
         run: python3 .github/scripts/detect_platforms.py
 

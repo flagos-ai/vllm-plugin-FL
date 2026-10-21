@@ -128,3 +128,13 @@ jobs:
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
             test-results/logs/
+
+      - name: Upload NVIDIA runner evidence
+        if: always() && inputs.platform == 'cuda' && inputs.device == 'h20' && inputs.task == 'inference'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvidia-runner-${{ inputs.device }}-${{ inputs.task }}
+          path: |
+            nvidia-*.json
+            nvidia-*.log
+          if-no-files-found: error

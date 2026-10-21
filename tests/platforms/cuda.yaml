@@ -107,6 +107,10 @@ a100:
 
 h20:
   name: "h20"
+  # Explicit per-process choices; container defaults alone do not test V1.
+  inference_runners:
+    qwen3_6/27b_tp2_eager: v1
+    qwen3_6/35b_a3b_tp2_graph: v2
   tests:
     e2e:
       inference:

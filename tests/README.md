@@ -1,6 +1,8 @@
 # Tests
 
-Platform-agnostic test suite for the vllm-plugin-FL project. All tests are designed to run on both NVIDIA CUDA and Huawei Ascend NPU without modification.
+Shared test framework for the vllm-plugin-FL project, with platform-specific
+regressions selected by the configured backend. NVIDIA EMPTY operator tests
+include real CUDA numerical and graph checks.
 
 ## Architecture Overview
 
@@ -13,7 +15,7 @@ Platform-agnostic test suite for the vllm-plugin-FL project. All tests are desig
               │                  │                   │
         ┌─────▼─────┐   ┌───────▼───────┐   ┌──────▼──────┐
         │ Unit Tests │   │  Functional   │   │  E2E Tests  │
-        │ (no GPU)   │   │  (GPU, no     │   │ (GPU +      │
+        │ (CPU/GPU)  │   │  (GPU, no     │   │ (GPU +      │
         │            │   │   models)     │   │  models)    │
         └────────────┘   └───────────────┘   └──────┬──────┘
                                                      │
@@ -71,7 +73,7 @@ tests/
 │   └── distributed/
 │       └── test_collective_ops.py  # Collective ops (all_reduce, etc.)
 │
-├── unit_tests/                     # Fast isolated tests (no GPU required)
+├── unit_tests/                     # Isolated tests, including CUDA operator checks
 │   ├── conftest.py
 │   ├── dispatch/                   # Op dispatch system
 │   │   ├── test_call_op.py
@@ -139,10 +141,59 @@ python tests/run.py --platform cuda --device a100 --dry-run
 python tests/run.py --platform ascend --device 910b --scope unit
 ```
 
+### NVIDIA 0.32 EMPTY regression
+
+Use the pinned runtime and plugin installation in the
+[NVIDIA usage guide](../docs/usage/nvidia.md). The automatic H20 matrix retains
+the four Qwen3.6 inference/serving cases. Inference cases explicitly select
+native V1 or V2 in separate processes, verify the actual worker runner and
+EMPTY capability, and compare repeated greedy token IDs. JSON evidence and
+logs are uploaded even when the job fails. Draft PR checks remain skipped by
+the existing CI policy.
+
+Additional model regressions are explicit local runs on reserved GPUs. They
+are excluded from the automatic matrix and do not download checkpoints:
+
+```bash
+python .github/scripts/cuda/run_regression.py --list
+
+# Run inside the prepared container on an idle, visible GPU.
+CUDA_VISIBLE_DEVICES=0 python .github/scripts/cuda/run_regression.py \
+  --model qwen3 --case 4b_v1_graph \
+  --model-path /models/Qwen3-4B --output-dir /results/qwen3-v1
+CUDA_VISIBLE_DEVICES=0 python .github/scripts/cuda/run_regression.py \
+  --model qwen3 --case 4b_v2_eager \
+  --model-path /models/Qwen3-4B --output-dir /results/qwen3-v2
+```
+
+| Model / case | Coverage | GPU reservation |
+|---|---|---|
+| `qwen3/4b_v1_graph`, `qwen3/4b_v2_eager` | Native runner choice, exact text answers, repeat tokens | 1 GPU, at least 48 GiB |
+| `minicpm4_7/1b_multimodal` | Text, image and video; ordered answer terms and repeat tokens | 1 GPU, at least 24 GiB |
+| `minicpm4_7/1b_paired_images` | Two images with different sizes; ordered colors and repeat tokens | 1 GPU, at least 24 GiB |
+| `qwen3_8/flash_next_tp8_eager` | Full checkpoint, TP8 / V2 / eager, text answers and repeat tokens | 8 GPUs, each at least 70 GiB |
+| `deepseek_v4_1/flash_tp8_eager` | Full checkpoint, TP8 / V2 / eager, text answers and repeat tokens | 8 GPUs, each at least 70 GiB |
+
+The runner fails on missing selections, incomplete or wrong-architecture
+checkpoints, insufficient visible/free GPU memory, stack mismatches, or
+skipped/empty pytest execution. It checks the actual loaded model class too.
+`--check-only` performs preflight validation and explicitly records that
+inference was not executed. Outputs include stack and inference logs, worker
+facts, model metadata hashes, generated token IDs, and pytest JSON/JUnit
+reports. These semantic and repeat checks do not replace comparison with an
+independent upstream token oracle.
+
+Graph cases select the upstream graph configuration. Runner identity is
+checked directly; this harness does not separately assert graph replay.
+
+Hy4 BF16 TP8/PP2 requires two separately reserved 8-GPU nodes. Follow the
+two-node commands and limitations in the usage guide; it is not scheduled by
+the single-node regression entry point.
+
 ### Via `pytest` directly (for development)
 
 ```bash
-# Unit tests (no GPU required)
+# Unit tests (some tests require a GPU)
 pytest tests/unit_tests/ -v
 
 # Functional tests (requires GPU)
@@ -367,9 +418,12 @@ def test_my_kernel(device):
 
 | Scope | Directory | GPU | Models | Runs via |
 |---|---|---|---|---|
-| `unit` | `tests/unit_tests/` | No | No | `pytest` directly |
+| `unit` | `tests/unit_tests/` | Some tests | No | `pytest` directly |
 | `functional` | `tests/functional_tests/` | Yes | No | `pytest` directly |
 | `e2e` | `tests/e2e_tests/` | Yes | Yes | Subprocess per case (via `run.py`) |
+
+A CPU-only unit run may skip CUDA operator tests. It does not replace the full
+NVIDIA unit gate in the pinned EMPTY CI image.
 
 ## Available Markers
 
