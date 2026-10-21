@@ -77,3 +77,24 @@ def add_oot_quant_kernel() -> None:
     register_fl_w8a8_linear_kernel(_POSSIBLE_INT8_KERNELS)
     install_packed_w8a8_scheme()
     install_fl_w8a8_moe_selector()
+
+    # T-Head PPU: prefer the ported acext int8 GEMM (vendor kernel) over the
+    # FlagGems/cutlass/triton candidates. is_supported() gates this to thead
+    # with acext installed, so it is inert everywhere else.
+    #
+    # This must run AFTER register_fl_w8a8_linear_kernel: that prepends
+    # FLW8A8DynamicLinearKernel at index 0, and its is_supported() does not
+    # gate on vendor, so registering acext any earlier leaves FLW8A8 ahead of
+    # it and acext is never selected on PPU. It also sits outside the
+    # `OOT not in _POSSIBLE_INT8_KERNELS` guard above, which would otherwise
+    # skip acext whenever the OOT list is already populated.
+    try:
+        from vllm_fl.quantization.acext_int8_linear import (
+            AcextInt8ScaledMMLinearKernel,
+        )
+    except ImportError:
+        pass
+    else:
+        int8_candidates = _POSSIBLE_INT8_KERNELS.setdefault(PlatformEnum.OOT, [])
+        if AcextInt8ScaledMMLinearKernel not in int8_candidates:
+            int8_candidates.insert(0, AcextInt8ScaledMMLinearKernel)
