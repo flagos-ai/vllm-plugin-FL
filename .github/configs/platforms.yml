@@ -18,14 +18,16 @@
 # (e.g., "cuda" -> cuda.yml, "ascend" -> ascend.yml).
 #
 # Set `enabled: false` to skip a platform without removing its config file.
+# Enable NVIDIA first for the vLLM 0.32 rollout. Re-enable other backends
+# after their runtime and CI adaptations are ready.
 
 platforms:
   cuda:
     enabled: true
   ascend:
-    enabled: true
+    enabled: false
   hygon:
-    enabled: true
+    enabled: false
   metax:
     enabled: false
   musa:
@@ -34,8 +36,7 @@ platforms:
     enabled: false
   kunlunxin:
     enabled: false
-  # Image published; needs a self-hosted runner with labels in configs/iluvatar.yml.
   iluvatar:
-    enabled: true
+    enabled: false
   thead:
-    enabled: true
+    enabled: false

@@ -1,10 +1,11 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""NVIDIA platform integration for vLLM 0.28."""
+"""FL runtime integration with the native vLLM 0.32 CUDA platform."""
 
 import os
 from typing import TYPE_CHECKING
 
+from vllm.logger import init_logger
 from vllm.platforms import PlatformEnum
 from vllm.platforms.cuda import CudaPlatform
 
@@ -12,12 +13,12 @@ if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
 
-class NvidiaPlatformFL(CudaPlatform):
-    """Add FL runtime hooks without changing native CUDA platform semantics."""
+logger = init_logger(__name__)
 
-    # NVIDIA is an in-tree CUDA platform in vLLM. Marking it OOT makes v0.28
-    # attention and MoE code enter generic accelerator branches and corrupts
-    # MLA decode. FL is an operator/runtime plugin on top of native CUDA.
+
+class NvidiaPlatformFL(CudaPlatform):
+    """Keep upstream CUDA kernels, model runners and backend selection."""
+
     _enum = PlatformEnum.CUDA
     vendor_name = "nvidia"
     dist_backend = (
@@ -36,14 +37,23 @@ class NvidiaPlatformFL(CudaPlatform):
         super().check_and_update_config(vllm_config)
         if use_flagcx:
             vllm_config.parallel_config.disable_custom_all_reduce = True
-        vllm_config.parallel_config.worker_cls = "vllm_fl.worker.worker.NvidiaWorkerFL"
+            passes = vllm_config.compilation_config.pass_config
+            if passes.fuse_allreduce_rms:
+                # FlashInfer's fused collective bypasses the selected FlagCX
+                # communicator. Keep the ordinary all-reduce/RMSNorm sequence.
+                passes.fuse_allreduce_rms = False
+                logger.warning_once(
+                    "Disabling fuse_allreduce_rms to preserve the selected "
+                    "FlagCX communication backend."
+                )
+        vllm_config.parallel_config.worker_cls = (
+            "vllm_fl.worker.nvidia_worker.NvidiaWorkerFL"
+        )
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls._refresh_dist_backend():
-            return (
-                "vllm_fl.distributed.nvidia_communicator.NvidiaCommunicatorFL"
-            )
+            return "vllm_fl.distributed.nvidia_communicator.NvidiaCommunicatorFL"
         return super().get_device_communicator_cls()
 
     @classmethod
@@ -59,7 +69,7 @@ class NvidiaPlatformFL(CudaPlatform):
         attn_selector_config,
         num_heads: int | None = None,
     ) -> str:
-        """Keep native CUDA selection unless FlagGems attention is requested."""
+        """Use native CUDA selection unless FlagGems attention is requested."""
         use_flaggems_attn = os.environ.get(
             "VLLM_FL_USE_FLAGGEMS_ATTN", "0"
         ).lower() in ("1", "true", "yes")

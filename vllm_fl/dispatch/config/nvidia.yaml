@@ -48,6 +48,17 @@ op_backends:
 # independently against native PyTorch, and removals are revalidated with real
 # dense and MoE model inference.
 flagos_blacklist:
+  # FlagGems master (6fe7709e7717) with Triton 3.6 cannot lower E8M0
+  # storage operations used by Humming MXFP8/MXFP4 scales. Keep the
+  # native implementations for padding, scalar fill, and advanced indexing.
+  - pad
+  - constant_pad_nd
+  - fill_scalar_
+  - index
+  # FlagGems master (6fe7709e) infers int64 for floating arange arguments without an
+  # explicit dtype. NaViT position-bin boundaries then become all zeros,
+  # corrupting MiniCPM-V 4.7 image and video embeddings.
+  - arange_start
   # BF16 largest and smallest selections return incorrect indices on A800.
   - topk
   # Gemma3n grouped-query vision attention reshapes KV heads incorrectly.

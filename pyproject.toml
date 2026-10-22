@@ -52,7 +52,9 @@ test = [
     "requests",
     "openai",
     "decorator",
-    "vllm[audio]==0.28.0",
+    # NVIDIA uses the official CUDA distribution; other backends may preinstall
+    # their 0.32.0 local-version wheel before installing test dependencies.
+    "vllm[audio]==0.32.0",
     "modelscope>=1.18.1",
 ]
 
