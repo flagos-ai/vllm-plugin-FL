@@ -76,7 +76,7 @@ def _run_isolated_cpu_case(request):
     except subprocess.TimeoutExpired as error:
         (case_dir / "stdout.log").write_bytes(error.stdout or b"")
         (case_dir / "stderr.log").write_bytes(error.stderr or b"")
-        pytest.fail(f"Isolated CPU test timed out; see {case_dir}")
+        raise AssertionError(f"Isolated CPU test timed out; see {case_dir}") from error
     (case_dir / "stdout.log").write_bytes(result.stdout)
     (case_dir / "stderr.log").write_bytes(result.stderr)
     request.node.user_properties.append(("cpu_child_returncode", result.returncode))
