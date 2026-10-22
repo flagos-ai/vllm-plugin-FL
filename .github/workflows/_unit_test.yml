@@ -97,6 +97,7 @@ jobs:
             report-${{ inputs.platform }}.json
             test-results-${{ inputs.platform }}.json
             test-results-${{ inputs.platform }}.xml
+            test-results-cpu-contracts/
 
       - name: Upload coverage report to FlagCICD
         uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
