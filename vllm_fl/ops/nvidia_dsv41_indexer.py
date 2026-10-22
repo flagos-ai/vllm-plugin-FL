@@ -247,9 +247,7 @@ def fp8_paged_mqa_logits(
 
 
 def fp8_einsum(equation, a, b, out, recipe=(1, 128, 128)):
-    from flag_gems.runtime.backend._nvidia.hopper.ops.fp8_einsum import (
-        fp8_einsum as gems_einsum,
-    )
+    from flaggems_vllm import fp8_einsum as gems_einsum
 
     x, xs = a
     y, ys = b

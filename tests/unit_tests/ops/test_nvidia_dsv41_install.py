@@ -109,6 +109,8 @@ def test_dsv41_install_rejects_unsupported_hardware(adapter_state, monkeypatch, 
 def test_dsv41_installs_real_kernels_without_advertising_native_libraries(
     adapter_state, monkeypatch
 ):
+    from flaggems_vllm import flash_mla_with_kvcache
+
     from vllm.model_executor.layers import sparse_attn_indexer
     from vllm.models.deepseek_v4.nvidia.ops import o_proj
     from vllm.models.deepseek_v41 import attention as dsv41_attention
@@ -128,7 +130,7 @@ def test_dsv41_installs_real_kernels_without_advertising_native_libraries(
 
     bindings = [
         (flashmla, "flash_mla_sparse_fwd", dsv41_mla.flash_mla_sparse_fwd),
-        (flashmla, "flash_mla_with_kvcache", dsv41_mla.flash_mla_with_kvcache),
+        (flashmla, "flash_mla_with_kvcache", flash_mla_with_kvcache),
         (
             flashmla.DeepseekSparseSWAFlashMLAMetadataBuilder,
             "build_tile_scheduler",

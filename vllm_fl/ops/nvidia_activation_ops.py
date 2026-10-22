@@ -30,21 +30,16 @@ def _silu_and_mul_with_clamp(
     if out.numel() == 0:
         return
 
-    # CUDA evaluates the sigmoid in FP32. Gems constructs its limit tensor
-    # using the input dtype, so FP32 inputs also retain nonrepresentable BF16
-    # limits (e.g. 0.7) rather than rounding the limit before the clamp.
+    # CUDA evaluates the sigmoid and scalar limit in FP32. The public provider
+    # rounds the limit to its input dtype, so retain FP32 inputs here even when
+    # the caller supplies BF16 (e.g. a nonrepresentable limit such as 0.7).
     gate = x[..., :width].float()
     up = x[..., width:].float()
     if alpha == 1.0 and beta == 0.0:
-        from flag_gems.fused.silu_and_mul_with_clamp import (
-            silu_and_mul_with_clamp_kernel,
-        )
+        from flaggems_vllm import silu_and_mul_with_clamp_out
 
-        # The public Gems _out wrapper constructs this scalar on the CPU and
-        # copies it to CUDA, which cannot be captured. Use the same fused
-        # kernel with a scalar filled on-device, including during graph replay.
-        limit_tensor = torch.full((), limit, dtype=torch.float32, device=x.device)
-        silu_and_mul_with_clamp_kernel(gate, up, limit_tensor, out0=out)
+        # v0.2.0 accepts a Python scalar without a host-to-device tensor copy.
+        silu_and_mul_with_clamp_out(gate, up, out, limit)
         return
 
     # The existing Gems fused API has no alpha/beta parameters. Preserve the

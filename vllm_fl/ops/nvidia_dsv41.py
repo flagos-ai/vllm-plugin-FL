@@ -55,6 +55,8 @@ def install_dsv41_empty_adapters(vllm_config) -> bool:
     if _installed:
         return True
 
+    from flaggems_vllm import flash_mla_with_kvcache
+
     from vllm.logger import init_logger
     from vllm.model_executor.layers import sparse_attn_indexer
     from vllm.models.deepseek_v4.nvidia.ops import o_proj
@@ -67,7 +69,7 @@ def install_dsv41_empty_adapters(vllm_config) -> bool:
 
     register_nvidia_dsv41_ops()
     flashmla.flash_mla_sparse_fwd = dsv41_mla.flash_mla_sparse_fwd
-    flashmla.flash_mla_with_kvcache = dsv41_mla.flash_mla_with_kvcache
+    flashmla.flash_mla_with_kvcache = flash_mla_with_kvcache
     flashmla.DeepseekSparseSWAFlashMLAMetadataBuilder.build_tile_scheduler = (
         dsv41_mla.build_tile_scheduler
     )
