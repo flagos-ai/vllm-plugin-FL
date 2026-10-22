@@ -1,20 +1,150 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""MUSA graph input ownership, output descriptors, and executable replay policy."""
+"""MUSA graph input ownership, borrowed outputs, and bounded native admission."""
 
 import dataclasses
+import os
+import threading
 import weakref
-from contextlib import suppress
+from contextlib import contextmanager, nullcontext, suppress
 from typing import Any
 
 import torch
 from torch.utils._pytree import tree_flatten
 
 from vllm.config import CUDAGraphMode
+from vllm.logger import init_logger
 
 from vllm_fl.compilation.graph import GraphEntry, GraphWrapper
-from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
-    musa_graph_class,
-)
+
+
+class _MusaGraphAdmissionBudget:
+    def __init__(self, cap=1900):
+        if cap < 1:
+            raise ValueError("MUSA graph admission cap must be positive")
+        self.cap = cap
+        self._lock = threading.RLock()
+        self._graphs = weakref.WeakSet()
+        self._pending = 0
+        self._capturing = False
+        self._replaying = 0
+        self._poisoned = False
+        self._total = 0
+        self._epoch = 0
+        self._had_live = False
+        self._first = False
+        self._rejected = False
+        self._cap_announced = False
+
+    def _healthy(self):
+        if self._poisoned:
+            raise RuntimeError(
+                "MUSA graph admission is poisoned after an earlier error"
+            )
+
+    def snapshot(self):
+        with self._lock:
+            return dict(
+                cap=self.cap,
+                live=len(self._graphs),
+                pending=self._pending,
+                total_admitted=self._total,
+                epoch=self._epoch,
+                poisoned=self._poisoned,
+            )
+
+    @contextmanager
+    def capture(self):
+        with self._lock:
+            self._healthy()
+            if self._capturing or self._replaying:
+                raise RuntimeError(
+                    "Cannot admit a MUSA capture during capture or replay"
+                )
+            admitted = len(self._graphs) + self._pending < self.cap
+            if admitted:
+                self._capturing = True
+                self._pending += 1
+            try:
+                yield admitted
+                if admitted and self._pending:
+                    raise RuntimeError("MUSA capture admission was not committed")
+            except BaseException:
+                self._poisoned = True
+                raise
+            finally:
+                if admitted:
+                    self._pending = 0
+                    self._capturing = False
+
+    def register(self, graph):
+        with self._lock:
+            if not self._capturing or self._pending != 1:
+                raise RuntimeError("MUSA graph has no capture reservation")
+            self._graphs.add(graph)
+            self._pending = 0
+            self._total += 1
+            self._had_live = True
+            events = []
+            if not self._first:
+                self._first = True
+                events.append("first_native_admission")
+            if len(self._graphs) == self.cap and not self._cap_announced:
+                self._cap_announced = True
+                events.append("cap_reached")
+            return events
+
+    def rejected(self):
+        with self._lock:
+            first = not self._rejected
+            self._rejected = True
+            return first
+
+    @contextmanager
+    def replay(self):
+        with self._lock:
+            self._healthy()
+            if self._capturing:
+                raise RuntimeError("Cannot replay a MUSA graph during capture")
+            self._replaying += 1
+            try:
+                yield
+            except BaseException:
+                self._poisoned = True
+                raise
+            finally:
+                self._replaying -= 1
+
+    @contextmanager
+    def eager(self):
+        with self._lock:
+            self._healthy()
+            try:
+                yield
+            except BaseException:
+                self._poisoned = True
+                raise
+
+    @contextmanager
+    def clearing(self):
+        # Clearing never refunds an externally-held native graph or heals errors.
+        with self._lock:
+            if self._capturing or self._replaying:
+                raise RuntimeError("Cannot clear MUSA graphs during capture or replay")
+            yield
+
+    def cleared_to_zero(self):
+        with self._lock:
+            if self._had_live and not self._graphs and not self._pending:
+                self._epoch += 1
+                self._had_live = False
+                self._first = False
+                self._rejected = False
+                self._cap_announced = False
+                return True
+            return False
+
+
+_musa_admission_budget = _MusaGraphAdmissionBudget()
 
 
 def _weak_ref_musa_tensors(value: Any) -> Any:
@@ -102,12 +232,16 @@ class MUSAGraphEntry(GraphEntry):
     musa_input_addresses: list[int | None] | None = None
     musa_last_input_tensor_refs: list[Any] | None = None
 
+    musa_eager_only: bool = False
+
+    musa_capture_device: int | None = None
+
 
 class MUSAGraphWrapper(GraphWrapper):
-    """Keep the MUSA capture/replay contract out of the shared wrapper."""
+    """Replay admitted native graphs and run excess entries with original inputs."""
 
     entry_type = MUSAGraphEntry
-    _graph_type = musa_graph_class(torch.musa.MUSAGraph)
+    _graph_type = torch.musa.MUSAGraph
 
     @staticmethod
     def _musa_tensor_metadata(tensor):
@@ -301,36 +435,70 @@ class MUSAGraphWrapper(GraphWrapper):
             for x in entry.musa_input_leaves
         ]
 
-    def _capture_context(self, graph):
-        from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
-            musa_graph_capture,
-        )
-
-        return musa_graph_capture(graph)
-
     def _weak_ref_output(self, output):
         return _weak_ref_musa_tensors(output)
 
-    def _replay_graph(self, entry, args, kwargs):
-        if entry.musa_input_leaves is None:
-            self._validate_replay_addresses(entry, args)
-        from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
-            musa_graph_replay,
+    def _admission_log(self, event):
+        state = _musa_admission_budget.snapshot()
+        init_logger(__name__).info(
+            "MUSA graph admission: event=%s class=%s.%s pid=%d "
+            "live=%d pending=%d cap=%d total_admitted=%d epoch=%d",
+            event,
+            type(self).__module__,
+            type(self).__qualname__,
+            os.getpid(),
+            state["live"],
+            state["pending"],
+            state["cap"],
+            state["total_admitted"],
+            state["epoch"],
         )
 
-        def prepare_replay():
-            # Residency is locked across validation and enqueue; cold pieces run
-            # the original callable without staging or restoring an executable.
-            if entry.musa_input_leaves is not None and not self._stage_musa_inputs(
-                entry, args, kwargs
-            ):
-                return False
-            with suppress(ImportError, RuntimeError):
-                from vllm.model_executor.offloader.base import get_offloader
+    def _capture_context(self, graph):
+        return nullcontext()
 
-                get_offloader().sync_prev_onload()
-            return True
-
-        if not musa_graph_replay(entry.graph, before_replay=prepare_replay):
+    def _capture_graph(self, entry, args, kwargs):
+        if entry.musa_eager_only:
+            with _musa_admission_budget.eager():
+                return self.runnable(*args, **kwargs)
+        with _musa_admission_budget.capture() as admitted:
+            if admitted:
+                entry.musa_capture_device = torch.musa.current_device()
+                output = super()._capture_graph(entry, args, kwargs)
+                for event in _musa_admission_budget.register(entry.graph):
+                    self._admission_log(event)
+                return output
+            entry.musa_eager_only = True
+            if _musa_admission_budget.rejected():
+                self._admission_log("first_admission_rejected")
+        with _musa_admission_budget.eager():
             return self.runnable(*args, **kwargs)
-        return entry.output
+
+    def _replay_graph(self, entry, args, kwargs):
+        replayed = False
+        with (
+            _musa_admission_budget.replay(),
+            torch.musa.device(entry.musa_capture_device),
+        ):
+            if entry.musa_input_leaves is None:
+                self._validate_replay_addresses(entry, args)
+                stable = True
+            else:
+                stable = self._stage_musa_inputs(entry, args, kwargs)
+            if stable:
+                with suppress(ImportError, RuntimeError):
+                    from vllm.model_executor.offloader.base import get_offloader
+
+                    get_offloader().sync_prev_onload()
+                entry.graph.replay()
+                replayed = True
+        if replayed:
+            return entry.output
+        with _musa_admission_budget.eager():
+            return self.runnable(*args, **kwargs)
+
+    def clear_graphs(self):
+        with _musa_admission_budget.clearing():
+            super().clear_graphs()
+            if _musa_admission_budget.cleared_to_zero():
+                self._admission_log("cleared_to_zero")

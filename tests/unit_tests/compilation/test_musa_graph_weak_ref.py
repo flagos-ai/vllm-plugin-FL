@@ -68,7 +68,7 @@ def contract():
     root = Path(__file__).resolve().parents[3]
     source = root / "vllm_fl/compilation/graph.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
-    musa_source = root / "vllm_fl/dispatch/backends/vendor/musa/compilation/graph.py"
+    musa_source = root / "vllm_fl/dispatch/backends/vendor/musa/graph.py"
     musa_module = ast.parse(
         musa_source.read_text(encoding="utf-8"), filename=str(musa_source)
     )
