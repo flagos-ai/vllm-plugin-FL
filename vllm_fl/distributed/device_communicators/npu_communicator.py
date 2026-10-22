@@ -22,6 +22,12 @@ class NPUCommunicator(DeviceCommunicatorBase):
 
             self.all2all_manager = AgRsAll2AllManager(self.cpu_group)
 
+    def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+        # GroupCoordinator's public reduction must not mutate or alias input.
+        output = input_.clone()
+        dist.all_reduce(output, group=self.device_group)
+        return output
+
     def _check_sizes(self, sizes):
         if len(sizes) != self.world_size or any(size < 0 for size in sizes):
             raise ValueError("Collective sizes must match the active process group")

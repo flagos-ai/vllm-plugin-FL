@@ -55,6 +55,56 @@ def groups():
             destroy_distributed_environment()
 
 
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+def test_all_reduce_preserves_input(groups, dtype):
+    from vllm_fl.distributed.device_communicators.npu_communicator import (
+        NPUCommunicator,
+    )
+
+    comm = groups.device_communicator
+    assert isinstance(comm, NPUCommunicator)
+    rank = groups.rank_in_group
+    backing = torch.full((6, 8), rank + 1, dtype=dtype, device="npu")
+    tensor = backing[1:5]
+    alias = tensor.view(-1)
+    expected_sum = groups.world_size * (groups.world_size + 1) // 2
+
+    # Exercise both the communicator and the public group wrapper: callers
+    # may retain the input or a view after the reduction returns.
+    for reduce in (comm.all_reduce, groups.all_reduce):
+        backing.fill_(rank + 1)
+        before = backing.clone()
+        for _ in range(3):
+            result = reduce(tensor)
+        torch.npu.synchronize()
+        torch.testing.assert_close(backing, before, rtol=0, atol=0)
+        torch.testing.assert_close(alias, before[1:5].reshape(-1), rtol=0, atol=0)
+        assert result.data_ptr() != tensor.data_ptr()
+        torch.testing.assert_close(
+            result, torch.full_like(tensor, expected_sum), rtol=0, atol=0
+        )
+
+        graph = torch.npu.NPUGraph()
+        with torch.npu.graph(graph):
+            result = reduce(tensor)
+        for step in range(1, 4):
+            tensor.add_(1)
+            before = backing.clone()
+            graph.replay()
+            torch.npu.synchronize()
+            torch.testing.assert_close(backing, before, rtol=0, atol=0)
+            torch.testing.assert_close(
+                alias, before[1:5].reshape(-1), rtol=0, atol=0
+            )
+            assert result.data_ptr() != tensor.data_ptr()
+            torch.testing.assert_close(
+                result,
+                torch.full_like(tensor, expected_sum + groups.world_size * step),
+                rtol=0,
+                atol=0,
+            )
+
+
 @pytest.mark.parametrize("sizes", [[4, 4], [2, 4], [0, 4], [0, 0]])
 def test_padded_collectives(groups, sizes):
     from vllm_fl.distributed.device_communicators.npu_communicator import (
