@@ -2,17 +2,19 @@
 
 Compatible, explicit FlagGems operator imports use FlagGems-vllm directly.
 No environment variable or opt-in is required. `flag_gems.enable()` continues
-to own ATen registration. NVIDIA uses the upstream vLLM 0.32 V1/V2 runners
-with an ordinary EMPTY wheel. Its FlagGems development commit is
+to own ATen registration. NVIDIA uses the full official vLLM 0.32 CUDA
+distribution and upstream V1/V2 runners. Its FlagGems development commit is
 `6fe7709e7717e49cf12bb00346719a0885f505fa`; the NVIDIA dispatch policy retains
-the EMPTY-specific exclusions. Other platforms keep their vendor settings.
+the ATen correctness exclusions, including floating `arange` dtype inference
+and E8M0 storage operations. These provider issues also apply with native vLLM
+extensions installed. Other platforms keep their vendor settings.
 
 ## Install in the NVIDIA CI image
 
 Start with the image and runtime checks in the [NVIDIA guide](usage/nvidia.md):
 
 ```text
-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-empty-ci
+harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci
 ```
 
 In a container with this checkout mounted at `/workspace/vllm-plugin-FL`:
@@ -30,7 +32,7 @@ checks that the existing Torch, FlagTree/Triton, FlagGems, vLLM, and NumPy
 versions are preserved by that installer. The NVIDIA image preinstalls the
 package; CI setup verifies it without fetching or replacing a matching source.
 NVIDIA stack checks also verify the pinned FlagGems and FlagTree development
-wheels and the ordinary vLLM EMPTY wheel.
+wheels and the full vLLM CUDA distribution with its native extensions.
 
 The pinned FlagGems-vllm package is required for the migrated providers.
 
@@ -71,9 +73,10 @@ validated Ascend vendor paths retain their existing implementations.
 
 ## CI and local verification
 
-Every platform's setup installs the pinned package. Platform CI enable/disable
-settings are preserved; a disabled platform remains disabled. NVIDIA retains
-its pinned development dependencies; other platforms retain their vendor runtimes.
+Every platform's setup installs the pinned package. NVIDIA CI is enabled for
+the 0.32 adaptation; other backends remain disabled pending their adaptation.
+NVIDIA retains its pinned development dependencies; other platforms retain
+their vendor runtimes.
 CUDA E2E executes each original model/task/device group once with the direct
 FlagGems-vllm providers.
 

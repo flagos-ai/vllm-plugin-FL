@@ -161,7 +161,7 @@ EXAMPLES:
     # Build CUDA dev image
     ./build.sh --target dev
 
-    # Build the NVIDIA vLLM 0.32 EMPTY CI image
+    # Build the NVIDIA vLLM 0.32 native CUDA CI image
     ./build.sh --platform cuda --target ci
 
     # Build the validated Ascend CI image
@@ -238,7 +238,7 @@ fi
 
 DOCKERFILE="${SCRIPT_DIR}/${PLATFORM}/Dockerfile"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
-    DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.empty"
+    DOCKERFILE="${SCRIPT_DIR}/cuda/Dockerfile.ci"
 fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
@@ -255,7 +255,7 @@ BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 BUILD_ARGS=()
 
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
-    # The EMPTY recipe supplies the verified 0.32 stack. Other CUDA targets
+    # The CI recipe preserves the official 0.32 CUDA stack. Other CUDA targets
     # retain their existing toolkit-based Dockerfile and version defaults.
     VLLM_VERSION="0.32.0"
     BUILD_CONTEXT="${SCRIPT_DIR}/.."
@@ -267,7 +267,7 @@ if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
         --build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="v${VLLM_VERSION}-cuda-empty-ci"
+        IMAGE_TAG="v${VLLM_VERSION}-cuda-ci"
     fi
 elif [[ "${PLATFORM}" == "cuda" ]]; then
     BUILD_ARGS+=(
@@ -399,7 +399,7 @@ msg "Building image: ${FULL_IMAGE}"
 msg "  Platform:       ${PLATFORM}"
 msg "  Target:         ${TARGET}"
 if [[ "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ]]; then
-    msg "  Stack:          official vLLM 0.32.0 CUDA 12.9 / EMPTY wheel / FlagTree 0.7.0 / FlagGems 5.4.0"
+    msg "  Stack:          official vLLM 0.32.0 CUDA 12.9 / native extensions / FlagTree 317a0249 / FlagGems 6fe7709e7717"
 elif [[ "${PLATFORM}" == "cuda" ]]; then
     msg "  CUDA:           ${CUDA_VERSION}"
 elif [[ "${PLATFORM}" == "ascend" ]]; then

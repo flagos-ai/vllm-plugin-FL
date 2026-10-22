@@ -1,7 +1,12 @@
 # Copyright 2026 FlagOS Contributors
 # Build with the repository root as context (docker/build.sh selects it).
-ARG CUDA_EMPTY_BASE_IMAGE=vllm/vllm-openai:v0.32.0-cu129@sha256:bc0445dac61accbf1c3b17fbb524a71eee0b1b32f55ba45952095e3be8991c3f
-FROM ${CUDA_EMPTY_BASE_IMAGE} AS tools
+# Preserve the complete upstream CUDA wheel and all its native extensions.
+ARG CUDA_CI_BASE_IMAGE=vllm/vllm-openai:v0.32.0-cu129@sha256:bc0445dac61accbf1c3b17fbb524a71eee0b1b32f55ba45952095e3be8991c3f
+# An offline rebuild can reuse prepared local stages with these build args.
+# The wheels image must provide FlagTree, FlagGems and TorchCodec in /opt/fl-wheels.
+ARG CUDA_CI_RUNTIME_IMAGE=tools
+ARG CUDA_CI_WHEELS_IMAGE=wheels
+FROM ${CUDA_CI_BASE_IMAGE} AS tools
 # Repository CI entry points use python; the official image provides python3.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
@@ -10,7 +15,7 @@ RUN apt-get update \
 
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-COPY docker/cuda/requirements-empty-ci.txt /opt/fl-ci/requirements.txt
+COPY docker/cuda/requirements-ci.txt /opt/fl-ci/requirements.txt
 RUN python -m pip install --no-cache-dir \
         ${INDEX_URL:+--index-url ${INDEX_URL}} \
         ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
@@ -36,20 +41,11 @@ RUN bash /opt/fl-build/build-flagtree.sh
 FROM tools AS wheels
 ARG INDEX_URL
 ARG EXTRA_INDEX_URL
-ARG VLLM_SOURCE_URL=https://codeload.github.com/vllm-project/vllm/tar.gz/5df63a7203cdb9328d824a27b682e77c7b9928be
 ARG FLAGGEMS_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagGems/tar.gz/6fe7709e7717e49cf12bb00346719a0885f505fa
 
 WORKDIR /opt/fl-build
 # Source URL overrides may point to a cache; fixed checksums still enforce
-# the exact official archives. Keep sources unmodified and install ordinary wheels. EMPTY skips
-# upstream CUDA/C++ kernels while retaining the official Python interfaces.
-RUN curl -fsSL --retry 5 "${VLLM_SOURCE_URL}" -o vllm.tar.gz \
-    && echo "b698d4ffe4c3694182964c11dd42ddd943a26a6cd24fe15de8aa5752d1296f47  vllm.tar.gz" | sha256sum -c - \
-    && mkdir vllm \
-    && tar -xzf vllm.tar.gz --strip-components=1 -C vllm \
-    && cd vllm \
-    && VLLM_TARGET_DEVICE=empty SETUPTOOLS_SCM_PRETEND_VERSION=0.32.0 \
-        python -m pip wheel --no-deps --no-build-isolation --wheel-dir /opt/fl-wheels .
+# the exact official archives. Keep sources unmodified and install ordinary wheels.
 RUN curl -fsSL --retry 5 "${FLAGGEMS_SOURCE_URL}" -o flaggems.tar.gz \
     && echo "1925bcf08657f011cc0aa1193ecf96742a7c18fa66121fb1ab36c8142d8107b7  flaggems.tar.gz" | sha256sum -c - \
     && mkdir flaggems \
@@ -68,20 +64,24 @@ RUN python -m pip download --no-deps --only-binary=:all: \
         --index-url https://download.pytorch.org/whl/cu129 \
         --dest /opt/fl-wheels 'torchcodec==0.16.0+cu129'
 
-FROM tools AS ci
+FROM ${CUDA_CI_WHEELS_IMAGE} AS ci-wheels
+
+FROM ${CUDA_CI_RUNTIME_IMAGE} AS ci
 COPY .github/scripts/cuda/stack.py /opt/fl-ci/stack.py
 COPY docker/cuda/record-provenance.py /opt/fl-ci/record-provenance.py
-COPY --from=wheels /opt/fl-wheels /opt/fl-wheels
+COPY --from=ci-wheels /opt/fl-wheels /opt/fl-wheels
 # CI dependencies are resolved before installing FlagTree, which deliberately
 # replaces PyTorch's standalone Triton provider. Never resolve the FL wheels
 # against torch's triton requirement after this point.
-RUN python -m pip uninstall -y vllm triton \
-    && python -m pip install --no-cache-dir --no-deps /opt/fl-wheels/*.whl \
+RUN python -m pip uninstall -y triton \
+    && python -m pip install --no-index --no-cache-dir --no-deps \
+        /opt/fl-wheels/flagtree-*.whl /opt/fl-wheels/flag_gems-*.whl \
+        /opt/fl-wheels/torchcodec-*.whl \
     && python /opt/fl-ci/record-provenance.py /opt/fl-ci/stack.py \
         /opt/fl-wheels /opt/fl-ci/provenance.json \
     && rm -rf /opt/fl-wheels
 
-# Retain pip's exact Git provenance and protect the pinned EMPTY/FL stack.
+# Retain pip's exact Git provenance and protect the pinned native CUDA/FL stack.
 # CI setup runs the same installer idempotently without fetching another copy.
 COPY .github/scripts/install_flaggems_vllm.py /opt/fl-ci/install_flaggems_vllm.py
 RUN python /opt/fl-ci/install_flaggems_vllm.py \

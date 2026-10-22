@@ -1,5 +1,5 @@
 # Copyright 2026 FlagOS Contributors
-# Build and test tools for the NVIDIA 0.32 EMPTY image. The official base
+# Build and test tools for the NVIDIA 0.32 CUDA image. The official base
 # supplies vLLM's CUDA/runtime dependency closure, including humming-kernels.
 uv==0.13.4
 setuptools==80.10.2
@@ -23,7 +23,7 @@ xgboost==3.3.0
 scikit-learn==1.9.1
 # FlagGems master 6fe7709e7717 direct dependencies; keep the base image's NumPy.
 # FlagTree main 317a0249 still uses Triton 3.6 and XGBoost 3.3 above.
-# Both ordinary wheels are built from checksummed sources in Dockerfile.empty.
+# Both ordinary wheels are built from checksummed sources in Dockerfile.ci.
 packaging==26.3
 PyYAML==6.0.1
 SQLAlchemy==2.0.48

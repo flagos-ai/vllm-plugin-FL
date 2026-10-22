@@ -96,7 +96,7 @@ jobs:
             .github/scripts
       - name: Install PyYAML
         run: pip install pyyaml
-      - name: Check NVIDIA EMPTY stack validation
+      - name: Check NVIDIA native CUDA stack validation
         run: python -I -B .github/scripts/cuda/test_stack.py
       - id: detect
         run: python3 .github/scripts/detect_platforms.py

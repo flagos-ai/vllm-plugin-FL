@@ -2,7 +2,7 @@
 
 This inventory targets FlagGems-vllm **v0.2.0**, commit
 `b5c2c2249319277ccda4d41aa0f65164bd9b2a19`. It was inherited from the vLLM
-0.28 adaptation; NVIDIA now uses the 0.32 EMPTY runtime.
+0.28 adaptation; NVIDIA now uses the full official vLLM 0.32 CUDA distribution.
 An existing export is substituted only when it preserves the current call
 contract. The entries below retain their original providers. Missing interface requests are tracked in
 [FlagGems-vllm #932](https://github.com/flagos-ai/FlagGems-vllm/issues/932).
@@ -18,8 +18,15 @@ contract. The entries below retain their original providers. Missing interface r
 | Ascend vendor-specific FLA/MoE implementations | `vllm_fl/dispatch/backends/vendor/ascend/` | Preserve the independently validated vLLM 0.28 Ascend implementation. Compatible generic imports use FlagGems-vllm directly; these vendor-specific implementations remain unchanged. |
 
 ATen registration (`flag_gems.enable()`), device detection, runtime utilities,
-and backend launch/configuration helpers retain their existing providers. The
-NVIDIA EMPTY attention/cache paths retain their 0.32 layout adaptations;
-the public cache writer still cannot replace the strided upstream writer.
-The NVIDIA policy keeps its existing ATen exclusions and pinned development
+and backend launch/configuration helpers retain their existing providers.
+
+NVIDIA normally uses upstream attention backend selection. When
+`VLLM_FL_USE_FLAGGEMS_ATTN=1` selects the existing FlagGems attention provider,
+its `do_kv_cache_update` in
+`vllm_fl/dispatch/backends/flaggems/impl/attention.py` uses upstream's
+stride-aware Triton writer. The public FlagGems-vllm cache writer assumes
+contiguous token/head layout and cannot directly replace that call for packed
+K/V views. This remains a conditional provider layout gap with the full CUDA
+distribution installed; it is not a missing native vLLM cache kernel.
+The NVIDIA policy keeps its ATen correctness exclusions and pinned development
 FlagGems wheel. Other vendor policies remain unchanged.

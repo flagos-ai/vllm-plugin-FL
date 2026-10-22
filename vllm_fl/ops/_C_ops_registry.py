@@ -29,7 +29,7 @@ _OPTIONAL_NATIVE_ONLY_OPS = frozenset(
 def _unavailable_cuda_view(tensor):
     raise RuntimeError(
         "vLLM empty builds do not provide a mapped CUDA view of CPU memory; "
-        "use the NVIDIA platform's NonUvaBuffer path"
+        "this backend must provide an implementation or avoid mapped CPU buffers"
     )
 
 
