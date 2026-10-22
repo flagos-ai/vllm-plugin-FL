@@ -93,9 +93,7 @@ def test_all_reduce_preserves_input(groups, dtype):
             graph.replay()
             torch.npu.synchronize()
             torch.testing.assert_close(backing, before, rtol=0, atol=0)
-            torch.testing.assert_close(
-                alias, before[1:5].reshape(-1), rtol=0, atol=0
-            )
+            torch.testing.assert_close(alias, before[1:5].reshape(-1), rtol=0, atol=0)
             assert result.data_ptr() != tensor.data_ptr()
             torch.testing.assert_close(
                 result,
