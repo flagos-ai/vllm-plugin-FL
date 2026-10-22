@@ -29,6 +29,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
+| GLM-5.3 Flash | Supported | [implementation](./vllm_fl/models/glm5/model.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |

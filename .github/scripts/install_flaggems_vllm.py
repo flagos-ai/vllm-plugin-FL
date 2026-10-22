@@ -7,9 +7,9 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, distribution, version
 
-# Public HY4 MLA APIs, optional MetaX TLE fixes, and portable math shims.
-# The math fix is tracked in flagos-ai/FlagGems-vllm#955 (pending merge).
-COMMIT = "6f8a48649fafd8ec811b36acf7ce65915c84a6da"
+# Public HY4/GLM APIs, portable math/constexpr hints, and XPU timer recovery.
+# Includes the shared main pin plus flagos-ai/FlagGems-vllm#941.
+COMMIT = "27f7b83a0c3bf05c288e513280c6f8337893b7a7"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
 RUNTIME_PACKAGES = ("torch", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
@@ -27,6 +27,8 @@ def source_is_installed():
         text = distribution("flaggems-vllm").read_text("direct_url.json")
         source = json.loads(text or "{}")
     except (PackageNotFoundError, ValueError):
+        return False
+    if not isinstance(source, dict) or not isinstance(source.get("vcs_info"), dict):
         return False
     return (
         source.get("url", "").removesuffix(".git") == REPOSITORY.removesuffix(".git")

@@ -15,12 +15,24 @@ if "torch" in sys.modules:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 else:
     import torch as _torch
+
     if not hasattr(_torch, "float4_e2m1fn_x2"):
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
+try:
+    from vllm_fl.utils import get_op_config as _get_op_config
+except ModuleNotFoundError as exc:
+    # The native GLM5-Next baseline reuses only this package's config/model
+    # modules and deliberately does not install or activate FlagGems.
+    if exc.name != "flag_gems":
+        raise
+
+    def _get_op_config():
+        return None
+
+
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
-from vllm_fl.utils import get_op_config as _get_op_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +51,7 @@ def _arm_cpu_platform() -> str | None:
 def __getattr__(name):
     if name == "distributed":
         import importlib
+
         module = importlib.import_module(f".{name}", __name__)
         globals()[name] = module
         return module
@@ -48,10 +61,9 @@ def __getattr__(name):
 def _patch_transformers_compat():
     """Patch transformers compatibility for ALLOWED_LAYER_TYPES and tokenizer."""
     import transformers.configuration_utils as cfg
+
     if not hasattr(cfg, "ALLOWED_LAYER_TYPES"):
-        cfg.ALLOWED_LAYER_TYPES = getattr(
-            cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ()
-        )
+        cfg.ALLOWED_LAYER_TYPES = getattr(cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ())
 
 
 def _register_flagcx_connector():
@@ -71,6 +83,7 @@ def _register_flagcx_connector():
 def _patch_flash_attn_import():
     """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
     import sys
+
     if "vllm.vllm_flash_attn" in sys.modules:
         return
     try:
@@ -89,7 +102,9 @@ def _patch_flash_attn_import():
         stub = types.ModuleType("vllm.vllm_flash_attn")
         stub.FA2_AVAILABLE = False
         stub.FA3_AVAILABLE = False
-        stub.fa_version_unsupported_reason = lambda *a, **kw: "flash_attn C extensions not available"
+        stub.fa_version_unsupported_reason = lambda *a, **kw: (
+            "flash_attn C extensions not available"
+        )
         stub.flash_attn_varlen_func = None
         stub.get_scheduler_metadata = None
         stub.is_fa_version_supported = lambda *a, **kw: False
@@ -111,6 +126,7 @@ def _patch_custom_ops():
         logger.debug("Failed to import vllm_fl._C: %s", e)
 
     from vllm_fl.ops._C_ops_registry import register_op_schemas
+
     register_op_schemas()
 
 
@@ -144,6 +160,7 @@ def register():
 
     # Model-specific platform patches
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
+
     glm5_platform()
 
     # Note: FlagCX connector registration is deferred to register_model()
@@ -157,25 +174,32 @@ def register():
 
     return "vllm_fl.platform.PlatformFL"
 
+
 def register_quant_linear():
     from vllm.platforms import current_platform
+
     # vllm.model_executor.kernels.linear triggers cutlass_scaled_mm_supports_fp8
     # at module level, which requires torch.ops._C — not available on these
     # platforms.
     if current_platform.device_type in {"musa", "gcu"}:
         return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
+
     add_oot_quant_kernel()
+
 
 def register_router():
     from vllm.platforms import current_platform
+
     # fused_moe import chain triggers cutlass_scaled_mm_supports_fp8 on MUSA
     if current_platform.device_type == "musa":
         return
     from vllm_fl.utils import is_oot_enabled
+
     if not is_oot_enabled():
         return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
+
     replace_router_with_fl()
 
 
@@ -218,11 +242,18 @@ def register_model():
 
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
+    from vllm_fl.models.glm5.runtime import (
+        register_glm5_next_support,
+    )
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
 
+    # GLM5-Next is intentionally registered only by its vLLM-0.24 adapter;
+    # the plugin main branch is ABI-pinned to that release line.
+    register_glm5_next_support()
     apply_qwen3_5_text_patches()
 
     from vllm.platforms import current_platform
+
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
         from vllm_fl.patches.arm_cpu_gdn import (
             apply_arm_cpu_gdn_state_indices_patch,
@@ -274,9 +305,10 @@ def register_model():
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
 
         from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
+
         _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
 
-        #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
-        #glm5_model()
+        # from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
+        # glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")

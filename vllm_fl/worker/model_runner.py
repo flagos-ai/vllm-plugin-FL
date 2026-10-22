@@ -29,7 +29,7 @@ from vllm.compilation.breakable_cudagraph import (
     is_breakable_cudagraph_enabled,
 )
 from vllm.compilation.counter import compilation_counter
-from vllm.compilation.cuda_graph import CUDAGraphStat
+from vllm.compilation.cuda_graph import CUDAGraphStat, CUDAGraphWrapper
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
 from vllm.config import (
     CompilationMode,
@@ -167,7 +167,7 @@ from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.math_utils import cdiv, round_up
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
-from vllm.utils.platform_utils import num_compute_units, is_pin_memory_available, num_compute_units
+from vllm.utils.platform_utils import is_pin_memory_available, num_compute_units
 from vllm.utils.torch_utils import (
     get_dtype_size,
     is_quantized_kv_cache,
@@ -294,6 +294,21 @@ from vllm_fl.worker.common_attention_metadata import (
 from vllm_fl.worker.kv_cache_utils import bind_kv_cache
 
 GraphWrapper = GraphWrapper
+
+
+def _decoder_graph_wrappers():
+    """Return every decoder graph wrapper used by the CUDA runner."""
+    return list(GraphWrapper._all_instances) + list(
+        BreakableCUDAGraphWrapper._all_instances
+    )
+
+
+def _clear_decoder_graphs(runtime=None) -> None:
+    if runtime is not None:
+        runtime.clear_decoder_graphs()
+    else:
+        GraphWrapper.clear_all_graphs()
+    BreakableCUDAGraphWrapper.clear_all_graphs()
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
@@ -6666,6 +6681,7 @@ class ModelRunnerFL(
             # Drop captured graphs before distributed teardown. On ROCm, delayed
             # graph destruction can surface HSA faults in the next engine startup.
             CUDAGraphWrapper.clear_all_graphs()
+            BreakableCUDAGraphWrapper.clear_all_graphs()
             self.encoder_cudagraph_manager = None
         self.compilation_config.static_forward_context.clear()
         self.model = None  # type: ignore[assignment]
@@ -6813,6 +6829,18 @@ class ModelRunnerFL(
             if instance.graph_pool is not None:
                 instance.graph_pool = profiling_pool
 
+        # The common-attention metadata producer captures its own graphs before
+        # the decoder wrapper is entered.  Keep those profiling graphs in the
+        # same temporary pool as the decoder graphs.  If they use the global
+        # runtime pool here, the profiling cleanup drops the last graph owning
+        # that pool; the first real decoder capture then reuses a zero-refcount
+        # CachingHostAllocator pool and aborts in capture_begin().
+        metadata_graph = self.common_attention_metadata_graph
+        original_metadata_pool = None
+        if metadata_graph is not None:
+            original_metadata_pool = metadata_graph.graph_pool
+            metadata_graph.graph_pool = profiling_pool
+
         shared_memory_estimate = {}
         per_graph_estimate = {}
         private_memory_estimate = 0
@@ -6896,17 +6924,10 @@ class ModelRunnerFL(
                     )
         finally:
             set_cudagraph_capturing_enabled(False)
-            if self.graph_runtime is not None:
-                self.graph_runtime.clear_decoder_graphs()
-            else:
-                GraphWrapper.clear_all_graphs()
-            BreakableCUDAGraphWrapper.clear_all_graphs()
+            _clear_decoder_graphs(getattr(self, "graph_runtime", None))
             if encoder_cudagraph_manager is not None:
                 encoder_cudagraph_manager.clear()
-            all_wrappers = list(GraphWrapper._all_instances) + list(
-                BreakableCUDAGraphWrapper._all_instances
-            )
-            for instance in all_wrappers:
+            for instance in _decoder_graph_wrappers():
                 if id(instance) in original_pools:
                     instance.graph_pool = original_pools[id(instance)]
             for key_set in self.cudagraph_dispatcher.cudagraph_keys.values():
@@ -6914,6 +6935,8 @@ class ModelRunnerFL(
             self.cudagraph_dispatcher.keys_initialized = False
             self.maybe_remove_all_loras(self.lora_config)
             self._cleanup_profiling_kv_cache()
+            if metadata_graph is not None:
+                metadata_graph.graph_pool = original_metadata_pool
             compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
 
         # Overlay shared-pool modes, but add private Breakable pools: neither their
@@ -7506,6 +7529,7 @@ class ModelRunnerFL(
         kv_caches: dict[str, torch.Tensor] = {}
         has_attn, has_mamba = False, False
 
+
         # Map layer names to (offset, block_stride) within the packed
         # backing tensor so we can create strided views per layer.
         layer_packing: dict[str, tuple[int, int]] = {}
@@ -7533,16 +7557,21 @@ class ModelRunnerFL(
                     num_blocks = raw_tensor.numel() // kv_cache_spec.page_size_bytes
                 if isinstance(kv_cache_spec, AttentionSpec):
                     has_attn = True
-                    num_blocks_per_kv_block = (
-                        kv_cache_spec.block_size // kernel_block_size
-                    )
-                    kernel_num_blocks = num_blocks * num_blocks_per_kv_block
-
-                    # For MLA with compression, storage_block_size != block_size
-                    if kv_cache_spec.storage_block_size != kv_cache_spec.block_size:
-                        shape_block_size = kv_cache_spec.storage_block_size
+                    from vllm_fl.runtime.kv_layout import get_physical_cache_layout
+                    layout = get_physical_cache_layout(attn_backend, kv_cache_spec)
+                    if layout is not None:
+                        num_blocks_per_kv_block = layout.pages_per_block
+                        shape_block_size = layout.kernel_block_size
                     else:
-                        shape_block_size = kernel_block_size
+                        num_blocks_per_kv_block = (
+                            kv_cache_spec.block_size // kernel_block_size
+                        )
+                        shape_block_size = (
+                            kv_cache_spec.storage_block_size
+                            if kv_cache_spec.storage_block_size != kv_cache_spec.block_size
+                            else kernel_block_size
+                        )
+                    kernel_num_blocks = num_blocks * num_blocks_per_kv_block
 
                     kv_cache_shape = attn_backend.get_kv_cache_shape(
                         kernel_num_blocks,
@@ -7564,9 +7593,38 @@ class ModelRunnerFL(
                     except (AttributeError, NotImplementedError):
                         kv_cache_stride_order = tuple(range(len(kv_cache_shape)))
                     raw_tensor = kv_cache_raw_tensors[layer_name]
+                    # A padded logical cache block can be split into multiple
+                    # backend blocks (for example, GLM5-Next uses a 192-token
+                    # logical DSA indexer block and the indexer kernel consumes
+                    # 64-token blocks).  The upstream v0.24 helper applies the
+                    # complete logical-page stride to every backend block,
+                    # which makes the strided view run past the allocation.
+                    # Divide the physical page evenly across the backend blocks
+                    # so flattened kernel block ids retain a constant stride.
+                    reshape_spec = kv_cache_spec
+                    if (
+                        layout is not None
+                        and packing is None
+                        and kv_cache_spec.page_size_padded is not None
+                        and num_blocks_per_kv_block > 1
+                    ):
+                        assert (
+                            kv_cache_spec.page_size_bytes
+                            % num_blocks_per_kv_block
+                            == 0
+                        )
+                        reshape_spec = replace(
+                            kv_cache_spec,
+                            block_size=layout.metadata_block_size,
+                            page_size_padded=(
+                                kv_cache_spec.page_size_bytes
+                                // num_blocks_per_kv_block
+                            ),
+                        )
+
                     kv_caches[layer_name] = _reshape_attention_kv_cache(
                         raw_tensor,
-                        kv_cache_spec,
+                        reshape_spec,
                         kv_cache_shape,
                         kv_cache_stride_order,
                         kernel_num_blocks,

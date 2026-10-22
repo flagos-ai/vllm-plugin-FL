@@ -150,7 +150,19 @@ def test_profile_finally_clears_decoder_once_and_restores_state(with_runtime):
         },
         "compilation_counter": counter,
         "saved_num_cudagraph_captured": 3,
+        "metadata_graph": NS(graph_pool="profile-metadata"),
+        "original_metadata_pool": "original-metadata",
     }
+    helpers = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in ("_clear_decoder_graphs", "_decoder_graph_wrappers")
+    ]
+    exec(
+        compile(ast.Module(body=helpers, type_ignores=[]), "graph-helpers", "exec"),
+        namespace,
+    )
     exec(
         compile(ast.Module(body=cleanup, type_ignores=[]), "profile-finally", "exec"),
         namespace,
@@ -164,6 +176,7 @@ def test_profile_finally_clears_decoder_once_and_restores_state(with_runtime):
     assert dispatcher.cudagraph_keys == {"full": set()}
     assert not dispatcher.keys_initialized
     assert counter.num_cudagraph_captured == 3
+    assert namespace["metadata_graph"].graph_pool == "original-metadata"
 
 
 def _module(monkeypatch, name, **attributes):

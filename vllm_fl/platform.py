@@ -80,9 +80,7 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
 
     compilation = vllm_config.compilation_config
     model_config = vllm_config.model_config
-    enforce_eager = bool(
-        model_config is not None and model_config.enforce_eager
-    )
+    enforce_eager = bool(model_config is not None and model_config.enforce_eager)
     if enforce_eager or compilation.cudagraph_mode == CUDAGraphMode.NONE:
         compilation.mode = CompilationMode.NONE
         compilation.cudagraph_mode = CUDAGraphMode.NONE
@@ -105,7 +103,9 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
             "FL basic Ascend FULL decode graphs do not support ubatching"
         )
     if compilation.mode not in (
-        None, CompilationMode.NONE, CompilationMode.VLLM_COMPILE
+        None,
+        CompilationMode.NONE,
+        CompilationMode.VLLM_COMPILE,
     ):
         raise NotImplementedError(
             "FL Ascend graph compilation supports VLLM_COMPILE or NONE"
@@ -121,6 +121,7 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     compilation.pass_config.fuse_norm_quant = False
     compilation.pass_config.fuse_act_quant = False
     compilation.pass_config.fuse_attn_quant = False
+
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -453,6 +454,11 @@ class PlatformFL(Platform):
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
 
+        # GLM guards run after vLLM resolves its final configuration.
+        from vllm_fl.models.glm5.runtime import validate_glm5_config
+
+        validate_glm5_config(vllm_config)
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -465,6 +471,18 @@ class PlatformFL(Platform):
 
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
+
+        # A model activation plan may override the attention backend (for
+        # example GLM5's portable MLA path).  Only a plan activated for the
+        # model being loaded is consulted, so a process-level GLM provider
+        # variable no longer rewrites the generic path of other MLA models.
+        from vllm_fl.activation import get_active_plan
+
+        plan = get_active_plan()
+        if use_mla and plan is not None and plan.attention_backend is not None:
+            override = plan.attention_backend(use_mla=use_mla, use_sparse=use_sparse)
+            if override:
+                return override
 
         backend_path = call_op(
             "attention_backend", use_mla=use_mla, use_sparse=use_sparse
@@ -541,6 +559,8 @@ class PlatformFL(Platform):
         if cls.dist_backend == "flagcx":
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
+        elif cls.vendor_name == "thead":
+            return "vllm_fl.distributed.nccl_communicator.NcclCommunicatorFL"
         else:
             logger.info("Using CudaCommunicator for communication.")
             return "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
@@ -637,8 +657,22 @@ class PlatformFL(Platform):
 
             patch_triton_chained_or_for_iluvatar()
 
+    @classmethod
     def supports_fp8(cls) -> bool:
-        return cls.vendor_name == "nvidia"
+        """Report native FP8 support for the current device architecture."""
+        minimum = {
+            "nvidia": DeviceCapability(8, 9),
+            "mthreads": DeviceCapability(3, 1),
+            "gcu": DeviceCapability(4, 0),
+            "enflame": DeviceCapability(4, 0),
+        }.get(cls.vendor_name)
+        if minimum is None:
+            return False
+        try:
+            capability = cls.get_device_capability()
+        except (AttributeError, RuntimeError, NotImplementedError):
+            return False
+        return capability is not None and capability >= minimum
 
     @classmethod
     def get_device_uuid(cls, device_id: int = 0) -> str:
@@ -689,10 +723,7 @@ class PlatformFL(Platform):
                 # path — the GroupCoordinator that matters is built after
                 # check_and_update_config has finalized cudagraph_mode.
                 return False
-            return (
-                vllm_config.compilation_config.cudagraph_mode
-                != CUDAGraphMode.NONE
-            )
+            return vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         return cls.vendor_name in ("nvidia", "thead", "iluvatar")
 
     @classmethod
@@ -703,6 +734,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
+        if cls.vendor_name == "nvidia":
+            # Capability probes run during activation, including after fork.
+            # Reuse vLLM's NVML query without initializing a CUDA context.
+            from vllm.platforms.cuda import NvmlCudaPlatform
+
+            return NvmlCudaPlatform.get_device_capability(device_id)
         # TODO(yxa): For NPU/Ascend devices, return None (no capability version like CUDA)
         if cls.device_type == "npu":
             return None
