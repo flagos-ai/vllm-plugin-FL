@@ -23,6 +23,11 @@ on:
       platform:
         required: true
         type: string
+      graph_comparison:
+        description: "Run the isolated native graph policy experiment instead of the ordinary suite"
+        required: false
+        type: boolean
+        default: false
       musa_allocation:
         description: "Explicit MUSA allocation JSON for this workflow only"
         required: false
@@ -107,7 +112,7 @@ jobs:
             $CHANGED_ARG
 
   musa_suite:
-    name: MUSA complete test suite
+    name: ${{ inputs.graph_comparison && 'MUSA native graph comparison' || 'MUSA complete test suite' }}
     needs: setup
     if: inputs.platform == 'musa'
     runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
@@ -139,24 +144,40 @@ jobs:
       - name: Verify owned child cleanup without accelerator allocation
         timeout-minutes: 1
         run: python -I -B .github/scripts/musa/tests/test_ci_serial.py
+      - name: Compare native MUSA graph policies
+        if: ${{ inputs.graph_comparison }}
+        timeout-minutes: 60
+        run: |
+          python -I -B .github/scripts/musa/run_graph_ownership_probe.py --output-dir "$MUSA_SUITE_ARTIFACT_DIR/graph-comparison/ownership"
+          python -I -B .github/scripts/musa/run_musa_graph_comparison.py --output-dir "$MUSA_SUITE_ARTIFACT_DIR/graph-comparison/capacity"
       - name: Run unit tests
+        if: ${{ !inputs.graph_comparison }}
         id: unit
         timeout-minutes: 361
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope unit
       - name: Run functional tests
+        if: ${{ !inputs.graph_comparison }}
         id: functional
         timeout-minutes: 16
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope functional
       - name: Run the existing E2E groups serially
+        if: ${{ !inputs.graph_comparison }}
         id: e2e
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope e2e
       - name: Run benchmark smoke tests
         id: benchmark
-        if: steps.e2e.outputs.gpu_stages_safe == 'true'
+        if: ${{ !inputs.graph_comparison && steps.e2e.outputs.gpu_stages_safe == 'true' }}
         timeout-minutes: 31
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope benchmark
+      - name: Preserve graph comparison reports
+        if: ${{ always() && inputs.graph_comparison }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: musa-graph-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.MUSA_SUITE_ARTIFACT_DIR }}/graph-comparison
+          if-no-files-found: warn
       - name: Preserve suite and installation reports
-        if: always()
+        if: ${{ always() && !inputs.graph_comparison }}
         uses: actions/upload-artifact@v4
         with:
           name: musa-suite-${{ github.run_id }}-${{ github.run_attempt }}
@@ -170,7 +191,7 @@ jobs:
 
   notify:
     needs: [setup, musa_suite]
-    if: always()
+    if: ${{ always() && !inputs.graph_comparison }}
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}
