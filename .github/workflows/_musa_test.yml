@@ -191,7 +191,7 @@ jobs:
 
   notify:
     needs: [setup, musa_suite]
-    if: ${{ always() && !inputs.graph_comparison }}
+    if: ${{ always() && !inputs.graph_comparison && github.ref != 'refs/heads/codex/musa-graph-ab-20261022' }}
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}

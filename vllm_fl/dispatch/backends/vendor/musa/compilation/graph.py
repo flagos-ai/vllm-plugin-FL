@@ -2,16 +2,22 @@
 """MUSA graph input ownership, output descriptors, and executable replay policy."""
 
 import dataclasses
+import os
+import sys
 import weakref
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from typing import Any
 
 import torch
 from torch.utils._pytree import tree_flatten
 
 from vllm.config import CUDAGraphMode
+from vllm.logger import init_logger
 
 from vllm_fl.compilation.graph import GraphEntry, GraphWrapper
+from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_admission import (
+    _musa_admission_budget,
+)
 from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
     musa_graph_class,
 )
@@ -334,3 +340,90 @@ class MUSAGraphWrapper(GraphWrapper):
         if not musa_graph_replay(entry.graph, before_replay=prepare_replay):
             return self.runnable(*args, **kwargs)
         return entry.output
+
+
+# Isolated experiment: retain the original class above for unchanged regressions.
+# The exported alias below selects this class in both platform factory routes.
+@dataclasses.dataclass
+class _MUSAAdmissionGraphEntry(MUSAGraphEntry):
+    musa_eager_only: bool = False
+    musa_capture_device: int | None = None
+
+
+class MUSAAdmissionGraphWrapper(MUSAGraphWrapper):
+    """Admit at most 1900 live native graphs; never destroy or restore an exec."""
+
+    entry_type = _MUSAAdmissionGraphEntry
+    _graph_type = torch.musa.MUSAGraph
+
+    def _admission_log(self, event):
+        state = _musa_admission_budget.snapshot()
+        init_logger(__name__).info(
+            "MUSA admission experiment: event=%s class=%s.%s pid=%d "
+            "live=%d pending=%d cap=%d total_admitted=%d epoch=%d "
+            "legacy_loader_loaded=%s native_extension_loaded=%s",
+            event,
+            type(self).__module__,
+            type(self).__qualname__,
+            os.getpid(),
+            state["live"],
+            state["pending"],
+            state["cap"],
+            state["total_admitted"],
+            state["epoch"],
+            "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec"
+            in sys.modules,
+            "vllm_fl_musa_graph_exec" in sys.modules,
+        )
+
+    def _capture_context(self, graph):
+        return nullcontext()
+
+    def _capture_graph(self, entry, args, kwargs):
+        if entry.musa_eager_only:
+            with _musa_admission_budget.eager():
+                return self.runnable(*args, **kwargs)
+        with _musa_admission_budget.capture() as admitted:
+            if admitted:
+                entry.musa_capture_device = torch.musa.current_device()
+                output = super()._capture_graph(entry, args, kwargs)
+                for event in _musa_admission_budget.register(entry.graph):
+                    self._admission_log(event)
+                return output
+            entry.musa_eager_only = True
+            if _musa_admission_budget.rejected():
+                self._admission_log("first_admission_rejected")
+        with _musa_admission_budget.eager():
+            return self.runnable(*args, **kwargs)
+
+    def _replay_graph(self, entry, args, kwargs):
+        replayed = False
+        with (
+            _musa_admission_budget.replay(),
+            torch.musa.device(entry.musa_capture_device),
+        ):
+            if entry.musa_input_leaves is None:
+                self._validate_replay_addresses(entry, args)
+                stable = True
+            else:
+                stable = self._stage_musa_inputs(entry, args, kwargs)
+            if stable:
+                with suppress(ImportError, RuntimeError):
+                    from vllm.model_executor.offloader.base import get_offloader
+
+                    get_offloader().sync_prev_onload()
+                entry.graph.replay()
+                replayed = True
+        if replayed:
+            return entry.output
+        with _musa_admission_budget.eager():
+            return self.runnable(*args, **kwargs)
+
+    def clear_graphs(self):
+        with _musa_admission_budget.clearing():
+            super().clear_graphs()
+            if _musa_admission_budget.cleared_to_zero():
+                self._admission_log("cleared_to_zero")
+
+
+MUSAGraphWrapper = MUSAAdmissionGraphWrapper
