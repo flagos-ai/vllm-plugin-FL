@@ -16,6 +16,17 @@ def _bf16(shape, seed):
     return torch.randn(shape, generator=torch.Generator().manual_seed(seed)).bfloat16()
 
 
+def test_metadata_matches_decode_provider_type():
+    from flaggems_vllm.ops.flash_mla_with_kvcache import FlashMLASchedMeta
+
+    from vllm_fl.dispatch.backends.flaggems.impl.dsv41_mla import build_tile_scheduler
+
+    # FlagGems and FlagGems-vllm have distinct metadata classes even when their
+    # sources are identical. The decode provider rejects the other class.
+    metadata = build_tile_scheduler(SimpleNamespace(_layer_types={"c1a"}), 1)
+    assert isinstance(metadata["c1a"], FlashMLASchedMeta)
+
+
 def _reference(
     q,
     keys,
@@ -122,6 +133,8 @@ def test_sparse_prefill_out_sink_lengths_and_invalid_indices(heads):
 @requires_cuda_hopper
 @pytest.mark.parametrize("extra", [False, True])
 def test_sparse_decode_two_caches_and_real_metadata(extra):
+    from flaggems_vllm import flash_mla_with_kvcache
+
     from vllm_fl.dispatch.backends.flaggems.impl import dsv41_mla as ops
 
     cache, keys = _cache_and_decoded_keys(3, 64, 5)
@@ -161,7 +174,7 @@ def test_sparse_decode_two_caches_and_real_metadata(extra):
         if extra
         else {}
     )
-    result, lse = ops.flash_mla_with_kvcache(
+    result, lse = flash_mla_with_kvcache(
         q.cuda().unsqueeze(1),
         cache,
         None,
@@ -184,6 +197,8 @@ def test_sparse_decode_two_caches_and_real_metadata(extra):
 @pytest.mark.gpu
 @requires_cuda_hopper
 def test_sparse_decode_cuda_graph_replays_indices():
+    from flaggems_vllm import flash_mla_with_kvcache
+
     from vllm_fl.dispatch.backends.flaggems.impl import dsv41_mla as ops
 
     cache, keys = _cache_and_decoded_keys(3, 64, 11)
@@ -191,11 +206,11 @@ def test_sparse_decode_cuda_graph_replays_indices():
     ids = torch.arange(64, dtype=torch.int32, device="cuda").view(1, 1, 64)
     lengths = torch.tensor([53], dtype=torch.int32, device="cuda")
     sink = torch.zeros(64, device="cuda")
-    state = ops.get_mla_metadata()[0]
+    state = ops.build_tile_scheduler(SimpleNamespace(_layer_types={"c1a"}), 1)["c1a"]
     output = torch.empty(1, 1, 64, 512, dtype=torch.bfloat16, device="cuda")
 
     def run():
-        return ops.flash_mla_with_kvcache(
+        return flash_mla_with_kvcache(
             q.unsqueeze(1),
             cache,
             None,
