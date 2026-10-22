@@ -5,7 +5,7 @@ No environment variable or opt-in is required. `flag_gems.enable()` continues
 to own ATen registration. NVIDIA uses the full official vLLM 0.32 CUDA
 distribution and upstream V1/V2 runners. Its FlagGems development commit is
 `6fe7709e7717e49cf12bb00346719a0885f505fa`; the NVIDIA dispatch policy retains
-the ATen correctness exclusions, including floating `arange` dtype inference
+the ATen correctness exclusions, including floating `torch.arange` dtype inference
 and E8M0 storage operations. These provider issues also apply with native vLLM
 extensions installed. Other platforms keep their vendor settings.
 
