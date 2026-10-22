@@ -23,11 +23,6 @@ on:
       platform:
         required: true
         type: string
-      graph_comparison:
-        description: "Run the isolated native graph policy experiment instead of the ordinary suite"
-        required: false
-        type: boolean
-        default: false
       musa_allocation:
         description: "Explicit MUSA allocation JSON for this workflow only"
         required: false
@@ -112,7 +107,7 @@ jobs:
             $CHANGED_ARG
 
   musa_suite:
-    name: ${{ inputs.graph_comparison && 'MUSA native graph comparison' || 'MUSA complete test suite' }}
+    name: MUSA complete test suite
     needs: setup
     if: inputs.platform == 'musa'
     runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
@@ -130,7 +125,8 @@ jobs:
       - name: Set unique suite result directory
         run: |
           suite_root="${RUNNER_TEMP}/musa-suite-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          printf 'MUSA_SUITE_ARTIFACT_DIR=%s\n' "$suite_root" >> "$GITHUB_ENV"
+          gate_root="${RUNNER_TEMP}/musa-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf 'MUSA_SUITE_ARTIFACT_DIR=%s\nMUSA_GATE_ARTIFACT_DIR=%s\nMUSA_CI_RESULT_ROOT=%s\n' "$suite_root" "$gate_root" "$gate_root" >> "$GITHUB_ENV"
           mkdir -p "$suite_root/unit" "$suite_root/functional" "$suite_root/benchmark"
       - uses: actions/checkout@v4
       - name: Check the actual allocated devices and native PCI mapping
@@ -143,47 +139,55 @@ jobs:
         run: bash .github/scripts/musa/setup.sh
       - name: Verify owned child cleanup without accelerator allocation
         timeout-minutes: 1
-        run: python -I -B .github/scripts/musa/tests/test_ci_serial.py
-      - name: Compare native MUSA graph policies
-        if: ${{ inputs.graph_comparison }}
-        timeout-minutes: 60
         run: |
-          python -I -B .github/scripts/musa/run_graph_ownership_probe.py --output-dir "$MUSA_SUITE_ARTIFACT_DIR/graph-comparison/ownership"
-          python -I -B .github/scripts/musa/run_musa_graph_comparison.py --output-dir "$MUSA_SUITE_ARTIFACT_DIR/graph-comparison/capacity"
+          python -I -B .github/scripts/musa/tests/test_ci_serial.py
+          python -I -B .github/scripts/musa/tests/test_gate_fail_closed.py
+          python -I -B .github/scripts/musa/tests/test_native_admission_probe.py
+      - name: Verify native admission and RNG lifecycle
+        id: native_admission
+        timeout-minutes: 7
+        run: >-
+          python -I -B .github/scripts/musa/run_native_admission_probe.py
+          --candidate-root "$GITHUB_WORKSPACE"
+          --output-dir "$MUSA_SUITE_ARTIFACT_DIR/native-admission"
       - name: Run unit tests
-        if: ${{ !inputs.graph_comparison }}
         id: unit
+        if: ${{ success() && steps.native_admission.outcome == 'success' && steps.native_admission.outputs.gpu_stages_safe == 'true' }}
         timeout-minutes: 361
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope unit
       - name: Run functional tests
-        if: ${{ !inputs.graph_comparison }}
         id: functional
         timeout-minutes: 16
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope functional
       - name: Run the existing E2E groups serially
-        if: ${{ !inputs.graph_comparison }}
         id: e2e
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope e2e
       - name: Run benchmark smoke tests
         id: benchmark
-        if: ${{ !inputs.graph_comparison && steps.e2e.outputs.gpu_stages_safe == 'true' }}
+        if: ${{ success() && steps.e2e.outcome == 'success' && steps.e2e.outputs.gpu_stages_safe == 'true' }}
         timeout-minutes: 31
         run: python -I -B .github/scripts/musa/run_ci_stage.py --scope benchmark
-      - name: Preserve graph comparison reports
-        if: ${{ always() && inputs.graph_comparison }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: musa-graph-comparison-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.MUSA_SUITE_ARTIFACT_DIR }}/graph-comparison
-          if-no-files-found: warn
+      - name: Run both original Gate models in eager and graph modes
+        id: gate
+        if: >-
+          ${{ success() &&
+          steps.devices.outcome == 'success' && steps.install.outcome == 'success' &&
+          steps.native_admission.outcome == 'success' && steps.native_admission.outputs.gpu_stages_safe == 'true' &&
+          steps.unit.outcome == 'success' && steps.unit.outputs.gpu_stages_safe == 'true' &&
+          steps.functional.outcome == 'success' && steps.functional.outputs.gpu_stages_safe == 'true' &&
+          steps.e2e.outcome == 'success' && steps.e2e.outputs.gpu_stages_safe == 'true' &&
+          steps.benchmark.outcome == 'success' && steps.benchmark.outputs.gpu_stages_safe == 'true' }}
+        timeout-minutes: 500
+        run: bash .github/scripts/musa/run-adaptation-gate.sh
       - name: Preserve suite and installation reports
-        if: ${{ always() && !inputs.graph_comparison }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: musa-suite-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ env.MUSA_SUITE_ARTIFACT_DIR }}
             ${{ env.MUSA_CI_INSTALL_EVIDENCE }}
+            ${{ env.MUSA_GATE_ARTIFACT_DIR }}
             coverage-musa.json
             report-musa.json
             test-results/logs
@@ -191,7 +195,7 @@ jobs:
 
   notify:
     needs: [setup, musa_suite]
-    if: ${{ always() && !inputs.graph_comparison && github.ref != 'refs/heads/codex/musa-graph-ab-20261022' }}
+    if: ${{ always() && github.event_name == 'pull_request' }}
     uses: ./.github/workflows/_notify_feishu.yml
     with:
       platform: ${{ inputs.platform }}

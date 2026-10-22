@@ -265,7 +265,9 @@ class ConfigTests(unittest.TestCase):
             )
         notify = musa["jobs"]["notify"]
         self.assertEqual(notify["needs"], ["setup", "musa_suite"])
-        self.assertEqual(notify["if"], "always()")
+        self.assertEqual(
+            notify["if"], "${{ always() && github.event_name == 'pull_request' }}"
+        )
         self.assertIn("needs.musa_suite.result == 'success'", notify["with"]["status"])
         self.assertIn("needs.setup.result == 'cancelled'", notify["with"]["status"])
         self.assertIn("'failure'", notify["with"]["status"])
@@ -289,8 +291,25 @@ class ConfigTests(unittest.TestCase):
                 for scope in ("unit", "functional", "e2e", "benchmark")
             ],
         )
-        self.assertFalse(
-            any("run-adaptation-gate" in step.get("run", "") for step in suite["steps"])
+        gate_steps = [
+            step
+            for step in suite["steps"]
+            if "run-adaptation-gate" in step.get("run", "")
+        ]
+        self.assertEqual(len(gate_steps), 1)
+        self.assertIn("steps.benchmark.outcome == 'success'", gate_steps[0]["if"])
+        self.assertIn(
+            "steps.benchmark.outputs.gpu_stages_safe == 'true'", gate_steps[0]["if"]
+        )
+        native_steps = [
+            step for step in suite["steps"] if step.get("id") == "native_admission"
+        ]
+        self.assertEqual(len(native_steps), 1)
+        self.assertIn("run_native_admission_probe.py", native_steps[0]["run"])
+        self.assertIn("--candidate-root", native_steps[0]["run"])
+        self.assertIn(
+            "steps.native_admission.outputs.gpu_stages_safe == 'true'",
+            gate_steps[0]["if"],
         )
         self.assertNotIn("max-parallel", platform["jobs"]["e2e"]["strategy"])
         self.assertEqual(platform["jobs"]["e2e"]["strategy"]["fail-fast"], "false")

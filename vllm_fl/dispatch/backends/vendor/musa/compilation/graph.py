@@ -1,9 +1,8 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""MUSA graph input ownership, output descriptors, and executable replay policy."""
+"""MUSA graph input ownership, borrowed outputs, and bounded native admission."""
 
 import dataclasses
 import os
-import sys
 import weakref
 from contextlib import nullcontext, suppress
 from typing import Any
@@ -17,9 +16,6 @@ from vllm.logger import init_logger
 from vllm_fl.compilation.graph import GraphEntry, GraphWrapper
 from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_admission import (
     _musa_admission_budget,
-)
-from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
-    musa_graph_class,
 )
 
 
@@ -108,12 +104,16 @@ class MUSAGraphEntry(GraphEntry):
     musa_input_addresses: list[int | None] | None = None
     musa_last_input_tensor_refs: list[Any] | None = None
 
+    musa_eager_only: bool = False
+
+    musa_capture_device: int | None = None
+
 
 class MUSAGraphWrapper(GraphWrapper):
-    """Keep the MUSA capture/replay contract out of the shared wrapper."""
+    """Replay admitted native graphs and run excess entries with original inputs."""
 
     entry_type = MUSAGraphEntry
-    _graph_type = musa_graph_class(torch.musa.MUSAGraph)
+    _graph_type = torch.musa.MUSAGraph
 
     @staticmethod
     def _musa_tensor_metadata(tensor):
@@ -307,61 +307,14 @@ class MUSAGraphWrapper(GraphWrapper):
             for x in entry.musa_input_leaves
         ]
 
-    def _capture_context(self, graph):
-        from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
-            musa_graph_capture,
-        )
-
-        return musa_graph_capture(graph)
-
     def _weak_ref_output(self, output):
         return _weak_ref_musa_tensors(output)
-
-    def _replay_graph(self, entry, args, kwargs):
-        if entry.musa_input_leaves is None:
-            self._validate_replay_addresses(entry, args)
-        from vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache import (
-            musa_graph_replay,
-        )
-
-        def prepare_replay():
-            # Residency is locked across validation and enqueue; cold pieces run
-            # the original callable without staging or restoring an executable.
-            if entry.musa_input_leaves is not None and not self._stage_musa_inputs(
-                entry, args, kwargs
-            ):
-                return False
-            with suppress(ImportError, RuntimeError):
-                from vllm.model_executor.offloader.base import get_offloader
-
-                get_offloader().sync_prev_onload()
-            return True
-
-        if not musa_graph_replay(entry.graph, before_replay=prepare_replay):
-            return self.runnable(*args, **kwargs)
-        return entry.output
-
-
-# Isolated experiment: retain the original class above for unchanged regressions.
-# The exported alias below selects this class in both platform factory routes.
-@dataclasses.dataclass
-class _MUSAAdmissionGraphEntry(MUSAGraphEntry):
-    musa_eager_only: bool = False
-    musa_capture_device: int | None = None
-
-
-class MUSAAdmissionGraphWrapper(MUSAGraphWrapper):
-    """Admit at most 1900 live native graphs; never destroy or restore an exec."""
-
-    entry_type = _MUSAAdmissionGraphEntry
-    _graph_type = torch.musa.MUSAGraph
 
     def _admission_log(self, event):
         state = _musa_admission_budget.snapshot()
         init_logger(__name__).info(
-            "MUSA admission experiment: event=%s class=%s.%s pid=%d "
-            "live=%d pending=%d cap=%d total_admitted=%d epoch=%d "
-            "legacy_loader_loaded=%s native_extension_loaded=%s",
+            "MUSA graph admission: event=%s class=%s.%s pid=%d "
+            "live=%d pending=%d cap=%d total_admitted=%d epoch=%d",
             event,
             type(self).__module__,
             type(self).__qualname__,
@@ -371,9 +324,6 @@ class MUSAAdmissionGraphWrapper(MUSAGraphWrapper):
             state["cap"],
             state["total_admitted"],
             state["epoch"],
-            "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec"
-            in sys.modules,
-            "vllm_fl_musa_graph_exec" in sys.modules,
         )
 
     def _capture_context(self, graph):
@@ -424,6 +374,3 @@ class MUSAAdmissionGraphWrapper(MUSAGraphWrapper):
             super().clear_graphs()
             if _musa_admission_budget.cleared_to_zero():
                 self._admission_log("cleared_to_zero")
-
-
-MUSAGraphWrapper = MUSAAdmissionGraphWrapper

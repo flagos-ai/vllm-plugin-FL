@@ -1,8 +1,8 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""New admission controls execute the candidate alias and real shared wrapper AST.
+"""CPU controls for the production native-graph admission wrapper.
 
-Native API, storage descriptors and profiling are CPU doubles, not GPU evidence.
-Legacy source tests are intentionally neither modified nor run by this file.
+Native graph APIs are CPU doubles. Input/alias and borrowed-storage contracts
+are separately covered by the unchanged original stream/weak-reference tests.
 """
 
 import __future__
@@ -86,8 +86,10 @@ def build(cap=2, mode=Mode.FULL):
     @contextmanager
     def device(ordinal):
         events.append(("device_enter", ordinal))
-        yield
-        events.append(("device_exit", ordinal))
+        try:
+            yield
+        finally:
+            events.append(("device_exit", ordinal))
 
     def deny_vendor_import(name, *args, **kwargs):
         if name.startswith(("vllm", "torch")):
@@ -97,25 +99,12 @@ def build(cap=2, mode=Mode.FULL):
     common = ast.parse((PRODUCTION / "vllm_fl/compilation/graph.py").read_text())
     musa = ast.parse((VENDOR / "graph.py").read_text())
     common_names = {"GraphEntry", "GraphOptions", "GraphWrapper"}
-    musa_names = {
-        "MUSAGraphEntry",
-        "MUSAGraphWrapper",
-        "_MUSAAdmissionGraphEntry",
-        "MUSAAdmissionGraphWrapper",
-    }
+    musa_names = {"MUSAGraphEntry", "MUSAGraphWrapper"}
     nodes = [
         n for n in common.body if isinstance(n, ast.ClassDef) and n.name in common_names
     ]
     nodes += [
         n for n in musa.body if isinstance(n, ast.ClassDef) and n.name in musa_names
-    ]
-    nodes += [
-        n
-        for n in musa.body
-        if isinstance(n, ast.Assign)
-        and any(
-            isinstance(x, ast.Name) and x.id == "MUSAGraphWrapper" for x in n.targets
-        )
     ]
     native = SimpleNamespace(
         MUSAGraph=FakeGraph, current_device=lambda: 3, device=device
@@ -132,7 +121,6 @@ def build(cap=2, mode=Mode.FULL):
         sys=sys,
         CUDAGraphMode=Mode,
         Graph=SimpleNamespace(graph=FakeGraph),
-        musa_graph_class=lambda cls: cls,
         torch=SimpleNamespace(Tensor=FakeTensor, musa=native),
         envs=SimpleNamespace(VLLM_LOGGING_LEVEL="INFO"),
         current_platform=SimpleNamespace(
@@ -185,14 +173,18 @@ def build(cap=2, mode=Mode.FULL):
 
 
 class AdmissionControls(unittest.TestCase):
-    def test_actual_alias_native_type_and_unchanged_ownership_hooks(self):
+    def test_public_native_class_and_shared_common_registry(self):
         wrapper, _, _, _, ns = build()
-        self.assertIs(type(wrapper), ns["MUSAAdmissionGraphWrapper"])
+        self.assertIs(type(wrapper), ns["MUSAGraphWrapper"])
         self.assertIs(wrapper._graph_type, FakeGraph)
-        legacy = type(wrapper).__mro__[1]
-        self.assertIs(type(wrapper)._stage_musa_inputs, legacy._stage_musa_inputs)
-        self.assertIs(type(wrapper)._weak_ref_output, legacy._weak_ref_output)
-        self.assertIs(type(wrapper)._capture_inputs, legacy._capture_inputs)
+        self.assertEqual(type(wrapper).__bases__, (ns["GraphWrapper"],))
+        self.assertIs(type(wrapper)._all_instances, ns["GraphWrapper"]._all_instances)
+        self.assertIn(wrapper, ns["GraphWrapper"]._all_instances)
+        entry_fields = {
+            field.name for field in dataclasses.fields(ns["MUSAGraphEntry"])
+        }
+        self.assertIn("musa_eager_only", entry_fields)
+        self.assertIn("musa_capture_device", entry_fields)
 
     def test_cap_permanent_eager_and_second_round_after_clear(self):
         wrapper, ctx, budget, events, _ = build()
@@ -314,7 +306,7 @@ class AdmissionControls(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "poisoned"), budget.capture():
             self.fail("must not enter")
 
-    def test_finite_transition_logs_and_legacy_source_class_AST(self):
+    def test_finite_transition_logs_and_no_legacy_dependency(self):
         wrapper, ctx, _, events, _ = build(cap=2)
         for key in ("a", "b", "c", "c"):
             ctx.batch_descriptor = key
@@ -334,17 +326,97 @@ class AdmissionControls(unittest.TestCase):
                 "cleared_to_zero",
             ],
         )
-        original = ast.parse(
-            (
-                PRODUCTION
-                / "vllm_fl/dispatch/backends/vendor/musa/compilation/graph.py"
-            ).read_text()
-        )
         candidate = ast.parse((VENDOR / "graph.py").read_text())
-        for name in ("MUSAGraphEntry", "MUSAGraphWrapper", "_weak_ref_musa_tensors"):
-            old = next(n for n in original.body if getattr(n, "name", None) == name)
-            new = next(n for n in candidate.body if getattr(n, "name", None) == name)
-            self.assertEqual(ast.dump(old), ast.dump(new), name)
+        wrappers = [
+            n
+            for n in candidate.body
+            if isinstance(n, ast.ClassDef) and n.name == "MUSAGraphWrapper"
+        ]
+        self.assertEqual(len(wrappers), 1)
+        self.assertEqual(
+            ast.dump(wrappers[0].bases[0]),
+            ast.dump(ast.Name(id="GraphWrapper", ctx=ast.Load())),
+        )
+        self.assertFalse(
+            any(
+                isinstance(n, ast.Assign)
+                and any(
+                    isinstance(t, ast.Name) and t.id == "MUSAGraphWrapper"
+                    for t in n.targets
+                )
+                for n in candidate.body
+            )
+        )
+        self.assertFalse(
+            any(
+                isinstance(n, ast.ImportFrom)
+                and n.module is not None
+                and ("musa_graph_exec" in n.module)
+                for n in ast.walk(candidate)
+            )
+        )
+        self.assertFalse(
+            any(
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id == "musa_graph_class"
+                for n in ast.walk(candidate)
+            )
+        )
+
+    def test_default_and_nonpositive_admission_caps(self):
+        self.assertEqual(Budget().snapshot()["cap"], 1900)
+        for cap in (0, -1):
+            with self.subTest(cap=cap), self.assertRaisesRegex(ValueError, "positive"):
+                Budget(cap)
+
+    def test_one_budget_is_shared_across_wrapper_instances(self):
+        first, ctx, budget, events, ns = build(cap=2)
+        second = ns["MUSAGraphWrapper"](
+            first.runnable,
+            SimpleNamespace(compilation_config=object()),
+            Mode.FULL,
+            ns["GraphOptions"](debug_log_enable=False, weak_ref_output=False),
+        )
+        first()
+        second()
+        ctx.batch_descriptor = "denied"
+        first()
+        self.assertEqual(events.count("native_capture"), 2)
+        self.assertEqual(budget.snapshot()["live"], 2)
+        self.assertTrue(first.concrete_graph_entries["denied"].musa_eager_only)
+        self.assertIs(type(first)._all_instances, type(second)._all_instances)
+
+    def test_51_by_121_admission_and_two_runtime_cycles(self):
+        wrapper, ctx, budget, events, _ = build(cap=1900)
+        sizes = [1, 2, 4, 8, *range(16, 257, 8), *range(272, 513, 16)]
+        original_sizes = tuple(sizes)
+        keys = [(size, piece) for size in sizes for piece in range(121)]
+        self.assertEqual(len(sizes), 51)
+        self.assertEqual(len(keys), 6171)
+        for key in keys:
+            ctx.batch_descriptor = key
+            wrapper()
+        entries = wrapper.concrete_graph_entries
+        self.assertEqual(len(entries), 6171)
+        self.assertEqual(sum(e.graph is not None for e in entries.values()), 1900)
+        self.assertEqual(sum(e.musa_eager_only for e in entries.values()), 4271)
+        self.assertEqual(events.count("native_capture"), 1900)
+        self.assertEqual(budget.snapshot()["live"], 1900)
+        for cycle in (1, 2):
+            eager_before = events.count("runnable")
+            for key in keys:
+                ctx.batch_descriptor = key
+                wrapper()
+            self.assertEqual(events.count("runnable") - eager_before, 4271)
+            self.assertEqual(
+                sum(e.graph.replays for e in entries.values() if e.graph is not None),
+                cycle * 1900,
+            )
+            self.assertEqual(events.count("native_capture"), 1900)
+            self.assertEqual(budget.snapshot()["live"], 1900)
+        self.assertEqual(tuple(sizes), original_sizes)
+        self.assertFalse(budget.snapshot()["poisoned"])
 
 
 if __name__ == "__main__":

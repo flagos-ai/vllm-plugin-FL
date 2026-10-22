@@ -29,7 +29,12 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 NAMES = {"flag-gems", "flagtree", "pyyaml"}
-MODULES = {"flag-gems": "flag_gems", "flagtree": "triton", "pyyaml": "yaml"}
+MODULES = {
+    "flag-gems": "flag_gems",
+    "flagtree": "triton",
+    "pyyaml": "yaml",
+    "musa-gate-observer": "musa_gate_observer",
+}
 WHEEL_CAP = 512 * 1024 * 1024
 JSON_CAP = 8 * 1024 * 1024
 
@@ -227,6 +232,7 @@ def wheel_review(raw, fp, expected):
             },
             "flagtree": {"flagtree", "triton"},
             "pyyaml": {"yaml", "_yaml"},
+            "musa-gate-observer": {"musa_gate_observer"},
         }[normalized(name)] | {dist_info}
         require(
             all(PurePosixPath(x).parts[0] in roots for x in regular),
@@ -269,8 +275,8 @@ def wheel_review(raw, fp, expected):
                 tags == ["cp310-cp310-linux_x86_64"] and "+mthreads" in version,
                 "Require an explicit MUSA FlagTree wheel, not a CUDA artifact",
             )
-        elif normalized(name) == "flag-gems":
-            require(tags == ["py3-none-any"], "Ordinary FlagGems Python wheel")
+        elif normalized(name) in {"flag-gems", "musa-gate-observer"}:
+            require(tags == ["py3-none-any"], "Ordinary Python wheel")
         else:
             require(
                 version == "6.0.1" and all(x.startswith("cp310-cp310-") for x in tags),

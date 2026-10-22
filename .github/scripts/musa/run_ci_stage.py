@@ -202,8 +202,12 @@ def run_groups(groups, output_root, run=bounded_run, clock=time.monotonic):
                 ],
                 budget - (clock() - started),
             )
-        safe = model_result["safe_to_continue"] and (
-            test_result is None or test_result["safe_to_continue"]
+        safe = (
+            model_result["actual_exit"] == 0
+            and model_result["safe_to_continue"]
+            and test_result is not None
+            and test_result["actual_exit"] == 0
+            and test_result["safe_to_continue"]
         )
         row = {
             "group_index": index,
@@ -272,7 +276,8 @@ def main():
             "timeout_minutes": minutes,
             "execution": execution,
             "passed": execution["actual_exit"] == 0 and execution["safe_to_continue"],
-            "safe_to_continue": execution["safe_to_continue"],
+            "safe_to_continue": execution["actual_exit"] == 0
+            and execution["safe_to_continue"],
         }
         (report_root / "execution.json").write_text(
             json.dumps(row, indent=2) + "\n", encoding="utf-8"
@@ -286,7 +291,9 @@ def main():
         "groups": results,
         "group_count": len(results),
         "requested_group_count": requested_count,
-        "gpu_stages_safe": all(row["safe_to_continue"] for row in results),
+        "gpu_stages_safe": all(
+            row["passed"] and row["safe_to_continue"] for row in results
+        ),
         "status": "SKIPPED"
         if not results
         else "PASS"

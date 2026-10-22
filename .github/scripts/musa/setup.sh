@@ -41,6 +41,8 @@ done < <(compgen -e)
   --manifest "${MUSA_CI_DEPENDENCY_MANIFEST:-}" \
   --manifest-sha256 "${MUSA_CI_DEPENDENCY_MANIFEST_SHA256:-}" \
   > "$task_dir/dependency-stage.stdout.raw" 2> "$task_dir/dependency-stage.stderr.raw"
+"$task_python" -I -B .github/scripts/musa/gate_observer_wheel.py stage --task-dir "$task_dir" \
+  > "$task_dir/gate-observer-stage.stdout.raw" 2> "$task_dir/gate-observer-stage.stderr.raw"
 "$task_python" -I -B - "$task_dir" <<'PY'
 import email, hashlib, json, pathlib, subprocess, sys, zipfile
 root = pathlib.Path(sys.argv[1])
@@ -54,11 +56,11 @@ for wheel in (root / 'wheels').glob('*.whl'):
     assert name not in distributions, name
     distributions[name] = str(wheel)
 profile = json.loads((root / 'dependency-profile-staged.json').read_text())
-expected = {'vllm', 'vllm_plugin_fl'}
+expected = {'vllm', 'vllm_plugin_fl', 'musa_gate_observer'}
 if profile['profile'] == 'latest':
     expected |= {'flag_gems', 'flagtree', 'pyyaml'}
 assert set(distributions) == expected, distributions
-order = ['vllm', 'vllm_plugin_fl']
+order = ['vllm', 'vllm_plugin_fl', 'musa_gate_observer']
 if profile['profile'] == 'latest':
     order += ['flag_gems', 'flagtree', 'pyyaml']
 argv = [sys.executable, '-I', '-B', '-m', 'pip', '--isolated', 'install', '--ignore-installed',
@@ -73,6 +75,8 @@ rows = [{'path': p, 'sha256': hashlib.sha256(pathlib.Path(p).read_bytes()).hexdi
         for p in distributions.values()]
 (root / 'installed-wheels.json').write_text(json.dumps(rows, indent=2) + '\n')
 PY
+"$task_python" -I -B .github/scripts/musa/gate_observer_wheel.py installed --task-dir "$task_dir" \
+  > "$task_dir/gate-observer-installed.stdout.raw" 2> "$task_dir/gate-observer-installed.stderr.raw"
 # Install only ordinary pytest tooling, not the test extra's vllm[audio] runtime.
 # Retain existing tool versions where present and verify core metadata before/after.
 "$task_python" -I -B - "$task_dir" <<'PY_TEST_TOOLS'

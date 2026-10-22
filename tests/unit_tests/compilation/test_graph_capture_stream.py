@@ -12,11 +12,10 @@ import ast
 import builtins
 import dataclasses
 import gc
-import importlib.util
-import sys
 import weakref
 from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from enum import IntEnum
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -85,9 +84,6 @@ class _Contract:
     def __init__(self):
         self.events = []
         self.errors = {}
-        self.cache_calls = []
-        self.cached_graph_ids = set()
-        self.nonresident_graph_ids = set()
         self.initial_stream = object()
         self.active_stream = self.initial_stream
         self.cached_stream = object()
@@ -145,38 +141,13 @@ class _Contract:
             if "replay" in self.errors:
                 raise self.errors["replay"]
 
-        graph = SimpleNamespace(replay=replay)
+        class CPUOwnedGraph:
+            pass
+
+        graph = CPUOwnedGraph()
+        graph.replay = replay
         self.events.append(("graph-created", graph))
         return graph
-
-    def cache_graph_class(self, native_graph_class):
-        self.cache_calls.append(("factory", native_graph_class))
-        return native_graph_class
-
-    @contextmanager
-    def cache_capture(self, graph):
-        assert self.platform.device_type == "musa"
-        self.cache_calls.append(("capture-enter", graph))
-        if "cache-capture" in self.errors:
-            raise self.errors["cache-capture"]
-        try:
-            yield
-            self.cached_graph_ids.add(id(graph))
-        finally:
-            self.cache_calls.append(("capture-exit", graph))
-
-    def cache_replay(self, graph, before_replay=None):
-        assert self.platform.device_type == "musa"
-        assert id(graph) in self.cached_graph_ids
-        if "cache-replay" in self.errors:
-            raise self.errors["cache-replay"]
-        if id(graph) in self.nonresident_graph_ids:
-            return False
-        if before_replay is not None and before_replay() is False:
-            return False
-        self.cache_calls.append(("replay", graph))
-        graph.replay()
-        return True
 
     def synchronize(self):
         self.events.append(("synchronize",))
@@ -250,21 +221,13 @@ def contract():
     assert len(helpers) == 1
     state = _Contract()
 
-    cache_api = SimpleNamespace(
-        musa_graph_class=state.cache_graph_class,
-        musa_graph_capture=state.cache_capture,
-        musa_graph_replay=state.cache_replay,
-    )
+    budget_source = musa_source.with_name("musa_graph_admission.py")
+    spec = spec_from_file_location("_musa_capture_admission_budget", budget_source)
+    budget_module = module_from_spec(spec)
+    spec.loader.exec_module(budget_module)
+    state.admission_budget = budget_module._MusaGraphAdmissionBudget()
 
     def deny_target_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if (
-            name
-            == "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache"
-            and level == 0
-            and fromlist
-            and set(fromlist) <= set(vars(cache_api))
-        ):
-            return cache_api
         if name in {"vllm", "torch", "torch_musa", "vllm_fl"} or name.startswith(
             ("vllm.", "torch.", "torch_musa.", "vllm_fl.")
         ):
@@ -286,11 +249,14 @@ def contract():
         "get_forward_context": lambda: state.context,
         "CUDAGraphMode": _Mode,
         "Graph": SimpleNamespace(graph=state.graph_factory),
-        "musa_graph_class": lambda native_class: native_class,
         "tree_flatten": tree_flatten,
         "torch": SimpleNamespace(
             Tensor=_Tensor,
-            musa=SimpleNamespace(MUSAGraph=state.graph_factory),
+            musa=SimpleNamespace(
+                MUSAGraph=state.graph_factory,
+                current_device=lambda: 0,
+                device=lambda ordinal: nullcontext(),
+            ),
             _C=SimpleNamespace(
                 _is_alias_of=lambda a, b: cpu_torch._C._is_alias_of(
                     a.payload, b.payload
@@ -301,6 +267,9 @@ def contract():
         "set_graph_pool_id": lambda pool: state.events.append(("pool", pool)),
         "weak_ref_tensors": lambda value: value,
         "_weak_ref_musa_tensors": lambda value: value,
+        "_musa_admission_budget": state.admission_budget,
+        "init_logger": lambda name: SimpleNamespace(info=lambda *args: None),
+        "os": SimpleNamespace(getpid=lambda: 1),
         "compilation_counter": state.counter,
     }
     exec(
@@ -681,7 +650,7 @@ def test_staging_validation_is_active_with_optimized_python_code(contract):
 
 
 @pytest.mark.parametrize("device", ["cuda", "npu", "musa", "gcu", "ptpu", "txda"])
-def test_graph_factory_uses_only_the_explicit_cpu_cache_interface(contract, device):
+def test_graph_factory_uses_only_native_classes(contract, device):
     source = Path(__file__).resolve().parents[3] / "vllm_fl/compilation/graph.py"
     module = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     factory = next(
@@ -716,7 +685,6 @@ def test_graph_factory_uses_only_the_explicit_cpu_cache_interface(contract, devi
             for node in backend_module.body
             if isinstance(node, ast.ClassDef) and node.name == "MUSAGraphWrapper"
         )
-        namespace["musa_graph_class"] = contract.cache_graph_class
         exec(
             compile(
                 ast.Module(body=[backend_class], type_ignores=[]),
@@ -729,43 +697,20 @@ def test_graph_factory_uses_only_the_explicit_cpu_cache_interface(contract, devi
         )
         assert namespace["MUSAGraphWrapper"]._graph_type is native_graph
     assert namespace["Graph"].graph is (None if device == "txda" else native_graph)
-    assert contract.cache_calls == (
-        [("factory", native_graph)] if device == "musa" else []
-    )
+    assert contract.admission_budget.snapshot()["live"] == 0
 
 
 @pytest.mark.parametrize("device", ["musa", "cuda", "npu"])
-def test_wrapper_cache_interface_preserves_native_capture_and_replay(contract, device):
+def test_wrapper_admission_preserves_native_capture_and_replay(contract, device):
     contract.platform.device_type = device
     wrapper = contract.wrapper()
     assert wrapper() is contract.output
     graph = wrapper.concrete_graph_entries["batch"].graph
     assert wrapper() is contract.output
-    assert contract.cache_calls == (
-        [("capture-enter", graph), ("capture-exit", graph), ("replay", graph)]
-        if device == "musa"
-        else []
-    )
+    assert contract.admission_budget.snapshot()["live"] == (device == "musa")
+    assert wrapper.concrete_graph_entries["batch"].graph is graph
     assert contract.event_names().count("capture-enter") == 1
     assert contract.event_names().count("replay") == 1
-
-
-@pytest.mark.parametrize("stage", ["cache-capture", "cache-replay"])
-def test_cache_interface_errors_preserve_identity_and_do_not_run_native(
-    contract, stage
-):
-    wrapper = contract.wrapper()
-    if stage == "cache-replay":
-        wrapper()
-    contract.events.clear()
-    error = RuntimeError(stage + " sentinel")
-    contract.errors[stage] = error
-    with pytest.raises(RuntimeError) as caught:
-        wrapper()
-    assert caught.value is error
-    assert "capture-enter" not in contract.event_names()
-    assert "replay" not in contract.event_names()
-    assert contract.counter.num_cudagraph_captured == (stage == "cache-replay")
 
 
 @pytest.mark.parametrize(
@@ -1257,17 +1202,21 @@ def test_stable_fast_path_checks_captured_addresses(contract):
     assert owner.tolist() == captured.payload.tolist() == [1.0, 2.0]
 
 
-def test_stable_fast_path_checks_metadata_and_static_arguments(contract):
+@pytest.mark.parametrize("change", ["metadata", "static"])
+def test_stable_fast_path_checks_metadata_and_static_arguments(contract, change):
     wrapper = contract.wrapper()
     captured = _Tensor(contract)
     wrapper(captured, scale=2)
-    captured.overrides["shape"] = (1, 2)
+    if change == "metadata":
+        captured.overrides["shape"] = (1, 2)
+        expected = "Captured MUSA graph input metadata"
+        scale = 2
+    else:
+        expected = "non-tensor input changed"
+        scale = 3
     contract.events.clear()
-    with pytest.raises(ValueError, match="Captured MUSA graph input metadata"):
-        wrapper(captured, scale=2)
-    captured.overrides.clear()
-    with pytest.raises(ValueError, match="non-tensor input changed"):
-        wrapper(captured, scale=3)
+    with pytest.raises(ValueError, match=expected):
+        wrapper(captured, scale=scale)
     assert contract.events == []
 
 
@@ -1284,9 +1233,11 @@ def test_validated_descriptor_cache_does_not_retain_new_owners(contract):
     assert wrapper(captured) is contract.output
 
 
-def test_nonresident_graph_runs_original_inputs_without_preparing_capture(
+def test_unadmitted_graph_runs_original_inputs_without_preparing_capture(
     contract, monkeypatch
 ):
+    contract.admission_budget.cap = 1
+
     def mutate(value):
         value.payload.add_(10)
         return value
@@ -1296,12 +1247,11 @@ def test_nonresident_graph_runs_original_inputs_without_preparing_capture(
     )
     captured = _Tensor(contract)
     assert capture(captured) is captured
-    entry = wrapper.concrete_graph_entries["batch"]
-    contract.nonresident_graph_ids.add(id(entry.graph))
+    contract.context.batch_descriptor = "denied"
     incoming = _Tensor(contract, (3.0, 4.0))
 
     def unexpected_validation(*args):
-        raise AssertionError("nonresident graph must not prepare captured inputs")
+        raise AssertionError("unadmitted graph must not prepare captured inputs")
 
     with monkeypatch.context() as patcher:
         patcher.setattr(wrapper, "_stage_musa_inputs", unexpected_validation)
@@ -1310,14 +1260,15 @@ def test_nonresident_graph_runs_original_inputs_without_preparing_capture(
     assert captured.payload.tolist() == [11.0, 12.0]
     assert contract.events == []
     assert len(calls) == 2
-    contract.nonresident_graph_ids.clear()
+    contract.context.batch_descriptor = "batch"
     assert wrapper(captured) is captured
     assert captured.payload.tolist() == [21.0, 22.0]
     assert contract.event_names() == ["numeric-replay"]
     assert contract.counter.num_cudagraph_captured == 1
 
 
-def test_nonresident_fallback_keeps_runnable_exception_and_mutation(contract):
+def test_unadmitted_fallback_keeps_runnable_exception_and_mutation(contract):
+    contract.admission_budget.cap = 1
     error = RuntimeError("cold runnable sentinel")
     failed = False
 
@@ -1332,8 +1283,7 @@ def test_nonresident_fallback_keeps_runnable_exception_and_mutation(contract):
     )
     captured = _Tensor(contract)
     capture(captured)
-    entry = wrapper.concrete_graph_entries["batch"]
-    contract.nonresident_graph_ids.add(id(entry.graph))
+    contract.context.batch_descriptor = "denied"
     failed = True
     incoming = _Tensor(contract, (3.0, 4.0))
     with pytest.raises(RuntimeError) as caught:
@@ -1345,86 +1295,42 @@ def test_nonresident_fallback_keeps_runnable_exception_and_mutation(contract):
     assert contract.events == []
 
 
-def test_production_cache_and_wrapper_preserve_cold_and_hot_semantics(
-    contract, monkeypatch
-):
-    support_path = Path(__file__).with_name("test_musa_graph_exec_cache.py")
-    spec = importlib.util.spec_from_file_location(
-        "_musa_cache_wrapper_support", support_path
-    )
-    support = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, support)
-    spec.loader.exec_module(support)
-    cache, device, _, _ = support._fixture(cap=1)
-    namespace = contract.cpu_namespace
-    original_import = namespace["__builtins__"]["__import__"]
-    cache_api = SimpleNamespace(
-        musa_graph_class=contract.cache_graph_class,
-        musa_graph_capture=cache.capture,
-        musa_graph_replay=cache.replay,
-    )
-
-    def import_cache(name, globals=None, locals=None, fromlist=(), level=0):
-        if (
-            name
-            == "vllm_fl.dispatch.backends.vendor.musa.compilation.musa_graph_exec_cache"
-            and fromlist
-        ):
-            assert set(fromlist) <= set(vars(cache_api))
-            return cache_api
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setitem(namespace["__builtins__"], "__import__", import_cache)
-    monkeypatch.setattr(
-        namespace["MUSAGraphWrapper"],
-        "_graph_type",
-        staticmethod(lambda: support._Graph(device)),
-    )
-    original_capture = contract.platform.torch_device_fn.graph
-
-    @contextmanager
-    def native_capture(graph, *, pool, stream):
-        with original_capture(graph, pool=pool, stream=stream):
-            yield
-        graph.capture()
-
-    monkeypatch.setattr(contract.platform.torch_device_fn, "graph", native_capture)
+def test_production_budget_and_wrapper_preserve_denied_and_admitted_semantics(contract):
+    contract.admission_budget.cap = 1
 
     def mutate(value):
         value.payload.add_(10)
         return value
 
-    wrapper = contract.wrapper()
-    wrapper.runnable = mutate
+    wrapper, capture, calls = _numeric_replay_wrapper(
+        contract, mutate, lambda entry, args, kwargs: args[0].payload.add_(10)
+    )
     captured = _Tensor(contract)
-    assert wrapper(captured) is captured
-    cold = wrapper.concrete_graph_entries["batch"]
-    contract.context.batch_descriptor = "hot"
-    hot_input = _Tensor(contract, (5.0, 6.0))
-    assert wrapper(hot_input) is hot_input
-    hot = wrapper.concrete_graph_entries["hot"]
-    assert not cold.graph.executable and hot.graph.executable
-    assert len(cache._live) == 1
-    native_replay = hot.graph.replay
-
-    def replay_hot():
-        native_replay()
-        hot_input.payload.add_(10)
-
-    hot.graph.replay = replay_hot
-    contract.context.batch_descriptor = "batch"
+    assert capture(captured) is captured
+    admitted = wrapper.concrete_graph_entries["batch"]
+    assert contract.admission_budget.snapshot()["live"] == 1
+    contract.context.batch_descriptor = "denied"
     incoming = _Tensor(contract, (3.0, 4.0))
-    before = list(device.calls)
     assert wrapper(incoming) is incoming
+    denied = wrapper.concrete_graph_entries["denied"]
+    assert denied.graph is None and denied.musa_eager_only
     assert incoming.payload.tolist() == [13.0, 14.0]
     assert captured.payload.tolist() == [11.0, 12.0]
-    assert device.calls == before
-    assert not cold.graph.executable and hot.graph.executable
-    contract.context.batch_descriptor = "hot"
-    assert wrapper(hot_input) is hot_input
-    assert hot_input.payload.tolist() == [25.0, 26.0]
-    assert device.calls[len(before) :] == [("native_replay", 0)]
-    assert len(cache._live) == 1 and not cache._replay_reserved
+    assert contract.events == []
+    assert len(calls) == 2
+    repeated = _Tensor(contract, (5.0, 6.0))
+    assert wrapper(repeated) is repeated
+    assert repeated.payload.tolist() == [15.0, 16.0]
+    assert denied.graph is None
+    contract.context.batch_descriptor = "batch"
+    assert wrapper(captured) is captured
+    assert captured.payload.tolist() == [21.0, 22.0]
+    assert contract.event_names() == ["numeric-replay"]
+    assert wrapper.concrete_graph_entries["batch"].graph is admitted.graph
+    state = contract.admission_budget.snapshot()
+    assert state["live"] == state["total_admitted"] == 1
+    assert state["pending"] == 0 and not state["poisoned"]
+    assert len(calls) == 3
 
 
 @pytest.mark.parametrize("output_kind", ["identity", "view", "nested"])

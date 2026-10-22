@@ -96,7 +96,6 @@ include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
 "vllm_fl.dispatch.config" = ["*.yaml"]
-"vllm_fl.dispatch.backends.vendor.musa.compilation" = ["musa_graph_exec.cpp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

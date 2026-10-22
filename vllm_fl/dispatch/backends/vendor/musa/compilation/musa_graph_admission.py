@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Pure Python live-graph admission for the isolated MUSA experiment."""
+"""Bound admitted MUSA graph owners without native executable mutation."""
 
 import threading
 import weakref
