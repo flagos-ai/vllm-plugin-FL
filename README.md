@@ -15,7 +15,7 @@ matrix, scenarios, and usage.
 |-----------------------|------------------------|
 | `release/0.2` | [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) |
 | `main` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
-| `0.5.0-dev` (NVIDIA EMPTY adaptation) | [v0.32.0](https://github.com/vllm-project/vllm/tree/v0.32.0) |
+| `0.5.0-dev` (NVIDIA CUDA adaptation) | [v0.32.0](https://github.com/vllm-project/vllm/tree/v0.32.0) |
 
 ## Supported Models and Chips
 
@@ -56,8 +56,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 ### Setup
 
 For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
-for the pinned vLLM 0.32 EMPTY image, development dependencies, native V1/V2
-runners and regression commands. It replaces the previous NVIDIA 0.28 setup.
+for the full official vLLM 0.32 CUDA image, pinned development dependencies,
+upstream V1/V2 runners and regression commands. FlagGems remains enabled.
+It replaces the previous NVIDIA 0.28 setup.
 The generic setup below applies to the other backends; their 0.32 validation
 is outside the NVIDIA adaptation. See also the
 [T-Head PPU guide](./docs/usage/thead.md) and
@@ -88,9 +89,9 @@ is outside the NVIDIA adaptation. See also the
     pip install --no-build-isolation --no-deps -e .
     ```
 
-    For CUDA-like devices, including CUDA and HIP/ROCm environments that use
-    PyTorch's CUDA dispatch key, build the plugin native extension by setting
-    `VLLM_VENDOR=cuda` during installation:
+    For **non-NVIDIA backends** that use PyTorch's CUDA dispatch key (such as
+    HIP/ROCm) with an EMPTY vLLM build, build the plugin native extension by
+    setting `VLLM_VENDOR=cuda` during installation:
     ```sh
     cd vllm-plugin-FL
     VLLM_VENDOR=cuda pip install --no-build-isolation --no-deps .
@@ -104,6 +105,10 @@ is outside the NVIDIA adaptation. See also the
 
     If `VLLM_VENDOR` is not set, vllm-plugin-FL is installed as a Python-only
     plugin and the native extension is skipped.
+
+    NVIDIA uses the official vLLM CUDA extensions and the Python-only plugin
+    installation in the [NVIDIA guide](./docs/usage/nvidia.md); it does not
+    require `VLLM_VENDOR=cuda`.
 
 3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/)
 

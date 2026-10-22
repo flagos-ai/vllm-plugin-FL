@@ -12,10 +12,7 @@ set(VLLM_FL_CUDA_SRCS
 )
 
 Python_add_library(_C MODULE WITH_SOABI ${VLLM_FL_CUDA_SRCS})
-target_compile_definitions(_C PRIVATE
-    TORCH_EXTENSION_NAME=_C
-    _GLIBCXX_USE_CXX11_ABI=${TORCH_CXX11_ABI}
-)
+target_compile_definitions(_C PRIVATE TORCH_EXTENSION_NAME=_C)
 
 target_include_directories(_C PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..

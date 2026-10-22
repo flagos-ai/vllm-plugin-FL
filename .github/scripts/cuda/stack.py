@@ -1,8 +1,11 @@
 # Copyright 2026 FlagOS Contributors
-"""Fail fast when NVIDIA CI is not using the verified vLLM EMPTY stack."""
+"""Fail fast when NVIDIA CI is not using the verified native vLLM CUDA stack."""
 
 import argparse
+import base64
+import hashlib
 import importlib
+import importlib.machinery
 import importlib.metadata as metadata
 import json
 import os
@@ -28,6 +31,21 @@ FLAGGEMS_VLLM_SOURCE = {
     "release": "v0.2.0",
     "commit": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
     "repository": "https://github.com/flagos-ai/FlagGems-vllm.git",
+}
+
+# Required payloads in the pinned official v0.32.0-cu129 image. Upstream now
+# supplies the stable libtorch modules rather than the old _C/_moe_C modules.
+NATIVE_VLLM_MODULES = (
+    "_C_stable_libtorch",
+    "_moe_C_stable_libtorch",
+    "_flashmla_C",
+    "_flashmla_extension_C",
+    "vllm_flash_attn._vllm_fa2_C",
+    "vllm_flash_attn._vllm_fa3_C",
+    "cumem_allocator",
+)
+NATIVE_VLLM_LIBRARIES = {
+    module: module.replace(".", "/") + ".abi3.so" for module in NATIVE_VLLM_MODULES
 }
 
 
@@ -89,14 +107,14 @@ def validate_vllm_provider(
     )
     if (
         module_version != "0.32.0"
-        or distribution_version != "0.32.0+empty"
+        or distribution_version != "0.32.0+cu129"
         or not same_origin
         or editable
-        or native_libraries
+        or not set(NATIVE_VLLM_LIBRARIES.values()).issubset(native_libraries)
     ):
         raise RuntimeError(
-            "NVIDIA CI requires the ordinary vLLM 0.32.0+empty wheel, "
-            "without upstream CUDA extensions or source-tree shadowing; "
+            "NVIDIA CI requires the ordinary official vLLM 0.32.0+cu129 wheel "
+            "with its native CUDA extensions and without source-tree shadowing; "
             f"actual: {facts}, editable={editable}, "
             f"native_libraries={list(native_libraries)}"
         )
@@ -104,9 +122,7 @@ def validate_vllm_provider(
 
 
 def native_vllm_libraries(package_dir):
-    # Optional Rust helpers are independent of the EMPTY device target. All
-    # upstream CUDA/shared-library payloads must be absent, including leftovers
-    # that are no longer recorded by the currently installed distribution.
+    # Inspect the actual payload, including nested extensions.
     return sorted(
         str(path.relative_to(package_dir))
         for path in Path(package_dir).rglob("*")
@@ -114,6 +130,44 @@ def native_vllm_libraries(package_dir):
         and (path.suffix in {".so", ".pyd", ".dll", ".dylib"} or ".so." in path.name)
         and not path.name.startswith("_rust_")
     )
+
+
+def validate_native_payload(distribution, package_dir):
+    """Verify real ELF payloads against the installed official wheel's RECORD."""
+    recorded = {str(path): path for path in distribution.files or ()}
+    origins = {}
+    for module, relative in NATIVE_VLLM_LIBRARIES.items():
+        path = Path(package_dir) / relative
+        entry = recorded.get(f"vllm/{relative}")
+        if entry is None or entry.hash is None or entry.hash.mode != "sha256":
+            raise RuntimeError(f"Native vLLM extension has no wheel hash: {relative}")
+        with path.open("rb") as stream:
+            if stream.read(4) != b"\x7fELF":
+                raise RuntimeError(f"Native vLLM extension is not ELF: {relative}")
+            stream.seek(0)
+            digest = hashlib.file_digest(stream, "sha256").digest()
+        actual_hash = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+        if actual_hash != entry.hash.value or path.stat().st_size != entry.size:
+            raise RuntimeError(
+                f"Native vLLM extension differs from its wheel: {relative}"
+            )
+        origins[f"vllm.{module}"] = str(path.resolve())
+    return origins
+
+
+def validate_native_import(module_name, module, expected_origin):
+    """Reject Python shims and sys.modules placeholders for upstream extensions."""
+    spec = getattr(module, "__spec__", None)
+    origin = getattr(module, "__file__", None)
+    if (
+        spec is None
+        or not isinstance(spec.loader, importlib.machinery.ExtensionFileLoader)
+        or not origin
+        or Path(origin).resolve() != Path(expected_origin).resolve()
+        or not spec.origin
+        or Path(spec.origin).resolve() != Path(expected_origin).resolve()
+    ):
+        raise RuntimeError(f"{module_name} must load its genuine native extension")
 
 
 def check_stack(*, runtime_only=False):
@@ -136,6 +190,8 @@ def check_stack(*, runtime_only=False):
         editable=direct.get("dir_info", {}).get("editable", False),
         native_libraries=native_vllm_libraries(Path(vllm.__file__).parent),
     )
+    native_origins = validate_native_payload(dist, Path(vllm.__file__).parent)
+    facts["vllm_native_extensions"] = native_origins
     fused_dist = metadata.distribution("flaggems-vllm")
     facts["flaggems-vllm"] = validate_flaggems_vllm_provenance(
         fused_dist.version,
@@ -203,18 +259,18 @@ def check_stack(*, runtime_only=False):
         fused_origin = fused_dist.locate_file("flaggems_vllm/__init__.py")
         if Path(flaggems_vllm.__file__).resolve() != Path(fused_origin).resolve():
             raise RuntimeError("FlagGems-vllm must come from the pinned installation")
-        extension = importlib.import_module("vllm_fl._C")
         worker = importlib.import_module("vllm_fl.worker.nvidia_worker").NvidiaWorkerFL
         if getattr(current_platform, "vendor_name", None) != "nvidia":
             raise RuntimeError("Normal FL registration did not activate NVIDIA")
         if not torch.cuda.is_available():
             raise RuntimeError("NVIDIA CI requires a visible CUDA device")
+        for name, origin in native_origins.items():
+            validate_native_import(name, importlib.import_module(name), origin)
         facts.update(
             platform=type(current_platform).__qualname__,
             llm_class=f"{LLM.__module__}.{LLM.__qualname__}",
             flaggems_origin=flag_gems.__file__,
             flaggems_vllm_origin=flaggems_vllm.__file__,
-            plugin_extension=extension.__file__,
             worker_class=f"{worker.__module__}.{worker.__qualname__}",
             device_count=torch.cuda.device_count(),
         )

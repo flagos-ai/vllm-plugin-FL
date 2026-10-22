@@ -77,20 +77,6 @@ class NvidiaWorkerFL(NativeGPUWorker):
         self._fl_io_dump_initialized = False
         _initialize_fl_runtime(self.rank)
 
-        from vllm_fl.ops.nvidia_rotary_ops import register_nvidia_rotary_ops
-
-        register_nvidia_rotary_ops()
-
-    def load_model(self, *, load_dummy_weights: bool = False) -> None:
-        from vllm_fl.ops.nvidia_dsv41 import install_dsv41_empty_adapters
-        from vllm_fl.ops.nvidia_hy4 import install_hy4_empty_adapters
-        from vllm_fl.ops.nvidia_qsa import install_nvidia_qsa
-
-        install_dsv41_empty_adapters(self.vllm_config)
-        install_hy4_empty_adapters(self.vllm_config)
-        install_nvidia_qsa(self.vllm_config)
-        return super().load_model(load_dummy_weights=load_dummy_weights)
-
     def _ensure_io_dump_initialized(self) -> None:
         """Enable IO dumping on the first execution after model loading."""
         if self._fl_io_dump_initialized:

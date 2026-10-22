@@ -140,9 +140,7 @@ def _patch_custom_ops():
     """Register fallback schemas when neither vLLM extension ABI is present."""
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
-            module = importlib.import_module(module_name)
-            if getattr(module, "_vllm_fl_empty_placeholder", False):
-                continue
+            importlib.import_module(module_name)
             return
         except (ImportError, OSError):
             continue
@@ -180,8 +178,14 @@ def register():
         logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
         return arm_cpu_platform
 
-    _patch_custom_ops()
-    _patch_flash_attn_import()
+    from vllm_fl.utils import DeviceInfo
+
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name != "nvidia":
+        # Other accelerators still use EMPTY wheels. NVIDIA uses upstream's
+        # native CUDA extensions and must not replace failed imports with stubs.
+        _patch_custom_ops()
+        _patch_flash_attn_import()
 
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
@@ -192,27 +196,11 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    from vllm_fl.utils import DeviceInfo
-
-    vendor_name = DeviceInfo().vendor_name
     if vendor_name in ("ascend", "enflame", "gcu"):
-        # v0.28 defaults some models to the upstream V2 runner. These backends
-        # use ModelRunnerFL; choose it before VllmConfig reads model defaults.
+        # These backends use ModelRunnerFL; choose it before VllmConfig reads
+        # model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
-        from vllm_fl.nvidia_compat import prepare_nvidia_empty_imports
-        from vllm_fl.ops.nvidia_activation_ops import register_nvidia_activation_ops
-        from vllm_fl.ops.nvidia_cache_ops import register_nvidia_cache_ops
-        from vllm_fl.ops.nvidia_embedding_ops import register_nvidia_embedding_ops
-        from vllm_fl.ops.nvidia_moe_ops import register_nvidia_moe_ops
-        from vllm_fl.ops.nvidia_topk_ops import register_nvidia_topk_ops
-
-        register_nvidia_activation_ops()
-        register_nvidia_cache_ops()
-        register_nvidia_embedding_ops()
-        register_nvidia_moe_ops()
-        register_nvidia_topk_ops()
-        prepare_nvidia_empty_imports()
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
 
     return "vllm_fl.platform.PlatformFL"
@@ -309,18 +297,21 @@ def register_model():
     register_quant_linear()
     register_router()
 
-    _register_gdn_packed_decode_patch()
-
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "nvidia":
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name != "nvidia":
+        # NVIDIA's native vLLM 0.32 already preserves packed GDN beta precision.
+        _register_gdn_packed_decode_patch()
+
+    if vendor_name == "nvidia":
         from vllm_fl.patches.minicpmo_audio import patch_minicpmo_audio_budget
 
         # General plugins run before encoder budgets are built in the engine
         # frontend and spawned workers, for both upstream model runners.
         patch_minicpmo_audio_budget()
 
-    if DeviceInfo().vendor_name == "ascend":
+    if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
         # configuration resolution in worker processes.
         from vllm.model_executor.models import ModelRegistry
