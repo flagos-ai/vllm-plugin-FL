@@ -30,9 +30,10 @@ def _silu_and_mul_with_clamp(
     if out.numel() == 0:
         return
 
-    # CUDA evaluates the sigmoid and scalar limit in FP32. The public provider
-    # rounds the limit to its input dtype, so retain FP32 inputs here even when
-    # the caller supplies BF16 (e.g. a nonrepresentable limit such as 0.7).
+    # Preserve this adapter's FP32-reference behavior: the public provider
+    # rounds the limit to its input dtype (e.g. BF16 cannot represent 0.7).
+    # This does not claim bitwise parity with upstream's scalar/packed CUDA
+    # kernels, which also round some intermediate values to the input dtype.
     gate = x[..., :width].float()
     up = x[..., width:].float()
     if alpha == 1.0 and beta == 0.0:

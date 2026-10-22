@@ -4,7 +4,7 @@
 
 Follow vLLM 0.32's native alignment contract: filter global IDs, map to local
 experts before counting, and keep the original flattened route indices. The
-FlagGems alignment kernels currently assume every input expert ID is valid.
+FlagGems alignment API does not expose this invalid-route/pre-map contract.
 """
 
 import torch
