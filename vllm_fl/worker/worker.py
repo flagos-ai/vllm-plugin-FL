@@ -52,9 +52,48 @@ from vllm.lora.request import LoRARequest
 from vllm.utils.torch_utils import set_random_seed
 from vllm.model_executor.models.interfaces import is_mixture_of_experts
 from vllm.platforms import current_platform
-from vllm.profiler.wrapper import CudaProfilerWrapper, TorchProfilerWrapper
+from vllm.profiler.wrapper import (
+    CudaProfilerWrapper,
+    TorchProfilerWrapper,
+    WorkerProfiler,
+)
 
 from vllm.sequence import IntermediateTensors
+
+
+class NpuProfilerWrapper(WorkerProfiler):
+    """Adapt torch_npu.profiler to the vLLM worker profiler lifecycle."""
+
+    def __init__(self, profiler_config, worker_name: str) -> None:
+        super().__init__(profiler_config)
+        import torch_npu
+
+        self.profiler = torch_npu.profiler.profile(
+            activities=[
+                torch_npu.profiler.ProfilerActivity.CPU,
+                torch_npu.profiler.ProfilerActivity.NPU,
+            ],
+            record_shapes=profiler_config.torch_profiler_record_shapes,
+            profile_memory=profiler_config.torch_profiler_with_memory,
+            with_stack=profiler_config.torch_profiler_with_stack,
+            with_flops=profiler_config.torch_profiler_with_flops,
+            on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(
+                profiler_config.torch_profiler_dir,
+                worker_name=worker_name,
+            ),
+        )
+
+    def _start(self) -> None:
+        self.profiler.start()
+
+    def _stop(self) -> None:
+        self.profiler.stop()
+
+    def annotate_context_manager(self, name: str):
+        import torch
+        return torch.profiler.record_function(name)
+
+
 from vllm.tasks import SupportedTask
 from vllm.utils.mem_utils import GiB_bytes  # , MemorySnapshot, memory_profiling
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
@@ -1051,15 +1090,23 @@ class WorkerFL(WorkerBase):
             if self.profiler is None:
                 profiler_type = self.profiler_config.profiler
                 if profiler_type == "torch":
-                    self.profiler = TorchProfilerWrapper(
-                        self.profiler_config,
-                        worker_name=trace_name,
-                        local_rank=self.local_rank,
-                        activities=["CPU", "CUDA"],
-                    )
-                    logger.debug(
-                        "Starting torch profiler with trace name: %s", trace_name
-                    )
+                    if current_platform.device_type == "npu":
+                        self.profiler = NpuProfilerWrapper(
+                            self.profiler_config, worker_name=trace_name
+                        )
+                        logger.info(
+                            "Starting torch_npu profiler: %s", trace_name
+                        )
+                    else:
+                        self.profiler = TorchProfilerWrapper(
+                            self.profiler_config,
+                            worker_name=trace_name,
+                            local_rank=self.local_rank,
+                            activities=["CPU", "CUDA"],
+                        )
+                        logger.debug(
+                            "Starting torch profiler with trace name: %s", trace_name
+                        )
                 elif profiler_type == "cuda":
                     self.profiler = CudaProfilerWrapper(self.profiler_config)
                     logger.debug("Starting CUDA profiler")
