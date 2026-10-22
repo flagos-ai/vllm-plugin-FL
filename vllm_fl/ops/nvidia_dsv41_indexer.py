@@ -251,27 +251,15 @@ def fp8_einsum(equation, a, b, out, recipe=(1, 128, 128)):
 
     x, xs = a
     y, ys = b
-    if equation != "bhr,hdr->bhd" or tuple(recipe) != (1, 128, 128):
-        raise NotImplementedError(
-            "Hopper DSV4.1 WO-A requires bhr,hdr->bhd with recipe (1,128,128)"
-        )
-    if x.dtype != torch.float8_e4m3fn or y.dtype != torch.float8_e4m3fn:
-        raise NotImplementedError("Hopper DSV4.1 WO-A requires E4M3 FP8 operands")
-    if xs.dtype != torch.float32 or ys.dtype != torch.float32:
-        raise NotImplementedError("Hopper DSV4.1 WO-A requires FP32 scales")
-    _same_cuda(x, xs, y, ys, out)
-    batch, heads, width = x.shape
-    if width % 128 or y.shape[0] != heads or y.shape[2] != width or y.shape[1] % 128:
-        raise ValueError(
-            "WO-A operands must have matching heads and dimensions divisible by 128"
-        )
-    if xs.shape != (batch, heads, width // 128) or ys.shape != (
-        heads,
-        y.shape[1] // 128,
-        width // 128,
+    if tuple(recipe) != (1, 128, 128):
+        raise NotImplementedError("Hopper DSV4.1 WO-A requires recipe (1,128,128)")
+    if (
+        x.ndim != 3
+        or y.ndim != 3
+        or out.dtype != torch.bfloat16
+        or out.device != x.device
+        or out.shape != (x.shape[0], x.shape[1], y.shape[1])
     ):
-        raise ValueError("WO-A scale shapes do not match the block-128 operands")
-    if out.dtype != torch.bfloat16 or out.shape != (batch, heads, y.shape[1]):
         raise ValueError("WO-A output must be BF16 [tokens, heads, output_dim]")
     # The pinned Hopper kernel uses split-K for the model's TP8 shape. Its
     # BF16 output accumulates separately rounded partial sums with atomic_add.

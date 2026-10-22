@@ -166,6 +166,7 @@ def install_hy4_empty_adapters(config) -> bool:
         flashmla_sparse as hy_mla,
     )
 
+    from vllm_fl.dispatch.backends.flaggems.impl.dsv41_mla import flash_mla_sparse_fwd
     from vllm_fl.ops import nvidia_dsv41_indexer, nvidia_hy4_mla
     from vllm_fl.ops.nvidia_dsv41_ops import register_nvidia_dsv41_ops
 
@@ -200,5 +201,5 @@ def install_hy4_empty_adapters(config) -> bool:
     )
     hy_attention.per_token_group_quant_fp8 = quantize_indexer_query
     hy_mla.HYV4FlashMLASparseBackend = nvidia_hy4_mla.NvidiaHYV4FlashMLASparseBackend
-    hy_mla.flash_mla_sparse_fwd = nvidia_hy4_mla.flash_mla_sparse_fwd
+    hy_mla.flash_mla_sparse_fwd = flash_mla_sparse_fwd
     return True

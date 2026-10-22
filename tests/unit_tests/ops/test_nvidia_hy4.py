@@ -60,13 +60,17 @@ def installed(monkeypatch):
 @pytest.mark.usefixtures("mock_hopper_capability")
 def test_real_upstream_indexer_constructor_and_capabilities(installed):
     from vllm.model_executor.layers.sparse_attn_indexer import SparseAttnIndexer
+    from vllm.models.hy_v4.nvidia import flashmla_sparse
     from vllm.utils.import_utils import has_deep_gemm
     from vllm.v1.attention.ops.flashmla import is_flashmla_sparse_supported
+
+    from vllm_fl.dispatch.backends.flaggems.impl.dsv41_mla import flash_mla_sparse_fwd
 
     config, provider = installed
     before = has_deep_gemm(), is_flashmla_sparse_supported()
     assert provider.install_hy4_empty_adapters(config)
     assert provider.install_hy4_empty_adapters(config)
+    assert flashmla_sparse.flash_mla_sparse_fwd is flash_mla_sparse_fwd
     cache = SimpleNamespace(prefix="test.indexer", kv_cache=torch.empty(0))
     layer = SparseAttnIndexer(
         cache,
@@ -288,7 +292,7 @@ def _attention_reference(q, kv, indices, sink, length=None):
 @pytest.mark.parametrize("heads", [64, 128])
 @pytest.mark.parametrize("graph", [False, True])
 def test_bf16_mla_sink_prefill_decode_and_graph(heads, graph, gems_mode):
-    from vllm_fl.ops.nvidia_hy4_mla import flash_mla_sparse_fwd
+    from vllm_fl.dispatch.backends.flaggems.impl.dsv41_mla import flash_mla_sparse_fwd
 
     q = (_values((3, heads, 576), 9) * 0.25).cuda()
     kv = (_values((96, 1, 576), 10) * 0.25).cuda()
