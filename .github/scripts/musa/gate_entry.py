@@ -1,6 +1,7 @@
 """No-argument CI wiring under the shell's whole-action timeout."""
 
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -10,8 +11,78 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gate_common import read_json, require, write_json
+from gate_common import read_bytes, read_json, require, write_json
 from run_gate import cleanup_complete, interrupted, run_command
+
+_DIAGNOSTIC_FILE_CAP = 64 * 1024
+_DIAGNOSTIC_TEXT_CAP = 4096
+_DIAGNOSTIC_LINES = 48
+_SECRET_LINE = re.compile(
+    r"\b(?:authorization|bearer)\b"
+    r"|\b(?:[A-Za-z0-9]+[_-])*(?:token|secret|password|passwd|credential|api[_-]?key)"
+    r"(?:[_-][A-Za-z0-9]+)*\b"
+    r"|https?://[^/\s]*@"
+    r"|^\s*(?:env:|[A-Z][A-Z0-9_]{2,}\s*=)",
+    re.IGNORECASE,
+)
+
+
+def _diagnostic_text(label, text):
+    """Prefix every bounded line so child output cannot issue workflow commands."""
+    if not isinstance(text, str):
+        return
+    # Filter complete original lines before taking any tail. Otherwise a long
+    # credential value could lose its key and be printed as an innocuous suffix.
+    sanitized = []
+    for line in text.splitlines():
+        if _SECRET_LINE.search(line):
+            safe = "[credential/environment line omitted]"
+        elif len(line) > _DIAGNOSTIC_TEXT_CAP:
+            safe = "[oversized diagnostic line omitted]"
+        else:
+            safe = "".join(c if c.isprintable() or c == "\t" else "?" for c in line)
+        sanitized.append(safe)
+    text = "\n".join(sanitized)
+    if len(text) > _DIAGNOSTIC_TEXT_CAP:
+        text = (
+            "[tail; earlier diagnostic text omitted]\n" + text[-_DIAGNOSTIC_TEXT_CAP:]
+        )
+    lines = text.splitlines()
+    if len(lines) > _DIAGNOSTIC_LINES:
+        lines = ["[earlier diagnostic lines omitted]", *lines[-_DIAGNOSTIC_LINES:]]
+    for line in lines:
+        print(f"MUSA Gate diagnostic [{label}] {line}", file=sys.stderr)
+
+
+def _failure_diagnostics(inputs, report, phase):
+    """Read only fixed small failure files; never dump argv, environment or binding."""
+    for error in report["errors"][-2:]:
+        _diagnostic_text("entry", error)
+    files = {
+        "preflight": ("preflight-command", "preflight.json"),
+        "observer-config": ("config-command", "observer-config-report.json"),
+    }
+    if phase not in files:
+        return
+    command, name = files[phase]
+    try:
+        detail = read_json(inputs / name, _DIAGNOSTIC_FILE_CAP, inputs)
+        for error in detail.get("errors", [])[:3]:
+            _diagnostic_text(phase, error)
+        _diagnostic_text(phase, detail.get("traceback"))
+    except (OSError, ValueError, TypeError, AttributeError) as error:
+        _diagnostic_text(
+            phase, "Small failure report unavailable: " + type(error).__name__
+        )
+    try:
+        stderr = read_bytes(
+            inputs / command / "stderr.raw", _DIAGNOSTIC_FILE_CAP, inputs
+        ).decode("utf-8", "replace")
+        _diagnostic_text(phase + " stderr", stderr)
+    except (OSError, ValueError) as error:
+        _diagnostic_text(
+            phase, "Small child stderr unavailable: " + type(error).__name__
+        )
 
 
 def main():
@@ -70,6 +141,7 @@ def main():
         "steps": [],
         "errors": [],
     }
+    diagnostic_phase = "preflight"
     try:
         commit = os.environ.get("MUSA_CI_EXPECTED_COMMIT") or os.environ.get(
             "GITHUB_SHA"
@@ -119,6 +191,7 @@ def main():
             and read_json(preflight_output)["passed"] is True,
             "Actual source/cache/device origin preflight failed",
         )
+        diagnostic_phase = "observer-config"
         config = inputs / "observer-config.json"
         config_report = inputs / "observer-config-report.json"
         argv = [
@@ -193,6 +266,7 @@ def main():
                 )
             }
         )
+        diagnostic_phase = "launch"
         os.execv(python, argv)
     except Exception:
         report["errors"].append(traceback.format_exc())
@@ -201,6 +275,14 @@ def main():
         else:
             write_json(inputs / "entry-launch-failure.json", report)
         print(f"MUSA Gate entry failed; evidence: {inputs}", file=sys.stderr)
+        try:
+            _failure_diagnostics(inputs, report, diagnostic_phase)
+        except Exception as error:
+            # Diagnostics cannot bypass the original entry failure or launch a route.
+            print(
+                "MUSA Gate failure diagnostics unavailable: " + type(error).__name__,
+                file=sys.stderr,
+            )
         return 1
     return None
 

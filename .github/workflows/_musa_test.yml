@@ -143,6 +143,8 @@ jobs:
           python -I -B .github/scripts/musa/tests/test_ci_serial.py
           python -I -B .github/scripts/musa/tests/test_gate_fail_closed.py
           python -I -B .github/scripts/musa/tests/test_native_admission_probe.py
+          python -I -B .github/scripts/musa/tests/test_gate_entry_diagnostics.py
+          python -I -B .github/scripts/musa/tests/test_preserve_reports.py
       - name: Verify native admission and RNG lifecycle
         id: native_admission
         timeout-minutes: 7
@@ -179,18 +181,35 @@ jobs:
           steps.benchmark.outcome == 'success' && steps.benchmark.outputs.gpu_stages_safe == 'true' }}
         timeout-minutes: 500
         run: bash .github/scripts/musa/run-adaptation-gate.sh
-      - name: Preserve suite and installation reports
+      - name: Stage original diagnostic bytes without the disposable venv
+        if: ${{ always() }}
+        run: >-
+          python -I -B .github/scripts/musa/preserve_reports.py
+          --candidate-root "$GITHUB_WORKSPACE"
+          --suite-root "$MUSA_SUITE_ARTIFACT_DIR"
+          --install-root "${MUSA_CI_INSTALL_EVIDENCE:-}"
+          --gate-root "$MUSA_GATE_ARTIFACT_DIR"
+          --output-root "${RUNNER_TEMP}/musa-preserved-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+      - name: Preserve diagnostics before large raw and wheel transfers
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: musa-suite-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ env.MUSA_SUITE_ARTIFACT_DIR }}
-            ${{ env.MUSA_CI_INSTALL_EVIDENCE }}
-            ${{ env.MUSA_GATE_ARTIFACT_DIR }}
-            coverage-musa.json
-            report-musa.json
-            test-results/logs
+          path: ${{ runner.temp }}/musa-preserved-${{ github.run_id }}-${{ github.run_attempt }}/diagnostics
+          if-no-files-found: error
+      - name: Preserve complete observer raw events independently
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: musa-observer-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/musa-preserved-${{ github.run_id }}-${{ github.run_attempt }}/observer-raw
+          if-no-files-found: error
+      - name: Preserve remaining ordinary wheels independently
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: musa-input-wheels-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/musa-preserved-${{ github.run_id }}-${{ github.run_attempt }}/wheels
           if-no-files-found: error
 
   notify:
