@@ -229,6 +229,17 @@ def _run_multimodal_test(llm: LLM, sampling_params: SamplingParams) -> None:
 
         print(f"  [{gen.modality} count={asset_count}] Q: {question}")
         print(f"  Output: {text!r}")
+        assert text.strip(), f"Empty output for prompt[{i}]: {question}"
+
+        # A successful generation call alone also accepts random-weight output.
+        # Multimodal cases can require keywords from the answer or transcription.
+        expected = prompt_cfg.get("expected", [])
+        if isinstance(expected, str):
+            expected = [expected]
+        for keyword in expected:
+            assert keyword.casefold() in text.casefold(), (
+                f"Expected {keyword!r} in output for prompt[{i}], got: {text!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +264,10 @@ def test_inference(combo: dict) -> None:
 
     # Build LLM kwargs with parametrize overrides
     llm_kwargs = _CFG.engine_kwargs(**combo)
+    assert llm_kwargs.get("load_format") != "dummy", (
+        "E2E inference requires checkpoint weights; load_format='dummy' "
+        "generates random-weight output."
+    )
 
     # For multimodal: inject limit_mm_per_prompt
     max_assets = _get_max_asset_count()

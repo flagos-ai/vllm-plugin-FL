@@ -313,6 +313,13 @@ def register_model():
 
     from vllm_fl.utils import DeviceInfo
 
+    if DeviceInfo().vendor_name == "nvidia":
+        from vllm_fl.patches.minicpmo_audio import patch_minicpmo_audio_budget
+
+        # General plugins run before encoder budgets are built in the engine
+        # frontend and spawned workers, for both upstream model runners.
+        patch_minicpmo_audio_budget()
+
     if DeviceInfo().vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
         # configuration resolution in worker processes.
