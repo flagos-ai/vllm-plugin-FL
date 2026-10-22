@@ -105,7 +105,7 @@ def worker(root):
                     owner = value.sin()
                     view = owner[1:, 1::2]
                     owner_ref, view_ref = weakref.ref(owner), weakref.ref(view)
-                    original = {"owner": owner, "view": view, "repeat": view}
+                    original = (owner, view, view)
                     descriptors = helper(original)
                     metadata = {
                         "size": tuple(view.size()),
@@ -119,35 +119,32 @@ def worker(root):
                     }
                 row["view_metadata"] = metadata
                 row["returns_original_structure"] = descriptors is original
-                row["view_is_original_tensor"] = descriptors["view"] is view
-                row["repeated_identity_preserved"] = (
-                    descriptors["view"] is descriptors["repeat"]
-                )
+                row["view_is_original_tensor"] = descriptors[1] is view
+                row["repeated_identity_preserved"] = descriptors[1] is descriptors[2]
                 row["view_same_data_pointer"] = (
-                    descriptors["view"].data_ptr() == metadata["address"]
+                    descriptors[1].data_ptr() == metadata["address"]
                 )
                 row["view_same_storage_impl"] = (
-                    descriptors["view"].untyped_storage()._cdata
-                    == metadata["storage_impl"]
+                    descriptors[1].untyped_storage()._cdata == metadata["storage_impl"]
                 )
                 assert row["view_same_data_pointer"]
-                assert tuple(descriptors["view"].size()) == metadata["size"]
-                assert tuple(descriptors["view"].stride()) == metadata["stride"]
-                assert descriptors["view"].storage_offset() == metadata["offset"]
+                assert tuple(descriptors[1].size()) == metadata["size"]
+                assert tuple(descriptors[1].stride()) == metadata["stride"]
+                assert descriptors[1].storage_offset() == metadata["offset"]
                 del original, owner, view
                 gc.collect()
                 row["original_owner_tensor_alive"] = owner_ref() is not None
                 row["original_view_tensor_alive"] = view_ref() is not None
                 graph.replay()
                 torch.musa.synchronize()
-                assert torch.equal(descriptors["owner"].cpu(), expected.cpu())
-                assert torch.equal(descriptors["view"].cpu(), expected[1:, 1::2].cpu())
+                assert torch.equal(descriptors[0].cpu(), expected.cpu())
+                assert torch.equal(descriptors[1].cpu(), expected[1:, 1::2].cpu())
                 value.add_(1)
                 expected = value.sin()
                 graph.replay()
                 torch.musa.synchronize()
-                assert torch.equal(descriptors["owner"].cpu(), expected.cpu())
-                assert torch.equal(descriptors["view"].cpu(), expected[1:, 1::2].cpu())
+                assert torch.equal(descriptors[0].cpu(), expected.cpu())
+                assert torch.equal(descriptors[1].cpu(), expected[1:, 1::2].cpu())
                 row["capture_replay_value_checks"] = 4
                 if label == "backend":
                     assert not row["original_owner_tensor_alive"]
