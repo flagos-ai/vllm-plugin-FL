@@ -68,15 +68,22 @@ class NpuProfilerWrapper(WorkerProfiler):
         super().__init__(profiler_config)
         import torch_npu
 
+        experimental_config = torch_npu.profiler._ExperimentalConfig(
+            export_type=torch_npu.profiler.ExportType.Db,
+            profiler_level=torch_npu.profiler.ProfilerLevel.Level1,
+            aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization,
+            data_simplification=False,
+        )
+
         self.profiler = torch_npu.profiler.profile(
             activities=[
                 torch_npu.profiler.ProfilerActivity.CPU,
                 torch_npu.profiler.ProfilerActivity.NPU,
             ],
-            record_shapes=profiler_config.torch_profiler_record_shapes,
             profile_memory=profiler_config.torch_profiler_with_memory,
-            with_stack=profiler_config.torch_profiler_with_stack,
-            with_flops=profiler_config.torch_profiler_with_flops,
+            with_stack=False,
+            with_modules=profiler_config.torch_profiler_with_stack,
+            experimental_config=experimental_config,
             on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(
                 profiler_config.torch_profiler_dir,
                 worker_name=worker_name,
