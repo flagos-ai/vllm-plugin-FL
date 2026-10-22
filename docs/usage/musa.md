@@ -54,11 +54,11 @@ The last command installs the shared FlagGems-vllm provider at the release
 pinned by the repository. It checks that the existing runtime package versions
 remain unchanged. Run it with the same interpreter that runs vLLM.
 
-CI uses a fresh private environment and reinstalls the image's pinned ordinary
-Gems, Tree and PyYAML wheels there. A nested environment must not assume that
-`--system-site-packages` also inherits packages from the image's parent virtual
-environment. The [MUSA setup script](../../.github/scripts/musa/setup.sh) performs
-that installation without replacing the vendor Torch or SDK.
+The [MUSA setup script](../../.github/scripts/musa/setup.sh) uses the image's
+existing interpreter. It installs the current checkout with `VLLM_VENDOR` unset,
+adds the reporting and timeout plugins required by the shared test runner, and
+installs the shared FlagGems-vllm provider. Preserve the image's vendor Torch,
+TorchMUSA and SDK packages.
 
 ## Run inference
 
@@ -82,42 +82,45 @@ other-platform paths retain their own operator dispatch.
 
 ## Graph behavior and limitations
 
-MUSA graph handling is isolated from the shared graph implementation. Captured
-inputs stay owned by the graph; output views are reconstructed from storage and
-tensor metadata. Stable captured buffers replay. Calls with replacement input
-allocations execute the original callable so mutations and output aliases remain
-visible to the caller.
+MUSA graph handling lives in
+[`dispatch/backends/vendor/musa/graph.py`](../../vllm_fl/dispatch/backends/vendor/musa/graph.py).
+Capture and replay use `torch.musa.MUSAGraph` directly. Captured inputs stay owned
+by the graph; output views are reconstructed from storage and tensor metadata.
+Stable captured buffers replay. Calls with replacement input allocations execute
+the original callable so mutations and output aliases remain visible to the
+caller.
 
-All configured capture sizes are retained. Initialization and memory profiling
-may rotate native executables to keep at most 1900 resident per process. Runtime
-replay only uses resident executables; a cold piece executes the original
-callable without synchronizing, destroying or instantiating an executable.
+All configured capture sizes and their order are retained. A process-wide budget
+admits at most 1900 live native graphs, including reservations for pending
+captures. Additional entries execute the original callable until their wrapper
+entries are cleared. The budget is a conservative resource policy; it does not
+measure the SDK's exact capacity or guarantee native capture of every size.
 
-The initialization helper requires Linux, a C++ compiler, Ninja and the installed
-PyTorch/TorchMUSA 2.9 and MUSA SDK headers. TorchMUSA 2.9 has no public API to
-release only an executable while retaining its captured graph and RNG state;
-its public [`reset()`](https://github.com/MooreThreads/torch_musa/blob/1dc78726ff84bb2da61697055be0d037a8a29170/torch_musa/csrc/aten/musa/MUSAGraph.cpp) releases the template too. The small version-bound native
-shim supplies that missing operation and propagates loading or native failures.
-A different TorchMUSA version or header layout needs separate validation.
+A weak-reference set tracks graph lifetime. Clearing a wrapper releases its
+entries; graphs held by external references continue to count against the budget
+until released. Capture, replay and eager execution failures propagate and poison
+the budget, stopping subsequent graph work. This path requires no extra C++ shim,
+Ninja build or executable rotation. A different TorchMUSA version needs separate
+validation.
 
-The executable cap and runtime fallback define resource behavior; they do not
+The live-graph budget and eager fallback define resource behavior; they do not
 establish a GPU latency or throughput guarantee. Representative hardware
 bucket-switching latency and broad ABI compatibility remain unmeasured.
 
 ## CI coverage
 
-MUSA runs unit tests, functional tests, the four inference and three serving
-configurations, and benchmark smoke serially in one allocated container. The
-workflow checks the physical device mapping and idle state before Torch starts,
-then cleans up only processes owned by the current job. These checks do not
-replace the runner scheduler's resource allocation.
+MUSA uses the repository's
+[shared platform workflow](../../.github/workflows/_platform_test.yml) for unit
+tests, functional tests, E2E inference and serving, and benchmark smoke. The
+[platform test configuration](../../tests/platforms/musa.yaml) currently lists
+four inference and three serving configurations.
 
-Use the repository's `ci.yml` platform selection and the existing allocation
-inputs for runner labels, device ordinals, PCI IDs and model locations. The
-`model_27b` and `model_35b_a3b` allocation keys override the corresponding E2E
-model paths. Keep the original model checks, capture sizes, memory budgets and
-timeouts when comparing changes. Consult the actual CI run for its source,
-platform results and conditional skips.
+Use the repository's `ci.yml` platform selection. Runner labels and device
+environment settings come from the
+[CI configuration](../../.github/configs/musa.yml); model cases and test settings
+come from the platform test configuration. Keep the original model checks,
+capture sizes, memory budgets and timeouts when validating changes. Consult the
+actual CI run for its source, platform results and conditional skips.
 
 ## Dependency limitations
 
