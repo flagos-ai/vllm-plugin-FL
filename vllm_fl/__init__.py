@@ -261,6 +261,10 @@ def register_model():
 
     register_hy_v4_support()
 
+    from vllm_fl.models.minimax_m3_registration import register_minimax_m3_support
+
+    register_minimax_m3_support()
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
