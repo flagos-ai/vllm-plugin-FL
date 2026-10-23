@@ -473,13 +473,13 @@ class WorkerFL(WorkerBase):
         if current_platform.is_cpu():
             return nullcontext()
 
-        # CoreX/Iluvatar (and any other out-of-tree vendor whose platform reports
-        # is_cuda_alike()==False) supports neither the CuMem nor the XPU sleep-mode
-        # allocator. vLLM 0.28 raises RuntimeError from get_mem_allocator_instance()
-        # for such platforms, so gate on the same capability predicate the upstream
-        # interface exposes. On NVIDIA this stays True and behaviour is unchanged.
-        # TODO(corex): drop once the plugin's sleep-mode path is vendor-neutral.
-        if not current_platform.is_sleep_mode_available():
+        # Backends without sleep-mode support use ordinary allocations when
+        # sleep is disabled. Keep explicit sleep requests on the allocator
+        # path so unsupported backends still report an error.
+        if (
+            not current_platform.is_sleep_mode_available()
+            and not self.vllm_config.model_config.enable_sleep_mode
+        ):
             return nullcontext()
 
         allocator = get_mem_allocator_instance()

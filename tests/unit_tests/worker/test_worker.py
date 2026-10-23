@@ -93,6 +93,15 @@ def test_sunrise_process_group_mapping_is_ptpu_only(
     assert worker_module._normalize_process_group_backend(backend) == expected
 
 
+@pytest.fixture
+def native_nvidia_platform_contract():
+    """Native CUDA-platform contracts apply only to the NVIDIA backend."""
+    from vllm.platforms import current_platform
+
+    if not current_platform.is_cuda():
+        pytest.skip("Native NVIDIA platform contract requires the NVIDIA CUDA backend")
+
+
 def test_worker_keeps_target_lifecycle_contract():
     from vllm_fl.worker.worker import WorkerFL
 
@@ -157,6 +166,7 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_keeps_native_cuda_semantics():
@@ -173,6 +183,7 @@ def test_nvidia_platform_keeps_native_cuda_semantics():
     assert not platform.is_out_of_tree()
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
@@ -207,6 +218,7 @@ def test_nvidia_platform_selects_target_version_worker_wrapper(monkeypatch):
     native_update.assert_called_once_with(vllm_config)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
@@ -243,6 +255,7 @@ def test_nvidia_platform_keeps_native_cuda_communication(monkeypatch):
     native_custom_allreduce.assert_called_once_with()
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
@@ -279,6 +292,7 @@ def test_nvidia_platform_uses_flagcx_when_configured(monkeypatch):
     native_update.assert_called_once_with(vllm_config)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
@@ -304,6 +318,7 @@ def test_nvidia_platform_uses_native_attention_by_default(monkeypatch):
     native_select.assert_called_once_with(None, selector, 32)
 
 
+@pytest.mark.usefixtures("native_nvidia_platform_contract")
 @skip_if_not_nvidia
 @skip_if_no_native_cuda_ext
 def test_nvidia_platform_honors_explicit_flaggems_attention(monkeypatch):

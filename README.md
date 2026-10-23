@@ -45,7 +45,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | Iluvatar | Supported | [deployment guide](./docs/usage/iluvatar.md) |
 | Tsingmicro | Supported | - |
 | Moore Threads | Supported | [deployment guide](./docs/usage/musa.md) |
-| Hygon | Supported | - |
+| Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |
 | Sunrise | Supported | - |
 | ARM64 CPU | Supported | - |
 
@@ -159,6 +159,11 @@ that are native in vLLM 0.28.0 and Transformers 5 are not duplicated here.
 Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
+
+### Operator profiling
+
+See the [operator profiling tools](./tools/operator_profile/README.md) for a
+reproducible native-vLLM and plugin comparison workflow on vLLM 0.28.0.
 
 4. (Optional) Install [FlagCX](https://github.com/flagos-ai/FlagCX/blob/main/docs/getting_started.md#build-and-installation)
 
