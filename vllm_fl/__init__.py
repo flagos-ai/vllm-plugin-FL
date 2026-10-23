@@ -155,7 +155,30 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
+    # The paired runtime's lazy parser table already lists ``hy_v4`` but points
+    # at a module the image does not ship, so ``--reasoning-parser hy_v4``
+    # fails in the API server before the general plugin (register_model) runs.
+    # Repoint the entry at plugin-FL's port here, lazily, so the platform hook
+    # alone is enough. Idempotent: platform registration can happen per process.
+    _register_hy4_reasoning_parser_lazy()
+
     return "vllm_fl.platform.PlatformFL"
+
+
+def _register_hy4_reasoning_parser_lazy() -> bool:
+    """Point the ``hy_v4`` reasoning-parser entry at plugin-FL's module."""
+    try:
+        from vllm.reasoning import ReasoningParserManager
+    except Exception as exc:  # noqa: BLE001 - never block platform registration
+        logger.debug("[vllm_fl] reasoning parser registry unavailable: %s", exc)
+        return False
+    for name in ("hy_v4", "hy_v4_vl"):
+        ReasoningParserManager.register_lazy_module(
+            name,
+            "vllm_fl.reasoning.hy_v4_reasoning_parser",
+            "HYV4ReasoningParser",
+        )
+    return True
 
 def register_quant_linear():
     from vllm.platforms import current_platform

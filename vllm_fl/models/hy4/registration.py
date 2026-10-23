@@ -89,6 +89,14 @@ def register_hy_v4_support() -> bool:
     if registered_loaders.get(_LOAD_FORMAT) is not HYV4SafetensorsLoader:
         model_loader.register_model_loader(_LOAD_FORMAT)(HYV4SafetensorsLoader)
 
+    # The image's lazy parser table points ``hy_v4`` at a module it does not
+    # ship, so ``--reasoning-parser hy_v4`` fails before serving starts.
+    from vllm_fl.reasoning.hy_v4_reasoning_parser import (
+        register_hy4_reasoning_parsers,
+    )
+
+    register_hy4_reasoning_parsers()
+
     # Register the public class path before an explicit CUSTOM prefill selection.
     from vllm_fl.attention.mla_prefill import register_flaggems_mla_prefill
 
