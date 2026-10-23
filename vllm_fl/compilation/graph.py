@@ -7,7 +7,7 @@
 import dataclasses
 import weakref
 from collections.abc import Callable
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, nullcontext, suppress
 from typing import Any, ClassVar
 from unittest.mock import patch
 
@@ -86,10 +86,9 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type == "npu":
-        # vLLM's current_stream helper maintains CUDA-specific thread-local
-        # state and can remain on the default stream while torch.npu.stream()
-        # has selected the side stream used for graph capture.
+    if current_platform.device_type in ("musa", "npu"):
+        # Native accelerator contexts do not update vLLM's CUDA stream cache.
+        # Read the active accelerator side stream directly during capture.
         return current_platform.torch_device_fn.current_stream()
     return current_stream()
 
@@ -113,7 +112,16 @@ class Graph:
 
 
 # Re-export CUDAGraphStat for compatibility
-from vllm.compilation.cuda_graph import CUDAGraphStat  # noqa: F401, E402
+from vllm.compilation.cuda_graph import CUDAGraphStat  # noqa: E402
+
+__all__ = [
+    "CUDAGraphStat",
+    "Graph",
+    "GraphEntry",
+    "GraphOptions",
+    "GraphWrapper",
+    "weak_ref_tensors",
+]
 
 
 @dataclasses.dataclass
@@ -137,6 +145,9 @@ class GraphOptions:
 class GraphWrapper:
     """FL-specific graph wrapper that supports multiple device types (CUDA, NPU).
     Adapted from upstream CUDAGraphWrapper with platform-agnostic graph capture."""
+
+    entry_type = GraphEntry
+    _graph_type = Graph.graph
 
     _all_instances: ClassVar[weakref.WeakSet["GraphWrapper"]] = weakref.WeakSet()
 
@@ -201,6 +212,18 @@ class GraphWrapper:
     def clear_graphs(self) -> None:
         self.concrete_graph_entries.clear()
 
+    def _capture_inputs(self, entry, args, kwargs):
+        return None
+
+    def _finish_capture_inputs(self, entry, inputs):
+        pass
+
+    def _capture_context(self, graph):
+        return nullcontext()
+
+    def _weak_ref_output(self, output):
+        return weak_ref_tensors(output)
+
     def __call__(self, *args, **kwargs):
         if not is_forward_context_available():
             # No forward context means we are outside the normal
@@ -220,80 +243,84 @@ class GraphWrapper:
         assert batch_descriptor is not None
         if batch_descriptor not in self.concrete_graph_entries:
             # create a new entry for this batch descriptor
-            self.concrete_graph_entries[batch_descriptor] = GraphEntry(
+            self.concrete_graph_entries[batch_descriptor] = self.entry_type(
                 batch_descriptor=batch_descriptor
             )
 
         entry = self.concrete_graph_entries[batch_descriptor]
 
         if entry.graph is None:
-            if self.cudagraph_options.debug_log_enable:
-                logger.debug(
-                    "Capturing a cudagraph on (%s,%s)",
-                    self.runtime_mode.name,
-                    entry.batch_descriptor,
+            return self._capture_graph(entry, args, kwargs)
+        return self._replay_graph(entry, args, kwargs)
+
+    def _capture_graph(self, entry, args, kwargs):
+        if self.cudagraph_options.debug_log_enable:
+            logger.debug(
+                "Capturing a cudagraph on (%s,%s)",
+                self.runtime_mode.name,
+                entry.batch_descriptor,
+            )
+        # validate that cudagraph capturing is legal at this point.
+        validate_cudagraph_capturing_enabled()
+
+        input_addresses = [x.data_ptr() for x in args if isinstance(x, torch.Tensor)]
+        entry.input_addresses = input_addresses
+        capture_inputs = self._capture_inputs(entry, args, kwargs)
+        graph = self._graph_type()
+
+        with ExitStack() as stack:
+            stack.enter_context(self._capture_context(graph))
+            if self.cudagraph_options.gc_disable:
+                stack.enter_context(patch("gc.collect", lambda *args, **kwargs: None))
+                stack.enter_context(
+                    patch(
+                        "torch.accelerator.empty_cache",
+                        lambda *args, **kwargs: None,
+                    )
                 )
-            # validate that cudagraph capturing is legal at this point.
-            validate_cudagraph_capturing_enabled()
-
-            input_addresses = [
-                x.data_ptr() for x in args if isinstance(x, torch.Tensor)
-            ]
-            entry.input_addresses = input_addresses
-            graph = Graph.graph()
-
-            with ExitStack() as stack:
-                if self.cudagraph_options.gc_disable:
-                    stack.enter_context(
-                        patch("gc.collect", lambda *args, **kwargs: None)
+                stack.enter_context(
+                    patch(
+                        "vllm_fl.platform.PlatformFL.empty_cache",
+                        lambda *args, **kwargs: None,
                     )
-                    stack.enter_context(
-                        patch(
-                            "torch.accelerator.empty_cache",
-                            lambda *args, **kwargs: None,
-                        )
-                    )
-                    stack.enter_context(
-                        patch(
-                            "vllm_fl.platform.PlatformFL.empty_cache",
-                            lambda *args, **kwargs: None,
-                        )
-                    )
+                )
 
-                if self.graph_pool is not None:
-                    set_graph_pool_id(self.graph_pool)
-                else:
-                    set_graph_pool_id(current_platform.graph_pool_handle())
+            if self.graph_pool is not None:
+                set_graph_pool_id(self.graph_pool)
+            else:
+                set_graph_pool_id(current_platform.graph_pool_handle())
 
-                # Sync offloader's copy stream before capture if available.
-                with suppress(ImportError, RuntimeError):
-                    from vllm.model_executor.offloader.base import get_offloader
+            # Sync offloader's copy stream before capture if available.
+            with suppress(ImportError, RuntimeError):
+                from vllm.model_executor.offloader.base import get_offloader
 
-                    get_offloader().sync_prev_onload()
+                get_offloader().sync_prev_onload()
 
-                # FL-specific: use platform-agnostic graph capture while
-                # preserving the explicit stream used by vLLM v0.28.0.
-                with current_platform.torch_device_fn.graph(
-                    graph,
-                    pool=self.graph_pool,
-                    stream=_graph_capture_stream(),
-                ):
-                    output = self.runnable(*args, **kwargs)
-                    with suppress(ImportError, RuntimeError, UnboundLocalError):
-                        get_offloader().join_after_forward()
-                    if self.cudagraph_options.weak_ref_output:
-                        output = weak_ref_tensors(output)
+            # FL-specific: use platform-agnostic graph capture while
+            # preserving the explicit stream used by vLLM v0.28.0.
+            with current_platform.torch_device_fn.graph(
+                graph,
+                pool=self.graph_pool,
+                stream=_graph_capture_stream(),
+            ):
+                output = self.runnable(*args, **kwargs)
+                with suppress(ImportError, RuntimeError, UnboundLocalError):
+                    get_offloader().join_after_forward()
+                if self.cudagraph_options.weak_ref_output:
+                    output = self._weak_ref_output(output)
 
-            entry.output = weak_ref_tensors(output)
-            entry.graph = graph
+        entry.output = self._weak_ref_output(output)
+        entry.graph = graph
+        self._finish_capture_inputs(entry, capture_inputs)
 
-            compilation_counter.num_cudagraph_captured += 1
+        compilation_counter.num_cudagraph_captured += 1
 
-            # important: we need to return the output, rather than
-            # the weak ref of the output, so that pytorch can correctly
-            # manage the memory during graph capture
-            return output
+        # important: we need to return the output, rather than
+        # the weak ref of the output, so that pytorch can correctly
+        # manage the memory during graph capture
+        return output
 
+    def _validate_replay_addresses(self, entry, args):
         if self.is_debugging_mode:
             # check if the input addresses are the same
             new_input_addresses = [
@@ -305,12 +332,13 @@ class GraphWrapper:
                 f"got {new_input_addresses}"
             )
 
-        # Sync offloader before replay if available
+    def _replay_graph(self, entry, args, kwargs):
+        self._validate_replay_addresses(entry, args)
+        # Sync offloader before replay if available.
         with suppress(ImportError, RuntimeError):
             from vllm.model_executor.offloader.base import get_offloader
 
             get_offloader().sync_prev_onload()
-
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
         entry.graph.replay()

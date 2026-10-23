@@ -17,19 +17,21 @@
 
 platform: musa
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
 
 runner_labels:
   - mt-cicd-vllm-plugin
 
 container_volumes:
-  - /data:/data
+  - /data:/data:ro
 
 container_options: >-
   --hostname vllm-plugin-fl
-  --privileged
-  --ipc=host
-  --shm-size=64g
+  --runtime=mthreads
+  --ipc=private
+  --shm-size=16g
   --env GEMS_VENDOR=mthreads
   --env VLLM_PLUGINS=fl
-  --env MTHREADS_VISIBLE_DEVICES=all
+  --env MTHREADS_VISIBLE_DEVICES=4,5,6,7
+  --env MUSA_VISIBLE_DEVICES=0,1,2,3
+  --env USE_FLAGGEMS=1
