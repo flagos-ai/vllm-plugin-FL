@@ -271,11 +271,19 @@ class HYV4VisionPatchMerger(nn.Module):
         dtype = x.dtype
         x = self.proj(x.permute(0, 3, 1, 2).contiguous())
         if x.shape[0] > 1:
-            x = F.avg_pool3d(
-                x.permute(1, 0, 2, 3),
-                (config.temporal_patch_size, 1, 1),
-                stride=(config.temporal_patch_size, 1, 1),
-            ).permute(1, 0, 2, 3)
+            # ``avg_pool3d`` here pools an *unbatched* (C, D, H, W) tensor, whose
+            # N dimension stands for the frame axis. Torch accepts that rank, but
+            # FlagGems' kernel (and other vendor kernels) only take 5D, so make
+            # the batch axis explicit instead of relying on the unbatched path.
+            x = (
+                F.avg_pool3d(
+                    x.permute(1, 0, 2, 3).unsqueeze(0),
+                    (config.temporal_patch_size, 1, 1),
+                    stride=(config.temporal_patch_size, 1, 1),
+                )
+                .squeeze(0)
+                .permute(1, 0, 2, 3)
+            )
             x = F.avg_pool2d(
                 x, config.spatial_patch_size, stride=config.spatial_patch_size
             )
