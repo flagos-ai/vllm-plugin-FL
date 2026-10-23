@@ -251,7 +251,7 @@ def test_native_fallback_preserves_configurable_activation(monkeypatch, activati
     calls = []
     from vllm_fl.quantization.w8a8.moe_experts import (
         TritonExperts,
-        VllmModularW8A8Experts,
+        VllmFunctionalW8A8Experts,
     )
 
     def upstream_selector(config, **kwargs):
@@ -268,7 +268,7 @@ def test_native_fallback_preserves_configurable_activation(monkeypatch, activati
     monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op_name: False)
     config = SimpleNamespace(activation=activation, **params)
     moe_adapter.install_fl_w8a8_moe_selector()
-    assert oracle.select_int8_moe_backend(config) == ("triton", VllmModularW8A8Experts)
+    assert oracle.select_int8_moe_backend(config) == ("triton", VllmFunctionalW8A8Experts)
     assert calls == [(config, {"weight_key": None, "activation_key": None})]
     assert calls[0][0].activation is activation
     for key, value in params.items():

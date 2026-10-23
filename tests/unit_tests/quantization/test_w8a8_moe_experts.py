@@ -59,7 +59,6 @@ def _quant_config():
     [
         moe_experts.FlagGemsW8A8Experts,
         moe_experts.VllmFunctionalW8A8Experts,
-        moe_experts.VllmModularW8A8Experts,
     ],
 )
 def test_functional_experts_defer_activation_quantization(experts_cls):
@@ -94,7 +93,7 @@ def test_modular_fallback_copies_activation_parameters(monkeypatch):
         calls.append((moe_config, quant_config))
 
     monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
-    moe_experts.VllmModularW8A8Experts(config, original)
+    moe_experts.VllmFunctionalW8A8Experts(config, original)
     forwarded = calls[0][1]
     assert calls[0][0] is config
     assert forwarded is not original
@@ -128,7 +127,7 @@ def test_vllm_functional_experts_call_only_native_vllm(monkeypatch):
     arguments = _apply_arguments()
 
     moe_experts.VllmFunctionalW8A8Experts.apply(
-        SimpleNamespace(quant_config=quant_config),
+        SimpleNamespace(quant_config=quant_config, _use_modular=False),
         **arguments,
     )
 
@@ -239,3 +238,44 @@ def test_functional_experts_rejects_incompatible_weight_scale(
 
     with pytest.raises((TypeError, ValueError), match="weight scales|scale must"):
         moe_experts.FlagGemsW8A8Experts.apply(instance, **_apply_arguments())
+
+
+@pytest.mark.parametrize(
+    "activation,parameters",
+    [
+        (MoEActivation.GELU, {}),
+        (MoEActivation.SILU, {"swiglu_limit": 7.0}),
+        (MoEActivation.SILU, {"swiglu_alpha": 1.702, "swiglu_beta": 1.0}),
+    ],
+)
+def test_native_experts_delegate_configurable_activation(monkeypatch, activation, parameters):
+    calls = []
+
+    def init(self, moe_config, quant_config):
+        self.quant_config = quant_config
+
+    monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
+    monkeypatch.setattr(
+        moe_experts.TritonExperts, "apply",
+        lambda self, **kwargs: calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        moe_experts, "_vllm_fused_experts",
+        lambda **kwargs: pytest.fail("Configurable activation must use modular experts"),
+    )
+    from vllm.model_executor.layers.fused_moe.config import int8_w8a8_moe_quant_config
+
+    quant_config = int8_w8a8_moe_quant_config(
+        w1_scale=torch.ones((2, 8, 1)),
+        w2_scale=torch.ones((2, 4, 1)),
+        a1_scale=None, a2_scale=None, per_act_token_quant=True,
+    )
+    instance = moe_experts.VllmFunctionalW8A8Experts(
+        SimpleNamespace(**parameters), quant_config,
+    )
+    arguments = _apply_arguments()
+    arguments["activation"] = activation
+    instance.apply(**arguments)
+    assert len(calls) == 1
+    assert calls[0].keys() == arguments.keys()
+    assert all(calls[0][name] is value for name, value in arguments.items())

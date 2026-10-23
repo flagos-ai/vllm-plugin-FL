@@ -162,11 +162,11 @@ def install_fl_w8a8_moe_selector() -> bool:
                 )
 
                 from vllm_fl.quantization.w8a8.moe_experts import (
-                    VllmModularW8A8Experts,
+                    VllmFunctionalW8A8Experts,
                 )
 
                 if experts_cls is TritonExperts:
-                    experts_cls = VllmModularW8A8Experts
+                    experts_cls = VllmFunctionalW8A8Experts
                 return backend, experts_cls
 
             if getattr(config, "is_lora_enabled", False):

@@ -34,6 +34,11 @@ output tokens. Adjust parallelism and memory settings for your hardware.
 From the repository root, inside the configured environment:
 
 ```bash
-VLLM_PLUGINS=fl HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+export VLLM_FL_FLAGOS_BLACKLIST_APPEND=pow_scalar,reciprocal,add,gelu,fused_moe,to_copy,copy_,sub,full,w8a8_dynamic_per_token_linear
+
+VLLM_PLUGINS=fl USE_FLAGGEMS=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
     python examples/minimax_m31_offline_inference.py
 ```
+
+`VLLM_FL_FLAGOS_BLACKLIST_APPEND` disables the listed FlagGems operators while
+preserving platform defaults. Other FlagGems operators remain enabled.
