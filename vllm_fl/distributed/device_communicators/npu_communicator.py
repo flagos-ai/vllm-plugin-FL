@@ -3,6 +3,7 @@
 
 import torch
 import torch.distributed as dist
+
 from vllm.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase,
 )
@@ -54,8 +55,11 @@ class NPUCommunicator(DeviceCommunicatorBase):
             padded[: tensor.shape[0]].copy_(tensor)
             gathered = self.all_gather(padded, dim=0)
             return torch.cat(
-                [gathered[rank * max_rows : rank * max_rows + size]
-                 for rank, size in enumerate(sizes)], dim=0
+                [
+                    gathered[rank * max_rows : rank * max_rows + size]
+                    for rank, size in enumerate(sizes)
+                ],
+                dim=0,
             )
 
         if isinstance(input_, torch.Tensor):
@@ -63,18 +67,27 @@ class NPUCommunicator(DeviceCommunicatorBase):
         return [gather(tensor) for tensor in input_]
 
     def reduce_scatterv(self, input_, dim=-1, sizes=None):
-        if sizes is None:
-            return self.reduce_scatter(input_, dim=dim)
-        self._check_sizes(sizes)
+        if not -input_.ndim <= dim < input_.ndim:
+            raise ValueError("Invalid reduce-scatter dimension")
         dim %= input_.ndim
         tensor = input_.movedim(dim, 0)
+        if sizes is None:
+            if tensor.shape[0] % self.world_size:
+                raise ValueError(
+                    "Reduce-scatter dimension size must be divisible by group size"
+                )
+            sizes = [tensor.shape[0] // self.world_size] * self.world_size
+        self._check_sizes(sizes)
         if tensor.shape[0] != sum(sizes):
             raise ValueError("Input rows do not match collective sizes")
         max_rows = max(sizes)
         if max_rows == 0 or self.world_size == 1:
             return input_
         if min(sizes) == max_rows:
-            return self.reduce_scatter(input_, dim=dim)
+            # Normalize before entering the base dim=0 collective; its generic
+            # dimension movement is not correct for higher-dimensional inputs.
+            output = self.reduce_scatter(tensor.contiguous(), dim=0)
+            return output.movedim(0, dim).contiguous()
         padded = tensor.new_zeros((self.world_size * max_rows, *tensor.shape[1:]))
         offset = 0
         for rank, size in enumerate(sizes):

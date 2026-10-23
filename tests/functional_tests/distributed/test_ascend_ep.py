@@ -137,6 +137,84 @@ def test_padded_collectives(groups, sizes):
         torch.testing.assert_close(reduced, tensor * 2, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("noncontiguous", [False, True])
+@pytest.mark.parametrize(
+    "shape,dim,sizes",
+    [
+        ((2, 3, 4), -1, [2, 2]),
+        ((2, 3, 4), 2, [2, 2]),
+        ((2, 3, 4), -1, None),
+        ((2, 3, 4), 2, [1, 3]),
+        ((2, 3, 4), -1, [0, 4]),
+        ((2, 4, 3), 1, None),
+        ((4, 2, 3), 0, [2, 2]),
+        ((2, 3, 0), -1, None),
+        ((4,), -1, None),
+    ],
+)
+def test_reduce_scatterv_dimensions(groups, shape, dim, sizes, noncontiguous, dtype):
+    """Equal/uneven/implicit splits share the same axis and reduction contract."""
+    from math import prod
+
+    comm = groups.device_communicator
+    rank = groups.rank_in_group
+    world = groups.world_size
+    normalized_dim = dim % len(shape)
+    values = torch.arange(prod(shape), dtype=torch.float32, device="npu").reshape(shape)
+    tensor = (values + rank).to(dtype)
+    if noncontiguous:
+        backing = tensor.new_full((*shape[:-1], shape[-1] * 2), -31)
+        tensor = backing[..., ::2]
+        tensor.copy_((values + rank).to(dtype))
+    else:
+        backing = tensor
+    before = backing.clone()
+    split_sizes = sizes or [shape[normalized_dim] // world] * world
+    start = sum(split_sizes[:rank])
+    expected = (
+        (values * world + world * (world - 1) // 2)
+        .narrow(normalized_dim, start, split_sizes[rank])
+        .to(dtype)
+    )
+
+    for _ in range(2):
+        result = comm.reduce_scatterv(tensor, dim=dim, sizes=sizes)
+    torch.npu.synchronize()
+    torch.testing.assert_close(result, expected, rtol=0, atol=0)
+    torch.testing.assert_close(backing, before, rtol=0, atol=0)
+    assert result.is_contiguous()
+    if tensor.numel() == 0:
+        return
+
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        result = comm.reduce_scatterv(tensor, dim=dim, sizes=sizes)
+    for step in range(1, 3):
+        tensor.add_(1)
+        before = backing.clone()
+        graph.replay()
+        torch.npu.synchronize()
+        torch.testing.assert_close(result, expected + world * step, rtol=0, atol=0)
+        torch.testing.assert_close(backing, before, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize(
+    "shape,dim,sizes",
+    [
+        ((2, 3, 4), -4, None),
+        ((2, 3, 4), 3, [2, 2]),
+        ((2, 3, 3), -1, None),
+        ((2, 3, 4), -1, [1, 1]),
+        ((2, 3, 4), -1, [4]),
+    ],
+)
+def test_reduce_scatterv_rejects_invalid_dimensions_or_sizes(groups, shape, dim, sizes):
+    tensor = torch.zeros(shape, dtype=torch.bfloat16, device="npu")
+    with pytest.raises(ValueError):
+        groups.device_communicator.reduce_scatterv(tensor, dim=dim, sizes=sizes)
+
+
 @pytest.mark.parametrize("topk", [1, 2])
 @pytest.mark.parametrize("num_tokens", [1, 8])
 def test_native_expert_partition(groups, topk, num_tokens, monkeypatch):
