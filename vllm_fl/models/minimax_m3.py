@@ -3,7 +3,7 @@
 
 Re-export the upstream classes themselves so multimodal processor registration
 and model execution stay unchanged. The paired vLLM 0.24 classes omit this
-metadata, causing named INT8 targets to fall through to unquantized linears.
+metadata, causing named quantization targets to fall through to plain linears.
 """
 
 from vllm.models.minimax_m3 import (
@@ -12,7 +12,6 @@ from vllm.models.minimax_m3 import (
 )
 
 from .minimax_m3_registration import add_fused_quantization_mapping
-
 
 for _model_cls in (
     MiniMaxM3SparseForCausalLM,
