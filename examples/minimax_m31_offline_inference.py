@@ -1,29 +1,35 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""MiniMax-M3.1-Flash W8A8 offline inference on T-Head (Zhenwu).
+"""MiniMax-M3.1-Flash offline text generation with official weights.
 
-Run in the platform's configured FlagOS environment:
-    VLLM_PLUGINS=fl python examples/minimax_m31_offline_inference.py
-
-See docs/minimax-m31.md for model downloads and platform requirements.
+Targets NVIDIA H100/H200 TP8 with an M3.1-capable vLLM runtime.
+See docs/minimax-m31.md for version requirements and validation status.
 """
 
 from vllm import LLM, SamplingParams
 
 
 if __name__ == "__main__":
-    prompts = ["Please introduce MiniMax-M3.1-Flash."]
-    sampling_params = SamplingParams(max_tokens=512, temperature=0.0)
+    sampling_params = SamplingParams(max_tokens=512, temperature=1.0, top_p=0.95)
 
-    # T-Head W8A8 Express example from the official FlagOS deployment guide.
-    # For local weights, replace model with the downloaded model directory.
+    # Official checkpoint: MXFP8 dense layers and NVFP4 MoE experts.
+    # Hopper uses FP8 KV/indexer caches and the Marlin MoE backend.
     llm = LLM(
-        model="FlagRelease/MiniMax-M3.1-Flash-W8A8-zhenwu-FlagOS-Express",
+        model="MiniMaxAI/MiniMax-M3.1-Flash",
         tensor_parallel_size=8,
         trust_remote_code=True,
+        block_size=128,
+        kv_cache_dtype="fp8",
+        attention_config={"indexer_kv_dtype": "fp8"},
+        moe_backend="marlin",
+        disable_hybrid_kv_cache_manager=True,
+        language_model_only=True,
+        max_model_len=8192,
+        max_num_seqs=1,
+        enforce_eager=True,
     )
 
-    outputs = llm.generate(prompts, sampling_params)
+    messages = [{"role": "user", "content": "Please introduce MiniMax-M3.1-Flash."}]
+    outputs = llm.chat(messages, sampling_params)
     for output in outputs:
-        print(f"Prompt: {output.prompt!r}")
         print(f"Generated: {output.outputs[0].text!r}")

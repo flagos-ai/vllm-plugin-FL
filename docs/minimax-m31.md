@@ -1,46 +1,49 @@
 # MiniMax-M3.1-Flash
 
-[MiniMax-M3.1-Flash](https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash)
-is the released MiniMax-M3.1 model. FlagOS provides platform-specific W8A8
-weights and deployment environments. See the official
-[FlagOS multi-chip deployment guide](https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash/blob/main/docs/FlagOS-Multi-Chip-Support-and-Downloads.md)
-for model downloads and the corresponding chip model cards.
+## Model and runtime requirements
 
-## Prepare the environment
+The example uses the public, official checkpoint
+[`MiniMaxAI/MiniMax-M3.1-Flash`](https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash).
+Its configuration declares MXFP8 dense layers and NVFP4 MoE experts. Download
+these weights directly or use the model ID in the example:
 
-Select the model card for your chip from the official guide. Follow that card
-to prepare the host drivers, runtime, compatible PyTorch build, model weights,
-and container image. The platform model card specifies framework versions,
-plugin branches, model-specific patches, accelerator count, and memory
-requirements. A configured FlagRelease container is the recommended starting
-point; for source installation, also see the repository's
-[setup instructions](../README.md#setup).
+```bash
+hf download MiniMaxAI/MiniMax-M3.1-Flash --local-dir /models/MiniMax-M3.1-Flash
+```
+
+The [upstream vLLM M3.1 recipe](https://github.com/vllm-project/vllm/blob/main/recipes/models/MiniMaxAI/MiniMax-M3.1-Flash.yaml)
+specifies a minimum vLLM version of **0.33.0** and requires a nightly build,
+with the dedicated NVIDIA image `vllm/vllm-openai:minimax-m31-flash`.
+This repository's `main` branch currently targets **vLLM 0.24.0**. The standard
+[setup](../README.md#setup) alone does not establish M3.1 compatibility.
+Use an M3.1-capable runtime and verify plugin compatibility before enabling
+`VLLM_PLUGINS=fl`. This example has not been validated end to end with the FL
+plugin; the README entry is therefore marked **Pending validation**.
 
 ## Offline text generation
 
-The [example script](../examples/minimax_m31_offline_inference.py) follows the
-official guide's **T-Head (Zhenwu) W8A8 Express** configuration with
-`tensor_parallel_size=8`. From the repository root, run it inside the prepared
-environment:
+The [example script](../examples/minimax_m31_offline_inference.py) targets
+**eight NVIDIA H100/H200 GPUs**, following the upstream Hopper recipe's FP8
+KV/indexer caches, Marlin MoE backend, 128-token cache blocks, and disabled
+hybrid KV cache manager. Prepare sufficient device memory for the official
+checkpoint and runtime. Accelerator count and settings are specific to this
+example.
+
+For a small text generation check, the script uses eager execution, skips
+the vision encoder, limits context to 8192 tokens and concurrent sequences
+to one, and generates up to 512 tokens. It applies the checkpoint's chat
+template through `LLM.chat` and uses the model card's recommended sampling
+settings (`temperature=1.0`, `top_p=0.95`).
+
+After preparing a compatible vLLM and plugin environment, run from the
+repository root:
 
 ```bash
 VLLM_PLUGINS=fl python examples/minimax_m31_offline_inference.py
 ```
 
-The script loads
-`FlagRelease/MiniMax-M3.1-Flash-W8A8-zhenwu-FlagOS-Express`, generates a response
-to a text prompt, and prints the prompt and generated text. To use downloaded
-weights, replace the script's `model` value with the local model directory.
-
-For another chip, select its W8A8 repository from the official guide and adjust
-`tensor_parallel_size`, `max_model_len`, `max_num_batched_tokens`, and
-`max_num_seqs` according to that platform's model card. The original
-`MiniMaxAI/MiniMax-M3.1-Flash` checkpoint and the platform-specific FlagOS W8A8
-checkpoints have different deployment requirements; use the weights specified
-by your platform's instructions.
-
-The example uses `temperature=0.0` and `max_tokens=512` for a short generation
-check. The official model card recommends `temperature=1.0` and `top_p=0.95`
-for general use. This example covers text generation; consult the platform
-model card for online serving, chat templates, image/video inputs, DSpark
-speculative decoding, and `reasoning_effort` settings.
+To use downloaded weights, replace `model` in the script with
+`/models/MiniMax-M3.1-Flash`. Other platforms require their own supported
+quantization kernels and configurations; consult the upstream recipe rather
+than reusing the Hopper settings. The example does not enable multimodal
+inputs or DSpark speculative decoding.
