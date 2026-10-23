@@ -42,6 +42,12 @@ from vllm.config import (
 from vllm.config.cache import CacheConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
 from vllm.config.model import PROCESSED_LOGPROBS_MODES
+try:  # FL: vLLM >= 0.28 slot mapping mode enum
+    from vllm.v1.worker.block_table import SlotMappingMode
+except ImportError:  # pragma: no cover - older vLLM
+    class SlotMappingMode:  # type: ignore[no-redef]
+        TOKEN_TO_KV_SLOT = 0
+        NONE = 1
 from vllm.distributed.ec_transfer import get_ec_transfer, has_ec_transfer
 from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.kv_transfer import get_kv_transfer_group, has_kv_transfer_group
@@ -53,11 +59,25 @@ from vllm.distributed.parallel_state import (
     get_tp_group,
     is_global_first_rank,
 )
+try:
+    from vllm.distributed.weight_transfer.sparse_nccl_engine import (
+        SparseWeightPatch,
+    )
+except ImportError:  # older vLLM
+    from vllm.distributed.weight_transfer.base import SparseWeightPatch
 from vllm.forward_context import (
     BatchDescriptor,
     set_forward_context,
 )
 from vllm.logger import init_logger
+# FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
+try:  # pragma: no cover - vLLM version compat
+    from vllm.distributed.parallel_state import (
+        prepare_communication_buffer_for_model as _prepare_comm_buffer,
+    )
+except ImportError:  # vLLM >= 0.28 dropped the symbol
+    def _prepare_comm_buffer(*args, **kwargs):
+        return None
 from vllm.lora.layers import BaseLayerWithLoRA, LoRAMapping, LoRAMappingType
 from vllm.model_executor.layers.attention import Attention, MLAAttention
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -214,15 +234,28 @@ from vllm.v1.spec_decode.utils import update_num_computed_tokens_for_batch_chang
 from vllm.v1.structured_output.utils import apply_grammar_bitmask
 from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
 from vllm.v1.worker import mamba_utils
-from vllm.v1.worker.block_table import SlotMappingMode
 from vllm.v1.worker.cp_utils import (
     check_attention_cp_compatibility,
     get_dcp_dummy_context_len,
     prepare_dcp_dummy_context_metadata,
 )
+try:
+    from vllm.v1.worker.cp_utils import (
+        get_total_cp_world_size,
+    )
+except ImportError:  # vLLM >= 0.28: CP merged into DCP; KV cache shards over DCP
+    from vllm.v1.worker.cp_utils import (
+        get_kv_cache_shard_count as get_total_cp_world_size,
+    )
 from vllm.v1.worker.dp_utils import coordinate_batch_across_dp
 from vllm.v1.worker.ec_connector_model_runner_mixin import ECConnectorModelRunnerMixin
 from vllm.v1.worker.gpu.attn_utils import _reshape_attention_kv_cache
+try:
+    from vllm.v1.worker.gpu.pool.late_interaction_runner import (
+        LateInteractionRunner,
+    )
+except ImportError:  # vLLM >= 0.28 moved it here
+    from vllm.v1.pool.late_interaction_runner import LateInteractionRunner
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.gpu_ubatch_wrapper import UBatchWrapper
 from vllm.v1.worker.kv_connector_model_runner_mixin import KVConnectorModelRunnerMixin
@@ -595,6 +628,11 @@ class ModelRunnerFL(
         self.max_model_len = model_config.max_model_len
 
         # Always set to false after the first forward pass
+        # FL: vLLM >= 0.28 removed CacheConfig.calculate_kv_scales
+        # (runtime kv-scale calibration dropped upstream); tolerate absence.
+        self.calculate_kv_scales = getattr(
+            self.cache_config, "calculate_kv_scales", False
+        )
         self.dcp_world_size = self.parallel_config.decode_context_parallel_size
         self.dcp_rank = 0 if self.dcp_world_size <= 1 else get_dcp_group().rank_in_group
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
@@ -797,6 +835,7 @@ class ModelRunnerFL(
         )
         self._init_block_sizes = [placeholder_block_size]
         self._init_kernel_block_sizes = [placeholder_block_size]
+        # FL: vLLM >= 0.28 requires these on InputBatch
         self._init_max_num_blocks = [placeholder_max_num_blocks]
         self._init_slot_mapping_modes = [SlotMappingMode.TOKEN_TO_KV_SLOT]
         self.input_batch = InputBatch(
@@ -5605,7 +5644,13 @@ class ModelRunnerFL(
             time_after_load - time_before_load,
         )
         if not load_dummy_weights:
+            _prepare_comm_buffer(self.model)
+            # FL: register IO dumper module hooks
             register_io_module_hooks(self.model)
+            if (drafter := getattr(self, "drafter", None)) and (
+                drafter_model := getattr(drafter, "model", None)
+            ):
+                _prepare_comm_buffer(drafter_model)
         mm_config = self.model_config.multimodal_config
         self.is_multimodal_pruning_enabled = (
             supports_multimodal_pruning(self.get_model())
@@ -7711,6 +7756,11 @@ class ModelRunnerFL(
                     # each block's bytes into its conv/ssm state views. Keeping
                     # one tensor per layer lets the KV connector register it
                     # without special-casing Mamba.
+                    # vLLM 0.28 MambaBase.bind_kv_cache expects exactly this single
+                    # view: it squeezes dims (1,2) then unpacks the layer conv/ssm
+                    # states. The old 0.27 fork returned a list of state tensors ->
+                    # AttributeError: list object has no attribute squeeze at
+                    # mamba/abstract.py:35. Mirror native 0.28.
                     kv_caches[layer_name] = raw_tensor[
                         : num_blocks * page_size_bytes
                     ].view(num_blocks, 1, 1, page_size_bytes)

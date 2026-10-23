@@ -46,6 +46,10 @@ if _torch_ver < (2, 9):
         "memory_allocated": torch.cuda.memory_allocated,
         "reset_peak_memory_stats": torch.cuda.reset_peak_memory_stats,
         "max_memory_allocated": torch.cuda.max_memory_allocated,
+        # vLLM 0.28 MemorySnapshot.measure() calls torch.accelerator.get_memory_info();
+        # torch 2.8+metax exposes only torch.cuda.mem_get_info (same (free,total)
+        # tuple, optional device arg). Needed after the 0.4.0-dev merge.
+        "get_memory_info": torch.cuda.mem_get_info,
     }
 
     for _name, _impl in _MISSING_APIS.items():

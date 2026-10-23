@@ -18,6 +18,26 @@ import torch
 _BACKEND = os.environ.get("FL_BACKEND", "").lower()
 
 
+def _is_metax_backend() -> bool:
+    """Detect the MetaX (MACA) runtime.
+
+    MACA ships a CUDA-shaped torch fork, so ``torch.cuda.is_available()`` is
+    True there and a plain CUDA probe would report "nvidia". That makes
+    NVIDIA-only baseline tests run on MetaX; detect the vendor instead.
+    """
+    if os.environ.get("GEMS_VENDOR", "").strip().lower() == "metax":
+        return True
+    version = str(getattr(torch, "__version__", "")).lower()
+    if "metax" in version or "maca" in version:
+        return True
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec("mcoplib") is not None
+    except Exception:
+        return False
+
+
 def get_backend() -> str:
     """Detect current backend from env or hardware.
 
@@ -27,6 +47,8 @@ def get_backend() -> str:
     """
     if _BACKEND:
         return _BACKEND
+    if _is_metax_backend():
+        return "metax"
     if torch.cuda.is_available():
         # Hygon HIP uses Torch CUDA APIs, but remains a distinct test backend.
         return (
@@ -55,7 +77,7 @@ def is_accelerator_available() -> bool:
 def get_device(index: int = 0) -> torch.device:
     """Get torch device for current backend."""
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu"):
+    if backend in ("nvidia", "hygon", "tianshu", "metax"):
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
@@ -65,7 +87,7 @@ def get_device(index: int = 0) -> torch.device:
 def get_device_count() -> int:
     """Get the number of available accelerators."""
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu"):
+    if backend in ("nvidia", "hygon", "tianshu", "metax"):
         return torch.cuda.device_count()
     elif backend == "ascend":
         try:

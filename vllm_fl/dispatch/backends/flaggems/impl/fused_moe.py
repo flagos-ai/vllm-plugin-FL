@@ -5,9 +5,11 @@ FlagGems fused moe operator implementations.
 """
 
 import torch
-
+from vllm.logger import init_logger
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
+
+logger = init_logger(__name__)
 
 
 def moe_align_block_size_flaggems(
@@ -154,6 +156,25 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    from flaggems_vllm import moe_sum
+    try:
+        from flaggems_vllm import moe_sum
 
-    moe_sum(inp, out)
+        moe_sum(inp, out)
+        return
+    except Exception:
+        # MetaX C550: flaggems-vllm ships no working moe_sum kernel for MACA,
+        # so dispatch reports "All implementations for op='moe_sum' have
+        # failed". The upstream flag_gems kernel is the validated path on this
+        # vendor; keep the failure visible everywhere else.
+        import flag_gems
+
+        if str(getattr(flag_gems, "vendor_name", "")).lower() != "metax":
+            raise
+        logger.debug(
+            "flaggems_vllm.moe_sum failed on MetaX; falling back to flag_gems",
+            exc_info=True,
+        )
+
+    from flag_gems import moe_sum as flag_gems_moe_sum
+
+    flag_gems_moe_sum(inp, out)
