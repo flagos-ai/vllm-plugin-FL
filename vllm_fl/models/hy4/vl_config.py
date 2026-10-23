@@ -150,5 +150,23 @@ class HYV4VLConfig(PretrainedConfig):
             if hasattr(text, name):
                 setattr(self, name, getattr(text, name))
 
+    def __getattr__(self, name: str) -> Any:
+        """Forward text-side fields that the outer VL config does not define.
+
+        vLLM reads several text fields off ``model_config.hf_config`` directly
+        rather than off ``hf_text_config`` — the MLA sparse KV builder takes
+        ``hf_config.index_topk``, for example. Those fields live on
+        ``text_config`` here, so resolve them through it instead of failing
+        with ``AttributeError`` after the KV cache has been sized.
+        """
+        if name.startswith("__"):
+            raise AttributeError(name)
+        text = self.__dict__.get("text_config")
+        if text is not None and hasattr(text, name):
+            return getattr(text, name)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )
+
 
 __all__ = ["HYV4VLConfig", "HYV4VLVisionConfig"]
