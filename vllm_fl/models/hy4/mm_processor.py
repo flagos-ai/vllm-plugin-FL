@@ -283,6 +283,9 @@ class HYV4VLVideoProcessor(BaseVideoProcessor):
     def preprocess(self, videos, **kwargs: Unpack[HYV4VideoProcessorKwargs]):
         if kwargs.get("num_frames") is not None and "fps" not in kwargs:
             kwargs["fps"] = None
+        videos, metadata = _split_video_metadata(videos, kwargs.get("video_metadata"))
+        if metadata is not None:
+            kwargs["video_metadata"] = metadata
         return super().preprocess(videos, **kwargs)
 
     def sample_frames(self, metadata, num_frames=None, fps=None, **kwargs):
@@ -404,6 +407,67 @@ def vision_token_grid(grid_thw, config, modality):
 def vision_token_count(grid_thw, config, modality):
     frames, rows, cols = vision_token_grid(grid_thw, config, modality)
     return frames * (rows * cols + 2 * int(bool(config.cat_extra_token)))
+
+
+def _is_video_metadata(value) -> bool:
+    """Whether ``value`` describes a video instead of holding its frames."""
+    if isinstance(value, dict):
+        return any(k in value for k in ("total_num_frames", "fps", "duration"))
+    return hasattr(value, "total_num_frames")
+
+
+#: Fields ``transformers.video_utils.VideoMetadata`` accepts in 5.17.
+_VIDEO_METADATA_FIELDS = frozenset(
+    {"total_num_frames", "fps", "width", "height", "duration", "video_backend",
+     "frames_indices"}
+)
+
+
+def _prune_video_metadata(metadata):
+    """Drop mapping keys 5.17's ``VideoMetadata`` dataclass does not declare.
+
+    The dummy builder writes the newer ``(frames, metadata)`` convention, which
+    carries preprocess options (``do_sample_frames``) inline; 5.17 expands the
+    mapping straight into ``VideoMetadata(**metadata)``.
+    """
+    if not isinstance(metadata, dict):
+        return metadata
+    return {key: value for key, value in metadata.items() if key in _VIDEO_METADATA_FIELDS}
+
+
+def _split_video_metadata(videos, metadata):
+    """Separate ``(frames, metadata)`` pairs, as the dummy builder emits them.
+
+    transformers 5.17's ``make_batched_videos`` does not understand the
+    ``(video, metadata)`` tuple convention: it recurses into the pair and lets
+    the metadata mapping survive as a "video", which then fails
+    ``video.permute``. Unpacking here feeds the base processor the two lists it
+    expects.
+    """
+    if videos is None or not isinstance(videos, (list, tuple)):
+        return videos, metadata
+    frames, collected = [], []
+    found = False
+    for item in videos:
+        if (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and not isinstance(item[1], (str, bytes))
+            and _is_video_metadata(item[1])
+        ):
+            frames.append(item[0])
+            collected.append(item[1])
+            found = True
+        else:
+            frames.append(item)
+    if not found:
+        return videos, metadata
+    collected = [_prune_video_metadata(item) for item in collected]
+    if metadata is None:
+        metadata = collected
+    elif isinstance(metadata, (list, tuple)) and len(metadata) == len(collected):
+        metadata = list(metadata)
+    return frames, metadata
 
 
 class HYV4VLProcessorKwargs(ProcessingKwargs, total=False):  # type: ignore[call-arg]
