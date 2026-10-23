@@ -135,14 +135,14 @@ def build(cap=2, mode=Mode.FULL):
         envs=SimpleNamespace(VLLM_LOGGING_LEVEL="INFO"),
         current_platform=SimpleNamespace(
             get_global_graph_pool=lambda: None,
-            graph_pool_handle=lambda: object(),
+            graph_pool_handle=object,
             torch_device_fn=SimpleNamespace(graph=capture),
         ),
         is_forward_context_available=lambda: True,
         get_forward_context=lambda: ctx,
         validate_cudagraph_capturing_enabled=lambda: None,
         set_graph_pool_id=lambda pool: None,
-        _graph_capture_stream=lambda: object(),
+        _graph_capture_stream=object,
         _weak_ref_musa_tensors=lambda value: value,
         weak_ref_tensors=lambda value: value,
         tree_flatten=lambda value: (
@@ -292,7 +292,7 @@ class AdmissionControls(unittest.TestCase):
                         keep.append(graph)
                         budget.register(graph)
                     outcomes.append(admitted)
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
 
         threads = [threading.Thread(target=thread) for _ in range(5)]

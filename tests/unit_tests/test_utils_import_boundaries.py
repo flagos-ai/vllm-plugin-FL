@@ -107,21 +107,21 @@ values = [[1., 2.], [-3., 4.]]
 residual_values = [[.5, -.5], [1., -1.]]
 weights = [1.25, .75]
 epsilon = 1e-5
-obj = SimpleNamespace(weight=torch.tensor(weights, dtype=torch.float64, device="cpu"), variance_epsilon=epsilon)
-norm_x = torch.tensor(values, dtype=torch.float64, device="cpu")
-residual = torch.tensor(residual_values, dtype=torch.float64, device="cpu")
+obj = SimpleNamespace(weight=torch.tensor(weights, dtype=torch.float32, device="cpu"), variance_epsilon=epsilon)
+norm_x = torch.tensor(values, dtype=torch.float32, device="cpu")
+residual = torch.tensor(residual_values, dtype=torch.float32, device="cpu")
 def expected_rms(rows):
     return [[value * weights[j] / math.sqrt(sum(v * v for v in row) / len(row) + epsilon) for j, value in enumerate(row)] for row in rows]
 normalized = backend.rms_norm(obj, norm_x)
-assert normalized.device.type == "cpu" and normalized.dtype == torch.float64
-assert torch.allclose(normalized, torch.tensor(expected_rms(values), dtype=torch.float64), rtol=1e-12, atol=1e-12)
+assert normalized.device.type == "cpu" and normalized.dtype == torch.float32
+torch.testing.assert_close(normalized, torch.tensor(expected_rms(values), dtype=torch.float32))
 combined = [[a + b for a, b in zip(row, res)] for row, res in zip(values, residual_values)]
 normalized_residual, observed_residual = backend.rms_norm(obj, norm_x, residual)
 assert normalized_residual.device.type == observed_residual.device.type == "cpu"
-assert torch.equal(observed_residual, torch.tensor(combined, dtype=torch.float64))
-assert torch.allclose(normalized_residual, torch.tensor(expected_rms(combined), dtype=torch.float64), rtol=1e-12, atol=1e-12)
-assert torch.equal(norm_x, torch.tensor(values, dtype=torch.float64))
-assert torch.equal(residual, torch.tensor(residual_values, dtype=torch.float64))
+assert torch.equal(observed_residual, torch.tensor(combined, dtype=torch.float32))
+torch.testing.assert_close(normalized_residual, torch.tensor(expected_rms(combined), dtype=torch.float32))
+assert torch.equal(norm_x, torch.tensor(values, dtype=torch.float32))
+assert torch.equal(residual, torch.tensor(residual_values, dtype=torch.float32))
 assert io_common.is_io_active() is False
 @io_common.managed_inference_mode()
 def evaluate():

@@ -26,7 +26,7 @@ device_overrides:
       - qwen3_6/35b_a3b_tp4_eager
       - qwen3_6/35b_a3b_tp4_graph
     llm:
-      gpu_memory_utilization: 0.80
+      gpu_memory_utilization: 0.90
       trust_remote_code: true
     serve:
       chat_template_kwargs:
