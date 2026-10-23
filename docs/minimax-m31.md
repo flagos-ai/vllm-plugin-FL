@@ -2,20 +2,19 @@
 
 ## Model weights
 
-The [example](../examples/minimax_m31_offline_inference.py) uses a FlagOS W8A8
-checkpoint of MiniMax-M3.1-Flash. Set `model` in the script to the local
-checkpoint directory in your deployment environment:
+Set `model` in the [example](../examples/minimax_m31_offline_inference.py)
+to the local MiniMax-M3.1-Flash checkpoint directory in your deployment
+environment:
 
 ```python
-model="/path/to/MiniMax-M3.1-Flash-W8A8"
+model="/path/to/MiniMax-M3.1-Flash"
 ```
 
-The official
-[`MiniMaxAI/MiniMax-M3.1-Flash`](https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash)
-checkpoint uses MXFP8 dense layers and NVFP4 experts. Its
+See the official
+[model card](https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash) and
 [upstream vLLM recipe](https://github.com/vllm-project/vllm/blob/main/recipes/models/MiniMaxAI/MiniMax-M3.1-Flash.yaml)
-has different runtime and kernel requirements. Use the configuration appropriate
-for your checkpoint's quantization format.
+for model details and deployment requirements. Select runtime versions and
+settings compatible with your checkpoint.
 
 ## Offline text generation
 

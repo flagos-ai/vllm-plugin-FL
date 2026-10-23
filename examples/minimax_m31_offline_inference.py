@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""MiniMax-M3.1-Flash W8A8 offline inference using existing local weights.
+"""MiniMax-M3.1-Flash offline inference using existing local weights.
 
 See docs/minimax-m31.md for checkpoint configuration and environment requirements.
 """
@@ -9,9 +9,9 @@ from vllm import LLM, SamplingParams
 
 
 if __name__ == "__main__":
-    # Replace this placeholder with your local FlagOS W8A8 checkpoint path.
+    # Replace this placeholder with your local model checkpoint path.
     llm = LLM(
-        model="/path/to/MiniMax-M3.1-Flash-W8A8",
+        model="/path/to/MiniMax-M3.1-Flash",
         tensor_parallel_size=8,
         trust_remote_code=True,
         block_size=128,
