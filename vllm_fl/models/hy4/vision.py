@@ -35,10 +35,27 @@ class IdentityInputNorm(nn.Module):
         return x
 
 
+def vision_uses_data_parallel(config, override: bool | None = None) -> bool:
+    """Whether the vision tower runs replicated instead of sharded by TP.
+
+    ``--mm-encoder-tp-mode data`` is authoritative. ``is_vit_use_data_parallel()``
+    reads a vLLM context variable that is not set on this plugin's model-loading
+    path, so it is used as a hint only; the final guard is divisibility, since
+    ``QKVParallelLinear`` refuses ``num_attention_heads % tp_size != 0``
+    (HY4 VL has 16 vision heads, TP32 would be 16 % 32).
+    """
+    if override is not None:
+        return override
+    if is_vit_use_data_parallel():
+        return True
+    world = get_tensor_model_parallel_world_size()
+    return bool(world) and config.num_attention_heads % world != 0
+
+
 class HYV4VisionAttention(nn.Module):
-    def __init__(self, config, quant_config=None, prefix=""):
+    def __init__(self, config, quant_config=None, prefix="", use_dp: bool | None = None):
         super().__init__()
-        use_dp = is_vit_use_data_parallel()
+        use_dp = vision_uses_data_parallel(config, use_dp)
         tp = 1 if use_dp else get_tensor_model_parallel_world_size()
         self.num_heads = config.num_attention_heads // tp
         self.head_dim = config.hidden_size // config.num_attention_heads
@@ -91,9 +108,9 @@ class HYV4VisionAttention(nn.Module):
 
 
 class HYV4VisionMLP(nn.Module):
-    def __init__(self, config, quant_config=None, prefix=""):
+    def __init__(self, config, quant_config=None, prefix="", use_dp: bool | None = None):
         super().__init__()
-        use_dp = is_vit_use_data_parallel()
+        use_dp = vision_uses_data_parallel(config, use_dp)
         self.dense_h_to_4h = ColumnParallelLinear(
             config.hidden_size,
             config.intermediate_size,
@@ -118,16 +135,16 @@ class HYV4VisionMLP(nn.Module):
 
 
 class HYV4VisionBlock(nn.Module):
-    def __init__(self, config, quant_config=None, prefix=""):
+    def __init__(self, config, quant_config=None, prefix="", use_dp: bool | None = None):
         super().__init__()
         self.input_layernorm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = nn.LayerNorm(
             config.hidden_size, eps=config.rms_norm_eps
         )
         self.self_attn = HYV4VisionAttention(
-            config, quant_config, f"{prefix}.self_attn"
+            config, quant_config, f"{prefix}.self_attn", use_dp
         )
-        self.mlp = HYV4VisionMLP(config, quant_config, f"{prefix}.mlp")
+        self.mlp = HYV4VisionMLP(config, quant_config, f"{prefix}.mlp", use_dp)
 
     def forward(self, x, **kwargs):
         x = x + self.self_attn(self.input_layernorm(x), **kwargs)
@@ -292,6 +309,7 @@ class HYV4VisionTransformer(nn.Module):
         quant_config=None,
         prefix="",
         input_norm: nn.Module | None = None,
+        use_dp: bool | None = None,
     ):
         super().__init__()
         self.config = config
@@ -299,7 +317,7 @@ class HYV4VisionTransformer(nn.Module):
         self.embeddings = HYV4VisionPatchEmbed(config)
         self.layers = nn.ModuleList(
             [
-                HYV4VisionBlock(config, quant_config, f"{prefix}.layers.{i}")
+                HYV4VisionBlock(config, quant_config, f"{prefix}.layers.{i}", use_dp)
                 for i in range(config.num_hidden_layers)
             ]
         )
@@ -308,7 +326,7 @@ class HYV4VisionTransformer(nn.Module):
             head_size=config.hidden_size // config.num_attention_heads,
             dtype=torch.get_default_dtype(),
         )
-        use_dp = is_vit_use_data_parallel()
+        use_dp = vision_uses_data_parallel(config, use_dp)
         self.tp_size = 1 if use_dp else get_tensor_model_parallel_world_size()
         self.rotary_pos_emb = None
         if config.use_2d_rope:

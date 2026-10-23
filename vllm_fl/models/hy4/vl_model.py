@@ -104,11 +104,14 @@ class HYV4VLForConditionalGeneration(
             self.visual = None
             if enabled:
                 quant = vllm_config.quant_config
+                # ``--mm-encoder-tp-mode data`` keeps the 16-head vision tower
+                # whole on every rank; sharding it by TP32 is impossible.
                 self.visual = HYV4VisionTransformer(
                     self.config.vision_config,
                     quant_config=quant,
                     prefix=maybe_prefix(prefix, "visual"),
                     input_norm=None,  # vLLM 0.24 has no mm_input_norm fusion pass
+                    use_dp=self.multimodal_config.mm_encoder_tp_mode == "data",
                 )
         with self._mark_language_model(vllm_config):
             self.language_model = init_vllm_registered_model(
