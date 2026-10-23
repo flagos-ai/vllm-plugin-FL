@@ -137,6 +137,38 @@ def install_fl_w8a8_moe_selector() -> bool:
         # contract: prepare must keep the first activation floating-point so
         # fused_experts can perform both dynamic quantization steps itself.
         if current_platform.is_cuda() and canonical_w8a8:
+            from vllm.model_executor.layers.fused_moe.activation import MoEActivation
+
+            # The functional fused_experts API drops the SwiGLU clamp/alpha/
+            # beta fields from the quant config. Let upstream select modular
+            # experts for configurable activations so both parameter passing
+            # and activation-input quantization remain under its control.
+            activation = getattr(config, "activation", MoEActivation.SILU)
+            if activation is not MoEActivation.SILU or any(
+                getattr(config, name, None) is not None
+                for name in ("swiglu_limit", "swiglu_alpha", "swiglu_beta")
+            ):
+                logger.info_once(
+                    "Using upstream modular INT8 MoE experts to preserve "
+                    "activation parameters."
+                )
+                backend, experts_cls = current_selector(
+                    config,
+                    weight_key=weight_key,
+                    activation_key=activation_key,
+                )
+                from vllm.model_executor.layers.fused_moe.experts.triton_moe import (
+                    TritonExperts,
+                )
+
+                from vllm_fl.quantization.w8a8.moe_experts import (
+                    VllmModularW8A8Experts,
+                )
+
+                if experts_cls is TritonExperts:
+                    experts_cls = VllmModularW8A8Experts
+                return backend, experts_cls
+
             if getattr(config, "is_lora_enabled", False):
                 raise NotImplementedError(
                     "The vLLM functional W8A8 MoE bridge does not support LoRA"

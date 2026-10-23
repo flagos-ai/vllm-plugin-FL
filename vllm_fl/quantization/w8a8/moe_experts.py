@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import torch
 
 import vllm.model_executor.layers.fused_moe.modular_kernel as mk
@@ -103,6 +105,30 @@ def _validate_w8a8_contract(
         raise ValueError(f"w1_bias must have shape {expected_w1_bias}")
     if w2_bias is not None and tuple(w2_bias.shape) != expected_w2_bias:
         raise ValueError(f"w2_bias must have shape {expected_w2_bias}")
+
+
+class VllmModularW8A8Experts(TritonExperts):
+    """Preserve configurable activations in the vLLM 0.24 native fallback."""
+
+    def __init__(self, moe_config, quant_config):
+        # The compressed-tensors INT8 builder does not carry these fields.
+        # Copy rather than mutate the quant config shared with other layers.
+        activation_params = {
+            quant_name: getattr(moe_config, config_name)
+            for quant_name, config_name in (
+                ("gemm1_clamp_limit", "swiglu_limit"),
+                ("gemm1_alpha", "swiglu_alpha"),
+                ("gemm1_beta", "swiglu_beta"),
+            )
+            if getattr(moe_config, config_name, None) is not None
+        }
+        super().__init__(moe_config, replace(quant_config, **activation_params))
+
+    @property
+    def expects_unquantized_inputs(self) -> bool:
+        # vLLM 0.24 TritonExperts.apply checks floating-point input before
+        # quantizing it internally when this property is true.
+        return True
 
 
 class VllmFunctionalW8A8Experts(TritonExperts):
@@ -283,4 +309,5 @@ class FlagGemsW8A8Experts(TritonExperts):
 __all__ = [
     "FlagGemsW8A8Experts",
     "VllmFunctionalW8A8Experts",
+    "VllmModularW8A8Experts",
 ]

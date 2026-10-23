@@ -14,7 +14,10 @@
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 import vllm.platforms as platforms
+from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 
 from vllm_fl.quantization.w8a8 import moe as moe_adapter
 
@@ -230,6 +233,46 @@ def test_w8a8_moe_selector_nvidia_policy_disable_uses_native_fallback(monkeypatc
     assert backend == "triton"
     assert experts_cls is VllmFunctionalW8A8Experts
     assert upstream_calls == []
+
+
+@pytest.mark.parametrize(
+    "activation,params",
+    [
+        (
+            MoEActivation.SWIGLUOAI_UNINTERLEAVE,
+            dict(swiglu_limit=7.0, swiglu_alpha=1.702, swiglu_beta=1.0),
+        ),
+        (MoEActivation.SILU, dict(swiglu_limit=7.0)),
+        (MoEActivation.SILU, dict(swiglu_alpha=1.702)),
+        (MoEActivation.SILU, dict(swiglu_beta=1.0)),
+    ],
+)
+def test_native_fallback_preserves_configurable_activation(monkeypatch, activation, params):
+    calls = []
+    from vllm_fl.quantization.w8a8.moe_experts import (
+        TritonExperts,
+        VllmModularW8A8Experts,
+    )
+
+    def upstream_selector(config, **kwargs):
+        calls.append((config, kwargs))
+        return "triton", TritonExperts
+
+    oracle, _ = _install_with_fake_modules(
+        monkeypatch, upstream_selector, lambda **kwargs: kwargs
+    )
+    import vllm_fl.utils as fl_utils
+
+    monkeypatch.setattr(type(platforms.current_platform), "is_cuda", lambda self: True)
+    monkeypatch.setattr(fl_utils, "is_oot_enabled", lambda: True)
+    monkeypatch.setattr(fl_utils, "use_flaggems_op", lambda op_name: False)
+    config = SimpleNamespace(activation=activation, **params)
+    moe_adapter.install_fl_w8a8_moe_selector()
+    assert oracle.select_int8_moe_backend(config) == ("triton", VllmModularW8A8Experts)
+    assert calls == [(config, {"weight_key": None, "activation_key": None})]
+    assert calls[0][0].activation is activation
+    for key, value in params.items():
+        assert getattr(calls[0][0], key) == value
 
 
 def test_w8a8_moe_selector_nvidia_noncanonical_falls_back_without_flaggems(

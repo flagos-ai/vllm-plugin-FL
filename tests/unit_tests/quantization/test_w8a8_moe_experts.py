@@ -59,6 +59,7 @@ def _quant_config():
     [
         moe_experts.FlagGemsW8A8Experts,
         moe_experts.VllmFunctionalW8A8Experts,
+        moe_experts.VllmModularW8A8Experts,
     ],
 )
 def test_functional_experts_defer_activation_quantization(experts_cls):
@@ -74,6 +75,36 @@ def test_vllm_functional_experts_changes_the_triton_input_contract():
         moe_experts.VllmFunctionalW8A8Experts.expects_unquantized_inputs.fget(instance)
         is True
     )
+
+
+def test_modular_fallback_copies_activation_parameters(monkeypatch):
+    from vllm.model_executor.layers.fused_moe.config import int8_w8a8_moe_quant_config
+
+    original = int8_w8a8_moe_quant_config(
+        w1_scale=torch.ones((2, 8, 1)),
+        w2_scale=torch.ones((2, 4, 1)),
+        a1_scale=None,
+        a2_scale=None,
+        per_act_token_quant=True,
+    )
+    config = SimpleNamespace(swiglu_limit=7.0, swiglu_alpha=1.702, swiglu_beta=1.0)
+    calls = []
+
+    def init(self, moe_config, quant_config):
+        calls.append((moe_config, quant_config))
+
+    monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
+    moe_experts.VllmModularW8A8Experts(config, original)
+    forwarded = calls[0][1]
+    assert calls[0][0] is config
+    assert forwarded is not original
+    assert forwarded.gemm1_clamp_limit == 7.0
+    assert forwarded.gemm1_alpha == 1.702
+    assert forwarded.gemm1_beta == 1.0
+    assert forwarded.use_int8_w8a8 and forwarded.per_act_token_quant
+    assert original.gemm1_clamp_limit is None
+    assert original.gemm1_alpha is None
+    assert original.gemm1_beta is None
 
 
 def test_vllm_functional_experts_call_only_native_vllm(monkeypatch):
