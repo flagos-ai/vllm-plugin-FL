@@ -128,7 +128,9 @@ class VllmFunctionalW8A8Experts(TritonExperts):
             if getattr(moe_config, config_name, None) is not None
         }
         self._use_modular = bool(activation_params)
-        super().__init__(moe_config, replace(quant_config, **activation_params))
+        if activation_params:
+            quant_config = replace(quant_config, **activation_params)
+        super().__init__(moe_config, quant_config)
 
     @property
     def expects_unquantized_inputs(self) -> bool:

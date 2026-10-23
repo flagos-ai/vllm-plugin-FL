@@ -76,6 +76,27 @@ def test_vllm_functional_experts_changes_the_triton_input_contract():
     )
 
 
+@pytest.mark.parametrize(
+    "parameters",
+    [{}, {"swiglu_limit": None, "swiglu_alpha": None, "swiglu_beta": None}],
+)
+def test_native_fallback_preserves_original_config_without_activation_parameters(
+    monkeypatch, parameters,
+):
+    original = _quant_config()
+    config = SimpleNamespace(**parameters)
+    calls = []
+
+    def init(self, moe_config, quant_config):
+        calls.append((moe_config, quant_config))
+
+    monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
+    instance = moe_experts.VllmFunctionalW8A8Experts(config, original)
+    assert calls[0][0] is config
+    assert calls[0][1] is original
+    assert instance._use_modular is False
+
+
 def test_modular_fallback_copies_activation_parameters(monkeypatch):
     from vllm.model_executor.layers.fused_moe.config import int8_w8a8_moe_quant_config
 
