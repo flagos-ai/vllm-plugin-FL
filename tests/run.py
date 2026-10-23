@@ -35,12 +35,14 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import threading
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -109,6 +111,7 @@ class TestRunner:
         save_gold: bool = False,
         output_dir: str = ".",
         extra_pytest_args: list[str] | None = None,
+        pytest_reports: bool = False,
     ):
         self.config = PlatformConfig.load(platform, device)
         self.scope = scope
@@ -121,6 +124,7 @@ class TestRunner:
         self.save_gold = save_gold
         self.output_dir = Path(output_dir)
         self.extra_pytest_args = extra_pytest_args or []
+        self.pytest_reports = pytest_reports
 
         self.report = TestReport(
             platform=self.config.platform,
@@ -138,9 +142,20 @@ class TestRunner:
 
         test_cases = self.discover_tests()
 
+        if self.pytest_reports and not self.dry_run:
+            (self.output_dir / "pytest-reports.zip").unlink(missing_ok=True)
+
         if not test_cases:
             print("[run] No test cases found for the given filters.")
             return 0
+
+        if self.pytest_reports and not self.dry_run:
+            # Do not package stale reports when a case fails before pytest starts.
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            for tc in test_cases:
+                path = self._pytest_report_path(tc)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.unlink(missing_ok=True)
 
         print(f"[run] Platform: {self.config.platform}")
         print(f"[run] Device:   {self.config.device}")
@@ -170,6 +185,22 @@ class TestRunner:
         self.report.save_json(json_path)
         print(f"[run] JUnit XML: {xml_path}")
         print(f"[run] JSON:      {json_path}")
+
+        if self.pytest_reports and not self.dry_run:
+            paths = [self._pytest_report_path(tc) for tc in test_cases]
+            missing = [path.name for path in paths if not path.is_file()]
+            if missing:
+                print(
+                    f"::warning::No pytest JSON for {len(missing)} invocation(s); "
+                    "see runner results for failures before pytest could report."
+                )
+            paths = [path for path in paths if path.is_file()]
+            if paths:
+                archive = self.output_dir / "pytest-reports.zip"
+                with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as reports:
+                    for path in paths:
+                        reports.write(path, arcname=path.name)
+                print(f"[run] Pytest reports: {archive}")
 
         return 0 if self.report.all_passed else 1
 
@@ -815,6 +846,12 @@ class TestRunner:
             stdout=proc.stdout if _quiet else "",
         )
 
+    def _pytest_report_path(self, tc: TestCase) -> Path:
+        # Case names include model/mode variants; separate files avoid parallel
+        # E2E writers overwriting each other's native pytest JSON reports.
+        name = hashlib.sha256(tc.name.encode("utf-8")).hexdigest()[:16]
+        return self.output_dir.resolve() / "pytest" / f"{name}.json"
+
     def _build_pytest_cmd(self, tc: TestCase) -> list[str]:
         """Build the full pytest command for a test case."""
         cmd = [
@@ -846,6 +883,11 @@ class TestRunner:
 
         cmd.extend(tc.extra_args)
         cmd.extend(self.extra_pytest_args)
+
+        if self.pytest_reports:
+            cmd.extend(
+                ["--json-report", f"--json-report-file={self._pytest_report_path(tc)}"]
+            )
 
         return cmd
 
@@ -922,6 +964,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=".",
         help="Directory for report output files (default: cwd)",
     )
+    parser.add_argument(
+        "--pytest-reports",
+        action="store_true",
+        help="Save native per-invocation pytest JSON and a FlagCICD upload archive",
+    )
     return parser.parse_args(argv)
 
 
@@ -944,6 +991,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         save_gold=args.save_gold,
         output_dir=args.output_dir,
+        pytest_reports=args.pytest_reports,
     )
     return runner.run()
 

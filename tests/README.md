@@ -32,6 +32,29 @@ Platform-agnostic test suite for the vllm-plugin-FL project. All tests are desig
 - **Process isolation**: Each E2E test case runs in its own subprocess via `run.py`, with device cleanup between cases.
 - **Backend-agnostic fixtures**: The `device` fixture returns the correct device (`cuda:0` or `npu:0`) based on detected hardware.
 
+## CI report uploads
+
+CI passes `--pytest-reports --output-dir results/<scope>` to `tests/run.py`.
+Each pytest invocation writes its own native JSON under `results/<scope>/pytest/`,
+and the runner packages the selected reports as `pytest-reports.zip`. This keeps
+parallel model/mode variants separate and preserves actual pytest case counts,
+outcomes, and timings instead of uploading the runner's test-group summary as
+a pytest report. Failed tests still return a failing exit status.
+
+The existing functional, E2E, and benchmark workflows upload these archives to
+FlagCICD using `file_type=pytest`, `file_format=json`, and `is_zipped=true`.
+`FLAGCICD_API_TOKEN` must be configured in the repository/organization and passed
+through the reusable workflows. When the secret is unavailable (including fork
+PRs), CI records the skipped upload and retains reports as GitHub artifacts.
+An HTTP upload error is visible in the upload step but does not change the test
+result. Successful ingestion must be checked in FlagCICD, not inferred from a
+green test job. The receiving service must support zipped pytest JSON reports.
+
+Unit and functional runner summaries are saved in separate directories. Their
+combined `coverage-<platform>.json` remains a separate artifact; it is not sent
+as `file_type=pytest`. Raw reports are generated only for invocations that reach
+pytest; failures before pytest starts remain in the runner summary and job log.
+
 ## Directory Structure
 
 ```

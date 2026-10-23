@@ -70,6 +70,9 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
 
 jobs:
   e2e-test:
@@ -117,12 +120,18 @@ jobs:
 
       - name: Run E2E test
         run: |
+          # Keep Hygon TP workers from contending on the shared tuning database.
+          if [ "${{ inputs.platform }}" = "hygon" ]; then
+            export FLAGGEMS_DB_URL="sqlite:///:memory:"
+          fi
           python tests/run.py \
             --platform ${{ inputs.platform }} \
             --device "${{ inputs.device }}" \
             --scope e2e \
             --task ${{ inputs.task }} \
-            --cases '${{ inputs.cases }}'
+            --cases '${{ inputs.cases }}' \
+            --pytest-reports \
+            --output-dir results/e2e
 
       - name: Upload test results
         if: always()
@@ -131,5 +140,32 @@ jobs:
         with:
           name: e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}
           path: |
-            test-results-${{ inputs.platform }}.xml
-            test-results-${{ inputs.platform }}.json
+            results/e2e/
+            /tmp/vllm_*.log
+
+      - name: Check FlagCICD authentication
+        id: flagcicd
+        if: ${{ !cancelled() && hashFiles('results/e2e/pytest-reports.zip') != '' }}
+        env:
+          FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
+        run: |
+          if [ -n "${FLAGCICD_API_TOKEN:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::FlagCICD upload skipped: FLAGCICD_API_TOKEN is unavailable (for example, on fork PRs). Reports remain in the artifact."
+            echo "FlagCICD: upload skipped because credentials are unavailable; reports were retained as artifacts." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload e2e test results to FlagCICD
+        if: ${{ !cancelled() && steps.flagcicd.outputs.configured == 'true' && hashFiles('results/e2e/pytest-reports.zip') != '' }}
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        continue-on-error: true
+        with:
+          backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
+          report_path: 'results/e2e/pytest-reports.zip'
+          file_format: 'json'
+          file_type: 'pytest'
+          is_zipped: 'true'
+          job_name: 'e2e-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}'
+          fail_on_error: 'true'

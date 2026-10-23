@@ -60,6 +60,9 @@ on:
         required: false
         type: string
         default: "nightly"
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
 
 jobs:
   benchmark-test:
@@ -102,7 +105,9 @@ jobs:
           python tests/run.py \
             --platform ${{ inputs.platform }} \
             --scope benchmark \
-            --stage ${{ inputs.ci_stage }}
+            --stage ${{ inputs.ci_stage }} \
+            --pytest-reports \
+            --output-dir results/benchmark
 
       - name: Upload test results
         if: always()
@@ -111,5 +116,31 @@ jobs:
         with:
           name: benchmark-${{ inputs.platform }}
           path: |
-            test-results-${{ inputs.platform }}.xml
-            test-results-${{ inputs.platform }}.json
+            results/benchmark/
+
+      - name: Check FlagCICD authentication
+        id: flagcicd
+        if: ${{ !cancelled() && hashFiles('results/benchmark/pytest-reports.zip') != '' }}
+        env:
+          FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
+        run: |
+          if [ -n "${FLAGCICD_API_TOKEN:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::FlagCICD upload skipped: FLAGCICD_API_TOKEN is unavailable (for example, on fork PRs). Reports remain in the artifact."
+            echo "FlagCICD: upload skipped because credentials are unavailable; reports were retained as artifacts." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload benchmark test results to FlagCICD
+        if: ${{ !cancelled() && steps.flagcicd.outputs.configured == 'true' && hashFiles('results/benchmark/pytest-reports.zip') != '' }}
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        continue-on-error: true
+        with:
+          backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
+          report_path: 'results/benchmark/pytest-reports.zip'
+          file_format: 'json'
+          file_type: 'pytest'
+          is_zipped: 'true'
+          job_name: 'benchmark-${{ inputs.platform }}'
+          fail_on_error: 'true'
