@@ -81,7 +81,8 @@ def test_vllm_functional_experts_changes_the_triton_input_contract():
     [{}, {"swiglu_limit": None, "swiglu_alpha": None, "swiglu_beta": None}],
 )
 def test_native_fallback_preserves_original_config_without_activation_parameters(
-    monkeypatch, parameters,
+    monkeypatch,
+    parameters,
 ):
     original = _quant_config()
     config = SimpleNamespace(**parameters)
@@ -269,7 +270,9 @@ def test_functional_experts_rejects_incompatible_weight_scale(
         (MoEActivation.SILU, {"swiglu_alpha": 1.702, "swiglu_beta": 1.0}),
     ],
 )
-def test_native_experts_delegate_configurable_activation(monkeypatch, activation, parameters):
+def test_native_experts_delegate_configurable_activation(
+    monkeypatch, activation, parameters
+):
     calls = []
 
     def init(self, moe_config, quant_config):
@@ -277,22 +280,29 @@ def test_native_experts_delegate_configurable_activation(monkeypatch, activation
 
     monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
     monkeypatch.setattr(
-        moe_experts.TritonExperts, "apply",
+        moe_experts.TritonExperts,
+        "apply",
         lambda self, **kwargs: calls.append(kwargs),
     )
     monkeypatch.setattr(
-        moe_experts, "_vllm_fused_experts",
-        lambda **kwargs: pytest.fail("Configurable activation must use modular experts"),
+        moe_experts,
+        "_vllm_fused_experts",
+        lambda **kwargs: pytest.fail(
+            "Configurable activation must use modular experts"
+        ),
     )
     from vllm.model_executor.layers.fused_moe.config import int8_w8a8_moe_quant_config
 
     quant_config = int8_w8a8_moe_quant_config(
         w1_scale=torch.ones((2, 8, 1)),
         w2_scale=torch.ones((2, 4, 1)),
-        a1_scale=None, a2_scale=None, per_act_token_quant=True,
+        a1_scale=None,
+        a2_scale=None,
+        per_act_token_quant=True,
     )
     instance = moe_experts.VllmFunctionalW8A8Experts(
-        SimpleNamespace(**parameters), quant_config,
+        SimpleNamespace(**parameters),
+        quant_config,
     )
     arguments = _apply_arguments()
     arguments["activation"] = activation

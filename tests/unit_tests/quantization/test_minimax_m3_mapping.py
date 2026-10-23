@@ -1,5 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -92,16 +94,18 @@ def test_existing_fusion_mapping_is_preserved():
     ],
 )
 def test_registration_is_lazy_and_platform_scoped(monkeypatch, cuda, available):
+    import vllm.platforms as platforms
     from vllm.model_executor.models import ModelRegistry
-    from vllm.platforms import current_platform
 
     calls = []
-    monkeypatch.setattr(current_platform, "is_cuda", lambda: cuda)
+    monkeypatch.setattr(
+        platforms, "current_platform", SimpleNamespace(is_cuda=lambda: cuda)
+    )
     monkeypatch.setattr(ModelRegistry, "get_supported_archs", lambda: available)
-    monkeypatch.setattr(ModelRegistry, "register_model", lambda *args: calls.append(args))
+    monkeypatch.setattr(
+        ModelRegistry, "register_model", lambda *args: calls.append(args)
+    )
     register_minimax_m3_support()
     assert calls == [
-        (name, f"vllm_fl.models.minimax_m3:{name}")
-        for name in available
-        if cuda
+        (name, f"vllm_fl.models.minimax_m3:{name}") for name in available if cuda
     ]

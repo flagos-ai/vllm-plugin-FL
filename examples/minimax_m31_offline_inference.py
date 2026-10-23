@@ -7,7 +7,6 @@ See docs/minimax-m31.md for checkpoint configuration and environment requirement
 
 from vllm import LLM, SamplingParams
 
-
 if __name__ == "__main__":
     # Replace this placeholder with your local model checkpoint path.
     llm = LLM(
