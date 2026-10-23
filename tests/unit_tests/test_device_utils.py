@@ -12,7 +12,9 @@ import pytest
 
 @pytest.fixture
 def device_utils(monkeypatch):
-    def load(*, explicit="", installed=False, gcu=False, cuda=False, npu=False):
+    def load(
+        *, explicit="", vendor="", installed=False, gcu=False, cuda=False, npu=False
+    ):
         torch = ModuleType("torch")
         torch.cuda = SimpleNamespace(
             is_available=Mock(return_value=cuda),
@@ -32,6 +34,7 @@ def device_utils(monkeypatch):
             sys.modules, "torch_npu", ModuleType("torch_npu") if npu else None
         )
         monkeypatch.setenv("FL_BACKEND", explicit)
+        monkeypatch.setenv("GEMS_VENDOR", vendor)
         path = Path(__file__).parents[1] / "utils" / "device_utils.py"
         spec = importlib.util.spec_from_file_location("_device_utils_regression", path)
         module = importlib.util.module_from_spec(spec)
@@ -125,3 +128,32 @@ def test_nvidia_only_selection_rejects_gcu_alias(device_utils, gcu):
     (mark,) = nvidia_only.pytestmark
     assert mark.name == "skipif"
     assert mark.args == (gcu,)
+
+
+@pytest.mark.parametrize("vendor", ["hygon", "HYGON"])
+def test_hygon_vendor_keeps_cuda_api_as_a_distinct_backend(device_utils, vendor):
+    utils, _ = device_utils(vendor=vendor, cuda=True)
+    assert utils.get_backend() == "hygon"
+    assert utils.is_accelerator_available()
+    assert utils.get_device(3) == "cuda:3"
+    assert utils.get_device_count() == 2
+
+    @utils.skip_if_not_nvidia
+    def nvidia_only():
+        pass
+
+    (mark,) = nvidia_only.pytestmark
+    assert mark.name == "skipif"
+    assert mark.args == (True,)
+
+
+def test_hygon_vendor_does_not_override_native_gcu(device_utils):
+    utils, torch = device_utils(vendor="hygon", installed=True, gcu=True, cuda=True)
+    assert utils.get_backend() == "enflame"
+    torch.cuda.is_available.assert_not_called()
+
+
+def test_hygon_vendor_requires_available_hardware(device_utils):
+    utils, _ = device_utils(vendor="hygon")
+    assert utils.get_backend() == "cpu"
+    assert not utils.is_accelerator_available()
