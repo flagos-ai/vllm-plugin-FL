@@ -101,6 +101,10 @@ def get_config_path(platform: str | None = None) -> Path | None:
     if platform is None:
         platform = get_platform_name()
 
+    # Older FlagGems releases report the same Enflame device as gcu.
+    if platform == "gcu":
+        platform = "enflame"
+
     arch_config = _get_arch_config_name(platform)
     if arch_config is not None:
         config_file = _CONFIG_DIR / f"{arch_config}.yaml"
