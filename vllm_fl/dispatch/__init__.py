@@ -77,6 +77,7 @@ Configuration File (YAML):
 """
 
 import os
+from vllm_fl import dsv4_config as _dsv4_config
 import threading
 import weakref
 
@@ -200,7 +201,10 @@ class CachedOp:
         if record_first_use:
             mgr._record_first_use(self._op_name, impl)
         self._impl = impl
-        self._frozen = _OP_FAST_PATH_ENABLED and not is_dump_enabled()
+        self._frozen = (
+            _OP_FAST_PATH_ENABLED and not is_dump_enabled()
+            and not _dsv4_config.is_enabled()
+        )
         self._use_manager_call = False
         self._manager_id = id(mgr)
         # Resolving can initialize the manager and bump its epoch.
@@ -273,11 +277,27 @@ class CachedOp:
             for fallback_impl in mgr.resolve_candidates(self._op_name):
                 if fallback_impl.impl_id not in failed_impls:
                     self._impl = fallback_impl
-                    self._frozen = True
+                    self._frozen = not _dsv4_config.is_enabled()
                     self._use_manager_call = False
                     break
             return result
 
+
+    def bind(self):
+        """Resolve before graph tracing; preserve normal cache invalidation semantics."""
+        mgr = get_default_manager()
+        mgr.ensure_initialized()
+        get_policy()
+        impl = mgr._resolve_impl(self._op_name)
+        mgr._record_first_use(self._op_name, impl)
+        self._impl = impl
+        self._frozen = False
+        self._first_use_pending = False
+        self._use_manager_call = False
+        self._manager_id = id(mgr)
+        self._manager_epoch = mgr.policy_epoch
+        self._policy_epoch = get_policy_epoch()
+        return impl
 
 def prewarm_cached_ops() -> tuple[int, int]:
     """Resolve loaded CachedOp call sites before full-graph compilation.
@@ -289,6 +309,10 @@ def prewarm_cached_ops() -> tuple[int, int]:
     Returns:
         A ``(prewarmed, unavailable)`` count for diagnostics and tests.
     """
+
+    if _dsv4_config.is_enabled():
+        # DS uses explicit non-frozen bindings before graph tracing.
+        return 0, 0
     mgr = get_default_manager()
     mgr.ensure_initialized()
     with _CACHED_OPS_LOCK:

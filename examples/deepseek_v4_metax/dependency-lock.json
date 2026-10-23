@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "libraries": [
+    {
+      "distribution": "flag_gems",
+      "repository": "https://github.com/cshujie131-bot/FlagGems",
+      "commit": "0ebb95bd47c902de9909e653f318fc57a5e315cf",
+      "base": "3123859968915e361e8452dd796dc6b27c956324",
+      "role": "Validated ATen/numerical compatibility; not a new performance PR"
+    },
+    {
+      "distribution": "flaggems_vllm",
+      "repository": "https://github.com/cshujie131-bot/FlagGems-vllm",
+      "commit": "9ae5b26e286a91c1dc1de50662373eef0715308a",
+      "base": "5f4dc53cc31b99e83967a2b19195ab1a295aeef6",
+      "operator_prs": [
+        946,
+        947,
+        755
+      ],
+      "role": "Backported operator contributions plus separately documented deployment compatibility"
+    }
+  ]
+}

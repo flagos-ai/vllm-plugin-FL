@@ -82,6 +82,14 @@ def register_builtins(registry) -> None:
             vendor="metax",
             priority=BackendPriority.VENDOR,
         ),
+        OpImpl(
+            op_name="fused_indexer_q_rope_quant",
+            impl_id="vendor.metax",
+            kind=BackendImplKind.VENDOR,
+            fn=_bind_is_available(backend.fused_indexer_q_rope_quant, is_avail),
+            vendor="metax",
+            priority=BackendPriority.VENDOR,
+        ),
         # invoke fused moe triton kernel
         OpImpl(
             op_name="invoke_fused_moe_triton_kernel",
@@ -94,3 +102,25 @@ def register_builtins(registry) -> None:
     ]
 
     registry.register_many(impls)
+
+    # TP8 attention is an FL/MetaX specialization, not a generic FG override.
+    from vllm_fl import dsv4_config
+
+    if dsv4_config.is_enabled():
+        from vllm_fl.attention.deepseek_v4.bridge import (
+            decode_attention,
+            prefill_attention,
+        )
+
+        for name, fn in (
+            ("flash_mla_with_kvcache", decode_attention),
+            ("flash_mla_sparse_fwd", prefill_attention),
+        ):
+            registry.register_impl(OpImpl(
+                op_name=name,
+                impl_id="vendor.metax.dsv4",
+                kind=BackendImplKind.VENDOR,
+                fn=_bind_is_available(fn, is_avail),
+                vendor="metax",
+                priority=BackendPriority.VENDOR,
+            ))

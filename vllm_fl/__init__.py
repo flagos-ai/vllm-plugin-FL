@@ -149,6 +149,12 @@ def register_router():
 def register_model():
     """Register FL-specific models not yet upstream."""
     from vllm.model_executor.models import ModelRegistry
+    from vllm.platforms import current_platform
+
+    if getattr(current_platform, "vendor_name", None) == "metax":
+        from vllm_fl.dispatch.backends.vendor.metax.patches import register_model_patches
+
+        register_model_patches()
 
     _register_flagcx_connector()
 
