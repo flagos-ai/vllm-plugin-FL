@@ -23,9 +23,13 @@ your checkpoint. See the repository's [setup instructions](../README.md#setup)
 and your deployment environment's model-specific requirements.
 
 The example uses tensor parallel size 8, BF16 activations, cache block size
-128, eager execution, 2048 context tokens, and one concurrent sequence. It
-uses `LLM.chat` for a short text-generation request with up to 64 output
-tokens. Adjust parallelism and memory settings for your hardware.
+128, 2048 context tokens, and one concurrent sequence. CUDA Graph is enabled
+only for decode with `FULL_DECODE_ONLY`; prefill runs without graph capture.
+The capture size is 1 to match the single concurrent sequence, and compilation
+mode is `NONE`. Adjust the capture sizes if you increase `max_num_seqs`.
+
+The script uses `LLM.chat` for a short text-generation request with up to 64
+output tokens. Adjust parallelism and memory settings for your hardware.
 
 From the repository root, inside the configured environment:
 

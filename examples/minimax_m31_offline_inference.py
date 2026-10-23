@@ -21,7 +21,12 @@ if __name__ == "__main__":
         max_num_seqs=1,
         max_num_batched_tokens=2048,
         gpu_memory_utilization=0.8,
-        enforce_eager=True,
+        compilation_config={
+            "mode": "NONE",
+            "cudagraph_mode": "FULL_DECODE_ONLY",
+            "cudagraph_capture_sizes": [1],
+            "max_cudagraph_capture_size": 1,
+        },
     )
 
     messages = [{"role": "user", "content": "What is 2 + 2? Answer briefly."}]
