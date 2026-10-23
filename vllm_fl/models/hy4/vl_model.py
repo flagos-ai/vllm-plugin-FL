@@ -17,7 +17,6 @@ from vllm.model_executor.models.interfaces import (
 )
 from vllm.model_executor.models.module_mapping import MultiModelKeys
 from vllm.model_executor.models.utils import (
-    AutoWeightsLoader,
     WeightsMapper,
     init_vllm_registered_model,
     maybe_prefix,
@@ -235,11 +234,36 @@ class HYV4VLForConditionalGeneration(
         )
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        loader = AutoWeightsLoader(
-            self,
-            ignore_unexpected_prefixes=["visual."] if self.visual is None else None,
-        )
-        return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
+        """Stream checkpoint tensors to the tower and the language model once.
+
+        ``AutoWeightsLoader`` groups tensors by their first name component and
+        calls each submodule's ``load_weights`` once per contiguous group.  HY4
+        checkpoints interleave ``vit.*`` and ``model.*`` tensors inside the same
+        shard, so the language model would be handed many small prefix runs.
+        Its strict coverage check treats every call as the complete checkpoint
+        and rejects the first partial run.  Dispatching from a single pass keeps
+        one ``language_model.load_weights`` call over the whole stream.
+        """
+        visual_loaded: set[str] = set()
+        pending = iter(self.hf_to_vllm_mapper.apply(weights))
+
+        def language_model_weights() -> Iterable[tuple[str, torch.Tensor]]:
+            for name, tensor in pending:
+                if name.startswith("visual."):
+                    if self.visual is not None:
+                        inner = name[len("visual.") :]
+                        visual_loaded.update(
+                            f"visual.{loaded}"
+                            for loaded in self.visual.load_weights([(inner, tensor)])
+                        )
+                    continue
+                if name.startswith("language_model."):
+                    yield name[len("language_model.") :], tensor
+                    continue
+                raise ValueError(f"Unexpected HY4 VL checkpoint tensor: {name}")
+
+        language_loaded = self.language_model.load_weights(language_model_weights())
+        return {f"language_model.{name}" for name in language_loaded} | visual_loaded
 
     def get_mrope_input_positions(
         self,

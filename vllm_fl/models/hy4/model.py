@@ -794,7 +794,11 @@ class HYV4ForCausalLM(
         tp_size = get_tensor_model_parallel_world_size()
         local_heads = self.config.num_attention_heads // tp_size
 
+        import os as _os
+        _dbg = _os.environ.get("HY4_DEBUG_LOAD") == "1"
         for name, loaded_weight in weights:
+            if _dbg and "layers.1.mlp.experts" in name:
+                print(f"[hy4-loader-dbg] iter {name} shape={tuple(loaded_weight.shape)}", flush=True)
             if name.startswith("model.mtp_layers."):
                 continue
             if "rotary_emb.inv_freq" in name:
@@ -853,6 +857,8 @@ class HYV4ForCausalLM(
                 loaded_weight = loaded_weight.narrow(0, start, local_heads)
 
             packed_expert = self._packed_expert_target(name)
+            if _dbg and packed_expert is not None and "layers.1." in name:
+                print(f"[hy4-loader-dbg] packed {name} -> {packed_expert[0]} local_ids={getattr(self, '_hy4_local_expert_ids', 'MISSING')}", flush=True)
             if packed_expert is not None:
                 mapped, is_gate_up = packed_expert
                 if is_pp_missing_parameter(mapped, self):
