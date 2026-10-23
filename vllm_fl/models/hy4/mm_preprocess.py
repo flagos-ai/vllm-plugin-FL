@@ -58,6 +58,14 @@ class HYV4VLProcessingInfo(BaseProcessingInfo):
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
         return {"image": None, "video": None}
 
+    def _merge_and_resolve_mm_processor_kwargs(self, kwargs):
+        """vLLM 0.24.0 compatibility.
+
+        Newer runtimes expose this helper on ``BaseProcessingInfo``; in 0.24.0
+        the merge lives on the input processing context.
+        """
+        return self.ctx.get_merged_mm_kwargs(kwargs)
+
     def get_max_frames_per_video(self) -> int:
         processor = self.get_hf_processor().video_processor
         options = self._merge_and_resolve_mm_processor_kwargs({}).get(
