@@ -198,6 +198,21 @@ class HYV4VLDummyInputsBuilder(BaseDummyInputsBuilder[HYV4VLProcessingInfo]):
 
 
 class HYV4VLMultiModalProcessor(BaseMultiModalProcessor[HYV4VLProcessingInfo]):
+    def _call_hf_processor(self, prompt, mm_data, mm_kwargs, tok_kwargs):
+        """Route HF processing through ``HYV4VLProcessor`` itself.
+
+        vLLM 0.24 applies the HF processor via
+        ``call_hf_processor_mm_only`` unless a model overrides this method;
+        that helper calls ``image_processor`` / ``video_processor``
+        individually, so composite-processor outputs never reach the model.
+        HY4 derives ``video_timestamps`` inside ``HYV4VLProcessor.__call__``
+        (they feed the per-frame temporal tokens and the M-RoPE positions),
+        so the no-op override below selects
+        ``_apply_hf_processor_text_mm`` instead, which invokes the composite
+        processor with the dummy prompt text.
+        """
+        return super()._call_hf_processor(prompt, mm_data, mm_kwargs, tok_kwargs)
+
     def apply(self, inputs, timing_ctx):
         processor = self.info.get_hf_processor(**inputs.hf_processor_mm_kwargs)
         prompt = inputs.prompt
@@ -208,13 +223,24 @@ class HYV4VLMultiModalProcessor(BaseMultiModalProcessor[HYV4VLProcessingInfo]):
                     getattr(processor, f"{modality}_token_id"),
                     getattr(processor, f"{modality}_end_token_id"),
                 ]
-                prompt = replace_token_matches(
-                    prompt,
-                    target,
-                    cached_encode(
-                        processor.tokenizer, f"<{modality}>", add_special_tokens=False
-                    ),
+                placeholder = cached_encode(
+                    processor.tokenizer, f"<{modality}>", add_special_tokens=False
                 )
+                if isinstance(prompt, str):
+                    # vLLM 0.24 hands this hook the *text* prompt, while
+                    # ``replace_token_matches`` indexes token ids; slicing a
+                    # str there silently returns a list of characters. Swap
+                    # the decoded start/pad/end triple in text form instead,
+                    # which leaves the same ``<image>`` / ``<video>``
+                    # placeholder the token form would produce.
+                    triple = processor.tokenizer.decode(
+                        target,
+                        skip_special_tokens=False,
+                        clean_up_tokenization_spaces=False,
+                    )
+                    prompt = prompt.replace(triple, f"<{modality}>")
+                else:
+                    prompt = replace_token_matches(prompt, target, placeholder)
         inputs = replace(inputs, prompt=prompt)
         options = self.info.ctx.get_merged_mm_kwargs(inputs.hf_processor_mm_kwargs)
         intervals = options.get("second_per_grid_ts")

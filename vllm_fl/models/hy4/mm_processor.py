@@ -705,20 +705,33 @@ class HYV4VLProcessor(ProcessorMixin):
             text_options.setdefault("add_special_tokens", False)
             image_pad = self.image_token
             video_pad = self.video_token
-            pattern = f"({re.escape(image_pad)}|{re.escape(video_pad)})"
+            # vLLM's dummy inputs describe the modalities with the plain
+            # ``<image>`` / ``<video>`` placeholder returned by
+            # ``get_placeholder_str``. Serving prompts use the checkpoint's
+            # real pad tokens instead, so accept both spellings.
+            pattern = (
+                f"({re.escape(image_pad)}|{re.escape(video_pad)}"
+                r"|<image>|<video>)"
+            )
             expanded_texts = []
             for prompt in texts:
                 expanded = []
                 for part in re.split(pattern, prompt):
-                    if part == image_pad and images is not None:
+                    if part in (image_pad, "<image>") and images is not None:
                         if image_index >= len(data["image_grid_thw"]):
                             raise ValueError("More image placeholders than images")
                         grid = data["image_grid_thw"][image_index]
+                        # The chat template delimits an image with a
+                        # start/pad/end triple; restore the same shape after
+                        # expanding the pads so prompt updates (and therefore
+                        # the M-RoPE positions) line up with the placeholder.
                         expanded.append(
-                            image_pad * len(self.get_replacement("image", grid))
+                            self.image_start_token
+                            + image_pad * len(self.get_replacement("image", grid))
+                            + self.image_end_token
                         )
                         image_index += 1
-                    elif part == video_pad and videos is not None:
+                    elif part in (video_pad, "<video>") and videos is not None:
                         if video_index >= len(data["video_grid_thw"]):
                             raise ValueError("More video placeholders than videos")
                         grid = data["video_grid_thw"][video_index]
@@ -729,11 +742,13 @@ class HYV4VLProcessor(ProcessorMixin):
                             timestamp_index : timestamp_index + count
                         ]
                         expanded.append(
-                            self.tokenizer.decode(
+                            self.video_start_token
+                            + self.tokenizer.decode(
                                 self.get_replacement("video", grid, times),
                                 skip_special_tokens=False,
                                 clean_up_tokenization_spaces=False,
                             )
+                            + self.video_end_token
                         )
                         video_index += 1
                         timestamp_index += count
