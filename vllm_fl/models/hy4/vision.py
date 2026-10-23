@@ -44,11 +44,13 @@ def vision_uses_data_parallel(config, override: bool | None = None) -> bool:
     ``QKVParallelLinear`` refuses ``num_attention_heads % tp_size != 0``
     (HY4 VL has 16 vision heads, TP32 would be 16 % 32).
     """
-    if override is not None:
-        return override
+    if override:
+        return True
     if is_vit_use_data_parallel():
         return True
     world = get_tensor_model_parallel_world_size()
+    # Last resort: a tower whose head count does not divide the tensor-parallel
+    # width cannot be sharded, whatever the caller believes.
     return bool(world) and config.num_attention_heads % world != 0
 
 
