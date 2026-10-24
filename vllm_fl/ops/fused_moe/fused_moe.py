@@ -53,6 +53,9 @@ def fused_experts_impl(
     block_shape: Optional[list[int]] = None,
     w1_bias: Optional[torch.Tensor] = None,
     w2_bias: Optional[torch.Tensor] = None,
+    gemm1_alpha: float | None = None,
+    gemm1_beta: float | None = None,
+    gemm1_clamp_limit: float | None = None,
 ) -> torch.Tensor:
     # Check constraints.
     if use_int4_w4a16:
@@ -92,7 +95,7 @@ def fused_experts_impl(
     # Note: for use_int8_w8a16 or use_int4_w4a16, the activations are
     # quantized prior to calling fused_experts.
     quant_dtype = _get_config_quant_dtype(
-        use_fp8_w8a8=use_fp8_w8a8, use_int8_w8a8=use_int8_w8a8, ocp_mx_scheme=None
+        use_fp8_w8a8=use_fp8_w8a8, use_int8_w8a8=use_int8_w8a8
     )
 
     get_config_func = functools.partial(
@@ -200,6 +203,8 @@ def fused_experts_impl(
             B_bias=w1_bias,
         )
 
+        fused_quantized = None
+
         # Activation function with multiplication
         # todo: dispatch to flag_gems and other backends
         # v0.18.1: activation may be a MoEActivation enum; normalize to str
@@ -211,6 +216,28 @@ def fused_experts_impl(
             #                           intermediate_cache1.view(-1, N))
         elif activation == "gelu":
             intermediate_cache2 = _gelu_and_mul(None, intermediate_cache1.view(-1, N))
+        elif activation == "swigluoai_uninterleave":
+            from vllm_fl.ops.fused_moe.activation import (
+                _apply_swigluoai_with_optional_quantization,
+            )
+
+            fused_quantized = _apply_swigluoai_with_optional_quantization(
+                intermediate_cache2,
+                intermediate_cache1.view(-1, N),
+                quantize=(
+                    use_int8_w8a8
+                    and not use_fp8_w8a8
+                    and not use_int8_w8a16
+                    and not use_int4_w4a16
+                    and per_channel_quant
+                    and a2_scale is None
+                    and block_shape is None
+                    and quant_dtype == torch.int8
+                ),
+                clamp_limit=gemm1_clamp_limit,
+                alpha=gemm1_alpha,
+                beta=gemm1_beta,
+            )
         # Activation function without multiplication
         elif activation == "silu_no_mul":
             intermediate_cache2 = F.silu(intermediate_cache1.view(-1, N))
@@ -220,13 +247,16 @@ def fused_experts_impl(
         else:
             raise ValueError(f"Unsupported FusedMoe activation: {activation}.")
 
-        qintermediate_cache2, a2q_scale = moe_kernel_quantize_input(
-            A=intermediate_cache2,
-            A_scale=a2_scale,
-            quant_dtype=quant_dtype,
-            per_act_token_quant=per_channel_quant,
-            block_shape=block_shape,
-        )
+        if fused_quantized is None:
+            qintermediate_cache2, a2q_scale = moe_kernel_quantize_input(
+                A=intermediate_cache2,
+                A_scale=a2_scale,
+                quant_dtype=quant_dtype,
+                per_act_token_quant=per_channel_quant,
+                block_shape=block_shape,
+            )
+        else:
+            qintermediate_cache2, a2q_scale = fused_quantized
 
         _invoke_fused_moe_triton_kernel(
             qintermediate_cache2,

@@ -53,6 +53,17 @@ def register_builtins(registry) -> None:
     is_avail = backend.is_available
 
     impls = [
+        OpImpl(
+            op_name="scaled_int8_mm",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                backend.scaled_int8_mm,
+                lambda: fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM and is_avail(),
+            ),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # Quantization
         OpImpl(
             op_name="dynamic_per_token_quant_int8",
@@ -165,6 +176,20 @@ def register_builtins(registry) -> None:
             vendor=None,
             priority=BackendPriority.DEFAULT,
         ),
+        # Ordinary sigmoid top-k is provided by the optional vLLM-specific library.
+        OpImpl(
+            op_name="topk_sigmoid",
+            impl_id="default.flagos",
+            kind=BackendImplKind.DEFAULT,
+            fn=_bind_is_available(
+                backend.topk_sigmoid,
+                lambda: fl_envs.VLLM_FL_USE_FLAGGEMS_VLLM
+                and is_avail()
+                and callable(getattr(flaggems_vllm, "topk_sigmoid", None)),
+            ),
+            vendor=None,
+            priority=BackendPriority.DEFAULT,
+        ),
         # invoke fused moe triton kernel
         OpImpl(
             op_name="invoke_fused_moe_triton_kernel",
@@ -190,7 +215,11 @@ def register_builtins(registry) -> None:
     filtered = [
         impl
         for impl in impls
-        if use_flaggems_op(
+        if (
+            impl.op_name != "scaled_int8_mm"
+            or use_flaggems_op("w8a8_dynamic_per_token_linear")
+        )
+        and use_flaggems_op(
             "rotary_embedding" if impl.op_name == "apply_rotary_emb" else impl.op_name
         )
     ]

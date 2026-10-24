@@ -24,14 +24,12 @@ from vllm.model_executor.kernels.linear import (
 from vllm.model_executor.layers.quantization.utils import replace_parameter
 
 from vllm_fl.dispatch import CachedOp
-from vllm_fl.utils import (
-    is_oot_enabled,
-    use_flaggems_op,
-)
+from vllm_fl.utils import is_oot_enabled, use_flaggems_op
 
 FLAGGEMS_W8A8_LINEAR_OP = "w8a8_dynamic_per_token_linear"
 
 _dynamic_per_token_quant_int8 = CachedOp("dynamic_per_token_quant_int8")
+_scaled_mm = CachedOp("scaled_int8_mm")
 
 
 class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
@@ -75,7 +73,7 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         if weight_scale.numel() != weight.shape[0]:
             raise ValueError("FL W8A8 requires one scale per output channel")
 
-        # FlagGems scaled_mm consumes B in [K, N] layout. Keep scales as [N].
+        # The scaled INT8 MM contract uses B=[K,N] and channel scales=[N].
         replace_parameter(
             layer,
             w_q_name,
@@ -99,19 +97,17 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        from flag_gems import scaled_mm
-
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape
         x_2d = x.reshape(-1, original_shape[-1]).contiguous()
         x_q, x_scale = _dynamic_per_token_quant_int8(x_2d)
-        output = scaled_mm(
+        output = _scaled_mm(
             x_q,
             weight,
             x_scale,
             weight_scale,
-            bias=bias,
             out_dtype=x.dtype,
+            bias=bias,
         )
         return output.reshape(*original_shape[:-1], weight.shape[1])
 

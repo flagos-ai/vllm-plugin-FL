@@ -17,6 +17,14 @@ def _fake_vllm_platforms(cpu_platform="vllm.platforms.cpu.CpuPlatform"):
 
 
 class TestArmCpuRegistration(unittest.TestCase):
+    def setUp(self):
+        # Model metadata has its own tests. Keep ARM registration independent
+        # of importing accelerator models with the intentionally minimal
+        # platform stub used here.
+        minimax_metadata = patch("vllm_fl.patches.minimax_m3.apply_minimax_m3_patches")
+        minimax_metadata.start()
+        self.addCleanup(minimax_metadata.stop)
+
     def test_arm_host_uses_vllm_cpu_platform(self):
         platforms = _fake_vllm_platforms()
         with (

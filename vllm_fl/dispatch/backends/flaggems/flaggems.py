@@ -43,6 +43,11 @@ class FlagGemsBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def scaled_int8_mm(self, a, b, scale_a, scale_b, out_dtype, bias=None):
+        from .impl.quantization import scaled_int8_mm_flaggems
+
+        return scaled_int8_mm_flaggems(a, b, scale_a, scale_b, out_dtype, bias)
+
     def dynamic_per_token_quant_int8(
         self,
         x: torch.Tensor,
@@ -238,6 +243,74 @@ class FlagGemsBackend(Backend):
         return topk_softmax_flaggems(
             topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
         )
+
+    def topk_sigmoid(
+        self,
+        hidden_states,
+        gating_output,
+        topk,
+        renormalize,
+        e_score_correction_bias=None,
+        indices_type=None,
+    ):
+        # The library kernel supports ordinary routing, not expert grouping.
+        supported = (
+            gating_output.ndim == 2
+            and gating_output.device.type == "cuda"
+            and gating_output.is_contiguous()
+            and gating_output.dtype in (torch.float16, torch.bfloat16, torch.float32)
+            and gating_output.shape[1] <= 256
+            and 0 < topk <= min(32, gating_output.shape[1])
+            and indices_type in (None, torch.int32, torch.int64)
+            and (
+                e_score_correction_bias is None
+                or (
+                    e_score_correction_bias.shape == (gating_output.shape[1],)
+                    and e_score_correction_bias.dtype == torch.float32
+                    and e_score_correction_bias.is_contiguous()
+                    and e_score_correction_bias.device == gating_output.device
+                )
+            )
+        )
+        if not supported:
+            from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
+                fused_topk_bias,
+            )
+
+            return fused_topk_bias(
+                hidden_states=hidden_states,
+                gating_output=gating_output,
+                scoring_func="sigmoid",
+                e_score_correction_bias=e_score_correction_bias,
+                topk=topk,
+                renormalize=renormalize,
+                indices_type=indices_type,
+            )
+
+        from flaggems_vllm import topk_sigmoid
+
+        assert hidden_states.size(0) == gating_output.size(0), (
+            "Number of tokens mismatch"
+        )
+        shape = (gating_output.shape[0], topk)
+        weights = torch.empty(shape, device=gating_output.device, dtype=torch.float32)
+        ids = torch.empty(
+            shape,
+            device=gating_output.device,
+            dtype=torch.int32 if indices_type is None else indices_type,
+        )
+        token_expert_indices = torch.empty(
+            shape, device=gating_output.device, dtype=torch.int32
+        )
+        topk_sigmoid(
+            weights,
+            ids,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+            e_score_correction_bias,
+        )
+        return weights, ids
 
     def invoke_fused_moe_triton_kernel(
         self,

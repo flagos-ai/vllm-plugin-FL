@@ -44,6 +44,12 @@ class ReferenceBackend(Backend):
 
     # ==================== Operator Implementations ====================
 
+    def scaled_int8_mm(self, a, b, scale_a, scale_b, out_dtype, bias=None):
+        """Keep vLLM's native INT8 implementation as the explicit fallback."""
+        from vllm.model_executor.kernels.linear.scaled_mm.triton import triton_scaled_mm
+
+        return triton_scaled_mm(a, b, scale_a, scale_b, out_dtype, bias)
+
     def dynamic_per_token_quant_int8(
         self,
         x: torch.Tensor,
@@ -178,6 +184,29 @@ class ReferenceBackend(Backend):
                 return AttentionBackendEnum.FLASHMLA_SPARSE.get_path()
             return AttentionBackendEnum.FLASHMLA.get_path()
         return AttentionBackendEnum.FLASH_ATTN.get_path()
+
+    def topk_sigmoid(
+        self,
+        hidden_states,
+        gating_output,
+        topk,
+        renormalize,
+        e_score_correction_bias=None,
+        indices_type=None,
+    ):
+        from vllm.model_executor.layers.fused_moe.router.fused_topk_bias_router import (
+            fused_topk_bias,
+        )
+
+        return fused_topk_bias(
+            hidden_states=hidden_states,
+            gating_output=gating_output,
+            scoring_func="sigmoid",
+            e_score_correction_bias=e_score_correction_bias,
+            topk=topk,
+            renormalize=renormalize,
+            indices_type=indices_type,
+        )
 
     def invoke_fused_moe_triton_kernel(
         self,

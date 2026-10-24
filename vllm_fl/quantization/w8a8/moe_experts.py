@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 import torch
@@ -53,9 +54,12 @@ def _validate_w8a8_contract(
     w2_bias: torch.Tensor | None,
 ) -> None:
     """Validate the exact channel-wise FlagGems W8A8 tensor contract."""
-    if activation is not MoEActivation.SILU:
+    if activation not in (
+        MoEActivation.SILU,
+        MoEActivation.SWIGLUOAI_UNINTERLEAVE,
+    ):
         raise NotImplementedError(
-            "FlagGems fused_experts_impl currently supports only silu, "
+            "FlagGems W8A8 experts support only silu and swigluoai_uninterleave, "
             f"got {activation.value}"
         )
     if hidden_states.ndim != 2 or not hidden_states.is_contiguous():
@@ -107,6 +111,29 @@ def _validate_w8a8_contract(
         raise ValueError(f"w2_bias must have shape {expected_w2_bias}")
 
 
+def _validate_dynamic_w8a8_inputs(experts, hidden_states, a1q_scale, a2_scale):
+    """Shared input contract for the native and FlagGems functional adapters."""
+    config = experts.quant_config
+    if not config.use_int8_w8a8:
+        raise ValueError("Functional W8A8 experts require an INT8 W8A8 quant config")
+    if not config.per_act_token_quant or config.block_shape is not None:
+        raise ValueError(
+            "Functional W8A8 experts require dynamic per-token/channel-wise INT8"
+        )
+    if getattr(experts, "_lora_context", None) is not None:
+        raise NotImplementedError("Functional W8A8 experts do not support LoRA")
+    if a1q_scale is not None or a2_scale is not None:
+        raise ValueError(
+            "W8A8 activation was quantized before the functional experts adapter; "
+            "expected an unquantized floating-point input"
+        )
+    if hidden_states.dtype not in (torch.float32, torch.float16, torch.bfloat16):
+        raise TypeError(
+            "W8A8 functional experts require floating-point hidden states, "
+            f"got {hidden_states.dtype}"
+        )
+
+
 class VllmFunctionalW8A8Experts(TritonExperts):
     """Run native MoE with floating-point inputs and preserved activations.
 
@@ -154,6 +181,8 @@ class VllmFunctionalW8A8Experts(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ) -> None:
+        _validate_dynamic_w8a8_inputs(self, hidden_states, a1q_scale, a2_scale)
+
         if activation is not MoEActivation.SILU or self._use_modular:
             return super().apply(
                 output=output,
@@ -176,33 +205,6 @@ class VllmFunctionalW8A8Experts(TritonExperts):
         del workspace13, workspace2, expert_tokens_meta
 
         quant_config = self.quant_config
-        if not quant_config.use_int8_w8a8:
-            raise ValueError(
-                "VllmFunctionalW8A8Experts requires an INT8 W8A8 quant config"
-            )
-        if not quant_config.per_act_token_quant or quant_config.block_shape is not None:
-            raise ValueError(
-                "VllmFunctionalW8A8Experts requires dynamic per-token/channel-wise INT8"
-            )
-        if getattr(self, "_lora_context", None) is not None:
-            raise NotImplementedError(
-                "The vLLM functional W8A8 MoE bridge does not support LoRA"
-            )
-        if a1q_scale is not None or a2_scale is not None:
-            raise ValueError(
-                "W8A8 activation was quantized before the vLLM functional "
-                "experts bridge; expected an unquantized floating-point input"
-            )
-        if hidden_states.dtype not in {
-            torch.float32,
-            torch.float16,
-            torch.bfloat16,
-        }:
-            raise TypeError(
-                "W8A8 functional experts require floating-point hidden states, "
-                f"got {hidden_states.dtype}"
-            )
-
         result = _vllm_fused_experts(
             hidden_states=hidden_states,
             w1=w1,
@@ -227,6 +229,32 @@ class FlagGemsW8A8Experts(TritonExperts):
     ``[M*top_k,1]``.
     """
 
+    def __init__(self, moe_config, quant_config):
+        super().__init__(moe_config, quant_config)
+        self._activation_kwargs = {}
+        if moe_config.activation is MoEActivation.SWIGLUOAI_UNINTERLEAVE:
+            values = tuple(
+                getattr(moe_config, name, None)
+                for name in ("swiglu_alpha", "swiglu_beta", "swiglu_limit")
+            )
+            if any(v is None or not math.isfinite(float(v)) for v in values):
+                raise ValueError(
+                    "W8A8 split SwiGLU-OAI requires finite alpha, beta and limit"
+                )
+            if float(values[2]) <= 0:
+                raise ValueError(
+                    "W8A8 split SwiGLU-OAI requires a positive clamp limit"
+                )
+            if not quant_config.use_int8_w8a8 or not quant_config.per_act_token_quant:
+                raise ValueError("W8A8 requires the FL dynamic-token INT8 adapter")
+            # These fields belong to this selected experts instance. Leave both
+            # the upstream quantization method and shared quant_config unchanged.
+            self._activation_kwargs = {
+                "gemm1_alpha": float(values[0]),
+                "gemm1_beta": float(values[1]),
+                "gemm1_clamp_limit": float(values[2]),
+            }
+
     @property
     def expects_unquantized_inputs(self) -> bool:
         return True
@@ -249,33 +277,8 @@ class FlagGemsW8A8Experts(TritonExperts):
         expert_tokens_meta: mk.ExpertTokensMetadata | None,
         apply_router_weight_on_input: bool,
     ) -> None:
-        del workspace13, workspace2, expert_tokens_meta
-
         quant_config = self.quant_config
-        if not quant_config.use_int8_w8a8:
-            raise ValueError("FlagGemsW8A8Experts requires an INT8 W8A8 quant config")
-        if not quant_config.per_act_token_quant or quant_config.block_shape is not None:
-            raise ValueError(
-                "FlagGemsW8A8Experts requires dynamic per-token/channel-wise INT8"
-            )
-        if getattr(self, "_lora_context", None) is not None:
-            raise NotImplementedError(
-                "The FlagGems W8A8 MoE adapter does not support LoRA"
-            )
-        if a1q_scale is not None or a2_scale is not None:
-            raise ValueError(
-                "W8A8 activation was quantized before the FlagGems experts "
-                "adapter; expected an unquantized floating-point input"
-            )
-        if hidden_states.dtype not in {
-            torch.float32,
-            torch.float16,
-            torch.bfloat16,
-        }:
-            raise TypeError(
-                "W8A8 functional experts require floating-point hidden states, "
-                f"got {hidden_states.dtype}"
-            )
+        _validate_dynamic_w8a8_inputs(self, hidden_states, a1q_scale, a2_scale)
 
         _validate_w8a8_contract(
             hidden_states,
@@ -290,7 +293,23 @@ class FlagGemsW8A8Experts(TritonExperts):
             quant_config.w2_bias,
         )
 
-        result = _flaggems_fused_experts_impl(
+        del workspace13, workspace2, expert_tokens_meta
+        operator = _flaggems_fused_experts_impl
+        gate_params = {}
+        if activation is MoEActivation.SWIGLUOAI_UNINTERLEAVE:
+            from vllm_fl.ops.fused_moe.fused_moe import fused_experts_impl
+
+            gate_params = getattr(self, "_activation_kwargs", {})
+            if any(
+                gate_params.get(name) is None
+                for name in ("gemm1_alpha", "gemm1_beta", "gemm1_clamp_limit")
+            ):
+                raise ValueError(
+                    "W8A8 split SwiGLU-OAI requires explicit gate parameters"
+                )
+            operator = fused_experts_impl
+
+        result = operator(
             hidden_states=hidden_states,
             w1=w1,
             w2=w2,
@@ -313,6 +332,7 @@ class FlagGemsW8A8Experts(TritonExperts):
             block_shape=None,
             w1_bias=quant_config.w1_bias,
             w2_bias=quant_config.w2_bias,
+            **gate_params,
         )
         output.copy_(result)
 

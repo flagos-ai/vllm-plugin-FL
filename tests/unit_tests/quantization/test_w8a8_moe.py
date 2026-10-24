@@ -320,3 +320,24 @@ def test_w8a8_moe_selector_nvidia_noncanonical_falls_back_without_flaggems(
 
     assert result == "nvidia-native"
     assert len(upstream_calls) == 1
+
+
+def test_w8a8_selector_keeps_original_vllm_quant_method(monkeypatch):
+    from importlib import import_module
+
+    from vllm_fl.quantization.w8a8 import moe
+
+    scheme = import_module(moe._SCHEME_MODULE)
+    oracle = import_module(moe._ORACLE_MODULE)
+    cls = scheme.CompressedTensorsW8A8Int8MoEMethod
+    original = cls.get_fused_moe_quant_config
+    assert not getattr(original, "_vllm_fl_split_swiglu_w8a8", False)
+    for obj, name in [
+        (scheme, "select_int8_moe_backend"),
+        (scheme, "make_int8_moe_quant_config"),
+        (oracle, "select_int8_moe_backend"),
+    ]:
+        monkeypatch.setattr(obj, name, getattr(obj, name))
+    assert moe.install_fl_w8a8_moe_selector()
+    assert moe.install_fl_w8a8_moe_selector()
+    assert cls.get_fused_moe_quant_config is original
