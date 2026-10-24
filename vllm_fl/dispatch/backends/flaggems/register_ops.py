@@ -175,3 +175,29 @@ def register_builtins(registry) -> None:
 
     filtered = [impl for impl in impls if use_flaggems_op(impl.op_name)]
     registry.register_many(filtered)
+
+    from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+
+    if is_kimi_k3_profile():
+        from .impl.kimi_k3 import grouped_topk, rms_norm_flaggems
+
+        providers = {
+            name: fn
+            for name, fn in (
+                ("rms_norm", rms_norm_flaggems),
+                ("grouped_topk", grouped_topk),
+            )
+            if use_flaggems_op(name)
+        }
+        for name, fn in providers.items():
+            identity = "flagos.kimi_k3." + name
+            prior = registry.get_implementation(name, identity)
+            if prior is not None:
+                if prior.fn is not fn:
+                    raise RuntimeError(f"Conflicting K3 provider: {name}")
+                continue
+            registry.register_impl(OpImpl(
+                op_name=name, impl_id=identity,
+                kind=BackendImplKind.DEFAULT, fn=fn,
+                priority=BackendPriority.DEFAULT + 10,
+            ))

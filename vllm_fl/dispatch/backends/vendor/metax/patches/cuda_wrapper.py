@@ -216,6 +216,9 @@ class CudaRTLibrary:
         return devPtr
 
 
-import vllm.distributed.device_communicators.cuda_wrapper
+from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
 
-vllm.distributed.device_communicators.cuda_wrapper.CudaRTLibrary = CudaRTLibrary
+if not is_kimi_k3_profile():
+    import vllm.distributed.device_communicators.cuda_wrapper
+
+    vllm.distributed.device_communicators.cuda_wrapper.CudaRTLibrary = CudaRTLibrary

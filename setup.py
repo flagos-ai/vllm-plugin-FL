@@ -2,8 +2,8 @@
 #
 # vllm-plugin-FL: vLLM Federated Learning Plugin
 #
-# This setup script builds the vllm_fl._C C++/CUDA extension via CMake.
-# It supports vendor-specific compilation (currently CUDA only) controlled by
+# This setup script builds vllm_fl._C via CMake for CUDA and PyTorch
+# CppExtension for the host-only MetaX wrapper. Compilation is controlled by
 # the VLLM_VENDOR environment variable. The build pipeline:
 #   1. Detects available tooling (cmake, ninja, sccache/ccache)
 #   2. Configures and compiles the C++/CUDA sources under csrc/
@@ -32,7 +32,7 @@ NVCC_THREADS = os.environ.get("NVCC_THREADS")
 CMAKE_BUILD_TYPE = os.environ.get("CMAKE_BUILD_TYPE")
 VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
-SUPPORTED_VENDORS = ("cuda",)
+SUPPORTED_VENDORS = ("cuda", "metax")
 
 
 def _is_cuda() -> bool:
@@ -169,18 +169,49 @@ class CMakeBuildExt(build_ext):
 
 
 ext_modules = []
+cmdclass = {}
 if VLLM_VENDOR:
     if VLLM_VENDOR not in SUPPORTED_VENDORS:
         raise ValueError(
             f"Unsupported vendor: {VLLM_VENDOR}. "
             f"Supported vendors: {', '.join(SUPPORTED_VENDORS)}"
         )
-    ext_modules.append(
-        CMakeExtension(name="vllm_fl._C", cmake_lists_dir=str(ROOT_DIR / "csrc"))
-    )
+    if VLLM_VENDOR == "metax":
+        from torch.utils.cpp_extension import BuildExtension, CppExtension
+
+        # Both sources are host C++: they register a CUDA dispatch wrapper
+        # around torch::from_blob without launching a device kernel. Use the
+        # active vendor Torch's headers/libraries without CMake FindCUDA.
+        ext_modules.append(
+            CppExtension(
+                name="vllm_fl._C",
+                sources=[
+                    "csrc/cuda/weak_ref_tensor.cpp",
+                    "csrc/cuda/torch_bindings.cpp",
+                ],
+                include_dirs=[str(ROOT_DIR / "csrc")],
+                extra_compile_args=["-O3", "-std=c++17"],
+            )
+        )
+        ext_modules.append(
+            CppExtension(
+                name="vllm_fl.dispatch.backends.vendor.metax.kimi_k3_runtime",
+                sources=["csrc/metax/uva.cpp"],
+                include_dirs=["/opt/maca/include"],
+                library_dirs=["/opt/maca/lib"],
+                libraries=["mcruntime"],
+                extra_compile_args=["-O3", "-std=c++17"],
+            )
+        )
+        cmdclass["build_ext"] = BuildExtension
+    else:
+        ext_modules.append(
+            CMakeExtension(name="vllm_fl._C", cmake_lists_dir=str(ROOT_DIR / "csrc"))
+        )
+        cmdclass["build_ext"] = CMakeBuildExt
 
 
 setup(
     ext_modules=ext_modules,
-    cmdclass={"build_ext": CMakeBuildExt} if ext_modules else {},
+    cmdclass=cmdclass,
 )

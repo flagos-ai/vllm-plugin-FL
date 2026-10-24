@@ -10,4 +10,9 @@ __all__ = [
     "MacaBackend",
 ]
 
-from . import patches  # noqa: F401 — apply MetaX kernel patches at backend load time
+from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+
+# The open K3 profile installs only its explicit MACA/MCCL ABI hooks.
+# Other models retain the upstream MetaX startup patches.
+if not is_kimi_k3_profile():
+    from . import patches  # noqa: F401

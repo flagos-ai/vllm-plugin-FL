@@ -5,7 +5,11 @@ import logging
 import os
 import sys
 
+from .patches.kimi_k3.cache import initialize_process_cache
+from .patches.kimi_k3.profile import is_kimi_k3_profile
 
+if is_kimi_k3_profile():
+    initialize_process_cache()
 def _patch_flag_gems_triton_import_compat():
     """Allow newer FlagGems to load with the Kunlunxin Triton runtime.
 
@@ -82,8 +86,6 @@ def _arm_cpu_platform() -> str | None:
 
 def __getattr__(name):
     if name == "distributed":
-        import importlib
-
         module = importlib.import_module(f".{name}", __name__)
         globals()[name] = module
         return module
@@ -102,6 +104,43 @@ def _register_flagcx_connector():
                 "vllm_fl.distributed.kv_transfer.flagcx_connector",
                 "FlagCXConnector",
             )
+
+
+def _patch_custom_ops():
+    """Use the accepted open MetaX runtime; preserve other platform behavior."""
+    import torch
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().vendor_name == "metax" and is_kimi_k3_profile():
+        if os.environ.get("FLAGCX_PATH"):
+            raise RuntimeError("K3 MetaX uses MCCL and does not enable FlagCX")
+        import vllm_fl._C
+        op_name = "_C::weak_ref_tensor"
+        expected_schema = "_C::weak_ref_tensor(Tensor input) -> Tensor"
+        actual_schema = str(
+            torch._C._dispatch_find_schema_or_throw(op_name, "").schema()
+        )
+        if actual_schema != expected_schema:
+            raise RuntimeError(f"FL weak_ref_tensor schema mismatch: {actual_schema}")
+        if not torch._C._dispatch_has_kernel_for_dispatch_key(op_name, "CUDA"):
+            raise RuntimeError("FL weak_ref_tensor has no CUDA dispatch implementation")
+        logger.info("FL open weak_ref_tensor provider: %s", vllm_fl._C.__file__)
+        from vllm_fl.patches.kimi_k3.op_registry import register_op_schemas
+        register_op_schemas()
+        return
+
+    for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
+        try:
+            importlib.import_module(module_name)
+            return
+        except (ImportError, OSError):
+            continue
+    try:
+        import vllm_fl._C  # noqa: F401
+    except (ImportError, OSError) as e:
+        logger.debug("Failed to import vllm_fl._C: %s", e)
+    from vllm_fl.ops._C_ops_registry import register_op_schemas
+    register_op_schemas()
 
 
 def _patch_flash_attn_import():
@@ -135,24 +174,6 @@ def _patch_flash_attn_import():
         sys.modules["vllm.vllm_flash_attn"] = stub
 
 
-def _patch_custom_ops():
-    """Register fallback schemas when neither vLLM extension ABI is present."""
-    for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
-        try:
-            importlib.import_module(module_name)
-            return
-        except (ImportError, OSError):
-            continue
-
-    try:
-        import vllm_fl._C  # noqa: F401
-    except (ImportError, OSError) as e:
-        logger.debug("Failed to import vllm_fl._C: %s", e)
-
-    from vllm_fl.ops._C_ops_registry import register_op_schemas
-
-    register_op_schemas()
-
 
 def _init_vendor_device():
     """Apply compatibility hooks that must run before vLLM model imports."""
@@ -178,7 +199,11 @@ def register():
         return arm_cpu_platform
 
     _patch_custom_ops()
-    _patch_flash_attn_import()
+
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().vendor_name != "metax" or not is_kimi_k3_profile():
+        _patch_flash_attn_import()
 
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
@@ -189,7 +214,6 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
     if vendor_name == "ascend":
@@ -287,13 +311,15 @@ def register_model():
         install_arm_cpu_packed_w4a8()
         return
 
-    _register_flagcx_connector()
+    if getattr(current_platform, "vendor_name", None) != "metax":
+        _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
     register_router()
 
-    _register_gdn_packed_decode_patch()
+    if getattr(current_platform, "vendor_name", None) != "metax":
+        _register_gdn_packed_decode_patch()
 
     from vllm_fl.utils import DeviceInfo
 

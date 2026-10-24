@@ -143,6 +143,17 @@ def patch_mm_encoder_attention():
         mm_mod.MMEncoderAttention.forward_oot = mm_mod.MMEncoderAttention.forward_cuda
 
     def _patched_maybe_get_vit_flash_attn_backend(attn_backend):
+        if (
+            getattr(current_platform, "vendor_name", None) == "metax"
+            and attn_backend in (
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.ROCM_AITER_FA,
+            )
+        ):
+            raise NotImplementedError(
+                "K3 MetaX has no validated open ViT FlashAttention adapter; "
+                "vendor FlashAttention packages are not a fallback"
+            )
         if attn_backend == AttentionBackendEnum.FLASH_ATTN:
             try:
                 from vllm.vllm_flash_attn import flash_attn_varlen_func
