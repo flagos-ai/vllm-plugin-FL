@@ -394,6 +394,12 @@ class WorkerFL(WorkerBase):
             not in ["ray", "external_launcher"]
             and self.vllm_config.parallel_config.data_parallel_backend != "ray"
             and self.vllm_config.parallel_config.nnodes_within_dp == 1
+            # Assigned Ascend devices are already scoped to this DP replica;
+            # local_rank indexes that list and must not receive a second offset.
+            and (
+                current_platform.vendor_name != "ascend"
+                or self.parallel_config.assigned_physical_gpu_ids is None
+            )
         ):
             # vLLM keeps the original DP rank in data_parallel_index when a
             # non-MoE DP replica is reconfigured as an independent engine.
