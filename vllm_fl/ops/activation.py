@@ -115,7 +115,7 @@ class SiluAndMulWithClampFL(SiluAndMulWithClamp):
         return (cls.default_on() or enabled) and not disabled
 
     def forward_oot(self, x: torch.Tensor) -> torch.Tensor:
-        # v0.2.0 only implements alpha=1,beta=0. Reject that capability before
+        # The fused API implements alpha=1,beta=0. Reject that capability before
         # entering the fused provider, rather than falling back after execution.
         if self.alpha != 1.0 or self.beta != 0.0:
             return self.forward_native(x)

@@ -13,10 +13,13 @@ def _resolve_source_platform() -> PlatformEnum:
     - cpu-alike OOT                          -> CPU kernels
     - fallback                               -> CUDA kernels
     """
-    if current_platform.is_cuda_alike():
-        return PlatformEnum.CUDA
     if current_platform.is_rocm():
         return PlatformEnum.ROCM
+    # ROCm/HIP exposes the CUDA-shaped torch API and therefore reports
+    # ``is_cuda_alike()`` as true on upstream platforms.  Check ROCm first so
+    # AMD OOT platforms do not accidentally inherit NVIDIA/CUDA candidates.
+    if current_platform.is_cuda_alike():
+        return PlatformEnum.CUDA
     if current_platform.is_cpu():
         return PlatformEnum.CPU
     # Fallback: try CUDA as the most common case

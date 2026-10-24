@@ -46,6 +46,10 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
     # Registered backend: vendor/hygon
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
+    # Registered backend: vendor/amd (ROCm/HIP exposed through torch.cuda)
+    # FlagGems intentionally reports ``vendor_name=amd`` and
+    # ``device_name=cuda`` for ROCm devices.
+    "amd": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
     # Registered backend: vendor/thead (tsingmicro)
@@ -157,14 +161,18 @@ def use_flaggems(default: bool = True) -> bool:
     return value.lower() in ("true", "1")
 
 
-def get_flag_gems_whitelist_blacklist() -> tuple[list[str] | None, list[str] | None]:
+def get_flag_gems_whitelist_blacklist(
+    *,
+    vllm_config=None,
+    vendor_name: str | None = None,
+) -> tuple[list[str] | None, list[str] | None]:
     """
     Get FlagGems operator whitelist and blacklist.
 
     Priority (highest to lowest):
     1. VLLM_FL_FLAGOS_WHITELIST env var: Only these ops use FlagGems
     2. VLLM_FL_FLAGOS_BLACKLIST env var: These ops don't use FlagGems
-    3. Platform config flagos_blacklist: Default blacklist from config file
+    3. Platform and model defaults: Default operator blacklist
     4. VLLM_FL_FLAGOS_BLACKLIST_APPEND: Ops appended to the selected blacklist
 
     Note: VLLM_FL_FLAGOS_WHITELIST and VLLM_FL_FLAGOS_BLACKLIST cannot be set
@@ -211,6 +219,21 @@ def get_flag_gems_whitelist_blacklist() -> tuple[list[str] | None, list[str] | N
                 blacklist = list(config_blacklist)
         except Exception:
             pass
+
+    if vllm_config is not None and not blacklist_str:
+        from vllm.model_executor.models.config import MODELS_CONFIG_MAP
+
+        model_config = vllm_config.model_config
+        for architecture in model_config.architectures:
+            config_cls = MODELS_CONFIG_MAP.get(architecture)
+            get_defaults = getattr(config_cls, "get_flag_gems_blacklist", None)
+            if get_defaults is not None:
+                blacklist = list(
+                    dict.fromkeys(
+                        (blacklist or []) + get_defaults(vendor_name=vendor_name)
+                    )
+                )
+                break
 
     # Add deployment exclusions without replacing platform safety defaults.
     # Preserve insertion order so startup logs and dispatch policy stay stable.
@@ -293,10 +316,12 @@ class DeviceInfo:
         self.device = DeviceDetector()
         self.supported_device = [
             "nvidia",
+            "amd",
             "ascend",
             "metax",
             "mthreads",
             "sunrise",
+            "hygon",
             "thead",
             "gcu",
             "enflame",
