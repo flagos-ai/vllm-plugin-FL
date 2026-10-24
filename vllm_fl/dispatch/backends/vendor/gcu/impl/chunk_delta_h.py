@@ -15,12 +15,27 @@ import torch
 
 from vllm.triton_utils import tl, triton
 
-from vllm.model_executor.layers.fla.ops.index import (
-    prepare_chunk_indices,
-    prepare_chunk_offsets,
-)
-from vllm.model_executor.layers.fla.ops.op import exp
-from vllm.model_executor.layers.fla.ops.utils import FLA_CHUNK_SIZE, use_cuda_graph
+# vLLM >= 0.28 relocated FLA to vllm.third_party.flash_linear_attention.
+try:
+    from vllm.third_party.flash_linear_attention.ops.index import (
+        prepare_chunk_indices,
+        prepare_chunk_offsets,
+    )
+    from vllm.third_party.flash_linear_attention.ops.op import exp
+    from vllm.third_party.flash_linear_attention.ops.utils import (
+        FLA_CHUNK_SIZE,
+        use_cuda_graph,
+    )
+except ImportError:  # vLLM <= 0.24
+    from vllm.model_executor.layers.fla.ops.index import (
+        prepare_chunk_indices,
+        prepare_chunk_offsets,
+    )
+    from vllm.model_executor.layers.fla.ops.op import exp
+    from vllm.model_executor.layers.fla.ops.utils import (
+        FLA_CHUNK_SIZE,
+        use_cuda_graph,
+    )
 
 logger = logging.getLogger(__name__)
 

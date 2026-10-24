@@ -93,6 +93,21 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      # Kunlunxin: E2E failures on this backend surface as bare HTTP 500 or
+      # native "illegal memory access" with no Python traceback in the CI log.
+      # Raise diagnostic verbosity only — no test case, assertion or mark is
+      # altered, so pass/fail semantics stay identical.
+      - name: Enable verbose diagnostics on Kunlunxin
+        if: inputs.platform == 'kunlunxin'
+        run: |
+          {
+            echo 'VLLM_LOGGING_LEVEL=DEBUG'
+            echo 'TORCH_SHOW_CPP_STACKTRACES=1'
+            # faulthandler dumps the Python traceback on SIGSEGV/SIGABRT,
+            # which is what an async device "illegal memory access" looks like.
+            echo 'PYTHONFAULTHANDLER=1'
+          } >> "$GITHUB_ENV"
+
       # This H20 runner fails NVLS multicast binding with CUDA error 401.
       - name: Disable NVLS on H20
         if: inputs.platform == 'cuda' && inputs.device == 'h20'
@@ -118,6 +133,9 @@ jobs:
             --task ${{ inputs.task }} \
             --cases '${{ inputs.cases }}'
 
+      # test-results/logs/ holds the vLLM server stdout/stderr written by
+      # VllmServer and preserved on failure. Without it the server-side
+      # traceback behind a bare HTTP 500 dies with the runner.
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -127,3 +145,4 @@ jobs:
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
+            test-results/logs/

@@ -88,8 +88,90 @@ flagos_blacklist:
   - argmax
   - bmm
   - index_put_
+  # `aten::pow.Scalar` (kernel fn `pow_scalar`) with a float scalar base
+  # (`2.0 ** tensor`, e.g. RotaryEmbedding._compute_inv_freq) crashes the
+  # Kunlunxin Triton backend: `tl.exp2(y * lnb)` trips
+  # "triton_xpu.unpack reached lowering without a bufPtr" in ConvertTritonXPUToLLVM.
+  # FlagGems matches flagos_blacklist against the KERNEL FUNCTION name
+  # (flag_gems/runtime/op_registrar.py: `item[1].__name__ not in self.exclude_ops`),
+  # so the entry MUST be `pow_scalar`; plain `pow` has no effect.
+  # Tensor-base forms (pow_tensor_scalar / pow_tensor_tensor) stay on FlagGems.
+  - pow_scalar
   - normal_
   - copy_
+  # `aten::_to_copy` (kernel fn `to_copy`) kills the Kunlunxin Triton backend
+  # with `err_code: -714` (misaligned address) on the P800: during
+  # `profile_run` the generated `_to_copy_contiguous_kernel` (Qwen3.6-27B eager)
+  # and `_to_copy_func_close_interleave_kernel_rank_3` (Qwen3.6-35B-A3B, 3-D
+  # non-contiguous RMSNorm input) both fail with
+  # `xpuLaunchKernel ... Exception in kernel execution`, taking the EngineCore
+  # down with an async "illegal memory access". A dtype cast has no reason to
+  # use a generated kernel, so keep it on the vendor torch path.
+  - to_copy
+  # `aten::zero_` (kernel fn `zero_` in
+  # flag_gems/runtime/backend/_kunlunxin/ops/zero.py) dispatches to the Triton
+  # `_zero_fill_kernel_rank_1`, which faults with `err_code: -714` on the P800.
+  # It is reached from the KV-block zeroing patch
+  # (`kv.narrow(block_dim, ...).zero_()`), so the first
+  # `POST /v1/chat/completions` killed all four TP workers and answered
+  # HTTP 500.  Zeroing has no reason to use a generated kernel: keep
+  # `aten::zero_` on the vendor ATen fill path.
+  - zero_
+  # `aten::min` (kernel fn `min` -> `min_kernel_1`) faults the same way
+  # (`xpuLaunchKernel("min_kernel_1") ... err_code: -714`).  It was reached not
+  # by model math but by `torch._tensor_str`, when vLLM's IR dispatcher
+  # formatted a DEBUG log for the unsupported `rms_norm` provider argument --
+  # so the *logging* inside `profile_run` took the engine down (35B-A3B eager).
+  # `min_dim` shares the same `min_kernel` in that file, so it is excluded too.
+  - min
+  - min_dim
+  # `aten::nonzero` (kernel fn `nonzero`) is the first FlagGems kernel the same
+  # `torch._tensor_str` formatting path runs (`data[mask]` -> nonzero + index).
+  # In the 35B-A3B run TP0 emitted the `nonzero.py` warnings and then logged the
+  # first `kl3ChannelCheckErrors ... status= 700` of that job, so it stays off
+  # the generated kernel too.
+  - nonzero
+  # `aten::fill_.Scalar` (kernel fn `fill_scalar_`,
+  # flag_gems/runtime/backend/_kunlunxin/ops/fill.py:128) is the FIRST kernel of
+  # the first decode step in the Qwen3.6-35B-A3B graph run: `_prepare_inputs`
+  # does `self.num_accepted_tokens.gpu.fill_(1)`, which JIT-compiles
+  # `fill_scalar_func_kernel_rank_1` (the `jit_monitor` "Triton kernel JIT
+  # compilation during inference" warning is logged one line above the crash)
+  # and then faults with
+  # `xpuLaunchKernel("fill_scalar_func_kernel_rank_1", ...) -> Exception in
+  # kernel execution(err_code: -714)`, surfacing as
+  # `kl3ChannelCheckErrors ... error set to 66250, status= 700` +
+  # `A kernel exception has occurred` + an async "illegal memory access" that
+  # kills all four TP workers.  `aten::fill_.Tensor` (kernel fn `fill_tensor_`)
+  # reaches the same `fill_scalar_func` through the plain Python helper
+  # `fill_tensor_ -> fill_scalar_` (no dispatch involved), so excluding
+  # `fill_scalar_` alone would not protect that overload; the out-of-place
+  # `fill_scalar` / `fill_tensor` launch the identical kernel with the identical
+  # CodeGenConfig.  Filling with a scalar has no reason to use a generated
+  # kernel, so the whole family stays on the vendor ATen path.
+  - fill_scalar_
+  - fill_tensor_
+  - fill_scalar
+  - fill_tensor
+  # `aten::index` (kernel fn `index`, flag_gems/runtime/backend/_kunlunxin/ops/
+  # index.py) is the next kernel of the same first decode step, right after the
+  # fill_ family above.  `_prepare_inputs` does
+  # `self.num_computed_tokens[req_indices_gpu].to(torch.int64)`
+  # (vllm_fl/worker/model_runner.py:2236 in _prepare_inputs), which selects the
+  # FlagGems path `index.py:468 index -> index.py:292 __call__` and JIT-compiles
+  # `.flaggems/code_cache/index_inp_rank_1_indices_len_1_index_rank_1.py:82
+  # _index_wrapper`, then faults with
+  # `xpuLaunchKernel("_index_jit_function", ...) -> Exception in kernel execution
+  # (err_code: -714)`, killing all four TP workers at the same instant
+  # (`kl3ChannelCheckErrors ... status= 700` + async "illegal memory access").
+  # Only the Qwen3.6-35B-A3B graph step hits it: the grid is tiny
+  # (`indices_len=1`, one request, first decode step).  The same kernel was
+  # JIT-compiled without faulting in the 27b_tp4_eager run, i.e. it degrades at
+  # this shape rather than being unconditionally broken.  The `.to(int64)` is
+  # the user of the result, not the faulting kernel, so the cast stays put.
+  # Gathering a handful of scalars has no reason to use a generated kernel:
+  # keep `aten::index` on the vendor ATen path.
+  - index
   - gelu
   - masked_scatter_
   - scatter

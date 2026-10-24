@@ -123,10 +123,12 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         # When use_qk_l2norm_in_kernel=True, the native kernel handles L2-norm
         # internally. When False, the caller has already normalized q/k externally.
 
-        # [N, H, K, V] -> [N, H, V, K] for kunlunxin kernel
-        if initial_state is not None:
-            initial_state = initial_state.transpose(2, 3).contiguous()
-
+        # vLLM passes the recurrent state straight out of the paged cache, whose
+        # per-block shape is [N, H, V, K]
+        # (MambaStateShapeCalculator.gated_delta_net_state_shape), which is also
+        # what the Kunlunxin chunk kernel expects. The 0.24-era transpose that
+        # used to run here assumed a [N, H, K, V] caller and silently scrambled
+        # the state, which corrupted every decode step after the first token.
         g, o, A, final_state, w, h, v_new = chunk_gated_delta_rule_fwd(
             q=q,
             k=k,
@@ -139,6 +141,11 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
             cu_seqlens=cu_seqlens,
             use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
         )
+        # chunk_gated_delta_rule_fwd hands the state back as [N, H, K, V], while
+        # vLLM's cache and the fused_recurrent decode kernel both use
+        # [N, H, V, K]; convert once here so the caller can store it as-is.
+        if final_state is not None:
+            final_state = final_state.transpose(2, 3).contiguous()
         ctx.scale = scale
         ctx.use_qk_l2norm_in_kernel = use_qk_l2norm_in_kernel
         return o.to(q.dtype), final_state
@@ -177,11 +184,11 @@ def chunk_gated_delta_rule(
             Scale factor for the RetNet attention scores.
             If not provided, it will default to `1 / sqrt(K)`. Default: `None`.
         initial_state (Optional[torch.Tensor]):
-            Initial state of shape `[N, H, K, V]` for `N` input sequences.
+            Initial state of shape `[N, H, V, K]` for `N` input sequences.
             For equal-length input sequences, `N` equals the batch size `B`.
             Default: `None`.
         output_final_state (Optional[bool]):
-            Whether to output the final state of shape `[N, H, K, V]`. Default: `False`.
+            Whether to output the final state of shape `[N, H, V, K]`. Default: `False`.
         cu_seqlens (torch.LongTensor):
             Cumulative sequence lengths of shape `[N+1]` used for variable-length training,
             consistent with the FlashAttention API.
