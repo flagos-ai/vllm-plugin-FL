@@ -20,6 +20,42 @@ del _torch
 
 from vllm_fl.utils import get_op_config as _get_op_config
 
+
+def _hy4_patch_ray_worker_early_device() -> None:
+    """让 ray actor 在创建时就绑定自己的 GPU（Iluvatar context 上限规避）。
+
+    背景见 models/iluvatar/hy4-1022/ixccl-bug/ROOT-CAUSE.md：
+    单卡最多 15 个 CUDA context；vLLM 的 ray actor 初始化阶段会在默认设备 0
+    上建 context，每节点 N 个 worker 就叠 N 个，TP16/TP8PP4 会超限。
+    """
+    if getattr(_hy4_patch_ray_worker_early_device, "_done", False):
+        return
+    try:
+        from vllm.v1.executor.ray_executor_v2 import RayWorkerProc
+    except Exception:
+        return  # 非 ray 后端或模块尚未可用
+
+    _orig = RayWorkerProc.__init__
+
+    def _patched_init(self, *args, **kwargs):
+        try:
+            import ray as _ray
+            import torch as _torch
+
+            _gids = _ray.get_gpu_ids()
+            if _gids:
+                _torch.cuda.set_device(int(_gids[0]))
+        except Exception:
+            pass
+        return _orig(self, *args, **kwargs)
+
+    RayWorkerProc.__init__ = _patched_init
+    _hy4_patch_ray_worker_early_device._done = True
+
+
+_hy4_patch_ray_worker_early_device()
+
+
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 
 
@@ -145,6 +181,12 @@ def register_model():
 
     apply_qwen3_5_text_patches()
     patch_vllm_moe_sum()
+
+    # HY4 (hy_v4 / hy_v4_vl): config + architecture + expert-sliced loader.
+    # Self-contained in plugin-FL; see vllm_fl/models/hy4/registration.py.
+    from vllm_fl.models.hy4.registration import register_hy_v4_support
+
+    register_hy_v4_support()
 
     _register_flagcx_connector()
 

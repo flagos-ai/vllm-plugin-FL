@@ -73,6 +73,55 @@ from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
 
+def _hy4_ctx_stage(tag: str) -> None:
+    """context 阶段探针：仅 /tmp/hy4_probe.flag 存在时生效。"""
+    try:
+        import os as _os
+
+        if not _os.path.exists("/tmp/hy4_probe.flag"):
+            return
+        import ctypes as _ct
+        import time as _tm
+
+        _lib = _ct.CDLL("libcuda.so.1")
+        _lib.cuInit(0)
+        _p = _ct.c_void_p()
+        _lib.cuCtxGetCurrent(_ct.byref(_p))
+        _d = _ct.c_int(0)
+        _lib.cuCtxGetDevice(_ct.byref(_d))
+        with open("/tmp/hy4_ctx_probe.log", "a") as _f:
+            _f.write(
+                f"{_tm.strftime('%H:%M:%S')} pid={_os.getpid()} STAGE={tag} "
+                f"ctx={_p.value} drv_dev={_d.value} "
+                f"CVD={_os.environ.get('CUDA_VISIBLE_DEVICES')!r}\n"
+            )
+    except Exception:
+        pass
+
+
+
+def _hy4_stage(tag: str) -> None:
+    """诊断打点：记录 flag_gems 是否已 patch，写文件避免日志缓冲吞掉。"""
+    try:
+        import os as _os
+        import torch as _t
+        import flag_gems as _fg
+
+        native = getattr(_t._int_mm, "__name__", "?") == "_int_mm"
+        patch_n = len(getattr(_fg, "aten_patch_list", []) or [])
+        with open("/tmp/hy4_stages.log", "a") as _f:
+            _f.write(
+                f"{_os.getpid()} {tag} int_mm_native={native} aten_patch={patch_n}\n"
+            )
+    except Exception as _e:  # noqa: BLE001
+        try:
+            with open("/tmp/hy4_stages.log", "a") as _f:
+                _f.write(f"{os.getpid()} {tag} FAIL {type(_e).__name__}\n")
+        except Exception:
+            pass
+
+
+
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
 
@@ -201,6 +250,21 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
+        # Iluvatar: bind the CUDA device BEFORE super().__init__, because vLLM's
+        # Worker.__init__ already creates a CUDA context, and without an explicit
+        # set_device that context lands on device 0. A node running N workers
+        # would then stack N contexts on device 0, and Iluvatar caps a single
+        # GPU at 15 CUDA contexts -- the 16th fails with cudaErrorUnknown and
+        # ixccl segfaults inside ncclCommInitRank. Verified by probe: at
+        # INIT0_after_super the context already exists with drv_dev=0.
+        if isinstance(local_rank, int) and local_rank >= 0:
+            try:
+                import torch as _torch
+
+                _torch.cuda.set_device(local_rank)
+            except Exception:
+                pass
+        _hy4_ctx_stage("INIT_pre_super")
         super().__init__(
             vllm_config=vllm_config,
             local_rank=local_rank,
@@ -210,6 +274,7 @@ class WorkerFL(WorkerBase):
         )
 
         # Buffers saved before sleep
+        _hy4_ctx_stage("INIT0_after_super")
         self._sleep_saved_buffers: dict[str, torch.Tensor] = {}
 
         # Torch/CUDA profiler. Enabled and configured through profiler_config.
@@ -234,38 +299,19 @@ class WorkerFL(WorkerBase):
 
         register_oot_ops()
 
-        if fl_envs.USE_FLAGGEMS:
-            import flag_gems
-
-            # Get whitelist and blacklist from environment variables
-            whitelist, blacklist = get_flag_gems_whitelist_blacklist()
-
-            # Only rank 0 records the oplist to avoid file truncation and
-            # interleaved writes when tensor-parallel-size > 1.
-            should_record = (rank == 0)
-
-            # Use whitelist if specified (takes precedence over blacklist)
-            if whitelist:
-                logger.info(f"[FlagGems] Enable only the following ops: {whitelist}")
-                flag_gems.only_enable(
-                    include=whitelist,
-                    record=should_record,
-                    once=True,
-                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-                )
-            elif blacklist:
-                logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
-                flag_gems.enable(
-                    unused=blacklist,
-                    record=should_record,
-                    once=True,
-                    path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-                )
-            else:
-                logger.info("[FlagGems] Enable all ops")
-                flag_gems.enable(
-                    record=should_record, once=True, path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH
-                )
+        # Iluvatar: ``flag_gems.enable()`` patches CUDA kernels in a way that
+        # makes ixccl segfault (``ixcclCommInitRank`` -> ``ixcclCuMemAlloc`` ->
+        # ``ixcclDebugLog`` -> ``__vsnprintf``) if the NCCL communicator is
+        # created *after* the patch. Creating the process group first and
+        # enabling FlagGems afterwards is safe (verified with
+        # cc_gems_order.py: before = SIGSEGV, lazy/after = OK).
+        # The enable therefore moves to ``init_device``, right after
+        # ``init_worker_distributed_environment()``, which is still well before
+        # ``load_model`` needs the FlagGems kernels.
+        self._fl_enable_flag_gems_pending = bool(fl_envs.USE_FLAGGEMS)
+        _hy4_stage("init_end")
+        _hy4_ctx_stage("INIT1_end")
+        self._fl_flag_gems_enabled = False
 
     # def sleep(self, level: int = 1) -> None:
     #     TODO(lms): rewrite CuMemAllocator
@@ -324,6 +370,55 @@ class WorkerFL(WorkerBase):
     def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+
+    def _enable_flag_gems_after_dist_init(self) -> None:
+        """Enable FlagGems only after the NCCL process group exists.
+
+        On Iluvatar, enabling FlagGems before ``init_process_group`` makes
+        ixccl segfault while creating the first communicator. Enabling it after
+        the group is up works, and model construction (which relies on the
+        FlagGems kernels) happens later in ``load_model``.
+        """
+        if getattr(self, "_fl_flag_gems_enabled", False):
+            return
+        self._fl_flag_gems_enabled = True
+        if not getattr(self, "_fl_enable_flag_gems_pending", False):
+            return
+
+        import flag_gems
+
+        import os as _hy4_os
+        if _hy4_os.environ.get("HY4_GEMS_MODE") == "import_only":
+            _hy4_stage("import_only_done")
+            return
+
+        whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+        should_record = (self.rank == 0)
+
+        if whitelist:
+            logger.info(f"[FlagGems] Enable only the following ops: {whitelist}")
+            flag_gems.only_enable(
+                include=whitelist,
+                record=should_record,
+                once=True,
+                path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+            )
+        elif blacklist:
+            logger.info(f"[FlagGems] Disable the following ops: {blacklist}")
+            flag_gems.enable(
+                unused=blacklist,
+                record=should_record,
+                once=True,
+                path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+            )
+        else:
+            logger.info("[FlagGems] Enable all ops")
+            flag_gems.enable(
+                record=should_record,
+                once=True,
+                path=fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
+            )
+        _hy4_stage("after_enable")
 
     def init_device(self):
         # Iluvatar: patch sampler ops to disable torch.compile (flagtree triton
@@ -405,6 +500,10 @@ class WorkerFL(WorkerBase):
             self.local_rank,
             current_platform.dist_backend,
         )
+
+        # Iluvatar: FlagGems must be enabled only after the process group is up
+        # (see the note in __init__). Still runs before load_model.
+        self._enable_flag_gems_after_dist_init()
 
         if current_platform.device_type == "npu":
             from vllm_fl.dispatch.backends.vendor.ascend.impl.triton_utils import (
@@ -1253,12 +1352,40 @@ def init_worker_distributed_environment(
         parallel_config.world_size, rank, init_method, local_rank, backend
     )
 
+    _hy4_stage("before_init_mp")
     ensure_model_parallel_initialized(
         parallel_config.tensor_parallel_size,
         parallel_config.pipeline_parallel_size,
         parallel_config.prefill_context_parallel_size,
         parallel_config.decode_context_parallel_size,
     )
+    _hy4_stage("after_init_mp")
+
+    # Iluvatar: prime the ixccl communicator *now*, while FlagGems has not yet
+    # patched the CUDA kernels. ixccl creates its communicator lazily on the
+    # first collective, and that creation path
+    #     ixcclCommInitRankFunc -> ixcclCuMemAlloc -> ixcclDebugLog -> __vsnprintf
+    # segfaults once FlagGems has replaced the kernels (verified: USE_FLAGGEMS=0
+    # -> no segfault; 16-rank order test -> enable-before-comm = SIGSEGV,
+    # comm-before-enable = OK). One 1-element all_reduce is enough.
+    try:
+        import torch as _fl_torch
+        from vllm.distributed.parallel_state import get_tp_group as _fl_get_tp
+
+        _fl_tp = _fl_get_tp()
+        if _fl_tp.world_size > 1:
+            _fl_probe = _fl_torch.zeros(
+                1, dtype=_fl_torch.float32, device=_fl_torch.cuda.current_device()
+            )
+            _fl_tp.all_reduce(_fl_probe)
+            _fl_torch.cuda.synchronize()
+            print(
+                f"[hy4-iluvatar] TP communicator primed (rank={rank}, "
+                f"world={_fl_tp.world_size})",
+                flush=True,
+            )
+    except Exception as _fl_exc:  # noqa: BLE001 - never block startup
+        print(f"[hy4-iluvatar] TP priming failed: {_fl_exc}", flush=True)
 
     # Init ec connector here before KV caches caches init
     # NOTE: We do not init KV caches for Encoder-only instance in EPD disagg mode

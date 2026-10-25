@@ -63,6 +63,17 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
+    # Ray sets CUDA_VISIBLE_DEVICES=<one physical card> per actor by default,
+    # which makes every worker see a single GPU. But RayExecutorV2 calls
+    # set_device(local_rank) with 0..N-1, so that would be an invalid ordinal.
+    # vLLM normally neutralises this via ray_noset_device_env_vars
+    # (see vllm/v1/executor/ray_executor_v2.py), but the base default is an
+    # empty list and only platforms/cuda.py populates it. Without this, any
+    # multi-node ray run (e.g. TP8 PP2) fails with
+    # "CUDA error: invalid device ordinal".
+    ray_noset_device_env_vars: list[str] = [
+        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
+    ]
     dist_backend: str = (
         "flagcx" if "FLAGCX_PATH" in os.environ else dist_backend_dict.get(device_name, "nccl")
     )
@@ -111,7 +122,46 @@ class PlatformFL(Platform):
         """
         Set the device for the current platform.
         """
+        # --- 诊断探针（HY4_CTX_PROBE=1 开启）---
+        # 记录 set_device 之前的 CUDA context 状态，用于定位
+        # 「16 worker 把 context 堆在 device0 导致超过单卡 15 个上限」的问题。
+        if os.path.exists("/tmp/hy4_probe.flag"):
+            try:
+                import ctypes as _ct
+                import time as _tm
+
+                _lib = _ct.CDLL("libcuda.so.1")
+                _lib.cuInit(0)
+                _p = _ct.c_void_p()
+                _lib.cuCtxGetCurrent(_ct.byref(_p))
+                _drv = _ct.c_int(0)
+                _lib.cuCtxGetDevice(_ct.byref(_drv))
+                with open("/tmp/hy4_ctx_probe.log", "a") as _f:
+                    _f.write(
+                        f"{_tm.strftime('%H:%M:%S')} pid={os.getpid()} "
+                        f"target={device} ctx_before={_p.value} "
+                        f"drv_dev={_drv.value} "
+                        f"CVD={os.environ.get('CUDA_VISIBLE_DEVICES')!r}\n"
+                    )
+            except Exception:
+                pass
         cls.torch_device_fn.set_device(device)
+        if os.path.exists("/tmp/hy4_probe.flag"):
+            try:
+                import ctypes as _ct
+
+                _lib = _ct.CDLL("libcuda.so.1")
+                _p = _ct.c_void_p()
+                _lib.cuCtxGetCurrent(_ct.byref(_p))
+                _drv = _ct.c_int(0)
+                _lib.cuCtxGetDevice(_ct.byref(_drv))
+                with open("/tmp/hy4_ctx_probe.log", "a") as _f:
+                    _f.write(
+                        f"    AFTER pid={os.getpid()} ctx={_p.value} "
+                        f"drv_dev={_drv.value}\n"
+                    )
+            except Exception:
+                pass
 
     @classmethod
     def empty_cache(cls) -> None:
