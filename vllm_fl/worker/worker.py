@@ -1385,7 +1385,39 @@ def init_worker_distributed_environment(
                 flush=True,
             )
     except Exception as _fl_exc:  # noqa: BLE001 - never block startup
+        import traceback as _fl_tb
+
         print(f"[hy4-iluvatar] TP priming failed: {_fl_exc}", flush=True)
+        _fl_tb.print_exc()
+
+    # Iluvatar: PP group 的 communicator 同样是惰性创建（见上面 TP priming 的注释）。
+    # 只 prime TP 的话，PP>1 时 PP group 的 device comm 会在第一次 send/recv 才建，
+    # 那时 FlagGems 已经替换了 kernel → 撞同一个 __vsnprintf 段错误。
+    # 实测：TP1PP2 不崩、TP2PP2/TP2PP4 崩在 ixcclCommInitRankFunc，正是这个差异。
+    # 这里用 all_reduce（对称、无先后依赖）触发 comm 创建，避免 send/recv 的死锁风险。
+    try:
+        import torch as _fl_torch2
+        from vllm.distributed.parallel_state import get_pp_group as _fl_get_pp
+
+        _fl_pp = _fl_get_pp()
+        if _fl_pp.world_size > 1:
+            _fl_pp_probe = _fl_torch2.zeros(
+                1,
+                dtype=_fl_torch2.float32,
+                device=_fl_torch2.cuda.current_device(),
+            )
+            _fl_pp.all_reduce(_fl_pp_probe)
+            _fl_torch2.cuda.synchronize()
+            print(
+                f"[hy4-iluvatar] PP communicator primed (rank={rank}, "
+                f"world={_fl_pp.world_size}, pp_rank={_fl_pp.rank_in_group})",
+                flush=True,
+            )
+    except Exception as _fl_exc2:  # noqa: BLE001 - never block startup
+        import traceback as _fl_tb2
+
+        print(f"[hy4-iluvatar] PP priming failed: {_fl_exc2}", flush=True)
+        _fl_tb2.print_exc()
 
     # Init ec connector here before KV caches caches init
     # NOTE: We do not init KV caches for Encoder-only instance in EPD disagg mode
