@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 import typing
 from collections.abc import Callable, Iterable
 from itertools import islice
@@ -474,10 +475,16 @@ class HYV4Model(nn.Module):
         super().__init__()
         config = typing.cast(HYV4Config, vllm_config.model_config.hf_config)
         self.config = config
-        validate_hy4_parallel_config(
-            config, vllm_config.parallel_config.pipeline_parallel_size
-        )
+        # PP>1 是支持的：vLLM 的标准 PP 结构（PPMissingLayer / make_layers /
+        # get_pp_group）本来就在。唯一缺的是 topk_indices_buffer 的跨 stage 传递
+        # —— shared indexer 层要读「前面最近的 full 层」算出的 top-k 索引，
+        # 而 PP 下那个 full 层可能落在更早的 stage 上。见 forward() 里的转发逻辑。
         self.runtime_plan = prepare_hy4_runtime(vllm_config)
+        self.pp_size = vllm_config.parallel_config.pipeline_parallel_size
+        # 调试开关：置 HY4_DISABLE_PP_TOPK=1 可临时关掉 topk 跨 stage 传输，
+        # 用于判别「PP 卡住」是否由本功能引入。
+        self._pp_transfer_topk = (self.pp_size > 1
+                                  and os.environ.get("HY4_DISABLE_PP_TOPK") != "1")
         self.topk_indices_buffer = torch.empty(
             vllm_config.scheduler_config.max_num_batched_tokens,
             config.index_topk,
@@ -510,10 +517,40 @@ class HYV4Model(nn.Module):
         else:
             self.hc_head = PPMissingLayer()
             self.norm = PPMissingLayer()
-        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
-            ["streams"],
-            config.hc_mult * config.hidden_size,
-        )
+        _streams_dim = config.hc_mult * config.hidden_size
+        if self._pp_transfer_topk:
+            # intermediate tensors 的 key 集合必须在所有 rank 上一致，否则 PP
+            # 收发时形状对不上。所以即使某个 rank 自己不消费 topk_indices，
+            # 也要把它包含进来。
+            _index_topk = config.index_topk
+
+            def make_empty_intermediate_tensors(
+                batch_size: int,
+                dtype: torch.dtype,
+                device: torch.device,
+            ) -> IntermediateTensors:
+                return IntermediateTensors(
+                    {
+                        "streams": torch.zeros(
+                            (batch_size, _streams_dim), dtype=dtype, device=device
+                        ),
+                        # buffer 是 int32，不能套用 factory 的统一 dtype
+                        "topk_indices": torch.zeros(
+                            (batch_size, _index_topk),
+                            dtype=torch.int32,
+                            device=device,
+                        ),
+                    }
+                )
+
+            self.make_empty_intermediate_tensors = make_empty_intermediate_tensors
+        else:
+            self.make_empty_intermediate_tensors = (
+                make_empty_intermediate_tensors_factory(
+                    ["streams"],
+                    _streams_dim,
+                )
+            )
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -543,11 +580,26 @@ class HYV4Model(nn.Module):
                 self.config.hc_mult,
                 self.config.hidden_size,
             )
+            # 接上游算好的 top-k 索引：shared 层直接读 buffer，若上游的 full 层
+            # 不在本 stage，本 rank 这块 buffer 是空的，必须在这里补上。
+            if self._pp_transfer_topk and "topk_indices" in intermediate_tensors:
+                _upstream_topk = intermediate_tensors["topk_indices"]
+                _n = streams.shape[0]
+                self.topk_indices_buffer[:_n].copy_(_upstream_topk[:_n])
 
         for layer in islice(self.layers, self.start_layer, self.end_layer):
             streams = layer(positions, streams)
 
         if not get_pp_group().is_last_rank:
+            if self._pp_transfer_topk:
+                # 只传当前 batch 的有效行；buffer 其余部分是预分配的空洞。
+                _n = streams.shape[0]
+                return IntermediateTensors(
+                    {
+                        "streams": streams.flatten(1),
+                        "topk_indices": self.topk_indices_buffer[:_n],
+                    }
+                )
             return IntermediateTensors({"streams": streams.flatten(1)})
         hidden_states = self.hc_head(streams)
         return self.norm(hidden_states)

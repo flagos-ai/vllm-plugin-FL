@@ -21,6 +21,53 @@ del _torch
 from vllm_fl.utils import get_op_config as _get_op_config
 
 
+def _hy4_probe_bind_kv_cache() -> None:
+    """诊断用：记录 bind_kv_cache 的 kv_caches key（受 /tmp/hy4_probe.flag 控制）。"""
+    if getattr(_hy4_probe_bind_kv_cache, "_done", False):
+        return
+    try:
+        from vllm.v1.worker import utils as _u
+    except Exception:
+        return
+
+    _orig = _u.bind_kv_cache
+
+    def _patched(kv_caches, forward_context, runner_kv_caches, *a, **kw):
+        try:
+            import os
+            if os.path.exists("/tmp/hy4_probe.flag"):
+                from collections import defaultdict
+                import vllm.model_executor.models.utils as _mu
+
+                num = a[0] if a else kw.get("num_attn_module", 1)
+                idx2name = defaultdict(list)
+                for name in kv_caches:
+                    idx2name[_mu.extract_layer_index(name, num)].append(name)
+                out = [f"num_attn_module={num} n_kv={len(kv_caches)}"]
+                for i in sorted(idx2name):
+                    names = idx2name[i]
+                    out.append(
+                        f"  idx={i}: {names}" + ("   <== DUPLICATE" if len(names) > 1 else "")
+                    )
+                with open("/tmp/hy4_kvcache_probe.log", "w") as f:
+                    f.write("\n".join(out) + "\n")
+        except Exception:
+            pass
+        return _orig(kv_caches, forward_context, runner_kv_caches, *a, **kw)
+
+    _u.bind_kv_cache = _patched
+    try:
+        from vllm.v1.worker import gpu_model_runner as _g
+        _g.bind_kv_cache = _patched
+    except Exception:
+        pass
+    _hy4_probe_bind_kv_cache._done = True
+
+
+_hy4_probe_bind_kv_cache()
+
+
+
 def _hy4_patch_ray_worker_early_device() -> None:
     """让 ray actor 在创建时就绑定自己的 GPU（Iluvatar context 上限规避）。
 

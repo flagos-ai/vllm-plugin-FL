@@ -82,8 +82,12 @@ class PlatformFL(Platform):
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "iluvatar":
-            return False
+        # NOTE: iluvatar 走的是 CUDA API 栈（libcuda.so / torch.cuda / nccl），
+        # device_type 实测为 'cuda'，所以必须按 cuda_alike 处理。
+        # 之前这里硬编码 return False，导致 vLLM 里大量 CUDA 分支被跳过，
+        # 例如 vllm/v1/worker/utils.py:bind_kv_cache() 在「同一 decoder layer
+        # 有多个 attention 模块」时（HY4 的 attn + indexer.k_cache）直接
+        # raise NotImplementedError，模型根本起不来。
         if self.device_type == "musa":
             return True
         if self.vendor_name == "hygon":
