@@ -1,6 +1,6 @@
 # The SDK, TorchMUSA and corrected ordinary dependencies are supplied by this
 # immutable runtime image. CI installs the checked-out plugin into its own venv.
-ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
 FROM ${MUSA_BASE_IMAGE} AS base
 
 ENV VLLM_PLUGINS=fl \
