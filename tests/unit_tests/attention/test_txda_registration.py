@@ -75,7 +75,15 @@ def test_dispatch_config_cannot_fall_back_to_known_bad_kernels():
     assert config["op_backends"]["attention_backend"] == ["vendor"]
     assert config["op_backends"]["rms_norm"] == ["reference"]
     assert config["op_backends"]["rotary_embedding"] == ["reference"]
-    assert {"copy", "copy_", "to_copy"} <= set(config["flagos_blacklist"])
+    assert config["op_backends"]["silu_and_mul"] == ["reference"]
+    allowed = set(config["flagos_whitelist"])
+    assert not {"copy", "copy_", "to_copy", "linear", "mm", "mm_out"} & allowed
+    # A bare add/mul list lets Dense run but leaves MoE routing unregistered.
+    assert {
+        "topk_softmax", "moe_align_block_size",
+        "invoke_fused_moe_triton_kernel", "moe_sum",
+    } <= allowed
+    assert not config.get("flagos_blacklist")
 
 
 def test_seeded_sampling_keeps_native_exponential_fallback():
@@ -84,4 +92,4 @@ def test_seeded_sampling_keeps_native_exponential_fallback():
     config = yaml.safe_load(
         (ROOT / "vllm_fl/dispatch/config/tsingmicro.yaml").read_text()
     )
-    assert "exponential_" in config["flagos_blacklist"]
+    assert "exponential_" not in config["flagos_whitelist"]

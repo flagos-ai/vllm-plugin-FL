@@ -13,6 +13,10 @@ containing the TXDA 0.28 adaptation described here.
 - Prefill and decode context parallel sizes must both be 1.
 - Speculative decoding is unsupported because the fused speculative Mamba
   state-copy path is not available on TXDA. Omit `--speculative-config`.
+- Generic FlagGems ATen replacement is limited to add/mul; four additional
+  selectors retain the required MoE implementations. Normalization, rotary and
+  SiLU use reference implementations. This conservative configuration can be
+  slow and does not establish a throughput guarantee.
 - The TXDA SDPA backend uses the paged KV cache with reference attention.
   Attention, GDN/Mamba, collectives, native casts and matrix multiplication stay
   outside captured regions. MLA and sparse attention are unsupported.
@@ -128,6 +132,11 @@ export FL_MODEL_BASE_PATH=/models
 
 The plugin uses `TXDA_VISIBLE_DEVICES` for logical-to-physical device mapping.
 Set the list to the allocated devices before starting the engine.
+
+On the reference host, some groups stalled during FlagCX warmup even with the
+original 0.24 image. The tested MoE group used `NCCL_P2P_DISABLE=1`, selecting
+socket transport; verify successful collectives on every allocated rank before
+starting a model. This option is process-local and is not forced by the plugin.
 
 An explicit `--kv-cache-memory-bytes` takes priority over the legacy
 `VLLM_TXDA_KV_CACHE_SIZE` environment variable. If neither is set, TXDA retains
@@ -250,9 +259,10 @@ input buffers, retained launch arguments and a private graph pool. Unsupported
 regions, input layouts or changed scalar values execute eagerly. A model that
 captures or reuses no live native graphs during startup is rejected explicitly.
 
-This path has passed changing-input graph probes and full MoE model capture.
-It has **not passed the model inference acceptance gate**: startup capture is
-not evidence of correct inference-time replay. Keep the original request
+This path has passed changing-input graph probes and two supplemental MoE
+requests with correct answers and native replay on every worker. It has
+**not passed the complete model inference acceptance gate**; short requests
+and startup capture do not establish the full matrix. Keep the original request
 budgets and assertions, and verify both response correctness and nonzero native
 replay activity after API readiness before accepting a graph run.
 
@@ -262,8 +272,15 @@ Validated on TX8110 using the reference vendor packages and vLLM
 `0.28.0+empty` built from upstream tag commit
 `2cf0a6915ce544dc493a0990f2ea38d81601128a`. The R6d graph candidate archive
 has SHA256 `ab6df28db9181968848db71a7093a6197ccf62f112b13d9b2a190994fa81943e`.
+The default-dispatch R7 snapshot has SHA256
+`111f7c70f77a8b2bef6f2146f4682b3eeed5a75516a2e198a25b0cecdf2a0666`; its
+production Python files are identical to R6d. Default registration was checked
+against the equivalent R6d environment whitelist.
 
-- 284 regression tests passed locally and in the actual TXDA container.
+- 284 regression tests passed locally and in the actual TXDA container. The
+  R7 default configuration passed the same container suite. Shared compilation
+  checks added 27 passes; three Ascend hardware checks were skipped because
+  this host has no NPU runtime.
 - Both models passed TP8 eager offline text, image and seeded chunked-prefill
   smoke checks. Repeated seeded requests produced identical token IDs.
 - Both models passed bounded OpenAI-compatible text/image serving with the
@@ -271,13 +288,19 @@ has SHA256 `ab6df28db9181968848db71a7093a6197ccf62f112b13d9b2a190994fa81943e`.
 - The original long-text gate passed for each model, but the default eager
   configuration failed the eight-concurrent-request gate with a device error.
   Changing generic GEMM dispatch allowed eight requests to pass in a diagnostic
-  run, but a subsequent long-text request failed. No such diagnostic exclusion
-  is enabled by default.
+  run, but a subsequent long-text request failed. The default now uses the
+  narrower add/mul whitelist with the required MoE selectors. This combination
+  passed the original Dense eight-request case and long-text case (309 tokens,
+  normal stop, all ten quality checks); image scenarios and the full matrix
+  are still under validation.
 - Isolated graph tests passed with changing FP32/BF16 tensor inputs, eager
   native casts/matmul around captured add/mul regions, and graph
-  clear/recreation. Full MoE startup completed with native captures on all
-  eight workers, but the first concurrent inference failed before any measured
-  inference-time replay. Full graph acceptance remains unverified.
+  clear/recreation. With the conservative whitelist, full MoE graph execution
+  correctly answered both a capital question and a changed-input arithmetic
+  question. Each of eight workers recorded 5,232 and 5,769 additional native
+  kernel replays during those requests. These 12-token-budget supplemental
+  requests do not replace the original five-scenario graph gate, which is
+  still running.
 
 These are correctness checks, not throughput or production-capacity claims.
 The vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions were
