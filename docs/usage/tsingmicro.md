@@ -259,12 +259,17 @@ input buffers, retained launch arguments and a private graph pool. Unsupported
 regions, input layouts or changed scalar values execute eagerly. A model that
 captures or reuses no live native graphs during startup is rejected explicitly.
 
-This path has passed changing-input graph probes and two supplemental MoE
-requests with correct answers and native replay on every worker. It has
-**not passed the complete model inference acceptance gate**; short requests
-and startup capture do not establish the full matrix. Keep the original request
-budgets and assertions, and verify both response correctness and nonzero native
-replay activity after API readiness before accepting a graph run.
+This path passed all five original MoE graph scenarios and all 26 requests on
+TP8, with native replay recorded on every worker during the formal requests.
+The complete two-model, two-mode matrix is still pending. Keep the original
+request budgets and assertions, and verify both response correctness and nonzero
+native replay activity after API readiness before accepting a graph run.
+
+TXDA communicator teardown explicitly disables further collectives and aborts
+the underlying TCCL communicator, waiting at most five seconds. Abort failure or
+timeout is logged. The vendor Abort API does not release all FlagCX host
+bookkeeping, so this is not a guarantee of complete resource reclamation or safe
+in-process reinitialization. Other backends retain their existing teardown.
 
 ## Validation status
 
@@ -290,17 +295,24 @@ against the equivalent R6d environment whitelist.
   Changing generic GEMM dispatch allowed eight requests to pass in a diagnostic
   run, but a subsequent long-text request failed. The default now uses the
   narrower add/mul whitelist with the required MoE selectors. This combination
-  passed the original Dense eight-request case and long-text case (309 tokens,
-  normal stop, all ten quality checks); image scenarios and the full matrix
-  are still under validation.
+  passed all five original Dense eager scenarios and all 26 requests on TP8.
+  Its long-text response completed normally at 309 tokens with all ten quality
+  checks passing; the independent evidence summary reports PASS without
+  integrity errors or verification gaps.
 - Isolated graph tests passed with changing FP32/BF16 tensor inputs, eager
   native casts/matmul around captured add/mul regions, and graph
   clear/recreation. With the conservative whitelist, full MoE graph execution
   correctly answered both a capital question and a changed-input arithmetic
   question. Each of eight workers recorded 5,232 and 5,769 additional native
   kernel replays during those requests. These 12-token-budget supplemental
-  requests do not replace the original five-scenario graph gate, which is
-  still running.
+  requests are supplemental. The subsequent original MoE graph gate passed
+  all five scenarios and all 26 requests on TP8 with P2P disabled; each worker
+  recorded a sampled increase of 133,484 native kernel replays during the run.
+  Dense graph and MoE eager acceptance remain pending.
+- The TXDA-specific communicator teardown has 26 focused CPU regression cases;
+  those and the three existing stream tests passed. They cover idempotence,
+  initialization and synchronization failures, bounded waiting, library/handle
+  lifetime, native ABI binding and unchanged behavior on other backends.
 
 These are correctness checks, not throughput or production-capacity claims.
 The vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions were
