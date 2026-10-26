@@ -332,6 +332,117 @@ def patch_torch_inductor_for_iluvatar() -> None:
 patch_torch_inductor_for_iluvatar()
 
 
+def patch_compressed_tensors_capability_gate() -> None:
+    """放开 compressed-tensors 对 W8A8-INT8 的 sm75 能力检查（Iluvatar 报 7.1）。
+
+    见模块级注释：Iluvatar 的 W8A8 用 FlagGems int8 kernel，不用 cutlass。
+    """
+    try:
+        from vllm.model_executor.layers.quantization.compressed_tensors import (
+            compressed_tensors as _ct,
+        )
+
+        _cls = _ct.CompressedTensorsConfig
+        if getattr(_cls, "_iluvatar_cap_gate_patched", False):
+            return
+        _orig = _cls._check_scheme_supported
+
+        def _relaxed(min_capability, error=True, match_exact=False):
+            # 只放开 INT8(turing, 75) 这一档
+            if not match_exact and min_capability <= 75:
+                return True
+            return _orig(min_capability, error=error, match_exact=match_exact)
+
+        _cls._check_scheme_supported = staticmethod(_relaxed)
+        _cls._iluvatar_cap_gate_patched = True
+        logger.info(
+            "patch_compressed_tensors_capability_gate: W8A8-INT8 (min_capability<=75) "
+            "no longer gated by cutlass sm75 on iluvatar (uses FlagGems int8 kernels)"
+        )
+    except Exception as e:  # noqa: BLE001 - never block startup
+        logger.warning(
+            "patch_compressed_tensors_capability_gate failed: %s", e
+        )
+
+
+patch_compressed_tensors_capability_gate()
+
+
+def disable_flaggems_tle_for_iluvatar() -> None:
+    """把 flaggems/flag_gems 的 TLE 路径关掉（CoreX 不支持 nv_mma_shared_layout）。
+
+    见模块级注释：必须在这里设，因为 vLLM spawn worker 时不一定转发这些 env。
+    每个开关在 flaggems 里都是 ``os.environ.get("FLAGGEMS_..._TLE", "1")``，
+    运行时读取，所以在这里设就能生效；关掉后走同文件的非 TLE Triton 实现。
+    """
+    import os as _os
+
+    _TLE_SWITCHES = (
+        "FLAGGEMS_FLASHMLA_SPARSE_TLE",          # MLA sparse prefill
+        "FLAGGEMS_FLASHMLA_DECODE_TLE",          # MLA decode
+        "FLAGGEMS_FP8_FP4_MQA_LOGITS_TLE",       # sparse indexer 的 paged MQA logits
+        "FLAGGEMS_CHUNK_GATED_DELTA_RULE_TLE",   # GDN (hybrid 模型)
+    )
+    changed = []
+    for _name in _TLE_SWITCHES:
+        if _os.environ.get(_name, "1").lower() not in {"0", "false", "off", "no"}:
+            _os.environ[_name] = "0"
+            changed.append(_name)
+    if changed:
+        logger.info(
+            "disable_flaggems_tle_for_iluvatar: disabled %s "
+            "(CoreX TLE has no nv_mma_shared_layout support)",
+            ", ".join(changed),
+        )
+
+
+disable_flaggems_tle_for_iluvatar()
+
+
+def patch_flaggems_flashmla_sparse_smem() -> None:
+    """把 flaggems FlashMLA-sparse prefill 的 autotune tile 收小到 128 KB 以内。
+
+    BI-V150 的 ``shared_memory_per_block`` 只有 131072 B(128 KB,与 A100 同级)。
+    flaggems 默认 autotune 是 ``BH=64, BK=64``,而 DQK=576 时
+        Q tile 64*576*2 = 73728
+        KV tile 64*576*2 = 73728
+    合计 147712 B > 131072 ⇒ 第一次推理就崩:
+        triton.runtime.errors.OutOfResources: out of resource: shared memory,
+        Required: 147712, Hardware limit: 131072
+
+    实测(单卡,与 fp32 参照比对,rel≈4e-3 属 bf16 正常):
+        BH=64 stages=2/1 → 147712/172032  OOM
+        BH=32 stages=1   → 135168          OOM
+        BH=32 stages=2   → OK  ✅
+        BH=16 stages=1   → OK
+    这里改成 BH=32 + num_stages=2。BH 只需整除 head-group G(=HQ,本 kernel 里
+    HKV 恒为 1),HQ ∈ {64,128} 都能被 32 整除。
+    """
+    try:
+        import triton
+
+        import flaggems_vllm.ops.flashmla_sparse as _fm
+
+        fn = getattr(_fm, "triton_flash_mla_sparse_fwd", None)
+        if fn is None or not hasattr(fn, "configs"):
+            return
+        if getattr(fn, "_iluvatar_smem_patched", False):
+            return
+        fn.configs = [
+            triton.Config({"BK": 64, "BH": 32}, num_warps=8, num_stages=2),
+        ]
+        fn._iluvatar_smem_patched = True
+        logger.info(
+            "patch_flaggems_flashmla_sparse_smem: FlashMLA-sparse prefill tile "
+            "BH=32,BK=64,stages=2 (default BH=64 needs 147712B > 131072B smem)"
+        )
+    except Exception as e:  # noqa: BLE001 - never block startup
+        logger.warning("patch_flaggems_flashmla_sparse_smem failed: %s", e)
+
+
+patch_flaggems_flashmla_sparse_smem()
+
+
 class IluvatarBackend(Backend):
     """
     Iluvatar backend for operator implementations.

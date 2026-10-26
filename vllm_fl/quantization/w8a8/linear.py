@@ -31,6 +31,24 @@ from vllm_fl.utils import (
 
 FLAGGEMS_W8A8_LINEAR_OP = "w8a8_dynamic_per_token_linear"
 
+# CoreX 的 `torch._int_mm` 硬性要求 M > 16（实测 M=16 也报
+# "self.size(0) needs to be greater than 16"，M=17 起才正常，
+# 且结果与 CPU int32 矩阵乘逐位一致）。
+# PP 的最后一级在 decode 阶段一次只有 1 个 token、warmup 的 dummy run 也只有
+# 几个 token，都会撞上这个限制 ⇒ 补零到 17 行算完再切回，被丢弃的行不影响结果。
+_MIN_INT_MM_M = 17
+
+
+def _iluvatar_int_mm(x_q: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    m = x_q.shape[0]
+    if m >= _MIN_INT_MM_M:
+        return _NATIVE_INT_MM(x_q, weight)
+    pad = torch.zeros(
+        (_MIN_INT_MM_M - m, x_q.shape[1]), dtype=x_q.dtype, device=x_q.device
+    )
+    padded = torch.cat([x_q, pad], dim=0)
+    return _NATIVE_INT_MM(padded, weight)[:m]
+
 _dynamic_per_token_quant_int8 = CachedOp("dynamic_per_token_quant_int8")
 
 # Capture the native INT8 GEMM before FlagGems' `enable()` monkeypatches
@@ -120,7 +138,8 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
             # The native INT8 GEMM is the only viable path: it accumulates in
             # int32 (no overflow for int8 x int8), then we dequantize in fp32
             # with the per-token [M,1] and per-channel [N] scales.
-            acc = torch._int_mm(x_q, weight)
+            # 见 _iluvatar_int_mm：CoreX 要求 M > 16，小 batch 需补零
+            acc = _iluvatar_int_mm(x_q, weight)
             output = acc.to(torch.float32) * x_scale
             output = output * weight_scale.unsqueeze(0)
             if bias is not None:

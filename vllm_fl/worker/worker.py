@@ -986,6 +986,11 @@ class WorkerFL(WorkerBase):
                     self.vllm_config, batch_desc.num_tokens
                 )
             }
+        # HY4 PP: topk_indices 在 TP 上是完全复制的、绝不能被切分。
+        # 它的 numel 常常能被 TP world size 整除，若不显式 opt-out，
+        # 发送端只发 1/TP、接收端却按整份 all_gather 收 → shm 广播死锁。
+        # 收发两端必须一致（见 HANDOFF §5-B）。
+        all_gather_tensors["topk_indices"] = False
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict = get_pp_group().recv_tensor_dict(
                 all_gather_group=get_tp_group(),
@@ -1333,6 +1338,60 @@ class WorkerFL(WorkerBase):
             model_runner.shutdown()
 
 
+_TLE_ENV_SWITCHES = (
+    "FLAGGEMS_FLASHMLA_SPARSE_TLE",          # MLA sparse prefill
+    "FLAGGEMS_FLASHMLA_DECODE_TLE",          # MLA decode
+    "FLAGGEMS_FP8_FP4_MQA_LOGITS_TLE",       # sparse indexer 的 paged MQA logits
+    "FLAGGEMS_CHUNK_GATED_DELTA_RULE_TLE",   # GDN (hybrid 模型)
+)
+
+
+def _disable_flaggems_tle_if_iluvatar() -> None:
+    """Iluvatar 上把 flaggems 的 TLE 路径关掉（CoreX 无 nv_mma_shared_layout）。"""
+    try:
+        import os as _os
+
+        import torch as _t
+
+        # 平台判定的三个坑（都实测踩过）：
+        # 1. 不能用 current_platform.vendor_name —— worker 早期它还是抽象基类，
+        #    会打印 "Current platform does not have 'vendor_name'" 且取值为空。
+        # 2. 不能用 torch.__version__ —— 本镜像里它就是 "2.10.0"，
+        #    没有 "+corex.4.5.0" 后缀（但 package 元数据里有）。
+        # 3. worker 只继承部分 env，GEMS_VENDOR / VLLM_FL_PLATFORM 可能都不在。
+        # 所以三路兜底。
+        _vendor = (
+            _os.environ.get("GEMS_VENDOR")
+            or _os.environ.get("VLLM_FL_PLATFORM")
+            or ""
+        ).strip().lower()
+        _is_iluvatar = _vendor == "iluvatar"
+        if not _is_iluvatar:
+            try:
+                from importlib.metadata import version as _pkg_version
+
+                _is_iluvatar = "corex" in _pkg_version("torch").lower()
+            except Exception:  # noqa: BLE001
+                pass
+        if not _is_iluvatar:
+            _is_iluvatar = "corex" in str(getattr(_t, "__version__", "")).lower()
+        if not _is_iluvatar:
+            return
+        changed = []
+        for _name in _TLE_ENV_SWITCHES:
+            # setdefault：尊重用户显式设置的 1（想试 TLE 时可用）
+            if _name not in _os.environ:
+                _os.environ[_name] = "0"
+                changed.append(_name)
+        if changed:
+            print(
+                "[hy4-iluvatar] disabled flaggems TLE: " + ", ".join(changed),
+                flush=True,
+            )
+    except Exception:  # noqa: BLE001 - never block startup
+        pass
+
+
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
     rank: int,
@@ -1341,6 +1400,14 @@ def init_worker_distributed_environment(
     backend: str = "nccl",
 ) -> None:
     """Initialize the distributed environment."""
+    # Iluvatar: flaggems 的 TLE 内核会用 NVIDIA Hopper/Blackwell 的
+    # mma shared layout（tle.gpu.alloc(..., nv_mma_shared_layout=True)），
+    # CoreX 不支持，第一次推理就报
+    #   iluvatar TLE alloc does not support nv_mma_shared_layout=True
+    # 而 vLLM spawn worker 时只继承部分 env（实测 FLAGGEMS_*_TLE 大多丢失），
+    # 所以必须在 worker 进程里就地关掉，才能真正生效。
+    _disable_flaggems_tle_if_iluvatar()
+
     parallel_config = vllm_config.parallel_config
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     from vllm.model_executor.layers.batch_invariant import init_batch_invariance

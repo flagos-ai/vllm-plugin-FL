@@ -582,7 +582,15 @@ class HYV4Model(nn.Module):
             )
             # 接上游算好的 top-k 索引：shared 层直接读 buffer，若上游的 full 层
             # 不在本 stage，本 rank 这块 buffer 是空的，必须在这里补上。
-            if self._pp_transfer_topk and "topk_indices" in intermediate_tensors:
+            # 注意：不能用 `"topk_indices" in intermediate_tensors`。
+            # IntermediateTensors 既没有 __contains__ 也没有 __iter__，Python 的
+            # `in` 会退化成 __getitem__(0), __getitem__(1), ... 直到 IndexError；
+            # 而它对 int 键返回 None 而不是抛 IndexError ⇒ 无限循环（实测确认）。
+            # 必须直接对底层 dict 做成员判断。
+            if (
+                self._pp_transfer_topk
+                and "topk_indices" in intermediate_tensors.tensors
+            ):
                 _upstream_topk = intermediate_tensors["topk_indices"]
                 _n = streams.shape[0]
                 self.topk_indices_buffer[:_n].copy_(_upstream_topk[:_n])

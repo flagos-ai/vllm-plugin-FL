@@ -4443,7 +4443,9 @@ class ModelRunnerFL(
                     all_gather_tensors = {
                         "residual": not is_residual_scattered_for_sp(
                             self.vllm_config, num_tokens_padded
-                        )
+                        ),
+                        # HY4 PP: topk_indices 跨 stage 是整份复制，禁止切分
+                        "topk_indices": False,
                     }
                     get_pp_group().send_tensor_dict(
                         hidden_states.tensors,
