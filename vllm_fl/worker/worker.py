@@ -695,16 +695,29 @@ class WorkerFL(WorkerBase):
             by adjusting the `gpu_memory_utilization` parameter.
         """
         if current_platform.device_type == "txda":
-            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
-            # e.g., 20 GiB or similar default cache memory size.
-            fallback_val = int(
-                os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024)
-            )
+            # TXDA cannot profile the peak allocation safely. Honor the vLLM
+            # byte budget first, retaining the legacy override/default when
+            # no explicit budget was supplied.
+            kv_cache_memory_bytes = self.cache_config.kv_cache_memory_bytes
+            if kv_cache_memory_bytes is None:
+                try:
+                    kv_cache_memory_bytes = int(
+                        os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * GiB_bytes)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "VLLM_TXDA_KV_CACHE_SIZE must be a positive integer in bytes."
+                    ) from exc
+            if kv_cache_memory_bytes <= 0:
+                raise ValueError(
+                    "TXDA KV cache memory must be positive; check "
+                    "kv_cache_memory_bytes or VLLM_TXDA_KV_CACHE_SIZE."
+                )
             logger.info(
-                "txda platform detected. Skipping memory profiling to avoid OOM. "
-                f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB."
+                "TXDA: skipping memory profiling; using %.2f GiB for KV cache.",
+                kv_cache_memory_bytes / GiB_bytes,
             )
-            return fallback_val
+            return kv_cache_memory_bytes
 
         maybe_apply_startup_plan(self)
 

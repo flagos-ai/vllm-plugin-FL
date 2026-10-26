@@ -55,6 +55,7 @@ dist_backend_dict = {
     "cuda": "nccl",
     "musa": "mccl",
     "gcu": "eccl",
+    "txda": "tccl",
 }
 
 
@@ -222,13 +223,49 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
-        if cls.device_type == "npu" and vllm_config.use_v2_model_runner:
+        if cls.device_type in {"npu", "txda"} and vllm_config.use_v2_model_runner:
+            platform_name = "Ascend" if cls.device_type == "npu" else "Tsingmicro TXDA"
             raise ValueError(
-                "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
+                f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
         parallel_config = vllm_config.parallel_config
+        if cls.device_type == "txda":
+            if getattr(vllm_config, "speculative_config", None) is not None:
+                raise ValueError(
+                    "Tsingmicro TXDA does not support speculative decoding; "
+                    "the fused speculative Mamba state-copy path is unsupported. "
+                    "Remove --speculative-config to use the FL/V1 runner."
+                )
+            parallel_config.disable_custom_all_reduce = True
+            if any(
+                getattr(parallel_config, field, 1) > 1
+                for field in (
+                    "prefill_context_parallel_size",
+                    "decode_context_parallel_size",
+                )
+            ):
+                raise ValueError(
+                    "Tsingmicro TXDA SDPA does not support context parallelism; "
+                    "prefill_context_parallel_size and decode_context_parallel_size "
+                    "must both be 1."
+                )
+            world_size = getattr(parallel_config, "world_size_across_dp", None)
+            if world_size is None:
+                world_size = 1
+                for field in (
+                    "tensor_parallel_size",
+                    "pipeline_parallel_size",
+                    "data_parallel_size",
+                ):
+                    world_size *= getattr(parallel_config, field, 1)
+            if world_size > 1 and cls.dist_backend != "flagcx":
+                raise ValueError(
+                    "Tsingmicro TXDA multi-device execution requires FlagCX. "
+                    "Set FLAGCX_PATH to a valid TXDA FlagCX repository containing "
+                    "plugin/interservice/flagcx_wrapper.py and build/lib/libflagcx.so."
+                )
         if cls.device_type == "npu" and model_config is not None:
             from vllm_fl.patches.ascend_glm_dsa import (
                 prepare_glm_dsa_dense_fallback,
@@ -300,6 +337,16 @@ class PlatformFL(Platform):
         compilation_config = vllm_config.compilation_config
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
+
+        if cls.device_type == "txda" and (
+            compilation_config.mode != CompilationMode.NONE
+            or compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        ):
+            raise ValueError(
+                "Tsingmicro TXDA currently requires eager execution; "
+                "torch.compile and graph capture are not supported by the "
+                "TXDA SDPA backend. Set --enforce-eager."
+            )
 
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False

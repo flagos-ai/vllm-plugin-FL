@@ -18,6 +18,15 @@ import torch
 _BACKEND = os.environ.get("FL_BACKEND", "").lower()
 
 
+def _txda_runtime():
+    """Return the optional TXDA runtime, including its PrivateUse1 registration."""
+    try:
+        import torch_txda  # noqa: F401
+    except ImportError:
+        return None
+    return getattr(torch, "txda", None)
+
+
 def get_backend() -> str:
     """Detect current backend from env or hardware.
 
@@ -26,7 +35,11 @@ def get_backend() -> str:
         2. Auto-detect from available hardware
     """
     if _BACKEND:
-        return _BACKEND
+        return "tsingmicro" if _BACKEND == "txda" else _BACKEND
+    # Check TXDA before CUDA: transfer_to_txda may expose CUDA-style aliases.
+    txda = _txda_runtime()
+    if txda is not None and txda.is_available():
+        return "tsingmicro"
     if torch.cuda.is_available():
         # Hygon HIP uses Torch CUDA APIs, but remains a distinct test backend.
         return (
@@ -49,6 +62,9 @@ def is_accelerator_available() -> bool:
     backend = get_backend()
     if backend == "hygon":
         return torch.cuda.is_available()
+    if backend == "tsingmicro":
+        txda = _txda_runtime()
+        return txda is not None and txda.is_available()
     return backend not in ("cpu", "")
 
 
@@ -59,6 +75,9 @@ def get_device(index: int = 0) -> torch.device:
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
+    elif backend == "tsingmicro":
+        _txda_runtime()
+        return torch.device(f"txda:{index}")
     return torch.device("cpu")
 
 
@@ -67,6 +86,9 @@ def get_device_count() -> int:
     backend = get_backend()
     if backend in ("nvidia", "hygon", "tianshu"):
         return torch.cuda.device_count()
+    elif backend == "tsingmicro":
+        txda = _txda_runtime()
+        return txda.device_count() if txda is not None else 0
     elif backend == "ascend":
         try:
             import torch_npu  # noqa: F401

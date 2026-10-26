@@ -1,0 +1,33 @@
+# vLLM-FL Dispatch Configuration for TSINGMICRO (TX8110 / TSM Runtime)
+# Ported from the vLLM 0.24 TXDA enablement (537284eb, #460) for vLLM 0.28.
+prefer: flagos
+strict: false
+
+op_backends:
+  # TX8110 FlagGems attention produces incorrect values without raising.
+  # Select SDPA directly; exception fallback cannot detect incorrect numerics.
+  attention_backend:
+    - vendor
+  # FlagGems normalization and rotary also produce incorrect values on TX8110.
+  rms_norm:
+    - reference
+  rotary_embedding:
+    - reference
+  silu_and_mul:
+    - flagos
+    - reference
+
+# Dtype-changing copies can hang the TX8110 Triton copy kernels.
+flagos_blacklist:
+  - masked_fill
+  - masked_fill_
+  # Seeded sampling uses CPU MT19937 generators; the FlagGems exponential
+  # kernel expects a two-word Philox state. Keep the native TXDA fallback.
+  - exponential_
+  - to_copy
+  - copy_
+  - copy
+
+oot_blacklist:
+  - masked_fill
+  - masked_fill_
