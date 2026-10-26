@@ -364,6 +364,13 @@ class PlatformFL(Platform):
                 ):
                     setattr(pass_config, name, False)
             if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+                if parallel_config.tensor_parallel_size == 1:
+                    raise ValueError(
+                        "Tsingmicro TXDA graphs are disabled for tensor_parallel_size=1 "
+                        "after a correctness failure in Dense TP1 validation. "
+                        "Use --enforce-eager for TP1; TP8 is the validated graph "
+                        "configuration."
+                    )
                 if compilation_config.mode != CompilationMode.VLLM_COMPILE:
                     raise ValueError(
                         "Tsingmicro TXDA graphs require piecewise VLLM_COMPILE "

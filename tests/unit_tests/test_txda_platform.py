@@ -79,6 +79,7 @@ class _GraphMode(IntEnum):
     PIECEWISE = 1
     FULL = 2
     FULL_AND_PIECEWISE = 3
+    FULL_DECODE_ONLY = 4
 
 
 @pytest.fixture
@@ -90,7 +91,7 @@ def configure_platform(monkeypatch):
     ):
         monkeypatch.setenv(name, os.environ.get(name, "unchanged"))
     txda_partition = ModuleType("vllm_fl.compilation.txda_partition")
-    txda_partition.install_txda_graph_partition = lambda device_type: None
+    txda_partition.install_txda_graph_partition = Mock()
     monkeypatch.setitem(sys.modules, txda_partition.__name__, txda_partition)
     config_module = ModuleType("vllm.config")
     config_module.CUDAGraphMode = _GraphMode
@@ -106,12 +107,17 @@ def configure_platform(monkeypatch):
     )
 
 
-def _config(mode=_CompilationMode.NONE, graph=_GraphMode.NONE):
+def _config(
+    mode=_CompilationMode.NONE, graph=_GraphMode.NONE, *, tensor_parallel_size=1
+):
     return SimpleNamespace(
         use_v2_model_runner=False,
         model_config=None,
         parallel_config=SimpleNamespace(
-            worker_cls=None, all2all_backend=None, data_parallel_size=1
+            worker_cls=None,
+            all2all_backend=None,
+            data_parallel_size=1,
+            tensor_parallel_size=tensor_parallel_size,
         ),
         scheduler_config=SimpleNamespace(),
         cache_config=SimpleNamespace(block_size=None),
@@ -145,32 +151,44 @@ def test_txda_rejects_explicit_upstream_v2_runner(configure_platform):
 
 @pytest.mark.parametrize("backend", ["inductor", "openxla"])
 def test_txda_rejects_unsupported_compiler_backend(configure_platform, backend):
-    config = _config(_CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE)
+    config = _config(
+        _CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE, tensor_parallel_size=8
+    )
     config.compilation_config.backend = backend
     with pytest.raises(ValueError, match="requires backend='eager'"):
         configure_platform(
-            SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+            SimpleNamespace(
+                device_type="txda", vendor_name="tsingmicro", dist_backend="flagcx"
+            ),
+            config,
         )
 
 
 def test_txda_rejects_graph_without_piecewise_compilation(configure_platform):
     with pytest.raises(ValueError, match="piecewise VLLM_COMPILE"):
         configure_platform(
-            SimpleNamespace(device_type="txda", vendor_name="tsingmicro"),
-            _config(_CompilationMode.NONE, _GraphMode.PIECEWISE),
+            SimpleNamespace(
+                device_type="txda", vendor_name="tsingmicro", dist_backend="flagcx"
+            ),
+            _config(
+                _CompilationMode.NONE, _GraphMode.PIECEWISE, tensor_parallel_size=8
+            ),
         )
 
 
 @pytest.mark.parametrize(
-    "mode", [_GraphMode.PIECEWISE, _GraphMode.FULL, _GraphMode.FULL_AND_PIECEWISE]
+    "mode", [mode for mode in _GraphMode if mode != _GraphMode.NONE]
 )
 def test_txda_graph_uses_eager_piecewise_with_native_launch_settings(
     configure_platform, mode
 ):
-    config = _config(_CompilationMode.VLLM_COMPILE, mode)
+    config = _config(_CompilationMode.VLLM_COMPILE, mode, tensor_parallel_size=8)
     config.compilation_config.backend = ""
     configure_platform(
-        SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+        SimpleNamespace(
+            device_type="txda", vendor_name="tsingmicro", dist_backend="flagcx"
+        ),
+        config,
     )
     cc = config.compilation_config
     assert cc.backend == "eager"
@@ -187,16 +205,23 @@ def test_txda_graph_uses_eager_piecewise_with_native_launch_settings(
     assert os.environ["TXDA_LAUNCH_VIA_GGL"] == "1"
     assert os.environ["TXDA_LAUNCH_KERNEL_SYNC"] == "0"
     assert os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] == "0"
+    partition = sys.modules["vllm_fl.compilation.txda_partition"]
+    partition.install_txda_graph_partition.assert_called_once_with("txda")
 
 
 def test_txda_custom_splits_keep_dynamic_attention_and_cache_outside_graph(
     configure_platform,
 ):
-    config = _config(_CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE)
+    config = _config(
+        _CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE, tensor_parallel_size=8
+    )
     cc = config.compilation_config
     cc.splitting_ops = ["custom::op", "vllm::unified_attention_with_output"]
     configure_platform(
-        SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+        SimpleNamespace(
+            device_type="txda", vendor_name="tsingmicro", dist_backend="flagcx"
+        ),
+        config,
     )
     assert cc.splitting_ops == [
         "custom::op",
@@ -208,12 +233,48 @@ def test_txda_custom_splits_keep_dynamic_attention_and_cache_outside_graph(
 
 
 def test_txda_rejects_empty_splitting_override(configure_platform):
-    config = _config(_CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE)
+    config = _config(
+        _CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE, tensor_parallel_size=8
+    )
     config.compilation_config.splitting_ops = []
     with pytest.raises(ValueError, match="empty splitting_ops"):
         configure_platform(
-            SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+            SimpleNamespace(
+                device_type="txda", vendor_name="tsingmicro", dist_backend="flagcx"
+            ),
+            config,
         )
+
+
+@pytest.mark.parametrize(
+    "graph", [mode for mode in _GraphMode if mode != _GraphMode.NONE]
+)
+@pytest.mark.parametrize("mode", [_CompilationMode.NONE, _CompilationMode.VLLM_COMPILE])
+@pytest.mark.parametrize("data_parallel_size", [1, 8])
+def test_txda_tp1_graph_rejected_before_launch_side_effects(
+    configure_platform, monkeypatch, graph, mode, data_parallel_size
+):
+    config = _config(mode, graph, tensor_parallel_size=1)
+    config.parallel_config.data_parallel_size = data_parallel_size
+    config.parallel_config.world_size_across_dp = data_parallel_size
+    platform = SimpleNamespace(
+        device_type="txda", vendor_name="tsingmicro", dist_backend="flagcx"
+    )
+    # Cover both an existing override and an absent launch environment entry.
+    monkeypatch.setenv("TXDA_LAUNCH_VIA_GGL", "existing-ggl")
+    monkeypatch.setenv("TXDA_LAUNCH_KERNEL_SYNC", "existing-sync")
+    monkeypatch.delenv("VLLM_USE_BREAKABLE_CUDAGRAPH", raising=False)
+    before = dict(os.environ)
+    partition = sys.modules["vllm_fl.compilation.txda_partition"]
+
+    with pytest.raises(ValueError, match="tensor_parallel_size=1") as exc:
+        configure_platform(platform, config)
+
+    assert "--enforce-eager" in str(exc.value)
+    assert "TP8 is the validated graph configuration" in str(exc.value)
+    assert config.compilation_config.cudagraph_mode == graph
+    assert dict(os.environ) == before
+    partition.install_txda_graph_partition.assert_not_called()
 
 
 @pytest.mark.parametrize("mode", [_CompilationMode.NONE, _CompilationMode.VLLM_COMPILE])
@@ -224,10 +285,15 @@ def test_txda_no_graph_preserves_launch_environment(configure_platform, mode):
         "VLLM_USE_BREAKABLE_CUDAGRAPH",
     ]
     before = {name: os.environ.get(name) for name in names}
+    config = _config(mode, tensor_parallel_size=1)
     configure_platform(
-        SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), _config(mode)
+        SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
     )
+    assert config.compilation_config.cudagraph_mode == _GraphMode.NONE
+    assert config.compilation_config.mode == mode
     assert {name: os.environ.get(name) for name in names} == before
+    partition = sys.modules["vllm_fl.compilation.txda_partition"]
+    partition.install_txda_graph_partition.assert_not_called()
 
 
 def test_txda_reports_eager_compile_backend_and_native_graph_support():

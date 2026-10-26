@@ -7,7 +7,8 @@ containing the TXDA 0.28 adaptation described here.
 ## Execution scope
 
 - Use the FL/V1 model runner. Eager execution uses `--enforce-eager`.
-  An experimental piecewise graph path is available with the limits below.
+  Piecewise graphs are validated at TP8 with the limits below. TXDA graph
+  execution at TP1 is rejected; use `--enforce-eager` for TP1.
 - Multi-device execution, including the TP8 examples below, requires a valid
   `FLAGCX_PATH`. Native TCCL remains the single-device fallback.
 - Prefill and decode context parallel sizes must both be 1.
@@ -247,9 +248,15 @@ synchronization. The longer request timeout changes waiting time only. Keep
 Use LF line endings for the shell scripts on Linux; a Windows CRLF checkout
 cannot be executed directly by Bash.
 
-### Experimental piecewise graphs
+### Piecewise graphs
 
-For graph validation, replace `--enforce-eager` in the gate server command with:
+The complete graph acceptance runs use TP8. TXDA rejects graph execution at
+TP1 before model loading because Dense TP1 correctness remains unresolved;
+use `--enforce-eager` for that configuration. This is a conservative support
+boundary based on the observed Dense failure, not an identified SDK root cause
+or a claim that every TP1 model fails.
+
+For TP8 graph validation, replace `--enforce-eager` in the gate server command with:
 
 ```bash
 --compilation-config '{"mode":3,"backend":"eager","cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8]}'
@@ -268,11 +275,11 @@ input buffers, retained launch arguments and a private graph pool. Unsupported
 regions, input layouts or changed scalar values execute eagerly. A model that
 captures or reuses no live native graphs during startup is rejected explicitly.
 
-This path passed all five original MoE graph scenarios and all 26 requests on
-TP8, with native replay recorded on every worker during the formal requests.
-The complete two-model, two-mode matrix is still pending. Keep the original
-request budgets and assertions, and verify both response correctness and nonzero
-native replay activity after API readiness before accepting a graph run.
+Both models passed all five original graph scenarios and all 26 requests on
+TP8. For each scenario, all eight workers recorded successful native replay
+within its request window after API readiness. Response correctness and these
+runtime replay events are both required evidence; startup capture counts alone
+do not establish graph inference correctness.
 
 TXDA communicator teardown explicitly disables further collectives and aborts
 the underlying TCCL communicator, waiting at most five seconds. Abort failure or
@@ -282,56 +289,79 @@ in-process reinitialization. Other backends retain their existing teardown.
 
 ## Validation status
 
-Validated on TX8110 using the reference vendor packages and vLLM
-`0.28.0+empty` built from upstream tag commit
-`2cf0a6915ce544dc493a0990f2ea38d81601128a`. The R6d graph candidate archive
-has SHA256 `ab6df28db9181968848db71a7093a6197ccf62f112b13d9b2a190994fa81943e`.
-The default-dispatch R7 snapshot has SHA256
-`111f7c70f77a8b2bef6f2146f4682b3eeed5a75516a2e198a25b0cecdf2a0666`; its
-production Python files are identical to R6d. Default registration was checked
-against the equivalent R6d environment whitelist.
+The complete acceptance matrix passed on TX8110 with the reference vendor
+packages and vLLM `0.28.0+empty`, built from upstream tag commit
+`2cf0a6915ce544dc493a0990f2ea38d81601128a`. Each row below selects one complete
+run with the original five scenarios, 512/128-token budgets, image fixtures
+and quality assertions. All runs used TP8, the default asynchronous scheduler,
+4096-token context, at most eight sequences, a 512-token scheduling batch and
+1 GiB of KV cache per worker.
 
-- The combined adaptation, communicator and shared compilation suite passed
-  337 tests in the reference container; three Ascend hardware checks were
-  skipped because this host has no NPU runtime. The CPU graph fixture isolates
-  its offloader dependency so mocked device detection cannot leak into later
-  tests. Earlier R7 default-dispatch checks also passed all 284 adaptation tests.
-- Both models passed TP8 eager offline text, image and seeded chunked-prefill
-  smoke checks. Repeated seeded requests produced identical token IDs.
-- Both models passed bounded OpenAI-compatible text/image serving with the
-  default asynchronous scheduler. These checks do not establish full acceptance.
-- The original long-text gate passed for each model, but the default eager
-  configuration failed the eight-concurrent-request gate with a device error.
-  Changing generic GEMM dispatch allowed eight requests to pass in a diagnostic
-  run, but a subsequent long-text request failed. The default now uses the
-  narrower add/mul whitelist with the required MoE selectors. This combination
-  passed all five original Dense eager scenarios and all 26 requests on TP8.
-  Its long-text response completed normally at 309 tokens with all ten quality
-  checks passing; the independent evidence summary reports PASS without
-  integrity errors or verification gaps.
-- Isolated graph tests passed with changing FP32/BF16 tensor inputs, eager
-  native casts/matmul around captured add/mul regions, and graph
-  clear/recreation. With the conservative whitelist, full MoE graph execution
-  correctly answered both a capital question and a changed-input arithmetic
-  question. Each of eight workers recorded 5,232 and 5,769 additional native
-  kernel replays during those requests. These 12-token-budget supplemental
-  requests are supplemental. The subsequent original MoE graph gate passed
-  all five scenarios and all 26 requests on TP8 with P2P disabled; each worker
-  recorded a sampled increase of 133,484 native kernel replays during the run.
-  Dense graph and MoE eager acceptance remain pending.
-- The TXDA-specific communicator teardown has 26 focused CPU regression cases;
-  those and the three existing stream tests passed. They cover idempotence,
-  initialization and synchronization failures, bounded waiting, library/handle
-  lifetime, native ABI binding and unchanged behavior on other backends.
-  On the SDK, two independent eight-rank process groups passed native copies,
-  all-reduce, all-gather and explicit abort; all 16 aborts returned success in
-  approximately 0.51 seconds, including when one peer delayed shutdown. An
-  additional stalled group verified bounded abort on all eight ranks, but
-  its communication test remained failed; this does not establish recovery of
-  previously stalled devices.
+| Model | Mode | Tested snapshot | Scenarios | Requests |
+| --- | --- | --- | --- | --- |
+| Qwen3.6-27B | Eager | R6d | 5/5 PASS | 26/26 PASS |
+| Qwen3.6-27B | Piecewise graph | R10 | 5/5 PASS | 26/26 PASS |
+| Qwen3.6-35B-A3B | Eager | R9 | 5/5 PASS | 26/26 PASS |
+| Qwen3.6-35B-A3B | Piecewise graph | R6d | 5/5 PASS | 26/26 PASS |
 
-These are correctness checks, not throughput or production-capacity claims.
+The total is **20 scenarios and 104 requests**. Both graph rows include
+successful replay evidence for all eight workers in every scenario's request
+window. Partial runs, TP1 diagnostics and supplemental short requests are not
+counted. The archived `acceptance-matrix-r10-complete.json` records the selected
+runs, original result hashes, strict summaries and source-equivalence checks;
+its SHA256 is
+`def8ad823b7532eaade76182eb3c788e3724acf41285c529be1e336871cffb4e`.
+
+The tested candidate archives have these SHA256 values:
+
+| Snapshot | Candidate archive SHA256 |
+| --- | --- |
+| R6d | `ab6df28db9181968848db71a7093a6197ccf62f112b13d9b2a190994fa81943e` |
+| R9 | `d44944533f73613d3cce500dd2bfec41c13e2f17ba5a0360428db894a6093fb7` |
+| R10 | `f9f8b3cb5a5008b3ad766e6e68e747c08fc1670292b08fe379352a72c7866f95` |
+
+R6d's environment selected the same inference operators as the later default:
+add/mul for Dense, with four additional MoE selectors for MoE. R7 retained the
+R6d production Python and made this selection the default. The R8 changes were
+verified formatting/import/type changes with normalized AST equality. R9 added
+TXDA communicator shutdown and initialization-error cleanup while preserving
+inference implementation bytes and successful collective computation. All 418
+production/config files are byte-identical between R9 and R10; R10 changes only
+documentation, a CPU test fixture and the packaging manifest. These checks do
+not mean that every row was rerun on R10. The subsequent TP1 graph rejection is
+a further configuration change, outside that byte-equivalence claim; it leaves
+the accepted TP8 inference path unchanged.
+
+The conservative dispatch configuration is intentional. Broader generic
+FlagGems replacement produced device failures in concurrent or long-text
+inference. The selected add/mul plus MoE configuration passed the complete
+matrix above; the earlier failures do not identify a single faulty kernel.
+These are correctness results, not throughput or production-capacity claims.
+
+The final combined adaptation, communicator and shared compilation suite,
+including the TP1 configuration-guard regressions, passed 354 tests in the
+reference container. Three Ascend hardware checks were skipped because the host
+has no NPU runtime. Separate hardware checks covered changing
+FP32/BF16 graph inputs, eager native casts/matmul around captured regions,
+graph clear/recreation, and seeded Mamba state copying across chunk boundaries.
+
+Two independent eight-rank process groups completed collectives and explicit
+teardown with all 16 native Abort calls returning success in approximately
+0.51 seconds, including a delayed peer. The R9 MoE eager gate also completed
+normal worker shutdown with 16 successful Abort calls and no forced worker
+kill. A separate stalled group returned success from all eight Abort calls,
+but its communication test remained failed. Bounded teardown therefore does
+not establish recovery of stalled devices or complete SDK resource release.
+
+The Dense eager provenance receipt originally recorded Windows checkout hashes
+for five Python files whose executed copies used LF. The corrected audit retains
+the original receipt and verifies the actual archived execution directory:
+those Python bytes match the baseline Git blobs, their ASTs and literal/assertion
+contents are unchanged, and all image fixtures are byte-identical. Only line
+endings changed in five Python and four shell files. The corrected strict
+summary, rather than the inaccurate original receipt alone, supports that row.
+
 The vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions were
 preserved. No Tsingmicro workflow or runner configuration exists in upstream
 `main` at `2ed81caa5cdc43770b3272d917950c82e3db131d`; this adaptation does not
-add a hardware CI job.
+add a hardware CI job. Skipped GitHub workflows are not hardware test passes.
