@@ -116,6 +116,21 @@ def select_unquantized_moe_backend_oot(
     if current_platform.is_tpu():
         return UnquantizedMoeBackend.TPU, None
 
+    if current_platform.device_type == "npu":
+        parallel = moe_config.moe_parallel_config
+        if (
+            moe_config.is_lora_enabled
+            or parallel.use_ep
+            or parallel.dp_size != 1
+            or parallel.use_batched_activation_format
+        ):
+            raise NotImplementedError(
+                "Ascend grouped MoE currently requires non-EP, DP1 without LoRA"
+            )
+        if moe_config.moe_backend not in ("auto", "triton"):
+            raise NotImplementedError("Unsupported explicit Ascend MoE backend")
+        return UnquantizedMoeBackend.TRITON, TritonExpertsFL
+
     # Accelerator OOT platforms use the FL Triton experts when FlagGems is
     # enabled. CPU must continue into the v0.28 architecture-aware oracle.
     if _should_use_fl_triton_experts():
@@ -276,6 +291,35 @@ def _prepare_expert_assignment(
 
 
 class TritonExpertsFL(TritonExperts):
+    def workspace_shapes(
+        self,
+        M,
+        N,
+        K,
+        topk,
+        global_num_experts,
+        local_num_experts,
+        expert_tokens_meta,
+        activation,
+    ):
+        workspace13, workspace2, output = super().workspace_shapes(
+            M,
+            N,
+            K,
+            topk,
+            global_num_experts,
+            local_num_experts,
+            expert_tokens_meta,
+            activation,
+        )
+        if current_platform.device_type == "npu":
+            # Reserve prefill capacity before capture fixes workspace
+            # addresses and locks the shared workspace against growth.
+            max_tokens = max(M, self.moe_config.max_num_tokens)
+            workspace13 = (max_tokens, *workspace13[1:])
+            workspace2 = (max_tokens, *workspace2[1:])
+        return workspace13, workspace2, output
+
     def apply(
         self,
         output: torch.Tensor,

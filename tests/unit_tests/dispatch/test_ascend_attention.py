@@ -22,10 +22,10 @@ def test_ascend_backend_resolves_through_upstream_registry():
     assert backend.get_class() is AscendAttentionBackend
 
 
-def test_ascend_attention_does_not_advertise_cudagraph_support():
+def test_ascend_attention_advertises_full_decode_graph_support():
     assert (
         AscendAttentionMetadataBuilder.get_cudagraph_support(None, None)
-        is AttentionCGSupport.NEVER
+        is AttentionCGSupport.ALWAYS
     )
 
 

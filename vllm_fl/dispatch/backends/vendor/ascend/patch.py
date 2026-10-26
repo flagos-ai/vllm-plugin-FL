@@ -22,6 +22,8 @@ def apply_ascend_patches():
         patch_fla_ops()
         patch_op_cls()
         patch_fused_moe()
+        patch_gdn()
+        patch_vision_position_interpolation()
         _patch_state["core_applied"] = True
     _patch_state["complete"] = patch_mamba_batch_memcpy()
 
@@ -134,6 +136,40 @@ def _wraps_target(function, target) -> bool:
             return True
         function = getattr(function, "__wrapped__", None)
     return False
+
+
+def patch_vision_position_interpolation():
+    """Use vLLM's tensor reference instead of the CUDA-oriented launch grid."""
+    from vllm.model_executor.models import qwen3_vl
+
+    # The Triton implementation launches one block per spatial patch. Vision
+    # profiling can exceed Ascend's 65535-block limit; the upstream tensor
+    # implementation has the same interpolation/spatial-merge contract.
+    qwen3_vl.triton_pos_embed_interpolate = qwen3_vl.pos_embed_interpolate_native
+
+
+def patch_gdn():
+    """Keep the current upstream GDN model, replacing its numerical core."""
+    from vllm.model_executor.custom_op import PluggableLayer, op_registry_oot
+    from vllm.model_executor.warmup import kernel_warmup
+
+    from .impl.gdn import AscendQwenGatedDeltaNetAttention
+
+    if (
+        op_registry_oot.get("QwenGatedDeltaNetAttention")
+        is not AscendQwenGatedDeltaNetAttention
+    ):
+        PluggableLayer.register_oot(
+            _decorated_layer_cls=AscendQwenGatedDeltaNetAttention,
+            name="QwenGatedDeltaNetAttention",
+        )
+
+    # vLLM 0.28 also warms Qwen Triton kernels globally, independently of the
+    # layer hook. Ascend's replacement never executes those kernels.
+    def skip_qwen_triton_warmup(runner, model_config):
+        return
+
+    kernel_warmup.qwen_triton_warmup = skip_qwen_triton_warmup
 
 
 def patch_causal_conv1d():

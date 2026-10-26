@@ -64,3 +64,20 @@ def test_fused_moe_factory_still_replaces_unquantized_method(monkeypatch):
 
     assert runner.routed_experts.quant_method is fl_method
     assert runner.replacements == [fl_method]
+
+
+def test_patches_vllm028_factory_in_package_and_layer(monkeypatch):
+    import vllm.model_executor.layers.fused_moe as package
+    import vllm.model_executor.layers.fused_moe.layer as upstream_layer
+
+    from vllm_fl.ops import custom_ops
+
+    monkeypatch.setattr(package, "FusedMoEFactory", layer_module._OrigFusedMoEFactory)
+    monkeypatch.setattr(
+        upstream_layer, "FusedMoEFactory", layer_module._OrigFusedMoEFactory
+    )
+    custom_ops._patch_fused_moe_factory()
+    assert package.FusedMoEFactory is layer_module.FusedMoEFactoryFL
+    assert upstream_layer.FusedMoEFactory is layer_module.FusedMoEFactoryFL
+    custom_ops._patch_fused_moe_factory()
+    assert package.FusedMoEFactory is layer_module.FusedMoEFactoryFL

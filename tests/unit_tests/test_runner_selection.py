@@ -16,18 +16,21 @@ def _make_ascend_vllm_config(
     if compilation_mode is None:
         compilation_mode = CompilationMode.VLLM_COMPILE
     if cudagraph_mode is None:
-        cudagraph_mode = CUDAGraphMode.PIECEWISE
+        cudagraph_mode = CUDAGraphMode.FULL_DECODE_ONLY
     return SimpleNamespace(
         use_v2_model_runner=False,
+        additional_config={},
         model_config=SimpleNamespace(
             enforce_eager=enforce_eager,
             hf_text_config=SimpleNamespace(model_type="test"),
             is_mm_prefix_lm=False,
+            is_hybrid=False,
             use_mla=False,
         ),
         parallel_config=SimpleNamespace(
             worker_cls=None,
             all2all_backend=None,
+            use_ubatching=False,
             data_parallel_size=1,
         ),
         scheduler_config=SimpleNamespace(
@@ -85,20 +88,20 @@ def test_ascend_rejects_explicit_upstream_v2_runner(monkeypatch):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
 
 
-def test_ascend_accepts_non_eager_and_downgrades_full_graphs(monkeypatch):
+def test_ascend_preserves_full_decode_graphs(monkeypatch):
     from vllm.config import CUDAGraphMode
 
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
-    config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE)
+    config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY)
 
     PlatformFL.check_and_update_config(config)
 
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
     assert config.compilation_config.backend == "eager"
     assert config.compilation_config.compile_sizes == []
-    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.PIECEWISE
+    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_DECODE_ONLY
     assert config.compilation_config.pass_config.fuse_norm_quant is False
     assert config.compilation_config.pass_config.fuse_act_quant is False
     assert config.compilation_config.pass_config.fuse_attn_quant is False
@@ -296,3 +299,15 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
     )
 
     assert vllm_fl.register() == "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+
+
+def test_ascend_allows_layer_only_vllm_config(monkeypatch):
+    from vllm.config import CompilationMode, CUDAGraphMode, VllmConfig
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    config = VllmConfig()
+    assert config.model_config is None
+    assert config.compilation_config.mode is CompilationMode.NONE
+    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.NONE

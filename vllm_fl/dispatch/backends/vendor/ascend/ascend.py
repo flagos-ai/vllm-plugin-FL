@@ -8,8 +8,6 @@ This backend provides operator implementations for Huawei Ascend NPUs.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -23,7 +21,7 @@ class AscendBackend(Backend):
     operator implementations for Huawei Ascend NPUs.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     def __init__(self) -> None:
         super().__init__()
@@ -33,7 +31,7 @@ class AscendBackend(Backend):
         return "ascend"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "ascend"
 
     def is_available(self) -> bool:
@@ -47,6 +45,36 @@ class AscendBackend(Backend):
         return AscendBackend._available
 
     # ==================== Operator Implementations ====================
+    def gdn_decode(self, *args, **kwargs):
+        from .impl.gdn_reference import gdn_decode
+
+        return gdn_decode(*args, **kwargs)
+
+    def gdn_prefill(self, *args, **kwargs):
+        from .impl.gdn_reference import gdn_prefill
+
+        return gdn_prefill(*args, **kwargs)
+
+    def fused_experts(self, *args, **kwargs):
+        """Stable expert-call seam; implementation owns routing and math."""
+        from .impl.fused_moe import fused_experts_impl
+
+        return fused_experts_impl(*args, **kwargs)
+
+    def topk_softmax(
+        self,
+        topk_weights,
+        topk_ids,
+        token_expert_indices,
+        gating_output,
+        renormalize: bool,
+    ):
+        from .impl.fused_moe import topk_softmax
+
+        return topk_softmax(
+            topk_weights, topk_ids, token_expert_indices, gating_output, renormalize
+        )
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
@@ -66,8 +94,8 @@ class AscendBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 
@@ -143,6 +171,8 @@ class AscendBackend(Backend):
         """
         if use_mla:
             if use_sparse:
-                raise NotImplementedError("MLA with sparse attention is not implemented for Ascend yet.")
+                raise NotImplementedError(
+                    "MLA with sparse attention is not implemented for Ascend yet."
+                )
             return "vllm_fl.dispatch.backends.vendor.ascend.impl.attention.AscendMLABackend"
         return "vllm_fl.dispatch.backends.vendor.ascend.impl.attention.AscendAttentionBackend"

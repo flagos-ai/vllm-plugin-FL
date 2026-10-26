@@ -12,6 +12,7 @@ Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
 from importlib import import_module
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -68,6 +69,57 @@ def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context
         device_api.Stream.assert_called_once_with(device=torch.device("cpu"))
     capture_stream.wait_stream.assert_called_once_with(current_stream)
     device_api.stream.assert_called_once_with(capture_stream)
+
+
+@pytest.mark.parametrize("disable_full", [False, True])
+@pytest.mark.parametrize("dp_size", [1, 2])
+def test_full_graph_exclusion_survives_dp_redispatch(
+    monkeypatch, disable_full, dp_size
+):
+    from vllm.config import CUDAGraphMode
+
+    module = import_module("vllm_fl.worker.model_runner")
+
+    dispatcher = MagicMock()
+    mode = CUDAGraphMode.NONE if disable_full else CUDAGraphMode.FULL
+    dispatcher.dispatch.return_value = (mode, SimpleNamespace(num_tokens=1))
+    parallel = SimpleNamespace(data_parallel_size=dp_size, data_parallel_rank=0)
+    runner = SimpleNamespace(
+        _is_uniform_decode=module.ModelRunnerFL._is_uniform_decode,
+        uniform_decode_query_len=1,
+        model_config=SimpleNamespace(is_encoder_decoder=False),
+        input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        _pad_for_sequence_parallelism=lambda tokens: tokens,
+        cudagraph_dispatcher=dispatcher,
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=False)
+        ),
+        parallel_config=parallel,
+        vllm_config=SimpleNamespace(
+            parallel_config=parallel,
+            observability_config=SimpleNamespace(cudagraph_metrics=False),
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "coordinate_batch_across_dp",
+        lambda **kwargs: (False, torch.ones(dp_size, dtype=torch.int32), mode.value),
+    )
+    result = module.ModelRunnerFL._determine_batch_execution_and_padding(
+        runner,
+        num_tokens=1,
+        num_reqs=1,
+        num_scheduled_tokens_np=np.array([1]),
+        max_num_scheduled_tokens=1,
+        use_cascade_attn=False,
+        disable_full=disable_full,
+    )
+    assert result[0] == mode
+    assert dispatcher.dispatch.call_count == dp_size
+    for call in dispatcher.dispatch.call_args_list:
+        assert call.kwargs["invalid_modes"] == (
+            {CUDAGraphMode.FULL} if disable_full else None
+        )
 
 
 # =============================================================================

@@ -7,7 +7,7 @@
 import dataclasses
 import weakref
 from collections.abc import Callable
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, nullcontext, suppress
 from typing import Any, ClassVar
 from unittest.mock import patch
 
@@ -152,11 +152,13 @@ class GraphWrapper:
         vllm_config: VllmConfig,
         runtime_mode: CUDAGraphMode,
         cudagraph_options: GraphOptions | None = None,
+        graph_runtime: Any | None = None,
     ):
         self.runnable = runnable
         self.vllm_config = vllm_config
         self.runtime_mode = runtime_mode
         self.compilation_config = vllm_config.compilation_config
+        self.graph_runtime = graph_runtime
 
         self.first_run_finished = False
         self.is_debugging_mode = envs.VLLM_LOGGING_LEVEL == "DEBUG"
@@ -273,10 +275,18 @@ class GraphWrapper:
 
                 # FL-specific: use platform-agnostic graph capture while
                 # preserving the explicit stream used by vLLM v0.28.0.
-                with current_platform.torch_device_fn.graph(
-                    graph,
-                    pool=self.graph_pool,
-                    stream=_graph_capture_stream(),
+                capture_scope = (
+                    self.graph_runtime.capture_scope(forward_context)
+                    if self.graph_runtime is not None
+                    else nullcontext()
+                )
+                with (
+                    capture_scope,
+                    current_platform.torch_device_fn.graph(
+                        graph,
+                        pool=self.graph_pool,
+                        stream=_graph_capture_stream(),
+                    ),
                 ):
                     output = self.runnable(*args, **kwargs)
                     with suppress(ImportError, RuntimeError, UnboundLocalError):
@@ -311,7 +321,9 @@ class GraphWrapper:
 
             get_offloader().sync_prev_onload()
 
-        if current_platform.device_type == "npu":
-            current_platform.torch_device_fn.synchronize()
-        entry.graph.replay()
+        if self.graph_runtime is not None:
+            with self.graph_runtime.replay_scope(forward_context):
+                entry.graph.replay()
+        else:
+            entry.graph.replay()
         return entry.output

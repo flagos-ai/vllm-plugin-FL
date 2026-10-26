@@ -341,6 +341,9 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
+        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
+        # this flag to select the matching block-table and KV-cache kernels.
+        self.use_v2_model_runner = False
 
         _initialize_fl_runtime(self.rank)
 
