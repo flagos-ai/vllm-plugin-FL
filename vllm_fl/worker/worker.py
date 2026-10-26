@@ -956,6 +956,20 @@ class WorkerFL(WorkerBase):
         for size in sorted(warmup_sizes, reverse=True):
             logger.info("Compile and warming up model for size %d", size)
             self.model_runner._dummy_run(size, skip_eplb=True, remove_lora=False)
+        if (
+            current_platform.device_type == "txda"
+            and self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        ):
+            # TXDA skips memory profiling, which normally primes workspaces
+            # for the largest prefill. Small decode capture sizes alone leave
+            # the MoE workspace too small once capture_model locks its storage.
+            logger.info("TXDA: warming maximum token batch before graph capture")
+            self.model_runner._dummy_run(
+                self.scheduler_config.max_num_batched_tokens,
+                cudagraph_runtime_mode=CUDAGraphMode.NONE,
+                skip_eplb=True,
+                remove_lora=False,
+            )
         self.model_runner.maybe_remove_all_loras(self.model_runner.lora_config)
 
         # Warmup and tune the kernels used during model execution before

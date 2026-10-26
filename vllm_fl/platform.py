@@ -338,15 +338,54 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
-        if cls.device_type == "txda" and (
-            compilation_config.mode != CompilationMode.NONE
-            or compilation_config.cudagraph_mode != CUDAGraphMode.NONE
-        ):
-            raise ValueError(
-                "Tsingmicro TXDA currently requires eager execution; "
-                "torch.compile and graph capture are not supported by the "
-                "TXDA SDPA backend. Set --enforce-eager."
-            )
+        if cls.device_type == "txda":
+            if compilation_config.mode != CompilationMode.NONE:
+                if compilation_config.backend not in ("", "eager"):
+                    raise ValueError(
+                        "Tsingmicro TXDA compilation requires backend='eager'; "
+                        "the requested compiler backend is unsupported."
+                    )
+                compilation_config.backend = "eager"
+                compilation_config.use_inductor_graph_partition = False
+                pass_config = compilation_config.pass_config
+                for name in (
+                    "fuse_norm_quant", "fuse_act_quant", "fuse_attn_quant",
+                    "enable_sp", "fuse_gemm_comms", "fuse_allreduce_rms",
+                    "enable_qk_norm_rope_fusion", "fuse_rope_kvcache_cat_mla",
+                    "fuse_act_padding", "fuse_mla_dual_rms_norm",
+                    "fuse_rope_kvcache", "fuse_qk_norm_rope_kvcache",
+                ):
+                    setattr(pass_config, name, False)
+            if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+                if compilation_config.mode != CompilationMode.VLLM_COMPILE:
+                    raise ValueError(
+                        "Tsingmicro TXDA graphs require piecewise VLLM_COMPILE "
+                        "(compilation mode 3) with backend='eager'."
+                    )
+                if compilation_config.splitting_ops == []:
+                    raise ValueError(
+                        "Tsingmicro TXDA graphs require attention and Mamba "
+                        "splitting ops; remove the empty splitting_ops override."
+                    )
+                if compilation_config.splitting_ops is not None:
+                    # Keep dynamic SDPA/GDN/Mamba and cache updates outside graphs,
+                    # including when callers add their own split operators.
+                    compilation_config.splitting_ops = list(dict.fromkeys([
+                        *compilation_config.splitting_ops,
+                        *compilation_config._attention_ops,
+                        "vllm::unified_kv_cache_update",
+                        "vllm::unified_mla_kv_cache_update",
+                    ]))
+                os.environ["TXDA_LAUNCH_VIA_GGL"] = "1"
+                os.environ["TXDA_LAUNCH_KERNEL_SYNC"] = "0"
+                os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] = "0"
+                from vllm_fl.compilation.txda_partition import (
+                    install_txda_graph_partition,
+                )
+
+                install_txda_graph_partition(cls.device_type)
+                compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+                compilation_config.cudagraph_mm_encoder = False
 
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
@@ -521,7 +560,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_compile_backend(cls) -> str:
-        if cls.device_type == "npu":
+        if cls.device_type in {"npu", "txda"}:
             # Keep vLLM's Dynamo tracing and piecewise graph splitting while
             # returning each FX GraphModule without running CUDA Inductor.
             return "eager"
@@ -540,6 +579,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "tsingmicro",
         ]
 
     @classmethod
@@ -638,7 +678,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
+        # TXDA collectives must remain opaque to Dynamo: tracing the FlagCX
+        # implementation enters native stream APIs. The vLLM custom operators
+        # provide fake implementations and are eager TXDA partition boundaries.
+        return cls.device_type == "txda" or cls.vendor_name in (
+            "nvidia", "thead", "iluvatar"
+        )
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:

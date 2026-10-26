@@ -162,6 +162,10 @@ class PyFlagcxCommunicator:
     def _current_stream(self):
         if self.device.type == "npu":
             return torch.npu.current_stream(self.device)
+        if self.device.type == "txda":
+            # The upstream helper may cache the default stream while TXDA
+            # graph preparation selects a side stream for model execution.
+            return torch.txda.current_stream(self.device)
         return current_stream()
 
     def _copy_flagcx_stream(self, stream):

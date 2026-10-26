@@ -77,10 +77,21 @@ class _CompilationMode(IntEnum):
 class _GraphMode(IntEnum):
     NONE = 0
     PIECEWISE = 1
+    FULL = 2
+    FULL_AND_PIECEWISE = 3
 
 
 @pytest.fixture
 def configure_platform(monkeypatch):
+    for name in (
+        "TXDA_LAUNCH_VIA_GGL",
+        "TXDA_LAUNCH_KERNEL_SYNC",
+        "VLLM_USE_BREAKABLE_CUDAGRAPH",
+    ):
+        monkeypatch.setenv(name, os.environ.get(name, "unchanged"))
+    txda_partition = ModuleType("vllm_fl.compilation.txda_partition")
+    txda_partition.install_txda_graph_partition = lambda device_type: None
+    monkeypatch.setitem(sys.modules, txda_partition.__name__, txda_partition)
     config_module = ModuleType("vllm.config")
     config_module.CUDAGraphMode = _GraphMode
     compilation_module = ModuleType("vllm.config.compilation")
@@ -105,7 +116,23 @@ def _config(mode=_CompilationMode.NONE, graph=_GraphMode.NONE):
         scheduler_config=SimpleNamespace(),
         cache_config=SimpleNamespace(block_size=None),
         compilation_config=SimpleNamespace(
-            mode=mode, cudagraph_mode=graph, compile_sizes=None
+            mode=mode,
+            cudagraph_mode=graph,
+            compile_sizes=None,
+            backend="eager",
+            splitting_ops=None,
+            _attention_ops=[
+                "vllm::unified_attention_with_output",
+                "vllm::qwen_gdn_attention_core",
+            ],
+            pass_config=SimpleNamespace(
+                fuse_norm_quant=True,
+                fuse_act_quant=True,
+                fuse_attn_quant=True,
+                enable_sp=True,
+                fuse_gemm_comms=True,
+                eliminate_noops=True,
+            ),
         ),
     )
 
@@ -116,18 +143,103 @@ def test_txda_rejects_explicit_upstream_v2_runner(configure_platform):
         configure_platform(platform, SimpleNamespace(use_v2_model_runner=True))
 
 
+@pytest.mark.parametrize("backend", ["inductor", "openxla"])
+def test_txda_rejects_unsupported_compiler_backend(configure_platform, backend):
+    config = _config(_CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE)
+    config.compilation_config.backend = backend
+    with pytest.raises(ValueError, match="requires backend='eager'"):
+        configure_platform(
+            SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+        )
+
+
+def test_txda_rejects_graph_without_piecewise_compilation(configure_platform):
+    with pytest.raises(ValueError, match="piecewise VLLM_COMPILE"):
+        configure_platform(
+            SimpleNamespace(device_type="txda", vendor_name="tsingmicro"),
+            _config(_CompilationMode.NONE, _GraphMode.PIECEWISE),
+        )
+
+
 @pytest.mark.parametrize(
-    "mode,graph",
-    [
-        (_CompilationMode.VLLM_COMPILE, _GraphMode.NONE),
-        (_CompilationMode.NONE, _GraphMode.PIECEWISE),
-        (_CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE),
-    ],
+    "mode", [_GraphMode.PIECEWISE, _GraphMode.FULL, _GraphMode.FULL_AND_PIECEWISE]
 )
-def test_txda_rejects_compile_or_graph_execution(configure_platform, mode, graph):
+def test_txda_graph_uses_eager_piecewise_with_native_launch_settings(
+    configure_platform, mode
+):
+    config = _config(_CompilationMode.VLLM_COMPILE, mode)
+    config.compilation_config.backend = ""
+    configure_platform(
+        SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+    )
+    cc = config.compilation_config
+    assert cc.backend == "eager"
+    assert cc.cudagraph_mode == _GraphMode.PIECEWISE
+    assert cc.use_inductor_graph_partition is False
+    assert cc.cudagraph_mm_encoder is False
+    assert cc.pass_config.fuse_norm_quant is False
+    assert cc.pass_config.fuse_act_quant is False
+    assert cc.pass_config.fuse_attn_quant is False
+    assert cc.pass_config.enable_sp is False
+    assert cc.pass_config.fuse_gemm_comms is False
+    assert cc.pass_config.eliminate_noops is True
+    assert cc.splitting_ops is None  # upstream supplies its complete default list
+    assert os.environ["TXDA_LAUNCH_VIA_GGL"] == "1"
+    assert os.environ["TXDA_LAUNCH_KERNEL_SYNC"] == "0"
+    assert os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] == "0"
+
+
+def test_txda_custom_splits_keep_dynamic_attention_and_cache_outside_graph(
+    configure_platform,
+):
+    config = _config(_CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE)
+    cc = config.compilation_config
+    cc.splitting_ops = ["custom::op", "vllm::unified_attention_with_output"]
+    configure_platform(
+        SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+    )
+    assert cc.splitting_ops == [
+        "custom::op",
+        "vllm::unified_attention_with_output",
+        "vllm::qwen_gdn_attention_core",
+        "vllm::unified_kv_cache_update",
+        "vllm::unified_mla_kv_cache_update",
+    ]
+
+
+def test_txda_rejects_empty_splitting_override(configure_platform):
+    config = _config(_CompilationMode.VLLM_COMPILE, _GraphMode.PIECEWISE)
+    config.compilation_config.splitting_ops = []
+    with pytest.raises(ValueError, match="empty splitting_ops"):
+        configure_platform(
+            SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), config
+        )
+
+
+@pytest.mark.parametrize("mode", [_CompilationMode.NONE, _CompilationMode.VLLM_COMPILE])
+def test_txda_no_graph_preserves_launch_environment(configure_platform, mode):
+    names = [
+        "TXDA_LAUNCH_VIA_GGL",
+        "TXDA_LAUNCH_KERNEL_SYNC",
+        "VLLM_USE_BREAKABLE_CUDAGRAPH",
+    ]
+    before = {name: os.environ.get(name) for name in names}
+    configure_platform(
+        SimpleNamespace(device_type="txda", vendor_name="tsingmicro"), _config(mode)
+    )
+    assert {name: os.environ.get(name) for name in names} == before
+
+
+def test_txda_reports_eager_compile_backend_and_native_graph_support():
     platform = SimpleNamespace(device_type="txda", vendor_name="tsingmicro")
-    with pytest.raises(ValueError, match="--enforce-eager"):
-        configure_platform(platform, _config(mode, graph))
+    for name, expected in [
+        ("get_compile_backend", "eager"),
+        ("support_static_graph_mode", True),
+    ]:
+        method = _load_function(
+            "vllm_fl/platform.py", name, {}, class_name="PlatformFL"
+        )
+        assert method(platform) == expected
 
 
 def test_txda_accepts_eager_configuration(configure_platform):
@@ -399,3 +511,107 @@ def test_txda_rejects_context_parallelism_even_with_flagcx(configure_platform, f
     )
     with pytest.raises(ValueError, match="does not support context parallelism"):
         configure_platform(platform, config)
+
+
+@pytest.mark.parametrize(
+    "device, mode, expected",
+    [
+        ("txda", _CompilationMode.VLLM_COMPILE, 1),
+        ("txda", _CompilationMode.NONE, 0),
+        ("npu", _CompilationMode.VLLM_COMPILE, 1),
+        ("npu", _CompilationMode.NONE, 0),
+        ("cuda", _CompilationMode.VLLM_COMPILE, 0),
+    ],
+)
+@pytest.mark.parametrize("graph_mode", [_GraphMode.NONE, _GraphMode.PIECEWISE])
+def test_runner_resolves_cached_ops_before_compilation(
+    monkeypatch, device, mode, expected, graph_mode
+):
+    source = _ROOT / "vllm_fl/worker/model_runner.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    runner = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.ClassDef) and n.name == "ModelRunnerFL"
+    )
+    load = next(
+        n
+        for n in runner.body
+        if isinstance(n, ast.FunctionDef) and n.name == "load_model"
+    )
+    warmup = next(
+        n
+        for n in load.body
+        if isinstance(n, ast.If)
+        and any(
+            isinstance(child, ast.ImportFrom)
+            and child.module == "vllm_fl.dispatch"
+            and any(alias.name == "warmup_cached_ops" for alias in child.names)
+            for child in ast.walk(n)
+        )
+    )
+    first_compile = next(
+        child
+        for child in ast.walk(load)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "compile"
+    )
+    assert warmup.end_lineno < first_compile.lineno
+    dispatch = ModuleType("vllm_fl.dispatch")
+    dispatch.warmup_cached_ops = Mock()
+    monkeypatch.setitem(sys.modules, dispatch.__name__, dispatch)
+    # Model loading occurs in a fresh spawned process without the parent's
+    # platform-hook mutations. Use the real installer against a fresh consumer.
+    partition = ModuleType("vllm_fl.compilation.txda_partition")
+    helpers = runpy.run_path(str(_ROOT / "vllm_fl/compilation/txda_partition.py"))
+    partition.install_txda_graph_partition = helpers["install_txda_graph_partition"]
+    monkeypatch.setitem(sys.modules, partition.__name__, partition)
+    compilation = ModuleType("vllm.compilation")
+    compilation.backends = SimpleNamespace(
+        should_split=Mock(return_value=False), split_graph=Mock(),
+        _decompose_size_nodes=Mock(), generate_execution_code=Mock()
+    )
+    monkeypatch.setitem(sys.modules, compilation.__name__, compilation)
+    exec(
+        compile(ast.Module(body=[warmup], type_ignores=[]), str(source), "exec"),
+        {
+            "current_platform": SimpleNamespace(device_type=device),
+            "self": SimpleNamespace(compilation_config=SimpleNamespace(
+                mode=mode, cudagraph_mode=graph_mode
+            )),
+            "CompilationMode": _CompilationMode,
+            "CUDAGraphMode": _GraphMode,
+        },
+    )
+    assert dispatch.warmup_cached_ops.call_count == expected
+    installed = getattr(
+        compilation.backends.should_split, "_vllm_fl_txda_partition", False
+    ) is True
+    assert installed == (
+        device == "txda" and mode != _CompilationMode.NONE
+        and graph_mode != _GraphMode.NONE
+    )
+
+
+@pytest.mark.parametrize(
+    "device_type,vendor_name,expected",
+    [
+        ("txda", "tsingmicro", True),
+        ("cuda", "nvidia", True),
+        ("cuda", "thead", True),
+        ("cuda", "iluvatar", True),
+        ("cuda", "metax", False),
+        ("npu", "ascend", False),
+        ("musa", "mthreads", False),
+    ],
+)
+def test_txda_collectives_use_opaque_ops_without_changing_other_platforms(
+    device_type, vendor_name, expected
+):
+    use_custom_ops = _load_function(
+        "vllm_fl/platform.py", "use_custom_op_collectives", {},
+        class_name="PlatformFL",
+    )
+    platform = SimpleNamespace(device_type=device_type, vendor_name=vendor_name)
+    assert use_custom_ops(platform) is expected

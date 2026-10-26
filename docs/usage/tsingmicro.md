@@ -6,14 +6,16 @@ containing the TXDA 0.28 adaptation described here.
 
 ## Execution scope
 
-- Use the FL/V1 model runner and eager execution (`--enforce-eager`).
+- Use the FL/V1 model runner. Eager execution uses `--enforce-eager`.
+  An experimental piecewise graph path is available with the limits below.
 - Multi-device execution, including the TP8 examples below, requires a valid
   `FLAGCX_PATH`. Native TCCL remains the single-device fallback.
 - Prefill and decode context parallel sizes must both be 1.
 - Speculative decoding is unsupported because the fused speculative Mamba
   state-copy path is not available on TXDA. Omit `--speculative-config`.
-- The TXDA SDPA backend uses the paged KV cache with reference attention. Graph
-  capture, `torch.compile`, MLA and sparse attention are not enabled by this path.
+- The TXDA SDPA backend uses the paged KV cache with reference attention.
+  Attention, GDN/Mamba, collectives, native casts and matrix multiplication stay
+  outside captured regions. MLA and sparse attention are unsupported.
 - The smoke cases cover Qwen3.6-27B and Qwen3.6-35B-A3B at TP8, with a 1024-token
   context, at most 2 sequences and a 128 MiB KV-cache budget per worker. These
   bounds are smoke-test settings, not recommended production capacity limits.
@@ -227,30 +229,55 @@ synchronization. The longer request timeout changes waiting time only. Keep
 Use LF line endings for the shell scripts on Linux; a Windows CRLF checkout
 cannot be executed directly by Bash.
 
-Graph mode is not accepted by this backend. Starting a server without
-`--enforce-eager` fails explicitly; it must not silently fall back to eager or
-be counted as a passing graph gate. The full acceptance matrix remains
-incomplete until real graph capture and changing-input replay are supported
-and both graph suites pass.
+### Experimental piecewise graphs
+
+For graph validation, replace `--enforce-eager` in the gate server command with:
+
+```bash
+--compilation-config '{"mode":3,"backend":"eager","cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8]}'
+```
+
+Here `backend="eager"` selects the compiler adapter that preserves FX operations;
+TXDA device graphs still capture and replay supported regions. The plugin
+selects the GGL launch path and disables per-kernel debug synchronization.
+It installs partition rules in each spawned worker and warms the maximum token
+batch before locking the MoE workspace.
+
+The current vendor SDK does not reliably capture native operators or replay
+multiple kernels in one graph. The plugin therefore captures audited add/mul
+regions as sequences of single-kernel native graphs. Each sequence owns stable
+input buffers, retained launch arguments and a private graph pool. Unsupported
+regions, input layouts or changed scalar values execute eagerly. A model that
+captures or reuses no live native graphs during startup is rejected explicitly.
+
+This path has passed changing-input graph probes and full MoE model capture.
+It has **not passed the model inference acceptance gate**: startup capture is
+not evidence of correct inference-time replay. Keep the original request
+budgets and assertions, and verify both response correctness and nonzero native
+replay activity after API readiness before accepting a graph run.
 
 ## Validation status
 
 Validated on TX8110 using the reference vendor packages and vLLM
 `0.28.0+empty` built from upstream tag commit
-`2cf0a6915ce544dc493a0990f2ea38d81601128a`. The tested plugin source archive has
-SHA256 `35b50e13ee0b987e125ef6808590433c9aebce95558b330c2250a19afabdcb41`.
+`2cf0a6915ce544dc493a0990f2ea38d81601128a`. The R6d graph candidate archive
+has SHA256 `ab6df28db9181968848db71a7093a6197ccf62f112b13d9b2a190994fa81943e`.
 
-- 161 regression tests passed in the actual TXDA container, with no skips.
+- 284 regression tests passed locally and in the actual TXDA container.
 - Both models passed TP8 eager offline text, image and seeded chunked-prefill
-  checks. Repeated seeded requests produced identical token IDs.
-- Both models passed OpenAI-compatible text/image serving with the default
-  asynchronous scheduler. The MoE seeded request used 665 prompt tokens,
-  covering the Mamba state-copy boundary, and produced identical repeated
-  answers.
-- The formal adaptation eager gates are being evaluated separately; the
-  preceding smoke checks do not establish formal acceptance.
-- Full-model graph execution remains unsupported by this adaptation and is
-  a full-gate blocker.
+  smoke checks. Repeated seeded requests produced identical token IDs.
+- Both models passed bounded OpenAI-compatible text/image serving with the
+  default asynchronous scheduler. These checks do not establish full acceptance.
+- The original long-text gate passed for each model, but the default eager
+  configuration failed the eight-concurrent-request gate with a device error.
+  Changing generic GEMM dispatch allowed eight requests to pass in a diagnostic
+  run, but a subsequent long-text request failed. No such diagnostic exclusion
+  is enabled by default.
+- Isolated graph tests passed with changing FP32/BF16 tensor inputs, eager
+  native casts/matmul around captured add/mul regions, and graph
+  clear/recreation. Full MoE startup completed with native captures on all
+  eight workers, but the first concurrent inference failed before any measured
+  inference-time replay. Full graph acceptance remains unverified.
 
 These are correctness checks, not throughput or production-capacity claims.
 The vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions were
