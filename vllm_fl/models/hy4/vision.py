@@ -180,11 +180,19 @@ class HYV4VisionPatchEmbed(nn.Module):
         self, grid_thw: list[list[int]], dtype: torch.dtype
     ) -> torch.Tensor:
         """Interpolated position embedding per patch, ``(num_patches, hidden)``."""
+        # The trailing ``.contiguous()`` is load-bearing, not a no-op: the
+        # permute yields a strided view, and FlagGems' ``upsample_bilinear2d``
+        # override (active on the MetaX stack) indexes it as if it were dense,
+        # which scrambles the 2-D position field. Symptoms are subtle -- the ViT
+        # still sees correct patch content, so colours and large shapes survive
+        # while counting, reading order and fine identity collapse. Upstream
+        # (CUDA ATen) honours strides, so this keeps parity with the reference.
         positions = (
             self.position_embedding.weight[1:]
             .float()
             .reshape(1, self.position_edge, self.position_edge, self.config.hidden_size)
             .permute(0, 3, 1, 2)
+            .contiguous()
         )
         positional = []
         for t, h, w in grid_thw:
