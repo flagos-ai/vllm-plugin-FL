@@ -19,6 +19,7 @@ def _gather_k_kernel(
     token_data_size: tl.constexpr,  # 576 bytes per token data
     block_stride: tl.constexpr,  # total bytes per block (padded) int32
     output_dim: tl.constexpr,  # 512
+    copy_block: tl.constexpr,
 ):
     batch_idx = tl.program_id(0)
     worker_id = tl.program_id(1)
@@ -58,9 +59,11 @@ def _gather_k_kernel(
 
         output_bf16_ptr = output_row_ptr.to(tl.pointer_type(tl.bfloat16))
 
-        # Process in chunks of 16
-        for j in tl.static_range(output_dim // 16):
-            chunk_offsets = j * 16 + tl.arange(0, 16)
+        # Copy a wide vector per iteration.  The previous 16-element vector
+        # left most threads idle and generated 32 separate load/store groups
+        # for the 512-element BF16 row.
+        for start in tl.static_range(0, output_dim, copy_block):
+            chunk_offsets = start + tl.arange(0, copy_block)
             bf16_vals = tl.load(token_bf16_ptr + chunk_offsets)
             tl.store(output_bf16_ptr + chunk_offsets, bf16_vals)
 
@@ -82,7 +85,10 @@ def gather_k_cache(
     TOKEN_DATA_SIZE = 512 #448 + 64
 
     num_reqs = seq_lens.shape[0]
-    NUM_WORKERS = 128
+    # The dominant prefill gather contains thousands of tokens per request.
+    # 1024 workers saturate H20 memory bandwidth without the negligible gains
+    # and extra launch footprint seen beyond this point.
+    NUM_WORKERS = 1024
     _gather_k_kernel[(num_reqs, NUM_WORKERS)](
         out,
         out.stride(0),
@@ -97,4 +103,6 @@ def gather_k_cache(
         token_data_size=TOKEN_DATA_SIZE,
         block_stride=k_cache.stride(0),
         output_dim=512,
+        copy_block=512,
+        num_warps=2,
     )

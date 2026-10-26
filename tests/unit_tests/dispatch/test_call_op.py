@@ -8,26 +8,128 @@ dispatch module's __init__.py, ensuring the full dispatch pipeline
 works correctly from call_op -> manager -> registry -> implementation.
 """
 
+import gc
 import os
+import weakref
 from unittest.mock import patch
 
 import pytest
+import torch
 
+import vllm_fl.dispatch as dispatch
 from vllm_fl.dispatch import (
     PREFER_REFERENCE,
     PREFER_VENDOR,
     BackendImplKind,
     BackendPriority,
+    CachedOp,
     OpImpl,
     SelectionPolicy,
     call_op,
     get_default_manager,
+    prewarm_cached_ops,
     reset_default_manager,
     reset_global_policy,
     resolve_op,
     set_global_policy,
     with_preference,
 )
+
+
+class TestCachedOpPrewarm:
+    """Cached call sites must not resolve Python state during fullgraph trace."""
+
+    @pytest.fixture(autouse=True)
+    def reset_all(self, monkeypatch):
+        reset_default_manager()
+        reset_global_policy()
+        monkeypatch.setattr(dispatch, "_CACHED_OPS", weakref.WeakSet())
+        monkeypatch.setattr(dispatch, "_OP_FAST_PATH_ENABLED", True)
+        yield
+        reset_default_manager()
+        reset_global_policy()
+
+    @staticmethod
+    def register_test_op(op_name, fn):
+        manager = get_default_manager()
+        manager._state.initialized = True
+        manager._state.init_pid = os.getpid()
+        manager.registry.register_impl(
+            OpImpl(
+                op_name=op_name,
+                impl_id=f"default.{op_name}",
+                kind=BackendImplKind.DEFAULT,
+                fn=fn,
+            )
+        )
+        return manager
+
+    def test_prewarm_resolves_without_executing(self):
+        calls = []
+        op = CachedOp("prewarm_only")
+        manager = self.register_test_op(
+            "prewarm_only", lambda x: calls.append(x) or x + 1
+        )
+
+        assert prewarm_cached_ops() == (1, 0)
+        assert op._impl is manager._resolve_impl("prewarm_only")
+        assert calls == []
+
+    def test_prewarm_skips_unavailable_optional_ops(self):
+        available = CachedOp("available")
+        unavailable = CachedOp("unavailable")
+        self.register_test_op("available", lambda x: x)
+
+        assert prewarm_cached_ops() == (1, 1)
+        assert available._impl is not None
+        assert unavailable._impl is None
+
+    def test_prewarmed_call_does_not_resolve_again(self):
+        op = CachedOp("cached")
+        manager = self.register_test_op("cached", lambda x: x * 2)
+        prewarm_cached_ops()
+
+        with patch.object(
+            manager, "_resolve_impl", side_effect=AssertionError("resolved twice")
+        ):
+            assert op(3) == 6
+
+    def test_prewarm_records_only_after_eager_use(self):
+        op = CachedOp("first_use")
+        manager = self.register_test_op("first_use", lambda x: x)
+
+        with patch.object(manager, "_record_first_use") as record_first_use:
+            prewarm_cached_ops()
+            record_first_use.assert_not_called()
+            assert op(3) == 3
+            record_first_use.assert_called_once()
+
+    def test_fullgraph_compile_uses_prewarmed_impl(self):
+        op = CachedOp("fullgraph")
+        manager = self.register_test_op("fullgraph", lambda x: x + 1)
+        prewarm_cached_ops()
+
+        def run(x):
+            return op(x)
+
+        with patch.object(
+            manager, "_resolve_impl", side_effect=AssertionError("resolved in graph")
+        ):
+            compiled = torch.compile(run, backend="eager", fullgraph=True)
+            result = compiled(torch.tensor([1.0]))
+
+        torch.testing.assert_close(result, torch.tensor([2.0]))
+
+    def test_registry_does_not_retain_temporary_call_sites(self):
+        op = CachedOp("temporary")
+        op_ref = weakref.ref(op)
+        assert len(dispatch._CACHED_OPS) == 1
+
+        del op
+        gc.collect()
+
+        assert op_ref() is None
+        assert len(dispatch._CACHED_OPS) == 0
 
 
 class TestCallOp:

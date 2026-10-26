@@ -147,6 +147,15 @@ if current_platform.dist_backend == "flagcx" or current_platform.device_type == 
             yield graph_capture_context
 else:
     from vllm.distributed.parallel_state import graph_capture
+
+from vllm_fl.compilation.graph_runtime import (
+    get_graph_capture,
+    get_graph_runtime_backend,
+)
+
+graph_capture = get_graph_capture(graph_capture)
+
+
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
@@ -260,6 +269,7 @@ from vllm.v1.worker.utils import (
 
 # FL-specific imports
 from vllm_fl.compilation.graph import GraphWrapper
+from vllm_fl.dispatch import prewarm_cached_ops
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.dispatch.io_dumper import (
     advance_io_step,
@@ -461,6 +471,7 @@ class ModelRunnerFL(
         self.cache_config = vllm_config.cache_config
         self.offload_config = vllm_config.offload_config
         self.compilation_config = vllm_config.compilation_config
+        self.graph_runtime = get_graph_runtime_backend()
         self.lora_config = vllm_config.lora_config
         self.load_config = vllm_config.load_config
         self.parallel_config = vllm_config.parallel_config
@@ -3589,13 +3600,15 @@ class ModelRunnerFL(
         Returns:
             Model output tensor
         """
-        return self.model(
+        model_output = self.model(
             input_ids=input_ids,
             positions=positions,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
             **model_kwargs,
         )
+        self.graph_runtime.after_model_forward(self.vllm_config)
+        return model_output
 
     @staticmethod
     def _is_uniform_decode(
@@ -4948,6 +4961,11 @@ class ModelRunnerFL(
             format_gib(self.model_memory_usage),
             time_after_load - time_before_load,
         )
+
+        # All model modules are loaded now, while compilation and CUDA Graph
+        # capture have not started yet. Resolve CachedOps outside either graph.
+        prewarm_cached_ops()
+
         if not load_dummy_weights:
             prepare_communication_buffer_for_model(self.model)
             # FL: register IO dumper module hooks
@@ -4975,6 +4993,12 @@ class ModelRunnerFL(
         ):
             self.eplb_state.start_async_loop()
 
+        if self.vllm_config.compilation_config.mode in (
+            CompilationMode.STOCK_TORCH_COMPILE,
+            CompilationMode.VLLM_COMPILE,
+        ):
+            self.graph_runtime.prepare_model_compile()
+
         if (
             self.vllm_config.compilation_config.mode
             == CompilationMode.STOCK_TORCH_COMPILE
@@ -4996,6 +5020,7 @@ class ModelRunnerFL(
             cudagraph_mode.has_full_cudagraphs()
             and not self.parallel_config.use_ubatching
         ):
+            self.graph_runtime.prepare_graph_wrapper()
             self.model = GraphWrapper(
                 self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
             )
@@ -6028,6 +6053,7 @@ class ModelRunnerFL(
         saved_num_cudagraph_captured = compilation_counter.num_cudagraph_captured
 
         capture_descs = self.cudagraph_dispatcher.get_capture_descs()
+        self.graph_runtime.prepare_capture(capture_descs)
 
         total_graphs = sum(len(descs) for _, descs in capture_descs)
         if total_graphs == 0:
@@ -6161,6 +6187,9 @@ class ModelRunnerFL(
 
         start_time = time.perf_counter()
 
+        capture_descs = self.cudagraph_dispatcher.get_capture_descs()
+        self.graph_runtime.prepare_capture(capture_descs)
+
         # Trigger CUDA graph capture for specific shapes.
         # Capture the large shapes first so that the smaller shapes
         # can reuse the memory pool allocated for the large shapes.
@@ -6170,10 +6199,7 @@ class ModelRunnerFL(
             torch.accelerator.empty_cache()
             start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
 
-            for (
-                runtime_mode,
-                batch_descs,
-            ) in self.cudagraph_dispatcher.get_capture_descs():
+            for runtime_mode, batch_descs in capture_descs:
                 self._capture_cudagraphs(
                     batch_descriptors=batch_descs,
                     cudagraph_runtime_mode=runtime_mode,
@@ -6723,7 +6749,11 @@ class ModelRunnerFL(
                         shape_block_size,
                         kv_cache_spec.num_kv_heads,
                         kv_cache_spec.head_size,
-                        cache_dtype_str=self.cache_config.cache_dtype,
+                        cache_dtype_str=getattr(
+                            kv_cache_spec,
+                            "cache_dtype_str",
+                            self.cache_config.cache_dtype,
+                        ),
                     )
                     dtype = kv_cache_spec.dtype
                     try:
@@ -6830,7 +6860,11 @@ class ModelRunnerFL(
                 kernel_block_sizes[group.kv_cache_group_id],
                 kv_cache_spec.num_kv_heads,
                 kv_cache_spec.head_size,
-                cache_dtype_str=self.cache_config.cache_dtype,
+                cache_dtype_str=getattr(
+                    kv_cache_spec,
+                    "cache_dtype_str",
+                    self.cache_config.cache_dtype,
+                ),
             )
             # block_dim: 0 means (num_blocks, 2, ...); 1 means (2, num_blocks, ...).
             if block_dim == 0:

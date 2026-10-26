@@ -148,7 +148,7 @@ def register_router():
 
 def register_model():
     """Register FL-specific models not yet upstream."""
-    from vllm import ModelRegistry
+    from vllm.model_executor.models import ModelRegistry
 
     _register_flagcx_connector()
 

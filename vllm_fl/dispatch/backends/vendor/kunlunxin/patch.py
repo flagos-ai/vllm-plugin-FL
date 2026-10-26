@@ -356,6 +356,25 @@ def patch_decode_attention():
         import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
         import xtorch_ops
 
+        original_forward_decode = attn_mod.KunlunxinPagedAttention.forward_decode
+        def use_native_decode_for_cudagraph() -> bool:
+            try:
+                from vllm.config import CUDAGraphMode
+                from vllm.forward_context import (
+                    get_forward_context,
+                    is_forward_context_available,
+                )
+                if not is_forward_context_available():
+                    return False
+                return (
+                    get_forward_context().cudagraph_runtime_mode
+                    == CUDAGraphMode.FULL
+                )
+            except Exception:
+                # Keep the patch usable across vLLM minor versions that do
+                # not expose the runtime-mode field.
+                return False
+
         @staticmethod
         def patched_forward_decode(
             query, key_cache, value_cache, block_tables,
@@ -365,6 +384,27 @@ def patch_decode_attention():
         ):
             """Use prefill_attention in prefix_cache mode for decode."""
             import torch
+
+            if use_native_decode_for_cudagraph():
+                return original_forward_decode(
+                    query,
+                    key_cache,
+                    value_cache,
+                    block_tables,
+                    seq_lens,
+                    seq_lens_host,
+                    max_seq_len,
+                    num_decode_tokens,
+                    kv_cache_dtype,
+                    num_kv_heads,
+                    scale,
+                    alibi_slopes,
+                    k_scale,
+                    v_scale,
+                    max_window_size=max_window_size,
+                    output=output,
+                )
+
             if output is None:
                 output = torch.empty_like(query)
 
@@ -390,7 +430,7 @@ def patch_decode_attention():
             if max_window_size > 0:
                 window_left = max_window_size
                 window_right = 0
-
+            alpha = scale * (float(decode_query.shape[2]) ** 0.5)
             xtorch_ops.prefill_attention(
                 decode_query,
                 key_cache,
@@ -398,7 +438,7 @@ def patch_decode_attention():
                 decode_output,
                 is_causal=True,
                 is_prefix_cache=True,
-                alpha=scale,
+                alpha=alpha,
                 context_qlen_lod_cpu=query_start_loc_host,
                 context_qlen_lod_xpu=query_start_loc,
                 context_kvlen_lod_cpu=kv_prefix_start_loc_host,
