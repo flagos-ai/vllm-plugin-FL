@@ -249,7 +249,8 @@ SHA256 `35b50e13ee0b987e125ef6808590433c9aebce95558b330c2250a19afabdcb41`.
   answers.
 - The formal adaptation eager gates are being evaluated separately; the
   preceding smoke checks do not establish formal acceptance.
-- Graph is unsupported in this vendor stack and remains a full-gate blocker.
+- Full-model graph execution remains unsupported by this adaptation and is
+  a full-gate blocker.
 
 These are correctness checks, not throughput or production-capacity claims.
 The vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions were
