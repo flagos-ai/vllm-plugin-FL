@@ -569,27 +569,31 @@ def test_runner_resolves_cached_ops_before_compilation(
     monkeypatch.setitem(sys.modules, partition.__name__, partition)
     compilation = ModuleType("vllm.compilation")
     compilation.backends = SimpleNamespace(
-        should_split=Mock(return_value=False), split_graph=Mock(),
-        _decompose_size_nodes=Mock(), generate_execution_code=Mock()
+        should_split=Mock(return_value=False),
+        split_graph=Mock(),
+        _decompose_size_nodes=Mock(),
+        generate_execution_code=Mock(),
     )
     monkeypatch.setitem(sys.modules, compilation.__name__, compilation)
     exec(
         compile(ast.Module(body=[warmup], type_ignores=[]), str(source), "exec"),
         {
             "current_platform": SimpleNamespace(device_type=device),
-            "self": SimpleNamespace(compilation_config=SimpleNamespace(
-                mode=mode, cudagraph_mode=graph_mode
-            )),
+            "self": SimpleNamespace(
+                compilation_config=SimpleNamespace(mode=mode, cudagraph_mode=graph_mode)
+            ),
             "CompilationMode": _CompilationMode,
             "CUDAGraphMode": _GraphMode,
         },
     )
     assert dispatch.warmup_cached_ops.call_count == expected
-    installed = getattr(
-        compilation.backends.should_split, "_vllm_fl_txda_partition", False
-    ) is True
+    installed = (
+        getattr(compilation.backends.should_split, "_vllm_fl_txda_partition", False)
+        is True
+    )
     assert installed == (
-        device == "txda" and mode != _CompilationMode.NONE
+        device == "txda"
+        and mode != _CompilationMode.NONE
         and graph_mode != _GraphMode.NONE
     )
 
@@ -610,7 +614,9 @@ def test_txda_collectives_use_opaque_ops_without_changing_other_platforms(
     device_type, vendor_name, expected
 ):
     use_custom_ops = _load_function(
-        "vllm_fl/platform.py", "use_custom_op_collectives", {},
+        "vllm_fl/platform.py",
+        "use_custom_op_collectives",
+        {},
         class_name="PlatformFL",
     )
     platform = SimpleNamespace(device_type=device_type, vendor_name=vendor_name)

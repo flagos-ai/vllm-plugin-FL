@@ -349,11 +349,18 @@ class PlatformFL(Platform):
                 compilation_config.use_inductor_graph_partition = False
                 pass_config = compilation_config.pass_config
                 for name in (
-                    "fuse_norm_quant", "fuse_act_quant", "fuse_attn_quant",
-                    "enable_sp", "fuse_gemm_comms", "fuse_allreduce_rms",
-                    "enable_qk_norm_rope_fusion", "fuse_rope_kvcache_cat_mla",
-                    "fuse_act_padding", "fuse_mla_dual_rms_norm",
-                    "fuse_rope_kvcache", "fuse_qk_norm_rope_kvcache",
+                    "fuse_norm_quant",
+                    "fuse_act_quant",
+                    "fuse_attn_quant",
+                    "enable_sp",
+                    "fuse_gemm_comms",
+                    "fuse_allreduce_rms",
+                    "enable_qk_norm_rope_fusion",
+                    "fuse_rope_kvcache_cat_mla",
+                    "fuse_act_padding",
+                    "fuse_mla_dual_rms_norm",
+                    "fuse_rope_kvcache",
+                    "fuse_qk_norm_rope_kvcache",
                 ):
                     setattr(pass_config, name, False)
             if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
@@ -370,12 +377,16 @@ class PlatformFL(Platform):
                 if compilation_config.splitting_ops is not None:
                     # Keep dynamic SDPA/GDN/Mamba and cache updates outside graphs,
                     # including when callers add their own split operators.
-                    compilation_config.splitting_ops = list(dict.fromkeys([
-                        *compilation_config.splitting_ops,
-                        *compilation_config._attention_ops,
-                        "vllm::unified_kv_cache_update",
-                        "vllm::unified_mla_kv_cache_update",
-                    ]))
+                    compilation_config.splitting_ops = list(
+                        dict.fromkeys(
+                            [
+                                *compilation_config.splitting_ops,
+                                *compilation_config._attention_ops,
+                                "vllm::unified_kv_cache_update",
+                                "vllm::unified_mla_kv_cache_update",
+                            ]
+                        )
+                    )
                 os.environ["TXDA_LAUNCH_VIA_GGL"] = "1"
                 os.environ["TXDA_LAUNCH_KERNEL_SYNC"] = "0"
                 os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] = "0"
@@ -682,7 +693,9 @@ class PlatformFL(Platform):
         # implementation enters native stream APIs. The vLLM custom operators
         # provide fake implementations and are eager TXDA partition boundaries.
         return cls.device_type == "txda" or cls.vendor_name in (
-            "nvidia", "thead", "iluvatar"
+            "nvidia",
+            "thead",
+            "iluvatar",
         )
 
     @classmethod
