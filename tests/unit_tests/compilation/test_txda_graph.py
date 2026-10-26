@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from enum import IntEnum
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
@@ -63,6 +63,13 @@ def state(monkeypatch):
             return SimpleNamespace(res=0)
 
     original_launch = Launcher.__call__
+    # The native graph branch imports the offloader lazily. Keep that dependency
+    # local to this CPU fixture: importing the real module while torch.txda is
+    # mocked can cache an UnspecifiedPlatform for the rest of the pytest run.
+    offloader = SimpleNamespace(sync_prev_onload=Mock(), join_after_forward=Mock())
+    offloader_module = ModuleType("vllm.model_executor.offloader.base")
+    offloader_module.get_offloader = lambda: offloader
+    monkeypatch.setitem(sys.modules, offloader_module.__name__, offloader_module)
     marker = SimpleNamespace(name="TXDA_SINGLE_KERNEL_CAPTURE", cpu_children=[])
     profile_events = [SimpleNamespace(name="aten::mul", cpu_children=[marker])]
     profile = SimpleNamespace(events=lambda: profile_events)
@@ -153,6 +160,7 @@ def state(monkeypatch):
         launcher=Launcher(),
         launcher_type=Launcher,
         original_launch=original_launch,
+        offloader=offloader,
         profile_events=profile_events,
         forward=forward,
     )
@@ -377,6 +385,8 @@ def test_non_txda_capture_keeps_existing_native_graph_path(state):
     assert wrapper(value) is output
     runnable.assert_called_once_with(value)
     state.runtime.graph.assert_called_once()
+    assert state.offloader.sync_prev_onload.call_args_list == [call(), call()]
+    state.offloader.join_after_forward.assert_called_once_with()
     assert state.module.compilation_counter.num_cudagraph_captured == 1
     assert state.launcher_type.__call__ is state.original_launch
 

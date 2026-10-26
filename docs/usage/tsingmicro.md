@@ -59,7 +59,7 @@ Use a dedicated task directory and container name.
 plugin_checkout=/path/to/vllm-plugin-FL
 task_root=/root/tsingmicro-vllm-028
 mkdir -p "$task_root/outputs"
-docker run -d --name codex-tsingmicro-028 --network host --ipc=host --privileged \
+docker run -d --init --name codex-tsingmicro-028 --network host --ipc=host --privileged \
   -v /dev:/dev -v /sys:/sys -v /lib/modules:/lib/modules \
   -v /models:/models:ro \
   -v "$plugin_checkout:/work/vllm-plugin-FL" \
@@ -125,6 +125,7 @@ export LD_LIBRARY_PATH="$FLAGCX_PATH/build/lib:${LD_LIBRARY_PATH:-}"
 export GEMS_VENDOR=tsingmicro
 export VLLM_PLUGINS=fl
 export VLLM_USE_V2_MODEL_RUNNER=0
+export VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS=30
 export TXDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export FL_BACKEND=tsingmicro
 export FL_MODEL_BASE_PATH=/models
@@ -132,6 +133,12 @@ export FL_MODEL_BASE_PATH=/models
 
 The plugin uses `TXDA_VISIBLE_DEVICES` for logical-to-physical device mapping.
 Set the list to the allocated devices before starting the engine.
+
+Use `--shutdown-timeout 60` for manual servers and send SIGTERM to the API
+server first. Allow at least 90 seconds for its shutdown before forcing owned
+worker processes to exit. The vLLM default of zero immediately kills the engine
+and workers, bypassing communicator cleanup. `--init` in the container example
+also reaps any orphaned child processes.
 
 On the reference host, some groups stalled during FlagCX warmup even with the
 original 0.24 image. The tested MoE group used `NCCL_P2P_DISABLE=1`, selecting
@@ -177,6 +184,7 @@ script and launch it through the same host `tmux` pattern:
 ```bash
 vllm serve /models/Qwen/Qwen3.6-27B \
   --served-model-name qwen --host 127.0.0.1 --port 8099 \
+  --shutdown-timeout 60 \
   --tensor-parallel-size 8 --enforce-eager --trust-remote-code \
   --disable-custom-all-reduce --max-model-len 1024 \
   --max-num-batched-tokens 1024 --max-num-seqs 2 \
@@ -215,6 +223,7 @@ export PORT=18280
 cd /work/vllm-plugin-FL/tools/adaptation-gate-cases
 vllm serve "$MODEL_PATH" \
   --served-model-name "$MODEL_PATH" --host 127.0.0.1 --port "$PORT" \
+  --shutdown-timeout 60 \
   --tensor-parallel-size 8 --enforce-eager --trust-remote-code \
   --disable-custom-all-reduce --max-model-len 4096 \
   --max-num-batched-tokens 512 --max-num-seqs 8 \
@@ -282,10 +291,11 @@ The default-dispatch R7 snapshot has SHA256
 production Python files are identical to R6d. Default registration was checked
 against the equivalent R6d environment whitelist.
 
-- 284 regression tests passed locally and in the actual TXDA container. The
-  R7 default configuration passed the same container suite. Shared compilation
-  checks added 27 passes; three Ascend hardware checks were skipped because
-  this host has no NPU runtime.
+- The combined adaptation, communicator and shared compilation suite passed
+  337 tests in the reference container; three Ascend hardware checks were
+  skipped because this host has no NPU runtime. The CPU graph fixture isolates
+  its offloader dependency so mocked device detection cannot leak into later
+  tests. Earlier R7 default-dispatch checks also passed all 284 adaptation tests.
 - Both models passed TP8 eager offline text, image and seeded chunked-prefill
   smoke checks. Repeated seeded requests produced identical token IDs.
 - Both models passed bounded OpenAI-compatible text/image serving with the
@@ -313,9 +323,15 @@ against the equivalent R6d environment whitelist.
   those and the three existing stream tests passed. They cover idempotence,
   initialization and synchronization failures, bounded waiting, library/handle
   lifetime, native ABI binding and unchanged behavior on other backends.
+  On the SDK, two independent eight-rank process groups passed native copies,
+  all-reduce, all-gather and explicit abort; all 16 aborts returned success in
+  approximately 0.51 seconds, including when one peer delayed shutdown. An
+  additional stalled group verified bounded abort on all eight ranks, but
+  its communication test remained failed; this does not establish recovery of
+  previously stalled devices.
 
 These are correctness checks, not throughput or production-capacity claims.
 The vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions were
 preserved. No Tsingmicro workflow or runner configuration exists in upstream
-`main` at `f901597765b3aedf4fe39d883bb9dfc32fa1f3a6`; this adaptation does not
+`main` at `2ed81caa5cdc43770b3272d917950c82e3db131d`; this adaptation does not
 add a hardware CI job.
