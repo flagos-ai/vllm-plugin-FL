@@ -221,3 +221,49 @@ def test_noncausal_respects_asymmetric_window(attention):
     output = impl._sdpa(q, k, v, 4, 2, causal=False)
     expected = _oracle(q, k, v, impl.scale, causal=False, window=2, window_right=0)
     torch.testing.assert_close(output, expected, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("layout", ["NHD", "HND"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_cache_update_padded_hybrid_storage_and_discontinuous_slots(
+    attention, layout, dtype
+):
+    impl = _impl(attention)
+    blocks, block_size, heads, width = 6, 4, 2, 8
+    page_values = block_size * heads * width
+    page_stride = 2 * page_values + 17
+    backing = torch.full((7 + blocks * page_stride + 23,), -7.0, dtype=dtype)
+    shape = (2, blocks, block_size, heads, width)
+    inner = (
+        (heads * width, width, 1) if layout == "NHD" else (width, block_size * width, 1)
+    )
+    strides = (page_values, page_stride, *inner)
+    cache = backing.as_strided(shape, strides, storage_offset=7)
+    expected_backing = backing.clone()
+    expected = expected_backing.as_strided(shape, strides, storage_offset=7)
+    # Cross a block boundary, skip padding, jump backward, and rewrite one slot.
+    slots = torch.tensor([2, 3, 4, 5, -1, 10, 11, 8, 9, 16, 17, 3])
+    values = torch.arange((len(slots) + 3) * 4 * width).reshape(-1, 4, width)
+    key = values.to(dtype)[:, ::2, :]
+    value = (values + 32).to(dtype)[:, 1::2, :]
+    assert not key.is_contiguous()
+    for index, slot in enumerate(slots.tolist()):
+        if slot >= 0:
+            block, offset = divmod(slot, block_size)
+            expected[0, block, offset] = key[index]
+            expected[1, block, offset] = value[index]
+    impl.do_kv_cache_update(None, key, value, cache, slots)
+    # Check untouched page padding/storage prefix and suffix, not just the view.
+    torch.testing.assert_close(backing, expected_backing, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("slots", [[], [-1, -3]])
+def test_cache_update_without_valid_slots_does_not_touch_storage(attention, slots):
+    impl = _impl(attention)
+    cache = torch.full((2, 3, 4, 2, 8), -7.0)
+    before = cache.clone()
+    key = torch.randn(len(slots) + 2, 2, 8)
+    impl.do_kv_cache_update(
+        None, key, key, cache, torch.tensor(slots, dtype=torch.int64)
+    )
+    torch.testing.assert_close(cache, before, rtol=0, atol=0)

@@ -108,18 +108,32 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
             return
 
         key_cache, value_cache = kv_cache.unbind(0)
-        # vLLM may supply padded K/V tensors but only actual slot IDs.
-        key = key[: slot_mapping.numel()]
-        value = value[: slot_mapping.numel()]
         block_size = key_cache.shape[1]
-        block_ids = slot_mapping // block_size
-        offsets = slot_mapping % block_size
-        # Padded slots carry slot_mapping == -1; without this guard they index
-        # the last block (floor division: -1 // block_size == -1) and corrupt
-        # the cache with padded garbage.
-        valid = slot_mapping >= 0
-        key_cache[block_ids[valid], offsets[valid]] = key[valid]
-        value_cache[block_ids[valid], offsets[valid]] = value[valid]
+        # Dynamic boolean indexing is expensive on TXDA, and the native
+        # index_put_ fallback transfers the cache through the CPU. Copy only
+        # selected rows, coalescing consecutive slots within each block so
+        # prefill does not require a Python iteration/copy per token.
+        slots = slot_mapping.tolist()
+        index = 0
+        while index < len(slots):
+            slot = slots[index]
+            if slot < 0:
+                index += 1
+                continue
+            block, offset = divmod(slot, block_size)
+            end = index + 1
+            while (
+                end < len(slots)
+                and end - index < block_size - offset
+                and slots[end] == slot + end - index
+            ):
+                end += 1
+            count = end - index
+            # Native copy_ supports strided input and NHD/HND cache views,
+            # including the blocks-first layout used by hybrid models.
+            key_cache[block, offset : offset + count].copy_(key[index:end])
+            value_cache[block, offset : offset + count].copy_(value[index:end])
+            index = end
 
     def forward(
         self,
