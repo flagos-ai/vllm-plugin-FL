@@ -472,10 +472,16 @@ class PlatformFL(Platform):
             if model_config is not None:
                 model_config.disable_cascade_attn = True
             if attention_config := vllm_config.attention_config:
-                attention_config.use_cudnn_prefill = False
-                attention_config.use_trtllm_ragged_deepseek_prefill = False
-                attention_config.use_trtllm_attention = False
-                attention_config.disable_flashinfer_prefill = True
+                # vLLM 0.24 removed some legacy prefill flags. Adding them
+                # dynamically breaks its dataclass replace() during MTP setup.
+                for name, value in (
+                    ("use_cudnn_prefill", False),
+                    ("use_trtllm_ragged_deepseek_prefill", False),
+                    ("use_trtllm_attention", False),
+                    ("disable_flashinfer_prefill", True),
+                ):
+                    if hasattr(attention_config, name):
+                        setattr(attention_config, name, value)
 
         # GCU relies on ECCL for collectives; custom all-reduce kernels are
         # not available.

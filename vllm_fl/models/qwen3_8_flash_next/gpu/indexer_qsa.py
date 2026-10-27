@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+from .runtime import is_metax
+from vllm_fl.dispatch import resolve_op
+from ..common.qsa_cache import PreparedQSAForwardMetadata, PreparedQSAMetadataBuilder
+
 from typing import Any, cast
 
 import torch
@@ -88,6 +92,11 @@ class QSAIndexer(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
+        self._metax = is_metax()
+        if self._metax:
+            self._qsa_compress_groups_with_ratio = resolve_op("qsa_compress_groups_with_ratio")
+            self._qsa_select_paged_tokens = resolve_op("qsa_select_paged_tokens")
+            self._qsa_store_cache_rows = resolve_op("qsa_store_cache_rows")
         if vllm_config.cache_config is None:
             raise ValueError("QSA requires a paged KV cache")
         if vllm_config.model_config.dtype != torch.bfloat16:
@@ -195,6 +204,8 @@ class QSAIndexer(nn.Module):
     def _metadata(
         self,
     ) -> tuple[QSAForwardMetadata, QSAForwardMetadata] | None:
+        if self._metax:
+            return self._metadata_metax()
         metadata = get_forward_context().attn_metadata
         if isinstance(metadata, list):
             metadata = metadata[0]
@@ -241,6 +252,8 @@ class QSAIndexer(nn.Module):
         raw_metadata: QSAForwardMetadata,
         compressed_metadata: QSAForwardMetadata,
     ) -> None:
+        if self._metax:
+            return self._update_and_compress_metax(token_k=token_k, positions=positions, raw_metadata=raw_metadata, compressed_metadata=compressed_metadata)
         num_tokens = raw_metadata.num_actual_tokens
         raw_key_cache = self.raw_key_cache.key_cache
         rope_position_cache = self.raw_key_cache.rope_position_cache
@@ -311,6 +324,8 @@ class QSAIndexer(nn.Module):
         metadata: QSAForwardMetadata,
         out: torch.Tensor | None,
     ) -> torch.Tensor:
+        if self._metax:
+            return self._select_metax(q=q, metadata=metadata, out=out)
         from .ops.qsa import qsa_select_paged_tokens
 
         return qsa_select_paged_tokens(
@@ -332,6 +347,8 @@ class QSAIndexer(nn.Module):
         out: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return fixed-width request-relative token indices padded with ``-1``."""
+        if self._metax:
+            return self.forward_metax(hidden_states=hidden_states, positions=positions, out=out)
 
         metadata = self._metadata()
         if metadata is None:
@@ -362,6 +379,118 @@ class QSAIndexer(nn.Module):
                 self.max_model_len,
                 out,
             )
+        q, token_k = self.project_qk(
+            hidden_states[:num_tokens], positions[..., :num_tokens]
+        )
+        self._update_and_compress(
+            token_k,
+            positions[..., :num_tokens],
+            raw_metadata,
+            compressed_metadata,
+        )
+        return self._select(q, compressed_metadata, out)
+
+
+    def _metadata_metax(
+        self,
+    ) -> tuple[PreparedQSAForwardMetadata, PreparedQSAForwardMetadata] | None:
+        metadata = get_forward_context().attn_metadata
+        if isinstance(metadata, list):
+            metadata = metadata[0]
+        if not isinstance(metadata, dict):
+            return None
+        raw = cast(PreparedQSAForwardMetadata, metadata[self.raw_key_cache.prefix])
+        compressed = cast(
+            PreparedQSAForwardMetadata, metadata[self.compressed_key_cache.prefix]
+        )
+        if raw.num_actual_tokens != compressed.num_actual_tokens:
+            raise RuntimeError("QSA side-cache metadata token counts disagree")
+        if raw.logical_positions.device.type == "cpu" and (
+            not torch.equal(raw.logical_positions, compressed.logical_positions)
+        ):
+            raise RuntimeError("QSA side-cache metadata positions disagree")
+        return raw, compressed
+
+    def _update_and_compress_metax(
+        self,
+        token_k: torch.Tensor,
+        positions: torch.Tensor,
+        raw_metadata: PreparedQSAForwardMetadata,
+        compressed_metadata: PreparedQSAForwardMetadata,
+    ) -> None:
+        num_tokens = raw_metadata.num_actual_tokens
+        raw_key_cache = self.raw_key_cache.key_cache
+        rope_position_cache = self.raw_key_cache.rope_position_cache
+        self._qsa_store_cache_rows(
+            raw_key_cache,
+            raw_metadata.slot_mapping,
+            token_k[:num_tokens],
+        )
+        if rope_position_cache is not None:
+            position_rows = canonical_qsa_rope_positions(positions)[:num_tokens].to(
+                device=rope_position_cache.device
+            )
+            self._qsa_store_cache_rows(
+                rope_position_cache,
+                raw_metadata.slot_mapping,
+                position_rows,
+            )
+        pooled, first_positions = self._qsa_compress_groups_with_ratio(
+            raw_key_cache,
+            raw_metadata.block_table,
+            raw_metadata.token_to_req,
+            raw_metadata.logical_positions,
+            compressed_metadata.slot_mapping,
+            self.compress_ratio,
+            rope_position_cache,
+        )
+        normalized = self.normalize_compressed_keys(pooled, first_positions)
+        self._qsa_store_cache_rows(
+            self.compressed_key_cache.kv_cache,
+            compressed_metadata.slot_mapping,
+            normalized,
+        )
+
+    def _select_metax(
+        self,
+        q: torch.Tensor,
+        metadata: PreparedQSAForwardMetadata,
+        out: torch.Tensor | None,
+    ) -> torch.Tensor:
+        return self._qsa_select_paged_tokens(
+            q,
+            self.compressed_key_cache.kv_cache,
+            metadata.block_table,
+            metadata.token_to_req,
+            metadata.logical_positions,
+            metadata.seq_lens,
+            self.token_topk,
+            self.compress_ratio,
+            out,
+        )
+
+    def forward_metax(
+        self,
+        hidden_states: torch.Tensor,
+        positions: torch.Tensor,
+        out: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return fixed-width request-relative token indices padded with ``-1``."""
+
+        metadata = self._metadata()
+        if metadata is None:
+            result = torch.full(
+                (hidden_states.shape[0], self.output_width),
+                -1,
+                dtype=torch.int32,
+                device=hidden_states.device,
+            )
+            if out is not None:
+                out.copy_(result)
+                return out
+            return result
+        raw_metadata, compressed_metadata = metadata
+        num_tokens = raw_metadata.num_actual_tokens
         q, token_k = self.project_qk(
             hidden_states[:num_tokens], positions[..., :num_tokens]
         )

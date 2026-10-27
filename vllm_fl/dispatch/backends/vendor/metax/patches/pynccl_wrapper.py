@@ -172,6 +172,7 @@ class MCCLLibrary:
         # it is better not to call it at all.
         # ncclResult_t  ncclCommDestroy(ncclComm_t comm);
         Function("mcclCommDestroy", ncclResult_t, [ncclComm_t]),
+        Function("mcclCommAbort", ncclResult_t, [ncclComm_t]),
         # ncclResult_t ncclGroupStart();
         Function("mcclGroupStart", ncclResult_t, []),
         # ncclResult_t ncclGroupEnd();
@@ -428,6 +429,9 @@ class MCCLLibrary:
 
     def ncclCommDestroy(self, comm: ncclComm_t) -> None:
         self.NCCL_CHECK(self._funcs["mcclCommDestroy"](comm))
+
+    def ncclCommAbort(self, comm: ncclComm_t) -> None:
+        self.NCCL_CHECK(self._funcs["mcclCommAbort"](comm))
 
     def ncclGroupStart(self) -> None:
         self.NCCL_CHECK(self._funcs["mcclGroupStart"]())

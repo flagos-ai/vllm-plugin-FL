@@ -94,3 +94,7 @@ def register_builtins(registry) -> None:
     ]
 
     registry.register_many(impls)
+
+    from .impl.qwen3_8_flash_next import register_qwen38_operators
+
+    register_qwen38_operators(registry, is_platform_available=is_avail)

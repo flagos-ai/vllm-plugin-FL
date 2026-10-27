@@ -113,12 +113,58 @@ class Qwen3_8FlashNextForConditionalGenerationConfig(
         if multimodal_config is not None and multimodal_config.language_model_only:
             _strip_mrope(vllm_config.model_config)
 
+        from vllm_fl.models.qwen3_8_flash_next.gpu.runtime import is_metax
+
+        if is_metax():
+            _verify_metax_config(vllm_config)
+            return
         spec_config = vllm_config.speculative_config
         if spec_config is not None:
             raise NotImplementedError(
                 "Qwen4Exp Day0 serves normal next-token generation first; "
                 "native MTP/speculative decoding is a separate follow-up gate"
             )
+
+
+def _verify_metax_config(vllm_config):
+    cache_config = vllm_config.cache_config
+    multimodal_config = vllm_config.model_config.multimodal_config
+    import torch
+    from vllm import envs
+
+    if envs.VLLM_USE_V2_MODEL_RUNNER:
+        raise NotImplementedError("Qwen3.8 basic integration requires ModelRunnerFL/MRV1")
+    if (
+        vllm_config.speculative_config is not None
+        and vllm_config.speculative_config.num_speculative_tokens != 1
+    ):
+        raise NotImplementedError("Qwen3.8 basic integration currently requires MTP K1")
+    if (
+        vllm_config.speculative_config is not None
+        and not vllm_config.speculative_config.disable_padded_drafter_batch
+    ):
+        raise NotImplementedError(
+            "Qwen3.8 vLLM 0.24 MTP requires disable_padded_drafter_batch=True "
+            "for chunked-prefill token alignment"
+        )
+    if vllm_config.model_config.dtype != torch.bfloat16:
+        raise ValueError("Qwen3.8 basic integration requires BF16 weights")
+    if cache_config.mamba_ssm_cache_dtype != "float32":
+        raise ValueError("Qwen3.8 recurrent state requires float32")
+    if cache_config.mamba_cache_mode != "none":
+        raise NotImplementedError("Qwen3.8 requires mamba_cache_mode=none")
+    if cache_config.enable_prefix_caching:
+        raise NotImplementedError("Qwen3.8 prefix caching is not supported")
+    if vllm_config.scheduler_config.async_scheduling:
+        raise NotImplementedError(
+            "CPU N-gram history requires synchronous scheduling"
+        )
+    if vllm_config.parallel_config.pipeline_parallel_size != 1:
+        raise NotImplementedError("Qwen3.8 basic integration requires PP1")
+    if multimodal_config is not None and not multimodal_config.language_model_only:
+        raise NotImplementedError(
+            "Qwen3.8 basic integration currently supports text-only serving"
+        )
 
 
 class Qwen3_8FlashNextForCausalLMConfig(Qwen3_8FlashNextForConditionalGenerationConfig):
@@ -267,8 +313,15 @@ def apply_qwen3_8_flash_next_patches() -> bool:
             architecture, f"{module}:{class_name}"
         )
 
-    _patch_common_attention_token_to_req_cache()
-    _patch_ple_metadata_bridge()
+    from vllm_fl.models.qwen3_8_flash_next.gpu.runtime import is_metax
+
+    if is_metax():
+        from .qwen3_8_flash_next_mtp import install_qwen38_mtp_compat
+
+        install_qwen38_mtp_compat()
+    else:
+        _patch_common_attention_token_to_req_cache()
+        _patch_ple_metadata_bridge()
     _register_compilation_boundaries()
     logger.info("Installed Qwen3.8-Flash-Next / Qwen4Exp Day0 runtime support")
     return True

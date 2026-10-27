@@ -1,0 +1,34 @@
+# Qwen3.8 basic integration: retain MetaX defaults, select local compatibility contracts.
+prefer: flagos
+strict: false
+op_backends:
+  attention_backend:
+  - vendor:metax
+  silu_and_mul:
+  - flagos
+  - reference
+  rms_norm:
+  - flagos
+  - reference
+  rotary_embedding:
+  - flagos
+  - reference
+  topk_softmax:
+  - flagos
+  - reference
+  gdn_prefill:
+  - impl:vendor.metax.qwen38
+  qsa_select_paged_tokens:
+  - impl:vendor.metax.qwen38
+  qwen38_small_projection:
+  - impl:vendor.metax.qwen38
+  qwen38_ple_gate:
+  - impl:vendor.metax.qwen38
+  qwen38_gdn_mixed_qkv:
+  - impl:vendor.metax.qwen38
+flagos_blacklist:
+- masked_fill
+- masked_fill_
+oot_blacklist:
+- masked_fill
+- masked_fill_

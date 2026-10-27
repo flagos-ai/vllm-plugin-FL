@@ -12,6 +12,8 @@ follow the main KV-cache lifecycle.
 
 from __future__ import annotations
 
+from vllm.platforms import current_platform
+
 from dataclasses import dataclass, field, fields as dataclass_fields
 from typing import ClassVar
 
@@ -376,6 +378,122 @@ class QSAMetadataBuilder(AttentionMetadataBuilder[QSAForwardMetadata]):
             metadata.prepare()
         return metadata
 
+@dataclass
+class PreparedQSAForwardMetadata(AttentionMetadata):
+    """Common per-forward metadata for one QSA side cache."""
+
+    block_table: torch.Tensor
+    slot_mapping: torch.Tensor
+    seq_lens: torch.Tensor
+    query_start_loc: torch.Tensor
+    token_to_req: torch.Tensor
+    logical_positions: torch.Tensor
+    num_actual_tokens: int
+    storage_block_size: int
+    compress_ratio: int
+
+class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMetadata]):
+    """Build QSA metadata from vLLM's cache-group-specific common metadata."""
+
+    _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.UNIFORM_BATCH
+
+    def __init__(
+        self,
+        kv_cache_spec: AttentionSpec,
+        layer_names: list[str],
+        vllm_config: VllmConfig,
+        device: torch.device,
+    ) -> None:
+        super().__init__(kv_cache_spec, layer_names, vllm_config, device)
+        self.compress_ratio = (
+            kv_cache_spec.compress_ratio
+            if isinstance(kv_cache_spec, MLAAttentionSpec)
+            else 1
+        )
+        self.storage_block_size = kv_cache_spec.storage_block_size
+        max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+        self.token_to_req_buffer = torch.empty(
+            max_tokens, dtype=torch.int32, device=device
+        )
+        self.arange_buffer = torch.arange(max_tokens, dtype=torch.int64, device=device)
+        self.slot_mapping_buffer = torch.empty(
+            max_tokens, dtype=torch.int64, device=device
+        )
+        self.logical_positions_buffer = torch.empty(
+            max_tokens, dtype=torch.int64, device=device
+        )
+
+    def build(
+        self,
+        common_prefix_len: int,
+        common_attn_metadata: CommonAttentionMetadata,
+        fast_build: bool = False,
+    ) -> PreparedQSAForwardMetadata:
+        del common_prefix_len, fast_build
+        num_tokens = common_attn_metadata.num_actual_tokens
+        token_to_req_fn = getattr(common_attn_metadata, "token_to_req_indices", None)
+        if token_to_req_fn is not None:
+            token_to_req = token_to_req_fn(self.token_to_req_buffer)[:num_tokens]
+        else:
+            # vLLM 0.24 predates the cached convenience method. Reproduce the
+            # same device-side mapping without changing CommonAttentionMetadata.
+            num_mapped = int(common_attn_metadata.query_start_loc_cpu[-1])
+            query_lens = (
+                common_attn_metadata.query_start_loc[1:]
+                - common_attn_metadata.query_start_loc[:-1]
+            )
+            mapped = torch.repeat_interleave(
+                torch.arange(
+                    query_lens.shape[0],
+                    dtype=torch.int32,
+                    device=self.token_to_req_buffer.device,
+                ),
+                query_lens,
+                output_size=num_mapped,
+            )
+            self.token_to_req_buffer[:num_mapped].copy_(mapped)
+            if num_mapped < num_tokens:
+                self.token_to_req_buffer[num_mapped:num_tokens].zero_()
+            token_to_req = self.token_to_req_buffer[:num_tokens]
+        num_mapped_tokens = int(common_attn_metadata.query_start_loc_cpu[-1])
+        logical_positions = self.logical_positions_buffer[:num_tokens]
+        logical_positions[:num_mapped_tokens].copy_(
+            _logical_positions(
+                common_attn_metadata.query_start_loc,
+                common_attn_metadata.seq_lens,
+                token_to_req[:num_mapped_tokens],
+                num_mapped_tokens,
+                self.arange_buffer,
+            )
+        )
+        if num_mapped_tokens < num_tokens:
+            logical_positions[num_mapped_tokens:].fill_(-1)
+        if self.compress_ratio == 1:
+            slot_mapping = common_attn_metadata.slot_mapping[:num_tokens]
+        else:
+            slot_mapping = compressed_qsa_slot_mapping(
+                common_attn_metadata.block_table_tensor,
+                token_to_req,
+                logical_positions,
+                self.storage_block_size,
+                self.compress_ratio,
+                self.slot_mapping_buffer,
+            )
+            slot_mapping.masked_fill_(
+                common_attn_metadata.slot_mapping[:num_tokens] < 0, -1
+            )
+        return PreparedQSAForwardMetadata(
+            block_table=common_attn_metadata.block_table_tensor,
+            slot_mapping=slot_mapping,
+            seq_lens=common_attn_metadata.seq_lens,
+            query_start_loc=common_attn_metadata.query_start_loc,
+            token_to_req=token_to_req,
+            logical_positions=logical_positions,
+            num_actual_tokens=num_tokens,
+            storage_block_size=self.storage_block_size,
+            compress_ratio=self.compress_ratio,
+        )
+
 class QSAStateBackend(AttentionBackend):
     """Key-only dummy backend for out-of-band BF16 QSA side-cache operations."""
 
@@ -394,7 +512,7 @@ class QSAStateBackend(AttentionBackend):
 
     @staticmethod
     def get_builder_cls() -> type[QSAMetadataBuilder]:
-        return QSAMetadataBuilder
+        return PreparedQSAMetadataBuilder if (getattr(current_platform, "vendor_name", None) == "metax") else QSAMetadataBuilder
 
     @staticmethod
     def get_kv_cache_shape(
@@ -530,15 +648,25 @@ class QSAKeyStateCache(_QSAStateCache):
     def bind_kv_cache(self, kv_cache: torch.Tensor) -> None:
         self.validate_kv_cache(kv_cache)
         super().bind_kv_cache(kv_cache)
-        self.key_cache = kv_cache[..., : self.key_head_size]
-        if self.cache_rope_positions:
-            position_tail = kv_cache[..., self.rope_position_offset :]
-            self.rope_position_cache = position_tail.view(torch.int64)
-        else:
-            self.rope_position_cache = None
+
+    @property
+    def key_cache(self) -> torch.Tensor:
+        # Legacy direct assignment and the explicit binding hook share one owner.
+        return self.kv_cache[..., : self.key_head_size]
+
+    @property
+    def rope_position_cache(self) -> torch.Tensor | None:
+        if not self.cache_rope_positions:
+            return None
+        return self.kv_cache[..., self.rope_position_offset :].view(torch.int64)
 
     def get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec:
         del vllm_config
+        if (getattr(current_platform, "vendor_name", None) == "metax"):
+            return FullAttentionSpec(
+                block_size=self.cache_config.block_size, num_kv_heads=1,
+                head_size=self.head_size, head_size_v=0, dtype=self.dtype,
+            )
         spec_kwargs = dict(
             block_size=self.cache_config.block_size,
             num_kv_heads=1,

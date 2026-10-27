@@ -691,7 +691,16 @@ class ModelRunnerFL(
             elif self.speculative_config.method == "suffix":
                 self.drafter = SuffixDecodingProposer(self.vllm_config)
             elif self.speculative_config.use_eagle():
-                self.drafter = EagleProposer(self.vllm_config, self.device, self)
+                draft_config = self.speculative_config.draft_model_config.hf_config
+                if getattr(draft_config, "qwen38_mtp", False):
+                    from vllm_fl.spec_decode.qwen3_8_flash_next import (
+                        Qwen38MTPProposer,
+                    )
+                    self.drafter = Qwen38MTPProposer(
+                        self.vllm_config, self.device, self
+                    )
+                else:
+                    self.drafter = EagleProposer(self.vllm_config, self.device, self)
                 if self.speculative_config.method == "eagle3":
                     self.use_aux_hidden_state_outputs = (
                         self.drafter.eagle3_use_aux_hidden_state
@@ -2635,6 +2644,12 @@ class ModelRunnerFL(
                 self.drafter.set_per_group_block_table(
                     kv_cache_gid, cm.block_table_tensor
                 )
+            elif self.speculative_config and getattr(
+                self.drafter, "_qwen38_multi_group_mtp", False
+            ):
+                self.drafter.set_per_group_attn_metadata(
+                    kv_cache_gid, cm.block_table_tensor, cm.slot_mapping
+                )
 
             for attn_gid in range(len(self.attn_groups[kv_cache_gid])):
                 if ubatch_slices is not None:
@@ -2650,9 +2665,14 @@ class ModelRunnerFL(
             # Currently the drafter still only uses piecewise cudagraphs (and modifies
             # the attention metadata in directly), and therefore does not want to use
             # padded attention metadata.
-            spec_decode_common_attn_metadata = (
-                spec_decode_common_attn_metadata.unpadded(num_tokens, num_reqs)
-            )
+            if getattr(self.drafter, "_qwen38_multi_group_mtp", False):
+                spec_decode_common_attn_metadata = self.drafter.unpad_target_metadata(
+                    spec_decode_common_attn_metadata, num_tokens, num_reqs
+                )
+            else:
+                spec_decode_common_attn_metadata = (
+                    spec_decode_common_attn_metadata.unpadded(num_tokens, num_reqs)
+                )
 
         return attn_metadata, spec_decode_common_attn_metadata
 
@@ -8045,3 +8065,9 @@ class EncoderTimingStats:
             "encoder_forward_secs": self.encoder_forward_secs,
             "num_encoder_calls": self.num_encoder_calls,
         }
+
+
+# Qwen's CPU N-gram staging runs outside CUDA graph capture/replay.
+from vllm_fl.worker.qwen3_8_flash_next import install_qwen38_runner_hooks
+
+install_qwen38_runner_hooks(ModelRunnerFL)

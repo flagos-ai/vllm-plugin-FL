@@ -6,6 +6,7 @@ from collections.abc import Iterable, Sequence
 from functools import wraps
 
 import torch
+import torch.nn.functional as F
 from flaggems_vllm import ple_short_conv_
 from torch import nn
 
@@ -37,59 +38,13 @@ from .ops.ple_fusion import (
     ple_prefill_short_conv_,
 )
 
-_MASK64 = (1 << 64) - 1
-_SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
-_SPLITMIX_M1 = 0xBF58476D1CE4E5B9
-_SPLITMIX_M2 = 0x94D049BB133111EB
-_PLE_LAYER_PRIME = 10007
+from ..common.ple import (
+    _MASK64, _SPLITMIX_GAMMA, _PLE_LAYER_PRIME, _splitmix64, _nth_prime_after,
+)
+from .runtime import is_metax
+from vllm_fl.dispatch import resolve_op
+import math
 
-
-def _splitmix64(value: int) -> int:
-    value = (value + _SPLITMIX_GAMMA) & _MASK64
-    value = ((value ^ (value >> 30)) * _SPLITMIX_M1) & _MASK64
-    value = ((value ^ (value >> 27)) * _SPLITMIX_M2) & _MASK64
-    return (value ^ (value >> 31)) & _MASK64
-
-
-def _is_prime_64(value: int) -> bool:
-    if value < 2:
-        return False
-    for prime in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
-        if value % prime == 0:
-            return value == prime
-    exponent = value - 1
-    shifts = 0
-    while exponent % 2 == 0:
-        exponent //= 2
-        shifts += 1
-    for base in (2, 325, 9375, 28178, 450775, 9780504, 1795265022):
-        if base % value == 0:
-            continue
-        witness = pow(base, exponent, value)
-        if witness in (1, value - 1):
-            continue
-        for _ in range(shifts - 1):
-            witness = pow(witness, 2, value)
-            if witness == value - 1:
-                break
-        else:
-            return False
-    return True
-
-
-def _nth_prime_after(start: int, count: int) -> int:
-    prime = int(start)
-    for _ in range(count):
-        candidate = prime + 1
-        if candidate <= 2:
-            prime = 2
-            continue
-        if candidate % 2 == 0:
-            candidate += 1
-        while not _is_prime_64(candidate):
-            candidate += 2
-        prime = candidate
-    return prime
 
 
 class Qwen3_8FlashNextPLEGroupedNorm(GroupedGemmaRMSNorm):
@@ -400,6 +355,10 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
+        self._metax = is_metax()
+        if self._metax:
+            self._ple_short_conv = resolve_op("ple_short_conv_")
+            self._ple_gate = resolve_op("qwen38_ple_gate")
         self.model_config: ModelConfig = model_config
         self.cache_config: CacheConfig = cache_config
         self.layer_idx = layer_idx
@@ -417,13 +376,24 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         self.conv_state_len = (self.conv_kernel_size - 1) * self.short_conv_dilation
         self.num_spec_tokens = vllm_config.num_speculative_tokens
         self.activation = "silu"
-        self.ple_embedding: nn.Module = Qwen3_8FlashNextNGramEmbedding(
+        ngram_cls = Qwen3_8FlashNextNGramEmbedding
+        ngram_kwargs = {}
+        if self._metax:
+            from .host_ngram import HostNGramEmbedding
+
+            ngram_cls = HostNGramEmbedding
+            ngram_kwargs = dict(
+                params_dtype=model_config.dtype,
+                host_lookup_mode=vllm_config.additional_config.get("qwen38_ngram_mode", "sharded"),
+            )
+        self.ple_embedding: nn.Module = ngram_cls(
             config,
             int(config.ple_embed_dim),
             self.ple_dense_layer_id,
             vllm_config.scheduler_config.max_num_batched_tokens,
             vllm_config.scheduler_config.max_num_seqs,
             f"{prefix}.ple_embedding",
+            **ngram_kwargs,
         )
         self.key_proj = ReplicatedLinear(
             int(config.ple_embed_dim),
@@ -445,9 +415,9 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             self.hidden_size,
             model_config.dtype,
         )
-        self.norm_key = Qwen3_8FlashNextPLEGroupedNorm(*norm_args)
-        self.norm_query = Qwen3_8FlashNextPLEGroupedNorm(*norm_args)
-        self.norm_conv = Qwen3_8FlashNextPLEGroupedNorm(*norm_args)
+        self.norm_key = Qwen3_8FlashNextPLEGroupedNorm(*norm_args, use_fused_ops=not self._metax)
+        self.norm_query = Qwen3_8FlashNextPLEGroupedNorm(*norm_args, use_fused_ops=not self._metax)
+        self.norm_conv = Qwen3_8FlashNextPLEGroupedNorm(*norm_args, use_fused_ops=not self._metax)
         self.conv1d = nn.Conv1d(
             self.hc_hidden_size,
             self.hc_hidden_size,
@@ -489,6 +459,11 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         )
 
     def _short_conv_fallback(self, inputs: torch.Tensor) -> torch.Tensor:
+        if self._metax:
+            # Profiling / CUDA graph capture only; conv state is not updated.
+            inputs_t = inputs.transpose(0, 1).unsqueeze(0)
+            output = self.conv1d(inputs_t)[..., : inputs_t.size(-1)]
+            return F.silu(output).squeeze(0).transpose(0, 1)
         # Profiling has no cache metadata or persistent state updates.
         output = torch.empty_like(inputs)
         state = torch.empty(
@@ -782,6 +757,10 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
                     f"expect at least {state_capacity}."
                 )
             conv_state = conv_state[..., -state_capacity:]
+        if self._metax:
+            return self._short_conv_dispatch_metax(
+                inputs, layer_attn_metadata, conv_state, conv_weights.to(dtype=inputs.dtype),
+            )
         return self._short_conv_dilated_dispatch(
             inputs,
             layer_attn_metadata,
@@ -810,17 +789,25 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         token_count = hidden_states.shape[0]
         key = key.reshape(token_count, self.hc_count, self.hidden_size)
         query = hidden_states.reshape(token_count, self.hc_count, self.hidden_size)
-        gated_value, normalized_grouped = ple_gate_norm(
-            key,
-            query,
-            value,
-            self.norm_key.weight,
-            self.norm_query.weight,
-            self.norm_conv.weight,
-            self.hc_count,
-            self.norm_conv.eps,
-        )
-        normalized = normalized_grouped.flatten(-2)
+        if self._metax:
+            key = self._apply_norm(self.norm_key, key)
+            query = self._apply_norm(self.norm_query, query)
+            gate = (key * query).sum(dim=-1, keepdim=True) / math.sqrt(self.hidden_size)
+            gate = self._ple_gate(gate)
+            gated_value = gate * value.unsqueeze(-2)
+            normalized = self._apply_norm(self.norm_conv, gated_value).flatten(-2)
+        else:
+            gated_value, normalized_grouped = ple_gate_norm(
+                key,
+                query,
+                value,
+                self.norm_key.weight,
+                self.norm_query.weight,
+                self.norm_conv.weight,
+                self.hc_count,
+                self.norm_conv.eps,
+            )
+            normalized = normalized_grouped.flatten(-2)
         conv_output = torch.zeros_like(normalized)
         torch.ops.vllm.qwen3_8_flash_next_ple_short_conv(
             normalized,
@@ -829,6 +816,121 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         )
         return gated_value.flatten(-2) + conv_output
 
+
+    def _apply_norm(
+        self, norm: Qwen3_8FlashNextPLEGroupedNorm, hidden_states: torch.Tensor
+    ) -> torch.Tensor:
+        shape = hidden_states.shape
+        return norm(hidden_states.flatten(-2)).reshape(shape)
+
+    def prepare_host_lookup(
+        self, input_ids, query_start_loc, ngram_context, *, dummy: bool = False
+    ) -> None:
+        """Graph-external producer called by the Qwen worker hook."""
+        self.ple_embedding.prepare_host_lookup(
+            input_ids, query_start_loc, ngram_context, dummy=dummy
+        )
+
+
+
+
+
+    def _short_conv_dispatch_metax(
+        self,
+        inputs: torch.Tensor,
+        metadata: PleShortConvAttentionMetadata,
+        conv_state: torch.Tensor,
+        conv_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        """Dispatch packed requests without packing or scattering the cache.
+
+        The FGV operator reads the previous speculative history at accepted-1
+        and retains all newly verified prefixes. In particular a one-token
+        decode following a rejected draft still needs the accepted offset.
+        """
+        x = inputs[: metadata.num_actual_tokens]
+        output = torch.zeros_like(x)
+        has_spec = metadata.spec_sequence_masks is not None
+        has_non_spec = metadata.num_decodes > 0 or metadata.num_prefills > 0
+        if has_spec:
+            if (
+                metadata.spec_state_indices_tensor is None
+                or metadata.spec_query_start_loc is None
+                or metadata.num_accepted_tokens is None
+            ):
+                raise ValueError("PLE speculative metadata is incomplete")
+            if has_non_spec:
+                if metadata.spec_token_indx is None:
+                    raise ValueError("PLE mixed batch lacks speculative token mapping")
+                spec_x = x.index_select(0, metadata.spec_token_indx.long())
+                spec_out = torch.empty_like(spec_x)
+            else:
+                # Keep graph padding in the same fixed output allocation; the
+                # varlen operator zeroes tokens beyond the query offsets.
+                spec_x, spec_out = x, output
+            self._ple_short_conv(
+                spec_x,
+                spec_out,
+                conv_state,
+                conv_weights,
+                # FGV's state writer retains the index dtype for row*stride.
+                # Hybrid page strides can overflow int32 even for small row IDs.
+                metadata.spec_state_indices_tensor.to(torch.int64),
+                dilation=self.short_conv_dilation,
+                query_start_loc=metadata.spec_query_start_loc,
+                accepted_tokens=metadata.num_accepted_tokens,
+                max_query_len=metadata.spec_query_len,
+                null_block_id=NULL_BLOCK_ID,
+            )
+            if has_non_spec:
+                output.index_copy_(0, metadata.spec_token_indx.long(), spec_out)
+        if has_non_spec:
+            if (
+                metadata.state_indices_tensor is None
+                or metadata.non_spec_query_start_loc is None
+            ):
+                raise ValueError("PLE non-speculative metadata is incomplete")
+            if has_spec:
+                if metadata.non_spec_token_indx is None:
+                    raise ValueError("PLE mixed batch lacks non-spec token mapping")
+                non_x = x.index_select(0, metadata.non_spec_token_indx.long())
+                non_out = torch.empty_like(non_x)
+            else:
+                non_x, non_out = x, output
+            if metadata.num_decodes and metadata.num_prefills:
+                if (
+                    metadata.has_initial_states_d is None
+                    or metadata.has_initial_states_p is None
+                ):
+                    raise ValueError(
+                        "PLE mixed decode/prefill lacks initial-state flags"
+                    )
+                initial = torch.cat(
+                    (
+                        metadata.has_initial_states_d[: metadata.num_decodes],
+                        metadata.has_initial_states_p[: metadata.num_prefills],
+                    )
+                )
+            elif metadata.num_prefills:
+                initial = metadata.has_initial_states_p
+            else:
+                initial = metadata.has_initial_states_d
+            if initial is None:
+                raise ValueError("PLE metadata lacks initial-state flags")
+            self._ple_short_conv(
+                non_x,
+                non_out,
+                conv_state,
+                conv_weights,
+                metadata.state_indices_tensor.to(torch.int64),
+                dilation=self.short_conv_dilation,
+                query_start_loc=metadata.non_spec_query_start_loc,
+                has_initial_state=initial,
+                null_block_id=NULL_BLOCK_ID,
+            )
+            if has_spec:
+                output.index_copy_(0, metadata.non_spec_token_indx.long(), non_out)
+        return output
 
 def qwen3_8_flash_next_ple_short_conv(
     inputs: torch.Tensor,

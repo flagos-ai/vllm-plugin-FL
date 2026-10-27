@@ -434,10 +434,14 @@ def use_flashinfer_prefill() -> bool:
 
     vllm_config = get_current_vllm_config()
     return (
-        not vllm_config.attention_config.disable_flashinfer_prefill
+        not getattr(vllm_config.attention_config, "disable_flashinfer_prefill", True)
         and flashinfer_available
-        and not vllm_config.attention_config.use_cudnn_prefill
-        and not vllm_config.attention_config.use_trtllm_ragged_deepseek_prefill
+        and not getattr(vllm_config.attention_config, "use_cudnn_prefill", False)
+        and not getattr(
+            vllm_config.attention_config,
+            "use_trtllm_ragged_deepseek_prefill",
+            False,
+        )
         and current_platform.is_device_capability_family(100)
     )
 

@@ -1,243 +1,113 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Cross-vendor Qwen3.8-Flash-Next MTP (Multi-Token Predictor) model.
+"""Qwen4Exp MTP with an H-wide logits stream and real 4H feedback.
 
-The MTP draft model reuses the Qwen3.8-Flash-Next backbone (PLE/HC/MoE) but:
-  - drops all multi-modal handling (text-only),
-  - forces PLE off while keeping the main model's HC stream count,
-  - fuses the backbone hidden and the new-token embedding via
-    ``residual_linear_shared`` (fc_embedding + shared fc_hidden) instead of
-    the ``Linear(2H, H)`` + repeat used by other MTP variants,
-  - emits TWO hidden streams per step (scheme A): a single stream [T, H]
-    (final-mixer collapsed, fed to the LM head) and a pre-final-mixer
-    multi stream [T, hc_count*H] (fed to the next draft step).
+The residual-linear-shared fusion follows vLLM qwen4_exp/nvidia/mtp.py at
+7b1d07440dde8426a8b3d85e5f5815c06913eb82. The decoder and checkpoint loader
+use this plugin's vLLM 0.24 interfaces; no upstream source is replaced.
 """
+from __future__ import annotations
 
 from collections.abc import Iterable
 
-import regex as re
 import torch
 from torch import nn
 
-from vllm.compilation.decorators import support_torch_compile
-from vllm.config import VllmConfig, replace, set_current_vllm_config
-from vllm.distributed import get_pp_group
-from vllm.model_executor.layers.layernorm import GemmaRMSNorm
+from vllm.config import VllmConfig
 from vllm.model_executor.layers.linear import ColumnParallelLinear
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
 )
-from vllm.model_executor.model_loader.utils import configure_quant_config
-from vllm.model_executor.models.interfaces import SupportsPP
-from vllm.model_executor.models.qwen3_5 import Qwen3_5Model
 from vllm.model_executor.models.qwen3_next import QwenNextMixtureOfExperts
-from vllm.model_executor.models.utils import (
-    AutoWeightsLoader,
-    PPMissingLayer,
-    get_draft_quant_config,
-    make_empty_intermediate_tensors_factory,
-    maybe_fuse_shared_experts,
-    maybe_prefix,
-)
-from vllm.sequence import IntermediateTensors
+from vllm.model_executor.models.utils import AutoWeightsLoader, maybe_prefix
 
-from ..common.hyperconnection import (
-    GatedResidualSimple,
-    HyperConnectionConfig,
-    pack_gated_hc_projection_weights,
-)
-from ..config import Qwen3_8FlashNextTextConfig
-from .model import (
-    _QWEN38_FLASH_NEXT_IGNORED_MISSING_SUFFIXES,
-    Qwen3_8FlashNextDecoderLayer,
-    Qwen3_8FlashNextSparseMoeBlock,
-)
+from .model import Qwen3_8FlashNextDecoderLayer, Qwen3_8FlashNextModel
+from ..common.hyperconnection import GatedResidualSimple, GroupedGemmaRMSNorm, HyperConnectionConfig
 
 
-def _remap_ignored_layers(
-    ignored_layers: list[str],
-    mtp_start_layer_idx: int,
-) -> list[str]:
-    remapped: list[str] = []
-    for name in ignored_layers:
-        if name.startswith("mtp."):
-            new_name = re.sub(
-                r"(?<=\.layers\.)\d+",
-                lambda m: str(mtp_start_layer_idx + int(m.group(0))),
-                name,
-            )
-            remapped.append(new_name)
-        else:
-            remapped.append(name)
-    return remapped
-
-
-def _remap_mtp_weight_name(name: str) -> str | None:
-    """Map Qwen3.8-Flash-Next checkpoint paths into the standalone draft model."""
-
-    for checkpoint_prefix in (
-        "model.language_model.",
-        "language_model.",
-    ):
-        if name.startswith(checkpoint_prefix):
-            name = name.removeprefix(checkpoint_prefix)
+def remap_mtp_weight_name(name: str) -> str | None:
+    """Keep only the draft weights and the target embedding/head it reuses."""
+    for prefix in ("model.language_model.", "language_model."):
+        if name.startswith(prefix):
+            name = name.removeprefix(prefix)
             break
-
-    if name.startswith("embed_tokens."):
-        name = f"model.{name}"
     if name.startswith("model.mtp."):
         name = name.removeprefix("model.")
-    if name.startswith("mtp.shared_head.head."):
-        return name.replace("mtp.shared_head.head.", "lm_head.", 1)
-    if name.startswith("model.shared_head.head."):
-        return name.replace("model.shared_head.head.", "lm_head.", 1)
-    if name.startswith("shared_head.head."):
-        return name.replace("shared_head.head.", "lm_head.", 1)
+    for prefix in ("mtp.shared_head.head.", "model.shared_head.head.",
+                   "shared_head.head."):
+        if name.startswith(prefix):
+            return "lm_head." + name.removeprefix(prefix)
+    if name.startswith("mtp."):
+        return "model." + name.removeprefix("mtp.")
+    if name.startswith("embed_tokens."):
+        return "model." + name
     if name.startswith("model.lm_head."):
         return name.removeprefix("model.")
-    if name.startswith("mtp."):
-        return name.replace("mtp.", "model.", 1)
-    if name.startswith("model.embed_tokens.") or name.startswith("lm_head."):
+    if name.startswith(("model.embed_tokens.", "lm_head.")):
         return name
     return None
 
 
-def _make_draft_vllm_config(
-    vllm_config: VllmConfig,
-    mtp_start_layer_idx: int,
-) -> VllmConfig:
-    """Ensure that the draft model config is set in the vLLM config."""
-    speculative_config = vllm_config.speculative_config
-    if speculative_config is None or speculative_config.draft_model_config is None:
-        raise ValueError("speculative_config.draft_model_config must be set")
-
-    draft_quant_config = get_draft_quant_config(vllm_config)
-
-    # inject packed and ignored modules to the quantization config of draft model
-    if draft_quant_config is not None:
-        configure_quant_config(draft_quant_config, Qwen3_8FlashNextMTP)
-        ignored_layers = getattr(draft_quant_config, "ignored_layers", None)
-        if ignored_layers:
-            setattr(  # noqa: B010
-                draft_quant_config,
-                "ignored_layers",
-                _remap_ignored_layers(ignored_layers, mtp_start_layer_idx),
-            )
-        exclude_modules = getattr(draft_quant_config, "exclude_modules", None)
-        if exclude_modules:
-            setattr(  # noqa: B010
-                draft_quant_config,
-                "exclude_modules",
-                _remap_ignored_layers(exclude_modules, mtp_start_layer_idx),
-            )
-
-    draft_vllm_config = replace(
-        vllm_config,
-        model_config=speculative_config.draft_model_config,
-    )
-    # VllmConfig post-init derives the target quant config, so restore the
-    # independently resolved draft quant config after replacement.
-    draft_vllm_config.quant_config = draft_quant_config
-    from .quantization import with_platform_quantization
-
-    return with_platform_quantization(draft_vllm_config)
-
-
-@support_torch_compile(
-    dynamic_arg_dims={
-        "input_ids": 0,
-        "positions": -1,
-        "intermediate_tensors": 0,
-        "inputs_embeds": 0,
-        "hidden_states": 0,
-    }
-)
 class Qwen3_8FlashNextMultiTokenPredictor(nn.Module):
-    hf_to_vllm_mapper = Qwen3_5Model.hf_to_vllm_mapper
+    hf_to_vllm_mapper = Qwen3_8FlashNextModel.hf_to_vllm_mapper
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__()
-
-        model_config = vllm_config.model_config
-        config: Qwen3_8FlashNextTextConfig = model_config.hf_text_config
-
+        config = vllm_config.model_config.hf_text_config
         self.config = config
-        self.vocab_size = config.vocab_size
-
-        self.mtp_start_layer_idx = config.num_hidden_layers
-        self.num_mtp_layers = getattr(config, "mtp_num_hidden_layers", 1)
-
         self.hidden_size = config.hidden_size
         self.hc_count = config.hc_count
-
-        self.embed_tokens = VocabParallelEmbedding(self.vocab_size, self.hidden_size)
-        draft_vllm_config = _make_draft_vllm_config(
-            vllm_config,
-            self.mtp_start_layer_idx,
+        self.num_mtp_layers = config.mtp_num_hidden_layers
+        if self.num_mtp_layers != 1:
+            raise ValueError("This checkpoint contract requires one MTP layer")
+        self.num_redundant_experts = (
+            vllm_config.parallel_config.eplb_config.num_redundant_experts
         )
-        with set_current_vllm_config(draft_vllm_config, prefix=prefix):
-            # residual_linear_shared fusion: fc_embedding projects the token
-            # embedding, fc_hidden (shared across HC branches) projects the
-            # backbone hidden; the embedding is added as a residual to every
-            # branch (see mtp_residual_linear_shared.md).
-            self.fc_embedding = ColumnParallelLinear(
-                self.hidden_size,
-                self.hidden_size,
-                gather_output=True,
-                bias=False,
-                return_bias=False,
-                quant_config=draft_vllm_config.quant_config,
-                prefix=f"{prefix}.fc_embedding",
+        self._qsa_layer_ids = frozenset(range(self.num_mtp_layers))
+        self.embed_tokens = VocabParallelEmbedding(
+            config.vocab_size, self.hidden_size,
+            prefix=maybe_prefix(prefix, "embed_tokens"),
+        )
+        linear_kwargs = dict(gather_output=True, bias=False, return_bias=False)
+        self.fc_embedding = ColumnParallelLinear(
+            self.hidden_size, self.hidden_size,
+            prefix=maybe_prefix(prefix, "fc_embedding"), **linear_kwargs,
+        )
+        self.fc_hidden = ColumnParallelLinear(
+            self.hidden_size, self.hidden_size,
+            prefix=maybe_prefix(prefix, "fc_hidden"), **linear_kwargs,
+        )
+        self.pre_fc_norm_embedding = GroupedGemmaRMSNorm(
+            self.hidden_size, config.rms_norm_eps, group_size=None,
+            dtype=vllm_config.model_config.dtype, use_fused_ops=False,
+        )
+        # The checkpoint normalizes the entire 4H stream before shared H->H FC.
+        self.pre_fc_norm_hidden = GroupedGemmaRMSNorm(
+            self.hc_count * self.hidden_size, config.rms_norm_eps, group_size=None,
+            dtype=vllm_config.model_config.dtype, use_fused_ops=False,
+        )
+        self.layers = nn.ModuleList([
+            Qwen3_8FlashNextDecoderLayer(
+                vllm_config,
+                layer_type="full_attention",
+                prefix=f"{prefix}.layers.{config.num_hidden_layers + layer_idx}",
+                force_disable_ple=True,
             )
-            self.fc_hidden = ColumnParallelLinear(
-                self.hidden_size,
-                self.hidden_size,
-                gather_output=True,
-                bias=False,
-                return_bias=False,
-                quant_config=draft_vllm_config.quant_config,
-                prefix=f"{prefix}.fc_hidden",
-            )
-            self.layers = nn.ModuleList(
-                Qwen3_8FlashNextDecoderLayer(
-                    draft_vllm_config,
-                    layer_type="full_attention",
-                    force_disable_ple=True,
-                    prefix=f"{prefix}.layers.{self.mtp_start_layer_idx + idx}",
-                )
-                for idx in range(self.num_mtp_layers)
-            )
-
-        self.pre_fc_norm_embedding = GemmaRMSNorm(
-            self.hidden_size, eps=config.rms_norm_eps
-        )
-        self.pre_fc_norm_hidden = GemmaRMSNorm(
-            self.hidden_size * self.hc_count, eps=config.rms_norm_eps
-        )
-        # HC final mixer collapses the multi stream into [T, H] for the LM head.
-        self.hyper_connection_mixer = self._build_final_mixer(config)
-
-        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
-            ["hidden_states"], self.hidden_size * self.hc_count
-        )
-
-    def _build_final_mixer(self, config: Qwen3_8FlashNextTextConfig):
-        hc_config = HyperConnectionConfig(
-            hc_count=config.hc_count,
-            hidden_size=config.hidden_size,
-            params_dtype=torch.bfloat16,
-            hc_lowrank=config.hc_lowrank,
-            rms_norm_eps=config.rms_norm_eps,
-            hc_per_branch_norm=True,
-        )
-        # role="final" (NOT "mtp_*") keeps hc_count identical to the main
-        # model; use_combine=False matches the main model's final mixer.
-        return GatedResidualSimple(
-            hc_config,
+            for layer_idx in range(self.num_mtp_layers)
+        ])
+        self.hyper_connection_mixer = GatedResidualSimple(
+            HyperConnectionConfig(
+                hc_count=self.hc_count,
+                hidden_size=self.hidden_size,
+                params_dtype=vllm_config.model_config.dtype,
+                hc_lowrank=config.hc_lowrank,
+                rms_norm_eps=config.rms_norm_eps,
+                hc_per_branch_norm=True,
+                use_fused_ops=False,
+            ),
             use_combine=False,
-            role="final",
         )
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -247,157 +117,65 @@ class Qwen3_8FlashNextMultiTokenPredictor(nn.Module):
         self,
         input_ids: torch.Tensor | None,
         positions: torch.Tensor,
-        hidden_states: torch.Tensor | None = None,
-        intermediate_tensors: IntermediateTensors | None = None,
+        hidden_states: torch.Tensor,
         inputs_embeds: torch.Tensor | None = None,
         spec_step_idx: int = 0,
-        query_start_loc: torch.Tensor | None = None,
-        ngram_context: torch.Tensor | None = None,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor] | IntermediateTensors:
-        hc_count = self.hc_count
-        H = self.hidden_size
-
-        if get_pp_group().is_first_rank:
-            assert hidden_states is not None
-            if inputs_embeds is None:
-                assert input_ids is not None
-                inputs_embeds = self.embed_input_ids(input_ids)
-            # Embedding branch: pre-norm -> fc_embedding -> [T, H].
-            inputs_embeds = self.pre_fc_norm_embedding(inputs_embeds)
-            inputs_embeds = self.fc_embedding(inputs_embeds)
-
-            # Backbone hidden is multi-stream [T, hc_count*H] (scheme A:
-            # the main model truly emits the pre-final-mixer multi stream
-            # on the first step; subsequent steps reuse the prior draft
-            # step's multi stream).
-            T = hidden_states.shape[0]
-            hidden_states = hidden_states.view(T, hc_count, H)
-            hidden_states = self.pre_fc_norm_hidden(hidden_states.flatten(-2)).view(
-                T, hc_count, H
-            )
-            hidden_states = self.fc_hidden(hidden_states)
-            # Add the embedding residual to every branch, then fold back
-            # to [T, hc_count*H] (HC outer, HS inner) for the HC decoder.
-            hidden_states = inputs_embeds.unsqueeze(-2) + hidden_states
-            hidden_states = hidden_states.flatten(-2)
-        else:
-            assert intermediate_tensors is not None
-            hidden_states = intermediate_tensors["hidden_states"]
-
-        current_step_idx = spec_step_idx % self.num_mtp_layers
-        layer = self.layers[current_step_idx]
-        hidden_states, block_output, injection = layer(
-            hidden_states=hidden_states,
-            prev_block_output=None,
-            prev_injection=None,
-            positions=positions,
-            input_ids=input_ids,
-            query_start_loc=query_start_loc,
-            ngram_context=ngram_context,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if hidden_states.shape[-1] != self.hc_count * self.hidden_size:
+            raise ValueError("MTP feedback must contain the target's real 4H stream")
+        if inputs_embeds is None:
+            if input_ids is None:
+                raise ValueError("MTP requires token IDs or their embeddings")
+            inputs_embeds = self.embed_input_ids(input_ids)
+        embedding = self.fc_embedding(self.pre_fc_norm_embedding(inputs_embeds))
+        hidden = self.pre_fc_norm_hidden(hidden_states).unflatten(
+            -1, (self.hc_count, self.hidden_size)
         )
-        if not get_pp_group().is_last_rank:
-            assert injection is not None
-            hidden_states = layer.mlp_hyper_connection.combine_pending(
-                hidden_states,
-                block_output,
-                injection,
-            )
-            return IntermediateTensors({"hidden_states": hidden_states})
-
-        # Last PP rank finalize. Keep both:
-        #   (A) sample_hidden_states [T, H]  -> single stream for the LM head
-        #   (B) multi_hidden [T, hc_count*H] -> pre-final-mixer multi stream
-        #       for the next draft step (zero extra compute, just kept).
-        multi_hidden, sample_hidden_states, _ = (
-            self.hyper_connection_mixer.combine_and_mix(
-                hidden_states,
-                block_output,
-                injection,
-            )
+        hidden = self.fc_hidden(hidden) + embedding.unsqueeze(-2)
+        hidden, _, _ = self.layers[spec_step_idx % self.num_mtp_layers](
+            hidden_states=hidden.flatten(-2), residual=None, positions=positions,
         )
-        return sample_hidden_states, multi_hidden
+        sample_hidden, _ = self.hyper_connection_mixer.mix(hidden)
+        return sample_hidden, hidden
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        weights = maybe_fuse_shared_experts(
-            weights,
-            n_routed_experts=getattr(self.config, "num_experts", 0) or 0,
-            n_shared_experts=1,
-            ckpt_prefix="mlp.shared_expert",
-        )
-        loader = AutoWeightsLoader(
-            self,
-            skip_substrs=["hyper_connection_mixer.block_inject_weight"],
-            ignore_unexpected_suffixes=_QWEN38_FLASH_NEXT_IGNORED_MISSING_SUFFIXES.copy(),
-        )
-        loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
-        pack_gated_hc_projection_weights(self)
-        return loaded
+        # Reuse the 0.24 QKV/shared-expert/fused routed-expert mapping once.
+        return Qwen3_8FlashNextModel.load_weights(self, weights)
 
 
-@support_torch_compile(
-    dynamic_arg_dims={
-        "input_ids": 0,
-        "positions": -1,
-        "intermediate_tensors": 0,
-        "inputs_embeds": 0,
-        "hidden_states": 0,
-    }
-)
-class Qwen3_8FlashNextMTP(nn.Module, SupportsPP, QwenNextMixtureOfExperts):
+class Qwen3_8FlashNextMTP(nn.Module, QwenNextMixtureOfExperts):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
         "gate_up_proj": ["gate_proj", "up_proj"],
-        "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
-        "in_proj_ba": ["in_proj_b", "in_proj_a"],
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
-        config: Qwen3_8FlashNextTextConfig = vllm_config.model_config.hf_text_config
-        self.vllm_config = vllm_config
-        cache_config = vllm_config.cache_config
-        if cache_config.mamba_cache_mode == "all":
-            raise NotImplementedError(
-                "Qwen3_8FlashNextMTP currently does not support 'all' prefix caching, "
-                "please use '--mamba-cache-mode=align' instead"
-            )
-
-        self.quant_config = vllm_config.quant_config
-
         super().__init__()
-        self.config = config
+        if vllm_config.parallel_config.pipeline_parallel_size != 1:
+            raise NotImplementedError("Qwen3.8 MTP currently requires PP=1")
+        if vllm_config.cache_config.mamba_cache_mode != "none":
+            raise NotImplementedError(
+                "Qwen3.8 MTP currently requires mamba_cache_mode=none"
+            )
+        if vllm_config.model_config.dtype != torch.bfloat16:
+            raise NotImplementedError("Qwen3.8 MTP requires the BF16 checkpoint")
+        if vllm_config.quant_config is not None:
+            raise NotImplementedError(
+                "Qwen3.8 MTP weight quantization is not validated"
+            )
+        self.config = vllm_config.model_config.hf_text_config
+        self.vllm_config = vllm_config
+        self.quant_config = None
         self.model = Qwen3_8FlashNextMultiTokenPredictor(
-            vllm_config=vllm_config,
-            prefix=maybe_prefix(prefix, "mtp"),
+            vllm_config=vllm_config, prefix=maybe_prefix(prefix, "mtp"),
         )
-
-        if get_pp_group().is_last_rank:
-            if config.tie_word_embeddings:
-                self.lm_head = self.model.embed_tokens
-            else:
-                self.lm_head = ParallelLMHead(
-                    config.vocab_size,
-                    config.hidden_size,
-                    prefix=maybe_prefix(prefix, "lm_head"),
-                )
-        else:
-            self.lm_head = PPMissingLayer()
-
-        self.logits_processor = LogitsProcessor(config.vocab_size)
-        self.make_empty_intermediate_tensors = (
-            self.model.make_empty_intermediate_tensors
+        self.lm_head = ParallelLMHead(
+            self.config.vocab_size, self.config.hidden_size,
+            prefix=maybe_prefix(prefix, "lm_head"),
         )
-        # MoE metadata. The MTP layer (idx == num_hidden_layers) is a MoE
-        # block under the real config; guard with a light fallback so a future
-        # dense MTP layer does not crash here.
-        if self._has_moe_layer():
-            self.set_moe_parameters()
-
-    def _has_moe_layer(self) -> bool:
-        return any(
-            isinstance(layer, Qwen3_8FlashNextDecoderLayer)
-            and isinstance(layer.mlp, Qwen3_8FlashNextSparseMoeBlock)
-            for layer in self.model.layers
-        )
+        self.logits_processor = LogitsProcessor(self.config.vocab_size)
+        if (getattr(self.config, "num_experts", 0) or 0) > 0:
+            QwenNextMixtureOfExperts.set_moe_parameters(self)
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.embed_input_ids(input_ids)
@@ -406,43 +184,28 @@ class Qwen3_8FlashNextMTP(nn.Module, SupportsPP, QwenNextMixtureOfExperts):
         self,
         input_ids: torch.Tensor | None,
         positions: torch.Tensor,
-        hidden_states: torch.Tensor | None = None,
-        intermediate_tensors: IntermediateTensors | None = None,
+        hidden_states: torch.Tensor,
+        intermediate_tensors=None,
         inputs_embeds: torch.Tensor | None = None,
         spec_step_idx: int = 0,
         **kwargs: object,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor] | IntermediateTensors:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if intermediate_tensors is not None:
+            raise ValueError("PP intermediate tensors are unsupported for Qwen3.8 MTP")
         return self.model(
-            input_ids,
-            positions,
-            hidden_states,
-            intermediate_tensors,
-            inputs_embeds,
-            spec_step_idx=spec_step_idx,
-            query_start_loc=kwargs.get("query_start_loc"),
-            ngram_context=kwargs.get("ngram_context"),
+            input_ids, positions, hidden_states, inputs_embeds, spec_step_idx,
         )
 
-    def compute_logits(
-        self, hidden_states: torch.Tensor, spec_step_idx: int = 0
-    ) -> torch.Tensor | None:
+    def compute_logits(self, hidden_states: torch.Tensor, spec_step_idx: int = 0):
         return self.logits_processor(self.lm_head, hidden_states)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        def remap_weight_names():
+        def remapped():
             for name, weight in weights:
-                remapped_name = _remap_mtp_weight_name(name)
-                if remapped_name is not None:
-                    yield remapped_name, weight
-
-        loader = AutoWeightsLoader(
-            self,
-            skip_substrs=["hyper_connection_mixer.block_inject_weight"],
-            ignore_unexpected_suffixes=_QWEN38_FLASH_NEXT_IGNORED_MISSING_SUFFIXES.copy(),
-        )
-        loaded = loader.load_weights(remap_weight_names())
-        pack_gated_hc_projection_weights(self)
-        return loaded
+                mapped = remap_mtp_weight_name(name)
+                if mapped is not None:
+                    yield mapped, weight
+        return AutoWeightsLoader(self).load_weights(remapped())
 
 
-__all__ = ["Qwen3_8FlashNextMTP", "Qwen3_8FlashNextMultiTokenPredictor"]
+Qwen4ExpMTP = Qwen3_8FlashNextMTP

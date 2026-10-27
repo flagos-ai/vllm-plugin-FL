@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+from .runtime import is_metax
+from vllm_fl.dispatch import resolve_op
+from ..common.qsa_cache import PreparedQSAForwardMetadata, PreparedQSAMetadataBuilder
+
 from typing import Any, ClassVar, cast
 
 import torch
@@ -134,7 +138,7 @@ class Qwen3_8FlashNextQSAAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_builder_cls() -> type[QSAMetadataBuilder]:
-        return QSAMetadataBuilder
+        return PreparedQSAMetadataBuilder if is_metax() else QSAMetadataBuilder
 
     @staticmethod
     def get_kv_cache_shape(
@@ -266,7 +270,12 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
 
         mm_config = model_config.multimodal_config
         text_only = mm_config is None or mm_config.language_model_only
+        self._metax = is_metax()
+        if self._metax:
+            self._qsa_store_cache_rows = resolve_op("qsa_store_cache_rows")
+            self._qsa_sparse_paged_attention = resolve_op("qsa_sparse_paged_attention")
         self.use_fused_qk_norm_rope_gate = (
+            not self._metax and
             self.attn_output_gate
             and getattr(self.rotary_emb, "is_neox_style", False)
             and current_platform.is_cuda()
@@ -365,7 +374,10 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             positions,
             self.topk_indices_buffer[:num_tokens],
         )
-        token_to_req = _prepared_qsa_token_to_req(metadata, self.indexer, num_tokens)
+        token_to_req = (
+            side_metadata.token_to_req[:num_tokens] if self._metax
+            else _prepared_qsa_token_to_req(metadata, self.indexer, num_tokens)
+        )
         if selected.shape != (
             num_tokens,
             self.indexer.output_width,
@@ -375,39 +387,63 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         if key_cache.dtype != torch.bfloat16 or query.dtype != torch.bfloat16:
             raise NotImplementedError("Qwen3.8-Flash-Next QSA requires BF16 Q/K/V")
 
-        from .ops.qsa import (
-            qsa_prepare_split_workspace,
-            qsa_sparse_paged_attention,
-            qsa_store_kv_cache_rows,
-        )
-
-        slot_mapping = main_metadata.slot_mapping[:num_tokens]
-        if num_tokens and has_native_cache_update():
-            # Isolated NVIDIA fast path: keep the model-owned QSA backend and
-            # use only vLLM's measured fused cache-update operator.
-            native_cache_update(
-                key[:num_tokens],
-                value[:num_tokens],
-                key_cache,
-                value_cache,
-                slot_mapping,
-                self.kv_cache_dtype,
-                self._k_scale,
-                self._v_scale,
+        if self._metax:
+            slot_mapping = main_metadata.slot_mapping[:num_tokens]
+            flat_width = self.num_kv_heads * self.head_dim
+            flat_key_cache = key_cache.view(
+                key_cache.shape[0], key_cache.shape[1], 1, flat_width
+            )
+            flat_value_cache = value_cache.view(
+                value_cache.shape[0], value_cache.shape[1], 1, flat_width
+            )
+            self._qsa_store_cache_rows(
+                flat_key_cache, slot_mapping,
+                key[:num_tokens].reshape(num_tokens, 1, flat_width),
+            )
+            self._qsa_store_cache_rows(
+                flat_value_cache, slot_mapping,
+                value[:num_tokens].reshape(num_tokens, 1, flat_width),
             )
         else:
-            # Cross-vendor fallback: one stride-aware launch writes K and V
-            # without flattening the allocator-owned head/dim layout.
-            qsa_store_kv_cache_rows(
-                key_cache,
-                value_cache,
-                slot_mapping,
-                key[:num_tokens],
-                value[:num_tokens],
+            from .ops.qsa import (
+                qsa_prepare_split_workspace,
+                qsa_sparse_paged_attention,
+                qsa_store_kv_cache_rows,
             )
 
+            slot_mapping = main_metadata.slot_mapping[:num_tokens]
+            if num_tokens and has_native_cache_update():
+                # Isolated NVIDIA fast path: keep the model-owned QSA backend and
+                # use only vLLM's measured fused cache-update operator.
+                native_cache_update(
+                    key[:num_tokens],
+                    value[:num_tokens],
+                    key_cache,
+                    value_cache,
+                    slot_mapping,
+                    self.kv_cache_dtype,
+                    self._k_scale,
+                    self._v_scale,
+                )
+            else:
+                # Cross-vendor fallback: one stride-aware launch writes K and V
+                # without flattening the allocator-owned head/dim layout.
+                qsa_store_kv_cache_rows(
+                    key_cache,
+                    value_cache,
+                    slot_mapping,
+                    key[:num_tokens],
+                    value[:num_tokens],
+                )
+
         output.zero_()
-        if num_tokens:
+        if num_tokens and self._metax:
+            self._qsa_sparse_paged_attention(
+                query[:num_tokens], key_cache, value_cache,
+                self.topk_indices_buffer[:num_tokens], main_metadata.block_table,
+                token_to_req, self.scaling, output[:num_tokens],
+            )
+        elif num_tokens:
             _, split_workspace = qsa_prepare_split_workspace(
                 query[:num_tokens],
                 key_cache,
@@ -466,8 +502,13 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                 encoded_layer_name,
             )
         flat_output = attn_output.view(num_tokens, -1)
+        if self._metax:
+            flat_output = flat_output * torch.sigmoid(gate.view(num_tokens, -1))
         output, _ = self.o_proj(flat_output)
         return output
+
+
+
 
 
 def qwen3_8_flash_next_qsa_with_output(
