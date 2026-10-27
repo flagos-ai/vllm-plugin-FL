@@ -10,7 +10,10 @@ import torch.distributed as dist
 from torch.distributed import ProcessGroup, ReduceOp
 from vllm.distributed.device_communicators.base_device_communicator import \
     DeviceCommunicatorBase
+from vllm.logger import init_logger
 from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
+
+logger = init_logger(__name__)
 
 class CommunicatorFL(DeviceCommunicatorBase):
     def __init__(
@@ -19,8 +22,18 @@ class CommunicatorFL(DeviceCommunicatorBase):
         device: torch.device | None = None,
         device_group: ProcessGroup | None = None,
         unique_name: str = "",
+        global_ranks: list[int] | None = None,
+        global_world_size: int | None = None,
+        tcp_store_group=None,
     ):
-        super().__init__(cpu_group, device, device_group, unique_name)
+        super().__init__(
+            cpu_group,
+            device,
+            device_group,
+            unique_name,
+            global_ranks,
+            global_world_size,
+        )
         self.pyflagcx_comm: Optional[PyFlagcxCommunicator] = None
         if self.world_size > 1:
             self.pyflagcx_comm = PyFlagcxCommunicator(
@@ -29,10 +42,19 @@ class CommunicatorFL(DeviceCommunicatorBase):
             )
 
         if self.use_all2all:
-            from .all2all import NaiveAll2AllManager
-            ### naive all2all is device communicator all2all
-            self.all2all_manager = NaiveAll2AllManager(self.cpu_group)
-            logger.info("Using naive all2all manager.")
+            # The EP communicator only participates in MoE expert-parallel
+            # all2all when DP > 1. Its dispatch/combine are implemented as
+            # all-gather + reduce-scatter through the GroupCoordinator's
+            # device_communicator, which is this object, so they still land in
+            # flagcx collectives. This replaces the pre-0.24 import of the
+            # removed vllm_fl.distributed.all2all.NaiveAll2AllManager, which
+            # did not exist in this head and crashed every MoE EP startup.
+            from vllm.distributed.device_communicators.all2all import (
+                AgRsAll2AllManager,
+            )
+
+            self.all2all_manager = AgRsAll2AllManager(cpu_group, tcp_store_group)
+            logger.info("Using all-gather/reduce-scatter all2all manager.")
 
     def all_reduce(self, input_):
         assert self.pyflagcx_comm is not None
@@ -192,18 +214,22 @@ class CommunicatorFL(DeviceCommunicatorBase):
     def dispatch(
         self,
         hidden_states: torch.Tensor,
-        router_logits: torch.Tensor,
-        is_sequence_parallel: bool = False
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        topk_weights: torch.Tensor,
+        topk_ids: torch.Tensor,
+        is_sequence_parallel: bool = False,
+        extra_tensors: list[torch.Tensor] | None = None,
+    ):
         assert self.all2all_manager is not None
-        hidden_states, router_logits = self.all2all_manager.dispatch(
-            hidden_states, router_logits, is_sequence_parallel)
-        return hidden_states, router_logits
+        return self.all2all_manager.dispatch(
+            hidden_states,
+            topk_weights,
+            topk_ids,
+            is_sequence_parallel,
+            extra_tensors,
+        )
 
-    def combine(self,
-                hidden_states: torch.Tensor,
-                is_sequence_parallel: bool = False) -> torch.Tensor:
+    def combine(
+        self, hidden_states: torch.Tensor, is_sequence_parallel: bool = False
+    ) -> torch.Tensor:
         assert self.all2all_manager is not None
-        hidden_states = self.all2all_manager.combine(hidden_states,
-                                                     is_sequence_parallel)
-        return hidden_states
+        return self.all2all_manager.combine(hidden_states, is_sequence_parallel)

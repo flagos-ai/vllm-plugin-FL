@@ -8,7 +8,6 @@
 # vLLM wheels. Keep the attempts independent: official vLLM 0.24 wheels have
 # only the stable-ABI module, so failure of the legacy import must not skip it.
 import importlib
-import importlib.util
 import os
 from contextlib import suppress
 from typing import TYPE_CHECKING, TypeVar
@@ -55,14 +54,17 @@ dist_backend_dict = {
 
 
 def _flagcx_backend_enabled() -> bool:
-    # FlagCX is selected by either install shape: the distribution is
-    # importable, or FLAGCX_PATH points at a source tree (tests, kunlunxin CI).
-    if os.environ.get("FLAGCX_PATH"):
-        return True
+    # The wheel (flagcx.api) is the supported install shape; FLAGCX_PATH names
+    # a legacy source tree and is only a fallback (tests, kunlunxin CI). The
+    # facade lives in ``flagcx.api`` — the compiled-bindings root imports fine
+    # without it, so a bare ``find_spec("flagcx")`` would wrongly enable the
+    # backend for a pre-API package and leave the communicator disabled.
     try:
-        return importlib.util.find_spec("flagcx") is not None
+        import flagcx.api  # noqa: F401
+
+        return True
     except (ImportError, ValueError):
-        return False
+        return bool(os.environ.get("FLAGCX_PATH"))
 
 
 def _configure_musa_tp_piecewise_graph(
