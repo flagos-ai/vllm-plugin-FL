@@ -43,10 +43,8 @@ class NativeLibrary:
 
     def __getitem__(self, name):
         self.lookups.append(name)
-        if name != "flagcxCommAbort":
-            raise AssertionError(f"Unexpected native API: {name}")
-        if self.abort is None:
-            raise AttributeError(name)
+        if name != "flagcxCommAbort" or self.abort is None:
+            raise KeyError(name)
         return self.abort
 
 

@@ -424,6 +424,8 @@ def txda_test_device_utils(monkeypatch):
     fake_torch.device = Mock(side_effect=lambda value: value)
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setitem(sys.modules, "torch_txda", ModuleType("torch_txda"))
+    # An installed GCU SDK must not be reused with this fixture's fake torch.
+    monkeypatch.setitem(sys.modules, "torch_gcu", None)
     monkeypatch.setitem(sys.modules, "torch_npu", None)
 
     def load(backend=""):
