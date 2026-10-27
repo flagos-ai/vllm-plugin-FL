@@ -1,5 +1,5 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.11.0/vllm/v1/attention/backends/flash_attn.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/attention/backends/flash_attn.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -11,12 +11,12 @@ import numpy as np
 import torch
 from flaggems_vllm import flash_attn_varlen_func, reshape_and_cache_flash
 
+import vllm.envs as envs
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm.model_executor.layers.attention.attention import Attention
-from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
+from vllm.model_executor.layers.attention import Attention
 from vllm.platforms.interface import DeviceCapability
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import is_quantized_kv_cache
@@ -26,11 +26,11 @@ from vllm.v1.attention.backend import (
     AttentionImpl,
     AttentionMetadataBuilder,
     AttentionType,
+    CommonAttentionMetadata,
     MultipleOf,
 )
 from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.attention.backends.utils import (
-    CommonAttentionMetadata,
     get_dcp_local_seq_lens,
     get_kv_cache_layout,
 )
@@ -38,14 +38,12 @@ from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
 
-# from vllm.attention.utils.fa_utils import flash_attn_varlen_func #reshape_and_cache_flash,
-# from flag_gems import reshape_and_cache_flash
-
 logger = init_logger(__name__)
 
 
 class AttentionFLBackend(AttentionBackend):
-    accept_output_buffer: bool = True
+    # The Sunrise kernels retain separate K/V caches and update them in forward.
+    forward_includes_kv_cache_update: bool = True
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
     @staticmethod
@@ -88,6 +86,15 @@ class AttentionFLBackend(AttentionBackend):
     @staticmethod
     def get_builder_cls() -> type["AttentionFLMetadataBuilder"]:
         return AttentionFLMetadataBuilder
+
+    @classmethod
+    def supports_sliding_window(cls) -> bool:
+        return True
+
+    @classmethod
+    def supports_non_causal(cls) -> bool:
+        # Decoder sliding windows need symmetric bounds for non-causal use.
+        return False
 
     @classmethod
     def supports_sink(cls) -> bool:
@@ -143,14 +150,19 @@ class AttentionFLBackend(AttentionBackend):
         head_size: int,
         dtype: torch.dtype,
         kv_cache_dtype: CacheDType | None,
-        block_size: int,
+        block_size: int | None,
         use_mla: bool,
         has_sink: bool,
         use_sparse: bool,
-        device_capability: DeviceCapability,
+        use_mm_prefix: bool,
+        device_capability: DeviceCapability | None,
     ) -> str | None:
         if has_sink:
-            return "not support sink"
+            return "attention sinks are not supported"
+        if use_mla or use_sparse:
+            return "MLA and sparse attention are not supported"
+        if use_mm_prefix:
+            return "partial multimodal token full attention is not supported"
         return None
 
 
@@ -243,6 +255,7 @@ class AttentionFLMetadataBuilder(AttentionMetadataBuilder[AttentionFLMetadata]):
         self.parallel_config = vllm_config.parallel_config
         self.cache_config = vllm_config.cache_config
         self.compilation_config = vllm_config.compilation_config
+        self.attention_config = vllm_config.attention_config
 
         self.num_heads_q = self.model_config.get_num_attention_heads(
             self.parallel_config
@@ -438,7 +451,10 @@ class AttentionFLImpl(AttentionImpl):
         logits_soft_cap: float | None = None,
         attn_type: AttentionType = AttentionType.DECODER,
         kv_sharing_target_layer_name: str | None = None,
+        sinks: torch.Tensor | None = None,
     ) -> None:
+        if sinks is not None:
+            raise NotImplementedError("Sunrise FA2 does not support attention sinks.")
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
@@ -464,7 +480,7 @@ class AttentionFLImpl(AttentionImpl):
         self.attn_type = attn_type
         self.vllm_flash_attn_version = 2  # 2 #get_flash_attn_version()
         # Cache the batch invariant result for use in forward passes
-        self.batch_invariant_enabled = _bi_mode
+        self.batch_invariant_enabled = envs.VLLM_BATCH_INVARIANT
 
         if is_quantized_kv_cache(self.kv_cache_dtype):
             raise NotImplementedError(

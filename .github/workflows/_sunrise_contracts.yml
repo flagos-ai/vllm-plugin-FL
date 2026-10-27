@@ -1,0 +1,62 @@
+# Copyright 2026 FlagOS Contributors
+# Draft PRs must still get an actual CPU result while Sunrise GPU CI is pending.
+name: Sunrise CPU Contracts
+
+on:
+  pull_request:
+    branches: [0.4.0-dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - .github/workflows/_sunrise_contracts.yml
+      - .github/workflows/_sunrise_test.yml
+      - .github/configs/sunrise.yml
+      - .github/configs/platforms.yml
+      - .github/scripts/sunrise/**
+      - .pre-commit-config.yaml
+      - pyproject.toml
+      - tests/platforms/sunrise.yaml
+      - tests/unit_tests/dispatch/test_sunrise*.py
+      - tests/unit_tests/test_sunrise_device_utils.py
+      - tests/unit_tests/test_runner_selection.py
+      - tests/unit_tests/worker/test_worker.py
+      - tests/utils/device_utils.py
+      - tools/adaptation-gate-cases/**
+      - vllm_fl/dispatch/backends/vendor/sunrise/**
+      - vllm_fl/compilation/graph.py
+      - vllm_fl/worker/worker.py
+      - vllm_fl/platform.py
+      - vllm_fl/__init__.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sunrise-cpu-contracts-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Sunrise CPU contracts and formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Run CPU-only CI acceptance contracts
+        run: python -I -S -B .github/scripts/sunrise/test_ci.py
+      - name: Install the repository pre-commit Ruff version
+        run: python -m pip install ruff==0.14.0
+      - name: Ruff check using the repository rules
+        run: ruff check --output-format=github .github/scripts/sunrise
+      - name: Ruff format check
+        run: ruff format --check .github/scripts/sunrise
+      - name: Check shell syntax
+        run: |
+          bash -n .github/scripts/sunrise/setup.sh
+          bash -n .github/scripts/sunrise/check.sh

@@ -1,0 +1,118 @@
+# Copyright 2026 FlagOS Contributors
+name: Sunrise Tests
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# All four Gates use the same reserved pair, one service at a time.
+concurrency:
+  group: sunrise-ci
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      config: ${{ steps.config.outputs.config }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check CPU-only CI acceptance contracts
+        run: python -I -S -B .github/scripts/sunrise/test_ci.py
+      - name: Install config parser
+        run: python -m pip install PyYAML
+      - id: config
+        name: Validate actual Sunrise runner and stack resources
+        env:
+          SUNRISE_CI_RUNNER_LABELS: ${{ vars.SUNRISE_CI_RUNNER_LABELS }}
+          SUNRISE_CI_IMAGE: ${{ vars.SUNRISE_CI_IMAGE }}
+          SUNRISE_CI_VLLM_WHEEL: ${{ vars.SUNRISE_CI_VLLM_WHEEL }}
+          SUNRISE_CI_VLLM_SOURCE: ${{ vars.SUNRISE_CI_VLLM_SOURCE }}
+          SUNRISE_CI_BASE_PYTHON: ${{ vars.SUNRISE_CI_BASE_PYTHON }}
+          SUNRISE_CI_CONTAINER_VOLUMES: ${{ vars.SUNRISE_CI_CONTAINER_VOLUMES }}
+          SUNRISE_CI_CONTAINER_OPTIONS: ${{ vars.SUNRISE_CI_CONTAINER_OPTIONS }}
+          SUNRISE_CI_VISIBLE_DEVICES: ${{ vars.SUNRISE_CI_VISIBLE_DEVICES }}
+          SUNRISE_CI_MODEL_27B: ${{ vars.SUNRISE_CI_MODEL_27B }}
+          SUNRISE_CI_MODEL_35B: ${{ vars.SUNRISE_CI_MODEL_35B }}
+          SUNRISE_CI_MAX_MODEL_LEN: ${{ vars.SUNRISE_CI_MAX_MODEL_LEN }}
+          SUNRISE_CI_MAX_NUM_SEQS: ${{ vars.SUNRISE_CI_MAX_NUM_SEQS }}
+          SUNRISE_CI_KV_CACHE_MEMORY_BYTES: ${{ vars.SUNRISE_CI_KV_CACHE_MEMORY_BYTES }}
+          SUNRISE_CI_FLAGCX_PATH: ${{ vars.SUNRISE_CI_FLAGCX_PATH }}
+        run: python .github/scripts/sunrise/config.py
+
+  test:
+    needs: setup
+    runs-on: ${{ fromJson(needs.setup.outputs.config).runner_labels }}
+    timeout-minutes: 360
+    container:
+      image: ${{ fromJson(needs.setup.outputs.config).ci_image }}
+      volumes: ${{ fromJson(needs.setup.outputs.config).container_volumes }}
+      options: ${{ fromJson(needs.setup.outputs.config).container_options }}
+    env:
+      SUNRISE_BASE_PYTHON: ${{ fromJson(needs.setup.outputs.config).base_python }}
+      SUNRISE_VLLM_WHEEL: ${{ fromJson(needs.setup.outputs.config).vllm_wheel }}
+      SUNRISE_VLLM_SOURCE: ${{ fromJson(needs.setup.outputs.config).vllm_source }}
+      TANG_VISIBLE_DEVICES: ${{ fromJson(needs.setup.outputs.config).visible_devices }}
+      FLAGCX_PATH: ${{ fromJson(needs.setup.outputs.config).flagcx_path }}
+      SUNRISE_KV_CACHE_MEMORY_BYTES: ${{ fromJson(needs.setup.outputs.config).kv_cache_memory_bytes }}
+      SUNRISE_MAX_MODEL_LEN: ${{ fromJson(needs.setup.outputs.config).max_model_len }}
+      SUNRISE_MAX_NUM_SEQS: ${{ fromJson(needs.setup.outputs.config).max_num_seqs }}
+      SUNRISE_MODEL_27B: ${{ fromJson(needs.setup.outputs.config).model_27b }}
+      SUNRISE_MODEL_35B: ${{ fromJson(needs.setup.outputs.config).model_35b }}
+      GEMS_VENDOR: sunrise
+      VLLM_PLUGINS: fl
+      USE_FLAGGEMS: "1"
+      VLLM_USE_V2_MODEL_RUNNER: "0"
+      TA_CLOSE_GRAPH_MEMORY: "1"
+      PCCL_PROTO: Simple
+      VLLM_FL_SUNRISE_BENCH_BASELINE_GDN_CORE_ATTN_ZEROS: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare isolated Sunrise 0.28 environment
+        id: install
+        run: bash .github/scripts/sunrise/setup.sh
+      - name: Check actual Sunrise stack and device identity
+        id: check
+        run: bash .github/scripts/sunrise/check.sh
+      - name: Run finite Sunrise unit regressions with zero skips
+        run: |
+          "$SUNRISE_CI_PYTHON" -B .github/scripts/sunrise/run_tests.py --output-dir ci-results/unit
+      - name: Shared adaptation Gate, both models in eager and graph modes
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.check.outcome == 'success' }}
+        shell: bash
+        run: |
+          status=0
+          for model in 27b 35b; do
+            if [[ "$model" = 27b ]]; then path="$SUNRISE_MODEL_27B"; else path="$SUNRISE_MODEL_35B"; fi
+            for mode in eager graph; do
+              out="ci-results/gate-$model-$mode"
+              "$SUNRISE_CI_PYTHON" -B .github/scripts/sunrise/run_gate.py \
+                --model "$path" --mode "$mode" --tensor-parallel-size 2 \
+                --kv-cache-memory-bytes "$SUNRISE_KV_CACHE_MEMORY_BYTES" --output-dir "$out" \
+                --max-model-len "$SUNRISE_MAX_MODEL_LEN" \
+                --max-num-seqs "$SUNRISE_MAX_NUM_SEQS" || status=1
+              # A quality failure may continue; an incomplete cleanup may not.
+              "$SUNRISE_CI_PYTHON" -I -S -B - "$out/summary.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          facts = json.loads(Path(sys.argv[1]).read_text())
+          if facts.get("only_owned_cleanup_complete") is not True:
+              raise RuntimeError("Stop serial Sunrise Gates after incomplete own cleanup")
+          PY
+            done
+          done
+          exit "$status"
+      - name: Upload actual stack, unit, server and shared Gate results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sunrise-results
+          path: |
+            ci-results/
+            ${{ env.SUNRISE_CI_WORK_DIR }}/stack.json

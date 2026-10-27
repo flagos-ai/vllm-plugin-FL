@@ -1,0 +1,43 @@
+# Copyright 2026 FlagOS Contributors
+# The dedicated _sunrise_test.yml runs the complete shared adaptation Gate.
+platform: sunrise
+vendor: sunrise
+device_types:
+  persistence_m:
+    memory_gb: 64
+    tags: [sunrise, ptpu, bf16, fp16, fp32]
+env_defaults:
+  GEMS_VENDOR: sunrise
+  VLLM_PLUGINS: fl
+  USE_FLAGGEMS: "1"
+  VLLM_USE_V2_MODEL_RUNNER: "0"
+  TA_CLOSE_GRAPH_MEMORY: "1"
+  PCCL_PROTO: Simple
+  VLLM_FL_SUNRISE_BENCH_BASELINE_GDN_CORE_ATTN_ZEROS: "0"
+device_overrides:
+  persistence_m:
+    cases:
+      - qwen3_6/27b_tp2_eager
+      - qwen3_6/27b_tp2_graph
+      - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_graph
+    llm:
+      kv_cache_memory_bytes: 4294967296
+      max_model_len: 8192
+      max_num_seqs: 8
+      compilation_config:
+        mode: 0
+        cudagraph_mode: FULL_DECODE_ONLY
+persistence_m:
+  name: persistence_m
+  tests:
+    unit:
+      include:
+        - tests/unit_tests/dispatch/test_sunrise_attention.py
+        - tests/unit_tests/dispatch/test_sunrise_runtime.py
+        - tests/unit_tests/dispatch/test_sunrise_graph_capture.py
+        - tests/unit_tests/test_sunrise_device_utils.py
+      exclude: []
+    e2e:
+      serving:
+        qwen3_6: [27b_tp2_eager, 27b_tp2_graph, 35b_a3b_tp2_eager, 35b_a3b_tp2_graph]

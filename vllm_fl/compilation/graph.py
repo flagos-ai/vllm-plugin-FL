@@ -152,9 +152,9 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type == "npu":
+    if current_platform.device_type in {"npu", "ptpu"}:
         # vLLM's current_stream helper maintains CUDA-specific thread-local
-        # state and can remain on the default stream while torch.npu.stream()
+        # state and can remain on the default stream while the vendor stream context
         # has selected the side stream used for graph capture.
         return current_platform.torch_device_fn.current_stream()
     return current_stream()
@@ -380,4 +380,10 @@ class GraphWrapper:
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
+        if current_platform.device_type == "ptpu" and self.is_debugging_mode:
+            logger.debug(
+                "Sunrise graph replay completed runtime_mode=%s batch_descriptor=%s",
+                self.runtime_mode.name,
+                entry.batch_descriptor,
+            )
         return entry.output

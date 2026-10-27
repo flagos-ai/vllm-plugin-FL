@@ -272,9 +272,10 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        if cls.device_type == "npu" and vllm_config.use_v2_model_runner:
+        if cls.device_type in {"npu", "ptpu"} and vllm_config.use_v2_model_runner:
+            vendor = "Sunrise" if cls.device_type == "ptpu" else "Ascend"
             raise ValueError(
-                "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
+                f"{vendor} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
@@ -587,6 +588,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "sunrise",
         ]
 
     @classmethod

@@ -1,0 +1,24 @@
+# Copyright 2026 FlagOS Contributors
+# FlagGems publishes runner_label=sunrise for this backend:
+# https://github.com/flagos-ai/FlagGems/blob/master/.github/backends.json
+# Override SUNRISE_CI_RUNNER_LABELS if this repository uses another reservation.
+# The verified host service is named Sunrise8; no label is inferred from its name.
+platform: sunrise
+runner_labels: [sunrise]
+# Existing vendor 0.24 base; setup requires a real 0.28 empty wheel/source
+# override, or SUNRISE_CI_IMAGE selecting an already prepared 0.28 vendor stack.
+ci_image: harbor.baai.ac.cn/plugin/sunrise001-gems5.3.4-treenone-triton3.6.0-cx0.13.0-plugin0.3.0-vllm0.24.0-cp310-pt211-x64-v0.24.0:202609281010
+container_volumes:
+  - /usr/local/tangrt:/usr/local/tangrt:ro
+  - /usr/local/pccl:/usr/local/pccl:ro
+  - /data:/data:ro
+container_options: --privileged --ipc=host --shm-size=64g
+# Administrators must reserve this pair exclusively; override when necessary.
+visible_devices: "6,7"
+model_27b: /data/models/Qwen/Qwen3.6-27B
+model_35b: /data/models/Qwen/Qwen3.6-35B-A3B
+base_python: python3
+flagcx_path: /workspace/FlagCX
+kv_cache_memory_bytes: 4294967296
+max_model_len: 8192
+max_num_seqs: 8

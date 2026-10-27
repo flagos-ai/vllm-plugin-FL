@@ -193,3 +193,10 @@ jobs:
     if: contains(fromJson(needs.discover.outputs.platforms), 'thead')
     uses: ./.github/workflows/_thead_test.yml
     secrets: inherit
+
+  # Sunrise runs the shared tools/adaptation-gate-cases acceptance matrix.
+  test-sunrise:
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.platforms), 'sunrise')
+    uses: ./.github/workflows/_sunrise_test.yml
+    secrets: inherit

@@ -121,6 +121,24 @@ def test_ascend_does_not_request_cuda_memory_pool(monkeypatch, tag):
         pass
 
 
+def test_sunrise_worker_applies_vendor_patches_at_call_time(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from vllm_fl.dispatch.backends.vendor.sunrise import patch as sunrise_patch
+    from vllm_fl.worker import worker as worker_module
+
+    monkeypatch.setattr(
+        worker_module, "current_platform", SimpleNamespace(device_type="ptpu")
+    )
+    apply_patches = Mock()
+    monkeypatch.setattr(sunrise_patch, "apply_sunrise_patches", apply_patches)
+
+    worker_module._apply_worker_vendor_patches()
+
+    apply_patches.assert_called_once_with()
+
+
 def test_sunrise_process_group_uses_pccl(monkeypatch):
     from vllm_fl.worker import worker as worker_module
 
