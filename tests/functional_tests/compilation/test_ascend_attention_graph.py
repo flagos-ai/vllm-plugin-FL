@@ -17,7 +17,8 @@ pytestmark = [
 
 
 @pytest.mark.parametrize("order", [("pa", "fia"), ("fia", "pa"), ("pa", "pa")])
-def test_attention_graph_updates_mixed_backends(order):
+@pytest.mark.parametrize("interleaved", [False, True])
+def test_attention_graph_updates_mixed_backends(order, interleaved):
     import torch_npu
 
     from vllm_fl.compilation.graph_params import clear_graph_params, get_graph_params
@@ -42,8 +43,10 @@ def test_attention_graph_updates_mixed_backends(order):
         impl.num_heads, impl.num_kv_heads, impl.head_size = 4, 2, 128
         impl.scale, impl.sinks = 128**-0.5, None
         impl.sliding_window = 64 if backend == "fia" else None
-        impl.key_cache = torch.randn(8, 128, 2, 128, dtype=torch.bfloat16, device="npu")
-        impl.value_cache = torch.randn_like(impl.key_cache)
+        cache = torch.randn(2, 8, 128, 2, 128, dtype=torch.bfloat16, device="npu")
+        if interleaved:
+            cache = cache.transpose(0, 1).contiguous().transpose(0, 1)
+        impl.key_cache, impl.value_cache = cache.unbind(0)
         query = torch.randn(1, 4, 128, dtype=torch.bfloat16, device="npu")
         output = torch.empty_like(query)
         metadata = AscendMetadata(
@@ -66,8 +69,8 @@ def test_attention_graph_updates_mixed_backends(order):
         if backend == "pa":
             torch_npu._npu_paged_attention(
                 query=query,
-                key_cache=impl.key_cache,
-                value_cache=impl.value_cache,
+                key_cache=impl.key_cache.contiguous(),
+                value_cache=impl.value_cache.contiguous(),
                 num_kv_heads=impl.num_kv_heads,
                 num_heads=impl.num_heads,
                 scale_value=impl.scale,
@@ -126,6 +129,8 @@ def test_attention_graph_updates_mixed_backends(order):
         expected = []
         for backend, impl, query, _, metadata, _ in layers:
             query.normal_()
+            impl.key_cache.normal_()
+            impl.value_cache.normal_()
             metadata.block_tables.copy_(metadata.block_tables.roll(1, dims=1))
             metadata.seq_lens.fill_(length)
             metadata.seq_lens_list = [length]

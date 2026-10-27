@@ -105,6 +105,7 @@ def test_hybrid_kv_cache_updates_shared_storage(via_forward):
 
     import torch
 
+    from vllm.forward_context import override_forward_context
     from vllm.v1.attention.backend import AttentionType
 
     impl = object.__new__(AscendAttentionBackendImpl)
@@ -145,12 +146,54 @@ def test_hybrid_kv_cache_updates_shared_storage(via_forward):
     impl.num_heads = impl.num_kv_heads = 2
     impl.scale = 128**-0.5
     output = torch.empty_like(key[:1])
-    impl.forward_paged_attention(
-        torch.zeros_like(output),
-        AscendMetadata(
-            seq_lens=torch.tensor([1], dtype=torch.int32),
-            block_tables=torch.tensor([[0]], dtype=torch.int32, device="npu"),
-        ),
-        output,
-    )
+    with override_forward_context(SimpleNamespace(capturing=False)):
+        impl.forward_paged_attention(
+            torch.zeros_like(output),
+            AscendMetadata(
+                seq_lens=torch.tensor([1], dtype=torch.int32),
+                block_tables=torch.tensor([[0]], dtype=torch.int32, device="npu"),
+            ),
+            output,
+        )
     torch.testing.assert_close(output[0].cpu(), value[0].cpu())
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
+@pytest.mark.parametrize("slot_dtype", ["int32", "int64"])
+def test_interleaved_kv_cache_graph_replays_shared_storage(dtype, slot_dtype):
+    import torch
+
+    dtype, slot_dtype = getattr(torch, dtype), getattr(torch, slot_dtype)
+    impl = object.__new__(AscendAttentionBackendImpl)
+    impl.key_cache = impl.value_cache = None
+    backing = torch.zeros(3, 2, 128, 2, 128, dtype=dtype, device="npu")
+    kv_cache = backing.permute(1, 0, 2, 3, 4)
+    key = torch.zeros(3, 2, 128, dtype=dtype, device="npu")
+    value = torch.zeros_like(key)
+    metadata = AscendMetadata(
+        num_actual_tokens=3,
+        slot_mapping=torch.full((3,), -1, dtype=slot_dtype, device="npu"),
+    )
+    impl.reshape_and_cache(key, value, kv_cache, metadata)
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        impl.reshape_and_cache(key, value, kv_cache, metadata)
+
+    expected = torch.zeros(backing.shape, dtype=dtype)
+    for step, slots in enumerate(
+        ([0, 131, -1], [-1, 0, 257], [-1, -1, -1], [129, -1, -1])
+    ):
+        cpu_key = torch.arange(3 * 2 * 128).view(3, 2, 128).to(dtype) + step
+        key.copy_(cpu_key)
+        value.copy_(-cpu_key)
+        metadata.slot_mapping.copy_(torch.tensor(slots, dtype=slot_dtype))
+        graph.replay()
+        torch.npu.synchronize()
+        for token, slot in enumerate(slots):
+            if slot >= 0:
+                block, offset = divmod(slot, 128)
+                expected[block, 0, offset] = cpu_key[token]
+                expected[block, 1, offset] = -cpu_key[token]
+        torch.testing.assert_close(backing.cpu(), expected, rtol=0, atol=0)
