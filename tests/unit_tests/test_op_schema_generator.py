@@ -14,7 +14,7 @@ def _load_generator():
     return module
 
 
-def test_cache_namespace_does_not_leak_into_c_schemas(tmp_path):
+def test_cache_schemas_keep_their_upstream_namespace(tmp_path):
     csrc = tmp_path / "csrc"
     csrc.mkdir()
     (csrc / "torch_bindings.cpp").write_text(
@@ -33,8 +33,9 @@ STABLE_TORCH_LIBRARY_FRAGMENT(_C, ops) {
     )
 
     assert _load_generator().extract_schemas(tmp_path) == [
-        "norm(Tensor input, Tensor! out) -> ()",
-        "activation(Tensor input) -> Tensor",
+        ("_C", "norm(Tensor input, Tensor! out) -> ()"),
+        ("_C_cache_ops", "reshape_and_cache(Tensor input, Tensor! cache) -> ()"),
+        ("_C", "activation(Tensor input) -> Tensor"),
     ]
 
 
@@ -48,13 +49,14 @@ TORCH_LIBRARY_FRAGMENT(_C, ops) {
   ops.def("norm.out(Tensor input, Tensor! out) -> ()");
 }
 TORCH_LIBRARY_FRAGMENT(_C_other, ops) {
-  ops.def("unrelated(Tensor input) -> Tensor");
+  ops.def("norm(Tensor input, Tensor! cache) -> ()");
 }
 """
     (csrc / "torch_bindings.cpp").write_text(source)
     (stable / "torch_bindings.cpp").write_text(source)
 
     assert _load_generator().extract_schemas(tmp_path) == [
-        "norm(Tensor input) -> Tensor",
-        "norm.out(Tensor input, Tensor! out) -> ()",
+        ("_C", "norm(Tensor input) -> Tensor"),
+        ("_C", "norm.out(Tensor input, Tensor! out) -> ()"),
+        ("_C_other", "norm(Tensor input, Tensor! cache) -> ()"),
     ]

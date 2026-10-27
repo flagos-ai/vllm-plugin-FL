@@ -1,6 +1,6 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 #
-# Register torch.ops._C op schemas so that vllm compilation passes can
+# Register namespaced vLLM op schemas so that vllm compilation passes can
 # reference them for pattern matching even when the native vllm._C extension
 # is not compiled for this platform.
 
@@ -74,8 +74,8 @@ _CUDA_FALLBACK_IMPLS = [
 
 
 def register_op_schemas():
-    """Register _C op schemas if not already present."""
-    if getattr(register_op_schemas, "_lib", None) is not None:
+    """Register missing vLLM schemas in their upstream namespaces."""
+    if getattr(register_op_schemas, "_libs", None) is not None:
         return
 
     try:
@@ -102,31 +102,36 @@ def register_op_schemas():
         logger.warning("No op schemas found; torch.compile may not work.")
         return
 
-    lib = torch.library.Library("_C", "FRAGMENT")
+    libs = {}
 
-    for schema in schemas:
+    for namespace, schema in schemas:
         full_name = schema.split("(")[0]
         op_name = full_name.split(".")[0]
-        if op_name in _OPTIONAL_NATIVE_ONLY_OPS:
+        if namespace == "_C" and op_name in _OPTIONAL_NATIVE_ONLY_OPS:
             continue
+        if namespace not in libs:
+            libs[namespace] = torch.library.Library(namespace, "FRAGMENT")
+        lib = libs[namespace]
+        ops = getattr(torch.ops, namespace)
         overload = full_name.split(".")[1] if "." in full_name else "default"
-        if hasattr(torch.ops._C, op_name) and hasattr(
-            getattr(torch.ops._C, op_name), overload
-        ):
+        if hasattr(ops, op_name) and hasattr(getattr(ops, op_name), overload):
             continue
         try:
             lib.define(schema)
         except Exception as e:
             raise RuntimeError(
-                f"Failed to register the vLLM 0.32 schema _C::{full_name}"
+                f"Failed to register the vLLM 0.32 schema {namespace}::{full_name}"
             ) from e
 
-    for name, fn in _QUERY_OP_IMPLS:
-        with suppress(RuntimeError):
-            lib.impl(name, fn, "CompositeImplicitAutograd")
+    c_lib = libs.get("_C")
+    if c_lib is not None:
+        for name, fn in _QUERY_OP_IMPLS:
+            with suppress(RuntimeError):
+                c_lib.impl(name, fn, "CompositeImplicitAutograd")
 
-    for name, fn in _CUDA_FALLBACK_IMPLS:
-        with suppress(RuntimeError):
-            lib.impl(name, fn, "CUDA")
+        for name, fn in _CUDA_FALLBACK_IMPLS:
+            with suppress(RuntimeError):
+                c_lib.impl(name, fn, "CUDA")
 
-    register_op_schemas._lib = lib
+    # Library registrations are removed when the Library is garbage-collected.
+    register_op_schemas._libs = libs
