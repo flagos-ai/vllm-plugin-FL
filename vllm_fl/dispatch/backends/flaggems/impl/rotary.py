@@ -107,7 +107,7 @@ def rotary_embedding_flaggems(
     # another warp loads it. Compute both outputs before copying either back,
     # preserving packed/partial-RoPE views and the caller's mutation contract.
     nvidia_inplace = inplace and getattr(flag_gems, "vendor_name", None) == "nvidia"
-    q_embed, k_embed = gems_rope_forward(
+    result = gems_rope_forward(
         query,
         key,
         cos,
@@ -117,7 +117,8 @@ def rotary_embedding_flaggems(
         inplace=inplace and not nvidia_inplace,
     )
     if nvidia_inplace:
+        q_embed, k_embed = result
         query.copy_(q_embed)
         key.copy_(k_embed)
         return query, key
-    return q_embed, k_embed
+    return result
