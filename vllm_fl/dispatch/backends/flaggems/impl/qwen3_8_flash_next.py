@@ -265,6 +265,7 @@ def qsa_select_paged_tokens(
     token_topk,
     compress_ratio,
     out=None,
+    num_columns=None,
 ):
     """Compose existing FGV scoring/top-k with Qwen's block/tail expansion.
 
@@ -277,7 +278,10 @@ def qsa_select_paged_tokens(
     out = _selection_output(rows, width, q.device, out)
     if rows == 0:
         return out
-    columns = page_table.shape[1] * k_cache.shape[1]
+    capacity = page_table.shape[1] * k_cache.shape[1]
+    columns = capacity if num_columns is None else num_columns
+    if not isinstance(columns, int) or not 0 <= columns <= capacity:
+        raise ValueError("QSA score width must fit the allocated cache capacity")
     scores, visible = qsa_mqa_paged(
         q,
         k_cache,

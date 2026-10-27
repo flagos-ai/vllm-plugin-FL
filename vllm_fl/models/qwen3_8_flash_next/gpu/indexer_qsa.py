@@ -467,6 +467,7 @@ class QSAIndexer(nn.Module):
             self.token_topk,
             self.compress_ratio,
             out,
+            num_columns=metadata.score_columns,
         )
 
     def forward_metax(

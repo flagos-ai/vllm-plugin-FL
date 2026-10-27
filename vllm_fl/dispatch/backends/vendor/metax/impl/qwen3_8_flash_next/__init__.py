@@ -72,6 +72,7 @@ def qsa_select_paged_tokens(
     token_topk,
     compress_ratio,
     out=None,
+    num_columns=None,
 ):
     """MetaX compatibility composition: FGV score + FG ATen top-k + expansion.
 
@@ -87,7 +88,10 @@ def qsa_select_paged_tokens(
     out = portable._selection_output(count, width, q.device, out)
     if count == 0:
         return out
-    columns = page_table.shape[1] * k_cache.shape[1]
+    capacity = page_table.shape[1] * k_cache.shape[1]
+    columns = capacity if num_columns is None else num_columns
+    if not isinstance(columns, int) or not 0 <= columns <= capacity:
+        raise ValueError("QSA score width must fit the allocated cache capacity")
     scores, visible = portable.qsa_mqa_paged(
         q,
         k_cache,
@@ -101,7 +105,9 @@ def qsa_select_paged_tokens(
     indices = torch.full((count, block_topk), -1, dtype=torch.int32, device=q.device)
     if columns:
         selected_count = min(block_topk, columns)
-        _, selected = flag_gems.topk(
+        from .launch_profile import qsa_topk
+
+        _, selected = qsa_topk(
             scores,
             selected_count,
             dim=-1,

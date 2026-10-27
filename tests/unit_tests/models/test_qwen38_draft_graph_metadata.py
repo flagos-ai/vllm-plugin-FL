@@ -18,6 +18,7 @@ def source(order=(0, 1), actual=3):
         num_actual_tokens=actual,
         storage_block_size=400,
         compress_ratio=1,
+        score_columns=None,
         block_table=torch.tensor([[9, 10], [20, 21]], dtype=torch.int32)[list(order)],
         seq_lens=torch.tensor([20, 11], dtype=torch.int32)[list(order)],
         query_start_loc=torch.tensor([0, 1, actual], dtype=torch.int32),
@@ -64,4 +65,14 @@ def test_fixed_metadata_rejects_new_capacity_or_cache_geometry():
     src = source()
     src.block_table = torch.zeros(2, 3, dtype=torch.int32)
     with pytest.raises(ValueError, match="width changed"):
+        graph.copy_qsa_metadata(dst, src)
+
+
+def test_fixed_metadata_rejects_changed_score_bucket():
+    src = source()
+    src.score_columns = 512
+    dst = graph.fixed_qsa_metadata(src, 8, 4)
+    graph.copy_qsa_metadata(dst, src)
+    src.score_columns = 2048
+    with pytest.raises(ValueError, match="score width"):
         graph.copy_qsa_metadata(dst, src)

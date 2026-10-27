@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Reproduce Qwen3.8's 63 CPU contracts without accelerator access.
+"""Reproduce Qwen3.8's 76 CPU contracts without accelerator access.
 
 Run inside the matching validation environment:
     python tests/qwen3_8_flash_next/run_cpu_contracts.py --log-dir /tmp/qwen38-cpu
 
-The 43 model/MTP contracts and 20 dispatch contracts run in separate processes.
+The 56 model/MTP contracts and 20 dispatch contracts run in separate processes.
 The dispatch subprocess loads production providers with only framework/package
 capability imports stubbed; it does not validate device kernels or imports.
 The model/MTP subprocess retains the real native metadata tests and the
@@ -162,7 +162,7 @@ def main():
     )
     summaries = {}
     success = True
-    for suite, expected in (("contracts", 43), ("dispatch", 20)):
+    for suite, expected in (("contracts", 56), ("dispatch", 20)):
         command = [
             sys.executable,
             str(Path(__file__).resolve()),
@@ -191,11 +191,11 @@ def main():
             flush=True,
         )
     total = sum(value.get("passed", 0) for value in summaries.values())
-    final = {"passed": total, "expected": 63, "success": success, "suites": summaries}
+    final = {"passed": total, "expected": 76, "success": success, "suites": summaries}
     (args.log_dir / "qwen38-final-cpu-summary.json").write_text(
         json.dumps(final, indent=2) + "\n"
     )
-    print(f"FINAL CPU CONTRACTS: {total}/63 passed; success={success}", flush=True)
+    print(f"FINAL CPU CONTRACTS: {total}/76 passed; success={success}", flush=True)
     return 0 if success else 1
 
 

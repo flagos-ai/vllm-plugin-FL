@@ -105,6 +105,7 @@ from .ple_layer import Qwen3_8FlashNextPLELayer, validate_ple_embedding_weights
 from .qsa import Qwen3_8FlashNextQSAAttention
 from .quantization import with_platform_quantization
 from .runtime import is_metax
+from ..common.qsa_cache import qsa_cudagraph_key
 from ..projections import use_qwen38_shared_expert_projection
 from vllm_fl.dispatch import resolve_op
 
@@ -688,6 +689,10 @@ class Qwen3_8FlashNextModel(nn.Module):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         vllm_config = with_platform_quantization(vllm_config)
+        if is_metax() and vllm_config.additional_config.get("qwen38_tuning_profile", False):
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.launch_profile import install_qwen38_launch_profile
+
+            install_qwen38_launch_profile(vllm_config)
         super().__init__()
         config: Qwen3_8FlashNextTextConfig = vllm_config.model_config.hf_text_config
         self.config = config
@@ -952,6 +957,7 @@ class Qwen3_8FlashNextForCausalLM(
         orig_to_new_prefix={"model.language_model.": "model."}
     )
     requires_raw_input_tokens = True
+    get_cudagraph_key = staticmethod(qsa_cudagraph_key)
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         vllm_config = with_platform_quantization(vllm_config)
@@ -1239,6 +1245,7 @@ class Qwen3_8FlashNextForConditionalGeneration(
     """Qwen3-VL vision tower backed by the Qwen3.8-Flash-Next language model."""
 
     requires_raw_input_tokens = True
+    get_cudagraph_key = staticmethod(qsa_cudagraph_key)
     # Do not inherit the multimodal-pruning capability from the Qwen3.5/Qwen3VL
     # base: some vLLM 0.24 builds default it to True, but this Day0 model never
     # initializes EVS pruning and ``recompute_mrope_positions`` raises. Declare

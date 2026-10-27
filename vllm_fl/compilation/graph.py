@@ -160,7 +160,7 @@ class GraphWrapper:
         self.cudagraph_options = cudagraph_options
         # the entries for different batch descriptors that we need to capture
         # cudagraphs for.
-        self.concrete_graph_entries: dict[BatchDescriptor, GraphEntry] = {}
+        self.concrete_graph_entries: dict[Any, GraphEntry] = {}
 
         GraphWrapper._all_instances.add(self)
 
@@ -203,13 +203,18 @@ class GraphWrapper:
             return self.runnable(*args, **kwargs)
 
         assert batch_descriptor is not None
-        if batch_descriptor not in self.concrete_graph_entries:
+        key_builder = getattr(self.runnable, "get_cudagraph_key", None)
+        graph_key = (
+            key_builder(batch_descriptor, forward_context)
+            if key_builder is not None else batch_descriptor
+        )
+        if graph_key not in self.concrete_graph_entries:
             # create a new entry for this batch descriptor
-            self.concrete_graph_entries[batch_descriptor] = GraphEntry(
+            self.concrete_graph_entries[graph_key] = GraphEntry(
                 batch_descriptor=batch_descriptor
             )
 
-        entry = self.concrete_graph_entries[batch_descriptor]
+        entry = self.concrete_graph_entries[graph_key]
 
         if entry.graph is None:
             if self.cudagraph_options.debug_log_enable:

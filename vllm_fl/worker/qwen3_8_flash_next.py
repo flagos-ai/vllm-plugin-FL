@@ -159,6 +159,7 @@ def install_qwen38_runner_hooks(runner_cls):
     original_kwargs = runner_cls._init_model_kwargs
     original_dummy = runner_cls._dummy_run
     original_attn = runner_cls._build_attention_metadata
+    original_capture = getattr(runner_cls, "_warmup_and_capture", None)
     original_dispatch = getattr(runner_cls, "_determine_batch_execution_and_padding", None)
 
     @wraps(original_init)
@@ -238,6 +239,24 @@ def install_qwen38_runner_hooks(runner_cls):
             return original_dispatch(self, *args, **kwargs)
         runner_cls._determine_batch_execution_and_padding = dispatch
 
+    @wraps(original_capture)
+    def warmup_and_capture(self, *args, **kwargs):
+        enabled = _uses_ple(self) and self.vllm_config.additional_config.get(
+            "qwen38_qsa_length_buckets", False
+        )
+        if not enabled:
+            return original_capture(self, *args, **kwargs)
+        from vllm_fl.models.qwen3_8_flash_next.common.qsa_cache import qsa_capture_columns
+
+        # Largest first allows the shared graph pool to reuse its allocations.
+        # The original warmup/capture method also participates in graph-memory
+        # profiling, so its estimate includes all four score-width variants.
+        for columns in (0, 8192, 2048, 512):
+            with qsa_capture_columns(columns):
+                original_capture(self, *args, **kwargs)
+
+    if original_capture is not None:
+        runner_cls._warmup_and_capture = warmup_and_capture
     runner_cls.__init__ = runner_init
     runner_cls._init_model_kwargs = model_kwargs
     runner_cls._dummy_run = dummy_run

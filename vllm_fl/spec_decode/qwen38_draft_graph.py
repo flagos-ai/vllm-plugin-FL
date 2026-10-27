@@ -16,7 +16,9 @@ import torch
 from vllm.config import CUDAGraphMode
 from vllm.distributed import graph_capture
 from vllm.forward_context import get_forward_context, set_forward_context
-from vllm_fl.models.qwen3_8_flash_next.common.qsa_cache import PreparedQSAForwardMetadata
+from vllm_fl.models.qwen3_8_flash_next.common.qsa_cache import (
+    PreparedQSAForwardMetadata, qsa_graph_columns,
+)
 
 
 @dataclass
@@ -45,6 +47,8 @@ def fixed_qsa_metadata(source: PreparedQSAForwardMetadata, bucket: int, max_reqs
 
 
 def copy_qsa_metadata(target: PreparedQSAForwardMetadata, source: PreparedQSAForwardMetadata):
+    if target.score_columns != source.score_columns:
+        raise ValueError("Draft QSA score width changed within a graph entry")
     count = source.num_actual_tokens
     requests = source.seq_lens.numel()
     if count > target.num_actual_tokens or requests > target.seq_lens.numel():
@@ -105,7 +109,8 @@ class Qwen38DraftGraph:
             self.eager_count += int(isinstance(metadata, dict) and bool(metadata))
             return self.model(**kwargs)
         bucket = next(size for size in self.capture_sizes if size >= count)
-        entry = self.entries.get(bucket)
+        graph_key = (bucket, qsa_graph_columns(metadata))
+        entry = self.entries.get(graph_key)
         if entry is None:
             inputs = {}
             for name in ('input_ids', 'positions', 'hidden_states'):
@@ -117,7 +122,7 @@ class Qwen38DraftGraph:
                 name: fixed_qsa_metadata(meta, bucket, self.max_reqs)
                 for name, meta in metadata.items()
             })
-            self.entries[bucket] = entry
+            self.entries[graph_key] = entry
         if set(metadata) != set(entry.metadata):
             raise ValueError('Qwen MTP attention-layer set changed after capture')
         for name, buffer in entry.inputs.items():

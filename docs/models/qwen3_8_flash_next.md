@@ -98,6 +98,7 @@ Set MODEL_PATH to the shared BF16 checkpoint and retain the matching runtime:
 export VLLM_USE_V2_MODEL_RUNNER=0
 export USE_FLAGGEMS=1 VLLM_FL_USE_FLAGGEMS_VLLM=1 VLLM_FL_PREFER_ENABLED=1
 export VLLM_FL_CONFIG="$PWD/vllm_fl/dispatch/config/qwen3_8_flash_next_metax.yaml"
+export VLLM_TUNED_CONFIG_FOLDER="$PWD/examples/qwen3_8_flash_next/metax_tuning/moe-configs"
 unset FLAGCX_PATH FLAGGEMS_CACHE_DIR FLAGGEMS_DB_URL GEMS_CACHE_PATH
 
 vllm serve "$MODEL_PATH" \
@@ -109,12 +110,21 @@ vllm serve "$MODEL_PATH" \
   --disable-custom-all-reduce \
   --speculative-config '{"method":"mtp","num_speculative_tokens":1,"parallel_drafting":false,"use_local_argmax_reduction":false,"disable_padded_drafter_batch":true}' \
   --compilation-config '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[2,4,8,16,32,64,128],"max_cudagraph_capture_size":128}' \
-  --additional-config '{"qwen38_ngram_mode":"shared_buffer","qwen38_mtp_graph":true}'
+  --additional-config '{"qwen38_ngram_mode":"shared_buffer","qwen38_mtp_graph":true,"qwen38_qsa_length_buckets":true,"qwen38_tuning_profile":true}'
 ```
 
-The base adaptation retains native launch choices and full-capacity QSA work.
-The subsequent optimization commit provides the reviewed parameter profile and
-context-width graph buckets.
+The [launch profile](../../examples/qwen3_8_flash_next/metax_tuning/) installs
+reviewed configuration before model construction and graph capture. It uses
+native LibTuner/ConfigCache choices and launch metadata on existing kernels;
+third-party sources are not rewritten and no diff artifacts are distributed.
+FG and FGV keep separate native caches.
+
+QSA work uses width buckets 512/2048/8192/cache-capacity, selected from the
+existing CPU length bound. At maxlen69632, capacity is 17600 groups. This
+changes work and graph geometry, not cache capacity or the K512 selection
+algorithm. Target and MTP keys include the width; seven target token shapes
+yield 28 target graphs. GDN output configuration retains context buckets
+without adding an argument to the library kernel.
 
 ## Validation and historical performance
 
@@ -131,6 +141,14 @@ python tests/qwen3_8_flash_next/run_cpu_contracts.py --log-dir /tmp/qwen38-cpu
 # Assigned-device checks additionally require QWEN38_RUN_DEVICE_TESTS=1 and
 # QWEN38_ENGINE_CONFIG pointing to a local BF16/K1 EngineArgs JSON.
 ```
+
+The post-consolidation TP8 regression completed eight short answers, P1024 and
+P4096 with O64/C64/N128 (one warmup plus one check round), and sequential
+16384/65536-token inputs. Both long prompts answered 42 and stopped normally.
+On all eight ranks, the short check rounds replayed every pure-decode target and
+MTP forward with no eager fallback or new capture; the long prompts first
+captured their new MTP width bucket, then replayed it without eager fallback.
+These O64 checks validate functionality and are not a new O1024 benchmark.
 
 The following **historical O1024 results precede this consolidation** and belong
 to [b201958](https://github.com/cshujie131-bot/vllm-plugin-FL/blob/b20195863bf59ff26a4241fe755750f702e445a9/docs/models/qwen3_8_flash_next.md).
