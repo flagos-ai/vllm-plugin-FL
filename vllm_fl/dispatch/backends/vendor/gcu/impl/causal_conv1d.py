@@ -21,7 +21,7 @@ CAUSAL_CONV1D_UPDATE_CONFIG = {"BLOCK_N": 1024}
 
 
 def apply_causal_conv1d_gcu_patch() -> None:
-    """Apply the S60-tuned causal-conv launch configurations to vLLM."""
+    """Apply the GCU300-tuned causal-conv launch configurations to vLLM."""
     causal_conv1d = importlib.import_module(
         "vllm.model_executor.layers.mamba.ops.causal_conv1d"
     )

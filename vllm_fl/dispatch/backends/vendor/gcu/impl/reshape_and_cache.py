@@ -23,16 +23,19 @@ def _reshape_and_cache_flash_kernel_gcu(
 ):
     pid = tl.program_id(0)
     for i in range(pid, N, NUM_SPC):
-        # slot_mapping is int64.  GCU300 上 int64 除法/取模不可用（见
-        # env-vllm-plugin-fl skill §2.1），必须先 cast 到 int32 再做地址分解；
-        # slot 值在 int32 范围内（block 数不会超过 2^31）。
+        # slot_mapping is int64.  int64 div/mod is unavailable on GCU300 (see
+        # env-vllm-plugin-fl skill section 2.1), so cast to int32 first and then
+        # decompose the address; slot values fit in int32 (the block count
+        # never exceeds 2^31).
         slot = tl.load(slot_mapping + i).to(tl.int32)
         if slot >= 0:
             bi = slot // BLOCK_SIZE
             bo = slot % BLOCK_SIZE
-            # 地址偏移必须用 int64：KV cache 的扁平偏移（bi * stride0）在大
-            # block 号下会超过 int32 上限（2^31），int32 会静默溢出导致写错位。
-            # 只有 div/mod 用 int32（规避 GCU300 int64 除法/取模限制）。
+            # Address offsets must use int64: the flat offset into the KV cache
+            # (bi * stride0) exceeds the int32 range (2^31) for large block
+            # numbers, and int32 would silently overflow and write to the wrong
+            # location.  Only div/mod use int32 (to avoid the GCU300 int64
+            # div/mod restriction).
             sb = i.to(tl.int64) * K_S0
             db = bi.to(tl.int64) * KC_S0 + bo.to(tl.int64) * KC_S1
             for ko in range(0, KV_DIM, BLOCK_KV):

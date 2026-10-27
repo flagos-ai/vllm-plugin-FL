@@ -2,17 +2,17 @@
 
 """GCU fix for ``invoke_fused_moe_triton_kernel`` / ``fused_moe_kernel``.
 
-GCU (Libra / L600) hardware limits:
-  - Grid (SP 数量): <= 48 (1-D only, no 2-D grid)
+GCU (GCU300 / GCU400) hardware limits:
+  - Grid (number of SPs): <= 48 (1-D only, no 2-D grid)
   - num_warps: <= 4
-  - 禁止 int64 工作项索引，统一使用 int32
+  - int64 work-item indexing is unsupported; use int32 consistently
 
 The upstream launcher uses ``grid = (num_pid_m * num_pid_n,)`` which exceeds
 the GCU grid limit for large token counts (e.g. ``EM=114176`` blocks).
 
 This patch converts the launch to GCU Fixed-Grid + strided-loop pattern:
-  - grid = (min(total_pid, GCU_NUM_GRID),)   — 1-D only
-  - kernel 内跨步循环 ``for pid in range(pid_start, total_pid, NUM_SPC)``
+  - grid = (min(total_pid, GCU_NUM_GRID),)   - 1-D only
+  - strided loop inside the kernel ``for pid in range(pid_start, total_pid, NUM_SPC)``
 """
 
 from __future__ import annotations
@@ -29,10 +29,10 @@ from vllm.triton_utils import tl, triton
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# GCU (L600 / Libra) hardware constants
+# GCU (GCU300 / GCU400) hardware constants
 # ---------------------------------------------------------------------------
-# S60 板卡:  GCU_NUM_GRID = 24, GCU_MAX_DSM_MEMORY = int(1.5 * 1024 * 1024)
-# Libra 板卡: GCU_NUM_GRID = 48, GCU_MAX_DSM_MEMORY = 917504 // 2
+# GCU300 board: GCU_NUM_GRID = 24, GCU_MAX_DSM_MEMORY = int(1.5 * 1024 * 1024)
+# GCU400 board: GCU_NUM_GRID = 48, GCU_MAX_DSM_MEMORY = 917504 // 2
 GCU_NUM_GRID = 48
 GCU_MAX_DSM_MEMORY = 917504 // 2  # 448 KB
 GCU_MAX_WARPS = 4

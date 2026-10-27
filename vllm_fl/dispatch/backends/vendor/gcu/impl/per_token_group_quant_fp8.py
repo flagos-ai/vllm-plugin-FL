@@ -2,18 +2,18 @@
 
 """GCU fix for per_token_group_quant_fp8 / per_token_group_quant_fp8_colmajor.
 
-GCU (L600/Libra) hardware limits:
-  - Grid (SP 数量): <= 48 (1-D only, no 2-D grid)
-  - DSM (片上共享存储): <= 448 KB
+GCU (GCU300/GCU400) hardware limits:
+  - Grid (number of SPs): <= 48 (1-D only, no 2-D grid)
+  - DSM (on-chip shared memory): <= 448 KB
   - num_warps: <= 4
-  - 禁止 int64 索引，统一使用 int32
+  - int64 indexing is unsupported; use int32 consistently
 
 The upstream launcher uses ``grid = (M,)`` where ``M = numel // group_size``,
-which exceeds the limit for large tensors (e.g. 8192 × 4096 ÷ 128 = 262144).
+which exceeds the limit for large tensors (e.g. 8192 x 4096 / 128 = 262144).
 
 This patch converts the launch to GCU Fixed-Grid + strided-loop pattern:
-  - grid = (min(M, GCU_NUM_GRID),)   — 1-D only
-  - kernel 内跨步循环 for g_id in range(pid, M, GCU_NUM_GRID)
+  - grid = (min(M, GCU_NUM_GRID),)   - 1-D only
+  - strided loop inside the kernel: for g_id in range(pid, M, GCU_NUM_GRID)
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ from vllm.triton_utils import tl, triton
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# GCU (L600 / Libra) hardware constants
+# GCU (GCU300 / GCU400) hardware constants
 # ---------------------------------------------------------------------------
-# S60 板卡: GCU_NUM_GRID = 24,  GCU_MAX_DSM_MEMORY = int(1.5 * 1024 * 1024)
-# Libra 板卡: GCU_NUM_GRID = 48, GCU_MAX_DSM_MEMORY = 917504 // 2
+# GCU300 board: GCU_NUM_GRID = 24, GCU_MAX_DSM_MEMORY = int(1.5 * 1024 * 1024)
+# GCU400 board: GCU_NUM_GRID = 48, GCU_MAX_DSM_MEMORY = 917504 // 2
 GCU_NUM_GRID = 48
 GCU_MAX_DSM_MEMORY = 917504 // 2  # 448 KB
 
@@ -80,7 +80,7 @@ def _per_token_group_quant_fp8_gcu(
     """GCU Fixed-Grid per-token-group FP8 quantization (row-major scales).
 
     Uses 1-D Fixed Grid + strided loop so that grid never exceeds
-    GCU_NUM_GRID (48 for L600).  Each program loops over multiple groups
+    GCU_NUM_GRID (48 for GCU400).  Each program loops over multiple groups
     via ``for g_id in range(pid, total_groups, NUM_SPC)``.
     """
     groups_per_row = y_num_columns // group_size
@@ -294,7 +294,7 @@ def per_token_group_quant_fp8_gcu(
     num_warps = min(max(BLOCK // 256, 1), 4)
     num_stages = 1
 
-    # DSM sanity check (GCU L600: ≤ 448 KB)
+    # DSM sanity check (GCU400: <= 448 KB)
     # Peak vectors per iteration: y (input) + y_q (output) ≈ 2
     # For BLOCK=128, fp16: 2 * 128 * 2 = 512 bytes — well within 448 KB
     _dsm_bytes = 2 * BLOCK * x.element_size()

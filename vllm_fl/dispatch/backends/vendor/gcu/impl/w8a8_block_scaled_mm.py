@@ -152,7 +152,7 @@ def _w8a8_triton_block_scaled_mm_gcu(
 
 
 # ---------------------------------------------------------------------------
-# Launch-config selection (auto-tuned on GCU S60/L600, see sweep_w8a8_config.py)
+# Launch-config selection (auto-tuned on GCU300/GCU400, see sweep_w8a8_config.py)
 # ---------------------------------------------------------------------------
 #
 # Empirical findings on GCU (N=4096, K=7168, block=[128,128]):

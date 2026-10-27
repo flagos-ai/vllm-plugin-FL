@@ -348,9 +348,11 @@ class PlatformFL(Platform):
             if compilation_config.mode != CompilationMode.NONE:
                 logger.warning(f'Override CompilationMode from {compilation_config.mode} to {CompilationMode.NONE}!')
                 compilation_config.mode = CompilationMode.NONE
-            # mode=NONE 不能带 piecewise cudagraph（vllm/config/vllm.py:1209 会 assert）。
-            # 平台钩子跑在 vllm.py:974 的自动兼容降级之后，这里必须自己把
-            # cudagraph_mode 收敛到不含 piecewise 的 FULL，保留整图捕获。
+            # mode=NONE cannot be combined with piecewise cudagraph
+            # (vllm/config/vllm.py:1209 asserts on it).  The platform hook runs
+            # after the automatic compatibility fallback at vllm.py:974, so we
+            # must narrow cudagraph_mode to FULL (without piecewise) ourselves
+            # while keeping whole-graph capture.
             if (
                 compilation_config.cudagraph_mode is not None
                 and compilation_config.cudagraph_mode.requires_piecewise_compilation()
