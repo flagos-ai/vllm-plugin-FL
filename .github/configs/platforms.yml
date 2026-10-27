@@ -39,3 +39,7 @@ platforms:
     enabled: true
   thead:
     enabled: true
+  # Enable after confirming real runner labels and restoring healthy PTPU devices.
+  # The dedicated workflow can be dispatched independently once configured.
+  sunrise:
+    enabled: false

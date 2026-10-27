@@ -14,16 +14,25 @@ _patches_applied = False
 
 def apply_sunrise_patches():
     """Apply Sunrise/PTPU patches that must run before model construction."""
-    global _patches_applied
-    if _patches_applied:
-        return
-    _patches_applied = True
+    from vllm.platforms import current_platform
 
+    global _patches_applied
+    if current_platform.device_type != "ptpu" or _patches_applied:
+        return
+
+    patch_accelerator_memory_stats()
+    patch_accelerator_memory_api()
+    patch_graph_capture_runtime()
     patch_flagcx_stream_adapter()
     patch_distributed_runtime()
     patch_op_cls()
-    patch_accelerator_empty_cache()
-    patch_accelerator_memory_stats()
+    _patches_applied = True
+
+
+def patch_graph_capture_runtime():
+    from .impl.graph_capture import patch_graph_capture_runtime as patch_runtime
+
+    patch_runtime()
 
 
 def patch_flagcx_stream_adapter():
@@ -171,32 +180,57 @@ def patch_op_cls():
         logger.warning("Failed to patch VocabParallelEmbedding for Sunrise: %s", e)
 
 
-def patch_accelerator_empty_cache():
-    """Redirect torch.accelerator.empty_cache() to torch.ptpu.empty_cache().
+def patch_accelerator_memory_api():
+    """Route vLLM 0.28 memory profiling through the PTPU runtime.
 
-    torch.accelerator.empty_cache() requires a DeviceAllocator interface that
-    PTPU does not implement. torch.ptpu.empty_cache() works correctly instead.
+    The generic accelerator allocator interface is unavailable in torch_ptpu.
+    vLLM 0.28 uses it for both its initial snapshot and KV-cache profiling.
     """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "ptpu":
+        return
+
     try:
         import torch.accelerator as _accel
 
-        if getattr(_accel, "_sunrise_empty_cache_patched", False):
+        if getattr(_accel, "_sunrise_memory_api_patched", False):
             return
-        _accel.empty_cache = torch.ptpu.empty_cache
-        _accel._sunrise_empty_cache_patched = True
-        logger.info("Patched torch.accelerator.empty_cache for Sunrise/PTPU")
+        api_names = {
+            "empty_cache": "empty_cache",
+            "memory_stats": "memory_stats",
+            "memory_allocated": "memory_allocated",
+            "memory_reserved": "memory_reserved",
+            "max_memory_allocated": "max_memory_allocated",
+            "reset_peak_memory_stats": "reset_peak_memory_stats",
+            "get_memory_info": "mem_get_info",
+        }
+        memory_api = {
+            name: getattr(torch.ptpu, ptpu_name)
+            for name, ptpu_name in api_names.items()
+        }
+        for name, fn in memory_api.items():
+            setattr(_accel, name, fn)
+        _accel._sunrise_memory_api_patched = True
+        logger.info("Patched torch.accelerator memory APIs for Sunrise/PTPU")
     except Exception as e:
-        logger.warning("Failed to patch torch.accelerator.empty_cache: %s", e)
+        logger.warning("Failed to patch torch.accelerator memory APIs: %s", e)
 
 
 def patch_accelerator_memory_stats():
-    """Provide torch.ptpu.memory_stats() for FL worker memory profiling.
+    """Provide the memory counter keys used by vLLM 0.28 snapshots.
 
     torch.ptpu exposes max_memory_allocated/memory_reserved but not the
     torch.cuda-style memory_stats() dict that the FL worker's KV-cache sizing
-    reads ("allocated_bytes.all.peak"). Synthesize the keys the worker uses
-    from the ptpu peak APIs. Guarded: never overrides a real implementation.
+    reads. Include the current allocation so v0.28 does not count it again
+    as transient peak headroom. These counters retain the runtime's own
+    tracking limitations; never override a native stats implementation.
     """
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "ptpu":
+        return
+
     try:
         if getattr(torch.ptpu, "_sunrise_memory_stats_patched", False):
             return
@@ -204,9 +238,14 @@ def patch_accelerator_memory_stats():
             return
 
         def _memory_stats(device=None):
+            allocated = torch.ptpu.memory_allocated(device)
+            peak = max(allocated, torch.ptpu.max_memory_allocated(device))
+            reserved = torch.ptpu.memory_reserved(device)
             return {
-                "allocated_bytes.all.peak": torch.ptpu.max_memory_allocated(device),
-                "reserved_bytes.all.peak": torch.ptpu.memory_reserved(device),
+                "allocated_bytes.all.peak": peak,
+                "allocated_bytes.all.current": allocated,
+                "reserved_bytes.all.peak": reserved,
+                "reserved_bytes.all.current": reserved,
             }
 
         torch.ptpu.memory_stats = _memory_stats

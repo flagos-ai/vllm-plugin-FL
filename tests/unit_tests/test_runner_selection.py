@@ -51,7 +51,7 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu"])
+@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "sunrise"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os
@@ -77,7 +77,8 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
 
 
 @pytest.mark.parametrize(
-    "device_type,vendor", [("npu", "ascend"), ("gcu", "enflame"), ("gcu", "gcu")]
+    "device_type,vendor",
+    [("npu", "ascend"), ("gcu", "enflame"), ("gcu", "gcu"), ("ptpu", "sunrise")],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
     monkeypatch, device_type, vendor
@@ -400,3 +401,39 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
     )
 
     assert vllm_fl.register() == "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+
+
+def test_sunrise_advertises_ptpu_static_graph_support(monkeypatch):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "ptpu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "sunrise")
+
+    assert PlatformFL.support_static_graph_mode()
+    assert (
+        PlatformFL.get_static_graph_wrapper_cls()
+        == "vllm_fl.compilation.graph.GraphWrapper"
+    )
+
+
+def test_sunrise_preserves_full_decode_only_graph(monkeypatch):
+    from vllm.config import CUDAGraphMode
+    from vllm.config.compilation import CompilationMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "ptpu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "sunrise")
+    config = _make_ascend_vllm_config(
+        compilation_mode=CompilationMode.NONE,
+        cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY,
+    )
+
+    PlatformFL.check_and_update_config(config)
+
+    assert PlatformFL.support_static_graph_mode()
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    assert config.compilation_config.mode is CompilationMode.NONE
+    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_DECODE_ONLY
+    assert config.compilation_config.cudagraph_mode.decode_mode() is CUDAGraphMode.FULL
+    assert config.compilation_config.cudagraph_mode.mixed_mode() is CUDAGraphMode.NONE

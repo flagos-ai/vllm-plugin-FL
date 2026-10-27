@@ -28,6 +28,18 @@ def _gcu_runtime():
     return torch.gcu
 
 
+def _get_sunrise_runtime():
+    """Load torch_ptpu lazily when PTPU has not been registered yet."""
+    runtime = getattr(torch, "ptpu", None)
+    if runtime is None:
+        try:
+            import torch_ptpu  # noqa: F401
+        except ImportError:
+            return None
+        runtime = getattr(torch, "ptpu", None)
+    return runtime
+
+
 def get_backend() -> str:
     """Detect current backend from env or hardware.
 
@@ -59,6 +71,9 @@ def get_backend() -> str:
             return "ascend"
     except ImportError:
         pass  # torch_npu not installed; ascend backend not available
+    sunrise = _get_sunrise_runtime()
+    if sunrise is not None and sunrise.is_available():
+        return "sunrise"
     return "cpu"
 
 
@@ -67,6 +82,9 @@ def is_accelerator_available() -> bool:
     backend = get_backend()
     if backend == "hygon":
         return torch.cuda.is_available()
+    if backend == "sunrise":
+        sunrise = _get_sunrise_runtime()
+        return sunrise is not None and sunrise.is_available()
     return backend not in ("cpu", "")
 
 
@@ -79,6 +97,10 @@ def get_device(index: int = 0) -> torch.device:
         return torch.device(f"npu:{index}")
     elif backend == "enflame":
         return torch.device(f"gcu:{index}")
+    elif backend == "sunrise":
+        if _get_sunrise_runtime() is None:
+            raise RuntimeError("Sunrise selected but torch_ptpu/PTPU is unavailable")
+        return torch.device(f"ptpu:{index}")
     return torch.device("cpu")
 
 
@@ -96,6 +118,10 @@ def get_device_count() -> int:
             return 0
     elif backend == "enflame":
         return torch.gcu.device_count()
+    elif backend == "sunrise":
+        sunrise = _get_sunrise_runtime()
+        if sunrise is not None and sunrise.is_available():
+            return sunrise.device_count()
     return 0
 
 

@@ -260,6 +260,15 @@ class NvidiaWorkerFL(NativeGPUWorker):
 
 def _apply_worker_vendor_patches() -> None:
     """Apply patches that must execute inside every worker process."""
+    if current_platform.device_type == "ptpu":
+        from vllm_fl.dispatch.backends.vendor.sunrise.patch import (
+            apply_sunrise_patches,
+        )
+
+        # v0.28 profiles memory through torch.accelerator before constructing
+        # the model runner or registering its OOT operators.
+        apply_sunrise_patches()
+        return
     if getattr(current_platform, "vendor_name", "") != "iluvatar":
         return
     try:
