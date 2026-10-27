@@ -8,6 +8,10 @@ from .impl.chunk_delta_h import apply_chunk_delta_h_gcu_patch
 from .impl.fused_recurrent_packed_decode import (
     apply_fused_recurrent_packed_decode_gcu_patch,
 )
+from .impl.index_fill import apply_index_fill_gcu_patch
+from .impl.inductor import apply_inductor_gcu_patch
+from .impl.kv_zeroer import apply_kv_zeroer_gcu_patch
+from .impl.mamba_copy import apply_mamba_copy_gcu_patch
 from .impl.sampler import apply_sampler_cpu_detour
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,10 @@ def apply_gcu_patches() -> None:
     apply_chunk_delta_h_gcu_patch()
     apply_sampler_cpu_detour()
     apply_fused_recurrent_packed_decode_gcu_patch()
+    apply_kv_zeroer_gcu_patch()
+    apply_mamba_copy_gcu_patch()
+    apply_index_fill_gcu_patch()
+    apply_inductor_gcu_patch()
     _patches_applied = True
 
 

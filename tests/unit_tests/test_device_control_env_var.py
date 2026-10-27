@@ -11,6 +11,12 @@ def test_nvidia_uses_cuda_visible_devices(monkeypatch):
     assert get_device_control_env_var("nvidia") == "CUDA_VISIBLE_DEVICES"
 
 
+@pytest.mark.parametrize("vendor", ["enflame", "gcu"])
+def test_enflame_aliases_use_tops_visible_devices(monkeypatch, vendor):
+    monkeypatch.delenv(_OVERRIDE, raising=False)
+    assert get_device_control_env_var(vendor) == "TOPS_VISIBLE_DEVICES"
+
+
 @pytest.mark.parametrize(
     "vendor",
     [
@@ -29,15 +35,23 @@ def test_unvalidated_vendors_preserve_vllm_base_noop(monkeypatch, vendor):
     assert get_device_control_env_var(vendor) == _PLACEHOLDER
 
 
-def test_env_override_wins(monkeypatch):
+@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "not_a_vendor"])
+def test_env_override_wins(monkeypatch, vendor):
     monkeypatch.setenv(_OVERRIDE, "CUSTOM_VISIBLE_DEVICES")
-    assert get_device_control_env_var("ascend") == "CUSTOM_VISIBLE_DEVICES"
-    assert get_device_control_env_var("not_a_vendor") == "CUSTOM_VISIBLE_DEVICES"
+    assert get_device_control_env_var(vendor) == "CUSTOM_VISIBLE_DEVICES"
 
 
-def test_blank_env_override_is_ignored(monkeypatch):
+@pytest.mark.parametrize(
+    "vendor, expected",
+    [
+        ("ascend", _PLACEHOLDER),
+        ("enflame", "TOPS_VISIBLE_DEVICES"),
+        ("gcu", "TOPS_VISIBLE_DEVICES"),
+    ],
+)
+def test_blank_env_override_is_ignored(monkeypatch, vendor, expected):
     monkeypatch.setenv(_OVERRIDE, "   ")
-    assert get_device_control_env_var("ascend") == _PLACEHOLDER
+    assert get_device_control_env_var(vendor) == expected
 
 
 def test_platform_picks_up_the_dispatched_value():
