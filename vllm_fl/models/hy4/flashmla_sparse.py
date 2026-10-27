@@ -269,3 +269,16 @@ class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
     @classmethod
     def supports_sink(cls) -> bool:
         return True
+
+    @classmethod
+    def supports_compute_capability(cls, capability) -> bool:
+        """Accept pre-Hopper devices when the portable sparse kernel is in use.
+
+        The parent gate (major in [9, 10]) guards NVIDIA's FlashMLA kernels.
+        On CUDA-alike vendors the resolved FlagGems providers are portable
+        Triton kernels -- MetaX C550 reports 8.0 and runs them -- so the
+        kernels themselves stay responsible for their own requirements.
+        Iluvatar BI-V150 reports 7.1 through CoreX and also runs the portable
+        Triton providers, so accept its major version too.
+        """
+        return capability.major in [7, 8, 9, 10]

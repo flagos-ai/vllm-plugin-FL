@@ -1004,6 +1004,14 @@ class WorkerFL(WorkerBase):
                     self.vllm_config, batch_desc.num_tokens
                 )
             }
+        # HY4 forwards its sparse-indexer top-k selections across PP stages.
+        # They are replicated over TP, so they must not be split: their numel
+        # is often divisible by the TP world size, which would otherwise trip
+        # the default all_gather heuristic -- the sender would ship 1/TP of
+        # the tensor while the receiver expects the whole thing, and both
+        # sides wedge in the shared-memory broadcast. The send side must make
+        # the same declaration (see model_runner.execute_model).
+        all_gather_tensors["topk_indices"] = False
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict = get_pp_group().recv_tensor_dict(
                 all_gather_group=get_tp_group(),
@@ -1351,6 +1359,126 @@ class WorkerFL(WorkerBase):
             model_runner.shutdown()
 
 
+_TLE_ENV_SWITCHES = (
+    "FLAGGEMS_FLASHMLA_SPARSE_TLE",          # MLA sparse prefill
+    "FLAGGEMS_FLASHMLA_DECODE_TLE",          # MLA decode
+    "FLAGGEMS_FP8_FP4_MQA_LOGITS_TLE",       # sparse indexer paged MQA logits
+    "FLAGGEMS_CHUNK_GATED_DELTA_RULE_TLE",   # GDN (hybrid models)
+)
+
+
+def _is_iluvatar_platform() -> bool:
+    """Detect the Iluvatar (CoreX) platform from inside a worker process.
+
+    ``current_platform.vendor_name`` is not usable this early: the worker may
+    still be holding the abstract base class, which raises a warning and
+    reports nothing. ``torch.__version__`` is also useless -- the FlagOS
+    images ship a plain ``"2.10.0"`` -- while ``importlib.metadata`` carries
+    the real ``2.10.0+corex.4.5.0`` build tag.
+    """
+    import os as _os
+
+    vendor = (
+        _os.environ.get("GEMS_VENDOR") or _os.environ.get("VLLM_FL_PLATFORM") or ""
+    ).strip().lower()
+    if vendor == "iluvatar":
+        return True
+    try:
+        from importlib.metadata import version as _pkg_version
+
+        if "corex" in _pkg_version("torch").lower():
+            return True
+    except Exception:  # noqa: BLE001 - metadata is best-effort
+        pass
+    return False
+
+
+def _disable_flaggems_tle_if_iluvatar() -> None:
+    """Turn flaggems' TLE kernels off on Iluvatar.
+
+    Those kernels allocate shared memory with
+    ``tle.gpu.alloc(..., nv_mma_shared_layout=True)`` -- the NVIDIA
+    Hopper/Blackwell wgmma layout -- which CoreX rejects at the first real
+    inference step::
+
+        iluvatar TLE alloc does not support nv_mma_shared_layout=True
+
+    Every switch is read at call time via ``os.environ.get("...", "1")``, so
+    setting it here is enough. The same flags are usually exported by the
+    launcher, but vLLM only forwards part of the environment to spawned
+    workers, which is why this also has to happen in-process.
+    """
+    import os as _os
+
+    if not _is_iluvatar_platform():
+        return
+    changed = []
+    for _name in _TLE_ENV_SWITCHES:
+        if _name not in _os.environ:
+            _os.environ[_name] = "0"
+            changed.append(_name)
+    if changed:
+        # Printed rather than logged: this runs before vLLM attaches its log
+        # handlers in the worker process, so logger output is dropped.
+        print(
+            "[hy4-iluvatar] disabled flaggems TLE kernels: " + ", ".join(changed),
+            flush=True,
+        )
+
+
+def _prime_ixccl_communicators(rank: int) -> None:
+    """Create the ixccl TP/PP communicators while FlagGems has not patched yet.
+
+    ixccl builds its communicator lazily on the first collective, and that
+    creation path -- ``ixcclCommInitRankFunc -> ixcclCuMemAlloc ->
+    ixcclDebugLog -> __vsnprintf`` -- segfaults once FlagGems has replaced the
+    CUDA kernels. Verified on iluvatar: with ``USE_FLAGGEMS=0`` there is no
+    crash, and a 16-rank ordering test crashes when FlagGems is enabled before
+    the communicator is created but succeeds the other way round.
+
+    Both the TP group and the PP group need priming: priming only TP leaves
+    PP>1 to create its device communicator on the first send/recv, which
+    happens after FlagGems is active. ``all_reduce`` is used rather than
+    send/recv because it is symmetric and has no ordering requirement between
+    ranks, so it cannot deadlock. A single 1-element all_reduce is enough.
+
+    A failure here must never block startup, hence the bare excepts.
+    """
+    if not _is_iluvatar_platform():
+        return
+
+    for group_name, get_group, label in (
+        ("tp", "get_tp_group", "TP"),
+        ("pp", "get_pp_group", "PP"),
+    ):
+        try:
+            import torch as _torch
+            from vllm.distributed import parallel_state as _ps
+
+            group = getattr(_ps, get_group)()
+            if group.world_size <= 1:
+                continue
+            probe = _torch.zeros(
+                1,
+                dtype=_torch.float32,
+                device=_torch.cuda.current_device(),
+            )
+            group.all_reduce(probe)
+            _torch.cuda.synchronize()
+            # Printed rather than logged: see the note in
+            # _disable_flaggems_tle_if_iluvatar.
+            print(
+                f"[hy4-iluvatar] {label} communicator primed "
+                f"(rank={rank}, world={group.world_size})",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - never block startup
+            print(
+                f"[hy4-iluvatar] {label} communicator priming failed: {exc}",
+                flush=True,
+            )
+
+
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
     rank: int,
@@ -1359,6 +1487,8 @@ def init_worker_distributed_environment(
     backend: str = "nccl",
 ) -> None:
     """Initialize the distributed environment."""
+    _disable_flaggems_tle_if_iluvatar()
+
     parallel_config = vllm_config.parallel_config
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     from vllm.model_executor.layers.batch_invariant import init_batch_invariance
@@ -1376,6 +1506,8 @@ def init_worker_distributed_environment(
         parallel_config.prefill_context_parallel_size,
         parallel_config.decode_context_parallel_size,
     )
+
+    _prime_ixccl_communicators(rank)
 
     # Init ec connector here before KV caches caches init
     # NOTE: We do not init KV caches for Encoder-only instance in EPD disagg mode

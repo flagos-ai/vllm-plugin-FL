@@ -116,15 +116,6 @@ def _validate_topk_producers(config, skip_layers: set[int]) -> None:
             producer = i
 
 
-def validate_hy4_parallel_config(config, pipeline_parallel_size: int) -> None:
-    shared = compute_skip_topk_layers(config)
-    if pipeline_parallel_size > 1 and shared:
-        raise ValueError(
-            "HY4 shared top-k indices are not transferred between PP stages; "
-            "use pipeline_parallel_size=1 for shared indexers."
-        )
-
-
 def is_skip_topk_indexer_weight(weight_name: str, skip_topk_layers: set[int]) -> bool:
     """Return whether an indexer weight belongs to a top-k sharing layer.
 

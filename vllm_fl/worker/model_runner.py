@@ -4608,7 +4608,10 @@ class ModelRunnerFL(
                     all_gather_tensors = {
                         "residual": not is_residual_scattered_for_sp(
                             self.vllm_config, num_tokens_padded
-                        )
+                        ),
+                        # HY4's PP top-k selections are replicated over TP and
+                        # must not be split; see WorkerFL.execute_model.
+                        "topk_indices": False,
                     }
                     get_pp_group().send_tensor_dict(
                         hidden_states.tensors,

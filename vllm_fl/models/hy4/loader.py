@@ -17,6 +17,9 @@ from vllm.model_executor.model_loader.default_loader import DefaultModelLoader
 from vllm.model_executor.model_loader.ep_weight_filter import should_skip_weight
 from vllm.model_executor.model_loader.weight_utils import enable_tqdm
 
+#: Architectures this loader can populate: the text model and the VL wrapper.
+_HY4_MODEL_CLASSES = ("HYV4ForCausalLM", "HYV4VLForConditionalGeneration")
+
 _PACKED_EXPERT_NAMES = (
     ".mlp.experts.gate_up_proj",
     ".mlp.experts.down_proj",
@@ -95,17 +98,21 @@ class HYV4SafetensorsLoader(DefaultModelLoader):
                 "filtering; start vLLM with --enable-expert-parallel and "
                 "--enable-ep-weight-filter"
             )
-        if model.__class__.__name__ != "HYV4ForCausalLM":
+        if model.__class__.__name__ not in _HY4_MODEL_CLASSES:
             raise ValueError(
-                "load_format=hy4_safetensors is specific to HYV4ForCausalLM"
+                "load_format=hy4_safetensors is specific to the HY4 text and VL "
+                f"models, got {model.__class__.__name__}"
             )
 
         expert_ids = sorted(local_expert_ids)
-        model._hy4_local_expert_ids = expert_ids
+        # The packed-expert loader and the coverage check live on the causal-LM
+        # module; the VL composition wraps it, so publish the ids there.
+        target = getattr(model, "language_model", model)
+        target._hy4_local_expert_ids = expert_ids
         try:
             super().load_weights(model, model_config)
         finally:
-            del model._hy4_local_expert_ids
+            del target._hy4_local_expert_ids
 
     def _get_weights_iterator(
         self,

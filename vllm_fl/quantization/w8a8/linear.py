@@ -33,6 +33,31 @@ FLAGGEMS_W8A8_LINEAR_OP = "w8a8_dynamic_per_token_linear"
 
 _dynamic_per_token_quant_int8 = CachedOp("dynamic_per_token_quant_int8")
 
+# Capture the native INT8 GEMM before FlagGems' ``enable()`` monkeypatches
+# ``torch._int_mm`` with its Triton implementation. That implementation cannot
+# compile on Iluvatar (``tl.dot`` has no int8 x int8 -> int32 form), while the
+# native C++ kernel is exact. Modules in ``vllm_fl`` are imported before the
+# worker calls ``flag_gems.enable()``, so this reference is the untouched one.
+_NATIVE_INT_MM = torch._int_mm
+
+# CoreX's ``torch._int_mm`` requires M > 16 (measured: M=16 still fails with
+# "self.size(0) needs to be greater than 16", M>=17 works and matches a CPU
+# int32 matmul bit for bit). Decode feeds a single token and the warmup dummy
+# run only a handful, so without padding W8A8 could never decode on Iluvatar.
+_MIN_INT_MM_M = 17
+
+
+def _iluvatar_int_mm(x_q: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """``torch._int_mm`` with the small-M case padded out to the CoreX minimum."""
+    m = x_q.shape[0]
+    if m >= _MIN_INT_MM_M:
+        return _NATIVE_INT_MM(x_q, weight)
+    pad = torch.zeros(
+        (_MIN_INT_MM_M - m, x_q.shape[1]), dtype=x_q.dtype, device=x_q.device
+    )
+    padded = torch.cat([x_q, pad], dim=0)
+    return _NATIVE_INT_MM(padded, weight)[:m]
+
 
 class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
     """Use FlagGems scaled-mm with the vLLM dynamic-W8A8 contract.
@@ -99,20 +124,37 @@ class FLW8A8DynamicLinearKernel(Int8ScaledMMLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        from flag_gems import scaled_mm
+        from vllm.platforms import current_platform
 
         weight, weight_scale, _, _, _ = self._get_layer_params(layer)
         original_shape = x.shape
         x_2d = x.reshape(-1, original_shape[-1]).contiguous()
         x_q, x_scale = _dynamic_per_token_quant_int8(x_2d)
-        output = scaled_mm(
-            x_q,
-            weight,
-            x_scale,
-            weight_scale,
-            bias=bias,
-            out_dtype=x.dtype,
-        )
+
+        if getattr(current_platform, "vendor_name", "") == "iluvatar":
+            # Iluvatar: flag_gems.scaled_mm implements only the FP8 contract
+            # ("mat1 and mat2 must be Float8 matrices"), and neither
+            # torch._scaled_mm(int8) nor flag_gems.int_mm works there.
+            # The native INT8 GEMM is the only viable path: it accumulates in
+            # int32 (no overflow for int8 x int8), then we dequantize in fp32
+            # with the per-token [M,1] and per-channel [N] scales.
+            acc = _iluvatar_int_mm(x_q, weight)
+            output = acc.to(torch.float32) * x_scale
+            output = output * weight_scale.unsqueeze(0)
+            if bias is not None:
+                output = output + bias
+            output = output.to(x.dtype)
+        else:
+            from flag_gems import scaled_mm
+
+            output = scaled_mm(
+                x_q,
+                weight,
+                x_scale,
+                weight_scale,
+                bias=bias,
+                out_dtype=x.dtype,
+            )
         return output.reshape(*original_shape[:-1], weight.shape[1])
 
 

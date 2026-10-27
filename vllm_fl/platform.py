@@ -213,8 +213,14 @@ class PlatformFL(Platform):
 
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
-        if self.vendor_name == "iluvatar":
-            return False
+        # NOTE: iluvatar uses the CUDA API stack (libcuda.so / torch.cuda /
+        # nccl) and reports device_type == "cuda", so it must be treated as
+        # cuda-alike. Returning False here (as this used to) made vLLM skip
+        # every CUDA branch; for example bind_kv_cache() in
+        # vllm/v1/worker/utils.py raises NotImplementedError whenever a
+        # decoder layer owns more than one attention module -- HY4 has both
+        # self_attn.attn and self_attn.indexer.k_cache -- so the model could
+        # not start at all.
         if self.device_type == "musa":
             return True
         if self.vendor_name == "hygon":

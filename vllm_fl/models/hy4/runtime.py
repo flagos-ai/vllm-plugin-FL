@@ -156,8 +156,19 @@ def validate_hy4_runtime(vllm_config) -> HY4RuntimePlan:
 
     from vllm_fl.dispatch.types import BackendImplKind
 
-    if not current_platform.is_cuda():
-        raise ValueError("HY4 currently requires an NVIDIA CUDA runtime")
+    # MetaX/other vendors expose a CUDA-compatible device_type but are not
+    # NVIDIA, so is_cuda() is False there; the portable FlagGems path below
+    # does not require NVIDIA kernels.
+    # Iluvatar (CoreX) exposes a CUDA-compatible ``device_type`` but
+    # ``vllm_fl.platform`` deliberately reports it as non-cuda-alike for
+    # unrelated dispatch reasons. HY4's portable FlagGems path runs there,
+    # so accept a CUDA device_type as well.
+    if not (
+        current_platform.is_cuda()
+        or current_platform.is_cuda_alike()
+        or getattr(current_platform, "device_type", None) == "cuda"
+    ):
+        raise ValueError("HY4 requires a CUDA or CUDA-alike runtime")
     cache_dtype = vllm_config.cache_config.cache_dtype
     if cache_dtype not in ("auto", "bfloat16", "fp8", "fp8_e4m3"):
         raise ValueError(f"Unsupported HY4 KV cache dtype: {cache_dtype}")
