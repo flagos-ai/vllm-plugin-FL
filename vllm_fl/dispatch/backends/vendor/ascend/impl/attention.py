@@ -586,17 +586,18 @@ class AscendAttentionBackendImpl(AttentionImpl):
     def update_graph_params(
         update_stream: Any,
         forward_context: Any,
-        num_tokens: int,
+        batch_descriptor: Any,
         vllm_config: VllmConfig,
     ) -> None:
         """Rebind live regular-attention metadata after FULL replay enqueue."""
         from vllm_fl.compilation.graph_params import get_graph_params
 
         graph_params = get_graph_params()
-        graph_params.require_shape(num_tokens)
-        params = graph_params.attn_params[num_tokens]
-        handles = graph_params.handles[num_tokens]
-        events = graph_params.events[num_tokens]
+        graph_params.require_capture(batch_descriptor)
+        num_tokens = batch_descriptor.num_tokens
+        params = graph_params.attn_params[batch_descriptor]
+        handles = graph_params.handles[batch_descriptor]
+        events = graph_params.events[batch_descriptor]
         if not params:
             raise RuntimeError(
                 f"No Ascend attention task was captured for graph size {num_tokens}"
@@ -657,7 +658,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
                         workspace=workspace,
                     )
                 else:
-                    workspace = graph_params.workspaces[num_tokens]
+                    workspace = graph_params.workspaces[batch_descriptor]
                     if workspace is None:
                         raise RuntimeError(
                             f"Missing FIA workspace for graph size {num_tokens}"
@@ -877,14 +878,14 @@ class AscendAttentionBackendImpl(AttentionImpl):
         key, value, block_size, block_table, actual_seq_lengths_kv = (
             self._get_fia_params(key, value, attn_metadata)
         )
-        num_tokens = query.shape[0]
+        batch_descriptor = get_forward_context().batch_descriptor
         graph_params = get_graph_params()
-        graph_params.require_shape(num_tokens)
+        graph_params.require_capture(batch_descriptor)
         softmax_lse = torch.empty(1, dtype=query.dtype, device=query.device)
         sparse_mode = 4 if self.sliding_window else 3 if attn_metadata.causal else 0
         pre_tokens = self.sliding_window or _SWA_INT_MAX
         next_tokens = 0 if self.sliding_window else _SWA_INT_MAX
-        workspace = graph_params.workspaces[num_tokens]
+        workspace = graph_params.workspaces[batch_descriptor]
         if workspace is None:
             workspace = torch_npu._npu_fused_infer_attention_score_get_max_workspace(
                 query=query,
@@ -903,14 +904,14 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 next_tokens=next_tokens,
                 scale=self.scale,
             )
-            graph_params.workspaces[num_tokens] = workspace
+            graph_params.workspaces[batch_descriptor] = workspace
 
         stream = torch.npu.current_stream()
         event = torch.npu.ExternalEvent()
         event.wait(stream)
         event.reset(stream)
-        graph_params.events[num_tokens].append(event)
-        graph_params.attn_params[num_tokens].append(
+        graph_params.events[batch_descriptor].append(event)
+        graph_params.attn_params[batch_descriptor].append(
             FusedInferAttentionGraphParam(
                 layer_name=layer_name,
                 query=self._weak_ref_tensor(query),
@@ -951,7 +952,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
             workspace=workspace,
             out=[output, softmax_lse],
         )
-        graph_params.handles[num_tokens].append(torch.npu.graph_task_group_end(stream))
+        graph_params.handles[batch_descriptor].append(
+            torch.npu.graph_task_group_end(stream)
+        )
         return output
 
     def forward_paged_attention(
@@ -989,9 +992,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
         from vllm_fl.compilation.graph_params import get_graph_params
 
         layer_name = self._require_regular_graph_capture(attn_metadata, layer)
-        num_tokens = query.shape[0]
+        batch_descriptor = get_forward_context().batch_descriptor
         graph_params = get_graph_params()
-        graph_params.require_shape(num_tokens)
+        graph_params.require_capture(batch_descriptor)
         key_cache = self.key_cache.contiguous()
         value_cache = self.value_cache.contiguous()
         # PA sizes its own workspace. Reserve the shared slot for FIA, which
@@ -1012,8 +1015,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
         event = torch.npu.ExternalEvent()
         event.wait(stream)
         event.reset(stream)
-        graph_params.events[num_tokens].append(event)
-        graph_params.attn_params[num_tokens].append(
+        graph_params.events[batch_descriptor].append(event)
+        graph_params.attn_params[batch_descriptor].append(
             PagedAttentionGraphParam(
                 layer_name=layer_name,
                 query=self._weak_ref_tensor(query),
@@ -1040,7 +1043,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
             out=output,
             workspace=workspace,
         )
-        graph_params.handles[num_tokens].append(torch.npu.graph_task_group_end(stream))
+        graph_params.handles[batch_descriptor].append(
+            torch.npu.graph_task_group_end(stream)
+        )
         return output
 
     def _forward_encoder_attention(

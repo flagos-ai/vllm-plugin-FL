@@ -1,7 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Per-shape accelerator task parameters for full graph replay.
+"""Per-descriptor accelerator task parameters for full graph replay.
 
 The graph runtime owns the lifetime of this registry. Attention backends own
 the operator-specific parameter records stored in it. Keeping the registry in
@@ -11,40 +11,48 @@ without pulling vendor operator implementations into the runner.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vllm.forward_context import BatchDescriptor
 
 
 @dataclass
 class GraphParams:
-    """Captured device-task state indexed by the full-graph token shape."""
+    """Captured device-task state indexed like GraphWrapper's graph entries."""
 
-    events: dict[int, list[Any]] = field(default_factory=dict)
-    workspaces: dict[int, Any | None] = field(default_factory=dict)
-    handles: dict[int, list[Any]] = field(default_factory=dict)
-    attn_params: dict[int, list[Any]] = field(default_factory=dict)
+    events: dict[BatchDescriptor, list[Any]] = field(default_factory=dict)
+    workspaces: dict[BatchDescriptor, Any | None] = field(default_factory=dict)
+    handles: dict[BatchDescriptor, list[Any]] = field(default_factory=dict)
+    attn_params: dict[BatchDescriptor, list[Any]] = field(default_factory=dict)
 
-    def prepare_shape(self, num_tokens: int) -> None:
-        if num_tokens <= 0:
+    def prepare_capture(self, descriptor: BatchDescriptor) -> None:
+        num_tokens = descriptor.num_tokens
+        if (
+            not isinstance(num_tokens, int)
+            or isinstance(num_tokens, bool)
+            or num_tokens <= 0
+        ):
             raise ValueError(f"Graph capture size must be positive, got {num_tokens}")
-        if num_tokens in self.attn_params and (
-            self.attn_params[num_tokens]
-            or self.handles[num_tokens]
-            or self.events[num_tokens]
+        if descriptor in self.attn_params and (
+            self.attn_params[descriptor]
+            or self.handles[descriptor]
+            or self.events[descriptor]
         ):
             raise RuntimeError(
-                f"Graph task parameters for capture size {num_tokens} "
-                "already contain captured state"
+                f"Graph task parameters for {descriptor} already contain captured state"
             )
-        self.events[num_tokens] = []
-        self.workspaces[num_tokens] = None
-        self.handles[num_tokens] = []
-        self.attn_params[num_tokens] = []
+        self.events[descriptor] = []
+        self.workspaces[descriptor] = None
+        self.handles[descriptor] = []
+        self.attn_params[descriptor] = []
 
-    def require_shape(self, num_tokens: int) -> None:
-        if num_tokens not in self.attn_params:
+    def require_capture(self, descriptor: BatchDescriptor) -> None:
+        if descriptor not in self.attn_params:
             raise RuntimeError(
-                f"Graph task parameters were not prepared for capture size {num_tokens}"
+                f"Graph task parameters were not prepared for {descriptor}"
             )
 
     def clear(self) -> None:
@@ -61,8 +69,8 @@ def get_graph_params() -> GraphParams:
     return _GRAPH_PARAMS
 
 
-def prepare_graph_params(num_tokens: int) -> GraphParams:
-    _GRAPH_PARAMS.prepare_shape(num_tokens)
+def prepare_graph_params(descriptor: BatchDescriptor) -> GraphParams:
+    _GRAPH_PARAMS.prepare_capture(descriptor)
     return _GRAPH_PARAMS
 
 
@@ -70,17 +78,13 @@ def clear_graph_params() -> None:
     _GRAPH_PARAMS.clear()
 
 
-def weak_ref_workspace(num_tokens: int) -> None:
+def weak_ref_workspace(
+    descriptor: BatchDescriptor, weak_ref: Callable[[Any], Any]
+) -> None:
     """Drop ownership while preserving the address retained by the NPU graph."""
     params = get_graph_params()
-    params.require_shape(num_tokens)
-    workspace = params.workspaces[num_tokens]
+    params.require_capture(descriptor)
+    workspace = params.workspaces[descriptor]
     if workspace is None:
         return
-    try:
-        from vllm.utils.torch_utils import weak_ref_tensors
-
-        weak_workspace = weak_ref_tensors(workspace)
-    except Exception:
-        weak_workspace = workspace
-    params.workspaces[num_tokens] = weak_workspace
+    params.workspaces[descriptor] = weak_ref(workspace)

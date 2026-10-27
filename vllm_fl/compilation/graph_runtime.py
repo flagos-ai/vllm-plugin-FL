@@ -24,33 +24,33 @@ class GraphRuntimeController:
         self._active = False
 
     @staticmethod
-    def _num_tokens(context: Any) -> int:
-        num_tokens = getattr(
-            getattr(context, "batch_descriptor", None), "num_tokens", None
-        )
+    def _batch_descriptor(context: Any) -> Any:
+        descriptor = getattr(context, "batch_descriptor", None)
+        num_tokens = getattr(descriptor, "num_tokens", None)
         if not isinstance(num_tokens, int) or isinstance(num_tokens, bool):
             raise RuntimeError(
                 "Ascend FULL graphs require integer BatchDescriptor.num_tokens"
             )
-        return num_tokens
+        return descriptor
 
     @contextmanager
     def capture_scope(self, context: Any):
+        from vllm_fl.compilation.graph import weak_ref_tensors
         from vllm_fl.compilation.graph_params import (
             prepare_graph_params,
             weak_ref_workspace,
         )
 
         assert not self._active
-        num_tokens = self._num_tokens(context)
-        prepare_graph_params(num_tokens)
+        descriptor = self._batch_descriptor(context)
+        prepare_graph_params(descriptor)
         self._active = True
         context.capturing = True
         try:
             yield
         finally:
             try:
-                weak_ref_workspace(num_tokens)
+                weak_ref_workspace(descriptor, weak_ref_tensors)
             finally:
                 context.capturing = False
                 self._active = False
@@ -80,7 +80,7 @@ class GraphRuntimeController:
                 impl.update_graph_params(
                     self.update_stream,
                     context,
-                    self._num_tokens(context),
+                    self._batch_descriptor(context),
                     self.vllm_config,
                 )
 

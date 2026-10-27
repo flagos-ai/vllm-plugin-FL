@@ -5,6 +5,7 @@ import ast
 import importlib.util
 import os
 import sys
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
@@ -186,85 +187,108 @@ def _graph_params(monkeypatch):
     return module
 
 
-def _legacy_weak_ref_helper():
-    tree = ast.parse((ROOT / "compilation/graph.py").read_text())
-    helper = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "weak_ref_tensors"
-    )
-    namespace = {"Any": object, "current_platform": NS(device_type="cuda")}
-    exec(
-        compile(ast.Module(body=[helper], type_ignores=[]), "legacy-weakref", "exec"),
-        namespace,
-    )
-    return namespace[helper.name]
+@dataclass(frozen=True)
+class _Descriptor:
+    num_tokens: int = 4
+    num_reqs: int = 4
+    uniform: bool = True
+    has_lora: bool = False
+    num_active_loras: int = 0
 
 
-def test_workspace_weak_ref_without_workspace_skips_upstream_import(monkeypatch):
+@pytest.mark.parametrize(
+    "first,second",
+    [
+        (_Descriptor(), _Descriptor(has_lora=True, num_active_loras=1)),
+        (
+            _Descriptor(has_lora=True, num_active_loras=1),
+            _Descriptor(has_lora=True, num_active_loras=2),
+        ),
+        (_Descriptor(), _Descriptor(num_reqs=2)),
+        (_Descriptor(), _Descriptor(uniform=False)),
+    ],
+)
+def test_capture_registry_isolates_complete_descriptors(monkeypatch, first, second):
     registry = _graph_params(monkeypatch)
-    registry.prepare_graph_params(4)
-    imports = []
-    original_import = __import__
+    params = registry.prepare_graph_params(first)
+    task, handle, event, workspace = object(), object(), object(), object()
+    params.attn_params[first].append(task)
+    params.handles[first].append(handle)
+    params.events[first].append(event)
+    params.workspaces[first] = workspace
 
-    def track_import(name, *args, **kwargs):
-        imports.append(name)
-        return original_import(name, *args, **kwargs)
+    registry.prepare_graph_params(second)
+    params.require_capture(first)
+    params.require_capture(second)
+    assert params.attn_params[first] == [task]
+    assert params.handles[first] == [handle]
+    assert params.events[first] == [event]
+    assert params.workspaces[first] is workspace
+    assert params.attn_params[second] == []
+    assert params.handles[second] == []
+    assert params.events[second] == []
+    assert params.workspaces[second] is None
 
-    monkeypatch.setattr("builtins.__import__", track_import)
-    registry.weak_ref_workspace(4)
-    assert registry.get_graph_params().workspaces[4] is None
-    assert "vllm.utils.torch_utils" not in imports
-    assert "vllm_fl.compilation.graph" not in imports
 
-
-def test_workspace_weak_ref_saves_upstream_result(monkeypatch):
+def test_duplicate_descriptor_preserves_captured_state(monkeypatch):
     registry = _graph_params(monkeypatch)
-    params = registry.prepare_graph_params(4)
+    descriptor = _Descriptor()
+    params = registry.prepare_graph_params(descriptor)
+    task = object()
+    params.attn_params[descriptor].append(task)
+    with pytest.raises(RuntimeError, match="already contain captured state"):
+        registry.prepare_graph_params(replace(descriptor))
+    assert params.attn_params[descriptor] == [task]
+
+
+def test_workspace_without_allocation_skips_conversion(monkeypatch):
+    registry = _graph_params(monkeypatch)
+    descriptor = _Descriptor()
+    registry.prepare_graph_params(descriptor)
+
+    def unexpected_conversion(_workspace):
+        raise AssertionError("No workspace was allocated")
+
+    registry.weak_ref_workspace(descriptor, unexpected_conversion)
+    assert registry.get_graph_params().workspaces[descriptor] is None
+
+
+def test_workspace_uses_platform_weak_ref_result(monkeypatch):
+    registry = _graph_params(monkeypatch)
+    descriptor = _Descriptor()
+    params = registry.prepare_graph_params(descriptor)
     workspace, weak_workspace = object(), object()
-    params.workspaces[4] = workspace
+    params.workspaces[descriptor] = workspace
     calls = []
 
-    def weak_ref_tensors(tensor):
+    def weak_ref(tensor):
         calls.append(tensor)
         return weak_workspace
 
-    _module(monkeypatch, "vllm.utils.torch_utils", weak_ref_tensors=weak_ref_tensors)
-    registry.weak_ref_workspace(4)
+    registry.weak_ref_workspace(descriptor, weak_ref)
     assert calls == [workspace]
-    assert params.workspaces[4] is weak_workspace
-    assert _legacy_weak_ref_helper()(workspace) is weak_workspace
+    assert params.workspaces[descriptor] is weak_workspace
 
 
-@pytest.mark.parametrize("failure", ["import", "missing-helper", "runtime", "type"])
-def test_workspace_weak_ref_failure_preserves_original(monkeypatch, failure):
+def test_workspace_weak_ref_error_is_reported(monkeypatch):
     registry = _graph_params(monkeypatch)
-    params = registry.prepare_graph_params(4)
+    descriptor = _Descriptor()
+    params = registry.prepare_graph_params(descriptor)
     workspace = object()
-    params.workspaces[4] = workspace
-    calls = []
+    params.workspaces[descriptor] = workspace
 
-    def fail(tensor):
-        calls.append(tensor)
-        exception = RuntimeError if failure == "runtime" else TypeError
-        raise exception("upstream weak-ref failed")
+    def fail(_tensor):
+        raise RuntimeError("platform weak-ref unavailable")
 
-    if failure == "import":
-        monkeypatch.setitem(sys.modules, "vllm.utils.torch_utils", None)
-    elif failure == "missing-helper":
-        _module(monkeypatch, "vllm.utils.torch_utils")
-    else:
-        _module(monkeypatch, "vllm.utils.torch_utils", weak_ref_tensors=fail)
-    registry.weak_ref_workspace(4)
-    assert params.workspaces[4] is workspace
-    assert calls == ([workspace] if failure in ("runtime", "type") else [])
-    assert _legacy_weak_ref_helper()(workspace) is workspace
+    with pytest.raises(RuntimeError, match="platform weak-ref unavailable"):
+        registry.weak_ref_workspace(descriptor, fail)
+    assert params.workspaces[descriptor] is workspace
 
 
-def test_workspace_weak_ref_requires_prepared_shape(monkeypatch):
+def test_workspace_weak_ref_requires_prepared_capture(monkeypatch):
     registry = _graph_params(monkeypatch)
-    with pytest.raises(RuntimeError, match="not prepared for capture size 4"):
-        registry.weak_ref_workspace(4)
+    with pytest.raises(RuntimeError, match="not prepared"):
+        registry.weak_ref_workspace(_Descriptor(), lambda x: x)
     assert registry.get_graph_params().workspaces == {}
 
 
@@ -273,14 +297,8 @@ def test_graph_params_has_no_back_import_to_fl_graph():
     modules = [
         node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
     ]
-    modules += [
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    ]
     assert not any(name and name.startswith("vllm_fl") for name in modules)
-    assert "vllm.utils.torch_utils" in modules
+    assert "vllm.utils.torch_utils" not in modules
 
 
 def _runtime(monkeypatch, calls):
@@ -297,9 +315,10 @@ def _runtime(monkeypatch, calls):
         monkeypatch,
         "vllm_fl.compilation.graph_params",
         prepare_graph_params=lambda n: calls.append(("prepare", n)),
-        weak_ref_workspace=lambda n: calls.append(("weak-ref", n)),
+        weak_ref_workspace=lambda d, fn: calls.append(("weak-ref", d, fn)),
         clear_graph_params=lambda: calls.append("clear"),
     )
+    _module(monkeypatch, "vllm_fl.compilation.graph", weak_ref_tensors=lambda x: x)
     spec = importlib.util.spec_from_file_location(
         "_fl_graph_contract_runtime", ROOT / "compilation/graph_runtime.py"
     )
@@ -313,9 +332,9 @@ def test_capture_replay_orders_updates_after_enqueue(monkeypatch):
     runtime, _ = _runtime(monkeypatch, calls)
     controller = runtime.GraphRuntimeController(vllm_config="config")
     controller.attention_impls = (
-        NS(update_graph_params=lambda *a: calls.append("update")),
+        NS(update_graph_params=lambda _s, _c, d, _v: calls.append(("update", d))),
     )
-    context = NS(batch_descriptor=NS(num_tokens=4), capturing=False)
+    context = NS(batch_descriptor=_Descriptor(), capturing=False)
     with controller.capture_scope(context):
         assert context.capturing
         calls.append("capture")
@@ -323,12 +342,16 @@ def test_capture_replay_orders_updates_after_enqueue(monkeypatch):
     with controller.replay_scope(context):
         calls.append("replay")
     assert calls == [
-        ("prepare", 4),
+        ("prepare", context.batch_descriptor),
         "capture",
-        ("weak-ref", 4),
+        (
+            "weak-ref",
+            context.batch_descriptor,
+            sys.modules["vllm_fl.compilation.graph"].weak_ref_tensors,
+        ),
         "synchronize",
         "replay",
-        "update",
+        ("update", context.batch_descriptor),
     ]
 
 
@@ -340,7 +363,7 @@ def test_failed_capture_and_replay_restore_state(monkeypatch):
     calls = []
     runtime, _ = _runtime(monkeypatch, calls)
     controller = runtime.GraphRuntimeController(vllm_config="config")
-    context = NS(batch_descriptor=NS(num_tokens=4), capturing=False)
+    context = NS(batch_descriptor=_Descriptor(), capturing=False)
     pytest.raises(
         RuntimeError, fail_in_scope, controller.capture_scope(context), "capture failed"
     ).match("capture failed")

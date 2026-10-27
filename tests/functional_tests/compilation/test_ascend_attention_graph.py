@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from vllm.forward_context import BatchDescriptor, override_forward_context
 from vllm.platforms import current_platform
 
 pytestmark = [
@@ -108,36 +109,61 @@ def test_attention_graph_updates_mixed_backends(order, interleaved):
     clear_graph_params()
     runtime = GraphRuntimeController(vllm_config=config)
     runtime.attention_impls = (AscendAttentionBackendImpl,)
+    descriptors = [
+        BatchDescriptor(
+            num_tokens=1,
+            num_reqs=1,
+            uniform=True,
+            has_lora=count > 0,
+            num_active_loras=count,
+        )
+        for count in (0, 1, 2)
+    ]
     context = SimpleNamespace(
-        batch_descriptor=SimpleNamespace(num_tokens=1),
+        batch_descriptor=descriptors[0],
         attn_metadata={name: metadata for _, _, _, _, metadata, name in layers},
         capturing=False,
     )
-    graph = torch.npu.NPUGraph()
-    with runtime.capture_scope(context), torch.npu.graph(graph):
-        for backend, impl, query, output, metadata, name in layers:
-            layer = SimpleNamespace(layer_name=name)
-            if backend == "pa":
-                impl._capture_paged_attention(query, metadata, output, layer)
-            else:
-                impl._capture_fused_infer_attention(
-                    query, None, None, metadata, output, layer
-                )
+    graphs = {}
+    for descriptor in descriptors:
+        context.batch_descriptor = descriptor
+        graph = torch.npu.NPUGraph()
+        with (
+            override_forward_context(context),
+            runtime.capture_scope(context),
+            torch.npu.graph(graph),
+        ):
+            for backend, impl, query, output, metadata, name in layers:
+                layer = SimpleNamespace(layer_name=name)
+                if backend == "pa":
+                    impl._capture_paged_attention(query, metadata, output, layer)
+                else:
+                    impl._capture_fused_infer_attention(
+                        query, None, None, metadata, output, layer
+                    )
+        graphs[descriptor] = graph
+        assert (get_graph_params().workspaces[descriptor] is not None) == (
+            "fia" in order
+        )
 
-    assert (get_graph_params().workspaces[1] is not None) == ("fia" in order)
+    assert set(get_graph_params().attn_params) == set(descriptors)
     for length in (65, 257, 129):
-        expected = []
-        for backend, impl, query, _, metadata, _ in layers:
-            query.normal_()
-            impl.key_cache.normal_()
-            impl.value_cache.normal_()
-            metadata.block_tables.copy_(metadata.block_tables.roll(1, dims=1))
-            metadata.seq_lens.fill_(length)
-            metadata.seq_lens_list = [length]
-            expected.append(eager(backend, impl, query, metadata))
-        with runtime.replay_scope(context):
-            graph.replay()
-        torch.npu.synchronize()
-        for (_, _, _, output, _, _), reference in zip(layers, expected):
-            torch.testing.assert_close(output, reference, rtol=0.01, atol=0.01)
+        # Revisit all three graphs so live updates must release the events
+        # belonging to the selected LoRA descriptor, even at one token shape.
+        for descriptor in reversed(descriptors):
+            context.batch_descriptor = descriptor
+            expected = []
+            for backend, impl, query, _, metadata, _ in layers:
+                query.normal_()
+                impl.key_cache.normal_()
+                impl.value_cache.normal_()
+                metadata.block_tables.copy_(metadata.block_tables.roll(1, dims=1))
+                metadata.seq_lens.fill_(length)
+                metadata.seq_lens_list = [length]
+                expected.append(eager(backend, impl, query, metadata))
+            with runtime.replay_scope(context):
+                graphs[descriptor].replay()
+            torch.npu.synchronize()
+            for (_, _, _, output, _, _), reference in zip(layers, expected):
+                torch.testing.assert_close(output, reference, rtol=0.01, atol=0.01)
     clear_graph_params()
