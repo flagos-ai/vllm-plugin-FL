@@ -315,6 +315,13 @@ class PlatformFL(Platform):
             except Exception as e:
                 logger.warning(f"Failed to apply MUSA patches: {e}")
 
+        if cls.device_type == "txda":
+            try:
+                from vllm_fl.dispatch.backends.vendor.txda.patch import apply_txda_patches
+                apply_txda_patches()
+            except Exception as e:
+                logger.warning(f"Failed to apply txda patches: {e}")
+
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""
@@ -564,6 +571,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "tsingmicro",
             "biren",
             # sunrise/PTPU: opt in to the static-graph path so VllmConfig
             # resolves a non-NONE cudagraph_mode (defaults to PIECEWISE) instead

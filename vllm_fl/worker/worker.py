@@ -625,6 +625,7 @@ class WorkerFL(WorkerBase):
                 (
                     current_platform.is_cuda()
                     or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+                    or current_platform.device_type == "txda"
                 )
                 and self.vllm_config.compilation_config.cudagraph_mode
                 != CUDAGraphMode.NONE
