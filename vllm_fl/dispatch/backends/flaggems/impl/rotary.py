@@ -103,12 +103,21 @@ def rotary_embedding_flaggems(
         key.copy_(k_embed)
         return query, key
 
-    return gems_rope_forward(
+    # The NVIDIA inplace kernel can overwrite a rotation partner before
+    # another warp loads it. Compute both outputs before copying either back,
+    # preserving packed/partial-RoPE views and the caller's mutation contract.
+    nvidia_inplace = inplace and getattr(flag_gems, "vendor_name", None) == "nvidia"
+    q_embed, k_embed = gems_rope_forward(
         query,
         key,
         cos,
         sin,
         position_ids=position_ids,
         rotary_interleaved=rotary_interleaved,
-        inplace=inplace,
+        inplace=inplace and not nvidia_inplace,
     )
+    if nvidia_inplace:
+        query.copy_(q_embed)
+        key.copy_(k_embed)
+        return query, key
+    return q_embed, k_embed
