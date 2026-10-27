@@ -109,4 +109,17 @@ def register_builtins(registry: OpRegistry) -> None:
         vendor="ascend",
         priority=BackendPriority.VENDOR,
     ))
+    # DeepSeek V4 paged-cache writer (Triton scatter_nd_update_v2).  Availability
+    # follows the normal Ascend platform check -- no environment gating.  A
+    # layout the implementation cannot write safely raises UnsupportedLayout
+    # before any device write, and the dispatch manager applies its regular
+    # priority fallback to reference.torch (strict: false).
+    impls.append(OpImpl(
+        op_name="deepseek_v4_cache_write",
+        impl_id="vendor.ascend",
+        kind=BackendImplKind.VENDOR,
+        fn=_bind_is_available(backend.deepseek_v4_cache_write, is_avail),
+        vendor="ascend",
+        priority=BackendPriority.VENDOR,
+    ))
     registry.register_many(impls)
