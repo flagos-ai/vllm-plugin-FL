@@ -336,3 +336,69 @@ def test_nvidia_compilation_preserves_supported_passes_and_graphs(monkeypatch, f
     assert compilation.pass_config.eliminate_noops is True
     assert compilation.mode == CompilationMode.VLLM_COMPILE
     assert compilation.cudagraph_mode == CUDAGraphMode.FULL_AND_PIECEWISE
+
+
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_qsa_patch_runs_after_native_device_selection(monkeypatch, use_v2):
+    from types import SimpleNamespace
+
+    import torch
+
+    from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
+
+    from vllm_fl.patches import qsa_cache_hint
+    from vllm_fl.worker.nvidia_worker import NvidiaWorkerFL
+
+    worker = object.__new__(NvidiaWorkerFL)
+    worker.use_v2_model_runner = use_v2
+    worker.local_rank = 0
+    worker.model_config = SimpleNamespace(
+        architecture="Qwen4ExpForConditionalGeneration"
+    )
+    runner = object()
+    calls = []
+
+    def native_init(actual_worker):
+        assert actual_worker is worker
+        assert actual_worker.use_v2_model_runner is use_v2
+        calls.append("native")
+        actual_worker.local_rank = 3
+        actual_worker.device = torch.device("cuda:3")
+        actual_worker.model_runner = runner
+
+    def install(config, device):
+        assert calls == ["native"]
+        assert config is worker.model_config
+        assert device == torch.device("cuda:3")
+        assert worker.model_runner is runner
+        calls.append("qsa")
+        return True
+
+    monkeypatch.setattr(NativeGPUWorker, "init_device", native_init)
+    monkeypatch.setattr(qsa_cache_hint, "patch_qsa_cache_hint", install)
+    worker.init_device()
+    assert calls == ["native", "qsa"]
+    assert worker.use_v2_model_runner is use_v2
+    assert worker.model_runner is runner
+    assert NvidiaWorkerFL.load_model is NativeGPUWorker.load_model
+
+
+def test_qsa_patch_does_not_run_after_native_device_failure(monkeypatch):
+    from unittest.mock import Mock
+
+    from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
+
+    from vllm_fl.patches import qsa_cache_hint
+    from vllm_fl.worker.nvidia_worker import NvidiaWorkerFL
+
+    worker = object.__new__(NvidiaWorkerFL)
+
+    def fail(_worker):
+        raise RuntimeError("native device unavailable")
+
+    install = Mock()
+    monkeypatch.setattr(NativeGPUWorker, "init_device", fail)
+    monkeypatch.setattr(qsa_cache_hint, "patch_qsa_cache_hint", install)
+    with pytest.raises(RuntimeError, match="native device unavailable"):
+        worker.init_device()
+    install.assert_not_called()

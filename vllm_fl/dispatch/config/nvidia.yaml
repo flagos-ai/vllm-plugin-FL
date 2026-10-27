@@ -43,10 +43,10 @@ op_backends:
     - vendor
     - reference
 
-# FlagOS operators with a reproducible NVIDIA correctness failure under the
-# supported FlagTree/Triton 3.6 environment. Each entry was reproduced
-# independently against native PyTorch, and removals are revalidated with real
-# dense and MoE model inference.
+# Operator-wide exclusions on the pinned FlagGems / FlagTree 3.6 stack.
+# Current H100 probes reproduce a failing input/overload for every entry;
+# these operator-wide exclusions also cover inputs that pass. The historical
+# scatter_.src concurrent-model failure still needs separate revalidation.
 flagos_blacklist:
   # FlagGems master (6fe7709e7717) with Triton 3.6 cannot lower E8M0
   # storage operations used by Humming MXFP8/MXFP4 scales. Keep the
@@ -59,9 +59,11 @@ flagos_blacklist:
   # explicit dtype. NaViT position-bin boundaries then become all zeros,
   # corrupting MiniCPM-V 4.7 image and video embeddings.
   - arange_start
-  # BF16 largest and smallest selections return incorrect indices on A800.
+  # BF16 selection failed on A800; current H100 probes also reproduce wrong
+  # values for strided BF16 input with the pinned FlagGems commit.
   - topk
-  # Gemma3n grouped-query vision attention reshapes KV heads incorrectly.
+  # Historical Gemma3n GQA head-layout failure; current FlagGems also rejects
+  # the Torch 2.13 ATen enable_gqa keyword before executing this operation.
   - _scaled_dot_product_attention_math
   # Gemma3n AltUp compares a CUDA tensor with a CPU scalar tensor; FlagGems
   # requires both operands to be on the same device.
@@ -69,7 +71,8 @@ flagos_blacklist:
   # Gemma3n AltUp divides a CUDA tensor by a CPU scalar tensor; FlagGems passes
   # the CPU pointer to Triton and fails at runtime.
   - true_divide
-  # Qwen3.6 multimodal batches use scatter_ to place image features into the
+  # The pinned implementation rejects scatter_.reduce; keep native overloads.
+  # Historical Qwen3.6 multimodal batches use scatter_ to place features into the
   # token batch. FlagGems 5.3.5 can cross-wire those rows under concurrency,
   # producing outputs from another request or repeated punctuation on A800.
   - scatter_

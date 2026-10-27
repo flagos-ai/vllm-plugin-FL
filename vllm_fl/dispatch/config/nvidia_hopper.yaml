@@ -1,8 +1,9 @@
 # vLLM-FL Dispatch Configuration for NVIDIA Hopper GPUs
 
-# Keep FlagOS as the default implementation and override only the operators
-# whose Hopper paths have a measured regression against the CUDA vendor stack.
-# This config is opt-in via VLLM_FL_HOPPER_LONG_CONTEXT_OPT=1.
+# Opt-in via VLLM_FL_HOPPER_LONG_CONTEXT_OPT=1. This file replaces, rather
+# than merges, nvidia.yaml. It mixes reproduced storage/dtype failures with
+# inherited correctness and performance choices; it is not a proven minimal
+# blacklist. Requalify the inherited choices on each new software stack.
 prefer: flagos
 strict: false
 
@@ -40,14 +41,16 @@ flagos_blacklist:
   # explicit dtype. NaViT position-bin boundaries then become all zeros,
   # corrupting MiniCPM-V 4.7 image and video embeddings.
   - arange_start
+  # Inherited exclusions: current per-item correctness evidence is pending.
   - index_put_
   - index_put
   - _index_put_impl_
   - nonzero
   - copy_
   - to_copy
+  # E8M0 advanced indexing has the same lowering failure as the storage ops.
   - index
-  # FlagGems' Hopper host-TMA mm.out path is slower than the native dense
-  # GEMM for the long-context projection shapes used by vLLM.
+  # Historical long-context projection performance policy. Fresh warmed
+  # eager/graph timings are required before retaining or removing these.
   - mm
   - mm_out

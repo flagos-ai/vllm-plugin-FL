@@ -77,6 +77,14 @@ class NvidiaWorkerFL(NativeGPUWorker):
         self._fl_io_dump_initialized = False
         _initialize_fl_runtime(self.rank)
 
+    def init_device(self):
+        super().init_device()
+
+        from vllm_fl.patches.qsa_cache_hint import patch_qsa_cache_hint
+
+        if patch_qsa_cache_hint(self.model_config, self.device):
+            logger.info("Applied the FlagTree 3.6 Hopper QSA K-cache hint workaround")
+
     def _ensure_io_dump_initialized(self) -> None:
         """Enable IO dumping on the first execution after model loading."""
         if self._fl_io_dump_initialized:
