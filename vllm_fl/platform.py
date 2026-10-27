@@ -222,6 +222,56 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.device_type == "gcu":
+            if vllm_config.use_v2_model_runner:
+                raise ValueError(
+                    "Enflame requires ModelRunnerFL; the upstream V2 runner is "
+                    "not supported on GCU. Set VLLM_USE_V2_MODEL_RUNNER=0."
+                )
+            # The default V1 override takes precedence over upstream's automatic
+            # V2 selection. Reject features that V1 cannot execute faithfully.
+            v2_only_features = []
+            speculative_config = getattr(vllm_config, "speculative_config", None)
+            if speculative_config is not None:
+                if speculative_config.method == "dspark":
+                    v2_only_features.append("DSpark")
+                elif speculative_config.method == "dflash":
+                    if vllm_config._dflash_needs_multi_kv_group():
+                        v2_only_features.append("mixed-KV DFlash")
+                    if vllm_config._is_dflash2_draft():
+                        v2_only_features.append("DFlash2")
+            model_config = getattr(vllm_config, "model_config", None)
+            if model_config is not None and getattr(
+                model_config, "is_diffusion", False
+            ):
+                v2_only_features.append("diffusion")
+            if v2_only_features:
+                raise ValueError(
+                    "Enflame ModelRunnerFL does not support these V2-only features: "
+                    + ", ".join(v2_only_features)
+                )
+            if (
+                getattr(model_config, "is_hybrid", False)
+                and speculative_config is not None
+                and getattr(vllm_config.cache_config, "mamba_cache_mode", None)
+                == "align"
+            ):
+                # vLLM's speculative align path fuses Mamba state copies on
+                # device, bypassing the GCU address translation in
+                # do_mamba_copy_block. Reject it before allocating cache state.
+                raise ValueError(
+                    "Enflame does not support speculative decoding for hybrid "
+                    "models with mamba_cache_mode='align': the fused Mamba state "
+                    "copy kernels do not translate GCU addresses. Disable "
+                    "speculative decoding for this configuration."
+                )
+        if cls.vendor_name in ("gcu", "enflame"):
+            from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+            # Install before CustomOp caches even a disabled encoder's native
+            # method during construction; backend selection happens later.
+            patch_mm_encoder_attention()
+
         if cls.device_type == "npu" and vllm_config.use_v2_model_runner:
             raise ValueError(
                 "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
@@ -298,6 +348,19 @@ class PlatformFL(Platform):
         from vllm.config.compilation import CompilationMode
 
         compilation_config = vllm_config.compilation_config
+        if (
+            cls.vendor_name in ("gcu", "enflame")
+            and getattr(compilation_config, "backend", None) == "inductor"
+            and getattr(compilation_config, "mode", CompilationMode.NONE)
+            != CompilationMode.NONE
+        ):
+            # TorchGCU's range header uses xloop, whose enclosing loop is only
+            # emitted by its standalone kernel generator. Inductor combo
+            # kernels reuse that header without defining xloop.
+            compilation_config.inductor_compile_config.update(
+                combo_kernels=False,
+                benchmark_combo_kernel=False,
+            )
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
@@ -438,8 +501,39 @@ class PlatformFL(Platform):
                 f"Backend {backend} is not supported for vit attention. "
                 f"Supported backends are: {cls.get_supported_vit_attn_backends()}"
             )
+            if (
+                cls.vendor_name in ("gcu", "enflame")
+                and backend == AttentionBackendEnum.FLASH_ATTN
+            ):
+                from vllm_fl.dispatch.backends.vendor.gcu.impl.attention import (
+                    AttentionGCUBackend,
+                )
+
+                if not (
+                    head_size > 0
+                    and AttentionGCUBackend.supports_head_size(head_size)
+                    and AttentionGCUBackend.supports_dtype(dtype)
+                ):
+                    raise ValueError(
+                        "Enflame vision FlashAttention requires FP16/BF16 and "
+                        "a positive head size divisible by 8 and at most 256; "
+                        f"got head_size={head_size}, dtype={dtype}."
+                    )
             logger.info_once(f"Using backend {backend} for vit attention")
             return backend
+
+        if cls.vendor_name in ("gcu", "enflame"):
+            from vllm_fl.dispatch.backends.vendor.gcu.impl.attention import (
+                AttentionGCUBackend,
+            )
+
+            if (
+                head_size > 0
+                and AttentionGCUBackend.supports_head_size(head_size)
+                and AttentionGCUBackend.supports_dtype(dtype)
+            ):
+                return AttentionBackendEnum.FLASH_ATTN
+            return AttentionBackendEnum.TORCH_SDPA
 
         # Try FlashAttention first
         if (cc := cls.get_device_capability()) and cc.major >= 8:
