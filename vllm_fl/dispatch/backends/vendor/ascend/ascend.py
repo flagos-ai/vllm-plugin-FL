@@ -52,6 +52,17 @@ class AscendBackend(Backend):
 
         return deepseek_v4_index_quant(*args, **kwargs)
 
+    def deepseek_v4_cache_write(self, *args, **kwargs):
+        """Ascend Triton writer for the paged DeepSeek V4 cache leaves.
+
+        Opt-in via ``VLLM_FL_DEEPSEEK_V4_CACHE_TRITON=1`` (the registration is
+        gated in ``register_ops.py``); unsupported cache layouts fall back to
+        the PyTorch reference writer inside the implementation.
+        """
+        from .impl.scatter_nd_update_v2 import scatter_nd_update_v2
+
+        return scatter_nd_update_v2(*args, **kwargs)
+
     def modelslim_w8a8_prepare_experts(self, *args, **kwargs):
         from .impl.w8a8_moe import modelslim_w8a8_prepare_experts
 

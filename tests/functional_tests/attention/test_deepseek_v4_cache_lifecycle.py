@@ -3,7 +3,6 @@
 
 from math import prod
 from types import SimpleNamespace
-
 import pytest
 import torch
 import torch.nn.functional as F
@@ -606,9 +605,12 @@ def test_two_scheduler_requests_keep_completed_slots_isolated(pools):
 def test_cache_write_typed_padding_and_null_page(pools, dtype):
     from vllm_fl.dispatch import call_op, get_default_manager
 
+    # The Triton scatter_nd_update_v2 implementation is the Ascend vendor
+    # implementation of this op and is selected by the normal priority policy
+    # (no environment gating).
     assert (
         get_default_manager().get_selected_impl_id("deepseek_v4_cache_write")
-        == "reference.torch"
+        == "vendor.ascend"
     )
     cache = torch.zeros(3, 4, 4, device="npu", dtype=dtype)
     values = torch.arange(12, device="npu").reshape(3, 4).to(dtype)
