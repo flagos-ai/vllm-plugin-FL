@@ -15,6 +15,16 @@
 name: Code Scan
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "examples/**"
+      - "docker/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
   pull_request:
     branches: [main, devops]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -26,6 +36,8 @@ on:
       - "LICENSE"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 02:00 UTC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
