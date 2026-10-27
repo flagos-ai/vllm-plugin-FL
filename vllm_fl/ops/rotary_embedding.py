@@ -4,6 +4,7 @@
 import torch
 
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
+from vllm.platforms import current_platform
 
 from vllm_fl.dispatch import CachedOp
 
@@ -30,6 +31,12 @@ class RotaryEmbeddingFL(RotaryEmbedding):
             dtype,
             init_cache,
         )
+        if current_platform.device_type == "npu":
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.rotary import (
+                initialize_rotary_embedding_ascend,
+            )
+
+            initialize_rotary_embedding_ascend()
 
     def forward_oot(
         self,

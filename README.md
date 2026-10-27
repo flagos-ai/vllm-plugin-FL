@@ -200,6 +200,9 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
+For native decode graph execution with vLLM 0.28, see the
+[Ascend graph guide](./docs/ascend-vllm028-graph.md).
+
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
    and FlagGems revisions
 
@@ -220,9 +223,12 @@ If there are multiple plugins in the current environment, you can specify use vl
     [Ascend image guide](./docker/ascend/README.md) for the complete CANN,
     PyTorch, vLLM empty-package, and dependency constraints.
 
-2. Enable eager execution
+2. Select eager or full-decode graph execution
 
-    Eager execution is the recommended setting for Ascend. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line. Graph mode is still experimental; see the tested cases in the [Ascend image guide](./docker/ascend/README.md).
+    For eager execution, add `enforce_eager=True` to the `LLM` constructor or
+    pass `--enforce-eager` on the command line. For native NPU graph capture and
+    replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=0` and the component versions
+    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm028-graph.md).
 
 
 ### Run a Task

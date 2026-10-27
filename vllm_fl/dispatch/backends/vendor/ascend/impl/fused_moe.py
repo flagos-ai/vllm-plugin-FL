@@ -4,12 +4,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
 import torch_npu
-from flag_gems.runtime.backend._ascend import fused
+
+
+def topk_softmax(
+    topk_weights, topk_ids, token_expert_indices, gating_output, renormalize
+):
+    """Tensor reference for FL's softmax router; its scratch output is unused."""
+    scores = gating_output.float().softmax(dim=-1)
+    weights, indices = scores.topk(topk_weights.shape[-1], dim=-1)
+    if renormalize:
+        weights = weights / weights.sum(dim=-1, keepdim=True)
+    topk_weights.copy_(weights)
+    topk_ids.copy_(indices.to(topk_ids.dtype))
+    return topk_weights, topk_ids
 
 
 def _torch_fused_experts_impl(
@@ -22,80 +33,78 @@ def _torch_fused_experts_impl(
     activation: str = "silu",
     apply_router_weight_on_input: bool = False,
     global_num_experts: int = -1,
-    expert_map: torch.Tensor|None = None,
+    expert_map: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Pure PyTorch implementation of fused MoE experts for NPU.
+    """Unquantized, non-EP routing and GMM using packaged torch_npu ops.
 
-    This avoids the Triton fused_moe_kernel which has compatibility issues
-    on Ascend NPU hardware.
+    Mirrors current vLLM-Ascend AllGather dispatch/MLP/combine semantics.
+    Routing produces fixed-size expanded tensors; no host reads or dynamic
+    boolean-indexed expert batches occur during graph capture.
     """
-    num_tokens, hidden_dim = hidden_states.size()
-    E, N, _ = w1.size()  # w1: [E, N, K_in]
-    K = w2.size(1)        # w2: [E, K_out, N//2]
-    top_k = topk_ids.size(1)
+    num_tokens = hidden_states.size(0)
+    num_experts = w1.size(0)
+    if expert_map is not None or global_num_experts not in (-1, num_experts):
+        raise NotImplementedError("Ascend grouped MoE requires all experts locally")
+    if apply_router_weight_on_input:
+        raise NotImplementedError("Ascend grouped MoE requires output router weights")
+    if activation not in ("silu", "gelu", "gelu_tanh", "silu_no_mul", "gelu_no_mul"):
+        raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
+    if num_tokens == 0:
+        return hidden_states if inplace else torch.empty_like(hidden_states)
 
-    if global_num_experts == -1:
-        global_num_experts = E
-
+    # The current rc1 dispatcher uses count-mode expert tokens and pairs its
+    # init-routing interface with token_unpermute (not finalize_routing).
+    # BF16 needs no custom quantization/routing extension.
+    routed, row_indices, expert_tokens, _ = torch_npu.npu_moe_init_routing_v2(
+        hidden_states,
+        topk_ids.to(torch.int32),
+        active_num=num_tokens * topk_ids.size(1),
+        expert_num=num_experts,
+        expert_tokens_num_type=1,
+        expert_tokens_num_flag=True,
+        active_expert_range=[0, num_experts],
+        quant_mode=-1,
+    )
+    group_list = expert_tokens.to(torch.int64)
+    # vLLM retains [E, N, K] weights. GMM expects [E, K, N]; match
+    # current rc1 moe_mlp.py's need_trans path without rewriting parameters.
+    gate_up = torch_npu.npu_grouped_matmul(
+        x=[routed],
+        weight=[w1.transpose(1, 2)],
+        split_item=2,
+        group_list_type=1,
+        group_type=0,
+        group_list=group_list,
+    )[0]
+    if activation == "silu":
+        activated = torch_npu.npu_swiglu(gate_up)
+    elif activation in ("gelu", "gelu_tanh"):
+        gate, up = gate_up.chunk(2, dim=-1)
+        activated = (
+            F.gelu(gate, approximate="tanh" if activation == "gelu_tanh" else "none")
+            * up
+        )
+    elif activation == "silu_no_mul":
+        activated = F.silu(gate_up)
+    else:
+        activated = F.gelu(gate_up)
+    expert_output = torch_npu.npu_grouped_matmul(
+        x=[activated],
+        weight=[w2.transpose(1, 2)],
+        split_item=2,
+        group_list_type=1,
+        group_type=0,
+        group_list=group_list,
+    )[0]
+    result = torch_npu.npu_moe_token_unpermute(
+        permuted_tokens=expert_output,
+        sorted_indices=torch.abs(row_indices),
+        probs=topk_weights,
+    )
     if inplace:
-        out_hidden_states = hidden_states
-    else:
-        out_hidden_states = torch.zeros_like(hidden_states)
-
-    # Map global expert ids to local expert ids
-    if expert_map is not None:
-        local_topk_ids = expert_map[topk_ids.long()]
-    else:
-        local_topk_ids = topk_ids.long()
-
-    # Process each expert
-    for expert_idx in range(E):
-        # Find which (token, k) pairs are assigned to this expert
-        mask = (local_topk_ids == expert_idx)  # [num_tokens, top_k]
-        if not mask.any():
-            continue
-
-        # Get token indices and their k-slot indices
-        token_indices, k_indices = torch.where(mask)
-
-        # Gather the hidden states for these tokens
-        expert_input = hidden_states[token_indices]  # [n, hidden_dim]
-
-        # Apply router weight on input if needed
-        if apply_router_weight_on_input:
-            weights = topk_weights[token_indices, k_indices].unsqueeze(-1)
-            expert_input = expert_input * weights.to(expert_input.dtype)
-
-        # First matmul: expert_input @ w1[expert_idx].T
-        # w1[expert_idx] shape: [N, hidden_dim], result: [n, N]
-        gate_up = torch.mm(expert_input, w1[expert_idx].t())
-
-        # Activation (pure PyTorch to avoid Triton kernel issues on NPU)
-        if activation == "silu":
-            d = gate_up.shape[-1] // 2
-            gate_up = F.silu(gate_up[..., :d]) * gate_up[..., d:]
-        elif activation == "gelu":
-            gate_up = torch_npu.npu_gelu_mul(gate_up)
-        elif activation == "silu_no_mul":
-            gate_up = F.silu(gate_up)
-        elif activation == "gelu_no_mul":
-            gate_up = torch_npu.npu_gelu(gate_up)
-        else:
-            raise ValueError(f"Unsupported FusedMoe activation: {activation}.")
-
-        # Second matmul: activated @ w2[expert_idx].T
-        # w2[expert_idx] shape: [K_out, N//2], result: [n, K_out]
-        expert_output = torch.mm(gate_up, w2[expert_idx].t())
-
-        # Apply router weight on output if not applied on input
-        if not apply_router_weight_on_input:
-            weights = topk_weights[token_indices, k_indices].unsqueeze(-1)
-            expert_output = expert_output * weights.to(expert_output.dtype)
-
-        # Accumulate results
-        out_hidden_states.index_add_(0, token_indices, expert_output)
-
-    return out_hidden_states
+        hidden_states.copy_(result)
+        return hidden_states
+    return result
 
 
 def fused_experts_impl(
@@ -113,17 +122,36 @@ def fused_experts_impl(
     use_int4_w4a16: bool = False,
     per_channel_quant: bool = False,
     global_num_experts: int = -1,
-    expert_map: Optional[torch.Tensor] = None,
-    w1_scale: Optional[torch.Tensor] = None,
-    w2_scale: Optional[torch.Tensor] = None,
-    w1_zp: Optional[torch.Tensor] = None,
-    w2_zp: Optional[torch.Tensor] = None,
-    a1_scale: Optional[torch.Tensor] = None,
-    a2_scale: Optional[torch.Tensor] = None,
-    block_shape: Optional[list[int]] = None,
-    w1_bias: Optional[torch.Tensor] = None,
-    w2_bias: Optional[torch.Tensor] = None,
+    expert_map: torch.Tensor | None = None,
+    w1_scale: torch.Tensor | None = None,
+    w2_scale: torch.Tensor | None = None,
+    w1_zp: torch.Tensor | None = None,
+    w2_zp: torch.Tensor | None = None,
+    a1_scale: torch.Tensor | None = None,
+    a2_scale: torch.Tensor | None = None,
+    block_shape: list[int] | None = None,
+    w1_bias: torch.Tensor | None = None,
+    w2_bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
+    if any(
+        (use_fp8_w8a8, use_int8_w8a8, use_int8_w8a16, use_int4_w4a16, per_channel_quant)
+    ) or any(
+        value is not None
+        for value in (
+            w1_scale,
+            w2_scale,
+            w1_zp,
+            w2_zp,
+            a1_scale,
+            a2_scale,
+            block_shape,
+            w1_bias,
+            w2_bias,
+        )
+    ):
+        raise NotImplementedError(
+            "Ascend grouped MoE supports unquantized, bias-free weights"
+        )
     # Check constraints.
     if use_int4_w4a16:
         assert hidden_states.size(1) // 2 == w1.size(2), "Hidden size mismatch"
@@ -136,10 +164,9 @@ def fused_experts_impl(
     assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
     assert w1.stride(-1) == 1, "Stride of last dimension must be 1"
     assert w2.stride(-1) == 1, "Stride of last dimension must be 1"
-    assert hidden_states.dtype in [torch.float32, torch.float16, torch.bfloat16]
+    assert hidden_states.dtype in [torch.float16, torch.bfloat16]
 
-    # Use pure-torch implementation on NPU to avoid Triton kernel
-    # compatibility issues with the Ascend backend.
+    # All expert routing, computation and reduction stay on the device.
     return _torch_fused_experts_impl(
         hidden_states=hidden_states,
         w1=w1,

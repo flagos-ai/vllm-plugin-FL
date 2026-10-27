@@ -239,6 +239,93 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
         assert len(calls) == 1
 
 
+@pytest.mark.gpu
+def test_npu_workspace_releases_ownership_across_capture_descriptors(monkeypatch):
+    import gc
+    import weakref
+
+    import torch
+
+    from vllm.config import CUDAGraphMode
+    from vllm.forward_context import (
+        BatchDescriptor,
+        get_forward_context,
+        override_forward_context,
+    )
+
+    from vllm_fl.compilation.graph_params import clear_graph_params, get_graph_params
+    from vllm_fl.compilation.graph_runtime import GraphRuntimeController
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "npu":
+        pytest.skip("Requires an Ascend NPU")
+
+    clear_graph_params()
+    config = SimpleNamespace(compilation_config=SimpleNamespace())
+    runtime = GraphRuntimeController(vllm_config=config)
+    runtime.attention_impls = ()
+    owners, addresses = {}, {}
+
+    def runnable(x):
+        descriptor = get_forward_context().batch_descriptor
+        workspace = torch.empty(1024 * 1024, dtype=torch.float32, device="npu")
+        owners[descriptor] = weakref.ref(workspace)
+        addresses[descriptor] = workspace.data_ptr()
+        get_graph_params().workspaces[descriptor] = workspace
+        workspace.fill_(descriptor.num_active_loras + 1)
+        return x + workspace[: x.numel()]
+
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
+    wrapper = graph_module.GraphWrapper(
+        runnable, config, CUDAGraphMode.FULL, graph_runtime=runtime
+    )
+    # Keep the three graphs on one pool, like the model runner's captures.
+    wrapper.graph_pool = torch.npu.graph_pool_handle()
+    descriptors = [
+        BatchDescriptor(num_tokens=8, num_reqs=8, uniform=True),
+        BatchDescriptor(
+            num_tokens=4, num_reqs=4, uniform=True, has_lora=True, num_active_loras=1
+        ),
+        BatchDescriptor(num_tokens=4, num_reqs=4, uniform=True),
+    ]
+    inputs = {
+        descriptor: torch.arange(descriptor.num_tokens, device="npu").float()
+        for descriptor in descriptors
+    }
+    context = SimpleNamespace(cudagraph_runtime_mode=CUDAGraphMode.FULL)
+    capture_stream = torch.npu.Stream()
+    capture_stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(capture_stream), override_forward_context(context):
+        for descriptor in descriptors:
+            context.batch_descriptor = descriptor
+            wrapper(inputs[descriptor])
+    torch.npu.current_stream().wait_stream(capture_stream)
+    torch.npu.synchronize()
+    gc.collect()
+
+    assert set(wrapper.concrete_graph_entries) == set(descriptors)
+    for descriptor in descriptors:
+        assert owners[descriptor]() is None
+        assert (
+            get_graph_params().workspaces[descriptor].data_ptr()
+            == addresses[descriptor]
+        )
+
+    with override_forward_context(context):
+        for descriptor in (*reversed(descriptors), *descriptors):
+            context.batch_descriptor = descriptor
+            inputs[descriptor].add_(1)
+            result = wrapper(inputs[descriptor])
+            torch.npu.synchronize()
+            torch.testing.assert_close(
+                result, inputs[descriptor] + descriptor.num_active_loras + 1
+            )
+    wrapper.clear_graphs()
+    clear_graph_params()
+
+
 class TestGraphOptions:
     """Test GraphOptions dataclass."""
 
