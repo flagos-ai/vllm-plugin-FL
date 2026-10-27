@@ -238,8 +238,10 @@ class PlatformFL(Platform):
                 elif speculative_config.method == "dflash":
                     if vllm_config._dflash_needs_multi_kv_group():
                         v2_only_features.append("mixed-KV DFlash")
-                    if vllm_config._is_dflash2_draft():
-                        v2_only_features.append("DFlash2")
+                    if vllm_config._is_dflash_candidate_draft():
+                        v2_only_features.append(
+                            "DFlash candidate head (DFlash2/LiLiCorr)"
+                        )
             model_config = getattr(vllm_config, "model_config", None)
             if model_config is not None and getattr(
                 model_config, "is_diffusion", False

@@ -1,6 +1,6 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-"""Runner-selection contracts for vLLM 0.28.0."""
+"""Runner-selection contracts for vLLM 0.32.0."""
 
 import pytest
 
@@ -94,7 +94,7 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
 
 @pytest.mark.parametrize("vendor", ["enflame", "gcu"])
 @pytest.mark.parametrize(
-    "feature", ["DSpark", "mixed-KV DFlash", "DFlash2", "diffusion"]
+    "feature", ["DSpark", "mixed-KV DFlash", "DFlash2", "LiLiCorr", "diffusion"]
 )
 def test_enflame_rejects_v2_only_features_with_v1_override(
     monkeypatch, vendor, feature
@@ -108,7 +108,7 @@ def test_enflame_rejects_v2_only_features_with_v1_override(
     class FeatureConfig(SimpleNamespace):
         use_v2_model_runner = VllmConfig.use_v2_model_runner
         _dflash_needs_multi_kv_group = VllmConfig._dflash_needs_multi_kv_group
-        _is_dflash2_draft = VllmConfig._is_dflash2_draft
+        _is_dflash_candidate_draft = VllmConfig._is_dflash_candidate_draft
 
     monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "0")
     monkeypatch.setattr(PlatformFL, "device_type", "gcu")
@@ -116,11 +116,14 @@ def test_enflame_rejects_v2_only_features_with_v1_override(
     speculative_config = None
     if feature == "DSpark":
         speculative_config = SimpleNamespace(method="dspark")
-    elif feature in ("mixed-KV DFlash", "DFlash2"):
+    elif feature in ("mixed-KV DFlash", "DFlash2", "LiLiCorr"):
         speculative_config = SimpleNamespace(
             method="dflash",
             draft_model_config=SimpleNamespace(
-                architectures=["DFlash2DraftModel"] if feature == "DFlash2" else [],
+                architectures={
+                    "DFlash2": ["DFlash2DraftModel"],
+                    "LiLiCorr": ["LiLiCorrDraftModel"],
+                }.get(feature, []),
                 hf_config=SimpleNamespace(
                     layer_types=(
                         ["sliding_attention", "full_attention"]
@@ -131,6 +134,7 @@ def test_enflame_rejects_v2_only_features_with_v1_override(
             ),
         )
     config = FeatureConfig(
+        attention_config=SimpleNamespace(hisparse_config=None),
         model_config=SimpleNamespace(is_diffusion=feature == "diffusion"),
         speculative_config=speculative_config,
     )
