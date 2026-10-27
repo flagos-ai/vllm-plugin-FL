@@ -7,6 +7,67 @@ import pytest
 from tests.utils.device_utils import skip_if_not_nvidia
 
 
+@pytest.fixture(autouse=True)
+def native_cuda_platform_imports_on_empty_wheels(request, monkeypatch):
+    """Load the real CUDA platform for metadata contracts on empty wheels.
+
+    These six tests patch CUDA operations themselves. The optional extension's
+    import only registers native ops, which empty backend wheels do not ship.
+    Keep import failures from an installed extension visible, and restore every
+    module/package attribute introduced by this temporary import environment.
+    """
+    if not request.node.name.startswith("test_nvidia_platform_"):
+        yield
+        return
+
+    import importlib.util
+    import sys
+    from types import ModuleType
+
+    import torch
+
+    import vllm
+    import vllm.platforms
+
+    import vllm_fl
+
+    extension = "vllm._C_stable_libtorch"
+    if extension in sys.modules or importlib.util.find_spec(extension) is not None:
+        yield
+        return
+
+    imported_modules = ("vllm.platforms.cuda", "vllm_fl.nvidia_platform")
+    previous_modules = {
+        name: sys.modules[name] for name in imported_modules if name in sys.modules
+    }
+    missing = object()
+    package_attributes = (
+        (vllm, "_C_stable_libtorch"),
+        (vllm.platforms, "cuda"),
+        (vllm_fl, "nvidia_platform"),
+    )
+    previous_attributes = [
+        (package, name, getattr(package, name, missing))
+        for package, name in package_attributes
+    ]
+    cudnn_sdp = torch.backends.cuda.cudnn_sdp_enabled()
+    with monkeypatch.context() as imports:
+        imports.setitem(sys.modules, extension, ModuleType(extension))
+        try:
+            yield
+        finally:
+            for name in imported_modules:
+                if name not in previous_modules:
+                    sys.modules.pop(name, None)
+            for package, name, value in previous_attributes:
+                if value is missing:
+                    if hasattr(package, name):
+                        delattr(package, name)
+                else:
+                    setattr(package, name, value)
+            torch.backends.cuda.enable_cudnn_sdp(cudnn_sdp)
+
+
 def has_vllm_worker() -> bool:
     try:
         from vllm_fl.worker.worker import WorkerFL  # noqa: F401

@@ -68,12 +68,78 @@ def _weak_ref_npu_tensors(value: Any) -> Any:
     return value
 
 
+def _weak_ref_gcu_tensor(value: torch.Tensor) -> torch.Tensor:
+    if value.device.type != "gcu":
+        return value
+
+    import torch_gcu
+
+    construct_storage = getattr(torch._C, "_construct_storage_from_data_pointer", None)
+    construct_tensor = getattr(
+        getattr(torch_gcu, "_C", None),
+        "_construct_GCU_Tensor_From_Storage_And_Metadata",
+        None,
+    )
+    if not callable(construct_storage) or not callable(construct_tensor):
+        raise RuntimeError(
+            "GCU graph weak references require the TorchGCU storage and tensor "
+            "construction primitives. Use the documented torch-gcu 2.11 runtime."
+        )
+
+    # Match TorchGCU's gcugraph_trees output reconstruction. These are Torch
+    # storage handles, not the translated device addresses used by Triton.
+    storage = value.untyped_storage()
+    metadata = {
+        "nbytes": storage.nbytes(),
+        "data_ptr": storage.data_ptr(),
+        "size": value.shape,
+        "stride": value.stride(),
+        "dtype": value.dtype,
+        "device": value.device,
+        "storage_offset": value.storage_offset(),
+    }
+    borrowed_storage = construct_storage(
+        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+    )
+    result = construct_tensor(metadata, borrowed_storage)
+    if value.is_conj():
+        torch._C._set_conj(result, True)
+    if value.is_neg():
+        torch._C._set_neg(result, True)
+    return result
+
+
+def _weak_ref_gcu_tensors(value: Any) -> Any:
+    """Release output ownership while the captured graph retains its pool."""
+    if isinstance(value, torch.Tensor):
+        return _weak_ref_gcu_tensor(value)
+    if isinstance(value, list):
+        return [_weak_ref_gcu_tensors(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_weak_ref_gcu_tensors(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _weak_ref_gcu_tensors(item) for key, item in value.items()}
+
+    from vllm.sequence import IntermediateTensors
+
+    if isinstance(value, IntermediateTensors):
+        return IntermediateTensors(
+            {key: _weak_ref_gcu_tensors(item) for key, item in value.tensors.items()}
+        )
+    return value
+
+
 def weak_ref_tensors(value: Any) -> Any:
     if current_platform.device_type == "npu":
         # The empty vLLM wheel registers torch.ops._C.weak_ref_tensor as an
         # identity. torch_npu's private primitive creates the real weak tensor
         # needed to release captured graph outputs.
         return _weak_ref_npu_tensors(value)
+
+    if current_platform.device_type == "gcu":
+        # The empty wheel's weak_ref_tensor identity keeps each graph output
+        # alive and prevents the shared pool from reusing its allocation.
+        return _weak_ref_gcu_tensors(value)
 
     try:
         from vllm.utils.torch_utils import (

@@ -13,9 +13,8 @@ import logging
 
 import torch
 
+from vllm.third_party.flash_linear_attention.ops.op import exp
 from vllm.triton_utils import tl, triton
-
-from vllm.model_executor.layers.fla.ops.op import exp
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +98,9 @@ def fused_recurrent_gated_delta_rule_packed_decode_kernel_gcu(
     x = a_val + dt_bias_val
     softplus_x = tl.where(x <= SOFTPLUS_THRESHOLD, tl.log(1.0 + tl.exp(x)), x)
     g_val = -tl.exp(A_log_val) * softplus_x
-    beta_val = tl.sigmoid(b_val).to(b.dtype.element_ty).to(tl.float32)
+    # Match the plugin's packed-GDN precision fix in this private GCU kernel.
+    # Rounding sigmoid(b) to BF16 compounds error across recurrent updates.
+    beta_val = tl.sigmoid(b_val)
 
     b_h *= exp(g_val)
     b_v -= tl.sum(b_h * b_k[None, :], 1)
@@ -282,13 +283,11 @@ def apply_fused_recurrent_packed_decode_gcu_patch() -> None:
         return
 
     try:
-        import vllm.model_executor.layers.fla.ops as fla_ops
-        import vllm.model_executor.layers.fla.ops.fused_recurrent as fused_recurrent
-        import vllm.model_executor.layers.mamba.gdn_linear_attn as gdn_linear_attn
+        import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as gdn_linear_attn
+        import vllm.third_party.flash_linear_attention.ops as fla_ops
+        import vllm.third_party.flash_linear_attention.ops.fused_recurrent as fused_recurrent
 
-        fused_recurrent.fused_recurrent_gated_delta_rule_packed_decode_kernel = (
-            fused_recurrent_gated_delta_rule_packed_decode_kernel_gcu
-        )
+        # Keep the official kernel ABI; this launcher owns the GCU kernel.
         fused_recurrent.fused_recurrent_gated_delta_rule_packed_decode = (
             fused_recurrent_gated_delta_rule_packed_decode_gcu
         )

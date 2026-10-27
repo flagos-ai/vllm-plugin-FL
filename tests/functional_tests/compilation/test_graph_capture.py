@@ -2,7 +2,7 @@
 
 """
 Functional tests for graph capture and replay.
-Tests CUDA/NPU/MUSA graph functionality for model optimization.
+Tests CUDA/NPU/MUSA/GCU graph functionality for model optimization.
 
 Note: Unit tests for GraphOptions, GraphEntry, and GraphWrapper are in
 unit_tests/compilation/test_graph.py. This file only contains functional
@@ -34,6 +34,8 @@ def _new_graph():
         return torch.npu.NPUGraph()
     elif current_platform.device_type == "musa":
         return torch.musa.MUSAGraph()
+    elif current_platform.device_type == "gcu":
+        return torch.gcu.GCUGraph()
     else:
         pytest.skip(f"Graph capture not supported on {current_platform.device_type}")
         return None
@@ -50,6 +52,9 @@ def _graph_capture(graph):
             yield
     elif current_platform.device_type == "musa":
         with torch.musa.graph(graph):
+            yield
+    elif current_platform.device_type == "gcu":
+        with torch.gcu.graph(graph):
             yield
     else:
         pytest.skip(f"Graph capture not supported on {current_platform.device_type}")

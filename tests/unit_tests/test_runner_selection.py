@@ -52,11 +52,9 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize("vendor", ["ascend", "mthreads"])
+@pytest.mark.parametrize("vendor", ["ascend", "mthreads", "enflame", "gcu"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
-def test_non_cuda_accelerators_default_to_fl_runner(
-    monkeypatch, vendor, requested, expected
-):
+def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os
     from types import SimpleNamespace
 
@@ -67,8 +65,8 @@ def test_non_cuda_accelerators_default_to_fl_runner(
         monkeypatch.delenv("VLLM_USE_V2_MODEL_RUNNER", raising=False)
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
-    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
@@ -80,16 +78,25 @@ def test_non_cuda_accelerators_default_to_fl_runner(
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
 
 
-@pytest.mark.parametrize("device,backend", [("npu", "Ascend"), ("musa", "MUSA")])
-def test_non_cuda_accelerators_reject_explicit_upstream_v2_runner(
-    monkeypatch, device, backend
+@pytest.mark.parametrize(
+    "device_type,vendor,error_pattern",
+    [
+        ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
+    ],
+)
+def test_accelerator_rejects_explicit_upstream_v2_runner(
+    monkeypatch, device_type, vendor, error_pattern
 ):
     from types import SimpleNamespace
 
     from vllm_fl.platform import PlatformFL
 
-    monkeypatch.setattr(PlatformFL, "device_type", device)
-    with pytest.raises(ValueError, match=f"{backend}.*VLLM_USE_V2_MODEL_RUNNER=0"):
+    monkeypatch.setattr(PlatformFL, "device_type", device_type)
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    with pytest.raises(ValueError, match=error_pattern):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
 
 
@@ -116,12 +123,106 @@ def test_musa_accepts_fl_runner_for_single_and_multiple_devices(monkeypatch, tp)
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
+@pytest.mark.parametrize("vendor", ["enflame", "gcu"])
+@pytest.mark.parametrize(
+    "feature", ["DSpark", "mixed-KV DFlash", "DFlash2", "diffusion"]
+)
+def test_enflame_rejects_v2_only_features_with_v1_override(
+    monkeypatch, vendor, feature
+):
+    from types import SimpleNamespace
+
+    from vllm.config import VllmConfig
+
+    from vllm_fl.platform import PlatformFL
+
+    class FeatureConfig(SimpleNamespace):
+        use_v2_model_runner = VllmConfig.use_v2_model_runner
+        _dflash_needs_multi_kv_group = VllmConfig._dflash_needs_multi_kv_group
+        _is_dflash2_draft = VllmConfig._is_dflash2_draft
+
+    monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "0")
+    monkeypatch.setattr(PlatformFL, "device_type", "gcu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    speculative_config = None
+    if feature == "DSpark":
+        speculative_config = SimpleNamespace(method="dspark")
+    elif feature in ("mixed-KV DFlash", "DFlash2"):
+        speculative_config = SimpleNamespace(
+            method="dflash",
+            draft_model_config=SimpleNamespace(
+                architectures=["DFlash2DraftModel"] if feature == "DFlash2" else [],
+                hf_config=SimpleNamespace(
+                    layer_types=(
+                        ["sliding_attention", "full_attention"]
+                        if feature == "mixed-KV DFlash"
+                        else ["full_attention"]
+                    )
+                ),
+            ),
+        )
+    config = FeatureConfig(
+        model_config=SimpleNamespace(is_diffusion=feature == "diffusion"),
+        speculative_config=speculative_config,
+    )
+    assert config.use_v2_model_runner is False
+    with pytest.raises(ValueError, match=feature):
+        PlatformFL.check_and_update_config(config)
+
+
+@pytest.mark.parametrize("vendor", ["enflame", "gcu", "iluvatar"])
+@pytest.mark.parametrize("is_hybrid", [False, True])
+@pytest.mark.parametrize("has_speculative_config", [False, True])
+@pytest.mark.parametrize("mamba_cache_mode", ["none", "all", "align"])
+def test_enflame_rejects_only_hybrid_speculative_align_cache(
+    monkeypatch, vendor, is_hybrid, has_speculative_config, mamba_cache_mode
+):
+    from types import SimpleNamespace
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(
+        PlatformFL, "device_type", "cuda" if vendor == "iluvatar" else "gcu"
+    )
+    # Encoder registration is unrelated to config acceptance and requires
+    # importing device-specific attention modules.
+    monkeypatch.setattr(
+        "vllm_fl.attention.utils.patch_mm_encoder_attention", lambda: None
+    )
+    config = _make_ascend_vllm_config()
+    config.model_config.is_hybrid = is_hybrid
+    config.speculative_config = (
+        SimpleNamespace(method="ngram") if has_speculative_config else None
+    )
+    config.cache_config.mamba_cache_mode = mamba_cache_mode
+
+    if (
+        vendor in ("enflame", "gcu")
+        and is_hybrid
+        and has_speculative_config
+        and mamba_cache_mode == "align"
+    ):
+        with pytest.raises(ValueError, match="fused Mamba state copy kernels"):
+            PlatformFL.check_and_update_config(config)
+        assert config.parallel_config.worker_cls is None
+    else:
+        PlatformFL.check_and_update_config(config)
+        assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+    # Validation must not silently disable speculative decoding or change the
+    # requested Mamba cache policy to avoid the unsupported fused-copy path.
+    assert (config.speculative_config is not None) == has_speculative_config
+    assert config.cache_config.mamba_cache_mode == mamba_cache_mode
+
+
 def test_ascend_accepts_non_eager_and_downgrades_full_graphs(monkeypatch):
     from vllm.config import CUDAGraphMode
 
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE)
 
     PlatformFL.check_and_update_config(config)
@@ -139,6 +240,7 @@ def test_ascend_rejects_inductor_backend(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(backend="inductor")
 
     with pytest.raises(ValueError, match="backend='eager'"):
@@ -152,6 +254,7 @@ def test_ascend_eager_mode_accepts_inductor_backend(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(
         backend="inductor",
         compilation_mode=CompilationMode.NONE,
@@ -200,6 +303,7 @@ def test_ascend_revalidates_parallelism_after_glm_dense_fallback(monkeypatch):
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     hf_config = SimpleNamespace(
         model_type="glm_moe_dsa",
         index_topk=128,
