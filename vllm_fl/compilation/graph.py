@@ -5,12 +5,9 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
-import inspect
-import threading
 import weakref
 from collections.abc import Callable
-from contextlib import ExitStack, contextmanager, suppress
-from contextvars import ContextVar
+from contextlib import ExitStack, suppress
 from typing import Any, ClassVar
 from unittest.mock import patch
 
@@ -71,12 +68,78 @@ def _weak_ref_npu_tensors(value: Any) -> Any:
     return value
 
 
+def _weak_ref_gcu_tensor(value: torch.Tensor) -> torch.Tensor:
+    if value.device.type != "gcu":
+        return value
+
+    import torch_gcu
+
+    construct_storage = getattr(torch._C, "_construct_storage_from_data_pointer", None)
+    construct_tensor = getattr(
+        getattr(torch_gcu, "_C", None),
+        "_construct_GCU_Tensor_From_Storage_And_Metadata",
+        None,
+    )
+    if not callable(construct_storage) or not callable(construct_tensor):
+        raise RuntimeError(
+            "GCU graph weak references require the TorchGCU storage and tensor "
+            "construction primitives. Use the documented torch-gcu 2.11 runtime."
+        )
+
+    # Match TorchGCU's gcugraph_trees output reconstruction. These are Torch
+    # storage handles, not the translated device addresses used by Triton.
+    storage = value.untyped_storage()
+    metadata = {
+        "nbytes": storage.nbytes(),
+        "data_ptr": storage.data_ptr(),
+        "size": value.shape,
+        "stride": value.stride(),
+        "dtype": value.dtype,
+        "device": value.device,
+        "storage_offset": value.storage_offset(),
+    }
+    borrowed_storage = construct_storage(
+        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+    )
+    result = construct_tensor(metadata, borrowed_storage)
+    if value.is_conj():
+        torch._C._set_conj(result, True)
+    if value.is_neg():
+        torch._C._set_neg(result, True)
+    return result
+
+
+def _weak_ref_gcu_tensors(value: Any) -> Any:
+    """Release output ownership while the captured graph retains its pool."""
+    if isinstance(value, torch.Tensor):
+        return _weak_ref_gcu_tensor(value)
+    if isinstance(value, list):
+        return [_weak_ref_gcu_tensors(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_weak_ref_gcu_tensors(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _weak_ref_gcu_tensors(item) for key, item in value.items()}
+
+    from vllm.sequence import IntermediateTensors
+
+    if isinstance(value, IntermediateTensors):
+        return IntermediateTensors(
+            {key: _weak_ref_gcu_tensors(item) for key, item in value.tensors.items()}
+        )
+    return value
+
+
 def weak_ref_tensors(value: Any) -> Any:
     if current_platform.device_type == "npu":
         # The empty vLLM wheel registers torch.ops._C.weak_ref_tensor as an
         # identity. torch_npu's private primitive creates the real weak tensor
         # needed to release captured graph outputs.
         return _weak_ref_npu_tensors(value)
+
+    if current_platform.device_type == "gcu":
+        # The empty wheel's weak_ref_tensor identity keeps each graph output
+        # alive and prevents the shared pool from reusing its allocation.
+        return _weak_ref_gcu_tensors(value)
 
     try:
         from vllm.utils.torch_utils import (
@@ -89,343 +152,12 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type in {"npu", "txda"}:
+    if current_platform.device_type == "npu":
         # vLLM's current_stream helper maintains CUDA-specific thread-local
         # state and can remain on the default stream while torch.npu.stream()
-        # has selected the side stream used for graph capture (also on TXDA).
+        # has selected the side stream used for graph capture.
         return current_platform.torch_device_fn.current_stream()
     return current_stream()
-
-
-def _validate_txda_graph_runnable(runnable) -> tuple[bool, str]:
-    from vllm_fl.compilation.txda_partition import validate_txda_graph_callable
-
-    valid, reason = validate_txda_graph_callable(runnable)
-    if valid:
-        return valid, reason
-    from vllm.compilation.piecewise_backend import PiecewiseBackend
-
-    # Only this known eager adapter is transparent. Arbitrary objects exposing
-    # .graph or .runnable are not evidence that their execution matches that FX.
-    if type(runnable) is not PiecewiseBackend:
-        return False, reason
-    if (
-        runnable.compilation_config.backend != "eager"
-        or runnable.compiled_runnables is not None
-        or not runnable.range_entries
-    ):
-        return False, "TXDA requires an uncached eager PiecewiseBackend"
-    valid, reason = validate_txda_graph_callable(runnable.graph)
-    if not valid:
-        return valid, reason
-    known_wrapper = PiecewiseBackend.get_compiled_graph_wrapper(runnable, None)
-    for entry in runnable.range_entries.values():
-        if not entry.compiled:
-            return False, "TXDA piecewise range is not compiled"
-        compiled = entry.runnable
-        if inspect.isfunction(compiled) and compiled.__code__ is known_wrapper.__code__:
-            closure = inspect.getclosurevars(compiled).nonlocals
-            if closure.get("self") is not runnable:
-                return False, "TXDA piecewise wrapper has a different owner"
-            compiled = closure.get("compiled_graph")
-        valid, reason = validate_txda_graph_callable(compiled)
-        if not valid:
-            return valid, reason
-    return True, ""
-
-
-class _TxdaGraphUnsupported(RuntimeError):
-    pass
-
-
-class _TxdaGraphInputs:
-    """Own stable inputs; eager split operations may allocate on every call."""
-
-    def __init__(self, args, kwargs):
-        from torch.utils._pytree import tree_flatten, tree_unflatten
-
-        leaves, self.spec = tree_flatten((args, kwargs))
-        self.buffers = []
-        self.layout = []
-        seen = {}
-        storage_owners = {}
-        for value in leaves:
-            if isinstance(value, torch.Tensor):
-                if (
-                    type(value) not in (torch.Tensor, torch.nn.Parameter)
-                    or value.device.type != current_platform.device_type
-                    or value.layout != torch.strided
-                    or not value.is_contiguous()
-                    or value.storage_offset() != 0
-                ):
-                    raise _TxdaGraphUnsupported(
-                        "TXDA staging requires contiguous device tensors without storage offsets"
-                    )
-                identity = id(value)
-                pointer = value.untyped_storage().data_ptr()
-                if (
-                    value.numel()
-                    and pointer in storage_owners
-                    and storage_owners[pointer] != identity
-                ):
-                    raise _TxdaGraphUnsupported(
-                        "TXDA staging cannot preserve distinct input storage aliases"
-                    )
-                storage_owners[pointer] = identity
-                if identity not in seen:
-                    seen[identity] = torch.empty_like(value)
-                    if seen[identity].stride() != value.stride():
-                        raise _TxdaGraphUnsupported(
-                            "TXDA staging cannot preserve input strides"
-                        )
-                    seen[identity].copy_(value)
-                self.buffers.append(seen[identity])
-                self.layout.append(
-                    (tuple(value.shape), value.dtype, value.device, value.stride())
-                )
-            elif value is None or type(value) in (
-                bool,
-                int,
-                float,
-                str,
-                torch.dtype,
-                torch.device,
-            ):
-                self.buffers.append(value)
-                self.layout.append(None)
-            else:
-                raise _TxdaGraphUnsupported(
-                    f"TXDA staging cannot validate {type(value).__name__}"
-                )
-        self.args, self.kwargs = tree_unflatten(self.buffers, self.spec)
-        # Retain only owned buffers, never the original request's input tensors.
-        self.aliases = tuple(
-            next((j for j in range(i) if leaves[j] is value), i)
-            if isinstance(value, torch.Tensor)
-            else None
-            for i, value in enumerate(leaves)
-        )
-
-    def update(self, args, kwargs):
-        from torch.utils._pytree import tree_flatten
-
-        leaves, spec = tree_flatten((args, kwargs))
-        if spec != self.spec or len(leaves) != len(self.buffers):
-            raise _TxdaGraphUnsupported("TXDA graph input structure changed")
-        owners = {}
-        for i, (value, buffer, layout) in enumerate(
-            zip(leaves, self.buffers, self.layout)
-        ):
-            if layout is None:
-                if type(value) is not type(buffer) or value != buffer:
-                    raise _TxdaGraphUnsupported("TXDA graph scalar input changed")
-                continue
-            if (
-                type(value) not in (torch.Tensor, torch.nn.Parameter)
-                or value.layout != torch.strided
-                or (tuple(value.shape), value.dtype, value.device, value.stride())
-                != layout
-                or not value.is_contiguous()
-                or value.storage_offset() != 0
-            ):
-                raise _TxdaGraphUnsupported("TXDA graph tensor layout changed")
-            identity = id(value)
-            pointer = value.untyped_storage().data_ptr()
-            if value.numel() and pointer in owners and owners[pointer] != identity:
-                raise _TxdaGraphUnsupported("TXDA graph input storage aliases changed")
-            owners[pointer] = identity
-            alias = next((j for j in range(i) if leaves[j] is value), i)
-            if alias != self.aliases[i]:
-                raise _TxdaGraphUnsupported("TXDA graph input object aliases changed")
-        # Validate every argument before changing any buffer.
-        for i, (value, buffer, layout) in enumerate(
-            zip(leaves, self.buffers, self.layout)
-        ):
-            if layout is not None and self.aliases[i] == i:
-                buffer.copy_(value)
-
-    def aliases_output(self, output) -> bool:
-        from torch.utils._pytree import tree_flatten
-
-        pointers = {
-            value.untyped_storage().data_ptr()
-            for value in self.buffers
-            if isinstance(value, torch.Tensor) and value.numel()
-        }
-        leaves, _ = tree_flatten(output)
-        return any(
-            isinstance(value, torch.Tensor)
-            and value.numel()
-            and value.untyped_storage().data_ptr() in pointers
-            for value in leaves
-        )
-
-
-class _TxdaGraphSequence:
-    """Replay individually captured Triton launches for an audited FX region.
-
-    The current TXDA SDK silently fails to execute multi-kernel graphs. Native
-    work is therefore never inferred from a successful capture: both FX and
-    actual operator events must match the conservative add/mul profile.
-    """
-
-    _capture_lock = threading.RLock()
-    _marker = "TXDA_SINGLE_KERNEL_CAPTURE"
-    _metadata_ops = frozenset(
-        {
-            "aten::empty",
-            "aten::empty_like",
-            "aten::empty_strided",
-            "aten::as_strided",
-            "aten::view",
-            "aten::_unsafe_view",
-            "aten::alias",
-            "aten::transpose",
-            "aten::permute",
-            "aten::t",
-            "aten::unsqueeze",
-            "aten::squeeze",
-            "aten::expand",
-            "aten::detach",
-            "aten::size",
-            "aten::stride",
-            "aten::numel",
-            "aten::dim",
-            "aten::storage_offset",
-            "aten::is_contiguous",
-            "aten::sym_size",
-            "aten::sym_stride",
-            "aten::sym_numel",
-            "aten::sym_storage_offset",
-        }
-    )
-
-    def __init__(self):
-        # TXDA marks a pool dead after its last graph is destroyed; reusing the
-        # global handle after memory profiling/clear triggers an allocator
-        # use_count assertion. Allocations here live outside native capture, so
-        # each sequence can safely own a fresh pool for kernel graph bookkeeping.
-        self.pool = current_platform.graph_pool_handle()
-        self.graphs = []
-        self.retained = []
-        self.inputs = None
-
-    @classmethod
-    def _contains_launch(cls, event):
-        return event.name == cls._marker or any(
-            cls._contains_launch(child) for child in event.cpu_children
-        )
-
-    @classmethod
-    def _audit(cls, profile):
-        for event in profile.events():
-            if event.name == cls._marker or "::" not in event.name:
-                continue
-            if event.name in cls._metadata_ops:
-                continue
-            if event.name in {"aten::add", "aten::mul"} and cls._contains_launch(event):
-                continue
-            raise _TxdaGraphUnsupported(
-                f"unrecorded TXDA graph operation: {event.name}"
-            )
-
-    def capture(self, runnable, args, kwargs):
-        from triton.backends.tsingmicro.driver import TXDALauncher
-
-        if torch.autograd._profiler_enabled():
-            raise _TxdaGraphUnsupported(
-                "TXDA graph audit cannot nest an active profiler"
-            )
-        self.inputs = _TxdaGraphInputs(args, kwargs)
-        runtime = current_platform.torch_device_fn
-        stream = _graph_capture_stream()
-        owner_thread = threading.get_ident()
-        with self._capture_lock:
-            original = TXDALauncher.__call__
-
-            def capture_launch(
-                launcher,
-                grid_x,
-                grid_y,
-                grid_z,
-                actual_stream,
-                function,
-                *launch_args,
-                **launch_kwargs,
-            ):
-                if threading.get_ident() != owner_thread:
-                    return original(
-                        launcher,
-                        grid_x,
-                        grid_y,
-                        grid_z,
-                        actual_stream,
-                        function,
-                        *launch_args,
-                        **launch_kwargs,
-                    )
-                if actual_stream != stream.txda_stream:
-                    raise _TxdaGraphUnsupported(
-                        "TXDA launch switched away from the capture stream"
-                    )
-                # Strong references keep intermediate allocations and wrappers
-                # alive even after the FX callable discards its local tensors.
-                self.retained.append((launch_args, launch_kwargs))
-                graph = runtime.TXDAGraph()
-                with torch.profiler.record_function(self._marker):
-                    graph.capture_begin(pool=self.pool)
-                    try:
-                        result = original(
-                            launcher,
-                            grid_x,
-                            grid_y,
-                            grid_z,
-                            actual_stream,
-                            function,
-                            *launch_args,
-                            **launch_kwargs,
-                        )
-                    finally:
-                        graph.capture_end()
-                    if result.res != 0:
-                        raise RuntimeError(f"TXDA Triton launch failed: {result.res}")
-                    self.graphs.append(graph)
-                    # Recording-time Python/native consumers must see the
-                    # intermediate. Every later replay repeats this launch.
-                    graph.replay()
-                return result
-
-            try:
-                with (
-                    torch.profiler.profile(
-                        activities=[torch.profiler.ProfilerActivity.CPU]
-                    ) as profile,
-                    patch.object(TXDALauncher, "__call__", capture_launch),
-                ):
-                    output = runnable(*self.inputs.args, **self.inputs.kwargs)
-                self._audit(profile)
-                if not self.graphs:
-                    raise _TxdaGraphUnsupported(
-                        "TXDA region recorded no Triton launches"
-                    )
-                if self.inputs.aliases_output(output):
-                    raise _TxdaGraphUnsupported(
-                        "TXDA region returns an alias of a staged input"
-                    )
-                return output
-            except Exception:
-                runtime.synchronize()
-                self.clear()
-                raise
-
-    def replay(self):
-        for graph in self.graphs:
-            graph.replay()
-
-    def clear(self):
-        self.graphs.clear()
-        self.retained.clear()
-        self.inputs = None
 
 
 # FL-specific: platform-agnostic graph class selection
@@ -441,7 +173,7 @@ class Graph:
     elif current_platform.device_type == "ptpu":
         graph = torch.ptpu.PTPUGraph
     elif current_platform.device_type == "txda":
-        graph = torch.txda.TXDAGraph
+        graph = None
     else:
         raise NotImplementedError("not support graph")
 
@@ -473,39 +205,6 @@ class GraphWrapper:
     Adapted from upstream CUDAGraphWrapper with platform-agnostic graph capture."""
 
     _all_instances: ClassVar[weakref.WeakSet["GraphWrapper"]] = weakref.WeakSet()
-    _active_txda_capture_scope: ClassVar[ContextVar] = ContextVar(
-        "txda_graph_capture_scope", default=None
-    )
-
-    @classmethod
-    @contextmanager
-    def txda_capture_scope(cls):
-        """Observe only wrappers actually captured or replayed by this runner."""
-        wrappers = weakref.WeakSet()
-        token = cls._active_txda_capture_scope.set(wrappers)
-        try:
-            yield wrappers
-        finally:
-            cls._active_txda_capture_scope.reset(token)
-
-    @classmethod
-    def count_live_txda_graphs(cls, wrappers) -> int:
-        """Count live native graphs, excluding cleared or eager-only wrappers."""
-        return len(
-            {
-                id(graph)
-                for wrapper in list(wrappers)
-                if not wrapper._txda_graph_disabled_reason
-                for entry in wrapper.concrete_graph_entries.values()
-                if isinstance(entry.graph, _TxdaGraphSequence)
-                for graph in entry.graph.graphs
-            }
-        )
-
-    def _record_txda_capture_scope(self) -> None:
-        wrappers = self._active_txda_capture_scope.get()
-        if wrappers is not None:
-            wrappers.add(self)
 
     @classmethod
     def clear_all_graphs(cls) -> None:
@@ -526,7 +225,6 @@ class GraphWrapper:
         self.compilation_config = vllm_config.compilation_config
 
         self.first_run_finished = False
-        self._txda_graph_disabled_reason = None
         self.is_debugging_mode = envs.VLLM_LOGGING_LEVEL == "DEBUG"
         self._runnable_str = str(runnable) if self.is_debugging_mode else None
 
@@ -537,8 +235,6 @@ class GraphWrapper:
         # streams, it might not be safe to share a global pool.
         # only investigate this when we use multiple streams
         self.graph_pool = current_platform.get_global_graph_pool()
-        if current_platform.device_type == "txda" and self.graph_pool is None:
-            self.graph_pool = current_platform.graph_pool_handle()
 
         if cudagraph_options is None:
             cudagraph_options = GraphOptions()
@@ -569,9 +265,6 @@ class GraphWrapper:
         return self
 
     def clear_graphs(self) -> None:
-        for entry in self.concrete_graph_entries.values():
-            if isinstance(entry.graph, _TxdaGraphSequence):
-                entry.graph.clear()
         self.concrete_graph_entries.clear()
 
     def __call__(self, *args, **kwargs):
@@ -591,8 +284,6 @@ class GraphWrapper:
             return self.runnable(*args, **kwargs)
 
         assert batch_descriptor is not None
-        if current_platform.device_type == "txda" and self._txda_graph_disabled_reason:
-            return self.runnable(*args, **kwargs)
         if batch_descriptor not in self.concrete_graph_entries:
             # create a new entry for this batch descriptor
             self.concrete_graph_entries[batch_descriptor] = GraphEntry(
@@ -600,9 +291,6 @@ class GraphWrapper:
             )
 
         entry = self.concrete_graph_entries[batch_descriptor]
-
-        if current_platform.device_type == "txda":
-            return self._call_txda(entry, args, kwargs)
 
         if entry.graph is None:
             if self.cudagraph_options.debug_log_enable:
@@ -649,6 +337,8 @@ class GraphWrapper:
 
                     get_offloader().sync_prev_onload()
 
+                # FL-specific: use platform-agnostic graph capture while
+                # preserving the explicit stream used by vLLM v0.28.0.
                 with current_platform.torch_device_fn.graph(
                     graph,
                     pool=self.graph_pool,
@@ -690,38 +380,4 @@ class GraphWrapper:
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
-        return entry.output
-
-    def _call_txda(self, entry, args, kwargs):
-        if entry.graph is None:
-            valid, reason = _validate_txda_graph_runnable(self.runnable)
-            if not valid:
-                self._txda_graph_disabled_reason = reason
-                logger.warning_once("TXDA region remains eager: %s", reason)
-                return self.runnable(*args, **kwargs)
-            validate_cudagraph_capturing_enabled()
-            sequence = _TxdaGraphSequence()
-            try:
-                output = sequence.capture(self.runnable, args, kwargs)
-            except _TxdaGraphUnsupported as error:
-                self._txda_graph_disabled_reason = str(error)
-                logger.warning_once("TXDA region remains eager: %s", error)
-                return self.runnable(*args, **kwargs)
-            entry.graph = sequence
-            # Strong outputs and launch arguments are necessary because the
-            # sequence uses allocations made outside each short native capture.
-            entry.output = output
-            compilation_counter.num_cudagraph_captured += len(sequence.graphs)
-            logger.debug("TXDA captured %d single-kernel graphs", len(sequence.graphs))
-            self._record_txda_capture_scope()
-            return output
-        try:
-            entry.graph.inputs.update(args, kwargs)
-        except _TxdaGraphUnsupported as error:
-            logger.warning_once(
-                "TXDA region runs eagerly for changed inputs: %s", error
-            )
-            return self.runnable(*args, **kwargs)
-        entry.graph.replay()
-        self._record_txda_capture_scope()
         return entry.output

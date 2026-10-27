@@ -56,6 +56,8 @@ _VALIDATED_DEVICE_CONTROL_ENV_VARS = {
     "nvidia": "CUDA_VISIBLE_DEVICES",
     "kunlunxin": "CUDA_VISIBLE_DEVICES",
     "tsingmicro": "TXDA_VISIBLE_DEVICES",
+    "enflame": "TOPS_VISIBLE_DEVICES",
+    "gcu": "TOPS_VISIBLE_DEVICES",
 }
 
 
@@ -93,7 +95,7 @@ def get_device_name(vendor_name: str) -> str:
 def get_device_control_env_var(vendor_name: str) -> str:
     """Return the validated vLLM device-control variable for a vendor.
 
-    Validated vendors use their runtime visibility variable. Other vendors
+    Defaults are provided only for validated vendor mappings. Other vendors
     retain the vLLM base-class no-op unless an operator explicitly sets
     ``FLAGOS_DEVICE_CONTROL_ENV_VAR``.
     """

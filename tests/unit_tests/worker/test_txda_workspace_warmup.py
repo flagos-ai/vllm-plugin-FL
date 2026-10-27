@@ -1,10 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""CPU regression for sizing workspaces before TXDA graph capture locks them.
-
-Execute the real worker method through capture_model, without importing the
-hardware runtime. The workspace double models the grow-before-lock contract;
-small decode captures cannot reserve the space needed by a 177-token prefill.
-"""
+"""CPU contracts for eager TXDA warmup and shared workspace sizing."""
 
 import __future__
 
@@ -156,39 +151,6 @@ def _run_warmup(
     exec(code, namespace)
     namespace["compile_or_warm_up_model"](worker)
     return runner, kernel_warmup
-
-
-@pytest.mark.parametrize("compile_sizes", [None, [1, 2, 4, 8]])
-def test_txda_maximum_batch_precedes_small_captures_and_workspace_lock(
-    warmup_code, compile_sizes
-):
-    # Negative control: the previous small-capture-only sequence rejects the
-    # real failure's prefill size, so an omitted maximum warmup cannot pass.
-    small_only = _Runner(_GraphMode.PIECEWISE, [1, 2, 4, 8])
-    small_only.capture_model()
-    assert small_only.workspace.capacity == 512 * 1024
-    with pytest.raises(RuntimeError, match="locked"):
-        small_only.workspace.reserve(177)
-
-    runner, kernel_warmup = _run_warmup(warmup_code, compile_sizes=compile_sizes)
-
-    assert runner.dummy_calls == [
-        (
-            512,
-            {
-                "cudagraph_runtime_mode": _GraphMode.NONE,
-                "skip_eplb": True,
-                "remove_lora": False,
-            },
-        )
-    ]
-    assert runner.events[:3] == [("dummy", 512), ("remove_loras",), ("capture",)]
-    assert runner.workspace.locked
-    capacity_at_capture = runner.workspace.capacity
-    for prefill_tokens in (177, 512):
-        runner.workspace.reserve(prefill_tokens)
-    assert runner.workspace.capacity == capacity_at_capture
-    kernel_warmup.assert_not_called()
 
 
 def test_txda_eager_does_not_add_graph_workspace_warmup(warmup_code):

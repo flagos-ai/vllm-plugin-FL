@@ -5640,7 +5640,7 @@ class ModelRunnerFL(
             self.eplb_state.start_async_loop()
 
         if (
-            current_platform.device_type in {"npu", "txda"}
+            current_platform.device_type == "npu"
             and self.compilation_config.mode != CompilationMode.NONE
         ):
             # Dispatch operators are lazily resolved behind a process-safe
@@ -5649,18 +5649,6 @@ class ModelRunnerFL(
             from vllm_fl.dispatch import warmup_cached_ops
 
             warmup_cached_ops()
-            if (
-                current_platform.device_type == "txda"
-                and self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
-            ):
-                # Spawned workers receive an already-built VllmConfig; the
-                # parent's platform hook cannot install process-local FX rules
-                # here. Install before this worker's first Dynamo trace.
-                from vllm_fl.compilation.txda_partition import (
-                    install_txda_graph_partition,
-                )
-
-                install_txda_graph_partition(current_platform.device_type)
 
         if (
             self.vllm_config.compilation_config.mode
@@ -7148,16 +7136,7 @@ class ModelRunnerFL(
                 "Rank %d: Torch profiler disabled for CUDA graph capture", local_rank
             )
 
-        capture_scope = (
-            GraphWrapper.txda_capture_scope()
-            if current_platform.device_type == "txda"
-            else nullcontext()
-        )
-        with (
-            self._freeze_gc(),
-            graph_capture(device=self.device),
-            capture_scope as txda_wrappers,
-        ):
+        with self._freeze_gc(), graph_capture(device=self.device):
             torch.accelerator.synchronize()
             torch.accelerator.empty_cache()
             start_free_gpu_memory = torch.accelerator.get_memory_info()[0]
@@ -7190,16 +7169,6 @@ class ModelRunnerFL(
 
         torch.accelerator.synchronize()
         torch.accelerator.empty_cache()
-
-        if (
-            current_platform.device_type == "txda"
-            and GraphWrapper.count_live_txda_graphs(txda_wrappers) == 0
-        ):
-            raise RuntimeError(
-                "TXDA graph mode captured or reused no live native graphs for "
-                "this model; every region remained eager. Use --enforce-eager "
-                "or resolve the preceding TXDA graph fallback diagnostics."
-            )
 
         # Lock workspace to prevent resizing during execution.
         # Max workspace sizes should have been captured during warmup/profiling.

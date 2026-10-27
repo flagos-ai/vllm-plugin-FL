@@ -6,9 +6,8 @@ containing the TXDA 0.28 adaptation described here.
 
 ## Execution scope
 
-- Use the FL/V1 model runner. Eager execution uses `--enforce-eager`.
-  Piecewise graphs are validated at TP8 with the limits below. TXDA graph
-  execution at TP1 is rejected; use `--enforce-eager` for TP1.
+- Use the FL/V1 model runner with `--enforce-eager` at every tensor-parallel
+  size. Graph mode is temporarily unsupported on TXDA.
 - Multi-device execution, including the TP8 examples below, requires a valid
   `FLAGCX_PATH`. Native TCCL remains the single-device fallback.
 - Prefill and decode context parallel sizes must both be 1.
@@ -19,8 +18,7 @@ containing the TXDA 0.28 adaptation described here.
   SiLU use reference implementations. This conservative configuration can be
   slow and does not establish a throughput guarantee.
 - The TXDA SDPA backend uses the paged KV cache with reference attention.
-  Attention, GDN/Mamba, collectives, native casts and matrix multiplication stay
-  outside captured regions. MLA and sparse attention are unsupported.
+  MLA and sparse attention are unsupported.
 - The smoke cases cover Qwen3.6-27B and Qwen3.6-35B-A3B at TP8, with a 1024-token
   context, at most 2 sequences and a 128 MiB KV-cache budget per worker. These
   bounds are smoke-test settings, not recommended production capacity limits.
@@ -141,6 +139,12 @@ worker processes to exit. The vLLM default of zero immediately kills the engine
 and workers, bypassing communicator cleanup. `--init` in the container example
 also reaps any orphaned child processes.
 
+TXDA communicator teardown explicitly disables further collectives and aborts
+the underlying TCCL communicator, waiting at most five seconds. Abort failure or
+timeout is logged. The vendor Abort API does not release all FlagCX host
+bookkeeping, so this is not a guarantee of complete resource reclamation or safe
+in-process reinitialization. Other backends retain their existing teardown.
+
 On the reference host, some groups stalled during FlagCX warmup even with the
 original 0.24 image. The tested MoE group used `NCCL_P2P_DISABLE=1`, selecting
 socket transport; verify successful collectives on every allocated rank before
@@ -202,13 +206,13 @@ curl http://127.0.0.1:8099/v1/chat/completions \
 
 ## Adaptation acceptance gate
 
-The acceptance standard is `tools/adaptation-gate-cases`, not the bounded
-smoke cases above. It requires both Qwen3.6 models in both eager and graph
-modes: five scenarios and 26 requests per model/mode, or 20 scenarios and
-104 requests for the complete matrix. The cases include a detailed answer
-with a 512-token budget, OCR, eight concurrent text requests, eight concurrent
-image requests, and eight mixed requests. Do not reduce their output budgets
-or change the quality assertions.
+Use the original cases in `tools/adaptation-gate-cases` for acceptance, in
+addition to the bounded smoke cases above. This eager-only delivery covers
+Qwen3.6-27B and Qwen3.6-35B-A3B: five scenarios and 26 requests per model,
+or 10 scenarios and 52 requests. Graph mode is outside the current scope.
+The cases include a detailed answer with a 512-token budget, OCR, eight
+concurrent text requests, eight concurrent image requests, and eight mixed
+requests. Preserve the original budgets, image fixtures and quality assertions.
 
 For each model, use the following eager server configuration in a host tmux
 job. The gate README permits a custom serve command. Set `MODEL_PATH` to
@@ -248,120 +252,48 @@ synchronization. The longer request timeout changes waiting time only. Keep
 Use LF line endings for the shell scripts on Linux; a Windows CRLF checkout
 cannot be executed directly by Bash.
 
-### Piecewise graphs
-
-The complete graph acceptance runs use TP8. TXDA rejects graph execution at
-TP1 before model loading because Dense TP1 correctness remains unresolved;
-use `--enforce-eager` for that configuration. This is a conservative support
-boundary based on the observed Dense failure, not an identified SDK root cause
-or a claim that every TP1 model fails.
-
-For TP8 graph validation, replace `--enforce-eager` in the gate server command with:
-
-```bash
---compilation-config '{"mode":3,"backend":"eager","cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8]}'
-```
-
-Here `backend="eager"` selects the compiler adapter that preserves FX operations;
-TXDA device graphs still capture and replay supported regions. The plugin
-selects the GGL launch path and disables per-kernel debug synchronization.
-It installs partition rules in each spawned worker and warms the maximum token
-batch before locking the MoE workspace.
-
-The current vendor SDK does not reliably capture native operators or replay
-multiple kernels in one graph. The plugin therefore captures audited add/mul
-regions as sequences of single-kernel native graphs. Each sequence owns stable
-input buffers, retained launch arguments and a private graph pool. Unsupported
-regions, input layouts or changed scalar values execute eagerly. A model that
-captures or reuses no live native graphs during startup is rejected explicitly.
-
-Both models passed all five original graph scenarios and all 26 requests on
-TP8. For each scenario, all eight workers recorded successful native replay
-within its request window after API readiness. Response correctness and these
-runtime replay events are both required evidence; startup capture counts alone
-do not establish graph inference correctness.
-
-TXDA communicator teardown explicitly disables further collectives and aborts
-the underlying TCCL communicator, waiting at most five seconds. Abort failure or
-timeout is logged. The vendor Abort API does not release all FlagCX host
-bookkeeping, so this is not a guarantee of complete resource reclamation or safe
-in-process reinitialization. Other backends retain their existing teardown.
-
 ## Validation status
 
-The complete acceptance matrix passed on TX8110 with the reference vendor
+The following are historical eager results on TX8110 with the reference vendor
 packages and vLLM `0.28.0+empty`, built from upstream tag commit
-`2cf0a6915ce544dc493a0990f2ea38d81601128a`. Each row below selects one complete
-run with the original five scenarios, 512/128-token budgets, image fixtures
-and quality assertions. All runs used TP8, the default asynchronous scheduler,
-4096-token context, at most eight sequences, a 512-token scheduling batch and
-1 GiB of KV cache per worker.
+`2cf0a6915ce544dc493a0990f2ea38d81601128a`. Each row is one complete original
+five-scenario run with unchanged 512/128-token budgets, fixtures and assertions.
+Both used TP8, the default asynchronous scheduler, 4096-token context, at most
+eight sequences, a 512-token scheduling batch and 1 GiB of KV cache per worker.
 
-| Model | Mode | Tested snapshot | Scenarios | Requests |
-| --- | --- | --- | --- | --- |
-| Qwen3.6-27B | Eager | R6d | 5/5 PASS | 26/26 PASS |
-| Qwen3.6-27B | Piecewise graph | R10 | 5/5 PASS | 26/26 PASS |
-| Qwen3.6-35B-A3B | Eager | R9 | 5/5 PASS | 26/26 PASS |
-| Qwen3.6-35B-A3B | Piecewise graph | R6d | 5/5 PASS | 26/26 PASS |
+| Model | Historical snapshot | Scenarios | Requests |
+| --- | --- | --- | --- |
+| Qwen3.6-27B | R6d eager | 5/5 PASS | 26/26 PASS |
+| Qwen3.6-35B-A3B | R9 eager | 5/5 PASS | 26/26 PASS |
 
-The total is **20 scenarios and 104 requests**. Both graph rows include
-successful replay evidence for all eight workers in every scenario's request
-window. Partial runs, TP1 diagnostics and supplemental short requests are not
-counted. The archived `acceptance-matrix-r10-complete.json` records the selected
-runs, original result hashes, strict summaries and source-equivalence checks;
-its SHA256 is
-`def8ad823b7532eaade76182eb3c788e3724acf41285c529be1e336871cffb4e`.
+These historical runs total **10 scenarios and 52 requests**. They were not
+rerun on the newly merged eager-only revision. The merged R12 candidate passed
+458 CPU regression tests in the reference environment; 17 tests were skipped
+under their original conditions (475 collected, pytest exit code 0). This CPU
+result does not constitute a rerun of the historical hardware requests.
 
-The tested candidate archives have these SHA256 values:
-
-| Snapshot | Candidate archive SHA256 |
+| Historical snapshot | Candidate archive SHA256 |
 | --- | --- |
 | R6d | `ab6df28db9181968848db71a7093a6197ccf62f112b13d9b2a190994fa81943e` |
 | R9 | `d44944533f73613d3cce500dd2bfec41c13e2f17ba5a0360428db894a6093fb7` |
-| R10 | `f9f8b3cb5a5008b3ad766e6e68e747c08fc1670292b08fe379352a72c7866f95` |
 
-R6d's environment selected the same inference operators as the later default:
-add/mul for Dense, with four additional MoE selectors for MoE. R7 retained the
-R6d production Python and made this selection the default. The R8 changes were
-verified formatting/import/type changes with normalized AST equality. R9 added
-TXDA communicator shutdown and initialization-error cleanup while preserving
-inference implementation bytes and successful collective computation. All 418
-production/config files are byte-identical between R9 and R10; R10 changes only
-documentation, a CPU test fixture and the packaging manifest. These checks do
-not mean that every row was rerun on R10. The subsequent TP1 graph rejection is
-a further configuration change, outside that byte-equivalence claim; it leaves
-the accepted TP8 inference path unchanged.
+R6d selected add/mul for Dense; the R9 MoE run used the additional four MoE
+selectors listed in the backend configuration. The conservative dispatch
+selection follows device failures observed with broader generic FlagGems
+replacement. The recorded passes establish correctness for those runs, without
+a throughput or production-capacity guarantee.
 
-The conservative dispatch configuration is intentional. Broader generic
-FlagGems replacement produced device failures in concurrent or long-text
-inference. The selected add/mul plus MoE configuration passed the complete
-matrix above; the earlier failures do not identify a single faulty kernel.
-These are correctness results, not throughput or production-capacity claims.
+The Dense eager receipt originally recorded Windows checkout hashes for five
+Python files whose executed copies used LF. The corrected audit preserves the
+original receipt and verifies the actual archived files: the Python bytes match
+the baseline Git blobs, their ASTs and assertions are unchanged, and all image
+fixtures are byte-identical. The corrected summary supports the result above.
 
-The final combined adaptation, communicator and shared compilation suite,
-including the TP1 configuration-guard regressions, passed 354 tests in the
-reference container. Three Ascend hardware checks were skipped because the host
-has no NPU runtime. Separate hardware checks covered changing
-FP32/BF16 graph inputs, eager native casts/matmul around captured regions,
-graph clear/recreation, and seeded Mamba state copying across chunk boundaries.
+The R9 MoE eager run completed normal worker shutdown with 16 successful native
+Abort calls and no forced worker kill. Separate lifecycle checks also verified
+bounded teardown, including a delayed peer. These results do not establish
+recovery of stalled devices or complete SDK resource release.
 
-Two independent eight-rank process groups completed collectives and explicit
-teardown with all 16 native Abort calls returning success in approximately
-0.51 seconds, including a delayed peer. The R9 MoE eager gate also completed
-normal worker shutdown with 16 successful Abort calls and no forced worker
-kill. A separate stalled group returned success from all eight Abort calls,
-but its communication test remained failed. Bounded teardown therefore does
-not establish recovery of stalled devices or complete SDK resource release.
-
-The Dense eager provenance receipt originally recorded Windows checkout hashes
-for five Python files whose executed copies used LF. The corrected audit retains
-the original receipt and verifies the actual archived execution directory:
-those Python bytes match the baseline Git blobs, their ASTs and literal/assertion
-contents are unchanged, and all image fixtures are byte-identical. Only line
-endings changed in five Python and four shell files. The corrected strict
-summary, rather than the inaccurate original receipt alone, supports that row.
-
-The vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions were
-preserved. No Tsingmicro workflow or runner configuration exists in upstream
-`main` at `2ed81caa5cdc43770b3272d917950c82e3db131d`; this adaptation does not
-add a hardware CI job. Skipped GitHub workflows are not hardware test passes.
+Keep the reference vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX
+versions. This adaptation adds no Tsingmicro hardware CI job; skipped GitHub
+workflows are not hardware test passes.

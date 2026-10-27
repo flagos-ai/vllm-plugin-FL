@@ -18,7 +18,14 @@ def moe_align_block_size_flaggems(
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    from flaggems_vllm import moe_align_block_size_triton
+    if topk_ids.device.type == "gcu":
+        # FlagGems-vllm's generic four-stage kernel uses atomic RMW operations
+        # unsupported by the pinned GCU compiler. Keep the official FlagGems
+        # GCU implementation until the new provider has a native implementation
+        # that passes the align value/padding and graph replay regressions.
+        from flag_gems import moe_align_block_size_triton
+    else:
+        from flaggems_vllm import moe_align_block_size_triton
 
     max_num_tokens_padded = topk_ids.numel() + num_experts * (block_size - 1)
     if pad_sorted_ids:
@@ -154,6 +161,17 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    from flaggems_vllm import moe_sum
+    if inp.device.type == "gcu" and inp.is_contiguous() and out.is_contiguous():
+        # FlagGems-vllm's MT kernel puts the token count on grid.y, which can
+        # exceed GCU's 255-block limit. Keep its input contract before using
+        # the official GCU kernel; retain the stride-aware provider below.
+        # Remove this branch once the pinned provider supports GCU launch
+        # limits and passes large-token value and graph-replay checks.
+        from flaggems_vllm.ops.moe_sum import _check_moe_sum_inputs
+
+        _check_moe_sum_inputs(inp, out)
+        from flag_gems import moe_sum
+    else:
+        from flaggems_vllm import moe_sum
 
     moe_sum(inp, out)

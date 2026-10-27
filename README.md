@@ -43,7 +43,8 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | MetaX | Supported | - |
 | T-Head | Supported | [deployment guide](./docs/usage/thead.md) |
 | Iluvatar | Supported | [deployment guide](./docs/usage/iluvatar.md) |
-| Tsingmicro | Supported | [deployment guide](./docs/usage/tsingmicro.md) |
+| Enflame | Supported | [deployment guide](./docs/usage/enflame.md) |
+| Tsingmicro | Supported (eager) | [deployment guide](./docs/usage/tsingmicro.md) |
 | Moore Threads | Supported | - |
 | Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |
 | Sunrise | Supported | - |
@@ -55,7 +56,8 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 For hardware-specific deployment and validation, see the
 [NVIDIA guide](./docs/usage/nvidia.md),
-[T-Head PPU guide](./docs/usage/thead.md), and
+[T-Head PPU guide](./docs/usage/thead.md),
+[Enflame S60 guide](./docs/usage/enflame.md), and
 [Tsingmicro TXDA guide](./docs/usage/tsingmicro.md).
 
 1. Install vLLM

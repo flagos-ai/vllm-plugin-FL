@@ -223,6 +223,56 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.device_type == "gcu":
+            if vllm_config.use_v2_model_runner:
+                raise ValueError(
+                    "Enflame requires ModelRunnerFL; the upstream V2 runner is "
+                    "not supported on GCU. Set VLLM_USE_V2_MODEL_RUNNER=0."
+                )
+            # The default V1 override takes precedence over upstream's automatic
+            # V2 selection. Reject features that V1 cannot execute faithfully.
+            v2_only_features = []
+            speculative_config = getattr(vllm_config, "speculative_config", None)
+            if speculative_config is not None:
+                if speculative_config.method == "dspark":
+                    v2_only_features.append("DSpark")
+                elif speculative_config.method == "dflash":
+                    if vllm_config._dflash_needs_multi_kv_group():
+                        v2_only_features.append("mixed-KV DFlash")
+                    if vllm_config._is_dflash2_draft():
+                        v2_only_features.append("DFlash2")
+            model_config = getattr(vllm_config, "model_config", None)
+            if model_config is not None and getattr(
+                model_config, "is_diffusion", False
+            ):
+                v2_only_features.append("diffusion")
+            if v2_only_features:
+                raise ValueError(
+                    "Enflame ModelRunnerFL does not support these V2-only features: "
+                    + ", ".join(v2_only_features)
+                )
+            if (
+                getattr(model_config, "is_hybrid", False)
+                and speculative_config is not None
+                and getattr(vllm_config.cache_config, "mamba_cache_mode", None)
+                == "align"
+            ):
+                # vLLM's speculative align path fuses Mamba state copies on
+                # device, bypassing the GCU address translation in
+                # do_mamba_copy_block. Reject it before allocating cache state.
+                raise ValueError(
+                    "Enflame does not support speculative decoding for hybrid "
+                    "models with mamba_cache_mode='align': the fused Mamba state "
+                    "copy kernels do not translate GCU addresses. Disable "
+                    "speculative decoding for this configuration."
+                )
+        if cls.vendor_name in ("gcu", "enflame"):
+            from vllm_fl.attention.utils import patch_mm_encoder_attention
+
+            # Install before CustomOp caches even a disabled encoder's native
+            # method during construction; backend selection happens later.
+            patch_mm_encoder_attention()
+
         if cls.device_type in {"npu", "txda"} and vllm_config.use_v2_model_runner:
             platform_name = "Ascend" if cls.device_type == "npu" else "Tsingmicro TXDA"
             raise ValueError(
@@ -335,75 +385,32 @@ class PlatformFL(Platform):
         from vllm.config.compilation import CompilationMode
 
         compilation_config = vllm_config.compilation_config
+        if (
+            cls.vendor_name in ("gcu", "enflame")
+            and getattr(compilation_config, "backend", None) == "inductor"
+            and getattr(compilation_config, "mode", CompilationMode.NONE)
+            != CompilationMode.NONE
+        ):
+            # TorchGCU's range header uses xloop, whose enclosing loop is only
+            # emitted by its standalone kernel generator. Inductor combo
+            # kernels reuse that header without defining xloop.
+            compilation_config.inductor_compile_config.update(
+                combo_kernels=False,
+                benchmark_combo_kernel=False,
+            )
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
         if cls.device_type == "txda":
-            if compilation_config.mode != CompilationMode.NONE:
-                if compilation_config.backend not in ("", "eager"):
-                    raise ValueError(
-                        "Tsingmicro TXDA compilation requires backend='eager'; "
-                        "the requested compiler backend is unsupported."
-                    )
-                compilation_config.backend = "eager"
-                compilation_config.use_inductor_graph_partition = False
-                pass_config = compilation_config.pass_config
-                for name in (
-                    "fuse_norm_quant",
-                    "fuse_act_quant",
-                    "fuse_attn_quant",
-                    "enable_sp",
-                    "fuse_gemm_comms",
-                    "fuse_allreduce_rms",
-                    "enable_qk_norm_rope_fusion",
-                    "fuse_rope_kvcache_cat_mla",
-                    "fuse_act_padding",
-                    "fuse_mla_dual_rms_norm",
-                    "fuse_rope_kvcache",
-                    "fuse_qk_norm_rope_kvcache",
-                ):
-                    setattr(pass_config, name, False)
             if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
-                if parallel_config.tensor_parallel_size == 1:
-                    raise ValueError(
-                        "Tsingmicro TXDA graphs are disabled for tensor_parallel_size=1 "
-                        "after a correctness failure in Dense TP1 validation. "
-                        "Use --enforce-eager for TP1; TP8 is the validated graph "
-                        "configuration."
-                    )
-                if compilation_config.mode != CompilationMode.VLLM_COMPILE:
-                    raise ValueError(
-                        "Tsingmicro TXDA graphs require piecewise VLLM_COMPILE "
-                        "(compilation mode 3) with backend='eager'."
-                    )
-                if compilation_config.splitting_ops == []:
-                    raise ValueError(
-                        "Tsingmicro TXDA graphs require attention and Mamba "
-                        "splitting ops; remove the empty splitting_ops override."
-                    )
-                if compilation_config.splitting_ops is not None:
-                    # Keep dynamic SDPA/GDN/Mamba and cache updates outside graphs,
-                    # including when callers add their own split operators.
-                    compilation_config.splitting_ops = list(
-                        dict.fromkeys(
-                            [
-                                *compilation_config.splitting_ops,
-                                *compilation_config._attention_ops,
-                                "vllm::unified_kv_cache_update",
-                                "vllm::unified_mla_kv_cache_update",
-                            ]
-                        )
-                    )
-                os.environ["TXDA_LAUNCH_VIA_GGL"] = "1"
-                os.environ["TXDA_LAUNCH_KERNEL_SYNC"] = "0"
-                os.environ["VLLM_USE_BREAKABLE_CUDAGRAPH"] = "0"
-                from vllm_fl.compilation.txda_partition import (
-                    install_txda_graph_partition,
+                raise ValueError(
+                    "Tsingmicro TXDA graph mode is not supported. Use --enforce-eager."
                 )
-
-                install_txda_graph_partition(cls.device_type)
-                compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
-                compilation_config.cudagraph_mm_encoder = False
+            if compilation_config.mode != CompilationMode.NONE:
+                raise ValueError(
+                    "Tsingmicro TXDA supports eager execution only; compilation "
+                    "must be disabled. Use --enforce-eager."
+                )
 
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
@@ -542,8 +549,39 @@ class PlatformFL(Platform):
                 f"Backend {backend} is not supported for vit attention. "
                 f"Supported backends are: {cls.get_supported_vit_attn_backends()}"
             )
+            if (
+                cls.vendor_name in ("gcu", "enflame")
+                and backend == AttentionBackendEnum.FLASH_ATTN
+            ):
+                from vllm_fl.dispatch.backends.vendor.gcu.impl.attention import (
+                    AttentionGCUBackend,
+                )
+
+                if not (
+                    head_size > 0
+                    and AttentionGCUBackend.supports_head_size(head_size)
+                    and AttentionGCUBackend.supports_dtype(dtype)
+                ):
+                    raise ValueError(
+                        "Enflame vision FlashAttention requires FP16/BF16 and "
+                        "a positive head size divisible by 8 and at most 256; "
+                        f"got head_size={head_size}, dtype={dtype}."
+                    )
             logger.info_once(f"Using backend {backend} for vit attention")
             return backend
+
+        if cls.vendor_name in ("gcu", "enflame"):
+            from vllm_fl.dispatch.backends.vendor.gcu.impl.attention import (
+                AttentionGCUBackend,
+            )
+
+            if (
+                head_size > 0
+                and AttentionGCUBackend.supports_head_size(head_size)
+                and AttentionGCUBackend.supports_dtype(dtype)
+            ):
+                return AttentionBackendEnum.FLASH_ATTN
+            return AttentionBackendEnum.TORCH_SDPA
 
         # Try FlashAttention first
         if (cc := cls.get_device_capability()) and cc.major >= 8:
@@ -578,7 +616,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_compile_backend(cls) -> str:
-        if cls.device_type in {"npu", "txda"}:
+        if cls.device_type == "npu":
             # Keep vLLM's Dynamo tracing and piecewise graph splitting while
             # returning each FX GraphModule without running CUDA Inductor.
             return "eager"
@@ -597,7 +635,6 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
-            "tsingmicro",
         ]
 
     @classmethod
@@ -696,9 +733,7 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        # TXDA collectives must remain opaque to Dynamo: tracing the FlagCX
-        # implementation enters native stream APIs. The vLLM custom operators
-        # provide fake implementations and are eager TXDA partition boundaries.
+        # Retain the registered collective route used by TXDA eager execution.
         return cls.device_type == "txda" or cls.vendor_name in (
             "nvidia",
             "thead",

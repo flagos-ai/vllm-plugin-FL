@@ -11,6 +11,7 @@ or auto-detected from available hardware.
 """
 
 import os
+from importlib.util import find_spec
 
 import pytest
 import torch
@@ -27,6 +28,15 @@ def _txda_runtime():
     return getattr(torch, "txda", None)
 
 
+def _gcu_runtime():
+    """Load an installed GCU SDK without hiding driver/import failures."""
+    if find_spec("torch_gcu") is None:
+        return None
+    import torch_gcu  # noqa: F401
+
+    return torch.gcu
+
+
 def get_backend() -> str:
     """Detect current backend from env or hardware.
 
@@ -34,12 +44,20 @@ def get_backend() -> str:
         1. FL_BACKEND environment variable (set by CI workflow)
         2. Auto-detect from available hardware
     """
+    if _BACKEND in ("enflame", "gcu"):
+        runtime = _gcu_runtime()
+        return "enflame" if runtime is not None and runtime.is_available() else "cpu"
     if _BACKEND:
         return "tsingmicro" if _BACKEND == "txda" else _BACKEND
     # Check TXDA before CUDA: transfer_to_txda may expose CUDA-style aliases.
     txda = _txda_runtime()
     if txda is not None and txda.is_available():
         return "tsingmicro"
+    # TorchGCU exposes CUDA-compatible aliases. Identify its native runtime
+    # first so NVIDIA-only tests cannot run on GCU through those aliases.
+    runtime = _gcu_runtime()
+    if runtime is not None and runtime.is_available():
+        return "enflame"
     if torch.cuda.is_available():
         # Hygon HIP uses Torch CUDA APIs, but remains a distinct test backend.
         return (
@@ -78,6 +96,8 @@ def get_device(index: int = 0) -> torch.device:
     elif backend == "tsingmicro":
         _txda_runtime()
         return torch.device(f"txda:{index}")
+    elif backend == "enflame":
+        return torch.device(f"gcu:{index}")
     return torch.device("cpu")
 
 
@@ -96,6 +116,8 @@ def get_device_count() -> int:
             return torch.npu.device_count()
         except ImportError:
             return 0
+    elif backend == "enflame":
+        return torch.gcu.device_count()
     return 0
 
 
