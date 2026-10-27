@@ -181,6 +181,11 @@ matrix has already passed on vLLM 0.28.0.
 
 ## CI and the standalone shared Gate
 
+The independent `Sunrise CPU Contracts` workflow also runs on draft PRs. It
+checks the Gate orchestration contracts, Ruff and shell syntax on a GitHub
+hosted runner without reserving Sunrise devices. These checks do not establish
+hardware or model-quality acceptance.
+
 The dedicated workflow is `.github/workflows/_sunrise_test.yml`. It runs the
 Sunrise unit contracts with zero skips, followed by the real
 `tools/adaptation-gate-cases/run_test.sh` for both models in both modes. Every
