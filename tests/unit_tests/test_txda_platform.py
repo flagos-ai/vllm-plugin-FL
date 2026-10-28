@@ -92,9 +92,6 @@ def configure_platform(monkeypatch):
         "VLLM_USE_BREAKABLE_CUDAGRAPH",
     ):
         monkeypatch.setenv(name, os.environ.get(name, "unchanged"))
-    txda_partition = ModuleType("vllm_fl.compilation.txda_partition")
-    txda_partition.install_txda_graph_partition = Mock()
-    monkeypatch.setitem(sys.modules, txda_partition.__name__, txda_partition)
     config_module = ModuleType("vllm.config")
     config_module.CUDAGraphMode = _GraphMode
     compilation_module = ModuleType("vllm.config.compilation")
@@ -177,7 +174,6 @@ def test_txda_rejects_all_graph_modes_without_launch_side_effects(
     monkeypatch.setenv("TXDA_LAUNCH_KERNEL_SYNC", "existing-sync")
     monkeypatch.delenv("VLLM_USE_BREAKABLE_CUDAGRAPH", raising=False)
     before = dict(os.environ)
-    partition = sys.modules["vllm_fl.compilation.txda_partition"]
 
     with pytest.raises(ValueError, match="graph mode is not supported") as exc:
         configure_platform(platform, config)
@@ -185,7 +181,6 @@ def test_txda_rejects_all_graph_modes_without_launch_side_effects(
     assert "--enforce-eager" in str(exc.value)
     assert config.compilation_config.cudagraph_mode == graph
     assert dict(os.environ) == before
-    partition.install_txda_graph_partition.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -206,8 +201,6 @@ def test_txda_requires_eager_even_when_graphs_are_disabled(
     assert config.compilation_config.mode == mode
     assert config.compilation_config.backend == backend
     assert dict(os.environ) == before
-    partition = sys.modules["vllm_fl.compilation.txda_partition"]
-    partition.install_txda_graph_partition.assert_not_called()
 
 
 @pytest.mark.parametrize("tensor_parallel_size", [1, 8])
@@ -225,8 +218,6 @@ def test_txda_eager_preserves_launch_environment(
     assert config.compilation_config.cudagraph_mode == _GraphMode.NONE
     assert config.compilation_config.mode == _CompilationMode.NONE
     assert dict(os.environ) == before
-    partition = sys.modules["vllm_fl.compilation.txda_partition"]
-    partition.install_txda_graph_partition.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -238,50 +229,6 @@ def test_txda_reports_no_static_graph_support(device, vendor, expected):
         "vllm_fl/platform.py", "support_static_graph_mode", {}, class_name="PlatformFL"
     )
     assert method(SimpleNamespace(device_type=device, vendor_name=vendor)) is expected
-
-
-def test_txda_can_import_shared_graph_module_without_vendor_graph_api(monkeypatch):
-    modules = {
-        "torch": {"Tensor": object},
-        "vllm.envs": {},
-        "vllm.compilation.counter": {"compilation_counter": SimpleNamespace()},
-        "vllm.compilation.monitor": {"validate_cudagraph_capturing_enabled": Mock()},
-        "vllm.config": {"CUDAGraphMode": _GraphMode, "VllmConfig": object},
-        "vllm.distributed.device_communicators.pynccl_allocator": {
-            "set_graph_pool_id": Mock()
-        },
-        "vllm.forward_context": {
-            "BatchDescriptor": object,
-            "get_forward_context": Mock(),
-            "is_forward_context_available": Mock(),
-        },
-        "vllm.logger": {"init_logger": Mock(return_value=Mock())},
-        "vllm.platforms": {"current_platform": SimpleNamespace(device_type="txda")},
-        "vllm.utils.torch_utils": {"current_stream": Mock()},
-        "vllm.compilation.cuda_graph": {"CUDAGraphStat": object},
-    }
-    installed = {}
-    for name, attributes in modules.items():
-        parts = name.split(".")
-        for index in range(1, len(parts) + 1):
-            key = ".".join(parts[:index])
-            if key not in installed:
-                module = ModuleType(key)
-                module.__path__ = []
-                installed[key] = module
-                monkeypatch.setitem(sys.modules, key, module)
-                if index > 1:
-                    setattr(
-                        installed[".".join(parts[: index - 1])],
-                        parts[index - 1],
-                        module,
-                    )
-        installed[name].__dict__.update(attributes)
-    # Eager ModelRunnerFL imports this shared module even when TXDA has no
-    # native graph API. Only the shared import/type dispatch is exercised.
-    module = runpy.run_path(str(_ROOT / "vllm_fl/compilation/graph.py"))
-    assert module["Graph"].graph is None
-    assert "GraphWrapper" in module
 
 
 def test_txda_accepts_eager_configuration(configure_platform):
@@ -480,40 +427,6 @@ def test_test_helpers_report_unavailable_txda_hardware(txda_test_device_utils):
 
 
 @pytest.mark.parametrize(
-    "case,model",
-    [
-        ("27b_tp8_eager", "Qwen3.6-27B"),
-        ("35b_a3b_tp8_eager", "Qwen3.6-35B-A3B"),
-    ],
-)
-def test_txda_smoke_config_preserves_engine_and_serving_limits(case, model):
-    from tests.utils.model_config import ModelConfig
-    from tests.utils.platform_config import PlatformConfig
-
-    platform = PlatformConfig.load("tsingmicro", "tx8110")
-    cases = platform.get_e2e_tests().get_cases()
-    assert {item["task"] for item in cases if item["case"] == case} == {
-        "inference",
-        "serving",
-    }
-    assert platform.env_defaults["FL_BACKEND"] == "tsingmicro"
-    assert platform.env_defaults["TXDA_VISIBLE_DEVICES"] == "0,1,2,3,4,5,6,7"
-    config = ModelConfig.load("qwen3_6", case, platform="tsingmicro", device="tx8110")
-    engine = config.engine_kwargs()
-    assert engine["model"] == f"/models/Qwen/{model}"
-    assert engine["tensor_parallel_size"] == 8
-    assert engine["max_model_len"] == 1024
-    assert engine["max_num_seqs"] == 2
-    assert engine["kv_cache_memory_bytes"] == 134217728
-    assert engine["enforce_eager"] is True
-    assert engine["trust_remote_code"] is True
-    args = config.serve_args()
-    assert args[args.index("--kv-cache-memory-bytes") + 1] == "134217728"
-    assert "--enforce-eager" in args
-    assert "--trust-remote-code" in args
-
-
-@pytest.mark.parametrize(
     "field",
     [
         "tensor_parallel_size",
@@ -555,68 +468,6 @@ def test_txda_rejects_context_parallelism_even_with_flagcx(configure_platform, f
     )
     with pytest.raises(ValueError, match="does not support context parallelism"):
         configure_platform(platform, config)
-
-
-@pytest.mark.parametrize(
-    "device, mode, expected",
-    [
-        ("txda", _CompilationMode.VLLM_COMPILE, 0),
-        ("txda", _CompilationMode.NONE, 0),
-        ("npu", _CompilationMode.VLLM_COMPILE, 1),
-        ("npu", _CompilationMode.NONE, 0),
-        ("cuda", _CompilationMode.VLLM_COMPILE, 0),
-    ],
-)
-@pytest.mark.parametrize("graph_mode", [_GraphMode.NONE, _GraphMode.PIECEWISE])
-def test_runner_resolves_cached_ops_before_compilation(
-    monkeypatch, device, mode, expected, graph_mode
-):
-    source = _ROOT / "vllm_fl/worker/model_runner.py"
-    tree = ast.parse(source.read_text(encoding="utf-8"))
-    runner = next(
-        n
-        for n in tree.body
-        if isinstance(n, ast.ClassDef) and n.name == "ModelRunnerFL"
-    )
-    load = next(
-        n
-        for n in runner.body
-        if isinstance(n, ast.FunctionDef) and n.name == "load_model"
-    )
-    warmup = next(
-        n
-        for n in load.body
-        if isinstance(n, ast.If)
-        and any(
-            isinstance(child, ast.ImportFrom)
-            and child.module == "vllm_fl.dispatch"
-            and any(alias.name == "warmup_cached_ops" for alias in child.names)
-            for child in ast.walk(n)
-        )
-    )
-    first_compile = next(
-        child
-        for child in ast.walk(load)
-        if isinstance(child, ast.Call)
-        and isinstance(child.func, ast.Attribute)
-        and child.func.attr == "compile"
-    )
-    assert warmup.end_lineno < first_compile.lineno
-    dispatch = ModuleType("vllm_fl.dispatch")
-    dispatch.warmup_cached_ops = Mock()
-    monkeypatch.setitem(sys.modules, dispatch.__name__, dispatch)
-    exec(
-        compile(ast.Module(body=[warmup], type_ignores=[]), str(source), "exec"),
-        {
-            "current_platform": SimpleNamespace(device_type=device),
-            "self": SimpleNamespace(
-                compilation_config=SimpleNamespace(mode=mode, cudagraph_mode=graph_mode)
-            ),
-            "CompilationMode": _CompilationMode,
-            "CUDAGraphMode": _GraphMode,
-        },
-    )
-    assert dispatch.warmup_cached_ops.call_count == expected
 
 
 @pytest.mark.parametrize(

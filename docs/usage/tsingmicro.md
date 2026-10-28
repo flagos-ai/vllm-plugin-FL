@@ -19,9 +19,9 @@ containing the TXDA 0.28 adaptation described here.
   slow and does not establish a throughput guarantee.
 - The TXDA SDPA backend uses the paged KV cache with reference attention.
   MLA and sparse attention are unsupported.
-- The smoke cases cover Qwen3.6-27B and Qwen3.6-35B-A3B at TP8, with a 1024-token
-  context, at most 2 sequences and a 128 MiB KV-cache budget per worker. These
-  bounds are smoke-test settings, not recommended production capacity limits.
+- Validation covers Qwen3.6-27B and Qwen3.6-35B-A3B at TP8. The command
+  examples below use bounded smoke-test settings, not recommended production
+  capacity limits.
 
 ## Reference environment
 
@@ -154,37 +154,12 @@ An explicit `--kv-cache-memory-bytes` takes priority over the legacy
 `VLLM_TXDA_KV_CACHE_SIZE` environment variable. If neither is set, TXDA retains
 its 20 GiB fallback budget and skips unsafe peak-memory profiling.
 
-## Run the bounded smoke tests
+## Run a bounded smoke test
 
-The platform configuration is `tests/platforms/tsingmicro.yaml`. It selects both
-TP8 eager model cases for offline inference and serving, including text and
-locally generated image requests. To run one offline case, save this as
-`$task_root/inference.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-source /work/task/env.sh
-cd /work/vllm-plugin-FL
-python tests/run.py --platform tsingmicro --device tx8110 \
-  --scope e2e --task inference --model qwen3_6 --case 27b_tp8_eager \
-  --output-dir /work/task/outputs
-```
-
-Run it from the host:
-
-```bash
-tmux new-session -d -s txda-028-inference \
-  "docker exec codex-tsingmicro-028 bash -lc 'bash /work/task/inference.sh' >'$task_root/outputs/inference.log' 2>&1"
-```
-
-Use `--case 35b_a3b_tp8_eager` for the MoE model, or `--task serving` for the API
-and image checks. Run one hardware test job at a time in the isolated container.
-The serving test allows up to 180 startup polls at a 10-second interval.
-Use `--dry-run` to inspect the selected cases without starting the models.
-
-For a manual server, put this command after `source /work/task/env.sh` in a
-script and launch it through the same host `tmux` pattern:
+There is no Tsingmicro CI runner, so this adaptation adds no platform test
+configuration. Validate manually against a server. Put the command below after
+`source /work/task/env.sh` in a script and launch it through the same host
+`tmux` pattern. Run one hardware job at a time in the isolated container.
 
 ```bash
 vllm serve /models/Qwen/Qwen3.6-27B \
@@ -207,7 +182,7 @@ curl http://127.0.0.1:8099/v1/chat/completions \
 ## Adaptation acceptance gate
 
 Use the original cases in `tools/adaptation-gate-cases` for acceptance, in
-addition to the bounded smoke cases above. This eager-only delivery covers
+addition to the bounded smoke check above. This eager-only delivery covers
 Qwen3.6-27B and Qwen3.6-35B-A3B: five scenarios and 26 requests per model,
 or 10 scenarios and 52 requests. Graph mode is outside the current scope.
 The cases include a detailed answer with a 512-token budget, OCR, eight
