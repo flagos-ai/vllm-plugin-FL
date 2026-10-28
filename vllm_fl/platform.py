@@ -70,7 +70,7 @@ class PlatformFL(Platform):
         device_info.vendor_name
         if (
             device_info.device_type == "cuda"
-            and device_info.vendor_name not in ("iluvatar", "hygon")
+            and device_info.vendor_name not in ("iluvatar", "hygon", "amd")
         )
         else device_info.device_type
     )
@@ -115,6 +115,17 @@ class PlatformFL(Platform):
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
+
+    def is_rocm(self) -> bool:
+        """Report AMD ROCm so vLLM's own ROCm handling applies.
+
+        ``PlatformFL`` registers as ``PlatformEnum.OOT``, so the base
+        implementation answers False for every vendor. vLLM gates a great deal
+        of behaviour on ``is_rocm()`` — including skipping the TileLang JIT hook,
+        whose symbols are broken on ROCm and abort the process inside
+        ``tvm_ffi`` — so AMD must answer truthfully here.
+        """
+        return self.vendor_name == "amd"
 
     def is_sleep_mode_available(self) -> bool:
         return self.vendor_name == "nvidia"
@@ -589,6 +600,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "amd",
         ]
 
     @classmethod
@@ -626,7 +638,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
-        return cls.vendor_name != "hygon" and cls.dist_backend != "flagcx"
+        # AMD (ROCm) uses RCCL for collectives; vLLM's custom all-reduce assumes
+        # NVIDIA NVLink topology and is not validated on RDNA3, so disable it
+        # like hygon and let RCCL handle the reduction.
+        return cls.vendor_name not in ("hygon", "amd") and cls.dist_backend != "flagcx"
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
@@ -651,6 +666,36 @@ class PlatformFL(Platform):
             )
 
             patch_triton_chained_or_for_iluvatar()
+
+        if cls.vendor_name == "amd":
+            cls._disable_rocm_native_kernels()
+
+    @classmethod
+    def _disable_rocm_native_kernels(cls) -> None:
+        """Turn off ROCm paths that need kernels an empty build does not ship.
+
+        Reporting ``is_rocm()`` lets vLLM apply its ROCm handling, but some of
+        those paths call into the native ``vllm._rocm_C`` extension, which an
+        empty install (``VLLM_TARGET_DEVICE=empty``) does not provide. Skinny
+        GEMM is the one reached by an ordinary dense model: vLLM defaults
+        ``VLLM_ROCM_USE_SKINNY_GEMM`` to True and then calls
+        ``ops.wvSplitK``/``ops.LLMM1``. Without the extension those raise
+        ``AttributeError``, so default them off here and let the operator keep
+        an explicit override.
+        """
+        import importlib.util
+
+        if importlib.util.find_spec("vllm._rocm_C") is not None:
+            return
+
+        if os.environ.get("VLLM_ROCM_USE_SKINNY_GEMM") is None:
+            os.environ["VLLM_ROCM_USE_SKINNY_GEMM"] = "0"
+            logger.info_once(
+                "AMD: disabling VLLM_ROCM_USE_SKINNY_GEMM because the native "
+                "vllm._rocm_C extension is not present in this empty build; "
+                "dense GEMMs use the Torch path. Set the variable explicitly "
+                "to override."
+            )
 
     @classmethod
     def supports_fp8(cls) -> bool:
@@ -736,18 +781,39 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs.
+
+        ``vllm_c`` is only a registered IR-op provider when the build ships the
+        native ``vllm._C`` extension. Empty-mode installs
+        (``VLLM_TARGET_DEVICE=empty``, used by every non-CUDA backend) register
+        ``native`` only, and vLLM asserts that every requested provider is a
+        registered implementation. Probe for the extension instead of assuming
+        it, so the priority list stays valid on empty builds.
+        """
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        if using_inductor or not cls._has_native_vllm_c():
+            default = ["native"]
+        else:
+            default = ["vllm_c", "native"]
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,
             fused_add_rms_norm=default,
         )
+
+    @staticmethod
+    def _has_native_vllm_c() -> bool:
+        """Return True when the native ``vllm._C`` extension is importable."""
+        import importlib.util
+
+        try:
+            return importlib.util.find_spec("vllm._C") is not None
+        except (ImportError, ValueError):
+            return False
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:
