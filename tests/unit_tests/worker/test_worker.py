@@ -210,3 +210,69 @@ class TestMemoryProfilingResult:
 
         assert result.before_profile is not None
         assert result.after_profile is not None
+
+
+@pytest.mark.parametrize("kind", ["async_pooling", "sync", "empty", "pipeline"])
+def test_execute_model_preserves_runner_output_contract(monkeypatch, kind):
+    from vllm.sequence import IntermediateTensors
+    from vllm.v1.outputs import AsyncModelRunnerOutput, ModelRunnerOutput
+
+    import vllm_fl.worker.worker as worker_module
+
+    class DeferredPoolingOutput(AsyncModelRunnerOutput):
+        def get_output(self):
+            raise AssertionError("Worker must not resolve deferred output")
+
+    if kind == "async_pooling":
+        output = DeferredPoolingOutput()
+    elif kind == "sync":
+        output = ModelRunnerOutput(
+            req_ids=[],
+            req_id_to_index={},
+            sampled_token_ids=[],
+            logprobs=None,
+            prompt_logprobs_dict={},
+            pooler_output=[],
+        )
+    elif kind == "pipeline":
+        output = IntermediateTensors({"hidden_states": torch.empty(0)})
+    else:
+        output = None
+
+    pipeline = kind == "pipeline"
+    pp_group = MagicMock(is_first_rank=True, is_last_rank=not pipeline)
+    tp_group = object()
+    monkeypatch.setattr(worker_module, "get_pp_group", lambda: pp_group)
+    monkeypatch.setattr(worker_module, "get_tp_group", lambda: tp_group)
+    config = SimpleNamespace(
+        parallel_config=SimpleNamespace(
+            pipeline_parallel_size=2 if pipeline else 1,
+            distributed_executor_backend="uni",
+        ),
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=False),
+        ),
+    )
+    runner = MagicMock()
+    runner.execute_model.return_value = output
+    worker = SimpleNamespace(
+        vllm_config=config,
+        model_runner=runner,
+        annotate_profile=lambda _: nullcontext(),
+    )
+    scheduler_output = SimpleNamespace(total_num_scheduled_tokens=4)
+
+    result = worker_module.WorkerFL.execute_model(worker, scheduler_output)
+
+    runner.execute_model.assert_called_once_with(scheduler_output, None)
+    if pipeline:
+        assert result is None
+        pp_group.send_tensor_dict.assert_called_once_with(
+            output.tensors,
+            all_gather_group=tp_group,
+            all_gather_tensors={},
+        )
+    else:
+        assert result is output
+        pp_group.send_tensor_dict.assert_not_called()
+    pp_group.recv_tensor_dict.assert_not_called()

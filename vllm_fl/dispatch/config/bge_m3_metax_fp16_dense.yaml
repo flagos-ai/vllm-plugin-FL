@@ -1,0 +1,15 @@
+# BGE-M3 FP16 dense on MetaX C550; launch with examples/bge_m3_dense/serve.sh.
+# Slow provider: FGV flash_attn_varlen_func / MetaX flash_varlen_fwd_kernel.
+# Append attention_backend to VLLM_FL_FLAGOS_BLACKLIST_APPEND at launch:
+# this removes default.flagos attention registration while retaining other FG ops.
+# Replacement: flash_attn.flash_attn_interface.flash_attn_varlen_func.
+# Validated scope: TP1, FP16 dense, 1024/2048/4096/8192-token requests.
+prefer: flagos
+strict: true
+op_backends:
+  attention_backend:
+    - impl:vendor.metax
+  bge_m3_encoder_attention:
+    - flagos
+  bge_m3_linear:
+    - flagos

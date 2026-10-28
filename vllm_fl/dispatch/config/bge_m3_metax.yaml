@@ -1,0 +1,10 @@
+# BGE-M3 FP32 encoder on MetaX: select one adapter, preserve all other providers.
+prefer: flagos
+strict: true
+op_backends:
+  attention_backend:
+    - impl:vendor.metax.bge_m3
+  bge_m3_encoder_attention:
+    - flagos
+  bge_m3_linear:
+    - impl:vendor.metax.bge_m3

@@ -1,0 +1,1129 @@
+{
+  "measurement_date": "2026-10-27 (Asia/Shanghai)",
+  "source_parent_commit": "45a12d42849d3d3749ff2dad3be419dc500a8187",
+  "execution_file_sha256": {
+    "pyproject.toml": "2e020e8e48e09188da3f02a968798fa85fe9a0851526c050c27fae412e3d0efa",
+    "examples/bge_m3_joint/serve.yaml": "f7ce4a6ce4befec56819572e402fd4b6674983242306d2ea9515f7b03a6cd216",
+    "examples/bge_m3_joint/benchmark.py": "517e6fe40e60bc423fccdb6d8ff4f0e78deecb6f588d90f4598045e4fd4dfec0",
+    "tests/unit_tests/models/bge_m3/test_http_client.py": "50e73bb3116a0ab1d53a0078876c1c8661fe84afe3a82b8f04386c2808272169"
+  },
+  "platform": {
+    "node": "102",
+    "gpu": "MetaX C550 64 GiB, device 0",
+    "cpu": "2 x Intel Xeon Platinum 8460Y+, 160 logical CPUs",
+    "image": "sha256:11eb78c9aeb6a66b96c930bcf96017bff9fe4488e86098a16e85665f3ae1e6a1",
+    "python": "3.12.13",
+    "torch": "2.10.0+metax3.8.1.0",
+    "maca_runtime": "3.8.1.3",
+    "flagtree": "0.6.1+metax3.6",
+    "vllm": "0.24.0",
+    "orjson": "3.11.4",
+    "requests": "2.34.2",
+    "numpy": "2.3.5"
+  },
+  "operator_pins": {
+    "FlagGems": "4897cc306cd83390c95b83b50df28f7edb1684c5",
+    "FlagGems-vllm": "60f1d386c94d1084f3f5f02f71714b7bc6581e6b"
+  },
+  "contract": {
+    "dtype": "FP32",
+    "tp": 1,
+    "eager": true,
+    "model_max_length": 8192,
+    "max_num_seqs": 64,
+    "gpu_memory_utilization": 0.25,
+    "prefix_caching": false,
+    "chunked_prefill": false,
+    "client_concurrency": 64,
+    "requests_per_round": 128,
+    "documents_per_request": 1,
+    "warmup_rounds_per_run_mode": 1,
+    "formal_rounds_per_run_mode": 1,
+    "fast_independent_runs_per_mbt_length": 3,
+    "standard_independent_runs_per_length": 1,
+    "mode_order": [
+      "dense",
+      "sparse",
+      "colbert",
+      "joint"
+    ],
+    "fast_mbt_order_per_length": [
+      32768,
+      8192,
+      8192,
+      32768,
+      32768,
+      8192
+    ],
+    "lengths_run_separately": true,
+    "transport": "same-host loopback HTTP; full official JSON",
+    "timing": "send through full body receive, parse, shape and finite validation; request latency excludes client executor queue",
+    "statistics": "arithmetic mean and sample standard deviation across all independent formal runs",
+    "memory": "maximum mx-smi device-memory sample within formal rounds, including driver/runtime allocations; sampled at a nominal 250 ms interval",
+    "cache": "Independent copies of the same prepopulated cache (prior explicit all-shape diagnostic priming plus correctness validation). No new/changed tuning records in any warmup/formal run. These are steady-state, not cold-start/out-of-box measurements."
+  },
+  "checks": {
+    "passed": true,
+    "targeted_tests": 105,
+    "http_correctness_passed": true,
+    "reference_samples": 34,
+    "output_combinations": 8,
+    "mixed_concurrent_requests": 24,
+    "performance_runs": 14,
+    "warmup_rounds": 56,
+    "formal_rounds": 56,
+    "warmup_requests": 7168,
+    "formal_requests": 7168,
+    "failures": 0,
+    "retries": 0,
+    "all_actual_http_peaks": 64,
+    "new_or_changed_tuning_rows": 0,
+    "code_source_unchanged_during_measurement": true,
+    "model_framework_operator_sources_unchanged": true,
+    "own_container_stopped": true,
+    "completed_ns": 1793037871751601150
+  },
+  "comparisons": [
+    {
+      "tokens_per_document": 1024,
+      "output": "dense",
+      "standard_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "dense",
+        "runs": 1,
+        "docs_per_s_mean": 33.385772148291366,
+        "docs_per_s_stdev": null,
+        "min": 33.385772148291366,
+        "max": 33.385772148291366,
+        "peak_gpu_mib": 3807,
+        "values": [
+          33.385772148291366
+        ],
+        "labels": [
+          "1024_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 1493.9169691328125,
+            "p50": 1855.4990425,
+            "p95": 1924.6630241999994,
+            "p99": 1966.0051874600001
+          }
+        ],
+        "response_bytes_by_run": [
+          2795593
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "dense",
+        "runs": 3,
+        "docs_per_s_mean": 33.45435408643521,
+        "docs_per_s_stdev": 0.009103765593119881,
+        "min": 33.446110831882535,
+        "max": 33.46412506002412,
+        "peak_gpu_mib": 3807,
+        "values": [
+          33.46412506002412,
+          33.452826367398984,
+          33.446110831882535
+        ],
+        "labels": [
+          "1024_2_mbt8192",
+          "1024_3_mbt8192",
+          "1024_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 1489.48143365625,
+            "p50": 1854.7738610000001,
+            "p95": 1916.4798402499994,
+            "p99": 1957.88053255
+          },
+          {
+            "mean": 1486.74401778125,
+            "p50": 1858.2807175,
+            "p95": 1913.8767266999996,
+            "p99": 1949.17942469
+          },
+          {
+            "mean": 1490.9822560390626,
+            "p50": 1855.5590105,
+            "p95": 1921.1614225999995,
+            "p99": 1973.5449386700002
+          }
+        ],
+        "response_bytes_by_run": [
+          2795926,
+          2795855,
+          2795878
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 1024,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "dense",
+        "runs": 3,
+        "docs_per_s_mean": 34.51354039805911,
+        "docs_per_s_stdev": 0.01593984305730337,
+        "min": 34.49605828229783,
+        "max": 34.52726746818136,
+        "peak_gpu_mib": 5823,
+        "values": [
+          34.517295443698124,
+          34.49605828229783,
+          34.52726746818136
+        ],
+        "labels": [
+          "1024_1_mbt32768",
+          "1024_4_mbt32768",
+          "1024_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 1608.759932546875,
+            "p50": 1786.566393,
+            "p95": 1914.3591497,
+            "p99": 1920.77233836
+          },
+          {
+            "mean": 1610.0095521328124,
+            "p50": 1784.7488055,
+            "p95": 1916.9265435,
+            "p99": 1922.93369816
+          },
+          {
+            "mean": 1607.53509190625,
+            "p50": 1787.181823,
+            "p95": 1910.53883785,
+            "p99": 1918.22731273
+          }
+        ],
+        "response_bytes_by_run": [
+          2795989,
+          2795949,
+          2795953
+        ]
+      },
+      "combined_change_pct": 3.377990614560211,
+      "mbt_only_change_pct": 3.166064150834602,
+      "fast32768_cv_pct": 0.04618431744023501
+    },
+    {
+      "tokens_per_document": 1024,
+      "output": "sparse",
+      "standard_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "sparse",
+        "runs": 1,
+        "docs_per_s_mean": 34.09469215489322,
+        "docs_per_s_stdev": null,
+        "min": 34.09469215489322,
+        "max": 34.09469215489322,
+        "peak_gpu_mib": 3807,
+        "values": [
+          34.09469215489322
+        ],
+        "labels": [
+          "1024_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 1460.7306440156249,
+            "p50": 1818.852914,
+            "p95": 1880.7891162499996,
+            "p99": 1907.63451084
+          }
+        ],
+        "response_bytes_by_run": [
+          854798
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "sparse",
+        "runs": 3,
+        "docs_per_s_mean": 34.015407505119924,
+        "docs_per_s_stdev": 0.0444138195816907,
+        "min": 33.96514865020449,
+        "max": 34.049375654022334,
+        "peak_gpu_mib": 3807,
+        "values": [
+          34.031698211132955,
+          34.049375654022334,
+          33.96514865020449
+        ],
+        "labels": [
+          "1024_2_mbt8192",
+          "1024_3_mbt8192",
+          "1024_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 1464.6723372499998,
+            "p50": 1821.5764494999999,
+            "p95": 1887.2736400499994,
+            "p99": 1924.33863992
+          },
+          {
+            "mean": 1462.5320644531248,
+            "p50": 1823.0393199999999,
+            "p95": 1883.4464676499997,
+            "p99": 1912.62559172
+          },
+          {
+            "mean": 1467.3411679140625,
+            "p50": 1827.390435,
+            "p95": 1889.7197228999996,
+            "p99": 1918.69076147
+          }
+        ],
+        "response_bytes_by_run": [
+          854788,
+          854798,
+          854799
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 1024,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "sparse",
+        "runs": 3,
+        "docs_per_s_mean": 35.05409004123328,
+        "docs_per_s_stdev": 0.041737812824082496,
+        "min": 35.019831894957576,
+        "max": 35.10057604846944,
+        "peak_gpu_mib": 5823,
+        "values": [
+          35.10057604846944,
+          35.04186218027282,
+          35.019831894957576
+        ],
+        "labels": [
+          "1024_1_mbt32768",
+          "1024_4_mbt32768",
+          "1024_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 1581.7109998671874,
+            "p50": 1757.6587585,
+            "p95": 1884.42768995,
+            "p99": 1889.96505108
+          },
+          {
+            "mean": 1584.6569723671876,
+            "p50": 1756.844998,
+            "p95": 1885.7946649500002,
+            "p99": 1895.63306409
+          },
+          {
+            "mean": 1585.572589640625,
+            "p50": 1756.97366,
+            "p95": 1894.2645920500001,
+            "p99": 1900.9606971
+          }
+        ],
+        "response_bytes_by_run": [
+          854928,
+          854916,
+          854908
+        ]
+      },
+      "combined_change_pct": 2.8139215394041184,
+      "mbt_only_change_pct": 3.053564876319692,
+      "fast32768_cv_pct": 0.11906688427794677
+    },
+    {
+      "tokens_per_document": 1024,
+      "output": "colbert",
+      "standard_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "colbert",
+        "runs": 1,
+        "docs_per_s_mean": 1.6091811997892755,
+        "docs_per_s_stdev": null,
+        "min": 1.6091811997892755,
+        "max": 1.6091811997892755,
+        "peak_gpu_mib": 3807,
+        "values": [
+          1.6091811997892755
+        ],
+        "labels": [
+          "1024_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 34202.23179009375,
+            "p50": 33436.486106,
+            "p95": 52602.6990028,
+            "p99": 54553.155777910004
+          }
+        ],
+        "response_bytes_by_run": [
+          2835797597
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "colbert",
+        "runs": 3,
+        "docs_per_s_mean": 4.838309175827541,
+        "docs_per_s_stdev": 0.017604505282009547,
+        "min": 4.818076515601827,
+        "max": 4.85012791639837,
+        "peak_gpu_mib": 4063,
+        "values": [
+          4.8467230954824245,
+          4.818076515601827,
+          4.85012791639837
+        ],
+        "labels": [
+          "1024_2_mbt8192",
+          "1024_3_mbt8192",
+          "1024_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 11208.515379492188,
+            "p50": 9748.8090215,
+            "p95": 19051.16958225,
+            "p99": 19434.67719128
+          },
+          {
+            "mean": 11301.38302028125,
+            "p50": 9498.955426,
+            "p95": 18544.995639149998,
+            "p99": 19315.76828046
+          },
+          {
+            "mean": 11204.037646093751,
+            "p50": 9511.426685499999,
+            "p95": 18838.48687465,
+            "p99": 20227.753467190003
+          }
+        ],
+        "response_bytes_by_run": [
+          2836068812,
+          2836068488,
+          2836073049
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 1024,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "colbert",
+        "runs": 3,
+        "docs_per_s_mean": 4.936200057542325,
+        "docs_per_s_stdev": 0.08016853148069386,
+        "min": 4.882937184552258,
+        "max": 5.028400489838758,
+        "peak_gpu_mib": 5823,
+        "values": [
+          4.882937184552258,
+          5.028400489838758,
+          4.897262498235959
+        ],
+        "labels": [
+          "1024_1_mbt32768",
+          "1024_4_mbt32768",
+          "1024_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 11108.888823578125,
+            "p50": 10263.3676865,
+            "p95": 17831.300934,
+            "p99": 18596.68482074
+          },
+          {
+            "mean": 10701.842182890625,
+            "p50": 10089.5862255,
+            "p95": 16124.975836249998,
+            "p99": 16835.83132288
+          },
+          {
+            "mean": 11054.0321018125,
+            "p50": 10505.1271905,
+            "p95": 17183.4754975,
+            "p99": 18043.2056297
+          }
+        ],
+        "response_bytes_by_run": [
+          2836059517,
+          2836062675,
+          2836058097
+        ]
+      },
+      "combined_change_pct": 206.75228235258572,
+      "mbt_only_change_pct": 2.0232456868166437,
+      "fast32768_cv_pct": 1.624094051013986
+    },
+    {
+      "tokens_per_document": 1024,
+      "output": "joint",
+      "standard_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "joint",
+        "runs": 1,
+        "docs_per_s_mean": 1.6398511284336448,
+        "docs_per_s_stdev": null,
+        "min": 1.6398511284336448,
+        "max": 1.6398511284336448,
+        "peak_gpu_mib": 4063,
+        "values": [
+          1.6398511284336448
+        ],
+        "labels": [
+          "1024_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 33422.909014703124,
+            "p50": 31459.0482475,
+            "p95": 50033.79391654999,
+            "p99": 51957.39509226
+          }
+        ],
+        "response_bytes_by_run": [
+          2839415951
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 1024,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "joint",
+        "runs": 3,
+        "docs_per_s_mean": 4.745938460509947,
+        "docs_per_s_stdev": 0.010771083119351117,
+        "min": 4.736235671260124,
+        "max": 4.757528411519138,
+        "peak_gpu_mib": 4063,
+        "values": [
+          4.7440512987505805,
+          4.757528411519138,
+          4.736235671260124
+        ],
+        "labels": [
+          "1024_2_mbt8192",
+          "1024_3_mbt8192",
+          "1024_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 11480.925270671874,
+            "p50": 9412.2137985,
+            "p95": 20986.419042199996,
+            "p99": 21756.970051360004
+          },
+          {
+            "mean": 11458.782559601563,
+            "p50": 10132.08879,
+            "p95": 18444.19710605,
+            "p99": 19412.866757879998
+          },
+          {
+            "mean": 11520.633892874997,
+            "p50": 9842.919944000001,
+            "p95": 18048.073699949997,
+            "p99": 18725.41341193
+          }
+        ],
+        "response_bytes_by_run": [
+          2839683571,
+          2839685282,
+          2839684613
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 1024,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "joint",
+        "runs": 3,
+        "docs_per_s_mean": 4.906684704119346,
+        "docs_per_s_stdev": 0.1094929955569147,
+        "min": 4.783116711875384,
+        "max": 4.991640440478601,
+        "peak_gpu_mib": 5824,
+        "values": [
+          4.945296960004053,
+          4.991640440478601,
+          4.783116711875384
+        ],
+        "labels": [
+          "1024_1_mbt32768",
+          "1024_4_mbt32768",
+          "1024_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 10898.358555796876,
+            "p50": 10354.1992145,
+            "p95": 16624.5378729,
+            "p99": 17485.02431539
+          },
+          {
+            "mean": 10794.6263416875,
+            "p50": 10349.9657835,
+            "p95": 16578.871387299998,
+            "p99": 17368.2301597
+          },
+          {
+            "mean": 11337.812593882813,
+            "p50": 10159.8885725,
+            "p95": 19400.431071799998,
+            "p99": 20318.66114634
+          }
+        ],
+        "response_bytes_by_run": [
+          2839672987,
+          2839677519,
+          2839678102
+        ]
+      },
+      "combined_change_pct": 199.2152530825234,
+      "mbt_only_change_pct": 3.387027559394995,
+      "fast32768_cv_pct": 2.23150665183339
+    },
+    {
+      "tokens_per_document": 4096,
+      "output": "dense",
+      "standard_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "dense",
+        "runs": 1,
+        "docs_per_s_mean": 4.986705606673679,
+        "docs_per_s_stdev": null,
+        "min": 4.986705606673679,
+        "max": 4.986705606673679,
+        "peak_gpu_mib": 3883,
+        "values": [
+          4.986705606673679
+        ],
+        "labels": [
+          "4096_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 9718.818367546875,
+            "p50": 12690.1026575,
+            "p95": 12809.8993006,
+            "p99": 12810.62731792
+          }
+        ],
+        "response_bytes_by_run": [
+          2797291
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "dense",
+        "runs": 3,
+        "docs_per_s_mean": 4.989127521269847,
+        "docs_per_s_stdev": 0.001077214126433001,
+        "min": 4.988379225499682,
+        "max": 4.990362151783721,
+        "peak_gpu_mib": 3883,
+        "values": [
+          4.988379225499682,
+          4.988641186526138,
+          4.990362151783721
+        ],
+        "labels": [
+          "4096_2_mbt8192",
+          "4096_3_mbt8192",
+          "4096_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 9713.724110398438,
+            "p50": 12679.045454,
+            "p95": 12806.6747094,
+            "p99": 12807.06624457
+          },
+          {
+            "mean": 9712.865489257812,
+            "p50": 12681.987261,
+            "p95": 12810.6820335,
+            "p99": 12811.57203066
+          },
+          {
+            "mean": 9709.704394804688,
+            "p50": 12672.742308,
+            "p95": 12801.0172741,
+            "p99": 12801.60530157
+          }
+        ],
+        "response_bytes_by_run": [
+          2797577,
+          2797635,
+          2797603
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 4096,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "dense",
+        "runs": 3,
+        "docs_per_s_mean": 5.141962792867253,
+        "docs_per_s_stdev": 0.0018935779754219908,
+        "min": 5.140318604706591,
+        "max": 5.1440331343262145,
+        "peak_gpu_mib": 6059,
+        "values": [
+          5.1440331343262145,
+          5.140318604706591,
+          5.141536639568954
+        ],
+        "labels": [
+          "4096_1_mbt32768",
+          "4096_4_mbt32768",
+          "4096_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 9706.160162734375,
+            "p50": 12286.9642815,
+            "p95": 12553.019202649997,
+            "p99": 12633.80185204
+          },
+          {
+            "mean": 9715.495489117187,
+            "p50": 12293.580815000001,
+            "p95": 12565.543443499997,
+            "p99": 12656.991798739999
+          },
+          {
+            "mean": 9713.032793257813,
+            "p50": 12292.587240500001,
+            "p95": 12563.545212449997,
+            "p99": 12654.18468568
+          }
+        ],
+        "response_bytes_by_run": [
+          2797764,
+          2797765,
+          2797713
+        ]
+      },
+      "combined_change_pct": 3.1134219350305026,
+      "mbt_only_change_pct": 3.0633667098271866,
+      "fast32768_cv_pct": 0.03682597583258857
+    },
+    {
+      "tokens_per_document": 4096,
+      "output": "sparse",
+      "standard_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "sparse",
+        "runs": 1,
+        "docs_per_s_mean": 5.000638843527846,
+        "docs_per_s_stdev": null,
+        "min": 5.000638843527846,
+        "max": 5.000638843527846,
+        "peak_gpu_mib": 3883,
+        "values": [
+          5.000638843527846
+        ],
+        "labels": [
+          "4096_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 9690.294892757813,
+            "p50": 12656.361546,
+            "p95": 12777.3537948,
+            "p99": 12777.97782988
+          }
+        ],
+        "response_bytes_by_run": [
+          854291
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "sparse",
+        "runs": 3,
+        "docs_per_s_mean": 4.994625097530663,
+        "docs_per_s_stdev": 0.010812735193621541,
+        "min": 4.982157465831512,
+        "max": 5.0014367215042075,
+        "peak_gpu_mib": 3883,
+        "values": [
+          4.982157465831512,
+          5.0014367215042075,
+          5.00028110525627
+        ],
+        "labels": [
+          "4096_2_mbt8192",
+          "4096_3_mbt8192",
+          "4096_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 9728.323901554686,
+            "p50": 12669.0728165,
+            "p95": 12820.23500015,
+            "p99": 12820.84196294
+          },
+          {
+            "mean": 9688.849531835938,
+            "p50": 12642.2809215,
+            "p95": 12774.952015,
+            "p99": 12775.32361589
+          },
+          {
+            "mean": 9691.319009210938,
+            "p50": 12653.0683725,
+            "p95": 12774.0047007,
+            "p99": 12774.72326827
+          }
+        ],
+        "response_bytes_by_run": [
+          854291,
+          854254,
+          854244
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 4096,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "sparse",
+        "runs": 3,
+        "docs_per_s_mean": 5.155427672182883,
+        "docs_per_s_stdev": 0.0008967360384602803,
+        "min": 5.154622725592868,
+        "max": 5.156394221060673,
+        "peak_gpu_mib": 6059,
+        "values": [
+          5.156394221060673,
+          5.155266069895108,
+          5.154622725592868
+        ],
+        "labels": [
+          "4096_1_mbt32768",
+          "4096_4_mbt32768",
+          "4096_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 9683.648811992189,
+            "p50": 12256.243547,
+            "p95": 12523.765882749998,
+            "p99": 12610.45150156
+          },
+          {
+            "mean": 9685.425633476561,
+            "p50": 12246.518459,
+            "p95": 12526.121511749998,
+            "p99": 12617.982414670001
+          },
+          {
+            "mean": 9687.8333771875,
+            "p50": 12257.6909915,
+            "p95": 12529.031054499997,
+            "p99": 12623.28634911
+          }
+        ],
+        "response_bytes_by_run": [
+          854019,
+          853996,
+          854022
+        ]
+      },
+      "combined_change_pct": 3.095381080266879,
+      "mbt_only_change_pct": 3.2195124060807156,
+      "fast32768_cv_pct": 0.01739401841090303
+    },
+    {
+      "tokens_per_document": 4096,
+      "output": "colbert",
+      "standard_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "colbert",
+        "runs": 1,
+        "docs_per_s_mean": 0.36900365275995733,
+        "docs_per_s_stdev": null,
+        "min": 0.36900365275995733,
+        "max": 0.36900365275995733,
+        "peak_gpu_mib": 3883,
+        "values": [
+          0.36900365275995733
+        ],
+        "labels": [
+          "4096_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 150616.38068932033,
+            "p50": 130504.1199045,
+            "p95": 246283.44351644994,
+            "p99": 255100.9732262
+          }
+        ],
+        "response_bytes_by_run": [
+          11344620758
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "colbert",
+        "runs": 3,
+        "docs_per_s_mean": 1.1132827002346322,
+        "docs_per_s_stdev": 0.017878284044970688,
+        "min": 1.092668254415987,
+        "max": 1.1245472674316905,
+        "peak_gpu_mib": 3883,
+        "values": [
+          1.1226325788562188,
+          1.1245472674316905,
+          1.092668254415987
+        ],
+        "labels": [
+          "4096_2_mbt8192",
+          "4096_3_mbt8192",
+          "4096_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 48475.12186494531,
+            "p50": 39723.2352985,
+            "p95": 78079.94464439999,
+            "p99": 81463.20828041
+          },
+          {
+            "mean": 48365.32529512499,
+            "p50": 39982.000589999996,
+            "p95": 78530.97592785,
+            "p99": 81432.90795609001
+          },
+          {
+            "mean": 49714.78279667969,
+            "p50": 41592.791133000006,
+            "p95": 79955.05905665,
+            "p99": 82487.11006939
+          }
+        ],
+        "response_bytes_by_run": [
+          11345709819,
+          11345718033,
+          11345706419
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 4096,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "colbert",
+        "runs": 3,
+        "docs_per_s_mean": 1.136671595690343,
+        "docs_per_s_stdev": 0.002715513646213541,
+        "min": 1.1340550488068475,
+        "max": 1.1394762902518376,
+        "peak_gpu_mib": 6059,
+        "values": [
+          1.1394762902518376,
+          1.136483448012344,
+          1.1340550488068475
+        ],
+        "labels": [
+          "4096_1_mbt32768",
+          "4096_4_mbt32768",
+          "4096_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 47651.606047453126,
+            "p50": 39550.125859499996,
+            "p95": 78395.9297984,
+            "p99": 81591.88519670001
+          },
+          {
+            "mean": 48014.60282602344,
+            "p50": 41149.561619500004,
+            "p95": 78662.0426427,
+            "p99": 81068.86715086
+          },
+          {
+            "mean": 48015.29148490625,
+            "p50": 39255.9869895,
+            "p95": 79361.84572225,
+            "p99": 82244.18266727001
+          }
+        ],
+        "response_bytes_by_run": [
+          11345743941,
+          11345742318,
+          11345742960
+        ]
+      },
+      "combined_change_pct": 208.03803355024394,
+      "mbt_only_change_pct": 2.100894539255971,
+      "fast32768_cv_pct": 0.23890045783754352
+    },
+    {
+      "tokens_per_document": 4096,
+      "output": "joint",
+      "standard_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "standard",
+        "mode": "joint",
+        "runs": 1,
+        "docs_per_s_mean": 0.3723678927458425,
+        "docs_per_s_stdev": null,
+        "min": 0.3723678927458425,
+        "max": 0.3723678927458425,
+        "peak_gpu_mib": 3883,
+        "values": [
+          0.3723678927458425
+        ],
+        "labels": [
+          "4096_standard_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 149210.4426380078,
+            "p50": 126430.49209449999,
+            "p95": 231653.904571,
+            "p99": 237577.50857082
+          }
+        ],
+        "response_bytes_by_run": [
+          11348240694
+        ]
+      },
+      "fast_mbt8192": {
+        "length": 4096,
+        "mbt": 8192,
+        "codec": "fast",
+        "mode": "joint",
+        "runs": 3,
+        "docs_per_s_mean": 1.1050885395657357,
+        "docs_per_s_stdev": 0.012074316779625007,
+        "min": 1.0924011582219535,
+        "max": 1.1164384155790639,
+        "peak_gpu_mib": 3883,
+        "values": [
+          1.1164384155790639,
+          1.1064260448961898,
+          1.0924011582219535
+        ],
+        "labels": [
+          "4096_2_mbt8192",
+          "4096_3_mbt8192",
+          "4096_6_mbt8192"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 48712.87718414844,
+            "p50": 41370.014908,
+            "p95": 77917.38239629999,
+            "p99": 80250.66014658
+          },
+          {
+            "mean": 49240.709932242185,
+            "p50": 41251.5455675,
+            "p95": 76981.82999175,
+            "p99": 79528.73013016
+          },
+          {
+            "mean": 49487.78270109375,
+            "p50": 42809.456879000005,
+            "p95": 78751.70616159998,
+            "p99": 82346.95220489
+          }
+        ],
+        "response_bytes_by_run": [
+          11349329578,
+          11349340005,
+          11349331710
+        ]
+      },
+      "fast_mbt32768": {
+        "length": 4096,
+        "mbt": 32768,
+        "codec": "fast",
+        "mode": "joint",
+        "runs": 3,
+        "docs_per_s_mean": 1.1308596408122011,
+        "docs_per_s_stdev": 0.010622898408011701,
+        "min": 1.1210729617316115,
+        "max": 1.1421570146291922,
+        "peak_gpu_mib": 6060,
+        "values": [
+          1.1421570146291922,
+          1.1293489460758,
+          1.1210729617316115
+        ],
+        "labels": [
+          "4096_1_mbt32768",
+          "4096_4_mbt32768",
+          "4096_5_mbt32768"
+        ],
+        "latency_ms_by_run": [
+          {
+            "mean": 47718.87317759375,
+            "p50": 40202.0994375,
+            "p95": 78114.68335200001,
+            "p99": 81746.0735933
+          },
+          {
+            "mean": 48218.12899426562,
+            "p50": 39154.4178405,
+            "p95": 80059.043446,
+            "p99": 83132.14884756
+          },
+          {
+            "mean": 48493.73885578125,
+            "p50": 40001.5752885,
+            "p95": 79888.4181842,
+            "p99": 82656.28978891001
+          }
+        ],
+        "response_bytes_by_run": [
+          11349364460,
+          11349366532,
+          11349359465
+        ]
+      },
+      "combined_change_pct": 203.69418600331977,
+      "mbt_only_change_pct": 2.332039499440719,
+      "fast32768_cv_pct": 0.939364888854126
+    }
+  ],
+  "interrupted_setup": "Node 126 became occupied by another workload; all performance was measured on idle node 102. Three migration/harness setup failures were retained separately and occurred before performance timing. No performance run was discarded."
+}

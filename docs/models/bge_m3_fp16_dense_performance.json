@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "measured_date": "2026-10-28",
+  "timezone": "Asia/Shanghai",
+  "source_base_commit": "b9269d2ceaed3d08b8b722b5f6ad3b9f9666ddff",
+  "scope": "Optional MetaX FP16 dense deployment profile using the native embeddings endpoint.",
+  "environment": {
+    "device": "MetaX C550 64 GiB",
+    "tensor_parallel_size": 1,
+    "vllm": "0.24.0",
+    "torch": "2.10.0+metax3.8.1.0",
+    "flagtree": "0.6.1+metax3.6",
+    "flash_attn": "2.6.3",
+    "flash_attn_binary_sha256": "1b5a65a404de34072c47cf244ab516fac8831c929d84c6a329642806e032d9b9",
+    "flag_gems_commit": "4897cc306cd83390c95b83b50df28f7edb1684c5",
+    "flaggems_vllm_commit": "60f1d386c94d1084f3f5f02f71714b7bc6581e6b",
+    "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "model_weight_sha256": "b5e0ce3470abf5ef3831aa1bd5553b486803e83251590ab7ff35a117cf6aad38"
+  },
+  "configuration": {
+    "encoder_dtype": "float16",
+    "pooling_heads_dtype": "float32",
+    "pooler_task": "embed",
+    "io_processor_plugin": null,
+    "enforce_eager": true,
+    "max_model_len": 8192,
+    "max_num_seqs": 64,
+    "max_num_batched_tokens": 32768,
+    "gpu_memory_utilization": 0.9,
+    "prefix_caching": false,
+    "chunked_prefill": false,
+    "omp_threads": 16,
+    "mkl_threads": 16,
+    "attention_backend": "vendor.metax",
+    "bge_m3_linear": "default.flagos",
+    "flagtree_aabs": true
+  },
+  "operator_exclusion": {
+    "api": "flaggems_vllm.ops.attention.flash_attn_varlen_func",
+    "provider": "FGV",
+    "reason_category": "slow",
+    "scope": "BGE-M3 FP16 dense on MetaX C550; validated at 1024/2048/4096/8192 tokens",
+    "blacklist_env": "VLLM_FL_FLAGOS_BLACKLIST_APPEND",
+    "blacklist_key": "attention_backend",
+    "replacement": "flash_attn.flash_attn_interface.flash_attn_varlen_func",
+    "implementation_note": "The benchmark selected vendor.metax explicitly. The review launch additionally excludes default.flagos attention registration; it selects the same measured vendor implementation."
+  },
+  "benchmark": {
+    "client": "vllm bench serve --backend openai-embeddings",
+    "endpoint": "/v1/embeddings",
+    "dataset": "random",
+    "seed": 0,
+    "concurrency": 64,
+    "requests_per_round": 256,
+    "documents_per_request": 1,
+    "warmup_rounds": 1,
+    "formal_rounds": 1,
+    "internal_num_warmups": 0,
+    "random_range_ratio": 0,
+    "random_prefix_len": 0,
+    "encoding_format": "float",
+    "add_special_tokens": true,
+    "truncate_prompt_tokens": null,
+    "metric": "total_input_tokens / native CLI benchmark duration; no generated tokens",
+    "cache_contract": "Prepopulated private cache plus untimed packed-position and native metadata shape priming. No tuning or compiler metadata additions during the formal rounds."
+  },
+  "results": [
+    {
+      "input_length": 1024,
+      "total_tokens_per_second": 121435.8476371605,
+      "duration_seconds": 2.158703587949276,
+      "completed_requests": 256,
+      "actual_input_tokens": 262144,
+      "request_errors": 0,
+      "formal_cache_stable": true
+    },
+    {
+      "input_length": 2048,
+      "total_tokens_per_second": 121840.69116085608,
+      "duration_seconds": 4.303061604499817,
+      "completed_requests": 256,
+      "actual_input_tokens": 524288,
+      "request_errors": 0,
+      "formal_cache_stable": true
+    },
+    {
+      "input_length": 4096,
+      "total_tokens_per_second": 106101.42632887894,
+      "duration_seconds": 9.88277006521821,
+      "completed_requests": 256,
+      "actual_input_tokens": 1048576,
+      "request_errors": 0,
+      "formal_cache_stable": true
+    },
+    {
+      "input_length": 8192,
+      "total_tokens_per_second": 80400.06725746636,
+      "duration_seconds": 26.08395827934146,
+      "completed_requests": 256,
+      "actual_input_tokens": 2097152,
+      "request_errors": 0,
+      "formal_cache_stable": true
+    }
+  ],
+  "comparison_to_previous_commit": {
+    "already_in_base": [
+      "MBT32768",
+      "optional orjson pooling serializer",
+      "orjson joint-response client parsing"
+    ],
+    "new_profile": [
+      "FP16 encoder",
+      "MetaX vendor attention with FG Linear retained",
+      "native dense embeddings launch and native benchmark example"
+    ],
+    "comparison_limits": [
+      "Previous FP32 measurements used C64/N128 and fixture cycling with the joint IO endpoint/client. These measurements use C64/N256, random inputs and the native embeddings CLI.",
+      "No same-protocol FP32-versus-FP16 A/B was run, so total historical gains are not attributed to one change."
+    ]
+  },
+  "launch_script": "examples/bge_m3_dense/serve.sh"
+}

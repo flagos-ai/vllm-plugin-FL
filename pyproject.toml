@@ -39,10 +39,16 @@ fl = "vllm_fl:register"
 [project.entry-points."vllm.general_plugins"]
 fl = "vllm_fl:register_model"
 
+[project.entry-points."vllm.io_processor_plugins"]
+bge_m3 = "vllm_fl.patches.bge_m3:register_bge_m3_processor"
+
 [project.urls]
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"
 
 [project.optional-dependencies]
+pooling = [
+    "orjson>=3.11.4,<4",
+]
 test = [
     "pytest",
     "pytest-cov",
