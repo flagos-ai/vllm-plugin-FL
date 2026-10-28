@@ -58,6 +58,20 @@ dist_backend_dict = {
 }
 
 
+def _flagcx_backend_enabled() -> bool:
+    # The wheel (flagcx.api) is the supported install shape; FLAGCX_PATH names
+    # a legacy source tree and is only a fallback (tests, kunlunxin CI). The
+    # facade lives in ``flagcx.api`` — the compiled-bindings root imports fine
+    # without it, so a bare ``find_spec("flagcx")`` would wrongly enable the
+    # backend for a pre-API package and leave the communicator disabled.
+    try:
+        import flagcx.api  # noqa: F401
+
+        return True
+    except (ImportError, ValueError):
+        return bool(os.environ.get("FLAGCX_PATH"))
+
+
 class PlatformFL(Platform):
     _enum = PlatformEnum.OOT
     device_info = DeviceInfo()
@@ -90,7 +104,7 @@ class PlatformFL(Platform):
     ]
     dist_backend: str = (
         "flagcx"
-        if "FLAGCX_PATH" in os.environ
+        if _flagcx_backend_enabled()
         else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
