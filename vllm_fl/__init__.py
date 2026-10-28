@@ -251,6 +251,10 @@ def _register_gdn_packed_decode_patch() -> bool:
 def register_model():
     """Register FL runtime extensions after vLLM model discovery."""
 
+    from vllm_fl.models.hy_v4.register import register_hy_v4
+
+    register_hy_v4()
+
     from vllm.platforms import current_platform
 
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:

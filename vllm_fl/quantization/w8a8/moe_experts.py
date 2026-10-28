@@ -471,6 +471,7 @@ class FlagGemsW8A8Experts(TritonExperts):
                 block_shape=None,
                 w1_bias=quant_config.w1_bias,
                 w2_bias=quant_config.w2_bias,
+                gemm1_clamp_limit=clamp_limit,
             )
         output.copy_(result)
 

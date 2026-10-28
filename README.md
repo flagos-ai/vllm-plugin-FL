@@ -162,6 +162,64 @@ Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
 
+### Hy4-preview text inference
+
+This branch ports the text model/configuration, weight mapping, attention sinks
+and bundled MTP block from the prior main-line adaptation. The existing
+`HYV4VLForConditionalGeneration` checkpoint identifier uses the causal text
+model and rejects media; no processor or vision encoder is installed.
+
+Use the native dependency declared by this branch (`vllm==0.28.0`). The model
+uses native sparse-MLA/indexer metadata and ordinary runner/proposer APIs; no
+native source patch or `_hy4_call_model` hook is required. `HY4_INDEXER_DTYPE`
+selects `auto`, `fp8` or `int8`; auto retains FP8 on NVIDIA SM90+ and selects
+INT8 elsewhere. INT8 uses the published quantize/cache-store/paged-logits APIs in
+[FlagGems #7782](https://github.com/flagos-ai/FlagGems/pull/7782). Install the
+exact public revision when selecting INT8:
+
+```sh
+pip install --no-deps "flag_gems @ git+https://github.com/CherryLemon/FlagGems.git@b3cb254c55b52c450131ada0ba87109ca18c6c25"
+```
+
+The API retains finite BF16/FP16/FP32 inputs and the packed cache layout.
+An isolated H100 public-wheel run at prior Core revision
+`bfb7b3fab3487a20e37ffb535ee3854eeefcff95` recorded 51 passes and one failure:
+the strict FP32 nextafter power-of-two quantization scale was half the independent
+reference. That failure is preserved. The pinned corrected Core wheel passed all
+72 component-packet tests on H100/SM90 with Torch 2.13.0+cu129 and Triton 3.6.0,
+including strict query/cache scale boundaries and ordinary mutable-input graph
+replay for the three public INT8 APIs. This total includes CPU reference and
+metadata tests; it is not 72 GPU mathematics cases. The run used the real installed
+package and did not execute this framework adapter. Combined-package GPU math,
+framework graph replay and whole-model equivalence remain unqualified. NVIDIA
+SM90+ auto selection retains the native FP8 indexer; this dependency update does
+not change the framework's precision policy.
+
+
+
+
+Optional iHC post/pre, MLA concat/pad, M-RoPE cache and INT8 O-projection
+consumers use the existing FlagGems operator controls (including whitelist and
+blacklist), with the provider default off. Their numerical APIs are delivered
+separately in [FlagGems-vllm #1002](https://github.com/flagos-ai/FlagGems-vllm/pull/1002);
+install its published revision:
+
+```sh
+pip install --no-deps "flaggems_vllm @ git+https://github.com/CherryLemon/FlagGems-vllm.git@ead30f59a34869f12b4837147fbb425581e47280"
+```
+The independent RMS API is in [#1001](https://github.com/flagos-ai/FlagGems-vllm/pull/1001).
+Unsupported shapes/providers retain their native call before numerical launch;
+selected launch failures propagate. MTP body/full/tail graph experiments,
+async input staging and private indexer candidates are excluded.
+
+Kernel ownership follows the implementation language: TileLang kernels stay
+in the framework; generic Triton kernels belong to FlagGems and framework-specific
+Triton kernels to its companion library. Existing native backend calls are reused.
+
+Current validation covers CPU contracts, native registration/import and Python
+wheel contents. Current combined-package GPU numerics, graph replay, serving,
+whole-model accuracy and performance remain unqualified.
+
 ### Operator profiling
 
 See the [operator profiling tools](./tools/operator_profile/README.md) for a

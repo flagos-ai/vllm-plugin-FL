@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import torch
+from vllm_fl.utils import use_flaggems_op
 from compressed_tensors.quantization import QuantizationStrategy
 
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
@@ -71,6 +72,16 @@ class CompressedTensorsPackedW8A8Int8(CompressedTensorsW8A8Int8):
             weight_loader=weight_loader,
             **kwargs,
         )
+        if use_flaggems_op("int8_scaled_mm_decode", default=False):
+            from .nvidia_oproj import maybe_select_nvidia_oproj_kernel
+
+            self.kernel = maybe_select_nvidia_oproj_kernel(
+                self.kernel,
+                self.layer_name,
+                input_size_per_partition,
+                output_partition_sizes,
+                params_dtype,
+            )
         self.input_size_per_partition = input_size_per_partition
         output_size_per_partition = sum(output_partition_sizes)
 
@@ -133,7 +144,7 @@ def install_packed_w8a8_scheme() -> bool:
             effective_format,
         ):
             return CompressedTensorsPackedW8A8Int8(layer_name=layer_name)
-        return current(
+        scheme = current(
             self,
             weight_quant,
             input_quant,
@@ -141,6 +152,22 @@ def install_packed_w8a8_scheme() -> bool:
             format=format,
             layer_name=layer_name,
         )
+        if (
+            use_flaggems_op("int8_scaled_mm_decode", default=False)
+            and isinstance(layer_name, str)
+            and layer_name.endswith(".self_attn.o_proj")
+        ):
+            from .intformat_oproj import maybe_wrap_intformat_oproj_scheme
+
+            return maybe_wrap_intformat_oproj_scheme(
+                scheme,
+                weight_quant,
+                input_quant,
+                effective_format,
+                layer_name,
+                output_quant=output_quant,
+            )
+        return scheme
 
     setattr(get_scheme_from_parts_fl, _PATCH_MARKER, True)
     config_cls._get_scheme_from_parts = get_scheme_from_parts_fl
