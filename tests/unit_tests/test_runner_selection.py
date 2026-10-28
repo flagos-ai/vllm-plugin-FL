@@ -51,7 +51,7 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu"])
+@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "tsingmicro"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os
@@ -77,7 +77,8 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
 
 
 @pytest.mark.parametrize(
-    "device_type,vendor", [("npu", "ascend"), ("gcu", "enflame"), ("gcu", "gcu")]
+    "device_type,vendor",
+    [("npu", "ascend"), ("gcu", "enflame"), ("gcu", "gcu"), ("txda", "tsingmicro")],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
     monkeypatch, device_type, vendor

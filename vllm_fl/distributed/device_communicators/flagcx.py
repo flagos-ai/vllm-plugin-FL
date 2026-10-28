@@ -7,6 +7,7 @@
 import ctypes
 import os
 import sys
+import threading
 from types import SimpleNamespace
 from typing import Optional, Union
 
@@ -15,7 +16,11 @@ import torch.distributed as dist
 from torch.distributed import ProcessGroup, ReduceOp
 
 from vllm.distributed.utils import StatelessProcessGroup
+from vllm.logger import init_logger
 from vllm.utils.torch_utils import current_stream
+
+logger = init_logger(__name__)
+_TXDA_ABORT_TIMEOUT_SECONDS = 5.0
 
 _flagcx_path = os.getenv('FLAGCX_PATH')
 if _flagcx_path and os.path.isdir(_flagcx_path):
@@ -58,6 +63,11 @@ class PyFlagcxCommunicator:
         It is the caller's responsibility to make sure each communicator
         is bind to a unique device.
         """
+        self.comm = None
+        self._destroy_lock = threading.Lock()
+        self._destroy_started = False
+        self._destroy_thread = None
+
         if not isinstance(group, StatelessProcessGroup):
             assert dist.is_initialized()
             ### TODO(lms)
@@ -152,16 +162,93 @@ class PyFlagcxCommunicator:
                 self.comm = self.flagcx.flagcxCommInitRank(
                     self.world_size, self.unique_id, self.rank)
 
-            stream = self._current_stream()
-            # A small all_reduce for warmup.
-            data = torch.zeros(1, device=device)
-            self.all_reduce(data)
-            stream.synchronize()
-            del data
+            try:
+                stream = self._current_stream()
+                # A small all_reduce for warmup.
+                data = torch.zeros(1, device=device)
+                self.all_reduce(data)
+                stream.synchronize()
+                del data
+            except Exception:
+                # A returned native handle still needs cleanup if warmup fails.
+                # Other vendors retain their existing initialization behavior.
+                if self.device.type == "txda":
+                    self.destroy()
+                raise
+
+    def destroy(self):
+        """Stop a TXDA communicator without waiting indefinitely for peers.
+
+        The caller must stop issuing collectives first. This is deliberately
+        explicit, not a Python finalizer: ranks may tear down in any order.
+        FlagCX Abort releases the underlying TCCL communicator, but the current
+        vendor implementation does not free all FlagCX host bookkeeping.
+        """
+        if getattr(getattr(self, "device", None), "type", None) != "txda":
+            return
+
+        with self._destroy_lock:
+            if self._destroy_started or self.comm is None:
+                return
+            self._destroy_started = True
+            self.available = False
+            self.disabled = True
+            library, comm, device = self.flagcx, self.comm, self.device
+            self.comm = None
+
+            def abort():
+                # Keep the wrapper, CDLL and handle alive even after the caller
+                # drops this communicator or the bounded join times out.
+                try:
+                    # The shipped wrapper exposes Destroy but not Abort. CDLL
+                    # indexing creates a separate function object, so binding
+                    # its prototype does not mutate a shared cached function.
+                    native_abort = library.lib["flagcxCommAbort"]
+                    native_abort.argtypes = [flagcxComm_t]
+                    native_abort.restype = ctypes.c_int
+                    with torch.txda.device(device):
+                        library.FLAGCX_CHECK(native_abort(comm))
+                except Exception:
+                    logger.exception(
+                        "TXDA FlagCX communicator abort failed on %s; "
+                        "cleanup is incomplete",
+                        device,
+                    )
+
+            # Like upstream PyNccl, let main-thread teardown continue if native
+            # cleanup waits on peers or retained graphs. Never follow Abort with
+            # Destroy: the underlying TCCL handle may already have been freed.
+            thread = threading.Thread(
+                target=abort, name="txda-flagcx-abort", daemon=True
+            )
+            self._destroy_thread = thread
+            try:
+                thread.start()
+            except Exception:
+                logger.exception(
+                    "Could not start TXDA FlagCX communicator abort on %s; "
+                    "cleanup is incomplete",
+                    device,
+                )
+                return
+
+        thread.join(timeout=_TXDA_ABORT_TIMEOUT_SECONDS)
+        if thread.is_alive():
+            logger.warning(
+                "TXDA FlagCX communicator abort on %s did not finish within "
+                "%.1f seconds; cleanup is incomplete and continues in a daemon "
+                "thread. Do not reinitialize this communicator in this process",
+                device,
+                _TXDA_ABORT_TIMEOUT_SECONDS,
+            )
 
     def _current_stream(self):
         if self.device.type == "npu":
             return torch.npu.current_stream(self.device)
+        if self.device.type == "txda":
+            # The upstream helper may cache the default stream while TXDA
+            # graph preparation selects a side stream for model execution.
+            return torch.txda.current_stream(self.device)
         return current_stream()
 
     def _copy_flagcx_stream(self, stream):

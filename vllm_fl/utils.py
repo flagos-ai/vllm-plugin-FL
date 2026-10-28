@@ -38,8 +38,8 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
-    # Registered backend: vendor/thead (tsingmicro)
-    "tsingmicro": {"device_type": "tsingmicro", "device_name": "txda"},
+    # Registered backend: vendor/txda (Tsingmicro)
+    "tsingmicro": {"device_type": "txda", "device_name": "txda"},
     # Registered backend: vendor/gcu (Enflame GCU / torch_gcu).
     # FlagGems >= 5.4 reports vendor_name "enflame"; older images report
     # "gcu" — keep both aliases.
@@ -55,6 +55,7 @@ _DEVICE_CONTROL_ENV_VAR_PLACEHOLDER = "VLLM_DEVICE_CONTROL_ENV_VAR_PLACEHOLDER"
 _VALIDATED_DEVICE_CONTROL_ENV_VARS = {
     "nvidia": "CUDA_VISIBLE_DEVICES",
     "kunlunxin": "CUDA_VISIBLE_DEVICES",
+    "tsingmicro": "TXDA_VISIBLE_DEVICES",
     "enflame": "TOPS_VISIBLE_DEVICES",
     "gcu": "TOPS_VISIBLE_DEVICES",
 }

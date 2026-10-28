@@ -11,12 +11,14 @@ import logging
 _logger = logging.getLogger(__name__)
 
 for _patch in (
+    "triton_compat",  # provide metadata required by vLLM's JIT monitor
+    "mamba_memcpy",  # retain native tensor views for Mamba state copies
     "apply_repetition_penalties",  # route sampler to pure-torch penalties
 ):
     try:
         __import__(f"{__name__}.{_patch}")
     except Exception:
         _logger.exception(
-            "Failed to apply txda patch '%s'; continuing with remaining "
-            "patches", _patch,
+            "Failed to apply txda patch '%s'; continuing with remaining patches",
+            _patch,
         )
