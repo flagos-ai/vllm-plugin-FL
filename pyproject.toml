@@ -31,6 +31,7 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml",
+    "modelscope==1.35.3",
 ]
 
 [project.entry-points."vllm.platform_plugins"]
@@ -53,7 +54,6 @@ test = [
     "openai",
     "decorator",
     "vllm[audio]==0.28.0",
-    "modelscope>=1.18.1",
 ]
 
 [tool.setuptools_scm]
