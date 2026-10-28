@@ -31,7 +31,7 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml",
-    "modelscope==1.18.1",
+    "modelscope==1.35.3",
 ]
 
 [project.entry-points."vllm.platform_plugins"]
