@@ -494,6 +494,13 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_supported_vit_attn_backends(cls) -> list["AttentionBackendEnum"]:
+        if cls.vendor_name == "amd":
+            # AMD defers ViT backend selection to vLLM's ROCm platform, so it
+            # must accept everything that platform can return (notably the
+            # Triton flash-attention backend used on RDNA).
+            from vllm.platforms.rocm import RocmPlatform
+
+            return RocmPlatform.get_supported_vit_attn_backends()
         return [
             AttentionBackendEnum.TORCH_SDPA,
             AttentionBackendEnum.FLASH_ATTN,
@@ -547,6 +554,19 @@ class PlatformFL(Platform):
             ):
                 return AttentionBackendEnum.FLASH_ATTN
             return AttentionBackendEnum.TORCH_SDPA
+
+        if cls.vendor_name == "amd":
+            # Do not let the capability probe below pick FLASH_ATTN: on ROCm
+            # that backend is Composable Kernel's FMHA, which is built for CDNA
+            # and segfaults on RDNA (observed on gfx1100 inside
+            # ck_tile::FmhaFwdKernel via mha_varlen_fwd while profiling a
+            # Qwen3.6 vision encoder). vLLM's own ROCm platform already splits
+            # the architectures — Composable Kernel on CDNA, Triton flash
+            # attention on gfx11xx/gfx12xx — so defer to it and inherit any
+            # upstream fix.
+            from vllm.platforms.rocm import RocmPlatform
+
+            return RocmPlatform.get_vit_attn_backend(head_size, dtype, backend)
 
         # Try FlashAttention first
         if (cc := cls.get_device_capability()) and cc.major >= 8:
