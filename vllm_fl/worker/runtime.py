@@ -11,6 +11,30 @@ from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 logger = init_logger(__name__)
 
 
+def is_residual_scattered_for_sp(vllm_config, num_input_tokens: int) -> bool:
+    """Keep the FL pipeline tensor-layout contract across vLLM versions."""
+    from vllm.v1.worker import utils as worker_utils
+
+    native = getattr(worker_utils, "is_residual_scattered_for_sp", None)
+    if native is not None:
+        return native(vllm_config, num_input_tokens)
+
+    # vLLM 0.32 removed this helper; FL still prepares legacy PP transfers.
+    compilation = vllm_config.compilation_config
+    if not compilation.pass_config.enable_sp:
+        return False
+    tp = vllm_config.parallel_config.tensor_parallel_size
+    if tp == 1:
+        return False
+    assert compilation.use_inductor_graph_partition or not compilation.splitting_ops, (
+        "Sequence parallelism requires full-graph compilation"
+    )
+    assert num_input_tokens % tp == 0, (
+        "Sequence parallelism requires TP-aligned token counts"
+    )
+    return True
+
+
 def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
     from vllm_fl.ops.custom_ops import register_oot_ops

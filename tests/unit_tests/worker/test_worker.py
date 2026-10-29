@@ -1,8 +1,93 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
-"""Contract tests for the FL adaptation of vLLM v0.28.0 GPUWorker."""
+"""Contracts for the multi-vendor worker and its runtime policies."""
+
+from types import SimpleNamespace
 
 import pytest
+
+
+def _sequence_parallel_config(enabled, tp, *, partition=False, splitting_ops=()):
+    return SimpleNamespace(
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=enabled),
+            use_inductor_graph_partition=partition,
+            splitting_ops=list(splitting_ops),
+        ),
+        parallel_config=SimpleNamespace(tensor_parallel_size=tp),
+    )
+
+
+@pytest.mark.parametrize(
+    "enabled,tp,tokens,partition,expected",
+    [
+        (False, 2, 3, False, False),
+        (True, 1, 3, False, False),
+        (True, 2, 4, False, True),
+        (True, 2, 4, True, True),
+    ],
+)
+def test_legacy_pipeline_residual_layout_when_upstream_helper_is_absent(
+    monkeypatch, enabled, tp, tokens, partition, expected
+):
+    from vllm.v1.worker import utils as worker_utils
+
+    from vllm_fl.worker.runtime import is_residual_scattered_for_sp
+
+    monkeypatch.delattr(worker_utils, "is_residual_scattered_for_sp", raising=False)
+    config = _sequence_parallel_config(enabled, tp, partition=partition)
+    assert is_residual_scattered_for_sp(config, tokens) is expected
+
+
+@pytest.mark.parametrize("tokens,splitting_ops", [(3, ()), (4, ("split",))])
+def test_legacy_pipeline_residual_layout_rejects_invalid_sp_configuration(
+    monkeypatch, tokens, splitting_ops
+):
+    from vllm.v1.worker import utils as worker_utils
+
+    from vllm_fl.worker.runtime import is_residual_scattered_for_sp
+
+    monkeypatch.delattr(worker_utils, "is_residual_scattered_for_sp", raising=False)
+    config = _sequence_parallel_config(True, 2, splitting_ops=splitting_ops)
+    with pytest.raises(AssertionError, match="Sequence parallelism requires"):
+        is_residual_scattered_for_sp(config, tokens)
+
+
+def test_pipeline_residual_layout_preserves_native_helper_errors(monkeypatch):
+    from vllm.v1.worker import utils as worker_utils
+
+    from vllm_fl.worker.runtime import is_residual_scattered_for_sp
+
+    error = RuntimeError("native layout failure")
+
+    def native(config, tokens):
+        raise error
+
+    monkeypatch.setattr(
+        worker_utils, "is_residual_scattered_for_sp", native, raising=False
+    )
+    with pytest.raises(RuntimeError) as caught:
+        is_residual_scattered_for_sp(_sequence_parallel_config(True, 2), 4)
+    assert caught.value is error
+
+
+def test_pipeline_residual_layout_preserves_native_helper_result(monkeypatch):
+    from vllm.v1.worker import utils as worker_utils
+
+    from vllm_fl.worker.runtime import is_residual_scattered_for_sp
+
+    calls = []
+
+    def native(config, tokens):
+        calls.append((config, tokens))
+        return False
+
+    monkeypatch.setattr(
+        worker_utils, "is_residual_scattered_for_sp", native, raising=False
+    )
+    config = _sequence_parallel_config(True, 2)
+    assert is_residual_scattered_for_sp(config, 4) is False
+    assert calls == [(config, 4)]
 
 
 @pytest.fixture(autouse=True)

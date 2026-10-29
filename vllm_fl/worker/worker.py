@@ -86,12 +86,15 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
 from vllm_fl.dispatch.io_common import managed_inference_mode
-from vllm_fl.worker.runtime import _initialize_fl_runtime
+from vllm_fl.worker.runtime import (
+    _initialize_fl_runtime,
+    is_residual_scattered_for_sp,
+)
 
 logger = init_logger(__name__)
 
