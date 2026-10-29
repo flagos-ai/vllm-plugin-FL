@@ -42,7 +42,6 @@ from vllm.v1.attention.backend import (
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
-    get_kv_cache_layout,
 )
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.platforms.interface import DeviceCapability
@@ -73,7 +72,7 @@ class AttentionGCUBackend(AttentionBackend):
     supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int | MultipleOf]:
         vllm_config = get_current_vllm_config()
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
@@ -136,6 +135,8 @@ class AttentionGCUBackend(AttentionBackend):
     def get_kv_cache_stride_order(
         include_num_layers_dimension: bool = False,
     ) -> tuple[int, ...]:
+        from vllm.v1.attention.backends.utils import get_kv_cache_layout
+
         cache_layout = get_kv_cache_layout()
         if cache_layout == "NHD" and include_num_layers_dimension:
             return (2, 0, 1, 3, 4, 5)
@@ -147,26 +148,17 @@ class AttentionGCUBackend(AttentionBackend):
             stride_order = (0, 1, 3, 2, 4)
         else:
             raise ValueError(f"Unknown cache layout format {cache_layout}.")
+
+    @classmethod
+    def supported_kv_cache_layouts(cls):
+        from vllm.v1.kv_cache_layout import KVCacheLayout
+
+        return (KVCacheLayout.LBNHC,)
         return stride_order
 
     @classmethod
     def supports_head_size(cls, head_size: int) -> bool:
         return head_size % 8 == 0 and head_size <= 256
-
-    @classmethod
-    def supports_combination(
-        cls,
-        head_size: int,
-        dtype: torch.dtype,
-        kv_cache_dtype: CacheDType | None,
-        block_size: int,
-        use_mla: bool,
-        has_sink: bool,
-        use_sparse: bool,
-        device_capability: DeviceCapability,
-    ) -> str | None:
-        # Enflame FA kernel supports sinks via s_aux parameter.
-        return None
 
 @dataclass
 class AttentionGCUMetadata:
@@ -555,7 +547,11 @@ class AttentionGCUImpl(AttentionImpl):
             )
 
         # For decoder and cross-attention, use KV cache as before
-        key_cache, value_cache = kv_cache.unbind(0)
+        if kv_cache.ndim == 4:
+            # vLLM 0.32 standardizes each layer to [B, H, N, K+V].
+            key_cache, value_cache = kv_cache.transpose(1, 2).split(self.head_size, dim=-1)
+        else:
+            key_cache, value_cache = kv_cache.unbind(0)
 
         if (
             self.kv_sharing_target_layer_name is None
