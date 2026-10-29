@@ -349,3 +349,47 @@ def test_batch_invariant_module_resolves_installed_upstream_api():
     assert module.__name__ == f"vllm.model_executor.{parent}.batch_invariant"
     assert callable(module.init_batch_invariance)
     assert isinstance(module._batch_invariant_MODE, bool)
+
+
+@pytest.mark.parametrize("legacy_flag", [None, False, True])
+def test_worker_initializes_cache_with_legacy_or_relocated_routing_config(
+    monkeypatch, legacy_flag
+):
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    from vllm_fl.worker import worker as module
+
+    worker = object.__new__(module.WorkerFL)
+    fields = (
+        {} if legacy_flag is None else {"enable_return_routed_experts": legacy_flag}
+    )
+    worker.model_config = SimpleNamespace(**fields)
+    worker.cache_config = SimpleNamespace()
+    worker.vllm_config = SimpleNamespace()
+    worker.model_runner = SimpleNamespace(
+        initialize_kv_cache=Mock(), init_routed_experts_capturer=Mock()
+    )
+    worker._maybe_get_memory_pool_context = lambda **kwargs: nullcontext()
+    transfer = Mock()
+    monkeypatch.setattr(module, "ensure_kv_transfer_initialized", transfer)
+    config = SimpleNamespace(num_blocks=7, needs_kv_cache_zeroing=False)
+    worker.initialize_from_config(config)
+    transfer.assert_called_once_with(worker.vllm_config, config)
+    worker.model_runner.initialize_kv_cache.assert_called_once_with(config)
+    assert worker.cache_config.num_gpu_blocks == 7
+    assert worker.model_runner.init_routed_experts_capturer.call_count == int(
+        legacy_flag is True
+    )
+
+
+def test_gcu_rejects_v2_auxiliary_routing_before_model_initialization(monkeypatch):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "gcu")
+    config = SimpleNamespace(
+        use_v2_model_runner=False,
+        aux_output_config=SimpleNamespace(enable_return_routed_experts=True),
+    )
+    with pytest.raises(ValueError, match="routed-expert auxiliary outputs"):
+        PlatformFL.check_and_update_config(config)

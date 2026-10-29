@@ -231,6 +231,9 @@ class PlatformFL(Platform):
             # The default V1 override takes precedence over upstream's automatic
             # V2 selection. Reject features that V1 cannot execute faithfully.
             v2_only_features = []
+            aux_output = getattr(vllm_config, "aux_output_config", None)
+            if getattr(aux_output, "enable_return_routed_experts", False) is True:
+                v2_only_features.append("routed-expert auxiliary outputs")
             speculative_config = getattr(vllm_config, "speculative_config", None)
             if speculative_config is not None:
                 if speculative_config.method == "dspark":
