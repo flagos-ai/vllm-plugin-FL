@@ -245,3 +245,54 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
     finally:
         set_cudagraph_capturing_enabled(False)
         wrapper.clear_graphs()
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_gcu_shared_experts_capture_and_replay(device, dtype, monkeypatch):
+    """The native MoE shared-expert path must allocate on the capture stream."""
+    if current_platform.device_type != "gcu":
+        pytest.skip("Requires TorchGCU graph capture")
+
+    from types import SimpleNamespace
+
+    import flag_gems
+
+    from vllm.model_executor.layers.fused_moe.runner.shared_experts import (
+        SharedExperts,
+        SharedExpertsOrder,
+    )
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.delenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", raising=False)
+    PlatformFL.pre_register_and_update()
+    config = SimpleNamespace(
+        moe_parallel_config=SimpleNamespace(
+            enable_eplb=False,
+            use_fi_nvl_two_sided_kernels=False,
+        )
+    )
+    layer = torch.nn.Linear(64, 128, bias=False, device=device, dtype=dtype)
+    shared = SharedExperts(layer, config, False, lambda: False)
+    static_input = torch.ones(32, 64, device=device, dtype=dtype)
+    assert shared._stream is None
+    with flag_gems.use_gems():
+        for _ in range(3):
+            assert not shared.maybe_forward_async(static_input)
+            shared(static_input, SharedExpertsOrder.NO_OVERLAP)
+            _ = shared.output
+        torch.gcu.synchronize()
+        graph = _new_graph()
+        with _graph_capture(graph):
+            shared(static_input, SharedExpertsOrder.NO_OVERLAP)
+            output = shared.output
+        for value in (2, 3):
+            static_input.fill_(value)
+            graph.replay()
+            torch.gcu.synchronize()
+            expected = torch.nn.functional.linear(
+                static_input.cpu().float(), layer.weight.cpu().float()
+            )
+            torch.testing.assert_close(
+                output.cpu().float(), expected, atol=0.03, rtol=0.03
+            )

@@ -9,6 +9,36 @@ from vllm.config import CompilationConfig, CompilationMode, CUDAGraphMode
 from vllm_fl.platform import PlatformFL
 
 
+@pytest.mark.parametrize("vendor", ["gcu", "enflame"])
+@pytest.mark.parametrize("existing", [None, "0", "1"])
+def test_enflame_shared_experts_stream_default(monkeypatch, vendor, existing):
+    import os
+
+    simulate_platform(monkeypatch, vendor)
+    monkeypatch.setattr(PlatformFL, "device_name", "gcu")
+    key = "VLLM_DISABLE_SHARED_EXPERTS_STREAM"
+    if existing is None:
+        monkeypatch.delenv(key, raising=False)
+    else:
+        monkeypatch.setenv(key, existing)
+
+    PlatformFL.pre_register_and_update()
+
+    assert os.environ[key] == (existing if existing is not None else "1")
+
+
+def test_other_vendor_preserves_shared_experts_stream(monkeypatch):
+    import os
+
+    simulate_platform(monkeypatch, "nvidia")
+    monkeypatch.setattr(PlatformFL, "device_name", "cuda")
+    monkeypatch.delenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", raising=False)
+
+    PlatformFL.pre_register_and_update()
+
+    assert "VLLM_DISABLE_SHARED_EXPERTS_STREAM" not in os.environ
+
+
 def simulate_platform(monkeypatch, vendor):
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
     monkeypatch.setattr(

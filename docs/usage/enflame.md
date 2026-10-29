@@ -216,6 +216,12 @@ esac
   "${mode_args[@]}" 2>&1 | tee "/logs/$MODEL_NAME-$MODE-server.log"
 ```
 
+The Enflame platform defaults `VLLM_DISABLE_SHARED_EXPERTS_STREAM=1` so MoE
+shared experts run on the graph capture stream. TorchGCU rejects allocations
+from the auxiliary shared-expert stream during capture with
+`topsErrorStreamCaptureUnsupported`. This keeps graph execution enabled.
+An explicit environment value is preserved for SDK compatibility experiments.
+
 Cold-cache compilation and graph capture can take substantial time. The native
 S60 e2e jobs allow 120 minutes. Follow the service log and wait for startup to
 finish before sending requests. In a second host terminal, use the host port
