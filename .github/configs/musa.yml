@@ -25,13 +25,14 @@ runner_labels:
 container_volumes:
   - /data:/data:ro
 
+# The vLLM 0.28 image uses the native MUSA runtime without privileged mode.
+# Keep the runner allocation explicit and retain 64 GiB with private IPC.
 container_options: >-
   --hostname vllm-plugin-fl
   --runtime=mthreads
   --ipc=private
-  --shm-size=16g
+  --shm-size=64g
   --env GEMS_VENDOR=mthreads
   --env VLLM_PLUGINS=fl
   --env MTHREADS_VISIBLE_DEVICES=4,5,6,7
   --env MUSA_VISIBLE_DEVICES=0,1,2,3
-  --env USE_FLAGGEMS=1
