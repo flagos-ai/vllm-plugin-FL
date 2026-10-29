@@ -15,7 +15,7 @@ The `VLLM_TARGET_DEVICE=empty` installation is for other hardware backends.
 | FlagGems | Development commit `6fe7709e7717e49cf12bb00346719a0885f505fa` |
 | FlagGems-vllm | Commit `b5c2c2249319277ccda4d41aa0f65164bd9b2a19` (`v0.2.0`; package metadata reports `0.1.0`) |
 | FlagTree | Development commit `317a0249ec25c6756e0aee3a87e8e3c92f154335`; supplies Triton `3.6.0` |
-| Runtime defaults | FlagGems enabled, FlagTune disabled, upstream V2 runner |
+| Runtime defaults | FlagGems enabled, FlagTune disabled, upstream runner defaults |
 
 Use the image reference selected in [the CUDA CI configuration](../../.github/configs/cuda.yml).
 Record the resolved image digest and plugin commit for each deployment. The
@@ -67,7 +67,6 @@ before pulling. Install the mounted plugin checkout inside the container:
 ```bash
 export VLLM_PLUGINS=fl
 export USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
-export VLLM_USE_V2_MODEL_RUNNER=1
 export FL_STACK_PROVENANCE=/opt/fl-ci/provenance.json
 
 python .github/scripts/install_flaggems_vllm.py
@@ -91,46 +90,39 @@ unset unless intentionally configuring and validating FlagCX.
 
 ## Basic service and runner selection
 
-Run inside the prepared container with a local `Qwen3-4B` checkpoint. This
-example selects upstream V2 with eager execution:
+Run inside the prepared container with a local `Qwen3-4B` checkpoint:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 VLLM_USE_V2_MODEL_RUNNER=1 \
-  vllm serve /models/Qwen3-4B \
-  --served-model-name fl-model --host 0.0.0.0 --port 8000 \
-  --dtype bfloat16 --tensor-parallel-size 1 \
-  --max-model-len 2048 --max-num-seqs 8 --max-num-batched-tokens 512 \
-  --gpu-memory-utilization 0.25 --seed 0 --enforce-eager
+CUDA_VISIBLE_DEVICES=0 vllm serve /models/Qwen3-4B \
+  --served-model-name fl-model
 ```
 
-To use upstream V1 with CUDA graphs, stop that service and run:
+The example uses upstream defaults for the runner, dtype, memory, batching and
+compilation. The service listens on port 8000. Adjust resource limits or tensor
+parallelism only when your model and hardware require them.
+
+To select upstream V1 explicitly, stop that service and run:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 VLLM_USE_V2_MODEL_RUNNER=0 \
-  vllm serve /models/Qwen3-4B \
-  --served-model-name fl-model --host 0.0.0.0 --port 8000 \
-  --dtype bfloat16 --tensor-parallel-size 1 \
-  --max-model-len 2048 --max-num-seqs 8 --max-num-batched-tokens 512 \
-  --gpu-memory-utilization 0.25 --seed 0 \
-  --compilation-config '{"cudagraph_capture_sizes":[1,2,4,8]}'
+  vllm serve /models/Qwen3-4B --served-model-name fl-model
 ```
 
-Both runners are inherited from upstream through `NvidiaWorkerFL`. Eager and
-graph execution are independent of runner selection: omit `--enforce-eager`
-for graph execution with either runner. Confirm the selected runner in the
-worker logs.
+Set `VLLM_USE_V2_MODEL_RUNNER=1` to select V2 explicitly. Both runners are
+inherited from upstream through `NvidiaWorkerFL`; confirm the selected runner
+in the worker logs. `--enforce-eager` is optional for debugging and is independent
+of runner selection.
 
-From another host terminal, wait for readiness and send a deterministic request:
+From another host terminal, check readiness and send a request:
 
 ```bash
 curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"fl-model","messages":[{"role":"user","content":"What is 2 + 2? Give only the number."}],"temperature":0,"max_tokens":64,"chat_template_kwargs":{"enable_thinking":false,"thinking":false},"return_token_ids":true}'
+  -d '{"model":"fl-model","messages":[{"role":"user","content":"What is 2 + 2? Give only the number."}],"temperature":0,"max_tokens":64,"chat_template_kwargs":{"enable_thinking":false}}'
 ```
 
-Check the answer, then repeat the request and compare the generated token IDs.
-Health and successful model construction alone do not validate generation.
+Check that the response answers the question correctly.
 
 ## Model coverage
 
@@ -150,21 +142,13 @@ complete checkpoints and an appropriate memory/parallelism configuration.
 For example, start MiniCPM's multimodal service with:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 VLLM_USE_V2_MODEL_RUNNER=1 \
-  vllm serve /models/MiniCPM-V-4.7-1B \
-  --served-model-name fl-model --host 0.0.0.0 --port 8000 \
-  --dtype bfloat16 --tensor-parallel-size 1 \
-  --max-model-len 4096 --max-num-seqs 4 --max-num-batched-tokens 1024 \
-  --gpu-memory-utilization 0.30 --seed 0 --enforce-eager \
-  --limit-mm-per-prompt '{"image":1,"video":1}' \
-  --media-io-kwargs '{"video":{"num_frames":4}}'
+CUDA_VISIBLE_DEVICES=0 vllm serve /models/MiniCPM-V-4.7-1B \
+  --served-model-name fl-model
 ```
 
 Use an `image_url` or `video_url` item in the chat message for media input.
-For paired images, restart with `--limit-mm-per-prompt '{"image":2,"video":0}'`
-and `--max-num-batched-tokens 4096`, then send two `image_url` items in one
-message. Evaluate the answer against the supplied media; a nonempty response
-alone is not a correctness check.
+For paired images, send two `image_url` items in the same message. Evaluate the
+answer against the supplied media.
 
 ## Build and CI
 
