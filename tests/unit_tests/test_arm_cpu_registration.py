@@ -88,6 +88,10 @@ class TestArmCpuRegistration(unittest.TestCase):
             patch.object(vllm_fl, "register_quant_linear") as quant_linear,
             patch.object(vllm_fl, "register_router") as router,
             patch.object(vllm_fl, "_register_gdn_packed_decode_patch") as gdn_packed,
+            patch(
+                "vllm_fl.utils.DeviceInfo",
+                return_value=SimpleNamespace(vendor_name="metax"),
+            ),
             patch.dict(
                 sys.modules,
                 {

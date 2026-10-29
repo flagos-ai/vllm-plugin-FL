@@ -15,6 +15,7 @@ matrix, scenarios, and usage.
 |-----------------------|------------------------|
 | `release/0.2` | [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) |
 | `main` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
+| `0.5.0-dev` (NVIDIA CUDA adaptation) | [v0.32.0](https://github.com/vllm-project/vllm/tree/v0.32.0) |
 
 ## Supported Models and Chips
 
@@ -54,22 +55,16 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 ### Setup
 
-For hardware-specific deployment and validation, see the
-[NVIDIA guide](./docs/usage/nvidia.md),
-[T-Head PPU guide](./docs/usage/thead.md), and
+For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
+for the full official vLLM 0.32 CUDA image, pinned development dependencies,
+upstream V1/V2 runners and regression commands. FlagGems remains enabled.
+It replaces the previous NVIDIA 0.28 setup.
+The generic setup below applies to the other backends; their 0.32 validation
+is outside the NVIDIA adaptation. See also the
+[T-Head PPU guide](./docs/usage/thead.md) and
 [Enflame S60 guide](./docs/usage/enflame.md).
 
 1. Install vLLM
-
-    The tested **NVIDIA** baseline is the official CUDA 12.9 image:
-    ```sh
-    docker pull vllm/vllm-openai:v0.28.0-cu129
-    ```
-
-    For a non-container NVIDIA installation, install the matching official
-    [vLLM v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0)
-    package first. The NVIDIA FlagTree step below intentionally replaces the
-    standalone Triton package from vLLM while leaving vLLM itself unchanged.
 
     For **non-NVIDIA** chips, install vLLM from source with the `empty` device target:
     ```sh
@@ -94,9 +89,9 @@ For hardware-specific deployment and validation, see the
     pip install --no-build-isolation --no-deps -e .
     ```
 
-    For CUDA-like devices, including CUDA and HIP/ROCm environments that use
-    PyTorch's CUDA dispatch key, build the plugin native extension by setting
-    `VLLM_VENDOR=cuda` during installation:
+    For **non-NVIDIA backends** that use PyTorch's CUDA dispatch key (such as
+    HIP/ROCm) with an EMPTY vLLM build, build the plugin native extension by
+    setting `VLLM_VENDOR=cuda` during installation:
     ```sh
     cd vllm-plugin-FL
     VLLM_VENDOR=cuda pip install --no-build-isolation --no-deps .
@@ -111,30 +106,19 @@ For hardware-specific deployment and validation, see the
     If `VLLM_VENDOR` is not set, vllm-plugin-FL is installed as a Python-only
     plugin and the native extension is skipped.
 
+    NVIDIA uses the official vLLM CUDA extensions and the Python-only plugin
+    installation in the [NVIDIA guide](./docs/usage/nvidia.md); it does not
+    require `VLLM_VENDOR=cuda`.
+
 3. Install [FlagGems](https://flagos-ai.github.io/FlagGems/getting-started/install/)
 
-    3.1 For NVIDIA, install the tested FlagTree/Triton runtime
-
-    FlagTree and FlagGems are a matched runtime. vLLM 0.28.0 normally installs
-    standalone Triton 3.7.1, but the NVIDIA baseline validated here uses
-    FlagTree `0.6.2a1`, which provides Triton `3.6.0`. Do not install a second
-    standalone Triton package on top of FlagTree.
-
-    ```sh
-    # Repeat this command until no standalone Triton distribution remains.
-    python3 -m pip uninstall -y triton
-
-    RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple"
-    python3 -m pip install flagtree===0.6.2a1 $RES
-    ```
-
-    3.2 Install build dependencies
+    3.1 Install build dependencies
 
     ```sh
     pip install -U scikit-build-core==0.11 pybind11 ninja cmake
     ```
 
-    3.3 Install the latest FlagGems master
+    3.2 Install FlagGems for the selected backend
 
     ```sh
     git clone --branch master https://github.com/flagos-ai/FlagGems
@@ -144,13 +128,9 @@ For hardware-specific deployment and validation, see the
     pip install --no-build-isolation --no-deps -e .
     ```
 
-    The NVIDIA results in this repository were produced with FlagGems commit
-    `34c6d2ce416d32a98f1dd2bb6e4cfb67c59342d9`
-    (`5.3.5+g34c6d2ce4`). Re-run the blacklist and model tests when moving to a
-    newer FlagGems master revision.
-
-For optional explicit fused operators, see the [FlagGems-vllm guide](./docs/flaggems-vllm.md).
-The provider defaults to off; general ATen registration remains with FlagGems.
+Compatible explicit fused operators also require the pinned
+[FlagGems-vllm package](./docs/flaggems-vllm.md). The NVIDIA CI image preinstalls it;
+general ATen registration remains with FlagGems.
 
 ### Runtime compatibility hooks
 

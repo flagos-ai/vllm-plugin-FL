@@ -27,6 +27,11 @@ on:
         description: "Platform name (e.g., cuda, ascend)"
         required: true
         type: string
+      device:
+        description: "Optional device config and runner selection"
+        required: false
+        type: string
+        default: ""
       ci_image:
         description: "Docker image for the test container"
         required: true
@@ -53,7 +58,7 @@ on:
 
 jobs:
   unit-tests:
-    name: Unit tests (${{ inputs.platform }})
+    name: Unit tests (${{ inputs.platform }}${{ inputs.device && format(', {0}', inputs.device) || '' }})
     runs-on: ${{ fromJson(inputs.runner_labels) }}
     container:
       image: ${{ inputs.ci_image }}
@@ -77,13 +82,33 @@ jobs:
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
+      - name: Verify Hopper runner
+        if: inputs.platform == 'cuda' && inputs.device == 'h20'
+        run: |
+          python - <<'PY'
+          import torch
+
+          capability = torch.cuda.get_device_capability()
+          if capability[0] != 9:
+              raise RuntimeError(f"Hopper unit job requires SM90, found {capability}")
+          print(f"Hopper unit coverage: {torch.cuda.get_device_name()} SM{capability[0]}{capability[1]}")
+          PY
+
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
       - name: Run unit tests
+        shell: bash
+        env:
+          TEST_DEVICE: ${{ inputs.device }}
         run: |
+          DEVICE_ARGS=()
+          if [ -n "$TEST_DEVICE" ]; then
+            DEVICE_ARGS=(--device "$TEST_DEVICE")
+          fi
           python tests/run.py \
             --platform ${{ inputs.platform }} \
+            "${DEVICE_ARGS[@]}" \
             --scope unit
 
       - name: Upload coverage report
@@ -91,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: coverage-${{ inputs.platform }}
+          name: coverage-${{ inputs.platform }}${{ inputs.device && format('-{0}', inputs.device) || '' }}
           path: |
             coverage-${{ inputs.platform }}.json
             report-${{ inputs.platform }}.json

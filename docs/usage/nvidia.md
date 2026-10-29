@@ -1,286 +1,190 @@
-# NVIDIA Deployment Guide
+# NVIDIA: vLLM 0.32 CUDA deployment
 
-This guide starts an OpenAI-compatible vLLM inference service on NVIDIA GPUs
-with the software stack validated by this repository. The recommended path uses
-the prebuilt CI image so that vLLM, FlagTree, Triton, and FlagGems stay on the
-tested versions.
+NVIDIA uses the full official CUDA distribution of vLLM 0.32.0, including its
+native extensions, on `0.5.0-dev`. The plugin keeps FlagGems enabled and adds FL
+dispatch and diagnostics around the upstream CUDA platform and V1/V2 runners.
+The `VLLM_TARGET_DEVICE=empty` installation is for other hardware backends.
 
-## Validated software stack
+## Software stack
 
-| Component | Validated version or configuration |
+| Component | Pinned configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci` |
-| Image manifest | `sha256:ad7a8dfc9f760d9878b6634a4009aefe98afd58e179f01c62333e935ee130e6f` |
-| Base image | `vllm/vllm-openai:v0.28.0-cu129` |
-| vLLM | `0.28.0` |
-| Python | `3.12.3` |
-| PyTorch | `2.13.0+cu129` |
-| CUDA runtime | `12.9` |
-| FlagTree | `0.6.2a1` |
-| Triton | `3.6.0`, provided by FlagTree; no standalone `triton` distribution |
-| FlagGems | `5.3.5+g34c6d2ce4` at commit `34c6d2ce416d32a98f1dd2bb6e4cfb67c59342d9` |
+| NVIDIA CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci` |
+| Official base | `vllm/vllm-openai:v0.32.0-cu129` |
+| vLLM | Full official CUDA `0.32.0`; preserve the installed native extensions |
+| FlagGems | Development commit `6fe7709e7717e49cf12bb00346719a0885f505fa` |
+| FlagGems-vllm | Commit `b5c2c2249319277ccda4d41aa0f65164bd9b2a19` (`v0.2.0`; package metadata reports `0.1.0`) |
+| FlagTree | Development commit `317a0249ec25c6756e0aee3a87e8e3c92f154335`; supplies Triton `3.6.0` |
+| Runtime defaults | FlagGems enabled, FlagTune disabled, upstream runner defaults |
 
-The NVIDIA dispatch policy is loaded automatically from
-[`vllm_fl/dispatch/config/nvidia.yaml`](../../vllm_fl/dispatch/config/nvidia.yaml).
-Keep that file and the plugin source from the same revision. Its blacklist is
-part of the validated configuration and must not be replaced with an ad-hoc
-whitelist.
+Use the image reference selected in [the CUDA CI configuration](../../.github/configs/cuda.yml).
+Record the resolved image digest and plugin commit for each deployment. The
+image records source and wheel provenance in `/opt/fl-ci/provenance.json`.
+These development revisions are fixed rather than floating branch installs.
+Do not install a second Triton distribution over FlagTree or replace the
+official vLLM CUDA package with an EMPTY wheel.
 
-## 1. Check the host
+Keep the plugin checkout and its
+[NVIDIA dispatch policy](../../vllm_fl/dispatch/config/nvidia.yaml) together.
+Compatible explicit fused operators use FlagGems-vllm; general ATen registration
+remains with FlagGems. See the [provider guide](../flaggems-vllm.md).
 
-The host needs Docker, NVIDIA Container Toolkit, and an NVIDIA driver that can
-run CUDA 12.9 containers.
+## Prepare the container
 
-```bash
-nvidia-smi
-docker version
-docker info | grep -i runtime
-docker run --rm --gpus all nvidia/cuda:12.9.1-base-ubuntu24.04 nvidia-smi
-```
+Use Linux, Docker with NVIDIA Container Toolkit, and a driver compatible with
+CUDA 12.9. Check the selected GPUs with `nvidia-smi`. Run long remote setup and
+serving commands inside `tmux`.
 
-Select a tensor-parallel size that matches the model and the number of visible
-GPUs. The Qwen3-8B example below fits on one 80 GB GPU with `TP_SIZE=1`.
-
-## 2. Prepare the repository and model
-
-Use the branch, tag, or commit that you intend to deploy. Keep the plugin
-checkout, this guide, and the checked-in NVIDIA dispatch configuration on the
-same revision.
+Prepare a checkout containing the adaptation and complete local checkpoints.
+Before the adaptation is merged, use its PR revision instead of the target
+branch.
 
 ```bash
-git clone https://github.com/flagos-ai/vllm-plugin-FL.git
+git clone --branch 0.5.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
-
+git rev-parse HEAD
 export REPO_DIR="$PWD"
-export MODEL_DIR=/data/models/Qwen3-8B
-export TP_SIZE=1
+export MODELS_DIR=/data/models
+export RUN_DIR=/data/vllm-fl-runs
+mkdir -p "$RUN_DIR"
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci
 
-test -f "$MODEL_DIR/config.json"
-```
-
-If the model is not already present, it can be downloaded with ModelScope. Keep
-weights outside the container so that they survive container recreation.
-
-```bash
-modelscope download \
-  --model Qwen/Qwen3-8B \
-  --local_dir /data/models/Qwen3-8B
-```
-
-Do not set a network proxy permanently. If a proxy is required for a download,
-export it only in the current shell and unset it when the download finishes.
-
-## 3. Pull the validated image
-
-Authenticate first if the Harbor registry requires it. Do not put credentials
-in scripts or shell history.
-
-```bash
-docker login harbor.baai.ac.cn
-
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
-```
-
-For a bit-for-bit reproducible deployment, use the manifest digest from the
-software-stack table after confirming that the registry still exposes it.
-
-## 4. Verify the image runtime
-
-This check confirms that Triton comes from FlagTree. A separately installed
-`triton` wheel would replace the tested runtime and is treated as an error.
-
-```bash
-docker run --rm \
-  --gpus all \
-  --ipc=host \
-  --entrypoint /bin/bash \
-  "$IMAGE" -lc '
-set -euo pipefail
-nvidia-smi
-if python3 -m pip show triton >/dev/null 2>&1; then
-  echo "ERROR: standalone triton is installed; FlagTree must provide Triton" >&2
-  exit 1
-fi
-python3 -c "
-from importlib.metadata import version
-import flag_gems
-import torch
-import triton
-import vllm
-
-assert vllm.__version__.startswith(\"0.28.0\"), vllm.__version__
-assert version(\"flagtree\") == \"0.6.2a1\", version(\"flagtree\")
-assert triton.__version__.startswith(\"3.6.0\"), triton.__version__
-flagtree_version = version(\"flagtree\")
-print(f\"vLLM={vllm.__version__}\")
-print(f\"PyTorch={torch.__version__}, CUDA={torch.version.cuda}\")
-print(f\"FlagTree={flagtree_version}\")
-print(f\"Triton={triton.__version__} (provided by FlagTree)\")
-print(f\"FlagGems={flag_gems.__version__}\")
-"
-'
-```
-
-## 5. Start the inference service
-
-The command mounts the current plugin checkout and installs it into the
-container without resolving dependencies. This preserves the validated image
-runtime while ensuring that the service runs the same plugin revision as the
-repository checkout.
-
-```bash
-docker run --rm -d \
-  --name vllm-fl-nvidia \
-  --privileged \
-  --gpus all \
-  --ipc=host \
-  --hostname vllm-plugin-fl \
-  --user root \
-  --ulimit nofile=65535:65535 \
-  -p 8000:8000 \
+docker run --rm -it --name vllm-fl-nvidia \
+  --gpus all --ipc=host --ulimit nofile=65535:65535 \
+  -p 127.0.0.1:8000:8000 \
   -v "$REPO_DIR:/workspace/vllm-plugin-FL" \
-  -v "$MODEL_DIR:/models/Qwen3-8B:ro" \
-  -e VLLM_PLUGINS=fl \
-  -e USE_FLAGGEMS=1 \
-  -e GEMS_VENDOR=nvidia \
-  -e USE_FLAGTUNE=0 \
-  -e TP_SIZE="$TP_SIZE" \
-  --entrypoint /bin/bash \
-  "$IMAGE" -lc '
-set -euo pipefail
-cd /workspace/vllm-plugin-FL
-uv pip install \
-  --system \
-  --break-system-packages \
-  --no-build-isolation \
-  --no-deps \
-  -e .
-exec vllm serve /models/Qwen3-8B \
-  --served-model-name qwen3-8b \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --tensor-parallel-size "$TP_SIZE" \
-  --max-model-len 8192 \
-  --gpu-memory-utilization 0.90 \
-  --trust-remote-code
-'
+  -v "$MODELS_DIR:/models:ro" \
+  -v "$RUN_DIR:/results" \
+  -w /workspace/vllm-plugin-FL \
+  --entrypoint /bin/bash "$IMAGE"
 ```
 
-The default vLLM 0.28 runner and CUDA Graph mode are used. Add
-`--enforce-eager` only when an eager-mode run is specifically required.
-
-The validated NVIDIA policy intentionally keeps vLLM's native CUDA attention
-backend. Do not set `VLLM_FL_USE_FLAGGEMS_ATTN=1` unless that path has been
-validated separately for the target model.
-
-Compatible explicit operator calls use FlagGems-vllm directly. Follow the
-[installation guide](../flaggems-vllm.md); no provider-selection environment
-variable is required. The installer preserves the validated image stack.
-
-## 6. Verify inference
-
-Follow startup logs in one terminal:
+If registry authentication is required, run `docker login harbor.baai.ac.cn`
+before pulling. Install the mounted plugin checkout inside the container:
 
 ```bash
-docker logs -f vllm-fl-nvidia
+export VLLM_PLUGINS=fl
+export USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
+export FL_STACK_PROVENANCE=/opt/fl-ci/provenance.json
+
+python .github/scripts/install_flaggems_vllm.py
+python -I -B .github/scripts/cuda/stack.py --runtime-only
+env -u VLLM_VENDOR python -m pip install \
+  --break-system-packages --no-build-isolation --no-deps -e .
+python -I -B .github/scripts/cuda/stack.py
 ```
 
-Wait for the OpenAI-compatible endpoint in another terminal:
+The plugin uses the official vLLM CUDA extensions and installs its Python
+integration without building `vllm_fl._C`. The stack checks verify the native
+vLLM package, pinned FL dependencies, active Triton provider and plugin
+installation. Avoid
+running from an upstream vLLM source checkout or shadowing its installed package
+through `PYTHONPATH`.
+
+Leave attention, cache and quantization backend selection at upstream defaults
+unless configuring a supported deployment explicitly. Native CUDA kernels, UVA
+and graph fusions remain available. The examples use NCCL; leave `FLAGCX_PATH`
+unset unless intentionally configuring and validating FlagCX.
+
+## Basic service and runner selection
+
+Run inside the prepared container with a local `Qwen3-4B` checkpoint:
 
 ```bash
-for attempt in $(seq 1 120); do
-  if curl --silent --fail http://127.0.0.1:8000/v1/models >/dev/null; then
-    echo "service is ready"
-    break
-  fi
-  if ! docker inspect -f '{{.State.Running}}' vllm-fl-nvidia 2>/dev/null \
-      | grep -q true; then
-    docker logs vllm-fl-nvidia
-    exit 1
-  fi
-  if [ "$attempt" -eq 120 ]; then
-    echo "service did not become ready" >&2
-    docker logs vllm-fl-nvidia
-    exit 1
-  fi
-  sleep 5
-done
+CUDA_VISIBLE_DEVICES=0 vllm serve /models/Qwen3-4B \
+  --served-model-name fl-model
 ```
 
-Send a deterministic chat request:
+The example uses upstream defaults for the runner, dtype, memory, batching and
+compilation. The service listens on port 8000. Adjust resource limits or tensor
+parallelism only when your model and hardware require them.
+
+To select upstream V1 explicitly, stop that service and run:
 
 ```bash
-curl http://127.0.0.1:8000/v1/chat/completions \
+CUDA_VISIBLE_DEVICES=0 VLLM_USE_V2_MODEL_RUNNER=0 \
+  vllm serve /models/Qwen3-4B --served-model-name fl-model
+```
+
+Set `VLLM_USE_V2_MODEL_RUNNER=1` to select V2 explicitly. Both runners are
+inherited from upstream through `NvidiaWorkerFL`; confirm the selected runner
+in the worker logs. `--enforce-eager` is optional for debugging and is independent
+of runner selection.
+
+From another host terminal, check readiness and send a request:
+
+```bash
+curl --fail http://127.0.0.1:8000/health
+curl --fail http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{
-    "model": "qwen3-8b",
-    "messages": [
-      {"role": "user", "content": "Reply with exactly: vLLM FL is ready"}
-    ],
-    "temperature": 0,
-    "max_tokens": 32
-  }'
+  -d '{"model":"fl-model","messages":[{"role":"user","content":"What is 2 + 2? Give only the number."}],"temperature":0,"max_tokens":64,"chat_template_kwargs":{"enable_thinking":false}}'
 ```
 
-The deployment is successful when `/v1/models` returns HTTP 200 and the chat
-request returns a non-empty `choices[0].message.content` without a server-side
-error.
+Check that the response answers the question correctly.
 
-Stop the example service with:
+## Model coverage
+
+These are the requested model validation targets. Results must come from the
+current full-CUDA image and plugin revision; earlier EMPTY runs do not validate
+this configuration. Run inference on the CI runner's allocated devices with
+complete checkpoints and an appropriate memory/parallelism configuration.
+
+| Model | Validation scope |
+|---|---|
+| Qwen3-4B | Basic inference, upstream V1/V2 selection, eager and graph execution |
+| Qwen3.8-Flash-Next | Text generation and repeated greedy requests |
+| DeepSeek-V4.1-Flash | Official checkpoint quantization, text generation and repeated greedy requests |
+| MiniCPM-V-4.7-1B | Text, image, video and paired-image correctness |
+| Hy4-preview | Official checkpoint loading and model inference on sufficient allocated hardware |
+
+For example, start MiniCPM's multimodal service with:
 
 ```bash
-docker stop vllm-fl-nvidia
+CUDA_VISIBLE_DEVICES=0 vllm serve /models/MiniCPM-V-4.7-1B \
+  --served-model-name fl-model
 ```
 
-## 7. Build the same stack from the official base image
+Use an `image_url` or `video_url` item in the chat message for media input.
+For paired images, send two `image_url` items in the same message. Evaluate the
+answer against the supplied media.
 
-Use this path only when the prebuilt Harbor image is unavailable. Start from
-`vllm/vllm-openai:v0.28.0-cu129`, then replace vLLM's standalone Triton package
-with the validated FlagTree runtime. Do not install `triton==3.6.0` separately.
+## Build and CI
+
+Build the native CUDA CI image from the repository root when needed:
 
 ```bash
-python3 -m pip uninstall -y triton
-# Repeat until: WARNING: Skipping triton as it is not installed.
-
-RES="--index-url=https://resource.flagos.net/repository/flagos-pypi-hosted/simple"
-python3 -m pip install flagtree===0.6.2a1 $RES
-
-python3 -m pip install -U scikit-build-core==0.11 pybind11 ninja cmake
-
-git clone https://github.com/flagos-ai/FlagGems.git
-cd FlagGems
-git checkout 34c6d2ce416d32a98f1dd2bb6e4cfb67c59342d9
-python3 -m pip install --no-build-isolation --no-deps .
-
-cd /workspace/vllm-plugin-FL
-VLLM_VENDOR=cuda python3 -m pip install \
-  --no-build-isolation \
-  --no-deps \
-  -e .
+bash docker/build.sh --platform cuda --target ci \
+  --image-name vllm-fl-local --image-tag v0.32.0-cuda-ci
 ```
 
-Run the runtime verification from step 4 before starting a service. Moving to a
-new FlagTree or FlagGems revision requires re-running operator-blacklist tests
-and real dense and MoE model inference before calling the environment
-supported.
+[Dockerfile.ci](../../docker/cuda/Dockerfile.ci) retains the official vLLM CUDA
+installation and installs the fixed FlagGems, FlagTree and FlagGems-vllm sources.
+The build records provenance and checks the runtime. Install the plugin checkout
+and run the full stack check after starting the resulting image.
+
+CI [setup.sh](../../.github/scripts/cuda/setup.sh) verifies the provider and
+runtime pins, installs the plugin with `--no-deps`, then checks the stack and audio
+dependencies. Audio checks require access to the official vLLM audio fixtures
+or a populated `VLLM_ASSETS_CACHE`.
+
+NVIDIA is the enabled backend for this adaptation. Existing CI runners execute
+unit and model tests using the selected image; their labels, model mounts and
+test entry points are defined in the existing workflow. The usage examples
+above do not add automatic CI jobs. See the [test guide](../../tests/README.md).
 
 ## Troubleshooting
 
-- **Plugin is not active:** confirm the container has `VLLM_PLUGINS=fl` and the
-  startup log reports the FL platform/plugin registration.
-- **FlagGems is not active:** confirm `USE_FLAGGEMS=1` and
-  `GEMS_VENDOR=nvidia`; do not define both a FlagGems whitelist and blacklist.
-- **Triton import or compilation errors:** run step 4. The supported setup has
-  FlagTree `0.6.2a1`, imported Triton `3.6.0`, and no standalone `triton`
-  package.
-- **Out of memory:** lower `--max-model-len` or
-  `--gpu-memory-utilization`, or increase `TP_SIZE` when the model supports that
-  tensor-parallel degree.
-- **First request is slow:** Triton kernels and CUDA Graphs may compile or
-  capture during warm-up. Check container logs before treating this as a
-  failure.
-- **A model-specific operator fails:** retain the checked-in NVIDIA blacklist,
-  reproduce the failure against native PyTorch/vLLM, and only then update
-  [`nvidia.yaml`](../../vllm_fl/dispatch/config/nvidia.yaml).
+- **Missing vLLM CUDA extension:** restore the full official CUDA image and run
+  the stack check. An EMPTY wheel is not a supported NVIDIA installation.
+- **Wrong dependency/provider:** restore the pinned image or rebuild its recipe;
+  keep FlagGems enabled and the matching NVIDIA dispatch policy installed.
+- **Incorrect model output:** retain prompts, generated token IDs, worker logs,
+  image digest and plugin/dependency revisions. For media, also retain the input
+  and preprocessing configuration.
+- **Memory failure:** distinguish weight loading, temporary buffers and KV-cache
+  allocation. Select an appropriate topology and request limits; reducing GPU
+  memory utilization does not shrink model weights.
+- **Slow first request:** inspect compiler and worker logs. Compilation cache
+  state affects startup time; GPU utilization alone does not identify a hang.

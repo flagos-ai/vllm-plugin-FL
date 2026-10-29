@@ -130,6 +130,7 @@ def _patch_flash_attn_import():
             "flash_attn C extensions not available"
         )
         stub.flash_attn_varlen_func = None
+        stub.compile_flash_attn_varlen_func_from_specs = None
         stub.get_scheduler_metadata = None
         stub.is_fa_version_supported = lambda *a, **kw: False
         sys.modules["vllm.vllm_flash_attn"] = stub
@@ -177,8 +178,14 @@ def register():
         logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
         return arm_cpu_platform
 
-    _patch_custom_ops()
-    _patch_flash_attn_import()
+    from vllm_fl.utils import DeviceInfo
+
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name != "nvidia":
+        # Other accelerators still use EMPTY wheels. NVIDIA uses upstream's
+        # native CUDA extensions and must not replace failed imports with stubs.
+        _patch_custom_ops()
+        _patch_flash_attn_import()
 
     # Note: FlagCX connector registration is deferred to register_model()
     # to avoid circular imports during VllmConfig.__post_init__ in spawned
@@ -189,12 +196,9 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    from vllm_fl.utils import DeviceInfo
-
-    vendor_name = DeviceInfo().vendor_name
     if vendor_name in ("ascend", "enflame", "gcu"):
-        # v0.28 defaults some models to the upstream V2 runner. These backends
-        # use ModelRunnerFL; choose it before VllmConfig reads model defaults.
+        # These backends use ModelRunnerFL; choose it before VllmConfig reads
+        # model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
@@ -293,11 +297,21 @@ def register_model():
     register_quant_linear()
     register_router()
 
-    _register_gdn_packed_decode_patch()
-
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "ascend":
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name != "nvidia":
+        # NVIDIA's native vLLM 0.32 already preserves packed GDN beta precision.
+        _register_gdn_packed_decode_patch()
+
+    if vendor_name == "nvidia":
+        from vllm_fl.patches.minicpmo_audio import patch_minicpmo_audio_budget
+
+        # General plugins run before encoder budgets are built in the engine
+        # frontend and spawned workers, for both upstream model runners.
+        patch_minicpmo_audio_budget()
+
+    if vendor_name == "ascend":
         # Import registers the ModelSlim quantization config before model
         # configuration resolution in worker processes.
         from vllm.model_executor.models import ModelRegistry
