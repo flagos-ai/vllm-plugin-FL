@@ -1,0 +1,29 @@
+trust-remote-code: true
+tensor-parallel-size: 8
+pipeline-parallel-size: 4
+data-parallel-size: 1
+distributed-executor-backend: mp
+nnodes: 4
+max-model-len: 69632
+gpu-memory-utilization: 0.95
+max-num-seqs: 64
+max-num-batched-tokens: 4096
+# The root CLI parser cannot resolve a subcommand's false boolean option.
+no-enable-prefix-caching: true
+mamba-cache-mode: none
+dtype: bfloat16
+load-format: safetensors
+safetensors-load-strategy: lazy
+disable-custom-all-reduce: true
+served-model-name: kimi-k3
+attention-config:
+  mla_prefill_backend: CUSTOM
+mm-encoder-attn-backend: TORCH_SDPA
+reasoning-parser: kimi_k3
+interleave-mm-strings: true
+compilation-config:
+  mode: 0
+  cudagraph_mode: FULL_DECODE_ONLY
+  cudagraph_capture_sizes: [1, 2, 4, 8, 12, 16, 24, 32, 64]
+  max_cudagraph_capture_size: 64
+cpu-distributed-timeout-seconds: 7200

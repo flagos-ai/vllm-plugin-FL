@@ -24,4 +24,7 @@ def find_mccl_library() -> str:
     return so_file
 
 
-vllm.utils.nccl.find_nccl_library = find_mccl_library
+from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+
+if not is_kimi_k3_profile():
+    vllm.utils.nccl.find_nccl_library = find_mccl_library

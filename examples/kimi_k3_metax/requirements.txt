@@ -1,0 +1,2 @@
+vllm @ git+https://github.com/cshujie131-bot/vllm.git@c88c603e1f3d3bde7ad18bd7299cb3d502f7b7a7
+flaggems_vllm @ git+https://github.com/cshujie131-bot/FlagGems-vllm.git@1d4b69b355a8a42deb0edd485ef9d9a94b2477b8

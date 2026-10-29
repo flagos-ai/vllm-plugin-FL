@@ -94,3 +94,9 @@ def register_builtins(registry) -> None:
     ]
 
     registry.register_many(impls)
+
+    from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+
+    if is_kimi_k3_profile():
+        from .kimi_k3_ops import register_builtins as register_kimi_k3
+        register_kimi_k3(registry)

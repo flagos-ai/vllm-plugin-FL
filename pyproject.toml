@@ -37,7 +37,7 @@ dependencies = [
 fl = "vllm_fl:register"
 
 [project.entry-points."vllm.general_plugins"]
-fl = "vllm_fl:register_model"
+fl = "vllm_fl.model_registration:register_model"
 
 [project.urls]
 Homepage = "https://github.com/flagos-ai/vllm-plugin-FL"

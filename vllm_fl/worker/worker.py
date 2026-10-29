@@ -1,9 +1,14 @@
+from functools import partial
+"""A GPU worker class adapted for the FL out-of-tree platform."""
+
+from vllm_fl.models.kimi_k3_context import execution_config
+from vllm_fl.worker.runtime_identity import worker_profile_identity
+from vllm.utils.import_utils import resolve_obj_by_qualname
 # Copyright (c) 2025 BAAI. All rights reserved.
 # Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/v1/worker/gpu_worker.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""A GPU worker class adapted for the FL out-of-tree platform."""
 
 import gc
 import os
@@ -96,6 +101,9 @@ from vllm_fl.attention.utils import patch_mm_encoder_attention
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
+from vllm_fl.worker.pipeline_input import AsyncIntermediateTensors
+from vllm_fl.worker.runtime_diagnostics import RuntimeDiagnostics
+
 logger = init_logger(__name__)
 
 
@@ -125,7 +133,7 @@ if TYPE_CHECKING:
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 
-def _initialize_fl_runtime(rank: int) -> None:
+def _initialize_fl_runtime(rank: int, config=None) -> None:
     """Install FL dispatch hooks before model/operator construction."""
     from vllm_fl.ops.custom_ops import register_oot_ops
 
@@ -140,12 +148,21 @@ def _initialize_fl_runtime(rank: int) -> None:
     import flag_gems
 
     whitelist, blacklist = get_flag_gems_whitelist_blacklist()
-    should_record = rank == 0
+    # Op DEBUG logging constructs a LogRecord before its once filter runs.
+    # Keep every TP worker free of that hot-path cost. Operator registration,
+    # backend selection, startup logs and profile evidence remain enabled.
+    should_record = False
     common = {
         "record": should_record,
         "once": True,
         "path": fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
     }
+    policy = execution_config(config) if config is not None else None
+    if policy is not None and policy.enabled:
+        common["registrar"] = partial(
+            resolve_obj_by_qualname("vllm_fl.dispatch.backends.flaggems.kimi_k3_registrar.K3OpRegistrar"),
+            execution_config=policy,
+        )
     if whitelist:
         logger.info("[FlagGems] Enable only the following ops: %s", whitelist)
         flag_gems.only_enable(include=whitelist, **common)
@@ -274,38 +291,6 @@ def _apply_worker_vendor_patches() -> None:
         logger.warning("Iluvatar worker patch failed: %s", exc)
 
 
-class AsyncIntermediateTensors(IntermediateTensors):
-    """IntermediateTensors with lazy comm synchronization"""
-
-    def __init__(
-        self,
-        tensors: dict[str, torch.Tensor],
-        comm_handles: list[Handle] | None = None,
-        comm_postprocess: list[Callable[[], None]] | None = None,
-    ) -> None:
-        super().__init__(tensors)
-        self._comm_handles = comm_handles
-        self._comm_postprocess = comm_postprocess
-        self._comm_waited = False
-
-    def wait_for_comm(self) -> None:
-        if self._comm_waited:
-            return
-        if self._comm_handles:
-            for handle in self._comm_handles:
-                handle.wait()
-        if self._comm_postprocess:
-            for fn in self._comm_postprocess:
-                fn()
-        self._comm_waited = True
-
-    def __getattribute__(self, name: str):
-        # ensure `.tensors` is ready before use
-        if name == "tensors" and not object.__getattribute__(self, "_comm_waited"):
-            object.__getattribute__(self, "wait_for_comm")()
-        return object.__getattribute__(self, name)
-
-
 class WorkerFL(WorkerBase):
     def __init__(
         self,
@@ -315,7 +300,6 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
         # kernels inside spawned workers; when every rank shares the default
         # Triton cache directory, concurrent compilation of the same kernel
@@ -342,7 +326,11 @@ class WorkerFL(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
 
-        _initialize_fl_runtime(self.rank)
+        _initialize_fl_runtime(self.rank, self.vllm_config)
+        self.k3_execution = execution_config(self.vllm_config)
+        self.runtime_diagnostics = RuntimeDiagnostics(
+            os.environ.get("VLLM_FL_DIAGNOSTICS_DIR")
+        )
 
         # configure float32 matmul precision according to vLLM env.
         precision = envs.VLLM_FLOAT32_MATMUL_PRECISION
@@ -639,13 +627,25 @@ class WorkerFL(WorkerBase):
             )
 
             # HACK(woosuk): This is a temporary fix to avoid type errors.
-            self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
-                self.vllm_config, self.device
-            )
+            if self.k3_execution.enabled:
+                runner_cls = resolve_obj_by_qualname("vllm_fl.worker.kimi_k3.K3ModelRunner")
+                self.model_runner = runner_cls(
+                    self.vllm_config, self.device, diagnostics=self.runtime_diagnostics
+                )
+            else:
+                self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
+                    self.vllm_config, self.device
+                )
         else:
             from vllm_fl.worker.model_runner import ModelRunnerFL
 
             self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
+
+        if self.runtime_diagnostics.enabled:
+            identity = worker_profile_identity(self)
+            identity.update(schema=2, use_v2_model_runner=self.use_v2_model_runner,
+                            profile_active_at_init=False)
+            self.runtime_diagnostics.record_worker_identity(identity)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -782,6 +782,11 @@ class WorkerFL(WorkerBase):
             self.requested_memory
             - profile_result.non_kv_cache_memory
             - cudagraph_memory_estimate_applied
+        )
+
+        self.runtime_diagnostics.record_startup_memory(
+            self, profile_result, cudagraph_memory_estimate,
+            cudagraph_memory_estimate_applied,
         )
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
@@ -1297,91 +1302,98 @@ class WorkerFL(WorkerBase):
         self, scheduler_output: "SchedulerOutput"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | None:
         # ensure any previous non-blocking PP sends are complete
-        if self._pp_send_work:
-            for handle in self._pp_send_work:
-                handle.wait()
-            self._pp_send_work = []
+        try:
+            if self._pp_send_work:
+                for handle in self._pp_send_work:
+                    handle.wait()
+                self._pp_send_work = []
 
-        intermediate_tensors = None
-        forward_pass = scheduler_output.total_num_scheduled_tokens > 0
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        all_gather_tensors = {}
-        compilation_config = self.vllm_config.compilation_config
-        parallel_config = self.vllm_config.parallel_config
+            intermediate_tensors = None
+            forward_pass = scheduler_output.total_num_scheduled_tokens > 0
+            num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+            all_gather_tensors = {}
+            compilation_config = self.vllm_config.compilation_config
+            parallel_config = self.vllm_config.parallel_config
 
-        if (
-            parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
-            and forward_pass
-        ):
-            # currently only supported by V1 GPUModelRunner
-            assert not self.use_v2_model_runner
-            num_scheduled_tokens_np = np.array(
-                list(scheduler_output.num_scheduled_tokens.values()),
-                dtype=np.int32,
-            )
-            # TODO(lucas): This is pretty gross; ideally we should only ever call
-            # `_determine_batch_execution_and_padding` once (will get called again
-            # in `execute_model`) but this requires a larger refactor of PP.
-            _, batch_desc, _, _, _ = (
-                self.model_runner._determine_batch_execution_and_padding(
-                    num_tokens=num_scheduled_tokens,
-                    num_reqs=len(num_scheduled_tokens_np),
-                    num_scheduled_tokens_np=num_scheduled_tokens_np,
-                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
-                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
-                )
-            )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
-
-        if forward_pass and not get_pp_group().is_first_rank:
-            tensor_dict, comm_handles, comm_postprocess = (
-                get_pp_group().irecv_tensor_dict(
-                    all_gather_group=get_tp_group(),
-                    all_gather_tensors=all_gather_tensors,
-                )
-            )
-            assert tensor_dict is not None
-            intermediate_tensors = AsyncIntermediateTensors(
-                tensor_dict,
-                comm_handles=comm_handles,
-                comm_postprocess=comm_postprocess,
-            )
-
-        with self.annotate_profile(scheduler_output):
-            output = self.model_runner.execute_model(
-                scheduler_output, intermediate_tensors
-            )
             if (
-                self.use_v2_model_runner
-                and self.model_runner.is_pooling_model
-                and output is None
+                parallel_config.pipeline_parallel_size > 1
+                and compilation_config.pass_config.enable_sp
+                and forward_pass
             ):
-                output = self.model_runner.pool()  # type: ignore
-            if isinstance(
-                output, ModelRunnerOutput | AsyncModelRunnerOutput | NoneType
-            ):
-                return output
+                # currently only supported by V1 GPUModelRunner
+                assert not self.use_v2_model_runner
+                num_scheduled_tokens_np = np.array(
+                    list(scheduler_output.num_scheduled_tokens.values()),
+                    dtype=np.int32,
+                )
+                # TODO(lucas): This is pretty gross; ideally we should only ever call
+                # `_determine_batch_execution_and_padding` once (will get called again
+                # in `execute_model`) but this requires a larger refactor of PP.
+                _, batch_desc, _, _, _ = (
+                    self.model_runner._determine_batch_execution_and_padding(
+                        num_tokens=num_scheduled_tokens,
+                        num_reqs=len(num_scheduled_tokens_np),
+                        num_scheduled_tokens_np=num_scheduled_tokens_np,
+                        max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
+                        use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
+                    )
+                )
+                all_gather_tensors = {
+                    "residual": not is_residual_scattered_for_sp(
+                        self.vllm_config, batch_desc.num_tokens
+                    )
+                }
 
-        assert isinstance(output, IntermediateTensors)
-        parallel_config = self.vllm_config.parallel_config
-        assert (
-            parallel_config.distributed_executor_backend != "external_launcher"
-            and not get_pp_group().is_last_rank
-        )
+            if forward_pass and not get_pp_group().is_first_rank:
+                tensor_dict, comm_handles, comm_postprocess = (
+                    get_pp_group().irecv_tensor_dict(
+                        all_gather_group=get_tp_group(),
+                        all_gather_tensors=all_gather_tensors,
+                    )
+                )
+                assert tensor_dict is not None
+                intermediate_tensors = AsyncIntermediateTensors(
+                    tensor_dict,
+                    comm_handles=comm_handles,
+                    comm_postprocess=comm_postprocess,
+                )
+                # Transfer receive ownership; do not retain producer aliases
+                # through model forward after the runner consumes these inputs.
+                del tensor_dict, comm_handles, comm_postprocess
 
-        # launch non-blocking send of intermediate tensors
-        self._pp_send_work = get_pp_group().isend_tensor_dict(
-            output.tensors,
-            all_gather_group=get_tp_group(),
-            all_gather_tensors=all_gather_tensors,
-        )
+            with self.annotate_profile(scheduler_output):
+                output = self.model_runner.execute_model(
+                    scheduler_output, intermediate_tensors
+                )
+                if (
+                    self.use_v2_model_runner
+                    and self.model_runner.is_pooling_model
+                    and output is None
+                ):
+                    output = self.model_runner.pool()  # type: ignore
+                if isinstance(
+                    output, ModelRunnerOutput | AsyncModelRunnerOutput | NoneType
+                ):
+                    return output
 
-        return None
+            assert isinstance(output, IntermediateTensors)
+            parallel_config = self.vllm_config.parallel_config
+            assert (
+                parallel_config.distributed_executor_backend != "external_launcher"
+                and not get_pp_group().is_last_rank
+            )
+
+            # launch non-blocking send of intermediate tensors
+            self._pp_send_work = get_pp_group().isend_tensor_dict(
+                output.tensors,
+                all_gather_group=get_tp_group(),
+                all_gather_tensors=all_gather_tensors,
+            )
+
+            return None
+        except torch.OutOfMemoryError as error:
+            self.runtime_diagnostics.capture_oom_once(self, scheduler_output, error)
+            raise
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
         return self.model_runner.take_draft_token_ids()

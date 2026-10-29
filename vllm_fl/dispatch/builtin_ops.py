@@ -134,6 +134,21 @@ def register_builtins(registry: OpRegistry) -> None:
     Args:
         registry: Registry to register into
     """
+    from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
+
+    if is_kimi_k3_profile():
+        # Exact profile admission: no silent fallback on failed registrations.
+        if os.environ.get("VLLM_FL_PLUGIN_MODULES", "").strip():
+            raise RuntimeError("K3 requires canonical FL registrations")
+        from .backends.flaggems.register_ops import register_builtins as register_flaggems
+        from .backends.reference.register_ops import register_builtins as register_reference
+        from .backends.vendor.metax.register_ops import register_builtins as register_metax
+
+        register_flaggems(registry)
+        register_reference(registry)
+        register_metax(registry)
+        return
+
     # Register FlagGems (DEFAULT) implementations
     try:
         from .backends.flaggems.register_ops import register_builtins as register_flaggems

@@ -1,0 +1,58 @@
+{
+  "schema": 2,
+  "dependencies": {
+    "vllm": {
+      "distribution": "vllm",
+      "import_package": "vllm",
+      "repository": "https://github.com/cshujie131-bot/vllm.git",
+      "commit": "c88c603e1f3d3bde7ad18bd7299cb3d502f7b7a7",
+      "validated_base": "2cf0a6915ce544dc493a0990f2ea38d81601128a"
+    },
+    "FlagGems": {
+      "distribution": "flag_gems",
+      "import_package": "flag_gems",
+      "repository": "https://github.com/cshujie131-bot/FlagGems.git",
+      "commit": "6efd6dab4a4a8a78167262d0841ff0d728a2d1d3",
+      "validated_base": "ad9f11380686edac17edc97856bc83f058329290"
+    },
+    "FlagGems-vllm": {
+      "distribution": "flaggems_vllm",
+      "import_package": "flaggems_vllm",
+      "repository": "https://github.com/cshujie131-bot/FlagGems-vllm.git",
+      "commit": "1d4b69b355a8a42deb0edd485ef9d9a94b2477b8",
+      "validated_base": "3e9e47c988bf834204b416d2a0b3db8c91e7a4de"
+    }
+  },
+  "reviews": {
+    "addmm_compat": {
+      "url": "https://github.com/flagos-ai/FlagGems/pull/7302",
+      "merged_at_lock_time": false,
+      "draft_at_lock_time": true
+    },
+    "alignment": {
+      "url": "https://github.com/flagos-ai/FlagGems-vllm/pull/952",
+      "merged_at_lock_time": false,
+      "draft_at_lock_time": false
+    },
+    "argmax": {
+      "url": "https://github.com/flagos-ai/FlagGems/pull/7300",
+      "merged_at_lock_time": false,
+      "draft_at_lock_time": false
+    },
+    "mla_interface": {
+      "url": "https://github.com/flagos-ai/FlagGems-vllm/pull/953",
+      "merged_at_lock_time": false,
+      "draft_at_lock_time": false
+    },
+    "situ": {
+      "url": "https://github.com/flagos-ai/FlagGems-vllm/pull/951",
+      "merged_at_lock_time": false,
+      "draft_at_lock_time": false
+    },
+    "topk": {
+      "url": "https://github.com/flagos-ai/FlagGems-vllm/pull/950",
+      "merged_at_lock_time": false,
+      "draft_at_lock_time": false
+    }
+  }
+}

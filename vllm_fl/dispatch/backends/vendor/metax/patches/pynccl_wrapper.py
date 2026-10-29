@@ -448,23 +448,26 @@ class MCCLLibrary:
         return
 
 
-from vllm.distributed.device_communicators import pynccl, pynccl_wrapper
+from vllm_fl.patches.kimi_k3.profile import is_kimi_k3_profile
 
-pynccl.NCCLLibrary = MCCLLibrary
-pynccl_wrapper.NCCLLibrary = MCCLLibrary
+if not is_kimi_k3_profile():
+    from vllm.distributed.device_communicators import pynccl, pynccl_wrapper
 
-
-# Patch: pynccl uses ctypes to pass tensor pointers to MCCL; TorchDynamo
-# cannot trace ctypes calls. Replace CudaCommunicator.all_reduce with a
-# torch.distributed call which Dynamo can trace natively.
-import torch.distributed as dist
-from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
+    pynccl.NCCLLibrary = MCCLLibrary
+    pynccl_wrapper.NCCLLibrary = MCCLLibrary
 
 
-def _compile_friendly_all_reduce(self, input_):
-    """Use torch.distributed all_reduce which Dynamo can trace."""
-    dist.all_reduce(input_, op=dist.ReduceOp.SUM, group=self.device_group)
-    return input_
+    # Patch: pynccl uses ctypes to pass tensor pointers to MCCL; TorchDynamo
+    # cannot trace ctypes calls. Replace CudaCommunicator.all_reduce with a
+    # torch.distributed call which Dynamo can trace natively.
+    import torch.distributed as dist
+    from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
 
 
-CudaCommunicator.all_reduce = _compile_friendly_all_reduce
+    def _compile_friendly_all_reduce(self, input_):
+        """Use torch.distributed all_reduce which Dynamo can trace."""
+        dist.all_reduce(input_, op=dist.ReduceOp.SUM, group=self.device_group)
+        return input_
+
+
+    CudaCommunicator.all_reduce = _compile_friendly_all_reduce
