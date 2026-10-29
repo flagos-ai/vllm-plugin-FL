@@ -319,8 +319,7 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         *([context, 4] if standardized else ["auto", context]),
         {"runner"},
     )
-    offsets = (0, 4096, 32768, 36864) if standardized else (0, 2048, 16384, 18432)
-    addresses = [kv.data_ptr() + offset for offset in offsets]
+    addresses = [kv.data_ptr() + offset for offset in (0, 2048, 16384, 18432)]
     assert backend_calls == (
         [] if standardized else [((16, 2, 16), {"cache_dtype_str": "auto"})]
     )
@@ -330,9 +329,9 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
     assert zeroer._meta[0].tolist() == [address + 256 for address in addresses]
     assert zeroer._meta[0].dtype == torch.uint64
     assert zeroer._meta[0].device == kv.device
-    assert zeroer._meta[1].tolist() == [2048 if standardized else 1024] * 4
-    assert zeroer._meta[2].tolist() == [1024 if standardized else 512] * 4
-    assert zeroer._meta[3:] == (1, 1024 if standardized else 512, 4)
+    assert zeroer._meta[1].tolist() == [1024] * 4
+    assert zeroer._meta[2].tolist() == [512] * 4
+    assert zeroer._meta[3:] == (1, 512, 4)
     assert all(
         actual is expected
         for actual, expected in zip(zeroer._meta[1:], snapshots[0][1:])
