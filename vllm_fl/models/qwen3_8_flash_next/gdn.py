@@ -9,15 +9,55 @@ import torch
 from torch import nn
 
 from vllm.forward_context import get_forward_context
-
 from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
     GDNAttentionMetadata,
     QwenGatedDeltaNetAttention,
     causal_conv1d_update,
     is_conv_state_dim_first as is_gdn_conv_state_dim_first,
 )
+from vllm.v1.attention.backends.gdn_attn import (
+    GDNAttentionBackend,
+    GDNAttentionMetadataBuilder,
+)
 
 from vllm_fl.dispatch import resolve_op
+
+
+class Qwen38GDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
+    """Restore the accepted state even when this step has no draft tokens."""
+
+    def build(
+        self,
+        common_prefix_len: int,
+        common_attn_metadata,
+        num_accepted_tokens: torch.Tensor | None = None,
+        num_decode_draft_tokens_cpu: torch.Tensor | None = None,
+        fast_build: bool = False,
+    ) -> GDNAttentionMetadata:
+        if self.use_spec_decode and num_decode_draft_tokens_cpu is not None:
+            # vLLM 0.24 bypasses its speculative path when the sum of draft
+            # counts is zero, losing the previous accepted-1 state offset.
+            # These counts are only classification markers inside the builder;
+            # the real token counts come from query_start_loc. Keep prefill's
+            # negative sentinel and the caller's scheduler counts unchanged.
+            num_decode_draft_tokens_cpu = torch.where(
+                num_decode_draft_tokens_cpu == 0,
+                1,
+                num_decode_draft_tokens_cpu,
+            )
+        return super().build(
+            common_prefix_len,
+            common_attn_metadata,
+            num_accepted_tokens,
+            num_decode_draft_tokens_cpu,
+            fast_build,
+        )
+
+
+class Qwen38GDNAttentionBackend(GDNAttentionBackend):
+    @staticmethod
+    def get_builder_cls() -> type[Qwen38GDNAttentionMetadataBuilder]:
+        return Qwen38GDNAttentionMetadataBuilder
 
 
 class _FGVPrefill(nn.Module):
@@ -93,6 +133,9 @@ class Qwen38GatedDeltaNetAttention(QwenGatedDeltaNetAttention):
             "decode_spec": "vLLM 0.24 fused_sigmoid_gating_delta_rule_update",
             "causal_conv": "vLLM 0.24 causal_conv1d (accepted-token support)",
         }
+
+    def get_attn_backend(self) -> type[Qwen38GDNAttentionBackend]:
+        return Qwen38GDNAttentionBackend
 
     def _forward_core(self, mixed_qkv, b, a, core_attn_out):
         # Upstream gathers only when speculative and non-speculative tokens

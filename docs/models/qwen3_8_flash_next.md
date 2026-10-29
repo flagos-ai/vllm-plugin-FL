@@ -84,6 +84,10 @@ Defaults remain available; scoped provider choices retain the previous runtime:
 
 - GDN prefill uses FGV's FP32 V-major implementation. Speculative recurrence
   and causal convolution retain vLLM 0.24's accepted-token/null-slot semantics.
+  When all current decode draft counts are zero, the Qwen metadata builder
+  retains the previous accepted-token state offset instead of dropping it.
+  Only local classification markers change; scheduler counts, prefill sentinels
+  and non-speculative metadata remain unchanged. This also protects K1.
 - QSA retains FGV score/cache operations and the K512 selection contract.
   Score widths N<=512 bypass score/TopK. For 512<N<=32768, query-row counts
   M<=128 use the corrected FGV non-TLE per-row selector; larger M uses the
