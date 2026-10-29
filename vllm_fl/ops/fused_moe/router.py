@@ -22,6 +22,7 @@ from vllm_fl.dispatch import CachedOp
 
 _topk_softmax = CachedOp("topk_softmax")
 _grouped_topk = CachedOp("grouped_topk")
+_topk_sigmoid = CachedOp("topk_sigmoid")
 
 def fused_topk(
     hidden_states: torch.Tensor,
@@ -238,17 +239,45 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
         *,
         input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        topk_weights, topk_ids = fused_topk_bias(
-            hidden_states=hidden_states,
-            gating_output=router_logits,
-            e_score_correction_bias=self.e_score_correction_bias.data
-            if self.e_score_correction_bias is not None
-            else None,
-            topk=self.top_k,
-            renormalize=self.renormalize,
-            scoring_func=self.scoring_func,
-            indices_type=indices_type,
-        )
+        # Dispatch sigmoid+bias to the native CUDA kernel when available;
+        # CUDA-less vendor wheels fall back to the PyTorch reference.
+        if self.scoring_func == "sigmoid" and not rocm_aiter_ops.is_fused_moe_enabled():
+            assert hidden_states.size(0) == router_logits.size(0)
+            num_tokens = hidden_states.size(0)
+            topk_weights = torch.empty(
+                num_tokens, self.top_k, dtype=torch.float32, device=hidden_states.device
+            )
+            topk_ids = torch.empty(
+                num_tokens,
+                self.top_k,
+                dtype=torch.int32 if indices_type is None else indices_type,
+                device=hidden_states.device,
+            )
+            token_expert_indices = torch.empty(
+                num_tokens, self.top_k, dtype=torch.int32, device=hidden_states.device
+            )
+            topk_weights, topk_ids = _topk_sigmoid(
+                topk_weights,
+                topk_ids,
+                token_expert_indices,
+                router_logits,
+                self.renormalize,
+                self.e_score_correction_bias.data
+                if self.e_score_correction_bias is not None
+                else None,
+            )
+        else:
+            topk_weights, topk_ids = fused_topk_bias(
+                hidden_states=hidden_states,
+                gating_output=router_logits,
+                e_score_correction_bias=self.e_score_correction_bias.data
+                if self.e_score_correction_bias is not None
+                else None,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                scoring_func=self.scoring_func,
+                indices_type=indices_type,
+            )
 
         if self.routed_scaling_factor != 1.0:
             topk_weights *= self.routed_scaling_factor

@@ -61,6 +61,15 @@ class CudaBackend(Backend):
                 CudaBackend._available = False
         return CudaBackend._available
 
+    def has_native_topk_sigmoid(self) -> bool:
+        """A CUDA device alone does not imply the native MoE op is installed."""
+        if not self.is_available():
+            return False
+        try:
+            return getattr(torch.ops._moe_C, "topk_sigmoid", None) is not None
+        except (AttributeError, RuntimeError):
+            return False
+
     # ==================== Operator Implementations ====================
 
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
@@ -229,6 +238,28 @@ class CudaBackend(Backend):
         return topk_softmax_cuda(
             topk_weights, topk_indices, token_expert_indices, gating_output, renormalize
         )
+
+    def topk_sigmoid(
+        self,
+        topk_weights: torch.Tensor,
+        topk_indices: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
+        renormalize: bool = False,
+        e_score_correction_bias: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Preserve vLLM's native in-place fused kernel and dispatch contract."""
+        from vllm import _custom_ops as ops
+
+        ops.topk_sigmoid(
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+            e_score_correction_bias,
+        )
+        return topk_weights, topk_indices
 
     def invoke_fused_moe_triton_kernel(
         self,

@@ -42,6 +42,26 @@ class ReferenceBackend(Backend):
                 ReferenceBackend._available = False
         return ReferenceBackend._available
 
+    def topk_sigmoid(
+        self,
+        topk_weights: torch.Tensor,
+        topk_indices: torch.Tensor,
+        token_expert_indices: torch.Tensor,
+        gating_output: torch.Tensor,
+        renormalize: bool = False,
+        e_score_correction_bias: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .impl.moe import topk_sigmoid_torch
+
+        return topk_sigmoid_torch(
+            topk_weights,
+            topk_indices,
+            token_expert_indices,
+            gating_output,
+            renormalize,
+            e_score_correction_bias,
+        )
+
     # ==================== Operator Implementations ====================
 
     def dynamic_per_token_quant_int8(
