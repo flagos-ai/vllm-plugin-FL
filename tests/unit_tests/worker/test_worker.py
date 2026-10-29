@@ -311,3 +311,26 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
     PlatformFL.check_and_update_config(vllm_config)
 
     assert parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+
+
+@pytest.mark.parametrize("mode", ["NONE", "VLLM_COMPILE"])
+def test_gcu_ir_defaults_only_select_registered_native_providers(monkeypatch, mode):
+    from dataclasses import fields
+
+    from vllm.config.compilation import CompilationMode
+    from vllm.ir.op import IrOp
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "gcu")
+    config = SimpleNamespace(
+        compilation_config=SimpleNamespace(
+            backend="inductor", mode=getattr(CompilationMode, mode)
+        )
+    )
+    priority = PlatformFL.get_default_ir_op_priority(config)
+    for field in fields(priority):
+        providers = getattr(priority, field.name)
+        assert providers == ["native"]
+        assert all(
+            provider in IrOp.registry[field.name].impls for provider in providers
+        )

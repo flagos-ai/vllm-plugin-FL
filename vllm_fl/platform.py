@@ -740,6 +740,11 @@ class PlatformFL(Platform):
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
+        if cls.device_type == "gcu":
+            # CUDA C++ providers are not registered for the Enflame empty
+            # wheel. Native IR operations use the GCU dispatch implementations.
+            return IrOpPriorityConfig.with_default(["native"])
+
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["vllm_c", "native"]

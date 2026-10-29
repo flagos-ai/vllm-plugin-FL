@@ -8,6 +8,7 @@
 # flash_attn backend.  Does NOT depend on vllm.v1.attention.backends.flash_attn.
 
 from dataclasses import dataclass
+from importlib.util import find_spec
 from typing import ClassVar
 
 import numpy as np
@@ -21,7 +22,10 @@ from vllm.v1.attention.backend import (
 )
 from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.model_executor.layers.attention.attention import Attention
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
+if find_spec("vllm.v1.attention.ops.dcp") is not None:
+    from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
+else:
+    from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 
 
