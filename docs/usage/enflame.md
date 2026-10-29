@@ -11,7 +11,7 @@ contain each candidate's plugin changes.
 |---|---|
 | Vendor SDK base image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci` |
 | Image manifest | `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88` |
-| Accelerator / host driver | Enflame S60 / `1.10.6` |
+| Accelerator / observed host driver | Enflame S60 / `1.9.10` |
 | vLLM target | `0.32.0+empty`, fixed upstream `5df63a7203cdb9328d824a27b682e77c7b9928be` |
 | Python | `3.12.8` |
 | PyTorch | `2.11.0+cpu` with `torch-gcu==2.11.0+3.8.20260713` |

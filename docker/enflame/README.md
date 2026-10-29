@@ -9,6 +9,22 @@ vLLM Python bytes against raw Git blobs. Compiler and index-fill guards run
 after installation. The plugin still needs installation from its selected
 checkout. Model/Gate acceptance remains a separate step.
 
+## Build the vLLM 0.32 candidate
+
+Run the build inside a uniquely named tmux session and retain its log:
+
+```bash
+docker/build.sh --platform enflame --target ci \
+  --image-name local/vllm-plugin-fl --image-tag v0.32.0-enflame-candidate
+```
+
+The default tag is `v0.32.0-enflame-<stage>`. The build fixes vLLM's version
+and upstream commit; incompatible version overrides fail before Docker runs.
+`ENFLAME_BASE_IMAGE` selects the SDK base passed as `ENFLAME_SDK_IMAGE`.
+The recipe verifies its package versions and compiler files. This command
+does not publish the image. GitHub CI uses the pinned SDK image and runs the
+same private environment preparation from the tested plugin checkout.
+
 The prior full SDK build recipe is retained in `Dockerfile.v0.28.0`. The notes
 below describe that historical baseline, including its earlier validation.
 
@@ -71,27 +87,16 @@ with `--no-deps`; the dependency image does not bake in that checkout.
 See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
 model serving, and validation commands.
 
-## Build a local candidate
+### Rebuild the historical 0.28 SDK
 
-Run long builds in a uniquely named tmux session and retain the build log.
-From a private checkout, the underlying build command is:
+The retained Dockerfile is independent of the current build entry point:
 
 ```bash
-docker/build.sh --platform enflame --target ci \
-  --image-name local/vllm-plugin-fl --image-tag v0.28.0-enflame-candidate
+docker build -f docker/enflame/Dockerfile.v0.28.0 --target ci \
+  -t local/vllm-plugin-fl:v0.28.0-enflame-sdk docker/enflame
 ```
 
-The example tag is a local build destination, not a published image.
-The default generated tag includes the selected stage, such as
-`v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push.
-`.github/configs/enflame.yml` references the published vLLM 0.28 dependency
-image by digest. Enflame is enabled in `platforms.yml`, following main's
-existing `enflame-s60` runner label, devices `2,3` and `/data:/data` mount.
-The reference is main commit `6182281a42ce857fa52ef73ec1abafca941cdf3a`.
-Publishing the image and selecting this configuration do not establish
-that hardware CI has passed; record the actual workflow results separately.
-The S60 e2e jobs allow 120 minutes for cold-cache compilation, graph capture
-and both original model cases; the measured 35B serving run took 3607 seconds.
+The following build-argument notes apply to `Dockerfile.v0.28.0`.
 
 `VLLM_VERSION` and `VLLM_SOURCE_COMMIT` select the source version and exact
 commit; the default official v0.28.0 commit is

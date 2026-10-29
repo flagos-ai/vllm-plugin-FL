@@ -319,6 +319,7 @@ def test_gcu_ir_defaults_only_select_registered_native_providers(monkeypatch, mo
 
     from vllm.config.compilation import CompilationMode
     from vllm.ir.op import IrOp
+
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "gcu")
@@ -340,6 +341,7 @@ def test_batch_invariant_module_resolves_installed_upstream_api():
     from importlib.metadata import version
 
     from packaging.version import Version
+
     from vllm_fl.utils import get_batch_invariant_module
 
     module = get_batch_invariant_module()

@@ -159,13 +159,13 @@ class AttentionGCUBackend(AttentionBackend):
             stride_order = (0, 1, 3, 2, 4)
         else:
             raise ValueError(f"Unknown cache layout format {cache_layout}.")
+        return stride_order
 
     @classmethod
     def supported_kv_cache_layouts(cls):
         from vllm.v1.kv_cache_layout import KVCacheLayout
 
         return (KVCacheLayout.LBNHC,)
-        return stride_order
 
     @classmethod
     def supports_head_size(cls, head_size: int) -> bool:

@@ -186,6 +186,7 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
     device, weak_ref_output, record_property
 ):
     from importlib.metadata import version
+
     from packaging.version import Version
 
     if device.type != "gcu" or Version(version("vllm")) < Version("0.32.0"):
@@ -194,6 +195,7 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
     from vllm.compilation.monitor import set_cudagraph_capturing_enabled
     from vllm.config import CUDAGraphMode, VllmConfig
     from vllm.forward_context import BatchDescriptor, set_forward_context
+
     from vllm_fl.compilation.enflame_graph import EnflameGraphWrapper
 
     config = VllmConfig()

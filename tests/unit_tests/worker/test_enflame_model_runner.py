@@ -108,6 +108,7 @@ def test_native_graph_wrapper_is_replaced_without_changing_runner_type():
     from vllm.compilation.cuda_graph import CUDAGraphWrapper
     from vllm.config import CUDAGraphMode
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
     from vllm_fl.compilation.enflame_graph import (
         EnflameGraphWrapper,
         adapt_enflame_graph_wrapper,

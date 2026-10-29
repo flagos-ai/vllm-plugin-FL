@@ -37,3 +37,28 @@ def test_upstream_cache_spec_customization_without_config(monkeypatch):
     assert customized.block_stride_alignment.base == 64
     assert customized.block_size == original.block_size
     assert customized.dtype == original.dtype
+
+
+@pytest.mark.skipif(
+    Version(version("vllm")) >= Version("0.32.0"),
+    reason="legacy pre-0.32 cache stride API",
+)
+@pytest.mark.parametrize(
+    "layout,include_layers,expected",
+    [
+        ("NHD", False, (0, 1, 2, 3, 4)),
+        ("NHD", True, (2, 0, 1, 3, 4, 5)),
+        ("HND", False, (0, 1, 3, 2, 4)),
+        ("HND", True, (2, 4, 0, 1, 3, 5)),
+    ],
+)
+def test_legacy_cache_stride_order_remains_available(
+    monkeypatch, layout, include_layers, expected
+):
+    from vllm.v1.attention.backends import utils
+
+    monkeypatch.setattr(utils, "get_kv_cache_layout", lambda: layout)
+    assert (
+        attention.AttentionGCUBackend.get_kv_cache_stride_order(include_layers)
+        == expected
+    )

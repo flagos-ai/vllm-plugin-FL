@@ -43,9 +43,12 @@ service_ready() {
 until service_ready; do
     if [[ -r "$server_pid_file" ]]; then
         read -r server_pid <"$server_pid_file"
-        if [[ "$server_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$server_pid" 2>/dev/null; then
-            echo "Service process $server_pid exited before becoming ready." >&2
-            exit 1
+        if [[ "$server_pid" =~ ^[0-9]+$ ]]; then
+            server_state=$(ps -o stat= -p "$server_pid" 2>/dev/null || true)
+            if ! kill -0 "$server_pid" 2>/dev/null || [[ "$server_state" =~ ^[[:space:]]*Z ]]; then
+                echo "Service process $server_pid exited before becoming ready." >&2
+                exit 1
+            fi
         fi
     fi
     if (( SECONDS >= deadline )); then
