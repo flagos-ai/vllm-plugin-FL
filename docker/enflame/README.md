@@ -1,4 +1,18 @@
-# Enflame S60 recipe for vLLM 0.28
+# Enflame S60 recipe for vLLM 0.32
+
+The default Dockerfile builds a private vLLM 0.32 environment over the digest-
+pinned 0.28 SDK image. `prepare_vllm032.sh` is shared with CI setup. It builds
+upstream `5df63a7203cdb9328d824a27b682e77c7b9928be` in empty mode with uv
+0.13.6, installs the ten version/hash-pinned overlays without resolving SDK
+replacements, and verifies the effective dependency closure and all tracked
+vLLM Python bytes against raw Git blobs. Compiler and index-fill guards run
+after installation. The plugin still needs installation from its selected
+checkout. Model/Gate acceptance remains a separate step.
+
+The prior full SDK build recipe is retained in `Dockerfile.v0.28.0`. The notes
+below describe that historical baseline, including its earlier validation.
+
+## Historical 0.28 SDK baseline
 
 The recipe keeps the vendor torch 2.11.0+cpu / torch_gcu
 2.11.0+3.8.20260713 stack and installs the official vLLM 0.28.0 empty-device

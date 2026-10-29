@@ -1,18 +1,18 @@
-# Enflame S60 Deployment Guide
+# Enflame S60 Deployment Guide (vLLM 0.32)
 
 This guide starts an OpenAI-compatible vLLM service on Enflame S60 GCUs using
 the dependency stack validated by this repository. Use the pinned image and
 install the plugin from the revision you intend to deploy; the image does not
 contain each candidate's plugin changes.
 
-## Validated software stack
+## Runtime recipe
 
 | Component | Validated version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci` |
+| Vendor SDK base image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci` |
 | Image manifest | `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88` |
 | Accelerator / host driver | Enflame S60 / `1.10.6` |
-| vLLM | `0.28.0+empty` (`VLLM_TARGET_DEVICE=empty`) |
+| vLLM target | `0.32.0+empty`, fixed upstream `5df63a7203cdb9328d824a27b682e77c7b9928be` |
 | Python | `3.12.8` |
 | PyTorch | `2.11.0+cpu` with `torch-gcu==2.11.0+3.8.20260713` |
 | FlagTree | `0.7.0+enflame3.6`, the Enflame-specific release |
@@ -30,6 +30,28 @@ Keep the plugin and its
 revision. The policy selects the GCU attention backend and retains its tested
 FlagGems exclusions. Build instructions and the rationale for the temporary
 vendor adapters are in the [image recipe](../../docker/enflame/README.md).
+
+
+The prebuilt image is the pinned SDK baseline. The Enflame setup script builds
+vLLM 0.32 in a private virtualenv, installs the ten hash-pinned dependency
+overlays, and checks the effective dependency closure and every tracked vLLM
+Python file against the fixed upstream Git blobs. It preserves vendor Torch,
+FlagTree, Triton GCU and FlagGems. FlagTree supplies the `triton` namespace;
+its missing same-name distribution metadata is reported explicitly.
+
+Use `VLLM_ENFLAME_VENV=/logs/.venv` when running setup in a container. Later
+`docker exec` commands must use `/logs/.venv/bin/python` or
+`/logs/.venv/bin/vllm`; PATH changes inside one exec do not affect another.
+For Gate clients, prepend `/logs/.venv/bin` to PATH before `run_test.sh`.
+Set `VLLM_PYPI_INDEX_URL` only for that preparation command when a package
+mirror is needed; wheel hashes remain fixed. For offline preparation,
+`VLLM_ENFLAME_WHEELHOUSE` can point to the ten verified wheels, and
+`VLLM_SOURCE_REPOSITORY` to a read-only local upstream checkout at the fixed
+commit. Preparation clones that checkout before building.
+
+Runtime preparation and operator tests are separate from model acceptance.
+Run all original Gate scenarios for both panel models and both execution
+modes, retaining result JSON and checking every request's checks.
 
 ## 1. Check the host and choose devices
 
@@ -62,7 +84,7 @@ Keep model weights on the host and mount them read-only. The native test YAMLs
 expect the following two directories under `/data/models/Qwen` in the container:
 
 ```bash
-git clone --branch 0.4.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
+git clone --branch 0.5.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
 
 export REPO_DIR="$PWD"
@@ -114,6 +136,7 @@ docker run --detach \
   -e TORCH_GCU_ENABLE_INT64_AND_UINT64=1 \
   -e ENABLE_I64_CHECK=0 \
   -e TORCHGCU_INDUCTOR_ENABLE=1 \
+  -e VLLM_ENFLAME_VENV=/logs/.venv \
   -e MODEL_NAME="$MODEL_NAME" \
   -e MODE="$MODE" \
   --entrypoint /bin/bash \
@@ -147,6 +170,7 @@ set -euo pipefail
 cd /workspace/vllm-plugin-FL
 bash .github/scripts/enflame/check.sh 2>&1 | tee /logs/check.log
 bash .github/scripts/enflame/setup.sh 2>&1 | tee /logs/setup.log
+export PATH="/logs/.venv/bin:$PATH"
 ```
 
 `check.sh` requires at least two visible GCUs and creates a small GCU tensor.
@@ -182,7 +206,7 @@ case "$MODE" in
   *) echo "MODE must be eager or graph" >&2; exit 2 ;;
 esac
 
-vllm serve "/data/models/Qwen/$MODEL_NAME" \
+/logs/.venv/bin/vllm serve "/data/models/Qwen/$MODEL_NAME" \
   --served-model-name qwen \
   --host 0.0.0.0 \
   --port 8000 \
@@ -222,20 +246,20 @@ container and retain the generated reports and logs:
 ```bash
 set -euo pipefail
 cd /workspace/vllm-plugin-FL
-python tests/run.py --platform enflame --device s60 --scope unit \
+/logs/.venv/bin/python tests/run.py --platform enflame --device s60 --scope unit \
   --output-dir /logs/unit 2>&1 | tee /logs/unit-console.log
-python tests/run.py --platform enflame --device s60 --scope functional \
+/logs/.venv/bin/python tests/run.py --platform enflame --device s60 --scope functional \
   --output-dir /logs/functional 2>&1 | tee /logs/functional-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
+/logs/.venv/bin/python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
   --model qwen3_6 --case 27b_tp2_eager --output-dir /logs/27b-eager \
   2>&1 | tee /logs/27b-eager-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
+/logs/.venv/bin/python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
   --model qwen3_6 --case 27b_tp2_graph --output-dir /logs/27b-graph \
   2>&1 | tee /logs/27b-graph-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
+/logs/.venv/bin/python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
   --model qwen3_6 --case 35b_a3b_tp2_eager --output-dir /logs/35b-eager \
   2>&1 | tee /logs/35b-eager-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
+/logs/.venv/bin/python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
   --model qwen3_6 --case 35b_a3b_tp2_graph --output-dir /logs/35b-graph \
   2>&1 | tee /logs/35b-graph-console.log
 ```

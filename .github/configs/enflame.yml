@@ -15,7 +15,8 @@
 # Enflame S60 hardware configuration.
 platform: enflame
 
-# Canonical vLLM 0.28 dependency image tag, pinned to the verified manifest.
+# Vendor SDK base image, pinned to its verified manifest. Setup builds the
+# fixed vLLM 0.32 empty package and hash-pinned overlay in a private virtualenv.
 # The runner, device allocation and mounts follow main's Enflame configuration.
 ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88
 

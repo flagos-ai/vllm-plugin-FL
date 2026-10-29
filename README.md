@@ -15,7 +15,7 @@ matrix, scenarios, and usage.
 |-----------------------|------------------------|
 | `release/0.2` | [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) |
 | `main` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
-| `0.5.0-dev` (NVIDIA CUDA adaptation) | [v0.32.0](https://github.com/vllm-project/vllm/tree/v0.32.0) |
+| `0.5.0-dev` (NVIDIA CUDA / Enflame adaptation) | [v0.32.0](https://github.com/vllm-project/vllm/tree/v0.32.0) |
 
 ## Supported Models and Chips
 
@@ -59,7 +59,9 @@ For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
 for the full official vLLM 0.32 CUDA image, pinned development dependencies,
 upstream V1/V2 runners and regression commands. FlagGems remains enabled.
 It replaces the previous NVIDIA 0.28 setup.
-The generic setup below applies to the other backends; their 0.32 validation
+Enflame S60 uses the pinned SDK and private 0.32 environment described in its
+[deployment guide](./docs/usage/enflame.md).
+The generic setup below applies to the remaining backends; their 0.32 validation
 is outside the NVIDIA adaptation. See also the
 [T-Head PPU guide](./docs/usage/thead.md) and
 [Enflame S60 guide](./docs/usage/enflame.md).
