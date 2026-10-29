@@ -96,7 +96,7 @@ where = ["."]
 include = ["vllm_fl*"]
 
 [tool.setuptools.package-data]
-"vllm_fl.dispatch.config" = ["*.yaml"]
+"vllm_fl.dispatch.config" = ["*.yaml", "*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -199,3 +199,7 @@ def register_builtins(registry) -> None:
     from .impl.mla_ops import register_mla_operators
 
     register_mla_operators(registry, allow=use_flaggems_op)
+
+    from .impl.qwen3_8_flash_next import register_qwen38_operators
+
+    register_qwen38_operators(registry, allow=use_flaggems_op)

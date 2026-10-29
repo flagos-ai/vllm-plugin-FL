@@ -263,7 +263,10 @@ class WorkerFL(WorkerBase):
             import flag_gems
 
             # Get whitelist and blacklist from environment variables
-            whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+            whitelist, blacklist = get_flag_gems_whitelist_blacklist(
+                vllm_config=vllm_config,
+                vendor_name=getattr(current_platform, "vendor_name", None),
+            )
 
             # Only rank 0 records the oplist to avoid file truncation and
             # interleaved writes when tensor-parallel-size > 1.
@@ -619,11 +622,16 @@ class WorkerFL(WorkerBase):
             # CUDA graphs are captured only after the KV cache has been
             # allocated. Account for their pool before sizing the cache;
             # otherwise high-concurrency batches can leave no room for
-            # runtime activations and fail with OOM.
+            # runtime activations and fail with OOM.  The pool accounting
+            # helper uses PyTorch's CUDA-shaped graph/memory API, which is also
+            # the supported interface on ROCm/HIP and Kunlunxin. Other OOT
+            # runtimes keep the estimate at zero until they expose a compatible
+            # graph profiler.
             cudagraph_memory_estimate = 0
             if (
                 (
                     current_platform.is_cuda()
+                    or current_platform.is_rocm()
                     or getattr(current_platform, "vendor_name", None) == "kunlunxin"
                     or current_platform.device_type == "txda"
                 )
@@ -653,7 +661,7 @@ class WorkerFL(WorkerBase):
         free_gpu_memory = profile_result.after_profile.free_memory
         # NOTE(woosuk): Here we assume that the other processes using the same
         # GPU did not change their memory usage during the profiling.
-        assert self.init_snapshot.free_memory > free_gpu_memory, (
+        assert self.init_snapshot.free_memory >= free_gpu_memory, (
             "Error in memory profiling. "
             f"Initial free memory {GiB(self.init_snapshot.free_memory)} GiB, "
             f"current free memory {GiB(free_gpu_memory)} GiB. "

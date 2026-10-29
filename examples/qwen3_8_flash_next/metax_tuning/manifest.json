@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "scope": "Qwen3.8-Flash-Next BF16 TP8 MetaX C550, reviewed launch parameters only",
+  "prerequisites": {
+    "plugin_pr": 455,
+    "plugin_commit": "72d6440bbdb4649375aad33390e176196a47104a",
+    "vllm_commit": "ee0da84ab9e04ac7610e28580af62c365e898389",
+    "fgv_commit": "0f3df8ecbff9b48b2f8745c7160e0df8cb5486b5",
+    "ple_fix_pr": "https://github.com/flagos-ai/FlagGems-vllm/pull/959",
+    "ple_fix_commit": "22194f0b2ee0cebb51f945a20a157b82c4e19c65",
+    "moe_fix_pr": "https://github.com/flagos-ai/FlagGems-vllm/pull/1000",
+    "moe_fix_commit": "e04f51c1c7176d7a356838fdfa8b3dc4fbaf6f8a"
+  },
+  "configuration": "vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json",
+  "operator_sources": "Unmodified pinned kernels; explicit prerequisite operator fixes only",
+  "enable": "additional_config.qwen38_tuning_profile",
+  "moe_configs": "moe-configs"
+}

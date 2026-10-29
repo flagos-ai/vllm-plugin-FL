@@ -39,9 +39,11 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -792,13 +794,25 @@ class TestRunner:
             env.update(extra_env_override)
 
         start = time.time()
-        proc = subprocess.run(
-            cmd,
-            capture_output=_quiet,
-            text=_quiet,
-            cwd=str(_REPO_ROOT),
-            env=env,
-        )
+        with ExitStack() as cleanup:
+            if self.config.platform == "hygon" and tc.task in ("inference", "serving"):
+                # TP workers tune concurrently. Each Python process gets its
+                # own FlagGems SQLite database before importing the provider.
+                # Kernel compilation caches and autotuning remain enabled.
+                env["FLAGGEMS_CACHE_DIR"] = cleanup.enter_context(
+                    tempfile.TemporaryDirectory(prefix="fl-hygon-cache-")
+                )
+                startup = str(_REPO_ROOT / "tests/utils/isolated_cache")
+                env["PYTHONPATH"] = os.pathsep.join(
+                    path for path in (startup, env.get("PYTHONPATH")) if path
+                )
+            proc = subprocess.run(
+                cmd,
+                capture_output=_quiet,
+                text=_quiet,
+                cwd=str(_REPO_ROOT),
+                env=env,
+            )
         duration = time.time() - start
 
         passed = proc.returncode == 0
