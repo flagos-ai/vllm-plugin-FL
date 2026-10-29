@@ -44,6 +44,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | T-Head | Supported | [deployment guide](./docs/usage/thead.md) |
 | Iluvatar | Supported | [deployment guide](./docs/usage/iluvatar.md) |
 | Enflame | Supported | [deployment guide](./docs/usage/enflame.md) |
+| Kunlunxin | Supported | [deployment guide](./docs/usage/kunlunxin.md) |
 | Tsingmicro | Supported | - |
 | Moore Threads | Supported | - |
 | Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |

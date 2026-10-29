@@ -32,10 +32,11 @@ platforms:
     enabled: false
   enflame:
     enabled: true
-  kunlunxin:
-    enabled: false
-  # Image published; needs a self-hosted runner with labels in configs/iluvatar.yml.
   iluvatar:
+    enabled: true
+  # Image published; needs a self-hosted runner with labels in configs/kunlunxin.yml.
+  # Kunlunxin is added on top of the existing vendor suites, not in place of them.
+  kunlunxin:
     enabled: true
   thead:
     enabled: true

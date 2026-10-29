@@ -40,6 +40,32 @@ except (ImportError, ModuleNotFoundError):
     flagcxUniqueId = None
     flagcxRedOpTypeEnum = None
 
+_FAKE_TENSOR_CLS = ()
+try:  # FakeTensor lives in torch._subclasses; keep the import optional.
+    from torch._subclasses.fake_tensor import FakeTensor as _FakeTensor
+
+    _FAKE_TENSOR_CLS = (_FakeTensor,)
+except Exception:  # pragma: no cover - very old torch
+    _FAKE_TENSOR_CLS = ()
+
+
+def is_trace_tensor(tensor) -> bool:
+    """True if `tensor` has no real device storage (fake/meta during tracing).
+
+    The FlagCX entry points below hand `tensor.data_ptr()` to the C library.
+    Under `torch.compile` tracing the tensors are FakeTensors whose data_ptr()
+    is a placeholder: launching a collective on it faults asynchronously and
+    leaves a sticky device error that only surfaces at the next synchronize
+    (observed as cudaErrorIllegalAddress / kl3ChannelCheckErrors several
+    seconds later, at the first real request).
+    """
+    if tensor is None or not isinstance(tensor, torch.Tensor):
+        return False
+    if tensor.is_meta:
+        return True
+    return isinstance(tensor, _FAKE_TENSOR_CLS)
+
+
 class PyFlagcxCommunicator:
     def __init__(
         self,
@@ -177,6 +203,10 @@ class PyFlagcxCommunicator:
                    stream=None) -> torch.Tensor:
         if self.disabled:
             return None
+        if is_trace_tensor(in_tensor) or is_trace_tensor(out_tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return torch.empty_like(in_tensor)
+
         # nccl communicator created on a specific device
         # will only work on tensors on the same device
         # otherwise it will cause "illegal memory access"
@@ -205,6 +235,10 @@ class PyFlagcxCommunicator:
                    stream=None):
         if self.disabled:
             return
+        if is_trace_tensor(input_tensor) or is_trace_tensor(output_tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return
+
         # nccl communicator created on a specific device
         # will only work on tensors on the same device
         # otherwise it will cause "illegal memory access"
@@ -238,6 +272,9 @@ class PyFlagcxCommunicator:
             f"but the input tensor is on {input_tensor.device}")
         if stream is None:
             stream = self._current_stream()
+        if is_trace_tensor(input_tensor) or is_trace_tensor(output_tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return
         assert output_tensor.shape[0] == sum(sizes)
         if self.device.type == "npu":
             assert input_tensor.shape[0] == sizes[self.rank]
@@ -281,6 +318,9 @@ class PyFlagcxCommunicator:
             f"but the input tensor is on {input_tensor.device}")
         if stream is None:
             stream = self._current_stream()
+        if is_trace_tensor(input_tensor) or is_trace_tensor(output_tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxReduceScatter(
             buffer_type(input_tensor.data_ptr()),
@@ -309,6 +349,9 @@ class PyFlagcxCommunicator:
         if stream is None:
             stream = self._current_stream()
 
+        if is_trace_tensor(input_tensor) or is_trace_tensor(output_tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return
         split_offset = 0
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.group_start()
@@ -332,6 +375,9 @@ class PyFlagcxCommunicator:
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = self._current_stream()
+        if is_trace_tensor(tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxSend(buffer_type(tensor.data_ptr()), tensor.numel(),
                            flagcxDataTypeEnum.from_torch(tensor.dtype), dst,
@@ -346,6 +392,9 @@ class PyFlagcxCommunicator:
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = self._current_stream()
+        if is_trace_tensor(tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxRecv(buffer_type(tensor.data_ptr()), tensor.numel(),
                            flagcxDataTypeEnum.from_torch(tensor.dtype), src,
@@ -360,6 +409,9 @@ class PyFlagcxCommunicator:
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = self._current_stream()
+        if is_trace_tensor(tensor):
+            # torch.compile tracing: no real storage to hand to FlagCX.
+            return
         if src == self.rank:
             sendbuff = buffer_type(tensor.data_ptr())
             # NCCL requires the sender also to have a receive buffer

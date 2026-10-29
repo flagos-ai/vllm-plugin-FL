@@ -232,6 +232,13 @@ def _run_chat_non_streaming(
         json=payload,
         proxies=_NO_PROXY,
     )
+    if response.status_code != 200:
+        # Diagnostic only — pass/fail semantics below are unchanged. vLLM puts
+        # the server-side exception text into the JSON error body, which the CI
+        # job log otherwise never shows (the pytest traceback stops at the
+        # assertion on the next line).
+        print(f"\nHTTP {response.status_code} from /chat/completions:", flush=True)
+        print(response.text[:8000], flush=True)
     assert response.status_code == 200
 
     data = response.json()

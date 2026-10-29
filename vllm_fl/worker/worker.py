@@ -125,6 +125,27 @@ if TYPE_CHECKING:
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 
+def _is_hybrid_kv_model(vllm_config: VllmConfig) -> bool:
+    """Whether the model mixes linear-attention layers with full attention.
+
+    Kunlunxin stores the attention KV cache of such models (Qwen3-Next /
+    Qwen3.5 / Qwen3.6) in the fused ``[2, blocks, ...]`` layout that only the
+    fused paged write path fills correctly.
+    """
+    cache_config = getattr(vllm_config, "cache_config", None)
+    if getattr(cache_config, "mamba_cache_mode", "none") in ("align", "all"):
+        return True
+    model_config = getattr(vllm_config, "model_config", None)
+    try:
+        if getattr(model_config, "is_hybrid", False):
+            return True
+    except Exception:
+        pass
+    hf_config = getattr(model_config, "hf_text_config", None)
+    layer_types = getattr(hf_config, "layer_types", None) or ()
+    return any(layer_type != "full_attention" for layer_type in layer_types)
+
+
 def _initialize_fl_runtime(rank: int) -> None:
     """Install FL dispatch hooks before model/operator construction."""
     from vllm_fl.ops.custom_ops import register_oot_ops
@@ -341,6 +362,17 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
+
+        # Hybrid models (mamba/linear attention + full attention) keep the
+        # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
+        # Writing it through the split reshape_and_cache path drops each token
+        # into the *previous* block, so the first decode step reads a block that
+        # was never written: the logits come out entirely NaN and sampling
+        # degenerates to token id 0 ("!" in the Qwen tokenizer) right after one
+        # correct token.  The fused paged write path already exists behind
+        # USE_RESHAPE_AND_CACHE_FLASH; default it on for such models.
+        if _is_hybrid_kv_model(vllm_config):
+            os.environ.setdefault("USE_RESHAPE_AND_CACHE_FLASH", "1")
 
         _initialize_fl_runtime(self.rank)
 

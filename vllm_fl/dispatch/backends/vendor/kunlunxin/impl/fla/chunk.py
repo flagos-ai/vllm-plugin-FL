@@ -54,7 +54,7 @@ def chunk_gated_delta_rule_fwd(
         g: decay gates (in log space)
         beta: betas
         scale: scale factor
-        initial_state: [N, H, V, K]
+        initial_state: [N, H, V, K] -- the layout of vLLM's paged SSM cache
         output_final_state: whether to output final state
         cu_seqlens: cumulative sequence lengths
 
@@ -63,6 +63,17 @@ def chunk_gated_delta_rule_fwd(
         to match the dispatch interface expected by vllm_fl
     """
     input_dtype = q.dtype
+
+    # vLLM's paged SSM cache stores one state block as [H, V, K]
+    # (MambaStateShapeCalculator.gated_delta_net_state_shape), while the xtorch
+    # chunk kernel follows the FLA convention [N, H, K, V] for h0 / ht
+    # (see xtorch_ops.chunk_gated_delta_rule: initial_state/ht are
+    # (batch, num_heads, head_dim, v_head_dim)).  Convert on the way in and on
+    # the way out; handing the [V, K] cache slice straight to the kernel is
+    # silently wrong whenever K == V (Qwen3.6), and it transposes the recurrent
+    # state that prefill writes back, which corrupts every decode step after the
+    # first token.
+    initial_state = initial_state.transpose(2, 3).contiguous()
 
     # check dtype
     if input_dtype == torch.bfloat16:
@@ -96,9 +107,8 @@ def chunk_gated_delta_rule_fwd(
         use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
     )
 
-    # Transpose final_state back to [N, H, K, V]
-    if final_state is not None:
-        final_state = final_state.transpose(2, 3).contiguous()
+    # Kernel returns ht as [N, H, K, V]; convert back to the cache layout [N, H, V, K]
+    final_state = final_state.transpose(2, 3).contiguous()
 
     # Return 7-tuple to match the dispatch interface:
     # (g, o, A, final_state, w, h, v_new)
@@ -123,10 +133,12 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         # When use_qk_l2norm_in_kernel=True, the native kernel handles L2-norm
         # internally. When False, the caller has already normalized q/k externally.
 
-        # [N, H, K, V] -> [N, H, V, K] for kunlunxin kernel
-        if initial_state is not None:
-            initial_state = initial_state.transpose(2, 3).contiguous()
-
+        # initial_state arrives straight out of vLLM's paged cache, whose
+        # per-block shape is [H, V, K]
+        # (MambaStateShapeCalculator.gated_delta_net_state_shape).
+        # chunk_gated_delta_rule_fwd owns the [V, K] <-> [K, V] conversion for
+        # both the incoming state and the returned final state, so no transpose
+        # belongs here.
         g, o, A, final_state, w, h, v_new = chunk_gated_delta_rule_fwd(
             q=q,
             k=k,
@@ -177,11 +189,12 @@ def chunk_gated_delta_rule(
             Scale factor for the RetNet attention scores.
             If not provided, it will default to `1 / sqrt(K)`. Default: `None`.
         initial_state (Optional[torch.Tensor]):
-            Initial state of shape `[N, H, K, V]` for `N` input sequences.
+            Initial state of shape `[N, H, V, K]` for `N` input sequences
+            (the layout of vLLM's paged SSM cache).
             For equal-length input sequences, `N` equals the batch size `B`.
             Default: `None`.
         output_final_state (Optional[bool]):
-            Whether to output the final state of shape `[N, H, K, V]`. Default: `False`.
+            Whether to output the final state of shape `[N, H, V, K]`. Default: `False`.
         cu_seqlens (torch.LongTensor):
             Cumulative sequence lengths of shape `[N+1]` used for variable-length training,
             consistent with the FlashAttention API.
@@ -193,36 +206,7 @@ def chunk_gated_delta_rule(
         o (torch.Tensor):
             Outputs of shape `[B, T, H, V]` if `head_first=False` else `[B, H, T, V]`.
         final_state (torch.Tensor):
-            Final state of shape `[N, H, K, V]` if `output_final_state=True` else `None`.
-
-    Examples::
-        >>> import torch
-        >>> import torch.nn.functional as F
-        >>> from einops import rearrange
-        >>> from fla.ops.gated_delta_rule import chunk_gated_delta_rule
-        # inputs with equal lengths
-        >>> B, T, H, K, V = 4, 2048, 4, 512, 512
-        >>> q = torch.randn(B, T, H, K, dtype=torch.bfloat16, device='cuda')
-        >>> k = F.normalize(torch.randn(B, T, H, K, dtype=torch.bfloat16, device='cuda'), p=2, dim=-1)
-        >>> v = torch.randn(B, T, H, V, dtype=torch.bfloat16, device='cuda')
-        >>> beta = torch.rand(B, T, H, dtype=torch.bfloat16, device='cuda').sigmoid()
-        >>> g = F.logsigmoid(torch.rand(B, T, H, dtype=torch.bfloat16, device='cuda'))
-        >>> h0 = torch.randn(B, H, K, V, dtype=torch.bfloat16, device='cuda')
-        >>> o, ht = chunk_gated_delta_rule(
-            q, k, v, g, beta,
-            initial_state=h0,
-            output_final_state=True
-        )
-        # for variable-length inputs, the batch size `B` is expected to be 1 and `cu_seqlens` is required
-        >>> q, k, v, beta, g = map(lambda x: rearrange(x, 'b t ... -> 1 (b t) ...'), (q, k, v, beta, g))
-        # for a batch with 4 sequences, `cu_seqlens` with 5 start/end positions are expected
-        >>> cu_seqlens = q.new_tensor([0, 2048, 4096, 6144, 8192], dtype=torch.long)
-        >>> o_var, ht_var = chunk_gated_delta_rule(
-            q, k, v, g, beta,
-            initial_state=h0,
-            output_final_state=True,
-            cu_seqlens=cu_seqlens
-        )
+            Final state of shape `[N, H, V, K]` if `output_final_state=True` else `None`.
     """
     assert q.dtype == k.dtype == v.dtype
     assert q.dtype != torch.float32, (
