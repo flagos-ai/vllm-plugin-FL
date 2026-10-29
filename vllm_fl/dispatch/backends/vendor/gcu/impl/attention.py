@@ -30,7 +30,11 @@ else:
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 
 
-from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
+from vllm.config import (
+    VllmConfig,
+    get_current_vllm_config_or_none,
+    get_layers_from_vllm_config,
+)
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
@@ -74,7 +78,11 @@ class AttentionGCUBackend(AttentionBackend):
 
     @staticmethod
     def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int | MultipleOf]:
-        vllm_config = get_current_vllm_config()
+        vllm_config = get_current_vllm_config_or_none()
+        if vllm_config is None:
+            # 0.32 customizes cache specs outside a current-config context.
+            # Keep the conservative S60 block limits used for hybrid caches.
+            return [16, 32, 64]
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
         if (
