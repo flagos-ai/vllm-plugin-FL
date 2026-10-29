@@ -98,3 +98,52 @@ def test_sampling_advances_io_only_for_completed_output(
     runner = object.__new__(runner_module.EnflameModelRunner)
     assert runner.sample_tokens("grammar") is output
     assert events == [("sample", "grammar")] + (["advance"] if has_output else [])
+
+
+def test_native_graph_wrapper_is_replaced_without_changing_runner_type():
+    from vllm.compilation.cuda_graph import CUDAGraphWrapper
+    from vllm.config import CUDAGraphMode
+    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+    from vllm_fl.compilation.enflame_graph import (
+        EnflameGraphWrapper,
+        adapt_enflame_graph_wrapper,
+    )
+    from vllm_fl.compilation.graph import GraphWrapper
+
+    model = object()
+    config = SimpleNamespace(compilation_config=SimpleNamespace())
+    original = CUDAGraphWrapper(model, config, CUDAGraphMode.FULL)
+    adapted = adapt_enflame_graph_wrapper(original)
+    assert isinstance(adapted, EnflameGraphWrapper)
+    assert isinstance(adapted, CUDAGraphWrapper)
+    assert adapted in CUDAGraphWrapper._all_instances
+    assert adapted in GraphWrapper._all_instances
+    assert adapted.runtime_mode == CUDAGraphMode.FULL
+    assert adapted.cudagraph_options is original.cudagraph_options
+    runner = object.__new__(GPUModelRunner)
+    runner.model = adapted
+    assert runner.get_model() is model
+    assert adapt_enflame_graph_wrapper(adapted) is adapted
+    assert adapt_enflame_graph_wrapper(model) is model
+    replacement = {}
+    adapted.concrete_cudagraph_entries = replacement
+    assert adapted.concrete_graph_entries is replacement
+
+
+@pytest.mark.parametrize(
+    "vllm_version,expected",
+    [
+        ("0.28.0+empty", "vllm_fl.compilation.graph.GraphWrapper"),
+        ("0.32.0+empty", "vllm_fl.compilation.enflame_graph.EnflameGraphWrapper"),
+    ],
+)
+def test_gcu_piecewise_wrappers_follow_native_runner_contract(
+    monkeypatch, vllm_version, expected
+):
+    import importlib.metadata
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "gcu")
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: vllm_version)
+    assert PlatformFL.get_static_graph_wrapper_cls() == expected

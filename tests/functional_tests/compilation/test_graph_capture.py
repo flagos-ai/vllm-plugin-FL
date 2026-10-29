@@ -179,3 +179,67 @@ class TestGraphCacheManagement:
         cache[desc] = entry
 
         assert cache[desc].batch_descriptor.num_tokens == 16
+
+
+@pytest.mark.parametrize("weak_ref_output", [False, True])
+def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
+    device, weak_ref_output, record_property
+):
+    from importlib.metadata import version
+    from packaging.version import Version
+
+    if device.type != "gcu" or Version(version("vllm")) < Version("0.32.0"):
+        pytest.skip("Enflame native V1 integration requires vLLM 0.32")
+    from vllm.compilation.cuda_graph import CUDAGraphOptions, CUDAGraphWrapper
+    from vllm.compilation.monitor import set_cudagraph_capturing_enabled
+    from vllm.config import CUDAGraphMode, VllmConfig
+    from vllm.forward_context import BatchDescriptor, set_forward_context
+    from vllm_fl.compilation.enflame_graph import EnflameGraphWrapper
+
+    config = VllmConfig()
+    descriptor = BatchDescriptor(num_tokens=2, num_reqs=2, uniform=True)
+    calls = []
+
+    def runnable(x):
+        calls.append(None)
+        return x * 2 + 1
+
+    static_input = torch.arange(8, dtype=torch.float32, device=device).reshape(2, 4)
+    runnable(static_input)
+    calls.clear()
+    wrapper = EnflameGraphWrapper(
+        runnable,
+        config,
+        CUDAGraphMode.FULL,
+        CUDAGraphOptions(weak_ref_output=weak_ref_output),
+    )
+    stream = torch.gcu.Stream()
+    stream.wait_stream(torch.gcu.current_stream())
+    set_cudagraph_capturing_enabled(True)
+    try:
+        with set_forward_context(
+            None,
+            config,
+            cudagraph_runtime_mode=CUDAGraphMode.FULL,
+            batch_descriptor=descriptor,
+        ):
+            with torch.gcu.stream(stream):
+                captured = wrapper(static_input)
+            torch.gcu.current_stream().wait_stream(stream)
+            torch.gcu.synchronize()
+            entry = wrapper.concrete_graph_entries[descriptor]
+            assert isinstance(entry.graph, torch.gcu.GCUGraph)
+            assert wrapper in CUDAGraphWrapper._all_instances
+            for revision in (1, 2):
+                values = torch.full((2, 4), revision, dtype=torch.float32)
+                static_input.copy_(values)
+                captured.fill_(-999)
+                result = wrapper(static_input)
+                torch.gcu.synchronize()
+                torch.testing.assert_close(result.cpu(), values * 2 + 1)
+                assert len(calls) == 1
+                assert wrapper.concrete_graph_entries[descriptor].graph is entry.graph
+            record_property("enflame_native_wrapper_graph_replays", 2)
+    finally:
+        set_cudagraph_capturing_enabled(False)
+        wrapper.clear_graphs()

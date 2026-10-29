@@ -152,9 +152,9 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type == "npu":
+    if current_platform.device_type in ("npu", "gcu"):
         # vLLM's current_stream helper maintains CUDA-specific thread-local
-        # state and can remain on the default stream while torch.npu.stream()
+        # state and can remain on the default stream while a vendor stream
         # has selected the side stream used for graph capture.
         return current_platform.torch_device_fn.current_stream()
     return current_stream()

@@ -40,8 +40,11 @@ class EnflameModelRunner(GPUModelRunner):
         return output
 
     def load_model(self, load_dummy_weights=False, *, model=None):
+        from vllm_fl.compilation.enflame_graph import adapt_enflame_graph_wrapper
+
         init_io_dump_from_env(self.model_config.enforce_eager)
         output = super().load_model(load_dummy_weights, model=model)
+        self.model = adapt_enflame_graph_wrapper(getattr(self, "model", None))
         if not load_dummy_weights:
             register_io_module_hooks(self.get_model())
         return output
