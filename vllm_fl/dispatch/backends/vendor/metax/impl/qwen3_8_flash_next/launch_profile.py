@@ -7,12 +7,11 @@ launch geometry and native LibTuner configurations; it never edits sources.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from importlib import import_module
 from importlib.resources import files
-import json
-import hashlib
 from pathlib import Path
-import math
 
 import torch
 import triton
@@ -192,58 +191,6 @@ class _GDNOutput:
             entry = libentry()(triton.heuristics(heuristics.values)(tuner))
             self.entries[bucket] = entry
         return entry.run(*args, grid=grid, **kwargs)
-
-
-def qsa_topk(x, k, dim=-1, largest=True, sorted=False):
-    """Use FG's existing two-stage kernels with the reviewed QSA launch geometry."""
-    import flag_gems
-
-    n = x.shape[-1]
-    if (
-        not _enabled
-        or x.dtype != torch.float32
-        or k != 512
-        or n not in (512, 2048, 8192, 17408, 17600)
-        or dim not in (-1, x.ndim - 1)
-        or not largest
-        or sorted
-    ):
-        return flag_gems.topk(x, k, dim=dim, largest=largest, sorted=sorted)
-    module = import_module("flag_gems.ops.topk")
-    m = math.prod(x.shape[:-1])
-    chunk = min(n, 2048 if 32 < m <= 128 else 4096)
-    chunks = triton.cdiv(n, chunk)
-    values = torch.empty(m * chunks * k, device=x.device, dtype=x.dtype)
-    indices = torch.empty(m * chunks * k, device=x.device, dtype=torch.int64)
-    out = torch.empty((*x.shape[:-1], k), device=x.device, dtype=x.dtype)
-    out_indices = torch.empty_like(out, dtype=torch.int64)
-    stages = 1 if m > 128 else 3
-    with module.torch_device_fn.device(x.device):
-        module.topk_stage1_kernel[(m, chunks)](
-            values,
-            indices,
-            x,
-            k,
-            n,
-            chunk,
-            True,
-            num_warps=2 if 32 < m <= 128 else 4,
-            num_stages=stages,
-        )
-        module.topk_stage2_kernel[(m,)](
-            out,
-            out_indices,
-            values,
-            indices,
-            dim % x.ndim,
-            k,
-            chunks * k,
-            triton.next_power_of_2(chunks * k),
-            True,
-            num_warps=4,
-            num_stages=stages,
-        )
-    return out, out_indices
 
 
 def install_qwen38_launch_profile(vllm_config=None):

@@ -35,19 +35,26 @@ is retained where applicable; that branch's HY4/T-Head changes are not imported.
 
 ## Runtime and operator dependencies
 
+This is the current dependency reference. The tuning manifest records the
+historical parameter base, not a complete current operator lock.
+
 | Dependency | Fixed MetaX runtime |
 |---|---|
 | vLLM 0.24.0 | `ee0da84ab9e04ac7610e28580af62c365e898389`, empty-target build |
-| FlagGems | 5.3.5 |
+| FlagGems | 5.3.5 / [a7620cc](https://github.com/flagos-ai/FlagGems/commit/a7620cc191a0b42e040194622c5758b22a7a25dc) plus only the MetaX index fix from [FG #7981](https://github.com/flagos-ai/FlagGems/pull/7981), published fix commit [5586276](https://github.com/flagos-ai/FlagGems/commit/55862761bd838e3de0f1ec39f3ba96674efa7d18); production file `flag_gems/runtime/backend/_metax/ops/index.py` SHA256 `e02c30372d8794968ad23a74f5099b65249dcc322ae706f53cb4804b327ed984`. |
 | FlagGems-vllm base | `0f3df8ecbff9b48b2f8745c7160e0df8cb5486b5` |
 | PLE fix | [FGV #959](https://github.com/flagos-ai/FlagGems-vllm/pull/959), PLE file from `22194f0b2ee0cebb51f945a20a157b82c4e19c65` |
 | MetaX inplace MoE fix | [FGV #1000](https://github.com/flagos-ai/FlagGems-vllm/pull/1000), `e04f51c1c7176d7a356838fdfa8b3dc4fbaf6f8a` |
+| Per-row TopK boundary fix | [FGV #1024](https://github.com/flagos-ai/FlagGems-vllm/pull/1024), fixed delta [1a811eb](https://github.com/flagos-ai/FlagGems-vllm/commit/1a811ebc3280e51b63fdbeef9cab89029508731d) |
+| MetaX radix TopK | Required FGV candidate; not published, public fixed reference pending. Production file `flaggems_vllm/runtime/backend/_metax/ops/radix_topk.py` SHA256 `f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e`. |
 | Torch / FlagTree | `2.10.0+metax3.8.1.0` / `0.6.1+metax3.6` |
 | MACA SDK / driver | 3.8.1.3 / 3.8.1 |
 
 Keep the matching runtime/ABI combination. Communication uses MCCL and
 torch.distributed; FlagCX is not used. The tested FGV composition is the fixed
-base plus the two explicit operator fixes, not an arbitrary moving main branch.
+base plus the PLE, inplace-MoE and per-row fixes and the retained radix candidate.
+The radix source remains an unpublished external dependency; the model does not
+embed that kernel or provide a source-replacement script.
 [FGV #982](https://github.com/flagos-ai/FlagGems-vllm/pull/982) is a related
 compiler-capability solution; these results use #1000.
 
@@ -77,8 +84,11 @@ Defaults remain available; scoped provider choices retain the previous runtime:
 
 - GDN prefill uses FGV's FP32 V-major implementation. Speculative recurrence
   and causal convolution retain vLLM 0.24's accepted-token/null-slot semantics.
-- QSA uses FGV scores/cache operations and FG top-k; the pinned FGV TLE
-  selection path is unsupported by this compiler.
+- QSA retains FGV score/cache operations and the K512 selection contract.
+  Score widths N<=512 bypass score/TopK. For 512<N<=32768, query-row counts
+  M<=128 use the corrected FGV non-TLE per-row selector; larger M uses the
+  FGV MetaX radix selector. Other geometries retain the FG fallback.
+  The profile-owned two-stage wrapper is removed.
 - N=1/4 BF16 projections use existing FG mv/stack. Wide linear operations keep
   their default provider; an operator-wide linear blacklist would be too broad.
 - The PLE gate computes sign in FP32 before returning to BF16. The rest of its
@@ -87,8 +97,8 @@ Defaults remain available; scoped provider choices retain the previous runtime:
 - HC keeps the validated materialized schedule and ATen/FG rounding on MetaX;
   the prerequisite's fused/deferred path remains the default elsewhere.
 
-These are the existing adaptation boundaries. No new operator exclusion or
-communication optimization is introduced by the code consolidation.
+The QSA provider selection is model- and shape-scoped; existing operator
+blacklists and communication paths are unchanged.
 
 ## Serving
 
@@ -97,9 +107,10 @@ Set MODEL_PATH to the shared BF16 checkpoint and retain the matching runtime:
 ```bash
 export VLLM_USE_V2_MODEL_RUNNER=0
 export USE_FLAGGEMS=1 VLLM_FL_USE_FLAGGEMS_VLLM=1 VLLM_FL_PREFER_ENABLED=1
+export FLAGGEMS_METAX_TLE=0
 export VLLM_FL_CONFIG="$PWD/vllm_fl/dispatch/config/qwen3_8_flash_next_metax.yaml"
 export VLLM_TUNED_CONFIG_FOLDER="$PWD/examples/qwen3_8_flash_next/metax_tuning/moe-configs"
-unset FLAGCX_PATH FLAGGEMS_CACHE_DIR FLAGGEMS_DB_URL GEMS_CACHE_PATH
+unset FLAGCX_PATH FLAGGEMS_CACHE_DIR FLAGGEMS_DB_URL GEMS_CACHE_PATH FLAGGEMS_FORCE_TLE
 
 vllm serve "$MODEL_PATH" \
   --tensor-parallel-size 8 --pipeline-parallel-size 1 --dtype bfloat16 \
@@ -121,12 +132,15 @@ FG and FGV keep separate native caches.
 
 QSA work uses width buckets 512/2048/8192/cache-capacity, selected from the
 existing CPU length bound. At maxlen69632, capacity is 17600 groups. This
-changes work and graph geometry, not cache capacity or the K512 selection
-algorithm. Target and MTP keys include the width; seven target token shapes
+changes work and graph geometry while preserving cache capacity and the K512
+selection contract. Target and MTP keys include the width; seven target token shapes
 yield 28 target graphs. GDN output configuration retains context buckets
 without adding an argument to the library kernel.
 
 ## Validation and historical performance
+
+The earlier performance records below do not establish performance acceptance
+for the new TopK routing composition.
 
 CPU contracts and opt-in device checks live under `tests/qwen3_8_flash_next`,
 `tests/unit_tests/models`, `tests/unit_tests/dispatch` and

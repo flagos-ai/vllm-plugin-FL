@@ -18,6 +18,13 @@ op_backends:
   - reference
   gdn_prefill:
   - impl:vendor.metax.qwen38
+  # Scoped exclusion: FG flag_gems.topk is slow for FP32 QSA K=512;
+  # FGV ops.DSA.bin_topk.tle_bucket_sort_topk fails MetaX TLE atomics.
+  # Native FGV per-row TLE also fails MetaX atomic type verification.
+  # The local provider explicitly selects generic non-TLE per-row for M<=128,
+  # retains radix for larger M, and bypasses score/selection when all blocks fit.
+  # Scope: FP32 K=512, score widths <=32768; FG remains the outside fallback.
+  # A global blacklist cannot distinguish these QSA-only library entrypoints.
   qsa_select_paged_tokens:
   - impl:vendor.metax.qwen38
   qwen38_small_projection:

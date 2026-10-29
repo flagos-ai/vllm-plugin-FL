@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Reproduce Qwen3.8's 76 CPU contracts without accelerator access.
+"""Run the Qwen3.8 CPU contracts without accelerator access.
 
 Run inside the matching validation environment:
     python tests/qwen3_8_flash_next/run_cpu_contracts.py --log-dir /tmp/qwen38-cpu
 
-The 56 model/MTP contracts and 20 dispatch contracts run in separate processes.
-The dispatch subprocess loads production providers with only framework/package
-capability imports stubbed; it does not validate device kernels or imports.
-The model/MTP subprocess retains the real native metadata tests and the
-repository's existing CPU declaration harnesses.
+The model/MTP and dispatch contracts run in separate processes. Exact suite
+counts are centralized in SUITE_EXPECTED_COUNTS and checked against collected
+node IDs. Dispatch imports use framework/capability stubs; these are not device
+kernel tests. Model/MTP contracts retain real native metadata and the existing
+CPU declaration harnesses.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import types
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SUITE_EXPECTED_COUNTS = {"contracts": 56, "dispatch": 24}
 
 
 def cpu_environment():
@@ -33,6 +34,8 @@ def cpu_environment():
         CUDA_VISIBLE_DEVICES="",
         MACA_VISIBLE_DEVICES="",
         VLLM_PLUGINS="",
+        FL_BACKEND="cpu",
+        PYTHONDONTWRITEBYTECODE="1",
         PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
         OMP_NUM_THREADS="2",
         MKL_NUM_THREADS="2",
@@ -92,6 +95,10 @@ class ResultRecorder:
         self.passed = set()
         self.failed = set()
         self.skipped = set()
+        self.collected_nodeids = []
+
+    def pytest_collection_finish(self, session):
+        self.collected_nodeids = [item.nodeid for item in session.items]
 
     def pytest_runtest_logreport(self, report):
         if report.when == "call" and report.passed:
@@ -104,6 +111,8 @@ class ResultRecorder:
     def pytest_sessionfinish(self, session, exitstatus):
         result = {
             "collected": session.testscollected,
+            "collected_nodeids": self.collected_nodeids,
+            "passed_nodeids": sorted(self.passed),
             "passed": len(self.passed),
             "failed": sorted(self.failed),
             "skipped": sorted(self.skipped),
@@ -162,7 +171,7 @@ def main():
     )
     summaries = {}
     success = True
-    for suite, expected in (("contracts", 56), ("dispatch", 20)):
+    for suite, expected in SUITE_EXPECTED_COUNTS.items():
         command = [
             sys.executable,
             str(Path(__file__).resolve()),
@@ -182,6 +191,9 @@ def main():
             result.returncode == 0
             and summary.get("collected") == expected
             and summary.get("passed") == expected
+            and len(set(summary.get("collected_nodeids", []))) == expected
+            and set(summary.get("collected_nodeids", []))
+            == set(summary.get("passed_nodeids", []))
             and not summary.get("failed")
             and not summary.get("skipped")
         )
@@ -191,11 +203,20 @@ def main():
             flush=True,
         )
     total = sum(value.get("passed", 0) for value in summaries.values())
-    final = {"passed": total, "expected": 76, "success": success, "suites": summaries}
+    expected_total = sum(SUITE_EXPECTED_COUNTS.values())
+    final = {
+        "passed": total,
+        "expected": expected_total,
+        "success": success,
+        "suites": summaries,
+    }
     (args.log_dir / "qwen38-final-cpu-summary.json").write_text(
         json.dumps(final, indent=2) + "\n"
     )
-    print(f"FINAL CPU CONTRACTS: {total}/76 passed; success={success}", flush=True)
+    print(
+        f"FINAL CPU CONTRACTS: {total}/{expected_total} passed; success={success}",
+        flush=True,
+    )
     return 0 if success else 1
 
 

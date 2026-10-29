@@ -423,3 +423,71 @@ def test_mixed_gdn_default_keeps_view_and_metax_preserves_values(monkeypatch):
     assert actual.is_contiguous()
     torch.testing.assert_close(actual, qkv, atol=0, rtol=0)
     assert metax.qwen38_gdn_mixed_qkv(actual) is actual
+
+
+def test_metax_short_bucket_never_scores_or_selects(monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("short bucket must not score or select")
+
+    monkeypatch.setattr(metax.portable, "qsa_mqa_paged", unexpected)
+    monkeypatch.setattr(metax, "import_module", unexpected)
+    requests = torch.tensor([0, 0, -1], dtype=torch.int32)
+    positions = torch.tensor([0, 2046, 2000])
+    actual = metax.qsa_select_paged_tokens(
+        torch.empty(3, 4, 128),
+        torch.empty(11, 1600, 1, 128),
+        torch.zeros(1, 11, dtype=torch.int32),
+        requests,
+        positions,
+        torch.tensor([2047]),
+        2048,
+        4,
+        num_columns=512,
+    )
+    expected = torch.full((3, 2051), -1, dtype=torch.int32)
+    expected[0, 0] = 0
+    expected[1, :2047] = torch.arange(2047, dtype=torch.int32)
+    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("rows", [1, 128, 129])
+def test_metax_selection_uses_native_only_for_small_batches(monkeypatch, rows):
+    scores = torch.empty(rows, 2048)
+    visible = torch.full((rows,), 2048, dtype=torch.int32)
+    calls = []
+    monkeypatch.setattr(
+        metax.portable, "qsa_mqa_paged", lambda *a, **kw: (scores, visible)
+    )
+    monkeypatch.setattr(metax.portable, "expand_qsa_block_indices", lambda ids, *a: ids)
+
+    def native(x, next_n, lens, out, count, stride0, stride1, k):
+        assert x is scores and lens is visible and next_n == 1
+        assert (count, stride0, stride1, k) == (rows, 2048, 1, 512)
+        calls.append("native")
+        out.fill_(3)
+
+    def radix(x, lens, k):
+        assert x is scores and lens is visible and k == 512
+        calls.append("radix")
+        return torch.full((rows, k), 4, dtype=torch.int32)
+
+    def module(name):
+        if name == "flaggems_vllm.ops.top_k_per_row_decode":
+            return SimpleNamespace(HAS_TLE=False, top_k_per_row_decode=native)
+        assert name == "flaggems_vllm.runtime.backend._metax.ops.radix_topk"
+        return SimpleNamespace(radix_topk=radix)
+
+    monkeypatch.setattr(metax, "import_module", module)
+    out = metax.qsa_select_paged_tokens(
+        torch.empty(rows, 4, 128),
+        torch.empty(2, 1600, 1, 128),
+        torch.zeros(1, 2, dtype=torch.int32),
+        torch.zeros(rows, dtype=torch.int32),
+        torch.zeros(rows, dtype=torch.int64),
+        torch.tensor([8192]),
+        2048,
+        4,
+        num_columns=2048,
+    )
+    assert calls == ["native" if rows <= 128 else "radix"]
+    assert bool((out == (3 if rows <= 128 else 4)).all())

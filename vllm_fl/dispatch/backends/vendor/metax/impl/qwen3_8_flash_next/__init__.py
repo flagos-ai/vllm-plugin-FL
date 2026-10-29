@@ -74,15 +74,12 @@ def qsa_select_paged_tokens(
     out=None,
     num_columns=None,
 ):
-    """MetaX compatibility composition: FGV score + FG ATen top-k + expansion.
+    """Select with the measured non-TLE FGV paths; skip fully visible buckets.
 
-    The pinned FGV TLE top-k fails FlagTree atomic type verification. Select
-    this provider by policy before capture; never retry after kernel execution.
-    Top-k ordering is unnecessary, so sorted=False uses FG's ordinary path.
-    Short rows use ascending visible blocks, independent of top-k pad order.
+    Small batches use the corrected native per-row selector. Large batches
+    retain radix selection because native per-row regresses at M2048/N2048.
+    This local VENDOR policy leaves other FG/FGV consumers unchanged.
     """
-    import flag_gems
-
     block_topk, width = portable._check_selection_geometry(compress_ratio, token_topk)
     count = q.shape[0]
     out = portable._selection_output(count, width, q.device, out)
@@ -92,31 +89,59 @@ def qsa_select_paged_tokens(
     columns = capacity if num_columns is None else num_columns
     if not isinstance(columns, int) or not 0 <= columns <= capacity:
         raise ValueError("QSA score width must fit the allocated cache capacity")
-    scores, visible = portable.qsa_mqa_paged(
-        q,
-        k_cache,
-        page_table,
-        token_to_req,
-        query_positions,
-        sequence_lengths,
-        compress_ratio,
-        num_columns=columns,
-    )
-    indices = torch.full((count, block_topk), -1, dtype=torch.int32, device=q.device)
-    if columns:
-        selected_count = min(block_topk, columns)
-        from .launch_profile import qsa_topk
-
-        _, selected = qsa_topk(
-            scores,
-            selected_count,
-            dim=-1,
-            largest=True,
-            sorted=False,
+    if columns <= block_topk:
+        # This graph bucket fits entirely in the selection budget. Expansion
+        # applies device-side visibility, request validity and incomplete tails.
+        indices = torch.arange(block_topk, dtype=torch.int32, device=q.device)
+        indices = indices.unsqueeze(0).expand(count, -1)
+    else:
+        scores, visible = portable.qsa_mqa_paged(
+            q,
+            k_cache,
+            page_table,
+            token_to_req,
+            query_positions,
+            sequence_lengths,
+            compress_ratio,
+            num_columns=columns,
         )
-        indices[:, :selected_count].copy_(selected.to(torch.int32))
-    ascending = torch.arange(block_topk, dtype=torch.int32, device=q.device)
-    indices = torch.where(visible[:, None] <= block_topk, ascending, indices)
+        if block_topk == 512 and columns <= 32768:
+            if count <= 128:
+                native = import_module("flaggems_vllm.ops.top_k_per_row_decode")
+                if native.HAS_TLE:
+                    raise RuntimeError(
+                        "Qwen QSA requires the validated FGV non-TLE selector; "
+                        "disable per-row TLE before worker startup"
+                    )
+                indices = torch.empty(
+                    (count, block_topk), device=scores.device, dtype=torch.int32
+                )
+                native.top_k_per_row_decode(
+                    scores,
+                    1,
+                    visible,
+                    indices,
+                    count,
+                    scores.stride(0),
+                    scores.stride(1),
+                    block_topk,
+                )
+            else:
+                select = import_module(
+                    "flaggems_vllm.runtime.backend._metax.ops.radix_topk"
+                ).radix_topk
+                indices = select(scores, visible, block_topk)
+        else:
+            # Preserve the original provider outside the measured QSA geometry.
+            import flag_gems
+
+            _, selected = flag_gems.topk(
+                scores, block_topk, dim=-1, largest=True, sorted=False
+            )
+            ascending = torch.arange(block_topk, dtype=torch.int32, device=q.device)
+            indices = torch.where(
+                visible[:, None] <= block_topk, ascending, selected.to(torch.int32)
+            )
     return portable.expand_qsa_block_indices(
         indices,
         query_positions,
