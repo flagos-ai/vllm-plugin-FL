@@ -144,7 +144,11 @@ def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
         "torch_device_fn",
         SimpleNamespace(current_stream=npu_current_stream),
     )
-    monkeypatch.setattr(graph_module, "current_stream", stale_vllm_stream)
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "current_stream",
+        stale_vllm_stream,
+    )
 
     assert graph_module._graph_capture_stream() is active_stream
     npu_current_stream.assert_called_once_with()
@@ -157,7 +161,11 @@ def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
     expected_stream = object()
     vllm_current_stream = MagicMock(return_value=expected_stream)
     monkeypatch.setattr(graph_module.current_platform, "device_type", "cuda")
-    monkeypatch.setattr(graph_module, "current_stream", vllm_current_stream)
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "current_stream",
+        vllm_current_stream,
+    )
 
     assert graph_module._graph_capture_stream() is expected_stream
     vllm_current_stream.assert_called_once_with()
@@ -181,10 +189,20 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     forward_context = SimpleNamespace(
         batch_descriptor=descriptor, cudagraph_runtime_mode=mode
     )
-    monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
-    monkeypatch.setattr(graph_module, "get_forward_context", lambda: forward_context)
     monkeypatch.setattr(
-        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+        import_module("vllm_fl.compilation.graph"),
+        "is_forward_context_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "get_forward_context",
+        lambda: forward_context,
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "validate_cudagraph_capturing_enabled",
+        lambda: None,
     )
 
     calls = []

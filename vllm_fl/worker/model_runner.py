@@ -123,6 +123,7 @@ from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.tracing import instrument
 from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.gpu_sync_debug import gpu_sync_allowed
+from vllm.utils.import_utils import resolve_obj_by_qualname
 from vllm.utils.math_utils import cdiv, round_up
 from vllm.utils.mem_utils import DeviceMemoryProfiler, format_gib
 from vllm.utils.nvtx_pytorch_hooks import PytHooks
@@ -5626,13 +5627,23 @@ class ModelRunnerFL(
             self.eplb_state.start_async_loop()
 
         if (
-            current_platform.device_type == "npu"
+            current_platform.device_type in ("npu", "musa")
             and self.compilation_config.mode != CompilationMode.NONE
         ):
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
             # because fullgraph compilation cannot enter that context manager.
             from vllm_fl.dispatch import warmup_cached_ops
+
+            if current_platform.device_type == "musa":
+                import logging
+
+                from torch._dynamo import config as dynamo_config
+
+                # FlagGems debug calls are side effects inside traced ops.
+                # Configure every worker before tracing, including spawn workers.
+                # Eager logging and warning/error logs remain unchanged.
+                dynamo_config.ignore_logger_methods.add(logging.Logger.debug)
 
             warmup_cached_ops()
 
@@ -5668,7 +5679,10 @@ class ModelRunnerFL(
             cudagraph_mode.has_full_cudagraphs()
             and not self.parallel_config.use_ubatching
         ):
-            self.model = GraphWrapper(
+            graph_wrapper_cls = resolve_obj_by_qualname(
+                current_platform.get_static_graph_wrapper_cls()
+            )
+            self.model = graph_wrapper_cls(
                 self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
             )
         elif self.parallel_config.use_ubatching:
@@ -6886,6 +6900,17 @@ class ModelRunnerFL(
             if self.encoder_cudagraph_manager is not None:
                 logger.info("Initialized EncoderCudaGraphManager for vision encoder")
 
+    def _get_musa_graph_capture_context(self) -> GraphCaptureContext:
+        # MUSA's graph allocator retains pools after graph destruction. Reuse
+        # the same pool and stream for profiling and the real decoder capture.
+        context = getattr(self, "_musa_graph_capture_context", None)
+        if context is None:
+            context = GraphCaptureContext(
+                current_platform.torch_device_fn.Stream(device=self.device)
+            )
+            self._musa_graph_capture_context = context
+        return context
+
     @managed_inference_mode()
     def profile_cudagraph_memory(self) -> int:
         with set_current_vllm_config(self.vllm_config):
@@ -6925,8 +6950,15 @@ class ModelRunnerFL(
 
         logger.info("Profiling CUDA graph memory: %s", ", ".join(graph_groups))
 
-        # Use a temporary pool for profiling to avoid fragmentation in the main pool.
-        profiling_pool = current_platform.graph_pool_handle()
+        # MUSA graph destruction retains allocator pools. Profiling in the
+        # actual decoder pool lets the real capture reuse those allocations,
+        # including wrappers created lazily during this first forward.
+        # Other backends keep an isolated temporary pool to avoid fragmentation.
+        profiling_pool = (
+            current_platform.get_global_graph_pool()
+            if current_platform.device_type == "musa"
+            else current_platform.graph_pool_handle()
+        )
         encoder_profiling_pool = current_platform.graph_pool_handle()
         original_pools: dict[int, Any] = {}
         all_wrappers = (
@@ -6962,6 +6994,8 @@ class ModelRunnerFL(
         # Cleanup-only guard: CUDA graph capture errors should still propagate
         # because encoder graph capture is opt-in.
         try:
+            if current_platform.device_type == "musa":
+                cap_ctx = self._get_musa_graph_capture_context()
             set_cudagraph_capturing_enabled(True)
             with (
                 self._freeze_gc(),
@@ -6971,11 +7005,30 @@ class ModelRunnerFL(
                 torch.accelerator.empty_cache()
 
                 for mode, descs in capture_descs:
-                    profile_descs = descs[:2]
+                    # MUSA retains shape-specific graph inputs. Measure every
+                    # original shape instead of extrapolating the second-largest
+                    # shape's retained allocation to all smaller shapes.
+                    is_musa = current_platform.device_type == "musa"
+                    profile_descs = descs if is_musa else descs[:2]
                     mem_samples: list[int] = []
+                    if is_musa:
+                        # Use vLLM's configured logger hierarchy for startup evidence.
+                        profile_logger = init_logger("vllm.musa_graph_profile")
 
                     for i, desc in enumerate(profile_descs):
                         mem_before = torch.accelerator.get_memory_info()[0]
+                        if is_musa:
+                            profile_logger.info(
+                                "MUSA graph profile bucket begin: "
+                                "mode=%s index=%d/%d tokens=%d uniform=%s "
+                                "free_before_bytes=%d",
+                                mode.name,
+                                i + 1,
+                                len(profile_descs),
+                                desc.num_tokens,
+                                desc.uniform,
+                                mem_before,
+                            )
                         self._warmup_and_capture(
                             desc,
                             cudagraph_runtime_mode=mode,
@@ -6991,24 +7044,55 @@ class ModelRunnerFL(
                         torch.accelerator.synchronize()
                         free_after = torch.accelerator.get_memory_info()[0]
                         mem_samples.append(mem_before - free_after)
+                        if is_musa:
+                            profile_logger.info(
+                                "MUSA graph profile bucket completed: "
+                                "mode=%s index=%d/%d tokens=%d uniform=%s "
+                                "free_before_bytes=%d free_after_bytes=%d "
+                                "memory_delta_bytes=%d",
+                                mode.name,
+                                i + 1,
+                                len(profile_descs),
+                                desc.num_tokens,
+                                desc.uniform,
+                                mem_before,
+                                free_after,
+                                mem_samples[-1],
+                            )
 
-                    first_capture = mem_samples[0]
-                    # Use at least 1 MiB per graph for driver overhead
-                    per_graph = max(
-                        mem_samples[1] if len(mem_samples) > 1 else 0, 1 << 20
-                    )
+                    if is_musa:
+                        shared_memory_estimate[mode] = max(mem_samples[0], 0)
+                        # Keep the driver's minimum overhead for each later
+                        # graph, including shapes that reuse the shared pool.
+                        per_graph_estimate[mode] = sum(
+                            max(sample, 1 << 20) for sample in mem_samples[1:]
+                        )
+                        logger.debug(
+                            "Measured %s MUSA graph memory: "
+                            "%.2f MiB first-capture + %.2f MiB for %d later graphs",
+                            mode.name,
+                            shared_memory_estimate[mode] / (1 << 20),
+                            per_graph_estimate[mode] / (1 << 20),
+                            len(descs) - 1,
+                        )
+                    else:
+                        first_capture = mem_samples[0]
+                        # Use at least 1 MiB per graph for driver overhead
+                        per_graph = max(
+                            mem_samples[1] if len(mem_samples) > 1 else 0, 1 << 20
+                        )
 
-                    shared_memory_estimate[mode] = first_capture
-                    per_graph_estimate[mode] = per_graph * (len(descs) - 1)
+                        shared_memory_estimate[mode] = first_capture
+                        per_graph_estimate[mode] = per_graph * (len(descs) - 1)
 
-                    logger.debug(
-                        "Estimated %s CUDA graph memory: "
-                        "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
-                        mode.name,
-                        first_capture / (1 << 20),
-                        len(descs),
-                        per_graph / (1 << 20),
-                    )
+                        logger.debug(
+                            "Estimated %s CUDA graph memory: "
+                            "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
+                            mode.name,
+                            first_capture / (1 << 20),
+                            len(descs),
+                            per_graph / (1 << 20),
+                        )
 
                 if encoder_cudagraph_manager is not None:
                     mem_before = torch.accelerator.get_memory_info()[0]
@@ -7076,6 +7160,12 @@ class ModelRunnerFL(
 
         start_time = time.perf_counter()
 
+        cap_ctx = (
+            self._get_musa_graph_capture_context()
+            if current_platform.device_type == "musa"
+            else None
+        )
+
         # Trigger CUDA graph capture for specific shapes.
         # Capture the large shapes first so that the smaller shapes
         # can reuse the memory pool allocated for the large shapes.
@@ -7118,7 +7208,10 @@ class ModelRunnerFL(
                 "Rank %d: Torch profiler disabled for CUDA graph capture", local_rank
             )
 
-        with self._freeze_gc(), graph_capture(device=self.device):
+        with (
+            self._freeze_gc(),
+            graph_capture(device=self.device, graph_capture_context=cap_ctx),
+        ):
             torch.accelerator.synchronize()
             torch.accelerator.empty_cache()
             start_free_gpu_memory = torch.accelerator.get_memory_info()[0]

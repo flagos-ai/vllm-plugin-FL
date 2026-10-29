@@ -207,6 +207,7 @@ def test_platform_accepts_v2_model_runner(monkeypatch):
         worker_cls=None,
         all2all_backend=None,
         data_parallel_size=1,
+        tensor_parallel_size=1,
     )
     vllm_config = SimpleNamespace(
         parallel_config=parallel_config,

@@ -59,6 +59,13 @@ def get_backend() -> str:
             return "ascend"
     except ImportError:
         pass  # torch_npu not installed; ascend backend not available
+    try:
+        import torch_musa  # noqa: F401
+
+        if torch.musa.is_available():
+            return "musa"
+    except ImportError:
+        pass  # torch_musa not installed; musa backend not available
     return "cpu"
 
 
@@ -77,6 +84,10 @@ def get_device(index: int = 0) -> torch.device:
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
+    elif backend == "musa":
+        import torch_musa  # noqa: F401
+
+        return torch.device(f"musa:{index}")
     elif backend == "enflame":
         return torch.device(f"gcu:{index}")
     return torch.device("cpu")
@@ -92,6 +103,13 @@ def get_device_count() -> int:
             import torch_npu  # noqa: F401
 
             return torch.npu.device_count()
+        except ImportError:
+            return 0
+    elif backend == "musa":
+        try:
+            import torch_musa  # noqa: F401
+
+            return torch.musa.device_count()
         except ImportError:
             return 0
     elif backend == "enflame":

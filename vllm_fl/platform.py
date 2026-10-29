@@ -272,9 +272,10 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        if cls.device_type == "npu" and vllm_config.use_v2_model_runner:
+        if cls.device_type in {"npu", "musa"} and vllm_config.use_v2_model_runner:
+            backend = "Ascend" if cls.device_type == "npu" else "MUSA"
             raise ValueError(
-                "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
+                f"{backend} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
@@ -364,6 +365,14 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
+        if cls.device_type == "musa":
+            # vLLM enables horizontal fusion on accelerator backends with Torch 2.9.
+            # MUSA combo-kernel autotuning can exhaust device memory before the
+            # model's normal profile forward executes. Keep Inductor and graph
+            # capture, but compile these nodes separately on MUSA.
+            compilation_config.inductor_compile_config["combo_kernels"] = False
+            compilation_config.inductor_compile_config["benchmark_combo_kernel"] = False
+
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
             compilation_config.use_inductor_graph_partition = True
@@ -447,6 +456,32 @@ class PlatformFL(Platform):
         # not available.
         if cls.vendor_name in ("gcu", "enflame"):
             parallel_config.disable_custom_all_reduce = True
+
+        if (
+            cls.device_type == "musa"
+            and cls.dist_backend == "mccl"
+            and parallel_config.tensor_parallel_size > 1
+            and compilation_config.mode == CompilationMode.VLLM_COMPILE
+            and compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+            and not compilation_config.use_inductor_graph_partition
+        ):
+            # This platform hook runs before vLLM initializes default split ops.
+            # Use its public initializer to retain attention/KV boundaries and
+            # any fusion-driven graph-mode changes before adding the TP boundary.
+            effective_dp_size = (
+                parallel_config.data_parallel_size
+                if model_config is None or model_config.is_moe
+                else 1
+            )
+            compilation_config.set_splitting_ops_for_v1(
+                all2all_backend=parallel_config.all2all_backend,
+                data_parallel_size=effective_dp_size,
+            )
+            if (
+                compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+                and "vllm::all_reduce" not in compilation_config.splitting_ops
+            ):
+                compilation_config.splitting_ops.append("vllm::all_reduce")
 
     @classmethod
     def get_attn_backend_cls(
@@ -564,13 +599,16 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
+        if cls.device_type == "musa":
+            return "vllm_fl.dispatch.backends.vendor.musa.graph.MUSAGraphWrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod
     def get_compile_backend(cls) -> str:
-        if cls.device_type == "npu":
-            # Keep vLLM's Dynamo tracing and piecewise graph splitting while
-            # returning each FX GraphModule without running CUDA Inductor.
+        if cls.device_type in ("npu", "musa"):
+            # Trace and split through Dynamo, then capture the FX modules with
+            # the platform graph wrapper. MUSA Inductor code generation can take
+            # hours for a single range before native graph capture starts.
             return "eager"
         return super().get_compile_backend()
 
@@ -685,7 +723,9 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
+        return cls.vendor_name in ("nvidia", "thead", "iluvatar") or (
+            cls.device_type == "musa" and cls.dist_backend == "mccl"
+        )
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:
