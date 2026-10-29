@@ -19,6 +19,33 @@ from vllm.v1.worker import mamba_utils
 from vllm_fl.dispatch.backends.vendor.gcu.impl import mamba_copy
 
 
+def test_gcu_hooks_bind_the_selected_model_runner(monkeypatch):
+    import vllm.platforms
+
+    import vllm_fl.worker.runtime as runtime
+
+    selected = object()
+    calls = []
+    monkeypatch.setattr(
+        vllm.platforms,
+        "current_platform",
+        SimpleNamespace(vendor_name="enflame", device_type="gcu"),
+    )
+
+    def select(device_type):
+        calls.append(("select", device_type))
+        return selected
+
+    monkeypatch.setattr(runtime, "get_fl_model_runner_cls", select)
+    monkeypatch.setattr(
+        mamba_copy,
+        "_install_mamba_hooks",
+        lambda runner, utils: calls.append(("install", runner, utils)),
+    )
+    mamba_copy.apply_mamba_copy_gcu_patch()
+    assert calls == [("select", "gcu"), ("install", selected, mamba_utils)]
+
+
 class _Storage:
     def __init__(self, base, size=4096):
         self.base, self.size = base, size
