@@ -135,8 +135,33 @@ def _patch_flash_attn_import():
         sys.modules["vllm.vllm_flash_attn"] = stub
 
 
+def _is_metax_backend() -> bool:
+    """True when this process runs on the MetaX (maca) backend."""
+    from vllm_fl.ops._C_ops_registry import _is_metax_backend as _impl
+
+    return _impl()
+
+
+def _metax_plugin_installed() -> bool:
+    """True when vllm_metax (the vendor platform plugin) is importable."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("vllm_metax") is not None
+    except Exception:
+        return False
+
+
 def _patch_custom_ops():
     """Register fallback schemas when neither vLLM extension ABI is present."""
+    # On MetaX the maca mcoplib._C already registered every _C operator.
+    # Importing vLLM's own vllm._C .so on top of it raises a
+    # duplicate-registration c10::Error, so skip the probe entirely.
+    if _is_metax_backend():
+        logger.debug(
+            "[vllm_fl] MetaX backend owns torch.ops._C; skipping vllm._C import"
+        )
+        return
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
             importlib.import_module(module_name)
@@ -166,8 +191,55 @@ def _init_vendor_device():
         _patch_xpu_get_device()
 
 
+def _install_metax_compat():
+    """Apply the MetaX vLLM 0.28 compatibility shims before any kernel runs.
+
+    These shims used to be installed as ``.pth`` hooks in ``site-packages`` so
+    that they ran at interpreter start-up. Every one of them either arms a
+    ``sys.meta_path`` hook for a lazily imported module or rebinds a module
+    that is already imported, so the plugin entry point runs early enough and
+    a plain ``pip install`` is sufficient.
+
+    This runs before the platform-slot decision below: under
+    ``VLLM_PLUGINS=metax`` FL yields the platform slot and
+    ``PlatformFL.import_kernels`` is never called, yet the vendor modules
+    still need these fixes.
+    """
+    try:
+        from vllm_fl.patches.metax_028_compat import install, metax_active
+
+        if metax_active():
+            install()
+    except Exception as exc:  # pragma: no cover - never block registration
+        logger.warning("[vllm_fl] MetaX compatibility shims not installed: %s", exc)
+
+
 def register():
     """Register the FL platform."""
+    _install_metax_compat()
+    # MetaX (maca) ships its own vLLM platform plugin (vllm_metax) and vLLM
+    # 0.28 rejects more than one platform plugin
+    # (RuntimeError: Only one platform plugin can be activated, but got
+    # ['metax', 'fl']).  On that backend FL must not claim the platform slot:
+    # the general plugin (vllm_fl:register_model) keeps FL's model and kernel
+    # registrations.
+    # Only yield the platform slot when the user actually asked for the
+    # vendor plugin (VLLM_PLUGINS allows "metax" and not "fl") and it is
+    # installed.  Keying this on the *hardware* instead would leave a MetaX
+    # host on UnspecifiedPlatform whenever VLLM_PLUGINS=fl: vLLM 0.28 would
+    # then activate neither plugin and no builtin plugin matches MACA.
+    _allowed = [
+        p.strip()
+        for p in (os.environ.get("VLLM_PLUGINS") or "").split(",")
+        if p.strip()
+    ]
+    if "metax" in _allowed and "fl" not in _allowed and _metax_plugin_installed():
+        logger.info(
+            "[vllm_fl] VLLM_PLUGINS requests metax -> vLLM metax platform; "
+            "FL platform registration skipped"
+        )
+        return None
+
     _init_vendor_device()
 
     # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,

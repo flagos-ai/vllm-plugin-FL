@@ -19,6 +19,19 @@ import torch
 _BACKEND = os.environ.get("FL_BACKEND", "").lower()
 
 
+def _is_metax_backend() -> bool:
+    """Detect the MetaX (MACA) runtime.
+
+    MACA ships a CUDA-shaped torch fork, so ``torch.cuda.is_available()`` is
+    True there and a plain CUDA probe would report "nvidia". That makes
+    NVIDIA-only baseline tests run on MetaX; detect the vendor instead.
+    """
+    if os.environ.get("GEMS_VENDOR", "").strip().lower() == "metax":
+        return True
+    version = str(getattr(torch, "__version__", "")).lower()
+    return "metax" in version or "maca" in version
+
+
 def _gcu_runtime():
     """Load an installed GCU SDK without hiding driver/import failures."""
     if find_spec("torch_gcu") is None:
@@ -40,6 +53,8 @@ def get_backend() -> str:
         return "enflame" if runtime is not None and runtime.is_available() else "cpu"
     if _BACKEND:
         return _BACKEND
+    if _is_metax_backend():
+        return "metax"
     # TorchGCU exposes CUDA-compatible aliases. Identify its native runtime
     # first so NVIDIA-only tests cannot run on GCU through those aliases.
     runtime = _gcu_runtime()
@@ -73,7 +88,7 @@ def is_accelerator_available() -> bool:
 def get_device(index: int = 0) -> torch.device:
     """Get torch device for current backend."""
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu"):
+    if backend in ("nvidia", "hygon", "tianshu", "metax"):
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
@@ -85,7 +100,7 @@ def get_device(index: int = 0) -> torch.device:
 def get_device_count() -> int:
     """Get the number of available accelerators."""
     backend = get_backend()
-    if backend in ("nvidia", "hygon", "tianshu"):
+    if backend in ("nvidia", "hygon", "tianshu", "metax"):
         return torch.cuda.device_count()
     elif backend == "ascend":
         try:
