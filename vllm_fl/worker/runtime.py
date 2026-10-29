@@ -11,6 +11,21 @@ from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 logger = init_logger(__name__)
 
 
+def get_fl_model_runner_cls(device_type: str):
+    from importlib.metadata import version
+
+    from packaging.version import Version
+
+    if device_type == "gcu" and Version(version("vllm")) >= Version("0.32.0"):
+        from vllm_fl.worker.enflame_model_runner import EnflameModelRunner
+
+        return EnflameModelRunner
+
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+    return ModelRunnerFL
+
+
 def is_residual_scattered_for_sp(vllm_config, num_input_tokens: int) -> bool:
     """Keep the FL pipeline tensor-layout contract across vLLM versions."""
     from vllm.v1.worker import utils as worker_utils

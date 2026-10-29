@@ -93,6 +93,7 @@ from vllm.v1.worker.workspace import init_workspace_manager
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.worker.runtime import (
     _initialize_fl_runtime,
+    get_fl_model_runner_cls,
     is_residual_scattered_for_sp,
 )
 
@@ -510,9 +511,8 @@ class WorkerFL(WorkerBase):
                 self.vllm_config, self.device
             )
         else:
-            from vllm_fl.worker.model_runner import ModelRunnerFL
-
-            self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
+            model_runner_cls = get_fl_model_runner_cls(self.device.type)
+            self.model_runner = model_runner_cls(self.vllm_config, self.device)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
