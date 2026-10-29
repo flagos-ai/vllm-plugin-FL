@@ -12,6 +12,21 @@ _silu_and_mul = CachedOp("silu_and_mul")
 _gelu_and_mul = CachedOp("gelu_and_mul")
 
 
+class _ApproximateTanh:
+    """Route CachedOp('gelu_and_mul') through the tanh approximation.
+
+    Equivalent to upstream gelu_tanh_and_mul. Upstream plugin-FL's
+    apply_moe_activation has no branch for MoEActivation.GELU_TANH, which is
+    the activation used by the MoE in gemma-4-26B-A4B. This reuses the
+    existing op and only adds the missing branch; no existing logic changes.
+    """
+
+    approximate = "tanh"
+
+
+_GELU_TANH_SHIM = _ApproximateTanh()
+
+
 def apply_moe_activation(
     activation: MoEActivation,
     output: torch.Tensor,
@@ -47,6 +62,10 @@ def apply_moe_activation(
         output.copy_(_silu_and_mul(None, input))
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
+    elif activation == MoEActivation.GELU_TANH:
+        # Equivalent to upstream torch.ops._C.gelu_tanh_and_mul; still goes
+        # through FlagGems.
+        output.copy_(_gelu_and_mul(_GELU_TANH_SHIM, input))
     elif activation == MoEActivation.SWIGLUOAI:
         torch.ops._C.swigluoai_and_mul(output, input)
     elif activation == getattr(MoEActivation, "SWIGLUOAI_UNINTERLEAVE", None):
@@ -67,6 +86,9 @@ def apply_moe_activation(
         output.copy_(F.silu(input))
     elif activation == MoEActivation.GELU_NO_MUL:
         output.copy_(F.gelu(input))
+    elif activation == MoEActivation.GELU_TANH_NO_MUL:
+        # tanh-approximated GELU (no gated mul).
+        output.copy_(F.gelu(input, approximate="tanh"))
     elif activation == MoEActivation.RELU2_NO_MUL:
         F.relu(input, inplace=True)
         torch.square(input, out=output)
