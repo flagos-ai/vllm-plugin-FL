@@ -101,6 +101,10 @@ def test_sampling_advances_io_only_for_completed_output(
 
 
 def test_native_graph_wrapper_is_replaced_without_changing_runner_type():
+    from vllm.platforms import current_platform
+
+    if current_platform.device_type != "gcu":
+        pytest.skip("GCU graph wrapper integration requires Enflame")
     from vllm.compilation.cuda_graph import CUDAGraphWrapper
     from vllm.config import CUDAGraphMode
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
