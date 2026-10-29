@@ -1,7 +1,8 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -127,3 +128,117 @@ def test_local_triton_quant_matches_reference_on_cuda(device):
 
     assert torch.equal(actual_q, expected_q)
     torch.testing.assert_close(actual_scale, expected_scale, rtol=0, atol=1e-7)
+
+
+def _int8_dispatch(monkeypatch, enabled):
+    import os
+
+    import flag_gems
+
+    import vllm.model_executor.kernels.linear.scaled_mm.triton as native
+
+    from vllm_fl.dispatch.backends.flaggems import register_ops as fg_registry
+    from vllm_fl.dispatch.backends.flaggems.flaggems import FlagGemsBackend
+    from vllm_fl.dispatch.backends.reference.register_ops import (
+        register_builtins as register_reference,
+    )
+    from vllm_fl.dispatch.manager import OpManager
+    from vllm_fl.dispatch.registry import OpRegistry
+
+    if enabled is None:
+        monkeypatch.delenv("VLLM_FL_USE_FLAGGEMS_VLLM", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", enabled)
+    selected = enabled in ("1", "true")
+    out = torch.zeros(2, 4, dtype=torch.bfloat16)
+    fv, ref = (Mock(return_value=out), Mock(return_value=out))
+    fp8 = Mock(side_effect=AssertionError("FP8 API must never handle INT8"))
+    monkeypatch.setattr(flag_gems, "scaled_mm", fp8)
+    monkeypatch.setattr(native, "triton_scaled_mm", ref)
+    monkeypatch.setitem(
+        sys.modules,
+        "flaggems_vllm",
+        SimpleNamespace(triton_scaled_mm=fv) if selected else None,
+    )
+    monkeypatch.setattr(FlagGemsBackend, "is_available", lambda self: True)
+    monkeypatch.setattr(fg_registry, "use_flaggems_op", lambda op: True)
+    registry = OpRegistry()
+    fg_registry.register_builtins(registry)
+    register_reference(registry)
+    manager = OpManager(registry=registry)
+    manager._state.initialized = True
+    manager._state.init_pid = os.getpid()
+    args = (
+        torch.ones(2, 8, dtype=torch.int8),
+        torch.ones(8, 4, dtype=torch.int8),
+        torch.ones(2, 1),
+        torch.ones(1, 4),
+        torch.bfloat16,
+        None,
+    )
+    return (manager, args, fv, ref, fp8, out)
+
+
+@pytest.mark.parametrize("enabled", [None, "0", "1"])
+@pytest.mark.parametrize("strict", [False, True])
+def test_int8_registry_selects_fv_or_native_without_fp8(monkeypatch, enabled, strict):
+    from vllm_fl.dispatch.policy import (
+        SelectionPolicy,
+        reset_global_policy,
+        set_global_policy,
+    )
+
+    manager, args, fv, ref, fp8, out = _int8_dispatch(monkeypatch, enabled)
+    selected = enabled in ("1", "true")
+    set_global_policy(SelectionPolicy(strict=strict))
+    try:
+        assert manager.get_selected_impl_id("scaled_int8_mm") == (
+            "default.flagos" if selected else "reference.torch"
+        )
+        assert manager.call("scaled_int8_mm", *args) is out
+        (fv if selected else ref).assert_called_once_with(*args)
+        (ref if selected else fv).assert_not_called()
+        fp8.assert_not_called()
+    finally:
+        reset_global_policy()
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_int8_selected_failure_preserves_strict_or_native_fallback(monkeypatch, strict):
+    from vllm_fl.dispatch.policy import (
+        SelectionPolicy,
+        reset_global_policy,
+        set_global_policy,
+    )
+
+    manager, args, fv, ref, fp8, out = _int8_dispatch(monkeypatch, "1")
+    fv.side_effect = RuntimeError("INT8 provider failed")
+    set_global_policy(SelectionPolicy(strict=strict))
+    try:
+        if strict:
+            with pytest.raises(RuntimeError, match="INT8 provider failed"):
+                manager.call("scaled_int8_mm", *args)
+            ref.assert_not_called()
+        else:
+            assert manager.call("scaled_int8_mm", *args) is out
+            ref.assert_called_once_with(*args)
+        fv.assert_called_once_with(*args)
+        fp8.assert_not_called()
+    finally:
+        reset_global_policy()
+
+
+def test_dynamic_quant_disabled_switch_uses_local_path(monkeypatch):
+    from vllm_fl.dispatch.backends.flaggems.impl import quantization
+
+    monkeypatch.setenv("VLLM_FL_USE_FLAGGEMS_VLLM", "0")
+    original = Mock(return_value=("original", "scale"))
+    monkeypatch.setattr(
+        quantization, "dynamic_per_token_quant_int8_flaggems_triton", original
+    )
+    monkeypatch.setitem(sys.modules, "flaggems_vllm.ops.scaled_int8_quant", None)
+    assert quantization.dynamic_per_token_quant_int8_flaggems_vllm(None) == (
+        "original",
+        "scale",
+    )
+    original.assert_called_once_with(None)

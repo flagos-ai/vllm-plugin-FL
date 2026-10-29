@@ -101,3 +101,14 @@ def dynamic_per_token_quant_int8_flaggems_triton(
             BLOCK_SIZE=block_size,
         )
     return output, scale
+
+
+def scaled_int8_mm_flaggems(a, b, scale_a, scale_b, out_dtype, bias=None):
+    """Call the FV INT8 API; availability is gated by its registry entry.
+
+    FlagGems ``scaled_mm`` implements the FP8 ATen contract and must not receive
+    INT8 tensors. When FV is disabled, dispatch selects the native reference.
+    """
+    from flaggems_vllm import triton_scaled_mm
+
+    return triton_scaled_mm(a, b, scale_a, scale_b, out_dtype, bias)

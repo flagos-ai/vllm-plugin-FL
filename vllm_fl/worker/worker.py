@@ -532,6 +532,15 @@ class WorkerFL(WorkerBase):
         # this only in a worker after init_device has bound its local device
         # and initialized the distributed environment.
         patch_vllm_moe_sum()
+        from vllm_fl.patches.minimax_m3 import prepare_minimax_m3_model
+
+        prepare_minimax_m3_model(self.vllm_config)
+        if getattr(current_platform, "vendor_name", None) == "thead":
+            # Model modules are fully importable here; import_kernels() may
+            # run while vLLM's MoE package is still being initialized.
+            from vllm_fl.dispatch.backends.vendor.thead.patch import apply_thead_patches
+
+            apply_thead_patches(self.model_config)
         with set_current_vllm_config(self.vllm_config):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
         if current_platform.device_type == "musa":

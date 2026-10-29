@@ -88,15 +88,21 @@ def test_musa_workers_bind_config_before_patching_and_loading(monkeypatch, world
             assigned_physical_gpu_ids=None,
             enable_dbo=False,
         )
+        model_config = SimpleNamespace(
+            dtype=torch.float16,
+            seed=1,
+            hf_config=SimpleNamespace(architectures=["OtherModel"]),
+        )
         config = SimpleNamespace(
             parallel_config=parallel,
             device_config=SimpleNamespace(device=torch.device("musa:0")),
+            model_config=model_config,
         )
         worker = SimpleNamespace(
             vllm_config=config,
             device_config=config.device_config,
             parallel_config=parallel,
-            model_config=SimpleNamespace(dtype=torch.float16, seed=1),
+            model_config=model_config,
             cache_config=SimpleNamespace(gpu_memory_utilization=0.5),
             local_rank=rank,
             rank=rank,
@@ -123,7 +129,11 @@ def test_musa_worker_rejects_parameters_on_another_rank(monkeypatch):
         ("weight", SimpleNamespace(device=torch.device("musa:0")))
     ]
     worker = SimpleNamespace(
-        vllm_config=SimpleNamespace(),
+        vllm_config=SimpleNamespace(
+            model_config=SimpleNamespace(
+                hf_config=SimpleNamespace(architectures=["OtherModel"])
+            )
+        ),
         model_runner=runner,
         device=torch.device("musa:1"),
         rank=1,
