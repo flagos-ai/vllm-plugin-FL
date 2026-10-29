@@ -28,7 +28,19 @@ port=$((10#$port))
 base_url=${BASE_URL:-"http://127.0.0.1:$port/v1"}
 
 deadline=$((SECONDS + service_timeout))
-until curl --silent --fail "$base_url/models" >/dev/null 2>&1; do
+service_ready() {
+    local probe_timeout=$((deadline - SECONDS))
+    if (( probe_timeout <= 0 )); then
+        return 1
+    fi
+    if (( probe_timeout > 5 )); then
+        probe_timeout=5
+    fi
+    curl --connect-timeout "$probe_timeout" --max-time "$probe_timeout" \
+        --silent --fail "$base_url/models" >/dev/null 2>&1
+}
+
+until service_ready; do
     if [[ -r "$server_pid_file" ]]; then
         read -r server_pid <"$server_pid_file"
         if [[ "$server_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$server_pid" 2>/dev/null; then
