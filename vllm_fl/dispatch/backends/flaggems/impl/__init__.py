@@ -6,7 +6,7 @@ FlagGems operator implementations.
 
 from importlib import import_module
 
-from .activation import silu_and_mul_flaggems, gelu_and_mul_flaggems
+from .activation import gelu_and_mul_flaggems, silu_and_mul_flaggems
 from .normalization import rms_norm_flaggems
 from .rotary import rotary_embedding_flaggems
 
@@ -29,6 +29,7 @@ def __getattr__(name):
     value = getattr(import_module(_LAZY_IMPORTS[name], __name__), name)
     globals()[name] = value
     return value
+
 
 __all__ = [
     "silu_and_mul_flaggems",
