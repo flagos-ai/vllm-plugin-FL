@@ -81,3 +81,26 @@ jobs:
 
       - name: Typos check
         uses: crate-ci/typos@v1
+
+  # Separate job on purpose: the lint job above carries a temporary
+  # continue-on-error (see its comment), which would swallow this
+  # check's failure. This job fails red on its own.
+  py-chinese-characters:
+    name: Chinese Characters Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (attempt 1)
+        id: checkout1
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 2)
+        id: checkout2
+        if: steps.checkout1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+      - name: Checkout (attempt 3)
+        if: steps.checkout2.outcome == 'failure'
+        uses: actions/checkout@v4
+
+      - name: Check added .py lines for Chinese characters
+        run: python .github/scripts/check_no_chinese_additions.py
