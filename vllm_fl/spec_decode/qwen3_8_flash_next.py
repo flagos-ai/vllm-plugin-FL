@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Native vLLM 0.24 K1 MTP with separate QSA main/raw/compressed caches.
+"""Native vLLM 0.24 sequential MTP with separate QSA main/raw/compressed caches.
 
 Sampling and first-pass token/hidden alignment remain in EagleProposer. Unlike
 Step3p5's multi-group adapter, every slot here uses its own logical block size
@@ -105,14 +105,20 @@ def qsa_group_slot_mapping(
 
 
 class Qwen38MTPProposer(EagleProposer):
-    """K1 Qwen MTP; target graph scheduling and native sampling stay unchanged."""
+    """Sequential Qwen MTP with independent QSA cache-group coordinates."""
 
     _qwen38_multi_group_mtp = True
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device, runner=None):
         spec = vllm_config.speculative_config
-        if spec is None or spec.method != "mtp" or spec.num_speculative_tokens != 1:
-            raise NotImplementedError("Qwen3.8 multi-group MTP currently requires K=1")
+        if (
+            spec is None
+            or spec.method != "mtp"
+            or spec.num_speculative_tokens not in (1, 2, 3)
+        ):
+            raise NotImplementedError(
+                "Qwen3.8 multi-group MTP supports K=1, K=2 or K=3"
+            )
         if not getattr(spec, "disable_padded_drafter_batch", False):
             raise NotImplementedError(
                 "Qwen3.8 MTP requires disable_padded_drafter_batch=True "
@@ -127,6 +133,8 @@ class Qwen38MTPProposer(EagleProposer):
         self._group_specs: dict[int, FullAttentionSpec] = {}
         self._per_group_slot_mapping_buffers: dict[int, torch.Tensor] = {}
         self._first_pass_sample_indices: torch.Tensor | None = None
+        self._first_pass_request_positions: torch.Tensor | None = None
+        self._first_pass_request_valid: torch.Tensor | None = None
         self._slot_mappings_prepared = False
         self._prepared_slot_count = 0
 
@@ -134,10 +142,13 @@ class Qwen38MTPProposer(EagleProposer):
         super().load_model(target_model)
         if self.vllm_config.additional_config.get("qwen38_mtp_graph", False):
             if self.speculative_config.enforce_eager:
-                raise ValueError("qwen38_mtp_graph conflicts with speculative enforce_eager")
+                raise ValueError(
+                    "qwen38_mtp_graph conflicts with speculative enforce_eager"
+                )
             if self.vllm_config.parallel_config.data_parallel_size != 1:
                 raise NotImplementedError("Qwen MTP graph currently requires DP=1")
             from vllm_fl.spec_decode.qwen38_draft_graph import Qwen38DraftGraph
+
             self.model = Qwen38DraftGraph(self.model, self.vllm_config)
 
     @staticmethod
@@ -264,6 +275,8 @@ class Qwen38MTPProposer(EagleProposer):
         # request table is reusable after native first-pass token compaction.
         self._per_group_block_tables[gid] = block_table
         self._first_pass_sample_indices = None
+        self._first_pass_request_positions = None
+        self._first_pass_request_valid = None
         self._slot_mappings_prepared = False
 
     def set_inputs_first_pass(
@@ -276,8 +289,8 @@ class Qwen38MTPProposer(EagleProposer):
         cad,
         num_rejected_tokens_gpu,
     ):
-        if self.num_speculative_tokens not in (0, 1) or self.needs_extra_input_slots:
-            raise NotImplementedError("Qwen3.8 multi-group drafting only supports K1")
+        if not 0 <= self.num_speculative_tokens <= 3 or self.needs_extra_input_slots:
+            raise NotImplementedError("Qwen3.8 requires sequential drafting up to K3")
         result = super().set_inputs_first_pass(
             target_token_ids,
             next_token_ids,
@@ -290,6 +303,8 @@ class Qwen38MTPProposer(EagleProposer):
         # Padded drafting retains rejected token rows. Never write their K/V or
         # compressed-index groups; the native sampler still selects the same row.
         self._first_pass_sample_indices = result[1]
+        self._first_pass_request_positions = None
+        self._first_pass_request_valid = None
         self._slot_mappings_prepared = False
         return result
 
@@ -298,8 +313,10 @@ class Qwen38MTPProposer(EagleProposer):
         common_attn_metadata: CommonAttentionMetadata,
         draft_index: int = 0,
     ) -> tuple[list[object], dict[str, object]]:
-        if draft_index != 0 or self.num_speculative_tokens not in (0, 1):
-            raise NotImplementedError("Qwen3.8 K>1 cache evolution is not implemented")
+        if not 0 <= draft_index < max(1, self.num_speculative_tokens) or not (
+            0 <= self.num_speculative_tokens <= 3
+        ):
+            raise ValueError("Qwen3.8 draft index exceeds the current proposal")
         common = common_attn_metadata
         count, nreq = common.num_actual_tokens, common.num_reqs
         if count > self.max_positions:
@@ -314,10 +331,38 @@ class Qwen38MTPProposer(EagleProposer):
             )
         if self._first_pass_sample_indices.numel() != nreq:
             raise ValueError("QSA draft sample rows do not match request-table rows")
-        if nreq:
-            valid &= tokens <= self._first_pass_sample_indices[requests.clamp_min(0)]
+        if draft_index == 0:
+            if nreq:
+                valid &= (
+                    tokens <= self._first_pass_sample_indices[requests.clamp_min(0)]
+                )
+                self._first_pass_request_positions = positions[
+                    self._first_pass_sample_indices
+                ].clone()
+                self._first_pass_request_valid = valid[
+                    self._first_pass_sample_indices
+                ].clone()
+            else:
+                valid.zero_()
+                self._first_pass_request_positions = positions[:0]
+                self._first_pass_request_valid = valid[:0]
         else:
-            valid.zero_()
+            if common.max_query_len != 1 or count != nreq:
+                raise ValueError("Later Qwen MTP steps require one token per request")
+            if (
+                self._first_pass_request_positions is None
+                or self._first_pass_request_valid is None
+            ):
+                raise RuntimeError(
+                    "Later Qwen MTP steps require first-pass request positions"
+                )
+            expected_positions = self._first_pass_request_positions + draft_index
+            # The native step helper clamps an out-of-range position to zero.
+            # Keep that request invalid for the rest of this proposal.
+            valid &= self._first_pass_request_valid
+            valid &= (expected_positions >= 0) & (
+                expected_positions < self.max_model_len
+            )
         per_group, per_layer = [], {}
         for group in self.draft_attn_groups:
             gid = group.kv_cache_group_id
@@ -346,7 +391,7 @@ class Qwen38MTPProposer(EagleProposer):
             cm.slot_mapping = buffer[:count]
             metadata = group.get_metadata_builder().build_for_drafting(
                 common_attn_metadata=cm,
-                draft_index=0,
+                draft_index=draft_index,
             )
             per_group.append(metadata)
             for name in group.layer_names:
@@ -358,12 +403,12 @@ class Qwen38MTPProposer(EagleProposer):
     def _get_slot_mapping(self, num_tokens: int, slot_mapping=None):
         if num_tokens > self.max_positions:
             raise ValueError("QSA padded draft tokens exceed fixed slot capacity")
-        if slot_mapping is None:
-            # Native dummy_run has no attention metadata and must not retain a
-            # real request's slots from a previous invocation.
+        if slot_mapping is None and not self._slot_mappings_prepared:
+            # No fresh build means dummy_run. Native later draft steps also
+            # pass None, but have a freshly prepared per-group mapping.
             for buffer in self._per_group_slot_mapping_buffers.values():
                 buffer.fill_(PADDING_SLOT_ID)
-            self._slot_mappings_prepared = False
+            self._prepared_slot_count = 0
         elif not self._slot_mappings_prepared:
             raise RuntimeError("QSA per-group slots were not rebuilt for this draft")
         elif num_tokens < self._prepared_slot_count:
@@ -371,9 +416,10 @@ class Qwen38MTPProposer(EagleProposer):
         result = {}
         for group in self.draft_attn_groups:
             buffer = self._per_group_slot_mapping_buffers[group.kv_cache_group_id]
-            if slot_mapping is not None:
+            if self._slot_mappings_prepared:
                 buffer[self._prepared_slot_count : num_tokens].fill_(PADDING_SLOT_ID)
             view = buffer[:num_tokens]
             for name in group.layer_names:
                 result[name] = view
+        self._slot_mappings_prepared = False
         return result

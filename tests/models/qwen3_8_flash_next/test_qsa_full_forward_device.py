@@ -357,3 +357,110 @@ def test_full_qsa_eager_changed_graph_global_flaggems(layer_and_config, m, tmp_p
     path = results_dir / "qsa-full-forward-results.jsonl"
     with path.open("a") as f:
         f.write(json.dumps(result) + "\n")
+
+
+@pytest.mark.parametrize("prefix_mod", range(4))
+@pytest.mark.parametrize(
+    "drafts,accepted_drafts",
+    [(k, accepted) for k in (2, 3) for accepted in range(k + 1)],
+    ids=[f"k{k}-a{accepted}" for k in (2, 3) for accepted in range(k + 1)],
+)
+def test_rejected_suffix_recompressed_across_steps(
+    layer_and_config, prefix_mod, drafts, accepted_drafts
+):
+    """Verified rows, partial commit, then sequential one-row graph drafts."""
+    from vllm_fl.spec_decode.qwen38_draft_graph import copy_qsa_metadata
+
+    layer, config = layer_and_config
+    prefix = 124 + prefix_mod
+    accepted = accepted_drafts + 1
+    pages = ([2, 1, 3, 4], [1, 3, 2, 4], [3, 1, 2, 4])
+    torch.manual_seed(3300 + 4 * prefix_mod + accepted_drafts)
+    tentative = (
+        torch.randn(prefix + drafts + 1, 2560, device="cuda", dtype=torch.bfloat16)
+        * 0.2
+    )
+    replacements = torch.randn(drafts, 2560, device="cuda", dtype=torch.bfloat16) * 0.3
+    committed = tentative[: prefix + accepted]
+    expected_inputs = torch.cat((committed, replacements))
+    with torch.no_grad():
+        expected, expected_k, expected_v, expected_raw = dense_oracle(
+            layer, expected_inputs
+        )
+
+    def forward(hidden, pos, meta):
+        with set_forward_context(meta, config, num_tokens=hidden.shape[0]):
+            return layer(pos, hidden)
+
+    prefix_pos, prefix_md = metadata(layer, 0, prefix, pages)
+    verify_pos, verify_md = metadata(layer, prefix, drafts + 1, pages)
+    start = prefix + accepted
+    static_pos, static_md = metadata(layer, start, 1, pages)
+    static_x = replacements[:1].clone()
+    with torch.no_grad(), flag_gems.use_gems():
+        clear_caches(layer)
+        forward(tentative[:prefix], prefix_pos, prefix_md)
+        forward(tentative[prefix:], verify_pos, verify_md)
+        for _ in range(2):
+            forward(static_x, static_pos, static_md)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            out = forward(static_x, static_pos, static_md)
+
+        # Restore the original speculative suffix. Replays must ignore its
+        # unaccepted future and replace a compressed group when it completes.
+        clear_caches(layer)
+        forward(tentative[:prefix], prefix_pos, prefix_md)
+        forward(tentative[prefix:], verify_pos, verify_md)
+        for step in range(drafts):
+            pos, meta = metadata(layer, start + step, 1, pages)
+            static_pos.copy_(pos)
+            static_x.copy_(replacements[step : step + 1])
+            for name in static_md:
+                copy_qsa_metadata(static_md[name], meta[name])
+            graph.replay()
+            torch.testing.assert_close(
+                out, expected[start + step : start + step + 1], atol=0.02, rtol=0.03
+            )
+            end = start + step + 1
+            logical = torch.arange(end, device="cuda")
+            main_pages = torch.tensor(pages[0], device="cuda")
+            raw_pages = torch.tensor(pages[1], device="cuda")
+            observed_k = layer.kv_cache[main_pages[logical // 128], 0, logical % 128]
+            observed_v = layer.kv_cache[main_pages[logical // 128], 1, logical % 128]
+            observed_raw = layer.indexer.raw_key_cache.key_cache[
+                raw_pages[logical // 128], logical % 128
+            ]
+            torch.testing.assert_close(
+                observed_k, expected_k[:end], atol=0.02, rtol=0.02
+            )
+            torch.testing.assert_close(
+                observed_v, expected_v[:end], atol=0.003, rtol=0.02
+            )
+            torch.testing.assert_close(
+                observed_raw, expected_raw[:end], atol=0.003, rtol=0.02
+            )
+            groups = end // 4
+            pooled = (
+                expected_raw[: groups * 4]
+                .float()
+                .view(groups, 4, 1, 128)
+                .mean(1)
+                .bfloat16()
+            )
+            normed = rms(
+                pooled,
+                layer.indexer.k_layernorm.weight,
+                layer.indexer.k_layernorm.variance_epsilon,
+            )
+            expected_compressed = rope(
+                normed, torch.arange(groups, device="cuda") * 4, layer
+            )
+            group = torch.arange(groups, device="cuda")
+            compressed_pages = torch.tensor(pages[2], device="cuda")
+            observed_compressed = layer.indexer.compressed_key_cache.kv_cache[
+                compressed_pages[group // 32], group % 32
+            ]
+            torch.testing.assert_close(
+                observed_compressed, expected_compressed, atol=0.03, rtol=0.03
+            )

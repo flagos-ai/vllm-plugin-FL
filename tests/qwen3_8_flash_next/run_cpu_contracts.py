@@ -25,7 +25,7 @@ import types
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SUITE_EXPECTED_COUNTS = {"contracts": 65, "dispatch": 24}
+SUITE_EXPECTED_COUNTS = {"contracts": 96, "dispatch": 24}
 
 
 def cpu_environment():

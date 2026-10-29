@@ -15,7 +15,7 @@ def test_committed_context_excludes_rejected_draft_suffix():
         worker.committed_context_cpu(history, [6], 2, 0)
 
 
-@pytest.mark.parametrize("k", [1, 3])
+@pytest.mark.parametrize("k", [1, 2, 3])
 def test_zero_draft_decode_keeps_restore_path_and_prefill_does_not(k):
     counts = worker.spec_decode_counts(
         [1, k + 1, 1, 8, 0], [False, False, True, True, False], k
@@ -136,3 +136,36 @@ def test_prefill_tail_cannot_alias_k1_decode_graph(monkeypatch):
     assert not runner._determine_batch_execution_and_padding(
         num_reqs=2, force_eager=False
     )["force_eager"]
+
+
+@pytest.mark.parametrize("k,allowed", [(1, True), (2, True), (3, True), (4, False)])
+def test_metax_config_accepts_only_validated_mtp_lengths(monkeypatch, k, allowed):
+    from _qwen38_cpu import ROOT, declarations
+
+    from vllm import envs
+
+    monkeypatch.setattr(envs, "VLLM_USE_V2_MODEL_RUNNER", False)
+    config_module = declarations(
+        ROOT / "vllm_fl/patches/qwen3_8_flash_next.py",
+        "_qwen38_metax_config_cpu",
+        names={"_verify_metax_config"},
+    )
+    config = SimpleNamespace(
+        speculative_config=SimpleNamespace(
+            num_speculative_tokens=k,
+            disable_padded_drafter_batch=True,
+        ),
+        model_config=SimpleNamespace(dtype=torch.bfloat16, multimodal_config=None),
+        cache_config=SimpleNamespace(
+            mamba_ssm_cache_dtype="float32",
+            mamba_cache_mode="none",
+            enable_prefix_caching=False,
+        ),
+        scheduler_config=SimpleNamespace(async_scheduling=False),
+        parallel_config=SimpleNamespace(pipeline_parallel_size=1),
+    )
+    if allowed:
+        config_module._verify_metax_config(config)
+    else:
+        with pytest.raises(NotImplementedError, match="MTP K1, K2 or K3"):
+            config_module._verify_metax_config(config)

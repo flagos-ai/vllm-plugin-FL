@@ -130,15 +130,18 @@ def _verify_metax_config(vllm_config):
     cache_config = vllm_config.cache_config
     multimodal_config = vllm_config.model_config.multimodal_config
     import torch
+
     from vllm import envs
 
     if envs.VLLM_USE_V2_MODEL_RUNNER:
-        raise NotImplementedError("Qwen3.8 basic integration requires ModelRunnerFL/MRV1")
+        raise NotImplementedError(
+            "Qwen3.8 basic integration requires ModelRunnerFL/MRV1"
+        )
     if (
         vllm_config.speculative_config is not None
-        and vllm_config.speculative_config.num_speculative_tokens != 1
+        and vllm_config.speculative_config.num_speculative_tokens not in (1, 2, 3)
     ):
-        raise NotImplementedError("Qwen3.8 basic integration currently requires MTP K1")
+        raise NotImplementedError("Qwen3.8 basic integration supports MTP K1, K2 or K3")
     if (
         vllm_config.speculative_config is not None
         and not vllm_config.speculative_config.disable_padded_drafter_batch
@@ -156,9 +159,7 @@ def _verify_metax_config(vllm_config):
     if cache_config.enable_prefix_caching:
         raise NotImplementedError("Qwen3.8 prefix caching is not supported")
     if vllm_config.scheduler_config.async_scheduling:
-        raise NotImplementedError(
-            "CPU N-gram history requires synchronous scheduling"
-        )
+        raise NotImplementedError("CPU N-gram history requires synchronous scheduling")
     if vllm_config.parallel_config.pipeline_parallel_size != 1:
         raise NotImplementedError("Qwen3.8 basic integration requires PP1")
     if multimodal_config is not None and not multimodal_config.language_model_only:

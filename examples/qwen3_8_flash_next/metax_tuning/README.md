@@ -2,32 +2,26 @@
 
 This profile builds on [plugin-FL #455](https://github.com/flagos-ai/vllm-plugin-FL/pull/455).
 It retains the validated BF16/TP8 C550 parameters, shared CPU N-gram lookup,
-K1 MTP graphs and context-width QSA buckets.
+optional MTP graphs and context-width QSA buckets. The executable
+[serving entry point](../serve_metax.py) defaults to MTP off and enables K1/K2/K3
+only when explicitly selected; it keeps checkpoint sampling defaults.
 
-Current operator requirements are listed in the model guide's
-[runtime and operator dependencies](../../../docs/models/qwen3_8_flash_next.md#runtime-and-operator-dependencies).
-The manifest in this directory records the historical tuning base only.
-The per-row boundary fix is published in FGV #1024; the required MetaX radix
-candidate still needs a public fixed reference. Operator implementations remain
-in their operator library.
+See the model guide's
+[runtime and operator dependencies](../../../docs/models/qwen3_8_flash_next.md#runtime-and-operator-dependencies)
+for the current required composition and unpublished dependency status.
+This directory's `manifest.json` records the historical tuning base only; it
+does not provide a complete current deployment lock.
 
-Add these settings to the existing serving configuration:
+Use the [serving entry point](../serve_metax.py) to select this profile. It owns
+the serving configuration, enables the shared N-gram and QSA tuning settings,
+and pairs each explicit MTP choice with its matching graph geometry. There is
+no separate manual `additional_config` recipe in this profile.
 
-```json
-{
-  "additional_config": {
-    "qwen38_ngram_mode": "shared_buffer",
-    "qwen38_mtp_graph": true,
-    "qwen38_qsa_length_buckets": true,
-    "qwen38_tuning_profile": true
-  }
-}
-```
-
-Point VLLM_TUNED_CONFIG_FOLDER to this directory's moe-configs folder.
-Use a dedicated container and keep the native FG and FGV caches separate
-(defaults: $HOME/.flaggems and $HOME/.flagdnn). Do not export a common
-FLAGGEMS_CACHE_DIR or FLAGGEMS_DB_URL for both libraries.
+The launcher selects this directory's `moe-configs` through
+VLLM_TUNED_CONFIG_FOLDER. FG and FGV use distinct native caches
+(`$HOME/.flaggems` and `$HOME/.flagdnn`); the deployment supplies separate
+container filesystems or homes when isolation between services is needed.
+Triton and the operator-hit log use the launcher's mode-specific cache paths.
 
 The model installs the profile before constructing layers and capturing graphs.
 Reviewed linear/MV choices use native LibTuner/ConfigCache entries. Remaining
@@ -38,8 +32,8 @@ original libraries. Geometry misses keep the native path.
 
 Parameters are packaged in
 vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json.
-QSA preserves the K512 selection contract and cache capacity. Widths N<=512
-skip score/TopK; supported M<=128 query-row shapes use corrected non-TLE FGV
-per-row selection, larger M uses radix, and other shapes retain the FG fallback.
-Score widths remain 512/2048/8192/cache-capacity. Target and MTP graph keys include the selected width.
+QSA retains K512 and the reviewed shape routing: width N<=512 skips score/TopK;
+otherwise supported M<=128 query-row shapes use corrected FGV non-TLE per-row selection,
+larger M uses radix, and out-of-scope shapes retain FG fallback. Score widths
+are 512/2048/8192/cache-capacity. Target and MTP graph keys include the selected width.
 No new communication optimization or operator exclusion is included.

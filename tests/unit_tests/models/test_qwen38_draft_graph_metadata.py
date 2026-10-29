@@ -9,7 +9,7 @@ graph = declarations(
     ROOT / "vllm_fl/spec_decode/qwen38_draft_graph.py",
     "qwen38_graph_metadata_cpu",
     namespace={"copy": __import__("copy").copy},
-    names={"fixed_qsa_metadata", "copy_qsa_metadata"},
+    names={"fixed_qsa_metadata", "copy_qsa_metadata", "draft_graph_max_tokens"},
 )
 
 
@@ -76,3 +76,73 @@ def test_fixed_metadata_rejects_changed_score_bucket():
     src.score_columns = 2048
     with pytest.raises(ValueError, match="score width"):
         graph.copy_qsa_metadata(dst, src)
+
+
+@pytest.mark.parametrize(
+    "drafts,requests,limit,expected",
+    [
+        (1, 3, 64, 6),
+        (2, 3, 64, 9),
+        (2, 64, 4096, 192),
+        (2, 64, 128, 128),
+        (3, 3, 64, 12),
+        (1, 64, 4096, 128),
+        (3, 64, 4096, 256),
+        (3, 64, 192, 192),
+    ],
+)
+def test_graph_token_capacity_covers_all_accepted_drafts(
+    drafts, requests, limit, expected
+):
+    config = SimpleNamespace(
+        speculative_config=SimpleNamespace(num_speculative_tokens=drafts),
+        scheduler_config=SimpleNamespace(
+            max_num_seqs=requests, max_num_batched_tokens=limit
+        ),
+    )
+    assert graph.draft_graph_max_tokens(config) == expected
+
+
+def test_k3_first_pass_and_later_steps_share_fixed_graph_metadata_without_stale_rows():
+    src = source()
+    src.num_actual_tokens = 12
+    src.block_table = torch.tensor([[9, 10], [20, 21], [30, 31]], dtype=torch.int32)
+    src.seq_lens = torch.tensor([403, 1603, 6403], dtype=torch.int32)
+    src.query_start_loc = torch.tensor([0, 4, 8, 12], dtype=torch.int32)
+    src.slot_mapping = torch.arange(12, dtype=torch.int64) + 100
+    src.token_to_req = torch.arange(3, dtype=torch.int32).repeat_interleave(4)
+    src.logical_positions = torch.tensor(
+        [399, 400, 401, 402, 1599, 1600, 1601, 1602, 6399, 6400, 6401, 6402],
+        dtype=torch.int64,
+    )
+    dst = graph.fixed_qsa_metadata(src, 16, 4)
+    graph.copy_qsa_metadata(dst, src)
+    assert dst.slot_mapping.tolist() == list(range(100, 112)) + [-1] * 4
+    pointers = {
+        name: getattr(dst, name).data_ptr()
+        for name in (
+            "block_table",
+            "seq_lens",
+            "query_start_loc",
+            "slot_mapping",
+            "token_to_req",
+            "logical_positions",
+        )
+    }
+    for step in (1, 2):
+        src.num_actual_tokens = 3
+        src.seq_lens = torch.tensor(
+            [403 + step, 1603 + step, 6403 + step], dtype=torch.int32
+        )
+        src.query_start_loc = torch.arange(4, dtype=torch.int32)
+        src.slot_mapping = torch.tensor([201, 301, 401], dtype=torch.int64) + step
+        src.token_to_req = torch.arange(3, dtype=torch.int32)
+        src.logical_positions = src.seq_lens.long() - 1
+        graph.copy_qsa_metadata(dst, src)
+        assert torch.equal(dst.logical_positions[:3], src.logical_positions)
+        assert dst.logical_positions[3:].tolist() == [-1] * 13
+        assert dst.slot_mapping[3:].tolist() == [-1] * 13
+        assert dst.query_start_loc.tolist() == [0, 1, 2, 3, 3]
+        assert dst.seq_lens[3:].tolist() == [0]
+        assert not torch.count_nonzero(dst.block_table[3:])
+        assert pointers == {name: getattr(dst, name).data_ptr() for name in pointers}
