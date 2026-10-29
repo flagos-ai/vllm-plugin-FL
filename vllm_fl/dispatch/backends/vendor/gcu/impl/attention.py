@@ -33,7 +33,7 @@ from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vll
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
+from vllm_fl.utils import get_batch_invariant_module
 from vllm.utils.math_utils import cdiv
 from vllm.v1.attention.backend import (
     AttentionCGSupport,
@@ -476,7 +476,7 @@ class AttentionGCUImpl(AttentionImpl):
         self.vllm_flash_attn_version = 3
 
         # Cache the batch invariant result for use in forward passes
-        self.batch_invariant_enabled = _bi_mode
+        self.batch_invariant_enabled = get_batch_invariant_module()._batch_invariant_MODE
 
         # FP8 KV cache is declared as supported (see AttentionGCUBackend),
         # but the actual kernel-level descale parameters are always passed.

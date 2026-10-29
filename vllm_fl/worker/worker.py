@@ -1513,9 +1513,9 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    from vllm_fl.utils import get_batch_invariant_module
 
-    init_batch_invariance()
+    get_batch_invariant_module().init_batch_invariance()
     override_envs_for_eplb(
         parallel_config,
         moe_backend=getattr(vllm_config.kernel_config, "moe_backend", None),

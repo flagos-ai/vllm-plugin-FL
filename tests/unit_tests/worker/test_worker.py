@@ -334,3 +334,18 @@ def test_gcu_ir_defaults_only_select_registered_native_providers(monkeypatch, mo
         assert all(
             provider in IrOp.registry[field.name].impls for provider in providers
         )
+
+
+def test_batch_invariant_module_resolves_installed_upstream_api():
+    from importlib.metadata import version
+
+    from packaging.version import Version
+    from vllm_fl.utils import get_batch_invariant_module
+
+    module = get_batch_invariant_module()
+    parent = (
+        "determinism" if Version(version("vllm")) >= Version("0.32.0") else "layers"
+    )
+    assert module.__name__ == f"vllm.model_executor.{parent}.batch_invariant"
+    assert callable(module.init_batch_invariance)
+    assert isinstance(module._batch_invariant_MODE, bool)
