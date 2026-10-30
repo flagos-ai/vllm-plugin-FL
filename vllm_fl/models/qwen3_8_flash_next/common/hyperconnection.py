@@ -183,9 +183,11 @@ class GatedResidualSimple(HyperConnectionBase):
         use_mix: bool = True,
         use_combine: bool = True,
         small_projection=None,
+        mix_projection=None,
     ) -> None:
         super().__init__(config, layer_idx, role)
         self._small_projection = F.linear if small_projection is None else small_projection
+        self._mix_projection = F.linear if mix_projection is None else mix_projection
         norm_size = (
             self.hyper_hidden_size if config.hc_per_branch_norm else config.hidden_size
         )
@@ -332,7 +334,9 @@ class GatedResidualSimple(HyperConnectionBase):
                 (self.config.hc_lowrank, self.hc_count), dim=-1
             )
         else:
-            down = F.linear(hyper_input_normed, self.input_mix_weight_down.weight)
+            down = self._mix_projection(
+                hyper_input_normed, self.input_mix_weight_down.weight
+            )
         gate = F.silu(down / self.hc_count)
         gate_logits = F.linear(gate, self.input_mix_weight_up.weight)
         if not self.config.use_fused_ops:

@@ -341,7 +341,10 @@ def qsa_prepare_split_workspace(
     workspace_cache: dict[
         tuple[int, int, int, int, int, int],
         tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    ] | None = None,
+    ]
+    | None = None,
+    *,
+    num_splits: int | None = None,
 ) -> tuple[
     int,
     tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None,
@@ -354,7 +357,10 @@ def qsa_prepare_split_workspace(
     workspace; the caller then uses the single kernel.
     """
 
-    num_splits = qsa_sparse_split_count(q, k_cache, topk)
+    if num_splits is None:
+        num_splits = qsa_sparse_split_count(q, k_cache, topk)
+    if num_splits not in (1, 2, 4, 8, 16, 32):
+        raise ValueError("QSA split count must be a power of two from 1 through 32")
     if num_splits <= 1:
         return 1, None
     key = (

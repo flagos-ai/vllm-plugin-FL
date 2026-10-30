@@ -570,13 +570,23 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
             hc_config,
             layer_idx=self.layer_idx,
             role="attn",
-            small_projection=resolve_op("qwen38_small_projection") if self._metax else None,
+            small_projection=resolve_op("qwen38_small_projection")
+            if self._metax
+            else None,
+            mix_projection=resolve_op("qwen38_grdown_projection")
+            if self._metax
+            else None,
         )
         self.mlp_hyper_connection = GatedResidualSimple(
             hc_config,
             layer_idx=self.layer_idx,
             role="mlp",
-            small_projection=resolve_op("qwen38_small_projection") if self._metax else None,
+            small_projection=resolve_op("qwen38_small_projection")
+            if self._metax
+            else None,
+            mix_projection=resolve_op("qwen38_grdown_projection")
+            if self._metax
+            else None,
         )
 
     def forward(

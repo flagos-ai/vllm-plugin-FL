@@ -23,6 +23,7 @@ QWEN38_OPERATORS = (
     "expand_qsa_block_indices",
     "qsa_select_paged_tokens",
     "qsa_sparse_paged_attention",
+    "qsa_sparse_split_count",
     "qsa_store_cache_rows",
     "qsa_compress_groups_with_ratio",
     "ple_short_conv_",
@@ -37,6 +38,7 @@ _FGV_DEPENDENCIES = {
     "expand_qsa_block_indices": (),
     "qsa_select_paged_tokens": ("qsa_mqa_paged", "top_k_per_row_prefill"),
     "qsa_sparse_paged_attention": ("qsa_sparse_paged_attention",),
+    "qsa_sparse_split_count": ("qsa_sparse_split_count",),
     "qsa_store_cache_rows": ("qsa_store_cache_rows",),
     "qsa_compress_groups_with_ratio": ("qsa_compress_groups_with_ratio",),
     "ple_short_conv_": ("ple_short_conv_",),
@@ -129,6 +131,10 @@ def qsa_compress_groups_with_ratio(
         compress_ratio,
         rope_cache,
     )
+
+
+def qsa_sparse_split_count(q, k_cache, topk):
+    return _fgv("qsa_sparse_split_count")(q, k_cache, topk)
 
 
 def qsa_sparse_paged_attention(

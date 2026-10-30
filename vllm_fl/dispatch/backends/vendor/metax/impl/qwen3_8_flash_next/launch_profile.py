@@ -218,6 +218,10 @@ def install_qwen38_launch_profile(vllm_config=None):
             raise ValueError(
                 "The Qwen launch profile requires the reviewed BF16 geometry"
             )
+    # Native BF16 projections keep the same FP32 accumulation contract.
+    # Set once before warmup/capture, never by toggling backend state per call.
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
     profile = json.loads(
         files("vllm_fl.dispatch.config")
         .joinpath("qwen3_8_flash_next_metax_tuning.json")
@@ -315,6 +319,9 @@ def install_qwen38_launch_profile(vllm_config=None):
     qsa = import_module("flaggems_vllm.ops.qwen4.qsa_attention")
     qsa._qsa_sparse_paged_gqa_kernel = _Launch(
         qsa._qsa_sparse_paged_gqa_kernel, _qsa_attention
+    )
+    qsa._qsa_sparse_paged_gqa_split_kernel = _Launch(
+        qsa._qsa_sparse_paged_gqa_split_kernel, _qsa_attention
     )
     wy = import_module("flaggems_vllm.ops.FLA.wy_fast")
     wy.recompute_w_u_fwd_kernel = _Launch(wy.recompute_w_u_fwd_kernel, _wy)

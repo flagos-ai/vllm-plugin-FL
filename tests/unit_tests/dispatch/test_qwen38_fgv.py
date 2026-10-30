@@ -211,17 +211,26 @@ def test_registration_preserves_default_and_scopes_vendor_difference():
     ops.register_qwen38_operators(
         Registry(),
         allow=lambda name: (
-            name in {"qsa_mqa_paged", "qsa_select_paged_tokens", "qwen38_gdn_mixed_qkv"}
+            name
+            in {
+                "qsa_mqa_paged",
+                "qsa_select_paged_tokens",
+                "qsa_sparse_split_count",
+                "qwen38_gdn_mixed_qkv",
+            }
         ),
     )
     metax.register_qwen38_operators(Registry(), is_platform_available=lambda: False)
     assert [(entry.op_name, entry.impl_id) for entry in entries] == [
         ("qsa_mqa_paged", "default.flagos"),
         ("qsa_select_paged_tokens", "default.flagos"),
+        ("qsa_sparse_split_count", "default.flagos"),
         ("qwen38_gdn_mixed_qkv", "default.flagos"),
         ("gdn_prefill", "vendor.metax.qwen38"),
         ("qsa_select_paged_tokens", "vendor.metax.qwen38"),
+        ("qsa_sparse_split_count", "vendor.metax.qwen38"),
         ("qwen38_small_projection", "vendor.metax.qwen38"),
+        ("qwen38_grdown_projection", "vendor.metax.qwen38"),
         ("qwen38_ple_gate", "vendor.metax.qwen38"),
         ("qwen38_gdn_mixed_qkv", "vendor.metax.qwen38"),
     ]

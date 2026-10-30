@@ -175,11 +175,14 @@ def qwen38_ple_gate(gate):
 
 
 def qwen38_small_projection(x, weight):
-    """Compatibility for BF16 N=1/4 projections using existing FG matrix-vector ops.
+    """Select the measured BF16 narrow projection without moving GR rounding.
 
-    The pinned FG linear dot path does not lower these narrow output tiles on
-    MetaX. Each mv accumulates in FP32 and stores BF16 before stacking. Division
-    by hc_count stays in the GR caller, after this BF16 rounding boundary.
+    The MetaX N=4/K=10240 path uses native mm.dtype with FP32 accumulation,
+    followed by the original BF16 store boundary. This explicit overload is
+    outside FlagGems' registered linear/mm APIs; a global blacklist cannot
+    express this model shape. Other N=4 shapes retain the FG mv fallback.
+    The N=1 result is already a contiguous column, so stacking adds only a copy.
+    Division by hc_count remains in the GR caller after the BF16 store.
     """
     import flag_gems
 
@@ -194,9 +197,50 @@ def qwen38_small_projection(x, weight):
     flat = x.reshape(-1, x.shape[-1])
     if flat.shape[0] == 0:
         return x.new_empty((*x.shape[:-1], weight.shape[0]))
+    if weight.shape[0] == 1:
+        return flag_gems.mv(flat, weight[0]).reshape(*x.shape[:-1], 1)
+    if (
+        flat.device.type == "cuda"
+        and flat.shape[1] == 10240
+        and flat.shape[0] <= 2048
+        and flat.is_contiguous()
+        and weight.is_contiguous()
+    ):
+        projected = torch.ops.aten.mm.dtype(flat, weight.T, out_dtype=torch.float32).to(
+            torch.bfloat16
+        )
+        return projected.reshape(*x.shape[:-1], 4)
     columns = [flag_gems.mv(flat, row) for row in weight.unbind(0)]
-    projected = torch.stack(columns, dim=-1)
-    return projected.reshape(*x.shape[:-1], weight.shape[0])
+    return torch.stack(columns, dim=-1).reshape(*x.shape[:-1], 4)
+
+
+def qsa_sparse_split_count(q, k_cache, topk):
+    """Use graph-static split-KV only for the measured MetaX QSA bucket."""
+    if (
+        q.device.type == "cuda"
+        and q.dtype == k_cache.dtype == torch.bfloat16
+        and 0 < q.shape[0] <= 64
+        and q.shape[1:] == (3, 256)
+        and k_cache.ndim == 4
+        and k_cache.shape[2:] == (1, 256)
+        and topk == 2051
+    ):
+        return 16 if q.shape[0] <= 32 else 8
+    return 1
+
+
+def qwen38_grdown_projection(x, weight):
+    """Fixed native path for graph-dominated GR down shapes, with FG fallback.
+
+    FP32 output from the unregistered aten.mm.dtype overload is rounded to
+    BF16 before the GR caller divides by hc_count. Warmup and capture select
+    the same path. Small-M eager is slower; this is a measured decode policy.
+    """
+    from .linear_policy import native_grdown, supports_native_grdown
+
+    if supports_native_grdown(x, weight):
+        return native_grdown(x, weight)
+    return torch.nn.functional.linear(x, weight)
 
 
 def register_qwen38_operators(registry, *, is_platform_available):
@@ -205,6 +249,8 @@ def register_qwen38_operators(registry, *, is_platform_available):
     def available(name):
         if not is_platform_available():
             return False
+        if name == "qwen38_grdown_projection":
+            return True
         if name == "qwen38_gdn_mixed_qkv":
             return True
         if name in {"qwen38_small_projection", "qwen38_ple_gate"}:
@@ -241,7 +287,9 @@ def register_qwen38_operators(registry, *, is_platform_available):
             for name in (
                 "gdn_prefill",
                 "qsa_select_paged_tokens",
+                "qsa_sparse_split_count",
                 "qwen38_small_projection",
+                "qwen38_grdown_projection",
                 "qwen38_ple_gate",
                 "qwen38_gdn_mixed_qkv",
             )

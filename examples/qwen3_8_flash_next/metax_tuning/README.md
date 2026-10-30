@@ -36,4 +36,10 @@ QSA retains K512 and the reviewed shape routing: width N<=512 skips score/TopK;
 otherwise supported M<=128 query-row shapes use corrected FGV non-TLE per-row selection,
 larger M uses radix, and out-of-scope shapes retain FG fallback. Score widths
 are 512/2048/8192/cache-capacity. Target and MTP graph keys include the selected width.
-No new communication optimization or operator exclusion is included.
+The current tested configuration also selects stage-specific MoE launch
+parameters, scoped native GR/N4 projections and QSA split-KV with caller-owned
+workspace. The deterministic sampling filter remains in FGV; its source and
+export hashes are checked by the profile. See the model guide for exact
+shape scopes, fallbacks, dependency limitations and the 248.6844 tok/s fixed-1K
+result. Later block-top20/fused sampling and QSA packing are not included.
+No communication or CPU-affinity change is selected.

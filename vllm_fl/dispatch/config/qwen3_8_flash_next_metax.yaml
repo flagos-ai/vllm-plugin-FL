@@ -27,7 +27,13 @@ op_backends:
   # A global blacklist cannot distinguish these QSA-only library entrypoints.
   qsa_select_paged_tokens:
   - impl:vendor.metax.qwen38
+  # Measured graph-static QSA split count; outside scope returns single.
+  qsa_sparse_split_count:
+  - impl:vendor.metax.qwen38
   qwen38_small_projection:
+  - impl:vendor.metax.qwen38
+  # Scoped native BF16 GR down policy; other shapes retain FG linear.
+  qwen38_grdown_projection:
   - impl:vendor.metax.qwen38
   qwen38_ple_gate:
   - impl:vendor.metax.qwen38

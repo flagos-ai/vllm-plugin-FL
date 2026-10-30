@@ -274,6 +274,7 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         if self._metax:
             self._qsa_store_cache_rows = resolve_op("qsa_store_cache_rows")
             self._qsa_sparse_paged_attention = resolve_op("qsa_sparse_paged_attention")
+            self._qsa_sparse_split_count = resolve_op("qsa_sparse_split_count")
         self.use_fused_qk_norm_rope_gate = (
             not self._metax and
             self.attn_output_gate
@@ -387,6 +388,8 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         if key_cache.dtype != torch.bfloat16 or query.dtype != torch.bfloat16:
             raise NotImplementedError("Qwen3.8-Flash-Next QSA requires BF16 Q/K/V")
 
+        from .ops.qsa import qsa_prepare_split_workspace
+
         if self._metax:
             slot_mapping = main_metadata.slot_mapping[:num_tokens]
             flat_width = self.num_kv_heads * self.head_dim
@@ -406,7 +409,6 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             )
         else:
             from .ops.qsa import (
-                qsa_prepare_split_workspace,
                 qsa_sparse_paged_attention,
                 qsa_store_kv_cache_rows,
             )
@@ -438,10 +440,25 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
 
         output.zero_()
         if num_tokens and self._metax:
+            _, split_workspace = qsa_prepare_split_workspace(
+                query[:num_tokens],
+                key_cache,
+                self.topk_indices_buffer.shape[1],
+                self._qsa_split_workspaces,
+                num_splits=self._qsa_sparse_split_count(
+                    query[:num_tokens], key_cache, self.topk_indices_buffer.shape[1]
+                ),
+            )
             self._qsa_sparse_paged_attention(
-                query[:num_tokens], key_cache, value_cache,
-                self.topk_indices_buffer[:num_tokens], main_metadata.block_table,
-                token_to_req, self.scaling, output[:num_tokens],
+                query[:num_tokens],
+                key_cache,
+                value_cache,
+                self.topk_indices_buffer[:num_tokens],
+                main_metadata.block_table,
+                token_to_req,
+                self.scaling,
+                output[:num_tokens],
+                split_workspace=split_workspace,
             )
         elif num_tokens:
             _, split_workspace = qsa_prepare_split_workspace(

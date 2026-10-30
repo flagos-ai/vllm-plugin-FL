@@ -270,7 +270,19 @@
     },
     {
       "path": "runtime/backend/_metax/ops/__init__.py",
-      "sha256": "abce69e0d0176d33e155eae001ec257b9516602f8e8fe4d9c212e6360cec6a4a"
+      "sha256": "5ccb1a7467477c5209d724e3dc89e8b5559be51ddf35817740b2c7ee4c40fcda"
+    },
+    {
+      "path": "runtime/backend/_metax/ops/top_k_top_p.py",
+      "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4"
+    },
+    {
+      "path": "ops/top_k_top_p.py",
+      "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84"
+    },
+    {
+      "path": "ops/__init__.py",
+      "sha256": "80de99b5416f586ffc4131046876cbe2bf2028a745f078194033ef112226ec5d"
     }
   ],
   "vllm": [

@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from typing import Any
 
 import torch
@@ -323,6 +324,11 @@ def select_unquantized_moe_backend_oot(
     )
 
 
+@lru_cache(maxsize=8)
+def _metax_moe_device_name(device_index):
+    return torch.cuda.get_device_name(device_index)
+
+
 def _prepare_expert_assignment(
     topk_ids: torch.Tensor,
     config: dict[str, Any],
@@ -546,6 +552,41 @@ class TritonExpertsFL(TritonExperts):
             block_shape=self.block_shape,
         )
 
+        config_gemm1, config_gemm2 = config, config
+        if (
+            getattr(current_platform, "vendor_name", None) == "metax"
+            and hidden_states.device.type == "cuda"
+        ):
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.moe_launch import (
+                select_stage_configs,
+            )
+
+            config_gemm1, config_gemm2, _ = select_stage_configs(
+                config,
+                num_tokens=num_tokens,
+                w1_shape=w1.shape,
+                w2_shape=w2.shape,
+                topk=top_k_num,
+                dtype=(
+                    hidden_states.dtype
+                    if w1.dtype == w2.dtype == hidden_states.dtype
+                    else None
+                ),
+                vendor=current_platform.vendor_name,
+                device_name=_metax_moe_device_name(hidden_states.device.index),
+                activation=activation.value,
+                quantized=(
+                    self.quant_dtype is not None
+                    or self.quant_config.use_fp8_w8a8
+                    or self.quant_config.use_int8_w8a8
+                    or self.quant_config.use_int8_w8a16
+                    or self.quant_config.use_int4_w4a16
+                    or self.gemm1_clamp_limit is not None
+                ),
+                has_lora=self._lora_context is not None,
+                has_bias=self.w1_bias is not None or self.w2_bias is not None,
+            )
+
         if hidden_states.dtype == torch.bfloat16:
             compute_type = tl.bfloat16
         elif hidden_states.dtype == torch.float16:
@@ -571,7 +612,7 @@ class TritonExpertsFL(TritonExperts):
         sorted_token_ids, expert_ids, num_tokens_post_padded = (
             _prepare_expert_assignment(
                 topk_ids,
-                config,
+                config_gemm1,
                 num_tokens,
                 top_k_num,
                 global_num_experts,
@@ -594,7 +635,7 @@ class TritonExpertsFL(TritonExperts):
             num_tokens_post_padded,
             False,  # mul_routed_weights
             top_k_num,
-            config,
+            config_gemm1,
             compute_type=compute_type,
             use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
             use_int8_w8a8=self.quant_config.use_int8_w8a8,
@@ -664,7 +705,7 @@ class TritonExpertsFL(TritonExperts):
             num_tokens_post_padded,
             not apply_router_weight_on_input,
             1,
-            config,
+            config_gemm2,
             compute_type=compute_type,
             use_fp8_w8a8=self.quant_config.use_fp8_w8a8,
             use_int8_w8a8=self.quant_config.use_int8_w8a8,

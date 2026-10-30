@@ -49,6 +49,8 @@ operator lock.
 | MetaX inplace MoE fix | [FGV #1000](https://github.com/flagos-ai/FlagGems-vllm/pull/1000), [e04f51c](https://github.com/flagos-ai/FlagGems-vllm/commit/e04f51c1c7176d7a356838fdfa8b3dc4fbaf6f8a) |
 | Per-row TopK boundary fix | [FGV #1024](https://github.com/flagos-ai/FlagGems-vllm/pull/1024), published fixed delta [1a811eb](https://github.com/flagos-ai/FlagGems-vllm/commit/1a811ebc3280e51b63fdbeef9cab89029508731d) |
 | MetaX radix TopK | Required FGV candidate retained by the large-M route. Not published; a public fixed reference is pending. Production file `flaggems_vllm/runtime/backend/_metax/ops/radix_topk.py` SHA256 `f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e`. |
+| MetaX sampling filter | Private FGV apply_top_k_top_p API: MetaX source SHA256 4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4, generic source SHA256 275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84. Both sources and exports are guarded by the tuning profile; a public revision is pending. |
+| MetaX FG sort | Retained private sort.py from the previous sampling baseline, SHA256 87921767027917f1781f90450d70061d8e0605217df8663c991694d62dd05b31. The selected FGV filter uses native int32 sort. |
 | Torch / FlagTree | `2.10.0+metax3.8.1.0` / `0.6.1+metax3.6` |
 | MACA SDK / driver | 3.8.1.3 / 3.8.1 |
 
@@ -56,13 +58,17 @@ Keep the matching runtime/ABI combination. Communication uses MCCL and
 torch.distributed; FlagCX is not used. The tested FGV composition applies the
 listed component fixes to the fixed base and retains the radix candidate; the
 references do not identify a single complete public release. Publicly
-reproducible installation remains pending the unpublished FGV radix
-candidate.
+reproducible installation remains pending the unpublished radix and sampling
+components. Source hashes identify the tested private composition, not public
+installable revisions.
 
 The current private validation bundle's
-`three-commit-publication-20261029/runtime-dependencies/SOURCE_MANIFEST.json`
-records 3,008 files in the final runtime assembly, including the operator
-source fingerprints above. Historical `common/source-manifest.json` belongs to
+hotspot-optimization-20261030/integrated/FINAL_SOURCE_MANIFEST_BEFORE_OMP4.json
+records 725 model files and 3,013 runtime files, including the operator source
+fingerprints above. Its model snapshot precedes this commit's configuration
+formatting, documentation and CPU regression tests; executable Python
+declarations and parsed runtime configuration are preserved.
+Historical `common/source-manifest.json` belongs to
 the earlier greedy diagnostics and records the prior index source; it does not
 identify the current assembly. These manifests are reproduction pointers for
 private evidence, not portable dependency locks. The launcher accepts explicitly
@@ -108,16 +114,40 @@ Defaults remain available; scoped provider choices retain the previous runtime:
   the corrected FGV non-TLE per-row path, larger M uses the existing radix
   path, and out-of-scope shapes retain the FG fallback. The FGV TLE selection
   path remains disabled on this compiler.
-- N=1/4 BF16 projections use existing FG mv/stack. Wide linear operations keep
-  their default provider; an operator-wide linear blacklist would be too broad.
+- N=1 BF16 projections keep FG mv and return a view without the stack copy.
+  Contiguous N=4/K=10240 projections with M<=2048 use native aten.mm.dtype
+  FP32 output rounded to BF16; other N=4 shapes keep FG mv/stack.
+- GR down uses the same native FP32-output primitive for contiguous BF16
+  [M,10240] x [10240,320], M1..64 or M1024..2048. BF16 storage still precedes
+  division by hc_count. Other shapes keep F.linear. Small-M eager is slower;
+  the choice is validated for the graph-dominated serving workload.
+- These shape-specific native overloads bypass the slow FG linear path without
+  disabling FlagOS globally. An operator-wide blacklist cannot express their
+  shape and overload scope. The profile pins allow_tf32=false and
+  allow_bf16_reduced_precision_reduction=false before warmup/capture.
+- MoE uses separate GEMM launch parameters for C550 BF16 E512/topk10,
+  H2560/local intermediate80 and M8..1024: G1 BM16/BN32/BK64/W4/S2,
+  G2 BM16/BN256/BK32/W4/S1, both GROUP_M1. Assignment uses BM16 once for
+  both stages. SiLU, BF16 boundaries and summation stay unchanged. Other
+  shapes, quantization, LoRA and bias retain the previous complete config.
+- Sparse QSA with BF16 [B,3,256], one local KV head and index width2051 uses
+  split16 for B1..32 and split8 for B33..64. Each layer owns graph-stable
+  workspaces; a capture-time cache miss keeps the single-kernel fallback.
+  This is ordinary split-KV, with no query/head packing.
+- Sampling calls FGV's deterministic filter when the API is available and
+  enabled, otherwise retaining the previous PyTorch fallback. The tested
+  FP32 [B,248320], B1..64 path uses full stable int32-key sorting and sparse
+  mask/scatter; kth ties, top-p semantics and the original full-vocabulary
+  RNG path are retained. This version does not include the subsequent
+  block-top20 or fused sampling candidates.
 - The PLE gate computes sign in FP32 before returning to BF16. The rest of its
   rounding and operation order remains unchanged.
 - Mixed GDN gathering makes the QKV slice contiguous at the required boundary.
 - HC keeps the validated materialized schedule and ATen/FG rounding on MetaX;
   the prerequisite's fused/deferred path remains the default elsewhere.
 
-These are the existing adaptation boundaries. No new operator exclusion or
-communication optimization is introduced by the code consolidation.
+The new choices are model/vendor policies over library primitives. No CPU
+affinity or communication change is selected.
 
 ## Serving
 
@@ -131,6 +161,7 @@ Select the matching runtime and explicit frozen operator package directories:
 
 ```bash
 export MODEL_PATH=/models/Qwen3.8-Flash-Next
+export OMP_NUM_THREADS=4
 export QWEN38_FLAGGEMS_ROOT=/path/to/frozen/flag_gems
 export QWEN38_FGV_ROOT=/path/to/frozen/flaggems_vllm
 export QWEN38_CACHE_ROOT=/path/to/private/cache
@@ -140,7 +171,10 @@ python examples/qwen3_8_flash_next/serve_metax.py --execute
 ```
 
 The launcher selects this plugin checkout, the supplied operator packages, and
-the packaged tuning configuration. FG and FGV retain their separate native
+the packaged tuning configuration. OMP_NUM_THREADS is inherited from the
+calling environment; set it to 4 as above to reproduce the tested CPU thread
+configuration. The validated workers reported torch.get_num_threads()==4.
+FG and FGV retain their separate native
 caches (`$HOME/.flaggems` and `$HOME/.flagdnn`). The launcher places Triton and
 the operator-hit log in mode-specific paths below QWEN38_CACHE_ROOT. Separate
 container filesystems or homes must be supplied by the deployment when cache
@@ -196,23 +230,40 @@ the default shown here.
 The native MTP argmax proposal policy is unchanged; it does not force the
 target/rejection sampler to be greedy. The existing
 [MetaX top-k/top-p fallback](../../vllm_fl/dispatch/backends/vendor/metax/patches/topk_topp_sampler.py)
-is retained. Random sampling activates a path that earlier temperature0
-benchmarks did not exercise. This change validates CPU parameter plumbing;
-GPU sampling behavior, performance and accuracy under the inherited defaults
-remain to be validated.
+retains native RNG and adds the optional FGV deterministic filter described
+above. Official random sampling was exercised in the fixed-output validation
+below. Full-model accuracy evaluation remains outside the acceptance scope.
 
 The [launch profile](../../examples/qwen3_8_flash_next/metax_tuning/) installs
 reviewed configuration before model construction and graph capture. QSA work
 uses width buckets512/2048/8192/cache-capacity from the CPU length bound, and
 target/MTP graph keys retain the width. At maxlen69632 the QSA capacity is17600
-groups. The launch change does not alter cache layout, operators or model code.
+groups. The width buckets and KV-cache layout remain unchanged.
 
 ## Validation and historical performance
 
 The records below retain their historical configuration and sampling provenance.
-The current default-off/checkpoint-sampling configuration change has CPU
-parameter-plumbing validation only; it does not convert earlier greedy results
-into random-sampling GPU or accuracy acceptance.
+Official sampling and default MTP off were introduced in 9fa633c.
+The following result measures the later integrated hotspot configuration,
+with the private dependencies above, on node126/C550x8:
+
+| Fixed workload | Previous sampling version | Hotspot configuration | Change |
+|---|---:|---:|---:|
+| P1024 / exact O1024 / C64 / N128 | 221.0897 tok/s | 248.6844 tok/s | +12.48% |
+
+Both use T1.0/top_p0.95/top_k20, MTP off and OMP/Torch threads4. Each version
+has one warmup, one formal and one profile round; only the unprofiled formal
+round supplies throughput. All 128 requests per round completed with exactly
+1024 input and output tokens, no failures or preemption. ignore_eos is a
+benchmark-only request setting, not the serving default. This is the observed
+combined gain from one formal round per version, not per-operator attribution.
+The later sampling/QSA standalone candidates are excluded.
+
+Private evidence: report36, hotspot-optimization-20261030/integrated/results/fixed-p1k,
+the source manifest above, and FINAL_SOURCE_VERIFICATION_AFTER.json.
+GPU component validation and source hashes bind this configuration to those
+results; consolidation adds CPU policy/fallback tests and source-equivalence
+checks, without claiming a new end-to-end run.
 
 CPU contracts and opt-in device checks live under `tests/qwen3_8_flash_next`,
 `tests/unit_tests/models`, `tests/unit_tests/dispatch` and
