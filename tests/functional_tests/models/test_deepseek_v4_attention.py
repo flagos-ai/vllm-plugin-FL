@@ -17,54 +17,31 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def runtime():
+    from tests.utils.device_utils import ascend_single_rank_runtime
     from vllm.config import (
         CacheConfig,
         CompilationConfig,
         CompilationMode,
         SchedulerConfig,
         VllmConfig,
-        set_current_vllm_config,
     )
-    from vllm.distributed import (
-        destroy_distributed_environment,
-        destroy_model_parallel,
-        init_distributed_environment,
-        initialize_model_parallel,
-    )
-    from vllm.utils.network_utils import get_open_port
 
-    from vllm_fl import _patch_ascend_torch_accelerator
-
-    torch.npu.set_device(0)
-    _patch_ascend_torch_accelerator()
-    config = VllmConfig(
-        compilation_config=CompilationConfig(
-            mode=CompilationMode.NONE, custom_ops=["all"]
-        ),
-        scheduler_config=SchedulerConfig(
-            is_encoder_decoder=False,
-            max_model_len=512,
-            max_num_batched_tokens=512,
-            max_num_seqs=2,
-        ),
-        cache_config=CacheConfig(block_size=128, enable_prefix_caching=False),
-    )
-    with set_current_vllm_config(config), torch.inference_mode():
-        init_distributed_environment(
-            world_size=1,
-            rank=0,
-            local_rank=0,
-            backend="hccl",
-            distributed_init_method=f"tcp://127.0.0.1:{get_open_port()}",
+    def config_factory():
+        return VllmConfig(
+            compilation_config=CompilationConfig(
+                mode=CompilationMode.NONE, custom_ops=["all"]
+            ),
+            scheduler_config=SchedulerConfig(
+                is_encoder_decoder=False,
+                max_model_len=512,
+                max_num_batched_tokens=512,
+                max_num_seqs=2,
+            ),
+            cache_config=CacheConfig(block_size=128, enable_prefix_caching=False),
         )
-        initialize_model_parallel(1, backend="hccl")
-        try:
-            yield config
-        finally:
-            try:
-                destroy_model_parallel()
-            finally:
-                destroy_distributed_environment()
+
+    with ascend_single_rank_runtime(config_factory) as config:
+        yield config
 
 
 @pytest.fixture(autouse=True)

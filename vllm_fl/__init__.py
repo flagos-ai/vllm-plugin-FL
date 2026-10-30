@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 
-
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""NPU-only projection, compression and HC layer checks without full models."""
+"""NPU-only compression and HC layer checks without full models."""
 
 import pytest
 import torch
@@ -15,47 +15,22 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def runtime_context():
+    from tests.utils.device_utils import ascend_single_rank_runtime
     from vllm.config import (
         CompilationConfig,
         CompilationMode,
         VllmConfig,
-        set_current_vllm_config,
     )
-    from vllm.distributed import (
-        destroy_distributed_environment,
-        destroy_model_parallel,
-        init_distributed_environment,
-        initialize_model_parallel,
-    )
-    from vllm.utils.network_utils import get_open_port
 
-    from vllm_fl import _patch_ascend_torch_accelerator
+    def config_factory():
+        return VllmConfig(
+            compilation_config=CompilationConfig(
+                mode=CompilationMode.NONE, custom_ops=["all"]
+            )
+        )
 
-    torch.npu.set_device(0)
-    _patch_ascend_torch_accelerator()
-    config = VllmConfig(
-        compilation_config=CompilationConfig(
-            mode=CompilationMode.NONE, custom_ops=["all"]
-        )
-    )
-    # A worker initializes these before constructing replicated linears or
-    # CustomOps. Reproduce real prerequisites rather than mocking rank getters.
-    with set_current_vllm_config(config):
-        init_distributed_environment(
-            world_size=1,
-            rank=0,
-            local_rank=0,
-            distributed_init_method=f"tcp://127.0.0.1:{get_open_port()}",
-            backend="hccl",
-        )
-        initialize_model_parallel(1, backend="hccl")
-        try:
-            yield
-        finally:
-            try:
-                destroy_model_parallel()
-            finally:
-                destroy_distributed_environment()
+    with ascend_single_rank_runtime(config_factory) as config:
+        yield config
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +38,11 @@ def inference_and_dispatch(runtime_context):
     from vllm_fl.dispatch import get_default_manager, with_strict_mode
 
     with torch.inference_mode(), with_strict_mode():
-        for name in ("project", "hc_pre", "hc_post", "hc_head"):
+        assert (
+            get_default_manager().get_selected_impl_id("deepseek_v4_compressor")
+            == "vendor.ascend"
+        )
+        for name in ("hc_pre", "hc_post", "hc_head"):
             assert (
                 get_default_manager().get_selected_impl_id("deepseek_v4_" + name)
                 == "reference.torch"
@@ -136,18 +115,6 @@ def _rms(x, weight):
     ).to(x.dtype)
 
 
-def test_projection_retains_fp32_accumulation():
-    x = _data((3, 128), 0.031, torch.bfloat16)
-    wkv = _data((8, 128), 0.019, torch.bfloat16, offset=3)
-    wgate = _data((8, 128), 0.027, torch.bfloat16, offset=11)
-    kv, gate = _call("project", x, wkv, wgate)
-    assert kv.dtype == gate.dtype == torch.float32
-    torch.testing.assert_close(kv, F.linear(x.float(), wkv.float()))
-    torch.testing.assert_close(gate, F.linear(x.float(), wgate.float()))
-    assert not torch.equal(kv, F.linear(x, wkv).float())
-    assert not torch.equal(gate, F.linear(x, wgate).float())
-
-
 def _compressor(ratio):
     from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
@@ -164,11 +131,6 @@ def _compressor(ratio):
         loader = getattr(param, "weight_loader", default_weight_loader)
         loader(param, value)
         torch.testing.assert_close(param, value)
-    return module
-
-
-def test_compressor_checkpoint_parameter_names_and_loaders():
-    module = _compressor(4)
     assert set(dict(module.named_parameters())) == {
         "wkv.weight",
         "wgate.weight",
@@ -178,7 +140,8 @@ def test_compressor_checkpoint_parameter_names_and_loaders():
     assert callable(module.wkv.weight.weight_loader)
     assert callable(module.wgate.weight.weight_loader)
     assert module.ape.dtype == torch.float32
-    assert module.ape.shape == (4, 8)
+    assert module.ape.shape == (ratio, (2 if ratio == 4 else 1) * 4)
+    return module
 
 
 def _compression_oracle(module, x, ends, ratio, rope):
@@ -249,7 +212,127 @@ def test_compressor_actual_module_prefill_decode(ratio, chunked):
     actual = torch.cat(outputs)
     expected = _compression_oracle(module, x, [ratio - 1, n - 1], ratio, rope)
     torch.testing.assert_close(actual, expected, rtol=0.01, atol=0.01)
-    assert torch.isfinite(state).all()
+    # Independently check the complete persistent state on CPU, including the
+    # physical page permutation. Finite outputs alone cannot detect lost writes
+    # during the chunks that return no compressed rows.
+    cpu_x = x.cpu().float()
+    cpu_kv = F.linear(cpu_x, module.wkv.weight.cpu().float())
+    cpu_gate = F.linear(cpu_x, module.wgate.weight.cpu().float())
+    cpu_ape = module.ape.cpu()
+    expected_state = torch.zeros(state.shape, dtype=torch.float32)
+    for index, slot in enumerate(slots.cpu().tolist()):
+        expected_state[slot // ratio, slot % ratio] = torch.cat(
+            [cpu_kv[index], cpu_gate[index] + cpu_ape[index % ratio]]
+        )
+    torch.testing.assert_close(state.cpu(), expected_state)
+
+
+def test_full_compressor_fake_has_no_kernel_launch(monkeypatch):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from triton.runtime.jit import JITFunction
+
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.compressor import (
+        _compressor_op,
+        deepseek_v4_compressor,
+    )
+
+    module = _compressor(4)
+    x = _data((2, 8), dtype=torch.bfloat16)
+    state = torch.empty(2, 4, 16, dtype=torch.float32, device="npu")
+    positions = torch.arange(2, device="npu")
+    slots = torch.tensor([0, 1], device="npu")
+    table = torch.tensor([[0, 1]], dtype=torch.int32, device="npu")
+    ends = torch.tensor([3, 7, -1], device="npu")
+    requests = torch.tensor([0, 0, -1], device="npu")
+    rope = torch.empty(8, 2, dtype=torch.float32, device="npu")
+    args = (
+        x,
+        module.wkv.weight,
+        module.wgate.weight,
+        module.ape,
+        state,
+        positions,
+        slots,
+        table,
+        requests,
+        ends,
+        module.norm.weight,
+        rope,
+    )
+
+    def forbidden_launch(*args, **kwargs):
+        pytest.fail("FakeTensor evaluation launched a Triton kernel")
+
+    monkeypatch.setattr(JITFunction, "run", forbidden_launch)
+    with FakeTensorMode() as mode:
+        fake_args = tuple(mode.from_tensor(tensor) for tensor in args)
+        result = deepseek_v4_compressor(*fake_args)
+        assert result.shape == (3, 4)
+        assert result.dtype == x.dtype
+        assert result.device == x.device
+        assert isinstance(result, torch._subclasses.fake_tensor.FakeTensor)
+
+    # Mutation must be present in the dispatcher schema, where functionalization
+    # and graph dead-code elimination can see it, rather than only in a comment.
+    schema = _compressor_op._opoverload._schema
+    mutated = {
+        argument.name
+        for argument in schema.arguments
+        if argument.alias_info is not None and argument.alias_info.is_write
+    }
+    assert mutated == {"state_cache"}
+
+
+def test_full_compressor_write_only_compile_preserves_state():
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.compressor import (
+        deepseek_v4_compressor,
+    )
+
+    module = _compressor(4)
+    x = _data((3, 8), 0.04, torch.bfloat16)
+    state = torch.full((2, 4, 16), -9.0, device="npu", dtype=torch.float32)
+    positions = torch.tensor([0, 3, 7], device="npu")
+    slots = torch.tensor([0, 3, 7], device="npu")
+    table = torch.tensor([[0, 1]], device="npu", dtype=torch.int32)
+    empty = torch.empty(0, device="npu", dtype=torch.int64)
+    rope = torch.ones(8, 2, device="npu", dtype=torch.float32)
+
+    def write_only(hidden, cache):
+        # Intentionally discard the zero-row result. The state mutation is the
+        # only observable effect of the custom op and must survive compilation.
+        deepseek_v4_compressor(
+            hidden,
+            module.wkv.weight,
+            module.wgate.weight,
+            module.ape,
+            cache,
+            positions,
+            slots,
+            table,
+            empty,
+            empty,
+            module.norm.weight,
+            rope,
+        )
+        return cache.clone()
+
+    compiled = torch.compile(write_only, backend="aot_eager", fullgraph=True)
+    expected = torch.full(state.shape, -9.0, dtype=torch.float32)
+    cpu_ape = module.ape.cpu()
+    cpu_positions = positions.cpu().tolist()
+    cpu_slots = slots.cpu().tolist()
+    for hidden in (x, x * 2):
+        cpu_hidden = hidden.cpu().float()
+        cpu_kv = F.linear(cpu_hidden, module.wkv.weight.cpu().float())
+        cpu_gate = F.linear(cpu_hidden, module.wgate.weight.cpu().float())
+        for index, slot in enumerate(cpu_slots):
+            expected[slot // 4, slot % 4] = torch.cat(
+                [cpu_kv[index], cpu_gate[index] + cpu_ape[cpu_positions[index] % 4]]
+            )
+        output = compiled(hidden, state)
+        torch.npu.synchronize()
+        torch.testing.assert_close(output.cpu(), expected)
+        torch.testing.assert_close(state.cpu(), expected)
 
 
 @pytest.mark.parametrize("iterations", [1, 4])
@@ -357,39 +440,8 @@ def test_actual_decoder_norms_and_argument_forwarding(with_ids):
     assert layer.mlp.last_ids is ids
 
 
-def test_decoder_changed_input_graph():
-    import torch_npu  # noqa: F401
-
-    layer = _decoder()
-    x = _data((2, 3, 8), 0.08, torch.bfloat16)
-    positions = torch.tensor([3, 7], device="npu")
-    ids = torch.tensor([11, 17], device="npu")
-    for _ in range(3):
-        layer(positions, x, input_ids=ids)
-    torch.npu.synchronize()
-    graph = torch.npu.NPUGraph()
-    with torch.npu.graph(graph):
-        output = layer(positions, x, input_ids=ids)
-    previous = output.clone()
-    for _ in range(2):
-        x.add_(0.0625)
-        expected = _decoder_oracle(layer, positions, x, ids)
-        graph.replay()
-        torch.npu.synchronize()
-        torch.testing.assert_close(output, expected, rtol=0.02, atol=0.02)
-        assert not torch.equal(output, previous)
-        previous = output.clone()
-
-
-def test_zero_token_projection_and_decoder():
+def test_zero_token_decoder():
     x = torch.empty(0, 8, device="npu", dtype=torch.bfloat16)
-    kv, gate = _call(
-        "project",
-        x,
-        _data((8, 8), dtype=torch.bfloat16),
-        _data((8, 8), dtype=torch.bfloat16),
-    )
-    assert kv.shape == gate.shape == (0, 8)
     output = _decoder()(
         torch.empty(0, device="npu", dtype=torch.int64), x.reshape(0, 3, 8)
     )

@@ -9,7 +9,6 @@ This module defines the abstract base class that all backends must implement.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional, Union
 
 import torch
 
@@ -48,7 +47,7 @@ class VLLMFLBackendBase(ABC):
         pass
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         """
         Get the vendor name for this backend (if applicable).
 
@@ -151,13 +150,24 @@ class VLLMFLBackendBase(ABC):
         """Project [T,H,D] using grouped logical weights [groups*out,in]."""
         raise NotImplementedError
 
-    def deepseek_v4_project(
+    def deepseek_v4_compressor(
         self,
-        x: torch.Tensor,
+        hidden_states: torch.Tensor,
         wkv: torch.Tensor,
         wgate: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute compressor KV/gate projections with FP32 accumulation/output."""
+        ape: torch.Tensor,
+        state_cache: torch.Tensor,
+        positions: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        state_block_table: torch.Tensor,
+        output_request_ids: torch.Tensor,
+        output_positions: torch.Tensor,
+        rms_weight: torch.Tensor,
+        cos_sin_cache: torch.Tensor,
+        compress_ratio: int = 4,
+        rms_eps: float = 1e-6,
+    ) -> torch.Tensor:
+        """Project and mutate FP32 paged state, then compress output rows."""
         raise NotImplementedError
 
     def deepseek_v4_hc_pre(
@@ -195,41 +205,13 @@ class VLLMFLBackendBase(ABC):
         """Collapse HC streams [T,C,D] to [T,D] with FP32 mixing parameters."""
         raise NotImplementedError
 
-    def deepseek_v4_cache_write(
+    def paged_cache_write(
         self,
         values: torch.Tensor,
         slots: torch.Tensor,
         cache: torch.Tensor,
     ) -> None:
         """Mutate paged [P,B,D] cache at unique valid slots; negative slots skip."""
-        raise NotImplementedError
-
-    def deepseek_v4_save_state(
-        self,
-        kv: torch.Tensor,
-        gate: torch.Tensor,
-        ape: torch.Tensor,
-        positions: torch.Tensor,
-        slot_mapping: torch.Tensor,
-        state_cache: torch.Tensor,
-        compress_ratio: int,
-    ) -> None:
-        """Store FP32 projected KV/gate+APE in continuous paged state."""
-        raise NotImplementedError
-
-    def deepseek_v4_compress(
-        self,
-        state_cache: torch.Tensor,
-        block_table: torch.Tensor,
-        request_ids: torch.Tensor,
-        positions: torch.Tensor,
-        rms_weight: torch.Tensor,
-        cos_sin_cache: torch.Tensor,
-        compress_ratio: int = 4,
-        rms_eps: float = 1e-6,
-        output_dtype: torch.dtype = torch.bfloat16,
-    ) -> torch.Tensor:
-        """Compress completed original-token boundaries; padded rows return zero."""
         raise NotImplementedError
 
     def deepseek_v4_indexer(
@@ -320,10 +302,10 @@ class VLLMFLBackendBase(ABC):
     def rms_norm(
         self,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor],
+        residual: torch.Tensor | None,
         weight: torch.Tensor,
         epsilon: float,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 

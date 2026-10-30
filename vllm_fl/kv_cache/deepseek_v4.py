@@ -15,7 +15,7 @@ from vllm_fl.attention.deepseek_v4 import (
 )
 from vllm_fl.dispatch import CachedOp
 
-_write = CachedOp("deepseek_v4_cache_write")
+_write = CachedOp("paged_cache_write")
 
 
 def create_deepseek_v4_cache_layers(config, cache_config, prefix):
