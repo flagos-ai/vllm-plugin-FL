@@ -50,13 +50,14 @@ SDPA path. Passing text attention tests alone does not validate image inference.
 Use the published runtime image:
 
 ```bash
-export PPU_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-thead-ci"
+export PPU_IMAGE="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-thead-ci"
 ```
 
-The published image digest is
-`sha256:1ec87ed25bce8a523bd9a24f20695821363b385f7b58a878bb87df7bef58c414`.
+After pulling the image, record its manifest digest with
+`docker image inspect "$PPU_IMAGE" --format '{{json .RepoDigests}}'`.
 The image includes vendor PyTorch, the PPU SDK and `flash_attn_3`, plus the
-ordinary Python stack in the table.
+ordinary Python stack in the table. The digest is deployment evidence and must
+be refreshed when the `flagos-dev` tag is rebuilt.
 The following versions were confirmed on 2026-10-14 on the same host and
 container used for model acceptance. SDK/runtime versions come from the
 container; VBIOS was checked on all four reserved host cards (12–15).
@@ -109,7 +110,7 @@ caches, and results. `MODEL_DIR` contains model directories with `config.json`
 and all weight shards.
 
 ```bash
-export PPU_IMAGE="${PPU_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-thead-ci}"
+export PPU_IMAGE="${PPU_IMAGE:-harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-thead-ci}"
 export REPO_DIR="$PWD"
 export WORK_DIR=/data/thead-work
 export MODEL_DIR=/data/models
@@ -402,7 +403,7 @@ The first startup/request can take minutes for kernel autotuning, compilation,
 and graph capture. Follow logs and wait for `/v1/models`; model loading alone
 is not readiness. Retain complete logs instead of truncating autotuning output.
 
-## 6. Run unit tests and the original adaptation Gate
+## 6. Run unit tests and model checks
 
 Stop model services before GPU unit tests. Select an idle card and run the
 checked-in T-Head cache and attention tests through the same interpreter:
@@ -448,44 +449,37 @@ The packaged `run_test.sh` also waits for readiness and runs all three files;
 use it when its `pytest` executable belongs to the intended environment.
 Each model/mode sends 26 requests: 1 text, 8 concurrent text, 1 image,
 8 concurrent image, and 8 mixed requests. It evaluates 260 response checks.
-The workflow runs the shared Gate files without changing their prompts,
-images, keyword checks, or thresholds. The detailed LLM introduction must
-contain at least 256 characters and the required terms in order; the other
-requests retain their exact answer/OCR checks. All ten checks must pass for
-every response, including repetition, encoding, and control-character checks.
+The generic E2E runner selects the cases declared in
+[`tests/platforms/thead.yaml`](../../tests/platforms/thead.yaml) and invokes
+`tests/run.py`; it does not add a separate T-Head Gate workflow. The manual
+checks above remain useful when validating a new image or hardware stack.
 
 ## CI configuration
 
-The reusable workflow is [`.github/workflows/_thead_test.yml`](../../.github/workflows/_thead_test.yml).
-It uses the same configuration loader as the other platforms, with
-[the T-Head configuration](../../.github/configs/thead.yml). Use the published
-versioned image below and reserve four PPU cards on a registered runner. Device mounts
-grant access; they do not reserve cards or prove that the cards are idle.
+T-Head uses the shared 0.28 platform workflow, the same path used by the
+other enabled platforms:
 
-The versioned THead configuration supplies the approved image, runner, four
-reserved cards, model mount, and image Python. This also supports PR runs that
-receive empty repository variables. Maintainers may override these defaults
-with the following repository variables; defaults and overrides undergo the
-same validation:
+```text
+ci.yml
+  -> _platform_test.yml
+       -> _functional_test.yml  (unit + functional)
+       -> _e2e_test.yml         (PR/nightly/weekly model cases)
+```
 
-| Variable | Value |
-|---|---|
-| `THEAD_CI_IMAGE` | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-thead-ci` |
-| `THEAD_CI_VISIBLE_DEVICES` | Exactly four distinct, exclusively reserved PPU indices, comma-separated |
-| `THEAD_CI_MODEL_27B` | Absolute container path to the complete `Qwen3.8-27B` model |
-| `THEAD_CI_MODEL_35B` | Absolute container path to the complete `Qwen3.6-35B-A3B` model |
-| `THEAD_CI_BASE_PYTHON` | Python in the image's ordinary environment; `/opt/thead/venv/bin/python` for the packaged runtime layout |
-| `THEAD_CI_RUNNER_LABELS` | Optional JSON array overriding the configured runner labels |
-| `THEAD_CI_CONTAINER_VOLUMES` | JSON array of Docker volume specifications; mount the two models read-only |
-| `THEAD_CI_CONTAINER_OPTIONS` | Optional Docker options overriding the explicit device grants and shared-memory settings |
+The `test-thead` job in [`ci.yml`](../../.github/workflows/ci.yml) calls the
+shared platform workflow. [`.github/configs/thead.yml](../../.github/configs/thead.yml)
+provides the `flagos-dev` image, runner label, model volume, device grants,
+and shared-memory options. [`tests/platforms/thead.yaml`](../../tests/platforms/thead.yaml)
+selects the `zw810e` unit/functional scope and the TP4 Qwen3.6 PR cases; its
+benchmark entries are disabled.
 
-The published image provides `/opt/thead/venv` and the complete ordinary
-stack. Ensure that the runner can pull this image and access the
-configured model mounts. Keep any registry authentication in the runner/CI
-secret configuration. The workflow accepts explicit v-version tags or SHA256
-digests and rejects missing or invalid image references, invalid
-card selection, and privileged container options, including invalid explicit
-overrides instead of silently using defaults.
+The functional job runs the platform `check.sh` and `setup.sh`, then executes
+`python tests/run.py --platform thead --scope unit` and
+`python tests/run.py --platform thead --scope functional`. Each E2E job runs
+the same platform setup, validates the selected model paths, and executes
+`tests/run.py --scope e2e` for the generated matrix. No `_thead_test.yml`,
+`run_tests.py`, `run_gate.py`, or `test_ci.py` workflow is required for this
+path.
 
 The image must contain vendor PyTorch 2.10.0 and SDK/extensions, vLLM
 0.28.0+empty, FlagTree 0.7.0+ppu3.6, the complete FlagGems wheel from
@@ -493,40 +487,31 @@ The image must contain vendor PyTorch 2.10.0 and SDK/extensions, vLLM
 The [setup script](../../.github/scripts/thead/setup.sh) creates a fresh child
 venv, inherits the image-owned package directory, and builds/installs this
 checkout as an ordinary plugin wheel with `--no-deps --no-build-isolation`.
-It does not download accelerator packages or replace the vendor stack.
-[The check script](../../.github/scripts/thead/check.sh) validates installed
-package identities, providers, and package integrity against the runtime
-snapshot before and after tests.
+It also installs the CI test helpers, including `pytest-xdist`. The [check
+script](../../.github/scripts/thead/check.sh) performs the PPU availability
+probe required by the shared workflow.
 
-To exercise the same scripts manually inside a prepared image, keep setup
-and tests in one Bash session. Set `CUDA_VISIBLE_DEVICES` to the reserved
-cards first. Each output directory must be new:
+For a local preflight on a prepared T-Head image, run the same configuration
+and matrix commands used by CI:
+
+```bash
+python .github/scripts/load_config.py --platform thead
+python .github/scripts/generate_matrix.py \
+    --platform thead --device zw810e --ci-stage pr
+```
+
+To exercise the generic test runner inside the image, source the platform
+setup script so its child environment remains in the current shell:
 
 ```bash
 cd /workspace/vllm-plugin-FL
-export THEAD_BASE_PYTHON=/opt/thead/venv/bin/python
 source .github/scripts/thead/setup.sh
 bash .github/scripts/thead/check.sh
-RESULT_DIR="$(mktemp -d /tmp/thead-ci-results.XXXXXXXX)"
-"$THEAD_CI_PYTHON" -I -B .github/scripts/thead/run_tests.py \
-    --output-dir "$RESULT_DIR/unit"
-"$THEAD_CI_PYTHON" -I -B .github/scripts/thead/run_gate.py \
-    --model /models/Qwen3.8-27B --mode eager --tensor-parallel-size 4 \
-    --output-dir "$RESULT_DIR/qwen27b-eager"
+python tests/run.py --platform thead --device zw810e --scope unit
+python tests/run.py --platform thead --device zw810e --scope functional
 ```
 
-Run `graph` next, then repeat `eager` and `graph` for
-`/models/Qwen3.6-35B-A3B`. The workflow runs those four Gates serially. Each
-Gate starts its own server, verifies readiness, executes the original Gate
-files, records all 26 requests/260 checks, and cleans up its own process group
-before the next model/mode. Graph mode also requires graph-execution evidence.
-
-The unit runner uses the existing
-[`tests/unit_tests/ops/test_numerical.py`](../../tests/unit_tests/ops/test_numerical.py)
-suite for shared reference operators, plus 5 CPU cache tests and 45 native PPU
-cache/attention tests, with zero skips. Reference tensors run on CPU using the
-normal package imports and the test suite's existing device fixture. Retain the
-JUnit reports, per-request JSON results, source/provider snapshots, and logs.
+The CI jobs retain the generated JUnit/JSON reports as artifacts.
 
 ## Recorded acceptance
 
