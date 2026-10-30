@@ -17,8 +17,13 @@ pytestmark = [pytest.mark.gpu, pytest.mark.flaggems]
 
 
 @pytest.fixture(scope="module")
-def providers(backend):
-    if backend != "nvidia":
+def providers(platform_name, backend):
+    # CUDA-compatible vendor stacks report a CUDA-shaped torch backend, but
+    # this module intentionally validates only the NVIDIA FlagGems baseline.
+    # Prefer the explicit platform selected by tests/run.py; retain the
+    # backend fallback for direct local pytest runs without --platform.
+    platform = platform_name or backend
+    if platform not in ("nvidia", "cuda"):
         pytest.skip("comparison targets the NVIDIA FlagGems migration baseline")
 
     import flaggems_vllm

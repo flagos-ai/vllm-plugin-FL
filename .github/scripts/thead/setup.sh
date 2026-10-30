@@ -78,6 +78,10 @@ print(wheels[0])
 PY
 "$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
   --ignore-installed --no-index --no-deps --no-compile "$(cat "$WORK/plugin-wheel.txt")"
+"$PY" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install \
+  "pytest-xdist>=3.0.0" \
+  "pytest-cov>=7.0.0" \
+  "pytest-json-report>=1.5.0"
 "$PY" -I -B "$HERE/../install_flaggems_vllm.py"
 "$PY" -I -B "$HERE/stack.py" check --compare "$WORK/vendor-before.json" > "$WORK/stack.json"
 if [[ -n "${GITHUB_ENV:-}" ]]; then

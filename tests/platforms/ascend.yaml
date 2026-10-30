@@ -45,7 +45,9 @@ tolerance:
     bfloat16: {rtol: 1e-2, atol: 1e-2}
     float16:  {rtol: 1e-2, atol: 1e-2}
 
-# Device-level overrides for specific test cases (optional)
+# Device-level overrides for specific test cases (optional).
+# Matrix follows the 0.4.0-dev line: eager only — decode graphs land with the
+# ascend graph work (see the ascend graph branch), not with this CI sync.
 device_overrides:
   910c:
     cases:
@@ -83,10 +85,24 @@ env_defaults: {}
   tests:
     e2e:
       # Add or remove test cases per model
-      inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_eager"]
-      serving:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_eager"]
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
@@ -99,5 +115,11 @@ env_defaults: {}
       # Exclude patterns: empty list or list paths to exclude
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Hygon platform config — matrix and tuned engine/serve parameters from the
+# 0.4.0-dev line (TP2-only on 64GB bw1000 cards, small cudagraph capture
+# sizes), staged into the pipeline schema synced from main.
+
 platform: hygon
 vendor: hygon
 
@@ -70,10 +74,16 @@ bw1000:
   name: "bw1000"
   tests:
     e2e:
-      inference:
-        qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
-      serving:
-        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+      pr:
+        inference:
+          qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
+        serving:
+          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+      nightly:
+        inference:
+          qwen3_6: ["35b_a3b_tp2_graph", "27b_tp2_eager"]
+        serving:
+          qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
     functional:
       include: "*"
       exclude: []
@@ -81,5 +91,11 @@ bw1000:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve
