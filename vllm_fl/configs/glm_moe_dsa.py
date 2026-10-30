@@ -31,6 +31,8 @@ class GlmMoeDsaConfig(DeepseekV2Config):
         dtype="bfloat16",
         **kwargs,
     ):
+        if rope_parameters is not None:
+            kwargs["rope_parameters"] = rope_parameters
         super().__init__(**kwargs)
         self.index_topk = index_topk
         self.index_n_heads = index_n_heads
