@@ -21,6 +21,7 @@ import os
 
 import pytest
 
+from tests.utils.device_utils import get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
 from vllm import LLM, SamplingParams
 from vllm.distributed import cleanup_dist_env_and_memory
@@ -270,6 +271,10 @@ def test_inference(combo: dict) -> None:
     combo_desc = ", ".join(f"{k}={v}" for k, v in combo.items()) or "default"
     print(f"\n[{_MODEL}/{_CASE}] combo: {combo_desc}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")
+    _visible_env_var = get_visible_device_env_var()
+    print(
+        f"[{_MODEL}/{_CASE}] devices: {_visible_env_var}={os.environ.get(_visible_env_var, '(not set)')}"
+    )
 
     llm = None
     try:

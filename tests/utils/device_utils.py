@@ -18,6 +18,29 @@ import torch
 
 _BACKEND = os.environ.get("FL_BACKEND", "").lower()
 
+_PLATFORM_VISIBLE_DEVICE_ENV: dict[str, str] = {
+    "cuda": "CUDA_VISIBLE_DEVICES",
+    "nvidia": "CUDA_VISIBLE_DEVICES",
+    "iluvatar": "CUDA_VISIBLE_DEVICES",
+    "hygon": "CUDA_VISIBLE_DEVICES",
+    "kunlunxin": "CUDA_VISIBLE_DEVICES",
+    "thead": "CUDA_VISIBLE_DEVICES",
+    "metax": "MACA_VISIBLE_DEVICES",
+    "ascend": "ASCEND_RT_VISIBLE_DEVICES",
+    "enflame": "TOPS_VISIBLE_DEVICES",
+    "musa": "MTHREADS_VISIBLE_DEVICES",
+}
+
+
+def get_visible_device_env_var() -> str:
+    """Return the device-visibility variable for the active test platform."""
+    platform = os.environ.get("FL_TEST_PLATFORM", "").lower()
+    if platform in _PLATFORM_VISIBLE_DEVICE_ENV:
+        return _PLATFORM_VISIBLE_DEVICE_ENV[platform]
+    if get_backend() == "ascend":
+        return "ASCEND_RT_VISIBLE_DEVICES"
+    return "CUDA_VISIBLE_DEVICES"
+
 
 def _gcu_runtime():
     """Load an installed GCU SDK without hiding driver/import failures."""
@@ -84,6 +107,16 @@ def get_device(index: int = 0) -> torch.device:
 
 def get_device_count() -> int:
     """Get the number of available accelerators."""
+    if os.environ.get("FL_TEST_PLATFORM", "").lower() == "musa":
+        try:
+            import torch_musa  # noqa: F401
+
+            if getattr(torch, "musa", None) and torch.musa.is_available():
+                return torch.musa.device_count()
+        except ImportError:
+            pass
+        return 0
+
     backend = get_backend()
     if backend in ("nvidia", "hygon", "tianshu"):
         return torch.cuda.device_count()

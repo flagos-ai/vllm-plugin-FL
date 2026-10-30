@@ -48,11 +48,12 @@ Build the image from the repository root:
 docker/build.sh \
   --platform ascend \
   --target ci \
-  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
+  --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl \
+  --image-tag v0.28.0-ascend-ci
 ```
 
 The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` image. Build and publish a
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci` image. Build and publish a
 replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
 changing the configuration does not publish it.
 `.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an
