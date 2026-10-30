@@ -370,7 +370,10 @@ def test_selected_backends_are_bound_once(monkeypatch):
     _module(monkeypatch, "vllm.v1.attention.backend", AttentionBackend=base)
     impl = type("Impl", (), {"update_graph_params": staticmethod(lambda *a: None)})
     backend = type("Backend", (base,), {"get_impl_cls": staticmethod(lambda: impl)})
-    controller = runtime.GraphRuntimeController(vllm_config="config")
+    config = NS(
+        compilation_config=NS(cudagraph_mode=NS(has_full_cudagraphs=lambda: True))
+    )
+    controller = runtime.GraphRuntimeController(vllm_config=config)
     controller.bind_attention_groups(
         [[NS(backend=backend), NS(backend=backend)], [NS(backend=base)]]
     )

@@ -43,6 +43,95 @@ class ReferenceBackend(Backend):
         return ReferenceBackend._available
 
     # ==================== Operator Implementations ====================
+    def deepseek_v4_partial_rope(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_partial_rope
+
+        return deepseek_v4_partial_rope(*args, **kwargs)
+
+    def deepseek_v4_hadamard(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_hadamard
+
+        return deepseek_v4_hadamard(*args, **kwargs)
+
+    def deepseek_v4_index_quant(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_index_quant
+
+        return deepseek_v4_index_quant(*args, **kwargs)
+
+    def deepseek_v4_grouped_project(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_grouped_project
+
+        return deepseek_v4_grouped_project(*args, **kwargs)
+
+    def deepseek_v4_project(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_project
+
+        return deepseek_v4_project(*args, **kwargs)
+
+    def deepseek_v4_hc_pre(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_hc_pre
+
+        return deepseek_v4_hc_pre(*args, **kwargs)
+
+    def deepseek_v4_hc_post(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_hc_post
+
+        return deepseek_v4_hc_post(*args, **kwargs)
+
+    def deepseek_v4_hc_head(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_hc_head
+
+        return deepseek_v4_hc_head(*args, **kwargs)
+
+    def deepseek_v4_cache_write(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_cache_write
+
+        return deepseek_v4_cache_write(*args, **kwargs)
+
+    def deepseek_v4_save_state(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_save_state
+
+        return deepseek_v4_save_state(*args, **kwargs)
+
+    def deepseek_v4_compress(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_compress
+
+        return deepseek_v4_compress(*args, **kwargs)
+
+    def deepseek_v4_indexer(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_indexer
+
+        return deepseek_v4_indexer(*args, **kwargs)
+
+    def deepseek_v4_sparse_attention(self, *args, **kwargs):
+        from .impl.deepseek_v4 import deepseek_v4_sparse_attention
+
+        return deepseek_v4_sparse_attention(*args, **kwargs)
+
+    def topk_softplus_sqrt(self, *args, **kwargs):
+        from .impl.routing import topk_softplus_sqrt
+
+        return topk_softplus_sqrt(*args, **kwargs)
+
+    def modelslim_w8a8_prepare_experts(self, *args, **kwargs):
+        from .impl.w8a8_moe import modelslim_w8a8_prepare_experts
+
+        return modelslim_w8a8_prepare_experts(*args, **kwargs)
+
+    def modelslim_w8a8_experts(self, *args, **kwargs):
+        from .impl.w8a8_moe import modelslim_w8a8_experts
+
+        return modelslim_w8a8_experts(*args, **kwargs)
+
+    def modelslim_w8a8_prepare_weight(self, *args, **kwargs):
+        from .impl.quantization import modelslim_w8a8_prepare_weight
+
+        return modelslim_w8a8_prepare_weight(*args, **kwargs)
+
+    def modelslim_w8a8_dynamic_linear(self, *args, **kwargs):
+        from .impl.quantization import modelslim_w8a8_dynamic_linear
+
+        return modelslim_w8a8_dynamic_linear(*args, **kwargs)
 
     def dynamic_per_token_quant_int8(
         self,

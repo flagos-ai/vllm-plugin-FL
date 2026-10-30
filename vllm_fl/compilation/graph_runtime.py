@@ -78,6 +78,13 @@ class GraphRuntimeController:
 
     def bind_attention_groups(self, attn_groups: Any) -> None:
         """Resolve backend factories while the runner's config is in scope."""
+        # Task updates belong to FULL capture/replay, not eager or piecewise
+        # execution. Cache-only backends need no AttentionImpl in those modes.
+        mode = self.vllm_config.compilation_config.cudagraph_mode
+        if not mode.has_full_cudagraphs():
+            self.attention_impls = ()
+            return
+
         from vllm.v1.attention.backend import AttentionBackend
 
         implementations = []
@@ -88,6 +95,8 @@ class GraphRuntimeController:
                 if backend in seen_backends:
                     continue
                 seen_backends.add(backend)
+                if getattr(backend, "requires_graph_task_updates", True) is False:
+                    continue
                 factory = getattr(backend, "get_impl_cls", None)
                 if factory is None or factory is AttentionBackend.get_impl_cls:
                     continue
