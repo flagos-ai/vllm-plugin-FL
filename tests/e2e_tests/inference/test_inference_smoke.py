@@ -246,6 +246,10 @@ _COMBO_IDS = [
 @pytest.mark.e2e
 @pytest.mark.parametrize("combo", _COMBOS, ids=_COMBO_IDS)
 def test_inference(combo: dict) -> None:
+    if _PLATFORM == "enflame" and "35b" in _CASE and "graph" in _CASE:
+        pytest.skip(
+            "Qwen3.6-35B-A3B graph mode is disabled on Enflame S60 due to MoE Triton MLIR compiler limitation"
+        )
     """Smoke test: load model, generate, assert non-empty output.
 
     Each parametrize combo overrides engine params from the YAML config.
