@@ -25,9 +25,14 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: "Platform name (e.g., cuda, ascend)"
+        description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
+      branch:
+        description: "Branch/ref under test (empty = caller ref)"
+        required: false
+        type: string
+        default: ""
       task:
         description: "Test task category (e.g., inference, serving)"
         required: true
@@ -80,22 +85,29 @@ jobs:
       - name: Checkout (attempt 1)
         id: checkout1
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
 
-      # This H20 runner fails NVLS multicast binding with CUDA error 401.
+      # This H20 runner fails NVLS multicast binding with CUDA error 401 (#598
+      # on this line; carried over from the pre-sync _e2e_test.yml).
       - name: Disable NVLS on H20
-        if: inputs.platform == 'cuda' && inputs.device == 'h20'
+        if: inputs.platform == 'nvidia' && inputs.device == 'h20'
         run: echo 'NCCL_NVLS_ENABLE=0' >> "$GITHUB_ENV"
 
       - name: Install project
@@ -127,4 +139,3 @@ jobs:
           path: |
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
-            test-results/logs/

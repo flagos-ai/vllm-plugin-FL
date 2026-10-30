@@ -45,12 +45,15 @@ tolerance:
     bfloat16: {rtol: 1e-2, atol: 1e-2}
     float16:  {rtol: 1e-2, atol: 1e-2}
 
-# Device-level overrides for specific test cases (optional)
+# Device-level overrides for specific test cases (optional).
+# Note: Ascend on vLLM 0.28 currently only supports eager mode; graph cases are disabled pending #646.
 device_overrides:
   910c:
     cases:
       - qwen3_6/27b_tp2_eager
+      # - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
+      # - qwen3_6/35b_a3b_tp2_graph
     llm:
       max_model_len: 4096
       max_num_batched_tokens: 4096
@@ -83,10 +86,37 @@ env_defaults: {}
   tests:
     e2e:
       # Add or remove test cases per model
-      inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_eager"]
-      serving:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_eager"]
+      # Note: Ascend on vLLM 0.28 currently only supports eager mode; graph cases are disabled pending #646.
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            # - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            # - 35b_a3b_tp2_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            # - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            # - 35b_a3b_tp2_graph
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            # - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            # - 35b_a3b_tp2_graph
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            # - 27b_tp2_graph
+            - 35b_a3b_tp2_eager
+            # - 35b_a3b_tp2_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            # - 35b_a3b_tp2_graph
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
@@ -99,5 +129,11 @@ env_defaults: {}
       # Exclude patterns: empty list or list paths to exclude
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

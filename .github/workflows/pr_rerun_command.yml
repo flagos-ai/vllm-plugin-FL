@@ -1,0 +1,136 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Handler for /rerun slash command.
+# Re-runs all failed CI jobs for the PR at the time the command was issued.
+# Authorized users: PR author or collaborators with write/maintain/admin.
+name: PR /rerun Command
+
+on:
+  repository_dispatch:
+    types: [rerun-command]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  rerun-failed-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check commenter authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENTER: ${{ github.event.client_payload.github.actor }}
+          PR_URL: ${{ github.event.client_payload.pull_request.url }}
+        run: |
+          set -euo pipefail
+          pr_author=$(gh api "$PR_URL" --jq '.user.login')
+          if [ "$COMMENTER" = "$pr_author" ]; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          perm=$(gh api "repos/${{ github.repository }}/collaborators/$COMMENTER/permission" --jq '.permission' 2>/dev/null || echo "none")
+          if echo "$perm" | grep -qE '^(admin|write|maintain|triage)$'; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::$COMMENTER is not authorized (need PR author or write+)"
+          echo "denied=true" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      - name: React to comment (ack)
+        if: always() && steps.auth.outputs.authorized == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST \
+            repos/${{ github.repository }}/issues/comments/${{ github.event.client_payload.github.payload.comment.id }}/reactions \
+            -f content='rocket'
+
+      - name: Re-run failed and cancelled jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.client_payload.pull_request.url }}
+        run: |
+          set -euo pipefail
+          head_sha=$(gh api "$PR_URL" --jq '.head.sha')
+          # Find the latest failed/cancelled workflow runs for the PR head
+          # commit (e.g. the main CI run and CodeQL), capped to avoid runaway
+          # loops. A cancelled workflow can contain both failed and cancelled
+          # jobs, so select the jobs below rather than rerunning the whole run.
+          # (Ported from rerun-failed-ci.yml #559 when this file replaced it.)
+          run_ids=$(gh run list --repo "${{ github.repository }}" \
+            --commit "$head_sha" --limit 30 \
+            --json databaseId,conclusion,createdAt \
+            --jq '.[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.createdAt, .databaseId] | @tsv' \
+            | sort -r | head -n 5 | cut -f2)
+          if [ -z "$run_ids" ]; then
+            echo "::error::No failed or cancelled workflow run found for head SHA $head_sha."
+            exit 1
+          fi
+
+          rerun_count=0
+          dependent_skipped=0
+          for id in $run_ids; do
+            job_ids=$(gh run view "$id" --repo "${{ github.repository }}" \
+              --json jobs \
+              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .databaseId')
+            for job_id in $job_ids; do
+              echo "Re-running failed/cancelled job $job_id from run $id"
+              # Jobs with needs dependencies (aggregators like ci-gate)
+              # cannot be re-run individually - the API rejects them. That
+              # is expected: they re-evaluate once their dependencies rerun.
+              # Count them separately instead of failing the whole command
+              # after the actionable reruns already went through.
+              if gh run rerun --job "$job_id" --repo "${{ github.repository }}"; then
+                rerun_count=$((rerun_count + 1))
+              else
+                dependent_skipped=$((dependent_skipped + 1))
+                echo "::warning::job $job_id cannot be re-run individually (depends on other jobs); it re-evaluates when its dependencies finish."
+              fi
+            done
+          done
+          echo "rerun_count=$rerun_count" >> "$GITHUB_ENV"
+          echo "dependent_skipped=$dependent_skipped" >> "$GITHUB_ENV"
+          if [ "$rerun_count" -eq 0 ] && [ "$dependent_skipped" -eq 0 ]; then
+            echo "::error::No failed or cancelled job found in runs for head SHA $head_sha."
+            exit 1
+          fi
+          if [ "$rerun_count" -eq 0 ]; then
+            echo "::error::Every failed/cancelled job is dependency-gated (e.g. ci-gate); re-run its dependencies (the platform jobs) or the whole run instead."
+            exit 1
+          fi
+
+      - name: Report result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.client_payload.github.payload.issue.number }}
+          COMMENTER: ${{ github.event.client_payload.github.actor }}
+        run: |
+          if [ "${{ steps.auth.outputs.denied }}" = "true" ]; then
+            body="⛔ @$COMMENTER is not authorized (PR author or collaborators with write access only)."
+          elif [ "${{ job.status }}" = "success" ]; then
+            body="🚀 Re-triggered ${rerun_count:-0} failed/cancelled job(s) for this PR (requested by @$COMMENTER)."
+            if [ "${dependent_skipped:-0}" -gt 0 ]; then
+              body="$body Skipped ${dependent_skipped} dependency-gated job(s) (e.g. ci-gate) - they re-evaluate with their dependencies."
+            fi
+          else
+            body="❌ Failed to re-run CI (requested by @$COMMENTER). See [workflow log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          fi
+          gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body "$body"
