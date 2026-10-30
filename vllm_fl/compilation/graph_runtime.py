@@ -26,9 +26,13 @@ class GraphRuntimeController:
 
     @staticmethod
     def _num_tokens(context: Any) -> int:
-        num_tokens = getattr(getattr(context, "batch_descriptor", None), "num_tokens", None)
+        num_tokens = getattr(
+            getattr(context, "batch_descriptor", None), "num_tokens", None
+        )
         if not isinstance(num_tokens, int) or isinstance(num_tokens, bool):
-            raise RuntimeError("Ascend FULL graphs require integer BatchDescriptor.num_tokens")
+            raise RuntimeError(
+                "Ascend FULL graphs require integer BatchDescriptor.num_tokens"
+            )
         return num_tokens
 
     @contextmanager
@@ -67,13 +71,18 @@ class GraphRuntimeController:
 
     def _update_attention(self, context: Any) -> None:
         if self.attention_impls is None:
-            raise RuntimeError("Ascend attention backends must be bound before FULL replay")
+            raise RuntimeError(
+                "Ascend attention backends must be bound before FULL replay"
+            )
         if self.attention_impls:
             if self.update_stream is None:
                 self.update_stream = current_platform.torch_device_fn.Stream()
             for impl in self.attention_impls:
                 impl.update_graph_params(
-                    self.update_stream, context, self._num_tokens(context), self.vllm_config
+                    self.update_stream,
+                    context,
+                    self._num_tokens(context),
+                    self.vllm_config,
                 )
 
     def bind_attention_groups(self, attn_groups: Any) -> None:
@@ -124,6 +133,7 @@ class GraphRuntimeController:
 
 def get_graph_capture(default_capture):
     """Use rc1's separate NPU capture stream; retain the caller elsewhere."""
+
     @contextmanager
     def capture(device):
         if current_platform.device_type != "npu":

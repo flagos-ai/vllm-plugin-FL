@@ -49,9 +49,7 @@ from vllm_fl.ops.activation import SiluAndMulFL, SiluAndMulWithClampFL
 from vllm_fl.ops.fused_moe.layer import FusedMoEFL
 from vllm_fl.ops.layernorm import RMSNormFL as RMSNorm
 
-_project = CachedOp("deepseek_v4_project")
-_save_state = CachedOp("deepseek_v4_save_state")
-_compress = CachedOp("deepseek_v4_compress")
+_compressor = CachedOp("deepseek_v4_compressor")
 _hc_pre = CachedOp("deepseek_v4_hc_pre")
 _hc_post = CachedOp("deepseek_v4_hc_post")
 _hc_head = CachedOp("deepseek_v4_hc_head")
@@ -109,20 +107,14 @@ class DeepseekV4Compressor(nn.Module):
         output_positions,
         cos_sin_cache,
     ):
-        # Calling the normal BF16 Linear forward would round the projections
-        # before they reach persistent FP32 state. The provider owns that choice.
-        kv, gate = _project(x, self.wkv.weight, self.wgate.weight)
-        _save_state(
-            kv,
-            gate,
+        return _compressor(
+            x,
+            self.wkv.weight,
+            self.wgate.weight,
             self.ape,
+            state_cache,
             positions,
             slot_mapping,
-            state_cache,
-            self.compress_ratio,
-        )
-        return _compress(
-            state_cache,
             state_block_table,
             output_request_ids,
             output_positions,
@@ -130,7 +122,6 @@ class DeepseekV4Compressor(nn.Module):
             cos_sin_cache,
             compress_ratio=self.compress_ratio,
             rms_eps=self.norm_eps,
-            output_dtype=x.dtype,
         )
 
     def forward_from_cache(

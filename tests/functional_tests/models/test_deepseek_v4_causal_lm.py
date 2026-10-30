@@ -158,41 +158,10 @@ def _runtime_config(pipeline_parallel_size=1):
 
 @pytest.fixture(scope="module")
 def runtime():
-    from vllm.config import set_current_vllm_config
-    from vllm.distributed import (
-        destroy_distributed_environment,
-        destroy_model_parallel,
-        init_distributed_environment,
-        initialize_model_parallel,
-    )
-    from vllm.utils.network_utils import get_open_port
-    from vllm.v1.worker.workspace import init_workspace_manager, reset_workspace_manager
+    from tests.utils.device_utils import ascend_single_rank_runtime
 
-    from vllm_fl import _patch_ascend_torch_accelerator
-
-    torch.npu.set_device(0)
-    _patch_ascend_torch_accelerator()
-    config = _runtime_config()
-    with set_current_vllm_config(config), torch.inference_mode():
-        init_distributed_environment(
-            world_size=1,
-            rank=0,
-            local_rank=0,
-            backend="hccl",
-            distributed_init_method=f"tcp://127.0.0.1:{get_open_port()}",
-        )
-        initialize_model_parallel(1, backend="hccl")
-        init_workspace_manager(torch.device("npu:0"))
-        try:
-            yield config
-        finally:
-            try:
-                reset_workspace_manager()
-            finally:
-                try:
-                    destroy_model_parallel()
-                finally:
-                    destroy_distributed_environment()
+    with ascend_single_rank_runtime(_runtime_config, workspace=True) as config:
+        yield config
 
 
 @pytest.mark.skipif(
@@ -588,6 +557,27 @@ def test_native_loader_maps_complete_parameter_set(model_env):
         assert routed.quant_method.supports_internal_mk
     assert len(env.leaves) == 10
 
+    before = model_env.model.model.layers[0].self_attn.wq_a.weight.clone()
+    result = model_env.model.load_weights(
+        iter(
+            [
+                (
+                    "mtp.0.attn.wq_a.weight",
+                    torch.ones(32, 128, device="npu", dtype=torch.bfloat16),
+                )
+            ]
+        )
+    )
+    assert not result
+    torch.testing.assert_close(
+        model_env.model.model.layers[0].self_attn.wq_a.weight, before
+    )
+
+    with pytest.raises((KeyError, ValueError)):
+        model_env.model.load_weights(
+            iter([("layers.0.not_a_parameter.weight", torch.ones(1, device="npu"))])
+        )
+
 
 def test_profile_is_cache_free(model_env):
     from vllm.forward_context import set_forward_context
@@ -731,31 +721,6 @@ def test_hash_or_bias_router_and_shared_scaling_once(model_env, layer_index):
     # Each component is checked independently above. The runner adds their
     # BF16 outputs, not an unrounded FP32 routed accumulator to the shared path.
     torch.testing.assert_close(actual, actual_routed + actual_shared, rtol=0, atol=0)
-
-
-def test_mtp_weights_are_skipped(model_env):
-    before = model_env.model.model.layers[0].self_attn.wq_a.weight.clone()
-    result = model_env.model.load_weights(
-        iter(
-            [
-                (
-                    "mtp.0.attn.wq_a.weight",
-                    torch.ones(32, 128, device="npu", dtype=torch.bfloat16),
-                )
-            ]
-        )
-    )
-    assert not result
-    torch.testing.assert_close(
-        model_env.model.model.layers[0].self_attn.wq_a.weight, before
-    )
-
-
-def test_unexpected_checkpoint_name_fails(model_env):
-    with pytest.raises((KeyError, ValueError)):
-        model_env.model.load_weights(
-            iter([("layers.0.not_a_parameter.weight", torch.ones(1, device="npu"))])
-        )
 
 
 def test_padded_positions_preserve_cache_safety(model_env):

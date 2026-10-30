@@ -10,8 +10,6 @@ and serve as fallback implementations.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -25,7 +23,7 @@ class ReferenceBackend(Backend):
     implementations that are always available as fallbacks.
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
@@ -35,7 +33,7 @@ class ReferenceBackend(Backend):
         """Check if PyTorch is available."""
         if ReferenceBackend._available is None:
             try:
-                import torch
+                import torch  # noqa: F401
 
                 ReferenceBackend._available = True
             except ImportError:
@@ -63,11 +61,6 @@ class ReferenceBackend(Backend):
 
         return deepseek_v4_grouped_project(*args, **kwargs)
 
-    def deepseek_v4_project(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_project
-
-        return deepseek_v4_project(*args, **kwargs)
-
     def deepseek_v4_hc_pre(self, *args, **kwargs):
         from .impl.deepseek_v4 import deepseek_v4_hc_pre
 
@@ -82,31 +75,6 @@ class ReferenceBackend(Backend):
         from .impl.deepseek_v4 import deepseek_v4_hc_head
 
         return deepseek_v4_hc_head(*args, **kwargs)
-
-    def deepseek_v4_cache_write(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_cache_write
-
-        return deepseek_v4_cache_write(*args, **kwargs)
-
-    def deepseek_v4_save_state(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_save_state
-
-        return deepseek_v4_save_state(*args, **kwargs)
-
-    def deepseek_v4_compress(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_compress
-
-        return deepseek_v4_compress(*args, **kwargs)
-
-    def deepseek_v4_indexer(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_indexer
-
-        return deepseek_v4_indexer(*args, **kwargs)
-
-    def deepseek_v4_sparse_attention(self, *args, **kwargs):
-        from .impl.deepseek_v4 import deepseek_v4_sparse_attention
-
-        return deepseek_v4_sparse_attention(*args, **kwargs)
 
     def topk_softplus_sqrt(self, *args, **kwargs):
         from .impl.routing import topk_softplus_sqrt
@@ -180,8 +148,8 @@ class ReferenceBackend(Backend):
         self,
         obj,
         x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         RMS normalization.
 
