@@ -824,7 +824,22 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 "Ascend FULL graph task capture does not yet support "
                 "speculative attention in FL"
             )
-        if self.vllm_config.quant_config is not None:
+        from vllm.model_executor.layers.attention.attention import (
+            should_load_quant_weights,
+        )
+
+        # Linear quantization does not imply quantized attention or KV cache.
+        # Use the layer method selected by init_attention_quantization instead
+        # of the model-wide configuration, and retain the floating-cache gate.
+        if (
+            should_load_quant_weights(getattr(layer, "quant_method", None))
+            or self.kv_cache_dtype not in ("auto", "float16", "bfloat16")
+            or any(
+                cache is not None
+                and cache.dtype not in (torch.float16, torch.bfloat16)
+                for cache in (self.key_cache, self.value_cache)
+            )
+        ):
             raise NotImplementedError(
                 "Ascend FULL graph task capture does not yet support "
                 "quantized attention in FL"

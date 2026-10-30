@@ -1,9 +1,21 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 import logging
+from functools import cache
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
+
+
+@cache
+def register_deepseek_v4():
+    """Register the lazy DeepSeek model in each Ascend process."""
+    from vllm.model_executor.models import ModelRegistry
+
+    ModelRegistry.register_model(
+        "DeepseekV4ForCausalLM",
+        "vllm_fl.models.deepseek_v4:DeepseekV4ForCausalLM",
+    )
 
 def apply_ascend_patches():
     """Apply all Ascend-specific patches."""

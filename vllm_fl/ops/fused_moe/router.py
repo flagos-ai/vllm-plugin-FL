@@ -22,6 +22,7 @@ from vllm_fl.dispatch import CachedOp
 
 _topk_softmax = CachedOp("topk_softmax")
 _grouped_topk = CachedOp("grouped_topk")
+_topk_softplus_sqrt = CachedOp("topk_softplus_sqrt")
 
 def fused_topk(
     hidden_states: torch.Tensor,
@@ -228,7 +229,7 @@ class GroupedTopKRouterFL(GroupedTopKRouter):
 
 
 class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
-    """FL router that routes topk_softmax (with bias) through call_op."""
+    """FL biased router with dispatch-backed Ascend square-root-softplus."""
 
     def _compute_routing(
         self,
@@ -238,6 +239,21 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
         *,
         input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if router_logits.device.type == "npu" and self.scoring_func == "sqrtsoftplus":
+            topk_weights, topk_ids = _topk_softplus_sqrt(
+                hidden_states=hidden_states,
+                gating_output=router_logits,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                e_score_correction_bias=self.e_score_correction_bias,
+                indices_type=indices_type,
+                input_tokens=input_ids if self._hash_indices_table is not None else None,
+                hash_indices_table=self._hash_indices_table,
+            )
+            if self.routed_scaling_factor != 1.0:
+                topk_weights *= self.routed_scaling_factor
+            return topk_weights, topk_ids
+
         topk_weights, topk_ids = fused_topk_bias(
             hidden_states=hidden_states,
             gating_output=router_logits,
