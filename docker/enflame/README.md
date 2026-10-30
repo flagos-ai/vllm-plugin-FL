@@ -43,10 +43,10 @@ vendor wrapper remains available as `Dockerfile.v0.20.2`.
 The local image ID is
 `sha256:4feef9aed222a8cffd9fab610288053c3f2ee5acdfc3540786e47d7daea48f0e`.
 The canonical dependency image name follows the other vLLM 0.28 backends:
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci`.
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci`.
 This tag was published on 2026-10-20 and aliases the unchanged image originally
 published on 2026-10-13 as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci-2cd00248d399-compiler`.
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci-2cd00248d399-compiler`.
 An anonymous manifest lookup confirmed that both names identify the same content.
 Its registry manifest digest is
 `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.

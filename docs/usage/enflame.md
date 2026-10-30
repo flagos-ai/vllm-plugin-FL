@@ -9,7 +9,7 @@ contain each candidate's plugin changes.
 
 | Component | Validated version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci` |
+| Prebuilt image | `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci` |
 | Image manifest | `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88` |
 | Accelerator / host driver | Enflame S60 / `1.10.6` |
 | vLLM | `0.28.0+empty` (`VLLM_TARGET_DEVICE=empty`) |
@@ -84,7 +84,7 @@ The digest pins the dependency image even if its tag changes. Authenticate with
 `docker login harbor.baai.ac.cn` only if required by your registry access.
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88
+export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 
