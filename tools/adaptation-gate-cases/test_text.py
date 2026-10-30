@@ -1,6 +1,7 @@
 """Text adaptation gate cases."""
 
 import os
+
 import pytest
 from case_utils import run_case
 
