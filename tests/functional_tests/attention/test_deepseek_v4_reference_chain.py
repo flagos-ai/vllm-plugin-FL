@@ -433,6 +433,9 @@ def test_full_compressor_empty_history_and_valid_nan():
     page = int(args[7][0, 0].cpu())
     args[4][page, 0, 0] = torch.nan
     _check_full_compressor(args)
+    args[4][page, 0, 0] = 0.125
+    args[4][page, 0, 2 * args[10].numel()] = torch.nan
+    _check_full_compressor(args)
     args[8], args[9] = args[8][:0], args[9][:0]
     assert _check_full_compressor(args).shape == (0, 5)
 
@@ -571,7 +574,6 @@ def test_full_compressor_actual_shared_parent_high_pages():
             f"page=26077 element_offset={offset + 26077 * 374096}"
         )
         del args, wide, output
-    del parent
 
 
 @pytest.mark.parametrize("n,hidden,ratio,dim", [(10, 4096, 128, 512), (17, 65, 4, 5)])
@@ -610,3 +612,117 @@ def test_full_compressor_projection_tail_and_slot_masks(n, hidden, ratio, dim):
     args[0].copy_(x)
     assert args[0].storage_offset() + args[0].numel() == backing.numel()
     assert _check_full_compressor(args).shape == (0, dim)
+
+
+def _single_token_compressor_case(ratio, dim, dtype, hidden):
+    args = _full_compressor_case(ratio, dim, dtype, min(64, 2 * (dim // 2)))
+    gen = torch.Generator().manual_seed(817 + hidden + dim)
+    width = (2 if ratio == 4 else 1) * dim
+    args[0] = (torch.randn(1, hidden, generator=gen) * 0.03).to(dtype)
+    args[1] = (torch.randn(width, hidden, generator=gen) * 0.03).to(dtype)
+    args[2] = (torch.randn(width, hidden, generator=gen) * 0.03).to(dtype)
+    position = 2 * ratio - 1
+    block = args[4].shape[1]
+    args[5] = torch.tensor([position])
+    args[6] = torch.tensor(
+        [int(args[7][0, position // block]) * block + position % block]
+    )
+    args[8], args[9] = torch.tensor([0]), torch.tensor([position])
+    return args
+
+
+@pytest.mark.parametrize(
+    "ratio,dim,dtype,hidden",
+    [
+        (4, 512, torch.bfloat16, 4096),
+        (128, 512, torch.bfloat16, 4096),
+        (4, 128, torch.bfloat16, 4096),
+        (4, 5, torch.float16, 65),
+        (128, 5, torch.bfloat16, 63),
+        (4, 5, torch.float32, 33),
+    ],
+)
+def test_full_compressor_single_token_output_and_state(ratio, dim, dtype, hidden):
+    for mode in (
+        "valid",
+        "negative_slot",
+        "large_slot",
+        "negative_position",
+        "empty_output",
+        "valid_nan",
+        "strided_input",
+    ):
+        cpu = _single_token_compressor_case(ratio, dim, dtype, hidden)
+        if mode == "negative_slot":
+            cpu[6].fill_(-1)
+            cpu[0].fill_(torch.nan)
+        elif mode == "large_slot":
+            cpu[6].fill_(2**40)
+            cpu[0].fill_(torch.nan)
+        elif mode == "negative_position":
+            cpu[5].fill_(-3)
+        elif mode == "empty_output":
+            cpu[8], cpu[9] = cpu[8][:0], cpu[9][:0]
+        elif mode == "valid_nan":
+            cpu[0][0, 0] = torch.nan
+        args = _full_to_device(cpu)
+        backing = torch.full(
+            (*args[4].shape, 2), 29.0, dtype=torch.float32, device=args[4].device
+        )
+        backing[..., 0].copy_(args[4])
+        args[4] = backing[..., 0]
+        for index, padding in ((1, 7), (2, 11)):
+            weight = args[index]
+            storage = torch.full(
+                (weight.shape[0], hidden + padding),
+                torch.nan,
+                dtype=dtype,
+                device=weight.device,
+            )
+            storage[:, :hidden].copy_(weight)
+            args[index] = storage[:, :hidden]
+        if mode == "strided_input":
+            storage = torch.full(
+                (*args[0].shape, 2), torch.nan, dtype=dtype, device=args[0].device
+            )
+            storage[..., 0].copy_(args[0])
+            args[0] = storage[..., 0]
+        _check_full_compressor(args)
+        torch.testing.assert_close(
+            backing[..., 1], torch.full_like(backing[..., 1], 29)
+        )
+
+
+@pytest.mark.parametrize("ratio,dim", [(4, 512), (128, 512), (4, 128)])
+def test_full_compressor_single_token_mutating_graph(ratio, dim):
+    cpu = _single_token_compressor_case(ratio, dim, torch.bfloat16, 4096)
+    args = _full_to_device(cpu)
+    _call("compressor", *args)
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        output = _call("compressor", *args)
+    for version in (1, 2, 3):
+        changed = [x.clone() if isinstance(x, torch.Tensor) else x for x in cpu]
+        if version == 1:
+            changed[0] *= 0.8
+        elif version == 2:
+            changed[0].fill_(torch.nan)
+            changed[6].fill_(-1)
+        else:
+            changed[0] *= 1.1
+            changed[5].fill_(0)
+            changed[6].fill_(0)
+            changed[9].fill_(ratio - 1)
+        expected, state = _full_compressor_cpu_oracle(changed)
+        for actual, value in zip(args, changed):
+            if isinstance(actual, torch.Tensor):
+                actual.copy_(value)
+        graph.replay()
+        torch.npu.synchronize()
+        torch.testing.assert_close(
+            output.cpu(), expected, rtol=0.01, atol=0.01, equal_nan=True
+        )
+        torch.testing.assert_close(
+            args[4].cpu(), state, rtol=1.3e-6, atol=1e-5, equal_nan=True
+        )

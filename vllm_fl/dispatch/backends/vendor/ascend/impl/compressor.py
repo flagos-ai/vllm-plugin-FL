@@ -4,6 +4,7 @@
 import torch
 import triton
 import triton.language as tl
+from triton.language.extra.cann import libdevice
 
 from .triton_utils import (
     get_aicore_num,
@@ -136,6 +137,52 @@ def _project_cube(
             BM,
             BN,
         )
+
+
+@triton.jit
+def _project_single_token(
+    X,
+    WKV,
+    WGATE,
+    APE,
+    POS,
+    SLOT,
+    STATE,
+    H: tl.constexpr,
+    C: tl.constexpr,
+    NP: tl.constexpr,
+    BS: tl.constexpr,
+    K0: tl.constexpr,
+    G0: tl.constexpr,
+    A0: tl.constexpr,
+    A1: tl.constexpr,
+    S0: tl.constexpr,
+    S1: tl.constexpr,
+    S2: tl.constexpr,
+    R: tl.constexpr,
+    BH: tl.constexpr,
+):
+    slot = tl.load(SLOT).to(tl.int64)
+    if (slot >= 0) & (slot < NP * BS):
+        h = tl.arange(0, BH)
+        x = tl.load(X + h, h < H, other=0).to(tl.float32)
+        pos = tl.load(POS).to(tl.int64)
+        base = (slot // BS) * S0 + (slot % BS) * S1
+        for channel in range(tl.program_id(0), C, tl.num_programs(0)):
+            # Read each contiguous weight row once instead of padding the
+            # single token to a Cube tile and revisiting it for every K tile.
+            kv_weight = tl.load(WKV + channel * K0 + h, h < H, other=0).to(tl.float32)
+            kv = tl.sum(x * kv_weight, 0)
+            offset = base + channel.to(tl.int64) * S2
+            tl.store(STATE + offset, kv)
+            gate_weight = tl.load(WGATE + channel * G0 + h, h < H, other=0).to(
+                tl.float32
+            )
+            gate = tl.sum(x * gate_weight, 0)
+            ape = tl.load(APE + (pos & (R - 1)) * A0 + channel.to(tl.int64) * A1).to(
+                tl.float32
+            )
+            tl.store(STATE + offset + C * S2, gate + ape)
 
 
 @triton.jit
@@ -290,7 +337,7 @@ def _history(
                 scores = tl.where(valid2, gate, -float("inf"))
                 maximum = tl.max(scores, axis=0)
                 # Explicitly retain valid NaNs, independent of max's NaN policy.
-                has_nan = tl.sum((scores != scores).to(tl.int32), axis=0) > 0
+                has_nan = tl.sum(libdevice.isnan(scores).to(tl.int32), axis=0) > 0
                 maximum = tl.where(has_nan, float("nan"), maximum)
                 exponent = tl.where(valid2, tl.exp(scores - maximum[None, :]), 0)
                 probability = exponent / tl.sum(exponent, axis=0)[None, :]
@@ -462,7 +509,43 @@ def _compressor_impl(
         )
         init_device_properties_triton()
         if n and state_cache.shape[0]:
-            for weight, gate in ((wkv, False), (wgate, True)):
+            projection_weights = ((wkv, False), (wgate, True))
+            single_token = (
+                n == 1
+                and 0 < h <= 4096
+                and hidden_states.dtype == wkv.dtype == wgate.dtype
+                and hidden_states.dtype in (torch.bfloat16, torch.float16)
+                and hidden_states.stride(1) == wkv.stride(1) == wgate.stride(1) == 1
+                and hidden_states.stride(0) >= h
+                and wkv.stride(0) >= h
+                and wgate.stride(0) >= h
+                and (c - 1) * wkv.stride(0) + h < 2**31
+                and (c - 1) * wgate.stride(0) + h < 2**31
+            )
+            if single_token:
+                # The H-wide FP32 reductions fit the A2/A3 UB for H <= 4096.
+                _project_single_token[(min(int(get_vectorcore_num()), c),)](
+                    hidden_states,
+                    wkv,
+                    wgate,
+                    ape,
+                    positions,
+                    slot_mapping,
+                    state_cache,
+                    h,
+                    c,
+                    state_cache.shape[0],
+                    state_cache.shape[1],
+                    wkv.stride(0),
+                    wgate.stride(0),
+                    *ape.stride(),
+                    *state_cache.stride(),
+                    compress_ratio,
+                    triton.next_power_of_2(h),
+                    enable_fp_fusion=False,
+                )
+                projection_weights = ()
+            for weight, gate in projection_weights:
                 cube = (
                     hidden_states.dtype == weight.dtype
                     and weight.dtype in (torch.bfloat16, torch.float16)
