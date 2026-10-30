@@ -556,6 +556,7 @@ class TestTorchDispatchMode:
         not HAS_TORCH_DISPATCH_MODE,
         reason="TorchDispatchMode not available in this PyTorch version",
     )
+    @pytest.mark.serial
     def test_dispatch_mode_creates_files(self, dump_dir):
         """TorchDispatchMode should dump files when dump is enabled."""
         enable_io_dump(dump_dir, modules={"Linear"}, with_values=True, with_metas=True)
@@ -638,6 +639,7 @@ class TestDumpTorchFunctionMode:
         not HAS_TORCH_FUNC_MODE,
         reason="TorchFunctionMode not available in this PyTorch version",
     )
+    @pytest.mark.serial
     def test_torch_func_mode_dumps_matmul(self, dump_dir):
         enable_io_dump(
             dump_dir,

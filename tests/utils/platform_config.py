@@ -45,7 +45,7 @@ def build_platform_file_map(
 
     Returns:
         Dict mapping platform/device names to YAML filenames.
-        E.g., ``{"cuda": "cuda.yaml", "a100": "cuda.yaml", "a800": "cuda.yaml"}``
+        E.g., ``{"nvidia": "nvidia.yaml", "a100": "nvidia.yaml", "a800": "nvidia.yaml"}``
     """
     if platforms_dir is None:
         platforms_dir = _PLATFORMS_DIR
@@ -144,15 +144,17 @@ class TestFilter:
 
 
 @dataclass
-class FunctionalTests:
-    """Functional test cases grouped by task and model."""
+class E2eTestConfig:
+    """E2E test cases grouped by CI stage, task, and model."""
 
-    # task -> model -> list of case names
-    # e.g. {"inference": {"qwen3": ["4b_tp2"]}, "serve": {"qwen2_5": ["0.5b"]}}
+    # stage -> task -> model -> list of case names
+    # e.g. {"pr": {"inference": {"qwen3": ["4b_tp2"]}},
+    #        "nightly": {"inference": {...}, "serving": {...}}}
     tests: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     def get_cases(
         self,
+        stage: str | None = None,
         task: str | None = None,
         model: str | None = None,
         test_list: str | None = None,
@@ -160,22 +162,33 @@ class FunctionalTests:
         """Return a flat list of {task, model, case} dicts, optionally filtered.
 
         Args:
-            task: Filter by task name.
+            stage: CI stage key (``"pr"``, ``"nightly"``, ``"weekly"``).
+                   When ``None``, cases from all stages are returned.
+            task: Filter by task name (``"inference"``, ``"serving"``).
             model: Filter by model name.
             test_list: Comma-separated list of case names to include.
         """
         allowed = {t.strip() for t in test_list.split(",")} if test_list else None
         cases: list[dict[str, str]] = []
-        for t, models in self.tests.items():
-            if task and t != task:
+        for s, task_models in self.tests.items():
+            if stage and s != stage:
                 continue
-            for m, case_list in models.items():
-                if model and m != model:
+            if not isinstance(task_models, dict):
+                continue
+            for t, models in task_models.items():
+                if task and t != task:
                     continue
-                for c in case_list:
-                    if allowed and c not in allowed:
+                if not isinstance(models, dict):
+                    continue
+                for m, case_list in models.items():
+                    if model and m != model:
                         continue
-                    cases.append({"task": t, "model": m, "case": c})
+                    if not isinstance(case_list, list):
+                        case_list = [case_list]
+                    for c in case_list:
+                        if allowed and str(c) not in allowed:
+                            continue
+                        cases.append({"task": t, "model": m, "case": str(c)})
         return cases
 
 
@@ -192,6 +205,12 @@ class PlatformConfig:
     env_defaults: dict[str, str]
     # Per-device test configurations
     device_tests: dict[str, dict[str, Any]]
+    # Platform-level e2e case variants (see nvidia.yaml): each e2e case runs
+    # once per entry, with the entry's env merged into the case subprocess.
+    e2e_variants: list[dict[str, Any]] = field(default_factory=list)
+    # Platform declares its runtime cannot host concurrent engines
+    # (see musa.yaml): e2e cases run serially even with many devices.
+    e2e_serial: bool = False
 
     # --- Active device (set after load) ---
     device: str = ""
@@ -262,6 +281,8 @@ class PlatformConfig:
             unsupported_features=raw.get("unsupported_features") or [],
             env_defaults=raw.get("env_defaults") or {},
             device_tests=device_tests,
+            e2e_variants=raw.get("e2e_variants") or [],
+            e2e_serial=bool(raw.get("e2e_serial", False)),
             device=active_device,
         )
         return config
@@ -330,16 +351,31 @@ class PlatformConfig:
             if key not in {"cases", "tolerance"}
         }
 
-    def get_e2e_tests(self) -> FunctionalTests:
-        """Return e2e test configuration (inference/serving) for the active device."""
+    def get_e2e_tests(self) -> E2eTestConfig:
+        """Return e2e test configuration for the active device."""
         dt = self.device_tests.get(self.device, {})
         e2e_raw = dt.get("tests", {}).get("e2e", {})
-        return FunctionalTests(tests=e2e_raw)
+        return E2eTestConfig(tests=e2e_raw)
 
-    def get_benchmark_tests(self) -> dict[str, Any]:
-        """Return benchmark test configuration for the active device."""
+    def get_e2e_variants(self) -> list[dict[str, Any]]:
+        """Return platform-level e2e case variants.
+
+        Each entry is ``{suffix: str, env: {name: value}}``; the runner
+        executes every e2e case once per entry. Platforms that declare none
+        get a single suffix-less pass (identical to the pre-variant
+        behavior).
+        """
+        return self.e2e_variants
+
+    def get_benchmark_tests(self, stage: str = "nightly") -> dict[str, Any]:
+        """Return benchmark test configuration for the active device and CI stage."""
         dt = self.device_tests.get(self.device, {})
-        return dt.get("tests", {}).get("benchmark", {})
+        benchmark = dt.get("tests", {}).get("benchmark", {})
+        # New-style: keyed by stage (pr / nightly / weekly)
+        if "pr" in benchmark or "nightly" in benchmark:
+            return benchmark.get(stage) or benchmark.get("nightly", {})
+        # Legacy flat format — return as-is for backwards compatibility
+        return benchmark
 
     def get_functional_filter(self) -> TestFilter:
         """Return functional test include/exclude for the active device."""

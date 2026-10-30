@@ -40,6 +40,7 @@ WHEELS=("${BUILD_DIR}"/wheels/vllm_plugin_fl-*.whl)
 python -I -B -m pip install \
     --force-reinstall --no-build-isolation --no-deps --no-cache-dir \
     "${WHEELS[0]}"
+python -I -B -m pip install "pytest-xdist>=3.0.0"
 python -I -B "${REPO_ROOT}/.github/scripts/install_flaggems_vllm.py"
 python -I -B "${VERIFY_SCRIPT}" \
     --compare-vendor-snapshot "${BUILD_DIR}/vendor-before.json" \
