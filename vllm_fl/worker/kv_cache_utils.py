@@ -17,17 +17,27 @@ def bind_kv_cache(
     runner_kv_caches: list[torch.Tensor],
     num_attn_module: int = 1,
 ) -> None:
-    """Bind all attention caches on the Iluvatar GPU runner.
+    """Bind vendor cache leaves without advertising unrelated CUDA capabilities.
 
     vLLM 0.24 permits multiple caches per decoder layer only for CUDA-like,
     XPU and CPU platforms. Iluvatar uses the same runner cache representation
     but deliberately reports is_cuda_alike() as False. Handle its binding
     here without enabling unrelated CUDA kernels or allocator capabilities.
     """
-    if not (
+    iluvatar = (
         getattr(current_platform, "vendor_name", None) == "iluvatar"
         and current_platform.device_type == "cuda"
-    ):
+    )
+    ascend_v4 = (
+        getattr(current_platform, "vendor_name", None) == "ascend"
+        and current_platform.device_type == "npu"
+        and bool(kv_caches)
+        and all(
+            getattr(forward_context[name], "_fl_deepseek_v4_cache", False)
+            for name in kv_caches
+        )
+    )
+    if not (iluvatar or ascend_v4):
         upstream_bind_kv_cache(
             kv_caches, forward_context, runner_kv_caches, num_attn_module
         )
