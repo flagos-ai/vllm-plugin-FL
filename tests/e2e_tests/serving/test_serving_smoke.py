@@ -56,6 +56,10 @@ if not os.path.exists(_CFG.model):
 
 @pytest.fixture(scope="module")
 def server():
+    if _PLATFORM == "enflame" and "35b" in _CASE and "graph" in _CASE:
+        pytest.skip(
+            "Qwen3.6-35B-A3B graph mode is disabled on Enflame S60 due to MoE Triton MLIR compiler limitation"
+        )
     """Start vLLM server with model config and optional serve overrides."""
     serve = _CFG.serve
 

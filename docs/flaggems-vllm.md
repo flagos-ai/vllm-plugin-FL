@@ -19,7 +19,7 @@ In a container with this checkout mounted at `/workspace/vllm-plugin-FL`:
 
 ```bash
 cd /workspace/vllm-plugin-FL
-bash .github/scripts/cuda/setup.sh
+bash .github/scripts/nvidia/setup.sh
 ```
 
 The installer pins FlagGems-vllm **v0.2.0**, commit
