@@ -258,3 +258,66 @@ def test_host_metadata_fast_path_keeps_forward_buffers_and_hash_identical():
     assert torch.equal(outputs[0], outputs[1])
     assert torch.equal(old_result["query_start_loc"], new_result["query_start_loc"])
     assert torch.equal(old_result["ngram_context"], new_result["ngram_context"])
+
+
+def test_async_history_plan_handles_reorder_resume_and_reused_request_ids():
+    states = {k: object() for k in ("a", "b", "c")}
+    old = {"a": (states["a"], 4, 0), "b": (states["b"], 8, 1)}
+    tokens = torch.full((3, 16), -1, dtype=torch.int32)
+    tokens[2, :3] = torch.tensor([5, 6, 7])
+    meta, following = worker.async_context_plan(
+        ["b", "a", "c"],
+        states,
+        [8, 4, 3],
+        torch.tensor([0, 1, 2, 5]),
+        tokens,
+        old,
+        2,
+        99,
+    )
+    assert meta.tolist() == [[1, 99, 99], [0, 99, 99], [-1, 6, 7]]
+    assert [(v[1], v[2]) for v in following.values()] == [(9, 0), (5, 1), (6, 2)]
+    # Recompute from zero and a reused logical ID cannot inherit stale suffixes.
+    states["b"] = object()
+    meta, _ = worker.async_context_plan(
+        ["b", "a"],
+        states,
+        [0, 0],
+        torch.tensor([0, 1, 2]),
+        tokens[:2],
+        old,
+        2,
+        99,
+    )
+    assert meta.tolist() == [[-1, 99, 99], [-1, 99, 99]]
+
+
+def test_async_history_never_seeds_unresolved_native_placeholders():
+    state = {"a": object()}
+    with pytest.raises(ValueError, match="unresolved"):
+        worker.async_context_plan(
+            ["a"],
+            state,
+            [3],
+            torch.tensor([0, 1]),
+            torch.tensor([[1, -1, -1]]),
+            {},
+            2,
+            0,
+        )
+
+
+def test_async_history_seed_padding_and_zero_length_requests():
+    states = {k: object() for k in ("a", "b")}
+    meta, following = worker.async_context_plan(
+        ["a", "b"],
+        states,
+        [1, 0],
+        torch.tensor([0, 0, 3]),
+        torch.tensor([[7, 8, 9], [1, 2, 3]]),
+        {},
+        2,
+        99,
+    )
+    assert meta.tolist() == [[-1, 99, 7], [-1, 99, 99]]
+    assert following["a"][1] == 1 and following["b"][1] == 3

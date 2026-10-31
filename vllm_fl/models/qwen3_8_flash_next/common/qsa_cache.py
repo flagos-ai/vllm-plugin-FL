@@ -480,7 +480,6 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
         self.pack_rows_enabled = (
             bool(vllm_config.additional_config.get("qwen38_qsa_packing", False))
             and vllm_config.speculative_config is None
-            and not vllm_config.scheduler_config.async_scheduling
             and device.type == "cuda"
         )
         max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
@@ -604,7 +603,8 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
             and int(common_attn_metadata.max_seq_len) <= 2051
             and seq_cpu is not None
         ):
-            # Under synchronous MTP-off this existing CPU mirror is exact.
+            # With MTP off, MRV1 copies these logical counts to the GPU even
+            # under async scheduling. Only async speculation can roll them back.
             # Do not call the deprecated property that can synchronize CUDA.
             pack_rows = _cached_pack_rows(
                 common_attn_metadata.query_start_loc_cpu,

@@ -343,3 +343,25 @@ def test_operator_logging_default_and_explicit_opt_in(
     launcher.main()
     record, _ = json.JSONDecoder().raw_decode(capsys.readouterr().out)
     assert record["config"]["additional_config"]["flaggems_record_ops"] is True
+
+
+def test_async_scheduling_is_explicit_and_mtp_stays_synchronous(launcher):
+    config = launcher.build_config("/checkpoint", async_scheduling=True)
+    assert config["async_scheduling"] is True
+    assert "speculative_config" not in config
+    command = launcher.native_command(
+        config,
+        host="127.0.0.1",
+        port=18170,
+        served_model_name="qwen38",
+        vllm_bin="vllm",
+    )
+    assert "--async-scheduling" in command
+    assert launcher.parser().parse_args(["--async-scheduling"]).async_scheduling is True
+    assert (
+        launcher.parser().parse_args(["--no-async-scheduling"]).async_scheduling
+        is False
+    )
+    for mode in ("k1", "k2", "k3"):
+        with pytest.raises(ValueError, match="MTP off"):
+            launcher.build_config("/checkpoint", mode, async_scheduling=True)

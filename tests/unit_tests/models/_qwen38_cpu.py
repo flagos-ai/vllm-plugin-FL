@@ -121,6 +121,23 @@ sampling_metadata = declarations(
 worker_namespace = {
     "install_sampling_contract": sampling_metadata.install_sampling_contract
 }
+ple_inputs = declarations(
+    ROOT / "vllm_fl/worker/qwen3_8_flash_next_ple.py",
+    "qwen_cpu_ple_inputs",
+)
+worker_namespace.update(
+    {
+        name: getattr(ple_inputs, name)
+        for name in (
+            "committed_context_cpu",
+            "_validate_base",
+            "async_context_plan",
+            "_AsyncNgramContext",
+            "_HostInputBuffers",
+            "_mrv1_prepare",
+        )
+    }
+)
 worker = declarations(
     ROOT / "vllm_fl/worker/qwen3_8_flash_next.py",
     "qwen_cpu_worker",

@@ -158,8 +158,11 @@ def _verify_metax_config(vllm_config):
         raise NotImplementedError("Qwen3.8 requires mamba_cache_mode=none")
     if cache_config.enable_prefix_caching:
         raise NotImplementedError("Qwen3.8 prefix caching is not supported")
-    if vllm_config.scheduler_config.async_scheduling:
-        raise NotImplementedError("CPU N-gram history requires synchronous scheduling")
+    if (
+        vllm_config.scheduler_config.async_scheduling
+        and vllm_config.speculative_config is not None
+    ):
+        raise NotImplementedError("Qwen3.8 MTP still requires synchronous scheduling")
     if vllm_config.parallel_config.pipeline_parallel_size != 1:
         raise NotImplementedError("Qwen3.8 basic integration requires PP1")
     if multimodal_config is not None and not multimodal_config.language_model_only:

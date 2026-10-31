@@ -8,8 +8,8 @@ from contextvars import ContextVar
 from functools import wraps
 
 import numpy as np
-import torch
 
+from .qwen3_8_flash_next_ple import _mrv1_prepare, _validate_base
 from .qwen3_8_flash_next_sampling import install_sampling_contract
 
 _ple_spec_context: ContextVar[tuple | None] = ContextVar(
@@ -40,142 +40,12 @@ def spec_decode_counts(query_lengths, is_prefilling, num_spec):
     return counts
 
 
-def committed_context_cpu(token_ids, computed_tokens, context_len, eos_token_id):
-    """Read the committed prefix only, excluding tentative draft suffixes."""
-    if token_ids.device.type != "cpu" or token_ids.ndim != 2:
-        raise ValueError("committed token history must be a CPU matrix")
-    ends = torch.as_tensor(computed_tokens, dtype=torch.int64, device="cpu")
-    if ends.ndim != 1 or ends.numel() > token_ids.shape[0]:
-        raise ValueError("invalid committed token counts")
-    if context_len < 1 or bool(((ends < 0) | (ends > token_ids.shape[1])).any()):
-        raise ValueError("committed count is outside its history")
-    columns = ends[:, None] + torch.arange(-context_len, 0, dtype=torch.int64)
-    values = token_ids[: ends.numel()].gather(1, columns.clamp_min(0))
-    return torch.where(columns >= 0, values, values.new_full((), eos_token_id)).long()
-
-
 def _uses_ple(runner):
     config = runner.model_config.hf_text_config
     return bool(
         is_metax()
         and getattr(config, "supports_qwen38_ngram_context", False)
         and getattr(config, "ple_layer_ids", ())
-    )
-
-
-def _validate_base(vllm_config, require_sync=False):
-    if vllm_config.parallel_config.pipeline_parallel_size != 1:
-        raise NotImplementedError("Qwen PLE base integration requires PP1")
-    if (
-        vllm_config.cache_config.mamba_cache_mode != "none"
-        or vllm_config.cache_config.enable_prefix_caching
-    ):
-        raise NotImplementedError(
-            "Qwen PLE requires Mamba none and prefix caching disabled"
-        )
-    if (
-        require_sync
-        and getattr(vllm_config.scheduler_config, "async_scheduling", None) is not False
-    ):
-        raise NotImplementedError(
-            "Qwen MRV1 host lookup requires explicit async_scheduling=False"
-        )
-
-
-class _HostInputBuffers:
-    def __init__(self, model, config, max_num_reqs, max_num_tokens, device):
-        self.config = config
-        self.context_len = int(config.ngram_size) - 1
-        self.query_start_loc = torch.zeros(
-            max_num_reqs + 1, dtype=torch.int32, device=device
-        )
-        self.context = torch.full(
-            (max_num_reqs, self.context_len),
-            int(config.eos_token_id),
-            dtype=torch.int64,
-            device=device,
-        )
-        from vllm_fl.models.qwen3_8_flash_next.gpu.ple_layer import (
-            Qwen3_8FlashNextPLELayer,
-        )
-
-        self.layers = [
-            m for m in model.modules() if isinstance(m, Qwen3_8FlashNextPLELayer)
-        ]
-        if not self.layers:
-            raise RuntimeError("configured PLE layer not found in the loaded target")
-
-    def prepare(
-        self, input_ids, query_start_loc, context, dummy=False, use_cpu_metadata=False
-    ):
-        nreq = query_start_loc.numel() - 1
-        if nreq > self.context.shape[0]:
-            raise ValueError("PLE requests exceed fixed buffers")
-        self.query_start_loc[: nreq + 1].copy_(query_start_loc)
-        self.query_start_loc[nreq + 1 :].fill_(query_start_loc[-1])
-        self.context.fill_(int(self.config.eos_token_id))
-        self.context[:nreq].copy_(context)
-        for layer in self.layers:
-            layer.prepare_host_lookup(
-                input_ids,
-                query_start_loc if use_cpu_metadata else self.query_start_loc,
-                context if use_cpu_metadata else self.context,
-                dummy=dummy,
-            )
-        return dict(query_start_loc=self.query_start_loc, ngram_context=self.context)
-
-
-def _mrv1_prepare(runner):
-    _validate_base(runner.vllm_config, require_sync=True)
-    config = runner.model_config.hf_text_config
-    buffers = getattr(runner, "_qwen38_host_inputs", None)
-    if buffers is None:
-        buffers = _HostInputBuffers(
-            runner.get_model(),
-            config,
-            runner.max_num_reqs,
-            runner.max_num_tokens,
-            runner.device,
-        )
-        runner._qwen38_host_inputs = buffers
-    dummy_tokens = getattr(runner, "_qwen38_dummy_tokens", None)
-    if dummy_tokens is not None:
-        starts = torch.tensor(
-            [0, min(dummy_tokens, runner.max_num_tokens)], dtype=torch.int32
-        )
-        context = torch.full(
-            (1, buffers.context_len), int(config.eos_token_id), dtype=torch.int64
-        )
-        return buffers.prepare(runner.input_ids.gpu, starts, context, dummy=True)
-    batch = runner.input_batch
-    nreq = batch.num_reqs
-    context = committed_context_cpu(
-        batch.token_ids_cpu_tensor[:nreq],
-        batch.num_computed_tokens_cpu[:nreq],
-        buffers.context_len,
-        int(config.eos_token_id),
-    )
-    use_cpu_metadata = bool(
-        runner.vllm_config.additional_config.get("qwen38_ple_cpu_metadata", False)
-    )
-    lookup_ids = runner.input_ids.gpu
-    if (
-        use_cpu_metadata
-        and runner.speculative_config is None
-        and nreq > 0
-        and not getattr(runner, "enable_prompt_embeds", False)
-        and np.all(
-            batch.num_computed_tokens_cpu[:nreq] < batch.num_prompt_tokens[:nreq]
-        )
-    ):
-        # Pure prefill IDs are gathered into this pinned CPU mirror by MRV1.
-        # Decode/draft IDs can be updated only on GPU, so retain that source.
-        lookup_ids = runner.input_ids.cpu
-    return buffers.prepare(
-        lookup_ids,
-        runner.query_start_loc.cpu[: nreq + 1],
-        context,
-        use_cpu_metadata=use_cpu_metadata,
     )
 
 

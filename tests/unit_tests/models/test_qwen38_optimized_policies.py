@@ -192,3 +192,17 @@ def test_packing_metadata_cache_is_scoped_and_cleared_on_error(monkeypatch):
     with module.qsa_metadata_build_scope():
         assert module._cached_pack_rows(starts, lengths, 3, "cpu") is not a
     assert len(calls) == 2
+
+
+def test_runner_import_resolves_real_ple_state_without_gpu_initialization():
+    package = ModuleType("qwen_review_worker_package")
+    package.__path__ = [str(ROOT / "vllm_fl/worker")]
+    sys.modules[package.__name__] = package
+    from importlib import import_module
+
+    module = import_module(package.__name__ + ".qwen3_8_flash_next")
+    assert module._mrv1_prepare.__module__.endswith("qwen3_8_flash_next_ple")
+    assert module.install_sampling_contract.__module__.endswith(
+        "qwen3_8_flash_next_sampling"
+    )
+    assert not torch.cuda.is_initialized()

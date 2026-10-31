@@ -22,7 +22,7 @@ full-length inputs.
 | `models/qwen3_8_flash_next/gpu/model.py`, `gpu/ple_layer.py`, `gpu/qsa.py`, `gpu/indexer_qsa.py` | Shared forward structure with scoped MetaX execution/provider choices |
 | `models/qwen3_8_flash_next/gpu/host_ngram.py`, `host_lookup.py` | CPU table loading, hashing, shared results and bounded pinned staging |
 | `models/qwen3_8_flash_next/gpu/mtp.py` | Optional sequential draft model with real 4H feedback, using the shared decoder/loader/HC components |
-| `worker/qwen3_8_flash_next.py`, `spec_decode/` | Committed-token preparation, accepted-state metadata, multi-group proposal and draft graphs |
+| `worker/qwen3_8_flash_next.py`, `worker/qwen3_8_flash_next_ple.py`, `worker/qwen3_8_flash_next_sampling.py`, `spec_decode/` | Runner hooks, PLE state, sampling metadata and optional draft graphs |
 | `patches/qwen3_8_flash_next.py`, `patches/qwen3_8_flash_next_mtp.py` | Existing registration plus the scoped vLLM 0.24 MTP compatibility |
 | `dispatch/backends/vendor/metax/impl/qwen3_8_flash_next/`, `dispatch/config/` | MetaX policy and reviewed launch configuration over existing library kernels |
 
@@ -199,6 +199,19 @@ draft steps retain their existing shape-dependent graph path.
 K2/K3 are existing explicit options; this configuration change adds no K2/K3
 GPU, performance or accuracy acceptance.
 
+### Asynchronous scheduling
+
+For the current best MTP-off configuration, pass `--async-scheduling`.
+Omitting the option keeps the synchronous fallback; `--no-async-scheduling`
+is explicit. MTP K1/K2/K3 remain synchronous and async/MTP is rejected.
+
+MRV1 supplies actual input tokens on GPU. PLE keeps a double-buffered
+consumed-token suffix indexed by request identity and logical position;
+new/resumed requests seed from the native restored history. CPU placeholder
+tokens cannot seed the suffix. QSA packing remains enabled because logical
+lengths are exact without speculation. CPU table lookup still runs before
+forward. UVA prefetch is not included.
+
 ### Checkpoint sampling defaults
 
 The launcher explicitly uses `--generation-config auto` without
@@ -238,11 +251,11 @@ groups. The width buckets and KV-cache layout remain unchanged.
 
 ## Validation and historical performance
 
-### Current reviewed stage: Reduce Qwen host preparation and metadata overhead
+### Current reviewed stage: Support asynchronous scheduling for Qwen PLE
 
 | Fixed workload | Comparison | Reviewed stage | Observed change |
 |---|---:|---:|---:|
-| P1024 / exact O1024 / C64 / N128 | 307.1341 tok/s | 661.0880 tok/s | +115.24% |
+| P1024 / exact O1024 / C64 / N128 | 661.6191 tok/s | 939.8054 tok/s | +42.05% |
 
 Both use checkpoint T1/p.95/k20, MTP off, BF16 TP8 and OMP/Torch4.
 The numbers belong to the corresponding frozen source snapshots. Cleanup
@@ -251,6 +264,7 @@ validates relocation with source equivalence and CPU contracts; it does not
 claim a new end-to-end measurement. Experimental module counters are removed
 from production; benchmark observers remain outside the model tree.
 Each mode has one formal measurement, not a stability or accuracy claim.
+The async comparison is the same-source synchronous control (661.6191); the previous recorded best was661.0880.
 
 The following records are historical milestones with their original scope.
 

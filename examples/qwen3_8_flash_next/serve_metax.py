@@ -52,12 +52,18 @@ UNSET_ENV = (
 
 
 def build_config(
-    model: str, mtp: str = "off", *, record_flaggems_ops: bool = False
+    model: str,
+    mtp: str = "off",
+    *,
+    record_flaggems_ops: bool = False,
+    async_scheduling: bool = False,
 ) -> dict:
     """Build one complete native configuration; no prior variant is mutated."""
     if mtp not in MTP_COUNTS:
         raise ValueError("MTP must be off, k1, k2 or k3")
     k = MTP_COUNTS[mtp]
+    if async_scheduling and k:
+        raise ValueError("Async scheduling is supported only with MTP off")
     buckets = [(k + 1) * count for count in REQUEST_BUCKETS]
     config = {
         "model": model,
@@ -73,7 +79,7 @@ def build_config(
         "enable_chunked_prefill": True,
         "mamba_cache_mode": "none",
         "mamba_ssm_cache_dtype": "float32",
-        "async_scheduling": False,
+        "async_scheduling": async_scheduling,
         "generation_config": "auto",
         "compilation_config": {
             "mode": 0,
@@ -183,6 +189,12 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--mtp", choices=tuple(MTP_COUNTS), default="off")
     p.add_argument(
+        "--async-scheduling",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use GPU-resident PLE history with native async scheduling (MTP off)",
+    )
+    p.add_argument(
         "--record-flaggems-ops",
         action="store_true",
         help="Record rank-0 operator calls for diagnosis (adds CPU overhead)",
@@ -215,7 +227,10 @@ def main() -> None:
             "Set QWEN38_FLAGGEMS_ROOT, QWEN38_FGV_ROOT, QWEN38_CACHE_ROOT or pass their CLI options"
         )
     config = build_config(
-        args.model, args.mtp, record_flaggems_ops=args.record_flaggems_ops
+        args.model,
+        args.mtp,
+        record_flaggems_ops=args.record_flaggems_ops,
+        async_scheduling=args.async_scheduling,
     )
     command = native_command(
         config,
