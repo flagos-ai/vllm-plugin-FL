@@ -1056,19 +1056,20 @@ class PlatformFL(Platform):
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
         """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs.
 
-        ``vllm_c`` is only a registered IR-op provider when the build ships the
-        native ``vllm._C`` extension. Empty-mode installs
-        (``VLLM_TARGET_DEVICE=empty``, used by every non-CUDA backend) register
-        ``native`` only, and vLLM asserts that every requested provider is a
-        registered implementation. Probe for the extension instead of assuming
-        it, so the priority list stays valid on empty builds.
+        Empty-mode installs (``VLLM_TARGET_DEVICE=empty``, used by every
+        non-CUDA backend) register ``native`` only, while vLLM asserts that
+        every requested provider is a registered implementation. Ask the IR-op
+        registry directly rather than assuming ``vllm_c`` is present: an
+        importable ``vllm._C`` is not sufficient, since a ROCm base image can
+        provide the module while the empty reinstall leaves the IR ops with
+        ``native`` alone.
         """
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        if using_inductor or not cls._has_native_vllm_c():
+        if using_inductor or not cls._vllm_c_is_registered_provider():
             default = ["native"]
         else:
             default = ["vllm_c", "native"]
@@ -1079,14 +1080,50 @@ class PlatformFL(Platform):
         )
 
     @staticmethod
-    def _has_native_vllm_c() -> bool:
-        """Return True when the native ``vllm._C`` extension is importable."""
-        import importlib.util
+    def _vllm_c_is_registered_provider() -> bool:
+        """Return True when every IR op has a ``vllm_c`` implementation.
+
+        vLLM asserts that each provider named in ``ir_op_priority`` is a
+        registered implementation, so the question is not whether ``vllm._C``
+        imports but whether the IR ops actually gained a ``vllm_c`` entry. The
+        two diverge on a ROCm base image reinstalled in empty mode: the module
+        is importable while the ops are registered as ``native`` only, and
+        requesting ``vllm_c`` then aborts worker startup with
+        ``AssertionError: All providers in priority must be registered
+        implementations.``
+
+        Every field of ``IrOpPriorityConfig`` is checked, because
+        ``with_default`` applies the default list to all of them — including
+        ops such as ``gelu_and_mul_sparse`` that this platform does not name
+        explicitly. Enumerating the config's fields keeps that in step if
+        upstream adds more.
+        """
+        try:
+            from dataclasses import fields
+
+            from vllm.config.kernel import IrOpPriorityConfig
+            from vllm.ir import op as ir_op, ops as ir_ops
+        except ImportError:
+            return False
 
         try:
-            return importlib.util.find_spec("vllm._C") is not None
-        except (ImportError, ValueError):
+            op_names = [f.name for f in fields(IrOpPriorityConfig)]
+        except TypeError:
             return False
+        if not op_names:
+            return False
+
+        for name in op_names:
+            candidate = getattr(ir_ops, name, None)
+            if not isinstance(candidate, ir_op.IrOp):
+                # An op the registry does not expose cannot carry vllm_c.
+                return False
+            try:
+                if "vllm_c" not in candidate.impls:
+                    return False
+            except Exception:
+                return False
+        return True
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:
