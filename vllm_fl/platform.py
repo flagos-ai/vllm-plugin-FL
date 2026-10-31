@@ -78,6 +78,21 @@ class PlatformFL(Platform):
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
+    # Backend for vLLM's standalone ``@torch.compile`` call sites. A few layers
+    # compile themselves through ``current_platform.simple_compile_backend`` —
+    # ``get_masked_input_and_mask`` in
+    # ``vllm/model_executor/layers/vocab_parallel_embedding.py`` is the one an
+    # ordinary model hits. Those decorators read the attribute directly, so they
+    # bypass ``get_compile_backend()`` and still run Inductor even when the
+    # engine reports "Inductor compilation was disabled by user settings" under
+    # ``CompilationMode.NONE``. On AMD that fails inside ``warmup_kernels`` with
+    # ``ValueError: Expected a cuda device, but got: cpu`` from Inductor's
+    # ``preserve_rng_state``. Dynamo tracing itself is fine, so use the eager
+    # backend there: the traced graph is kept and only Inductor codegen is
+    # dropped.
+    simple_compile_backend: str = (
+        "eager" if device_info.vendor_name == "amd" else "inductor"
+    )
     device_control_env_var: str = (
         "ASCEND_RT_VISIBLE_DEVICES"
         if device_type == "npu"
