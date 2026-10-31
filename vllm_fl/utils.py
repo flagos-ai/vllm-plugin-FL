@@ -36,6 +36,10 @@ VENDOR_DEVICE_MAP: dict[str, dict[str, str]] = {
     "sunrise": {"device_type": "ptpu", "device_name": "ptpu"},
     # Registered backend: vendor/hygon
     "hygon": {"device_type": "cuda", "device_name": "cuda"},
+    # Registered backend: vendor/amd (AMD Instinct / Radeon PRO, ROCm/HIP).
+    # FlagGems reports vendor_name "amd" with device.name "cuda" (ROCm maps to
+    # the torch.cuda API), so this is a CUDA-alike backend like hygon.
+    "amd": {"device_type": "cuda", "device_name": "cuda"},
     # Registered backend: vendor/thead (PPU)
     "thead": {"device_type": "cuda", "device_name": "thead"},
     # Registered backend: vendor/thead (tsingmicro)
@@ -281,6 +285,7 @@ class DeviceInfo:
             "gcu",
             "enflame",
             "kunlunxin",
+            "amd",
         ]
         self._backend.set_torch_backend_device_fn(self.device.vendor_name)
 
