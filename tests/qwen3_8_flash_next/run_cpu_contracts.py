@@ -25,7 +25,7 @@ import types
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SUITE_EXPECTED_COUNTS = {"contracts": 130, "dispatch": 24}
+SUITE_EXPECTED_COUNTS = {"contracts": 157, "dispatch": 24}
 
 
 def cpu_environment():
@@ -141,6 +141,7 @@ def run_suite(args):
                     (args.repo / "tests/unit_tests/models").glob("test_qwen38_*.py")
                 )
             ],
+            "tests/unit_tests/models/test_flaggems_logging.py",
             "tests/qwen3_8_flash_next/test_lazy_registration.py",
             "tests/qwen3_8_flash_next/test_mtp_contract.py",
             "tests/qwen3_8_flash_next/test_mtp_forward.py",

@@ -4,10 +4,6 @@
 
 from __future__ import annotations
 
-from .runtime import is_metax
-from vllm_fl.dispatch import resolve_op
-from ..common.qsa_cache import PreparedQSAForwardMetadata, PreparedQSAMetadataBuilder
-
 from typing import Any, ClassVar, cast
 
 import torch
@@ -45,10 +41,16 @@ from vllm.v1.kv_cache_interface import (
     get_kv_quant_mode,
 )
 
-from ..common.qsa_cache import QSAForwardMetadata, QSAMetadataBuilder
+from ..common.qsa_cache import (
+    PreparedQSAMetadataBuilder,
+    QSAForwardMetadata,
+    QSAMetadataBuilder,
+)
 from .indexer_qsa import QSAIndexer
 from .nvidia_fast_paths import has_native_cache_update, native_cache_update
 from .quantization import without_modelopt_fp4
+from .runtime import is_metax
+from vllm_fl.dispatch import resolve_op
 
 
 def _prepared_qsa_token_to_req(
@@ -62,9 +64,7 @@ def _prepared_qsa_token_to_req(
     never prepared. Reading it would route every token to request row zero.
     Call this after the indexer has prepared the compressed metadata.
     """
-    compressed = cast(
-        QSAForwardMetadata, metadata[indexer.compressed_key_cache.prefix]
-    )
+    compressed = cast(QSAForwardMetadata, metadata[indexer.compressed_key_cache.prefix])
     if compressed.num_actual_tokens != num_tokens:
         raise RuntimeError("QSA main and compressed metadata token counts disagree")
     return compressed.token_to_req[:num_tokens]
@@ -276,8 +276,8 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             self._qsa_sparse_paged_attention = resolve_op("qsa_sparse_paged_attention")
             self._qsa_sparse_split_count = resolve_op("qsa_sparse_split_count")
         self.use_fused_qk_norm_rope_gate = (
-            not self._metax and
-            self.attn_output_gate
+            not self._metax
+            and self.attn_output_gate
             and getattr(self.rotary_emb, "is_neox_style", False)
             and current_platform.is_cuda()
             and text_only
@@ -320,6 +320,7 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         # The global vLLM workspace is shared by sequential layers; retaining
         # these views here prevents a later rows/TopK bucket from resizing the
         # allocation referenced by an already-captured graph.
+        self._qsa_packed_workspaces = {}
         self._qsa_split_workspaces: dict[
             tuple[int, int, int, int, int, int],
             tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -376,7 +377,8 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             self.topk_indices_buffer[:num_tokens],
         )
         token_to_req = (
-            side_metadata.token_to_req[:num_tokens] if self._metax
+            side_metadata.token_to_req[:num_tokens]
+            if self._metax
             else _prepared_qsa_token_to_req(metadata, self.indexer, num_tokens)
         )
         if selected.shape != (
@@ -400,11 +402,13 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                 value_cache.shape[0], value_cache.shape[1], 1, flat_width
             )
             self._qsa_store_cache_rows(
-                flat_key_cache, slot_mapping,
+                flat_key_cache,
+                slot_mapping,
                 key[:num_tokens].reshape(num_tokens, 1, flat_width),
             )
             self._qsa_store_cache_rows(
-                flat_value_cache, slot_mapping,
+                flat_value_cache,
+                slot_mapping,
                 value[:num_tokens].reshape(num_tokens, 1, flat_width),
             )
         else:
@@ -459,6 +463,18 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                 self.scaling,
                 output[:num_tokens],
                 split_workspace=split_workspace,
+                gate=gate[:num_tokens],
+                packed_workspace_cache=self._qsa_packed_workspaces,
+                pack_rows=(
+                    getattr(main_metadata, "pack_rows", None)
+                    if getattr(
+                        metadata[self.indexer.compressed_key_cache.prefix],
+                        "score_columns",
+                        None,
+                    )
+                    == 512
+                    else None
+                ),
             )
         elif num_tokens:
             _, split_workspace = qsa_prepare_split_workspace(
@@ -519,13 +535,8 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                 encoded_layer_name,
             )
         flat_output = attn_output.view(num_tokens, -1)
-        if self._metax:
-            flat_output = flat_output * torch.sigmoid(gate.view(num_tokens, -1))
         output, _ = self.o_proj(flat_output)
         return output
-
-
-
 
 
 def qwen3_8_flash_next_qsa_with_output(

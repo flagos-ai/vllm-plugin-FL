@@ -86,7 +86,9 @@ class GroupedGemmaRMSNorm(nn.Module):
             hidden_states = hidden_states.float()
             if self.group_size is None:
                 variance = hidden_states.square().mean(dim=-1, keepdim=True)
-                normalized = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+                normalized = hidden_states * torch.rsqrt(
+                    variance + self.variance_epsilon
+                )
             else:
                 grouped = hidden_states.unflatten(
                     -1, (hidden_states.shape[-1] // self.group_size, self.group_size)
@@ -184,10 +186,16 @@ class GatedResidualSimple(HyperConnectionBase):
         use_combine: bool = True,
         small_projection=None,
         mix_projection=None,
+        mix_up_projection=None,
     ) -> None:
         super().__init__(config, layer_idx, role)
-        self._small_projection = F.linear if small_projection is None else small_projection
+        self._small_projection = (
+            F.linear if small_projection is None else small_projection
+        )
         self._mix_projection = F.linear if mix_projection is None else mix_projection
+        self._mix_up_projection = (
+            F.linear if mix_up_projection is None else mix_up_projection
+        )
         norm_size = (
             self.hyper_hidden_size if config.hc_per_branch_norm else config.hidden_size
         )
@@ -258,7 +266,9 @@ class GatedResidualSimple(HyperConnectionBase):
             )
         if use_mix and use_combine and not config.use_fused_ops:
             self.block_inject_weight = nn.Linear(
-                self.hyper_hidden_size, self.hc_count, bias=False,
+                self.hyper_hidden_size,
+                self.hc_count,
+                bias=False,
                 dtype=config.params_dtype,
             )
         if use_mix:
@@ -338,11 +348,14 @@ class GatedResidualSimple(HyperConnectionBase):
                 hyper_input_normed, self.input_mix_weight_down.weight
             )
         gate = F.silu(down / self.hc_count)
-        gate_logits = F.linear(gate, self.input_mix_weight_up.weight)
+        gate_logits = self._mix_up_projection(gate, self.input_mix_weight_up.weight)
         if not self.config.use_fused_ops:
-            gate = torch.sigmoid(gate_logits).unflatten(-1, (self.hc_count, self.hidden_size))
+            gate = torch.sigmoid(gate_logits).unflatten(
+                -1, (self.hc_count, self.hidden_size)
+            )
             mixed_input = (
-                gate * hyper_input_normed.unflatten(-1, (self.hc_count, self.hidden_size))
+                gate
+                * hyper_input_normed.unflatten(-1, (self.hc_count, self.hidden_size))
             ).mean(dim=-2)
             return mixed_input, None
         mixed_input = torch.ops.vllm.qwen4_hc_gate_reduce(
@@ -395,7 +408,9 @@ class GatedResidualSimple(HyperConnectionBase):
         if not self.config.use_fused_ops:
             injection_weight = 2.0 * torch.sigmoid(injection_logits / self.hc_count)
             residual = hidden_states.unflatten(-1, (self.hc_count, self.hidden_size))
-            output = residual + block_output.unsqueeze(-2) * injection_weight.unsqueeze(-1)
+            output = residual + block_output.unsqueeze(-2) * injection_weight.unsqueeze(
+                -1
+            )
             return output.flatten(-2).to(hidden_states.dtype)
         return torch.ops.vllm.qwen4_hc_inject_combine(
             injection_logits,
@@ -465,7 +480,9 @@ class GatedResidualSimple(HyperConnectionBase):
         # The paired mix keeps its normalized hyper input so combine uses the
         # same HC module's injection weight.
         if injection_logits is None:
-            projection = F.linear if self.config.use_fused_ops else self._small_projection
+            projection = (
+                F.linear if self.config.use_fused_ops else self._small_projection
+            )
             injection_logits = projection(
                 hyper_input_normed, self.block_inject_weight.weight
             )

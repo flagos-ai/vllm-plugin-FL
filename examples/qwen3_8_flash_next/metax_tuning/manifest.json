@@ -12,7 +12,8 @@
     "moe_fix_commit": "e04f51c1c7176d7a356838fdfa8b3dc4fbaf6f8a"
   },
   "configuration": "vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json",
-  "operator_sources": "Unmodified pinned kernels; explicit prerequisite operator fixes only",
+  "operator_sources": "Separately versioned FG/FGV composition; see operator_dependencies.json and active source guards",
   "enable": "additional_config.qwen38_tuning_profile",
-  "moe_configs": "moe-configs"
+  "moe_configs": "moe-configs",
+  "operator_dependencies": "operator_dependencies.json"
 }

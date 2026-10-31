@@ -10,6 +10,7 @@ from functools import wraps
 import numpy as np
 import torch
 
+from .qwen3_8_flash_next_sampling import install_sampling_contract
 
 _ple_spec_context: ContextVar[tuple | None] = ContextVar(
     "qwen38_ple_spec", default=None
@@ -56,7 +57,8 @@ def committed_context_cpu(token_ids, computed_tokens, context_len, eos_token_id)
 def _uses_ple(runner):
     config = runner.model_config.hf_text_config
     return bool(
-        is_metax() and getattr(config, "supports_qwen38_ngram_context", False)
+        is_metax()
+        and getattr(config, "supports_qwen38_ngram_context", False)
         and getattr(config, "ple_layer_ids", ())
     )
 
@@ -93,7 +95,9 @@ class _HostInputBuffers:
             dtype=torch.int64,
             device=device,
         )
-        from vllm_fl.models.qwen3_8_flash_next.gpu.ple_layer import Qwen3_8FlashNextPLELayer
+        from vllm_fl.models.qwen3_8_flash_next.gpu.ple_layer import (
+            Qwen3_8FlashNextPLELayer,
+        )
 
         self.layers = [
             m for m in model.modules() if isinstance(m, Qwen3_8FlashNextPLELayer)
@@ -160,7 +164,9 @@ def install_qwen38_runner_hooks(runner_cls):
     original_dummy = runner_cls._dummy_run
     original_attn = runner_cls._build_attention_metadata
     original_capture = getattr(runner_cls, "_warmup_and_capture", None)
-    original_dispatch = getattr(runner_cls, "_determine_batch_execution_and_padding", None)
+    original_dispatch = getattr(
+        runner_cls, "_determine_batch_execution_and_padding", None
+    )
 
     @wraps(original_init)
     def runner_init(self, *args, **kwargs):
@@ -169,7 +175,8 @@ def install_qwen38_runner_hooks(runner_cls):
             text_config = config.model_config.hf_text_config
             spec_config = config.speculative_config
             if (
-                is_metax() and getattr(text_config, "supports_qwen38_ngram_context", False)
+                is_metax()
+                and getattr(text_config, "supports_qwen38_ngram_context", False)
                 and spec_config is not None
                 and spec_config.method == "mtp"
             ):
@@ -178,12 +185,17 @@ def install_qwen38_runner_hooks(runner_cls):
                 )
 
                 install_qwen38_mtp_runtime_compat()
-        return original_init(self, *args, **kwargs)
+        result = original_init(self, *args, **kwargs)
+        if is_metax() and _uses_ple(self):
+            install_sampling_contract(self.input_batch)
+        return result
 
     @wraps(original_kwargs)
     def model_kwargs(self, *args, **kwargs):
         result = original_kwargs(self, *args, **kwargs)
         if _uses_ple(self):
+            if is_metax():
+                install_sampling_contract(self.input_batch)
             result.update(_mrv1_prepare(self))
         return result
 
@@ -226,17 +238,25 @@ def install_qwen38_runner_hooks(runner_cls):
             _ple_spec_context.reset(token)
 
     if original_dispatch is not None:
+
         @wraps(original_dispatch)
         def dispatch(self, *args, **kwargs):
+            # Native KV setup can replace InputBatch after runner construction.
+            if is_metax() and _uses_ple(self):
+                install_sampling_contract(self.input_batch)
             if _uses_ple(self) and getattr(self, "_qwen38_dummy_tokens", None) is None:
                 nreq = kwargs.get("num_reqs", args[1] if len(args) > 1 else 0)
                 batch = self.input_batch
-                if np.any(batch.num_computed_tokens_cpu[:nreq] < batch.num_prompt_tokens[:nreq]):
+                if np.any(
+                    batch.num_computed_tokens_cpu[:nreq]
+                    < batch.num_prompt_tokens[:nreq]
+                ):
                     # A two-token prompt or final prefill chunk can match K1's
                     # uniform decode shape. Its recurrent initialization must
                     # still execute eagerly, independent of tensor shape.
                     kwargs["force_eager"] = True
             return original_dispatch(self, *args, **kwargs)
+
         runner_cls._determine_batch_execution_and_padding = dispatch
 
     @wraps(original_capture)
@@ -246,7 +266,9 @@ def install_qwen38_runner_hooks(runner_cls):
         )
         if not enabled:
             return original_capture(self, *args, **kwargs)
-        from vllm_fl.models.qwen3_8_flash_next.common.qsa_cache import qsa_capture_columns
+        from vllm_fl.models.qwen3_8_flash_next.common.qsa_cache import (
+            qsa_capture_columns,
+        )
 
         # Largest first allows the shared graph pool to reuse its allocations.
         # The original warmup/capture method also participates in graph-memory

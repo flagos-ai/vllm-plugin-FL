@@ -25,6 +25,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_file(name, relative):
+    if relative.endswith("/common/qsa_cache.py"):
+        # Load real sibling metadata helpers through a package without running
+        # the accelerator-owning model package initializer.
+        package_name = "qwen38_actual_qsa_common_cpu"
+        package = ModuleType(package_name)
+        package.__path__ = [str((ROOT / relative).parent)]
+        sys.modules[package_name] = package
+        name = package_name + ".qsa_cache"
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module

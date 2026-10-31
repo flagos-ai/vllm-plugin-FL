@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "scope": "Tested package composition; model submission does not vendor or rewrite these implementations",
+  "vllm": {
+    "version": "0.24.0",
+    "commit": "ee0da84ab9e04ac7610e28580af62c365e898389"
+  },
+  "flag_gems_base": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+  "flaggems_vllm_base": "0f3df8ecbff9b48b2f8745c7160e0df8cb5486b5",
+  "published_component_references": {
+    "FG-index-address-product": "https://github.com/flagos-ai/FlagGems/pull/7981",
+    "FGV-PLE": "https://github.com/flagos-ai/FlagGems-vllm/pull/959",
+    "FGV-inplace-MoE": "https://github.com/flagos-ai/FlagGems-vllm/pull/1000",
+    "FGV-per-row-topk": "https://github.com/flagos-ai/FlagGems-vllm/pull/1024"
+  },
+  "private_sources": [
+    {
+      "package": "flag_gems",
+      "path": "runtime/backend/_metax/ops/index_select.py",
+      "sha256": "a403e7a46f5596d0fb251fd6c806a3f36be81a7acfd04a74fe066d44c03e7147",
+      "purpose": "Remove ineffective generator assertion and host tensor iteration",
+      "introduced": "01-hotpaths",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/radix_topk.py",
+      "sha256": "f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e",
+      "purpose": "Existing large-row QSA TopK dependency",
+      "introduced": "published-parent",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/top_k_top_p.py",
+      "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4",
+      "purpose": "Existing generic sampling fallback",
+      "introduced": "published-parent",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "ops/top_k_top_p.py",
+      "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84",
+      "purpose": "Existing exported sampling fallback",
+      "introduced": "published-parent",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flag_gems",
+      "path": "runtime/backend/_metax/ops/sort.py",
+      "sha256": "87921767027917f1781f90450d70061d8e0605217df8663c991694d62dd05b31",
+      "purpose": "Existing fallback dependency",
+      "introduced": "published-parent",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/sampling_top20.py",
+      "sha256": "c1cea3fd6db8dd25306f80b36aab2b9fe9f387b7980b854f92d00dd99f819186",
+      "purpose": "Block Top20 and top-p filtering",
+      "introduced": "01-hotpaths",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/sampling_race.py",
+      "sha256": "ade13cc1ef45c6d66cdc58f20cf2e2e644119bc388b29f975ad2341e6ee82156",
+      "purpose": "Race reduction with native RNG",
+      "introduced": "01-hotpaths",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/qsa_packed.py",
+      "sha256": "1b3ba59d4373d30ccac4d0ef8e127a741ea3bb45e3b831156f75c3cec13a5f06",
+      "purpose": "Packed QSA kernels",
+      "introduced": "01-hotpaths",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
+      "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0",
+      "purpose": "BF16 plans, AvBv scales and GEMM execution",
+      "introduced": "01-hotpaths",
+      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+    }
+  ],
+  "active_launch_source_guards": {
+    "flag_gems": [
+      {
+        "path": "ops/mean.py",
+        "sha256": "c968ad14d3ba76ed87c29e5e9346a0e392cdaeaeb01c0774cfd7c5c489394d1c"
+      },
+      {
+        "path": "ops/topk.py",
+        "sha256": "e6d433c2ab1fd63da45ac2d93d3ebed902453637f6a25aaf983b616b17ed7a65"
+      },
+      {
+        "path": "runtime/backend/_metax/heuristics_config_utils.py",
+        "sha256": "2e88725d4ce6c27f3847963bdc0c425493be1537ebe53fbc80779ff9ac560aa2"
+      },
+      {
+        "path": "runtime/backend/_metax/tune_configs.yaml",
+        "sha256": "65b3090adf0bdbb94b625a380b33cfb02895960b884f0234d0cd040cfb9aec0a"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/index_select.py",
+        "sha256": "a403e7a46f5596d0fb251fd6c806a3f36be81a7acfd04a74fe066d44c03e7147"
+      }
+    ],
+    "flaggems_vllm": [
+      {
+        "path": "ops/FLA/wy_fast.py",
+        "sha256": "dcef959727bc947db23374da466df2829c97846c22999c9aec50be8c420b33e3"
+      },
+      {
+        "path": "ops/qwen4/ple_conv.py",
+        "sha256": "2f273afafdfd1a991dd0138b0d330d001cf0cd17bdcb96b83a22a5f3929140c0"
+      },
+      {
+        "path": "ops/qwen4/qsa_attention.py",
+        "sha256": "89c0bb3e47fedfb7ef73512ceff6fe4d464863a296e874eadb411a54342efb42"
+      },
+      {
+        "path": "runtime/backend/_metax/fused/gdn_chunk.py",
+        "sha256": "f4a6bd6cf6db191439fa3bdc1e6b25d432b739c1a0700b85a2da78e427a3d75a"
+      },
+      {
+        "path": "runtime/backend/_metax/heuristics_config_utils.py",
+        "sha256": "65325853d03d9aa436b21ebbfa7fb15d7d0a4d7df3171266461824816ebd008e"
+      },
+      {
+        "path": "runtime/backend/_metax/tune_configs.yaml",
+        "sha256": "0d6d1d76f8b3f9f75fc27367a32f2a7435282443e3c275f9f5cfead17f62311d"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/__init__.py",
+        "sha256": "5ccb1a7467477c5209d724e3dc89e8b5559be51ddf35817740b2c7ee4c40fcda"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/top_k_top_p.py",
+        "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4"
+      },
+      {
+        "path": "ops/top_k_top_p.py",
+        "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84"
+      },
+      {
+        "path": "ops/__init__.py",
+        "sha256": "80de99b5416f586ffc4131046876cbe2bf2028a745f078194033ef112226ec5d"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/sampling_top20.py",
+        "sha256": "c1cea3fd6db8dd25306f80b36aab2b9fe9f387b7980b854f92d00dd99f819186"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/sampling_race.py",
+        "sha256": "ade13cc1ef45c6d66cdc58f20cf2e2e644119bc388b29f975ad2341e6ee82156"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/qsa_packed.py",
+        "sha256": "1b3ba59d4373d30ccac4d0ef8e127a741ea3bb45e3b831156f75c3cec13a5f06"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
+        "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0"
+      }
+    ],
+    "vllm": [
+      {
+        "path": "model_executor/layers/fla/ops/fused_sigmoid_gating.py",
+        "sha256": "000ab8996af9788fdb8843a6a3b91833e7a14c8acc0e1ea073a536330f64cb6f"
+      }
+    ]
+  },
+  "accuracy": "No new quantization, RNG distribution or model accuracy claim",
+  "portability": "Source hashes identify reproduction files, not public installable revisions; operator publication is separate."
+}

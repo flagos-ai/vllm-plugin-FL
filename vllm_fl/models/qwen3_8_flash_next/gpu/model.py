@@ -86,8 +86,11 @@ from vllm.model_executor.models.utils import (
 try:
     from vllm.model_executor.models.utils import maybe_fuse_shared_experts
 except ImportError:  # vLLM 0.24 predates optional AITER shared-expert fusion
+
     def maybe_fuse_shared_experts(weights, **_kwargs):
         return weights
+
+
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.sequence import IntermediateTensors
@@ -100,18 +103,16 @@ from ..common.hyperconnection import (
     HyperConnectionConfig,
     pack_gated_hc_projection_weights,
 )
+from ..common.qsa_cache import qsa_cudagraph_key
 from ..config import Qwen3_8FlashNextConfig, Qwen3_8FlashNextTextConfig
+from ..projections import use_qwen38_shared_expert_projection
 from .ple_layer import Qwen3_8FlashNextPLELayer, validate_ple_embedding_weights
 from .qsa import Qwen3_8FlashNextQSAAttention
 from .quantization import with_platform_quantization
 from .runtime import is_metax
-from ..common.qsa_cache import qsa_cudagraph_key
-from ..projections import use_qwen38_shared_expert_projection
 from vllm_fl.dispatch import resolve_op
 
-_HAS_NATIVE_STACKED_WEIGHTS_MAPPER = hasattr(
-    WeightsMapper(), "orig_to_new_stacked"
-)
+_HAS_NATIVE_STACKED_WEIGHTS_MAPPER = hasattr(WeightsMapper(), "orig_to_new_stacked")
 
 
 def _get_qwen35_hf_to_vllm_mapper() -> WeightsMapper:
@@ -164,10 +165,13 @@ def _get_expert_mappings(
     model: nn.Module,
     num_experts: int,
     num_redundant_experts: int,
-) -> tuple[
-    list[tuple[str, str, int, str]],
-    list[tuple[str, str, int, str]],
-] | None:
+) -> (
+    tuple[
+        list[tuple[str, str, int, str]],
+        list[tuple[str, str, int, str]],
+    ]
+    | None
+):
     """Probe for the fused-MoE mapping API.
 
     vLLM 0.24 exposes ``fused_moe_make_expert_params_mapping`` but does not
@@ -499,21 +503,17 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
                 "prefix": f"{prefix}.linear_attn",
                 "gqa_interleaved_layout": False,
             }
-            if "reduce_results" in inspect.signature(
-                gdn_cls.__init__
-            ).parameters:
+            if "reduce_results" in inspect.signature(gdn_cls.__init__).parameters:
                 gdn_kwargs["reduce_results"] = False
             self.linear_attn = gdn_cls(config, **gdn_kwargs)
             # vLLM 0.24 predates the constructor option. HC owns the single TP
             # reduction after each branch, so disable the GDN output linear's
             # internal reduction explicitly to avoid a double all-reduce.
-            if "reduce_results" not in inspect.signature(
-                gdn_cls.__init__
-            ).parameters:
+            if "reduce_results" not in inspect.signature(gdn_cls.__init__).parameters:
                 self.linear_attn.out_proj.reduce_results = False
-            self._gdn_requires_output_buffer = "output" in inspect.signature(
-                gdn_cls.forward
-            ).parameters
+            self._gdn_requires_output_buffer = (
+                "output" in inspect.signature(gdn_cls.forward).parameters
+            )
         elif layer_type == "full_attention":
             use_qsa = getattr(config, "indexer_n_heads", None) is not None
             if not use_qsa:
@@ -576,6 +576,9 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
             mix_projection=resolve_op("qwen38_grdown_projection")
             if self._metax
             else None,
+            mix_up_projection=resolve_op("qwen38_grup_projection")
+            if self._metax
+            else None,
         )
         self.mlp_hyper_connection = GatedResidualSimple(
             hc_config,
@@ -587,7 +590,17 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
             mix_projection=resolve_op("qwen38_grdown_projection")
             if self._metax
             else None,
+            mix_up_projection=resolve_op("qwen38_grup_projection")
+            if self._metax
+            else None,
         )
+
+        if self._metax:
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.mctlass_linear import (
+                install_linear_methods,
+            )
+
+            install_linear_methods(self)
 
     def forward(
         self,
@@ -600,8 +613,12 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
         ngram_context: torch.Tensor | None = None,
         **kwargs: object,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        if self._metax and (prev_block_output is not None or prev_injection is not None):
-            raise ValueError("MetaX HC materializes each residual before the next layer")
+        if self._metax and (
+            prev_block_output is not None or prev_injection is not None
+        ):
+            raise ValueError(
+                "MetaX HC materializes each residual before the next layer"
+            )
         # Keep a clear failure mode for old callers that still try to pass a
         # separate residual tensor.  HC's pending state is a block output plus
         # injection logits, not the ordinary vLLM residual ABI.
@@ -635,8 +652,12 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
         if self._metax:
             mixed, hc_residual = self.attn_hyper_connection.mix(hidden_states)
         else:
-            hidden_states, mixed, injection = self.attn_hyper_connection.combine_and_mix(
-                hidden_states, prev_block_output, prev_injection,
+            hidden_states, mixed, injection = (
+                self.attn_hyper_connection.combine_and_mix(
+                    hidden_states,
+                    prev_block_output,
+                    prev_injection,
+                )
             )
         if self.layer_type == "linear_attention":
             if self._gdn_requires_output_buffer:
@@ -668,7 +689,9 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
         else:
             hidden_states, mixed, next_injection = (
                 self.mlp_hyper_connection.combine_and_mix(
-                    hidden_states, self_attention_output, injection,
+                    hidden_states,
+                    self_attention_output,
+                    injection,
                 )
             )
         block_output = self.mlp(mixed)
@@ -677,10 +700,12 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
         ):
             block_output = tensor_model_parallel_all_reduce(block_output)
         if self._metax:
-            return self.mlp_hyper_connection.combine(block_output, hc_residual), None, None
+            return (
+                self.mlp_hyper_connection.combine(block_output, hc_residual),
+                None,
+                None,
+            )
         return hidden_states, block_output, next_injection
-
-
 
 
 @support_torch_compile(
@@ -699,8 +724,12 @@ class Qwen3_8FlashNextModel(nn.Module):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         vllm_config = with_platform_quantization(vllm_config)
-        if is_metax() and vllm_config.additional_config.get("qwen38_tuning_profile", False):
-            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.launch_profile import install_qwen38_launch_profile
+        if is_metax() and vllm_config.additional_config.get(
+            "qwen38_tuning_profile", False
+        ):
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.launch_profile import (
+                install_qwen38_launch_profile,
+            )
 
             install_qwen38_launch_profile(vllm_config)
         super().__init__()
@@ -763,11 +792,15 @@ class Qwen3_8FlashNextModel(nn.Module):
             and get_pp_group().is_last_rank
         )
         if needs_mtp_hidden:
-            self.register_buffer("_mtp_hidden_buffer", torch.empty(
-                vllm_config.scheduler_config.max_num_batched_tokens,
-                config.hc_count * config.hidden_size,
-                dtype=vllm_config.model_config.dtype,
-            ), persistent=False)
+            self.register_buffer(
+                "_mtp_hidden_buffer",
+                torch.empty(
+                    vllm_config.scheduler_config.max_num_batched_tokens,
+                    config.hc_count * config.hidden_size,
+                    dtype=vllm_config.model_config.dtype,
+                ),
+                persistent=False,
+            )
         else:
             self.register_buffer("_mtp_hidden_buffer", None, persistent=False)
 
@@ -925,9 +958,7 @@ class Qwen3_8FlashNextModel(nn.Module):
                         if handled:
                             legacy_loaded.update(loaded)
                             continue
-                        yield from _map_stacked_weights(
-                            ((name, loaded_weight),)
-                        )
+                        yield from _map_stacked_weights(((name, loaded_weight),))
 
                 weights = _legacy_weights()
             else:

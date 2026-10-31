@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from vllm.platforms import current_platform
-
 from dataclasses import dataclass, field, fields as dataclass_fields
 from typing import ClassVar
 
@@ -25,6 +23,7 @@ from torch import nn
 from vllm.config import CacheConfig, VllmConfig
 from vllm.config.cache import CacheDType
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
+from vllm.platforms import current_platform
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionCGSupport,
@@ -38,6 +37,8 @@ from vllm.v1.kv_cache_interface import (
     KVCacheSpec,
     MLAAttentionSpec,
 )
+
+from .qsa_packing import qsa_pack_row_groups
 
 
 def _spec_supports_block_stride_flag() -> bool:
@@ -330,8 +331,7 @@ class QSAMetadataBuilder(AttentionMetadataBuilder[QSAForwardMetadata]):
         # into model forward when the already-resolved global config requests a
         # full graph; otherwise metadata is built eagerly once below.
         self.defer_metadata_to_forward = (
-            _global_full_cudagraph_enabled(vllm_config)
-            and triton_metadata_supported
+            _global_full_cudagraph_enabled(vllm_config) and triton_metadata_supported
         )
         self.token_to_req_buffer = torch.empty(
             max_tokens, dtype=torch.int32, device=device
@@ -380,6 +380,7 @@ class QSAMetadataBuilder(AttentionMetadataBuilder[QSAForwardMetadata]):
             metadata.prepare()
         return metadata
 
+
 # Width is a graph geometry choice, independent of cache allocation/page size.
 _QSA_CAPTURE_COLUMNS: ContextVar[int | None] = ContextVar(
     "qwen38_qsa_capture_columns", default=None
@@ -416,8 +417,10 @@ def qsa_graph_columns(metadata) -> int:
     if not isinstance(metadata, dict):
         return 0
     columns = {
-        m.score_columns for m in metadata.values()
-        if isinstance(m, PreparedQSAForwardMetadata) and m.compress_ratio > 1
+        m.score_columns
+        for m in metadata.values()
+        if isinstance(m, PreparedQSAForwardMetadata)
+        and m.compress_ratio > 1
         and m.score_columns is not None
     }
     if len(columns) > 1:
@@ -444,6 +447,8 @@ class PreparedQSAForwardMetadata(AttentionMetadata):
     storage_block_size: int
     compress_ratio: int
     score_columns: int | None = None
+    pack_rows: torch.Tensor | None = None
+
 
 class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMetadata]):
     """Build QSA metadata from vLLM's cache-group-specific common metadata."""
@@ -466,6 +471,12 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
         self.storage_block_size = kv_cache_spec.storage_block_size
         self.length_buckets = bool(
             vllm_config.additional_config.get("qwen38_qsa_length_buckets", False)
+        )
+        self.pack_rows_enabled = (
+            bool(vllm_config.additional_config.get("qwen38_qsa_packing", False))
+            and vllm_config.speculative_config is None
+            and not vllm_config.scheduler_config.async_scheduling
+            and device.type == "cuda"
         )
         max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
         self.token_to_req_buffer = torch.empty(
@@ -540,7 +551,10 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
             )
         columns = None
         if self.length_buckets and self.compress_ratio > 1:
-            capacity = common_attn_metadata.block_table_tensor.shape[1] * self.storage_block_size
+            capacity = (
+                common_attn_metadata.block_table_tensor.shape[1]
+                * self.storage_block_size
+            )
             forced = _QSA_CAPTURE_COLUMNS.get()
             if forced is not None:
                 columns = capacity if forced == 0 else min(forced, capacity)
@@ -548,6 +562,30 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
                 columns = qsa_score_columns(
                     int(common_attn_metadata.max_seq_len), self.compress_ratio, capacity
                 )
+        pack_rows = None
+        seq_cpu = getattr(common_attn_metadata, "seq_lens_cpu_upper_bound", None)
+        if seq_cpu is None:
+            seq_cpu = getattr(common_attn_metadata, "_seq_lens_cpu", None)
+        if (
+            self.pack_rows_enabled
+            and self.compress_ratio == 1
+            and num_tokens > 64
+            and int(common_attn_metadata.max_seq_len) <= 2051
+            and seq_cpu is not None
+        ):
+            # Under synchronous MTP-off this existing CPU mirror is exact.
+            # Do not call the deprecated property that can synchronize CUDA.
+            groups = qsa_pack_row_groups(
+                common_attn_metadata.query_start_loc_cpu.tolist(),
+                seq_cpu.tolist(),
+                num_tokens,
+            )
+            if groups:
+                cpu_rows = torch.tensor(groups, dtype=torch.int32, pin_memory=True)
+                pack_rows = cpu_rows.to(
+                    self.token_to_req_buffer.device, non_blocking=True
+                )
+
         return PreparedQSAForwardMetadata(
             block_table=common_attn_metadata.block_table_tensor,
             slot_mapping=slot_mapping,
@@ -559,7 +597,9 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
             storage_block_size=self.storage_block_size,
             compress_ratio=self.compress_ratio,
             score_columns=columns,
+            pack_rows=pack_rows,
         )
+
 
 class QSAStateBackend(AttentionBackend):
     """Key-only dummy backend for out-of-band BF16 QSA side-cache operations."""
@@ -579,7 +619,11 @@ class QSAStateBackend(AttentionBackend):
 
     @staticmethod
     def get_builder_cls() -> type[QSAMetadataBuilder]:
-        return PreparedQSAMetadataBuilder if (getattr(current_platform, "vendor_name", None) == "metax") else QSAMetadataBuilder
+        return (
+            PreparedQSAMetadataBuilder
+            if (getattr(current_platform, "vendor_name", None) == "metax")
+            else QSAMetadataBuilder
+        )
 
     @staticmethod
     def get_kv_cache_shape(
@@ -704,7 +748,7 @@ class QSAKeyStateCache(_QSAStateCache):
                     f"{self._BF16_PER_INT64})"
                 )
             try:
-                kv_cache[..., self.rope_position_offset:].view(torch.int64)
+                kv_cache[..., self.rope_position_offset :].view(torch.int64)
             except RuntimeError as exc:
                 raise ValueError(
                     "QSA position cache cannot be viewed as int64 from the raw "
@@ -729,10 +773,13 @@ class QSAKeyStateCache(_QSAStateCache):
 
     def get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec:
         del vllm_config
-        if (getattr(current_platform, "vendor_name", None) == "metax"):
+        if getattr(current_platform, "vendor_name", None) == "metax":
             return FullAttentionSpec(
-                block_size=self.cache_config.block_size, num_kv_heads=1,
-                head_size=self.head_size, head_size_v=0, dtype=self.dtype,
+                block_size=self.cache_config.block_size,
+                num_kv_heads=1,
+                head_size=self.head_size,
+                head_size_v=0,
+                dtype=self.dtype,
             )
         spec_kwargs = dict(
             block_size=self.cache_config.block_size,

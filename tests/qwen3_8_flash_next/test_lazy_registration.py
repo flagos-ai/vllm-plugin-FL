@@ -143,7 +143,9 @@ class LazyRegistrationTest(unittest.TestCase):
         fake.install_qwen38_mtp_runtime_compat = lambda: events.append("install")
         with forbid_runtime_imports():
             worker = load_file(
-                "qwen38_lazy_worker", ROOT / "vllm_fl/worker/qwen3_8_flash_next.py"
+                "qwen38_lazy_worker",
+                ROOT / "vllm_fl/worker/qwen3_8_flash_next.py",
+                package=True,
             )
 
         class Runner:

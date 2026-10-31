@@ -51,7 +51,9 @@ UNSET_ENV = (
 )
 
 
-def build_config(model: str, mtp: str = "off") -> dict:
+def build_config(
+    model: str, mtp: str = "off", *, record_flaggems_ops: bool = False
+) -> dict:
     """Build one complete native configuration; no prior variant is mutated."""
     if mtp not in MTP_COUNTS:
         raise ValueError("MTP must be off, k1, k2 or k3")
@@ -82,9 +84,12 @@ def build_config(model: str, mtp: str = "off") -> dict:
         "disable_custom_all_reduce": True,
         "cudagraph_metrics": True,
         "additional_config": {
+            # Opt in for dispatch diagnosis; DEBUG records cost CPU even once.
+            "flaggems_record_ops": record_flaggems_ops,
             "qwen38_ngram_mode": "shared_buffer",
             "qwen38_mtp_graph": bool(k),
             "qwen38_qsa_length_buckets": True,
+            "qwen38_qsa_packing": not bool(k),
             "qwen38_tuning_profile": True,
         },
     }
@@ -173,6 +178,11 @@ def parser() -> argparse.ArgumentParser:
         "--model", default=os.environ.get("MODEL_PATH", "/models/Qwen3.8-Flash-Next")
     )
     p.add_argument("--mtp", choices=tuple(MTP_COUNTS), default="off")
+    p.add_argument(
+        "--record-flaggems-ops",
+        action="store_true",
+        help="Record rank-0 operator calls for diagnosis (adds CPU overhead)",
+    )
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=18170)
     p.add_argument("--served-model-name", default="qwen38")
@@ -200,7 +210,9 @@ def main() -> None:
         p.error(
             "Set QWEN38_FLAGGEMS_ROOT, QWEN38_FGV_ROOT, QWEN38_CACHE_ROOT or pass their CLI options"
         )
-    config = build_config(args.model, args.mtp)
+    config = build_config(
+        args.model, args.mtp, record_flaggems_ops=args.record_flaggems_ops
+    )
     command = native_command(
         config,
         host=args.host,

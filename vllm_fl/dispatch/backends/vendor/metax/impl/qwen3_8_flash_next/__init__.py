@@ -243,13 +243,67 @@ def qwen38_grdown_projection(x, weight):
     return torch.nn.functional.linear(x, weight)
 
 
+def qsa_sparse_paged_attention(
+    q,
+    k,
+    v,
+    indices,
+    table,
+    mapping,
+    scale,
+    out,
+    *,
+    split_workspace=None,
+    gate=None,
+    packed_workspace_cache=None,
+    pack_rows=None,
+):
+    from .qsa_packing import packed_attention
+
+    if packed_workspace_cache is not None and packed_attention(
+        q,
+        k,
+        v,
+        indices,
+        table,
+        mapping,
+        scale,
+        out,
+        gate,
+        packed_workspace_cache,
+        pack_rows,
+    ):
+        return out
+    portable.qsa_sparse_paged_attention(
+        q,
+        k,
+        v,
+        indices,
+        table,
+        mapping,
+        scale,
+        out,
+        split_workspace=split_workspace,
+    )
+    if gate is not None:
+        out.mul_(torch.sigmoid(gate))
+    return out
+
+
+def qwen38_grup_projection(x, weight):
+    from .mctlass_linear import linear_or_none
+
+    result = linear_or_none(x, weight)
+    return torch.nn.functional.linear(x, weight) if result is None else result
+
+
 def register_qwen38_operators(registry, *, is_platform_available):
     from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
     def available(name):
         if not is_platform_available():
             return False
-        if name == "qwen38_grdown_projection":
+        if name in {"qwen38_grdown_projection", "qwen38_grup_projection"}:
             return True
         if name == "qwen38_gdn_mixed_qkv":
             return True
@@ -288,8 +342,10 @@ def register_qwen38_operators(registry, *, is_platform_available):
                 "gdn_prefill",
                 "qsa_select_paged_tokens",
                 "qsa_sparse_split_count",
+                "qsa_sparse_paged_attention",
                 "qwen38_small_projection",
                 "qwen38_grdown_projection",
+                "qwen38_grup_projection",
                 "qwen38_ple_gate",
                 "qwen38_gdn_mixed_qkv",
             )

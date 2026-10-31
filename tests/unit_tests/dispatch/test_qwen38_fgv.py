@@ -229,8 +229,10 @@ def test_registration_preserves_default_and_scopes_vendor_difference():
         ("gdn_prefill", "vendor.metax.qwen38"),
         ("qsa_select_paged_tokens", "vendor.metax.qwen38"),
         ("qsa_sparse_split_count", "vendor.metax.qwen38"),
+        ("qsa_sparse_paged_attention", "vendor.metax.qwen38"),
         ("qwen38_small_projection", "vendor.metax.qwen38"),
         ("qwen38_grdown_projection", "vendor.metax.qwen38"),
+        ("qwen38_grup_projection", "vendor.metax.qwen38"),
         ("qwen38_ple_gate", "vendor.metax.qwen38"),
         ("qwen38_gdn_mixed_qkv", "vendor.metax.qwen38"),
     ]

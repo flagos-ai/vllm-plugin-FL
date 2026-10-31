@@ -35,49 +35,29 @@ is retained where applicable; that branch's HY4/T-Head changes are not imported.
 
 ## Runtime and operator dependencies
 
-This section is the deployment dependency reference. The tuning profile's
-manifest records its historical parameter provenance, not a complete current
-operator lock.
+The [operator composition](../../examples/qwen3_8_flash_next/metax_tuning/operator_dependencies.json)
+records the exact required files and hashes. The active tuning configuration
+checks its source guards before applying launch settings. The launcher only
+selects explicitly supplied package directories; it never installs, patches or
+rewrites third-party sources.
 
-| Dependency | Fixed reference or required status |
-|---|---|
-| vLLM 0.24.0 | [ee0da84](https://github.com/vllm-project/vllm/commit/ee0da84ab9e04ac7610e28580af62c365e898389), matching empty-target build |
-| FlagGems base | [5.3.5](https://github.com/flagos-ai/FlagGems/tree/v5.3.5), [a7620cc](https://github.com/flagos-ai/FlagGems/commit/a7620cc191a0b42e040194622c5758b22a7a25dc) |
-| MetaX index address-product fix | Widen indices before stride multiplication; [FG #7981](https://github.com/flagos-ai/FlagGems/pull/7981), published fix commit [5586276](https://github.com/flagos-ai/FlagGems/commit/55862761bd838e3de0f1ec39f3ba96674efa7d18). Apply only this index file/fix to the pinned FlagGems 5.3.5 base above; production file `flag_gems/runtime/backend/_metax/ops/index.py` SHA256 `e02c30372d8794968ad23a74f5099b65249dcc322ae706f53cb4804b327ed984`. |
-| FlagGems-vllm base | [0f3df8e](https://github.com/flagos-ai/FlagGems-vllm/commit/0f3df8ecbff9b48b2f8745c7160e0df8cb5486b5) |
-| PLE fix | [FGV #959](https://github.com/flagos-ai/FlagGems-vllm/pull/959), PLE file from [22194f0](https://github.com/flagos-ai/FlagGems-vllm/commit/22194f0b2ee0cebb51f945a20a157b82c4e19c65) |
-| MetaX inplace MoE fix | [FGV #1000](https://github.com/flagos-ai/FlagGems-vllm/pull/1000), [e04f51c](https://github.com/flagos-ai/FlagGems-vllm/commit/e04f51c1c7176d7a356838fdfa8b3dc4fbaf6f8a) |
-| Per-row TopK boundary fix | [FGV #1024](https://github.com/flagos-ai/FlagGems-vllm/pull/1024), published fixed delta [1a811eb](https://github.com/flagos-ai/FlagGems-vllm/commit/1a811ebc3280e51b63fdbeef9cab89029508731d) |
-| MetaX radix TopK | Required FGV candidate retained by the large-M route. Not published; a public fixed reference is pending. Production file `flaggems_vllm/runtime/backend/_metax/ops/radix_topk.py` SHA256 `f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e`. |
-| MetaX sampling filter | Private FGV apply_top_k_top_p API: MetaX source SHA256 4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4, generic source SHA256 275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84. Both sources and exports are guarded by the tuning profile; a public revision is pending. |
-| MetaX FG sort | Retained private sort.py from the previous sampling baseline, SHA256 87921767027917f1781f90450d70061d8e0605217df8663c991694d62dd05b31. The selected FGV filter uses native int32 sort. |
-| Torch / FlagTree | `2.10.0+metax3.8.1.0` / `0.6.1+metax3.6` |
-| MACA SDK / driver | 3.8.1.3 / 3.8.1 |
+The fixed framework is vLLM0.24.0 `ee0da84`, with FlagGems5.3.5
+`a7620cc` and FlagGems-vllm base `0f3df8e`. Retain the published component
+references FG#7981 (wide index products), FGV#959 (PLE), FGV#1000
+(inplace MoE), and FGV#1024 (per-row TopK); exact references are in the
+composition file. Native vLLM sources are unchanged by this optimization.
 
-Keep the matching runtime/ABI combination. Communication uses MCCL and
-torch.distributed; FlagCX is not used. The tested FGV composition applies the
-listed component fixes to the fixed base and retains the radix candidate; the
-references do not identify a single complete public release. Publicly
-reproducible installation remains pending the unpublished radix and sampling
-components. Source hashes identify the tested private composition, not public
-installable revisions.
+The measured assembly additionally requires private FGV radix, generic
+sampling fallback, Top20 filtering, race reduction, QSA packing and BF16
+MCTlass implementations, plus the FG index_select CPU-overhead fix.
 
-The current private validation bundle's
-hotspot-optimization-20261030/integrated/FINAL_SOURCE_MANIFEST_BEFORE_OMP4.json
-records 725 model files and 3,013 runtime files, including the operator source
-fingerprints above. Its model snapshot precedes this commit's configuration
-formatting, documentation and CPU regression tests; executable Python
-declarations and parsed runtime configuration are preserved.
-Historical `common/source-manifest.json` belongs to
-the earlier greedy diagnostics and records the prior index source; it does not
-identify the current assembly. These manifests are reproduction pointers for
-private evidence, not portable dependency locks. The launcher accepts explicitly
-selected package directories and checks their presence; it does not verify
-their revisions, install fixes, or rewrite operator source. Operator changes
-remain owned by FlagGems or FlagGems-vllm.
+These remain separate operator-library changes. The model submission carries
+integration, policy and fingerprints; it is not fully reproducible from public
+package versions alone. MCTlass requires the matching installed C ABI.
 
-[FGV #982](https://github.com/flagos-ai/FlagGems-vllm/pull/982) is a related
-compiler-capability solution; the inplace-MoE dependency above remains #1000.
+Use MetaX Torch2.10.0+metax3.8.1.0, FlagTree0.6.1+metax3.6,
+MACA SDK3.8.1.3 and driver3.8.1 as in the validation image. Communication
+continues to use MCCL/torch.distributed without FlagCX.
 
 ## Memory and state placement
 
@@ -125,21 +105,27 @@ Defaults remain available; scoped provider choices retain the previous runtime:
   disabling FlagOS globally. An operator-wide blacklist cannot express their
   shape and overload scope. The profile pins allow_tf32=false and
   allow_bf16_reduced_precision_reduction=false before warmup/capture.
-- MoE uses separate GEMM launch parameters for C550 BF16 E512/topk10,
-  H2560/local intermediate80 and M8..1024: G1 BM16/BN32/BK64/W4/S2,
-  G2 BM16/BN256/BK32/W4/S1, both GROUP_M1. Assignment uses BM16 once for
-  both stages. SiLU, BF16 boundaries and summation stay unchanged. Other
-  shapes, quantization, LoRA and bias retain the previous complete config.
-- Sparse QSA with BF16 [B,3,256], one local KV head and index width2051 uses
-  split16 for B1..32 and split8 for B33..64. Each layer owns graph-stable
-  workspaces; a capture-time cache miss keeps the single-kernel fallback.
-  This is ordinary split-KV, with no query/head packing.
-- Sampling calls FGV's deterministic filter when the API is available and
-  enabled, otherwise retaining the previous PyTorch fallback. The tested
-  FP32 [B,248320], B1..64 path uses full stable int32-key sorting and sparse
-  mask/scatter; kth ties, top-p semantics and the original full-vocabulary
-  RNG path are retained. This version does not include the subsequent
-  block-top20 or fused sampling candidates.
+- MoE retains the tuned BF16 G1/G2 fallback and assignment semantics.
+  For C550 E512/topk10/H2560/local intermediate80, M31..2048 may use
+  the pinned MCTlass G1 plan; M1024..2048 may also use its G2 plan.
+  Each GEMM consumes an assignment matching its own block-M. Small-M G2,
+  unsupported shapes, quantization, LoRA, bias and expert mapping retain
+  the validated fallback. Activation, router weighting and BF16 boundaries
+  are unchanged.
+- Scoped MCTlass projections select measured large-M shapes through
+  `mctlass_linear.py`; expert plans live in `mctlass_moe.py`. The library
+  owns C ABI execution and unit-scale buffers.
+- QSA BF16 [B,3,256] / one KV head / index width2051 uses reviewed
+  decode folding and request-aligned prefill packing from FGV. Each layer
+  owns graph-stable partial workspaces. Geometry and capture-time allocation
+  misses retain the split-KV fallback and gate boundary.
+- Sampling uses block Top20/top-p on FP32 [B,248320], B1..64, when CPU
+  metadata certifies top_k20. Other requests retain the generic FGV/native
+  filter. Native full-vocabulary exponential draws are preserved; only the
+  eligible race reduction is fused. Seeded generators and FP64-Gumbel
+  requests retain the native route. The positive-noise ContextVar is part
+  of the numerical contract, not an experimental counter.
+
 - The PLE gate computes sign in FP32 before returning to BF16. The rest of its
   rounding and operation order remains unchanged.
 - Mixed GDN gathering makes the QKV slice contiguous at the required boundary.
@@ -242,6 +228,23 @@ groups. The width buckets and KV-cache layout remain unchanged.
 
 ## Validation and historical performance
 
+### Current reviewed stage: Optimize MetaX sampled inference hot paths
+
+| Fixed workload | Comparison | Reviewed stage | Observed change |
+|---|---:|---:|---:|
+| P1024 / exact O1024 / C64 / N128 | 248.6844 tok/s | 307.1341 tok/s | +23.50% |
+
+Both use checkpoint T1/p.95/k20, MTP off, BF16 TP8 and OMP/Torch4.
+The numbers belong to the corresponding frozen source snapshots. Cleanup
+preserves tensor computations, parameters, fallbacks and defaults, and
+validates relocation with source equivalence and CPU contracts; it does not
+claim a new end-to-end measurement. Experimental module counters are removed
+from production; benchmark observers remain outside the model tree.
+Each mode has one formal measurement, not a stability or accuracy claim.
+
+The following records are historical milestones with their original scope.
+
+
 The records below retain their historical configuration and sampling provenance.
 Official sampling and default MTP off were introduced in 9fa633c.
 The following result measures the later integrated hotspot configuration,
@@ -257,7 +260,7 @@ round supplies throughput. All 128 requests per round completed with exactly
 1024 input and output tokens, no failures or preemption. ignore_eos is a
 benchmark-only request setting, not the serving default. This is the observed
 combined gain from one formal round per version, not per-operator attribution.
-The later sampling/QSA standalone candidates are excluded.
+That historical248.6844 version excluded the later sampling/QSA candidates; the current reviewed stage includes them.
 
 Private evidence: report36, hotspot-optimization-20261030/integrated/results/fixed-p1k,
 the source manifest above, and FINAL_SOURCE_VERIFICATION_AFTER.json.

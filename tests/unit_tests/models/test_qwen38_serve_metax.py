@@ -60,9 +60,11 @@ def test_mtp_configuration_contract(launcher, mode, k):
     assert config["enable_prefix_caching"] is False
     assert config["async_scheduling"] is False
     assert config["additional_config"] == {
+        "flaggems_record_ops": False,
         "qwen38_ngram_mode": "shared_buffer",
         "qwen38_mtp_graph": bool(k),
         "qwen38_qsa_length_buckets": True,
+        "qwen38_qsa_packing": k == 0,
         "qwen38_tuning_profile": True,
     }
     buckets = [(k + 1) * value for value in (1, 2, 4, 8, 16, 32, 64)]
@@ -315,3 +317,25 @@ def test_native_parser_and_checkpoint_sampling_in_cpu_subprocess(tmp_path):
         "sampling": ["RANDOM", "RANDOM"],
         "cuda_initialized": False,
     }
+
+
+def test_operator_logging_default_and_explicit_opt_in(
+    launcher, launch_paths, monkeypatch, capsys
+):
+    for mode in launcher.MTP_COUNTS:
+        assert (
+            launcher.build_config("/model", mode)["additional_config"][
+                "flaggems_record_ops"
+            ]
+            is False
+        )
+        assert (
+            launcher.build_config("/model", mode, record_flaggems_ops=True)[
+                "additional_config"
+            ]["flaggems_record_ops"]
+            is True
+        )
+    monkeypatch.setattr(sys, "argv", [str(LAUNCHER), "--record-flaggems-ops"])
+    launcher.main()
+    record, _ = json.JSONDecoder().raw_decode(capsys.readouterr().out)
+    assert record["config"]["additional_config"]["flaggems_record_ops"] is True

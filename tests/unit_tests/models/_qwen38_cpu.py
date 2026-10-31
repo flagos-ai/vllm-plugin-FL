@@ -114,9 +114,17 @@ ple = declarations(
         "resolve_op": lambda name: None,
     },
 )
+sampling_metadata = declarations(
+    ROOT / "vllm_fl/worker/qwen3_8_flash_next_sampling.py",
+    "qwen_cpu_sampling_metadata",
+)
+worker_namespace = {
+    "install_sampling_contract": sampling_metadata.install_sampling_contract
+}
 worker = declarations(
     ROOT / "vllm_fl/worker/qwen3_8_flash_next.py",
     "qwen_cpu_worker",
+    worker_namespace,
 )
 
 # This fixture exercises the MetaX worker contract without loading a device.
