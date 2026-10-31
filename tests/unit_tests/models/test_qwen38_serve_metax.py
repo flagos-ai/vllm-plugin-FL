@@ -61,6 +61,10 @@ def test_mtp_configuration_contract(launcher, mode, k):
     assert config["async_scheduling"] is False
     assert config["additional_config"] == {
         "flaggems_record_ops": False,
+        "qwen38_fused_qsa_metadata": not bool(k),
+        "qwen38_fused_gemma_norm": not bool(k),
+        "qwen38_reuse_gdn_metadata": not bool(k),
+        "qwen38_ple_cpu_metadata": not bool(k),
         "qwen38_ngram_mode": "shared_buffer",
         "qwen38_mtp_graph": bool(k),
         "qwen38_qsa_length_buckets": True,

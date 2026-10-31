@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU contracts for the optimized paths; GPU arithmetic stays in pinned libraries."""
 
+import importlib.util
 import sys
 from bisect import bisect_right
 from types import ModuleType, SimpleNamespace as NS
@@ -161,3 +162,33 @@ def test_native_rng_context_restores_after_an_exception():
         module._random_sample(tensor((64, 248320), torch.float32), {})
     assert seen == [True] and not module._POSITIVE_NATIVE_NOISE.get()
     assert module._sample_with_exponential_noise(object(), object()) == "native_noise"
+
+
+def test_packing_metadata_cache_is_scoped_and_cleared_on_error(monkeypatch):
+    path = ROOT / "vllm_fl/models/qwen3_8_flash_next/common/qsa_packing.py"
+    spec = importlib.util.spec_from_file_location("qwen_review_pack_cache", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    calls = []
+
+    class Rows:
+        def to(self, *args, **kwargs):
+            return self
+
+    def make(*args, **kwargs):
+        calls.append(1)
+        return Rows()
+
+    # Only the metadata upload is substituted; the real grouping and ContextVar run.
+    monkeypatch.setattr(module, "torch", NS(tensor=make, int32=torch.int32))
+    starts = torch.tensor([0, 3])
+    lengths = torch.tensor([5])
+    with pytest.raises(RuntimeError, match="scope"):
+        with module.qsa_metadata_build_scope():
+            a = module._cached_pack_rows(starts, lengths, 3, "cpu")
+            assert module._cached_pack_rows(starts, lengths, 3, "cpu") is a
+            raise RuntimeError("scope")
+    assert module._QSA_PACK_ROWS_CACHE.get() is None
+    with module.qsa_metadata_build_scope():
+        assert module._cached_pack_rows(starts, lengths, 3, "cpu") is not a
+    assert len(calls) == 2

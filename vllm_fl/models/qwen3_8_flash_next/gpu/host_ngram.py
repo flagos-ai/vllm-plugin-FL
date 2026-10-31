@@ -16,10 +16,14 @@ from vllm.distributed import (
 )
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
+from ..common.ple import (
+    _PLE_LAYER_PRIME,
+    _SPLITMIX_GAMMA,
+    _nth_prime_after,
+    _splitmix64,
+    copy_ple_embedding_shard_,
+)
 from vllm_fl.models.qwen3_8_flash_next.config import Qwen3_8FlashNextTextConfig
-from ..common.ple import copy_ple_embedding_shard_
-
-from ..common.ple import _MASK64, _SPLITMIX_GAMMA, _PLE_LAYER_PRIME, _splitmix64, _nth_prime_after
 
 
 class HostVocabEmbedding(nn.Module):
@@ -50,7 +54,9 @@ class HostVocabEmbedding(nn.Module):
             org_vocab_end_index=(tp_rank + 1) * rows,
         )
         self.weight = nn.Parameter(
-            torch.empty(rows if allocate else 0, embedding_dim, dtype=dtype, device="cpu"),
+            torch.empty(
+                rows if allocate else 0, embedding_dim, dtype=dtype, device="cpu"
+            ),
             requires_grad=False,
         )
 
@@ -103,38 +109,33 @@ def compute_ngram_ids_cpu(
     if vocab_sizes.numel() != num_heads or vocab_offsets.numel() != num_heads:
         raise ValueError("N-gram hash head metadata has inconsistent sizes")
     out = torch.empty(ids.numel(), num_heads, dtype=torch.int64, device="cpu")
-    for req, (begin, end) in enumerate(zip(starts, starts[1:])):
-        if begin == end:
-            continue
-        tokens = torch.cat((context[req].to(torch.int64), ids[begin:end]))
-        positions = torch.arange(tokens.numel(), dtype=torch.int64)
-        eos_pos = torch.where(tokens == eos_token_id, positions, -1)
-        previous_eos = torch.cat(
-            (eos_pos.new_full((1,), -1), torch.cummax(eos_pos, dim=0).values[:-1])
+    if ids.numel() == 0:
+        return out
+    # Map packed tokens to their request, without padding requests to a common
+    # length. right=True skips empty requests at repeated query offsets.
+    positions = torch.arange(ids.numel(), dtype=torch.int64, device="cpu")
+    offsets = query_start_loc.to(torch.int64).contiguous()
+    requests = torch.bucketize(positions, offsets[1:], right=True)
+    local_positions = positions - offsets[requests]
+    history = context.to(torch.int64)
+    valid_history = torch.ones_like(positions, dtype=torch.bool)
+    mixed = ids * multipliers[0]
+    for shift in range(1, ngram_size):
+        from_query = ids[(positions - shift).clamp_min(0)]
+        history_positions = (ngram_size - 1 + local_positions - shift).clamp_max(
+            ngram_size - 2
         )
-        distance = positions - previous_eos - 1
-        shifted = [tokens]
-        for shift in range(1, ngram_size):
-            source = positions - shift
-            values = tokens[source.clamp_min(0)]
-            shifted.append(
-                torch.where(
-                    (source >= 0) & (distance >= shift),
-                    values,
-                    values.new_full((), eos_token_id),
-                )
-            )
-        mixed = shifted[0] * multipliers[0]
-        for order in range(2, ngram_size + 1):
-            mixed = torch.bitwise_xor(
-                mixed, shifted[order - 1] * multipliers[order - 1]
-            )
-            h = (order - 2) * heads_per_ngram
-            v = mixed[ngram_size - 1 :].unsqueeze(-1)
-            out[begin:end, h : h + heads_per_ngram] = (
-                torch.remainder(v, vocab_sizes[h : h + heads_per_ngram])
-                + vocab_offsets[h : h + heads_per_ngram]
-            )
+        from_context = history[requests, history_positions]
+        previous = torch.where(local_positions >= shift, from_query, from_context)
+        # Once EOS occurs, all older tokens are replaced by EOS as well.
+        valid_history &= previous != eos_token_id
+        previous = torch.where(valid_history, previous, eos_token_id)
+        mixed = torch.bitwise_xor(mixed, previous * multipliers[shift])
+        h = (shift - 1) * heads_per_ngram
+        out[:, h : h + heads_per_ngram] = (
+            torch.remainder(mixed.unsqueeze(-1), vocab_sizes[h : h + heads_per_ngram])
+            + vocab_offsets[h : h + heads_per_ngram]
+        )
     return out
 
 
@@ -186,13 +187,19 @@ class HostNGramEmbedding(nn.Module):
         if host_lookup_mode == "shared_buffer":
             from vllm.distributed import get_tp_group
             from vllm.distributed.parallel_state import in_the_same_node_as
+
             from vllm_fl.models.qwen3_8_flash_next.host_lookup import SharedNgramBuffer
 
             group = get_tp_group()
             if group.world_size > 1 and not all(in_the_same_node_as(group.cpu_group)):
-                raise NotImplementedError("Shared N-gram results require one TP host/IPC namespace")
+                raise NotImplementedError(
+                    "Shared N-gram results require one TP host/IPC namespace"
+                )
             self._shared_lookup = SharedNgramBuffer(
-                group, max_total_tokens, embedding_dim, params_dtype,
+                group,
+                max_total_tokens,
+                embedding_dim,
+                params_dtype,
             )
         bound = max(1, (((1 << 63) - 1) // self.unigram_vocab_size) // 2)
         seed = (
@@ -280,15 +287,20 @@ class HostNGramEmbedding(nn.Module):
             self._copy_event.synchronize()
         self.prepared_embeddings.zero_()
         if self._shared_lookup is not None and not dummy:
+
             def produce(rows):
                 starts = query_start_loc.detach().to(device="cpu", dtype=torch.int64)
                 nreq, actual = starts.numel() - 1, int(starts[-1])
                 if nreq > self.max_num_reqs or not 0 <= actual <= capacity:
                     raise ValueError("PLE request/token count exceeds fixed buffers")
                 ids = input_ids[:actual].detach().to(device="cpu", dtype=torch.int64)
-                context = ngram_context[:nreq].detach().to(device="cpu", dtype=torch.int64)
+                context = (
+                    ngram_context[:nreq].detach().to(device="cpu", dtype=torch.int64)
+                )
                 hashed = compute_ngram_ids_cpu(
-                    ids, starts, context,
+                    ids,
+                    starts,
+                    context,
                     multipliers=self.layer_multipliers,
                     vocab_sizes=self.ngram_heads_vocab_sizes,
                     vocab_offsets=self.ngram_heads_offsets,
@@ -297,20 +309,29 @@ class HostNGramEmbedding(nn.Module):
                 )
                 if actual:
                     torch.index_select(
-                        self.ngram_embedding.weight, 0, hashed.reshape(-1),
+                        self.ngram_embedding.weight,
+                        0,
+                        hashed.reshape(-1),
                         out=rows[:actual].view(-1, self.head_dim),
                     )
                 return actual
 
             actual = self._shared_lookup.exchange(
-                produce, self._host_stage.reshape(-1, self.embedding_dim), capacity,
+                produce,
+                self._host_stage.reshape(-1, self.embedding_dim),
+                capacity,
             )
             if actual:
                 target = self.prepared_embeddings[:actual]
-                target.copy_(self._host_stage[:actual].reshape(actual, self.embedding_dim), non_blocking=True)
+                target.copy_(
+                    self._host_stage[:actual].reshape(actual, self.embedding_dim),
+                    non_blocking=True,
+                )
                 if target.device.type != "cpu":
                     if self._copy_event is None:
-                        self._copy_event = torch.get_device_module(target.device.type).Event()
+                        self._copy_event = torch.get_device_module(
+                            target.device.type
+                        ).Event()
                     self._copy_event.record()
             self._prepared = True
             self._prepared_capacity = capacity

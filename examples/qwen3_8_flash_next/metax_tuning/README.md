@@ -42,3 +42,4 @@ fallbacks. See the model guide and
 [operator composition](operator_dependencies.json) for shapes, dependencies
 and historical measured results. Experiment counters and benchmark RPCs are
 not part of the serving path.
+Host preparation additionally batches PLE hashing and reuses GDN/QSA metadata; no CPU-affinity or GC-policy change is selected.

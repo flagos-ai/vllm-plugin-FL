@@ -142,7 +142,16 @@ def qsa_select_paged_tokens(
             indices = torch.where(
                 visible[:, None] <= block_topk, ascending, selected.to(torch.int32)
             )
-    return portable.expand_qsa_block_indices(
+    # QSA block/tail semantics are model-owned. Fuse only this composition;
+    # keep individual FG operators available to all other consumers.
+    expand = portable.expand_qsa_block_indices
+    if indices.is_cuda and sequence_lengths.numel():
+        from vllm_fl.models.qwen3_8_flash_next.gpu.ops.qsa import (
+            expand_qsa_block_indices,
+        )
+
+        expand = expand_qsa_block_indices
+    return expand(
         indices,
         query_positions,
         sequence_lengths,

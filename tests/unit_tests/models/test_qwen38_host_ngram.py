@@ -222,3 +222,60 @@ def test_shared_consumer_validates_checkpoint_without_allocating_table(monkeypat
     assert model.ngram_embedding.weight.numel() == 0
     with pytest.raises(ValueError, match="Shape mismatch"):
         model.load_weights([("ngram_embedding.shard_0.weight", torch.zeros(1, 4))])
+
+
+@pytest.mark.parametrize("order,heads", [(2, 1), (3, 8), (4, 2), (6, 1)])
+def test_packed_hash_with_empty_requests_strides_and_signed_overflow(order, heads):
+    generator = torch.Generator().manual_seed(311 + order)
+    lengths = [0, 1, 0, 17, 1, 33, 0]
+    starts = [0]
+    for length in lengths:
+        starts.append(starts[-1] + length)
+    ids = torch.randint(0, 12, (starts[-1], 2), generator=generator)[:, 0]
+    context = torch.randint(0, 12, (len(lengths), order - 1, 2), generator=generator)[
+        ..., 0
+    ]
+    offsets = torch.tensor([[s, s] for s in starts], dtype=torch.int32)[:, 0]
+    ids[::7] = 9
+    context[::2] = 9
+    multipliers = torch.tensor([2**62 + 3 + 2 * i for i in range(order)])
+    sizes = torch.arange((order - 1) * heads, dtype=torch.int64) + 23
+    vocab_offsets = sizes.cumsum(0) - sizes
+    actual = ngram.compute_ngram_ids_cpu(
+        ids,
+        offsets,
+        context,
+        multipliers=multipliers,
+        vocab_sizes=sizes,
+        vocab_offsets=vocab_offsets,
+        heads_per_ngram=heads,
+        eos_token_id=9,
+    )
+    expected = oracle(
+        ids.tolist(),
+        starts,
+        context.tolist(),
+        multipliers.tolist(),
+        sizes.tolist(),
+        vocab_offsets.tolist(),
+        heads,
+        9,
+    )
+    assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("requests", [0, 3])
+def test_empty_packed_hash_has_exact_shape(requests):
+    actual = ngram.compute_ngram_ids_cpu(
+        torch.empty(0, dtype=torch.int64),
+        torch.zeros(requests + 1, dtype=torch.int64),
+        torch.full((requests, 2), 9, dtype=torch.int64),
+        multipliers=torch.tensor([5, 7, 11]),
+        vocab_sizes=torch.tensor([23, 29]),
+        vocab_offsets=torch.tensor([0, 23]),
+        heads_per_ngram=1,
+        eos_token_id=9,
+    )
+    assert actual.shape == (0, 2)
+    assert actual.dtype == torch.int64
+    assert actual.device.type == "cpu"

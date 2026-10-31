@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import torch
 from torch import nn
 
@@ -15,7 +17,9 @@ from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
     causal_conv1d_update,
     is_conv_state_dim_first as is_gdn_conv_state_dim_first,
 )
+from vllm.platforms import current_platform
 from vllm.v1.attention.backends.gdn_attn import (
+    NULL_BLOCK_ID,
     GDNAttentionBackend,
     GDNAttentionMetadataBuilder,
 )
@@ -25,6 +29,58 @@ from vllm_fl.dispatch import resolve_op
 
 class Qwen38GDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
     """Restore the accepted state even when this step has no draft tokens."""
+
+    def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
+        super().__init__(kv_cache_spec, layer_names, vllm_config, device)
+        self.supports_update_block_table = bool(
+            vllm_config.additional_config.get("qwen38_reuse_gdn_metadata", False)
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and device.type == "cuda"
+            and self.speculative_config is None
+            and vllm_config.cache_config.mamba_cache_mode == "none"
+            and self.gdn_prefill_backend == "triton"
+        )
+
+    def update_block_table(self, metadata, blk_table, slot_mapping):
+        """Use MRV1's per-step cache; every group keeps its own state addresses."""
+        del slot_mapping  # Mamba cache mode none reads column zero of its table.
+        if (
+            not self.supports_update_block_table
+            or metadata.spec_sequence_masks is not None
+        ):
+            raise RuntimeError(
+                "GDN metadata reuse requires non-speculative cache mode none"
+            )
+        if blk_table.ndim != 2 or blk_table.shape[1] < 1:
+            raise ValueError("GDN cache group requires a state block column")
+        indices = blk_table[:, 0]
+        query_starts = metadata.non_spec_query_start_loc
+        if (
+            self.use_full_cuda_graph
+            and metadata.num_prefills == 0
+            and metadata.num_spec_decodes == 0
+            and metadata.num_decodes <= self.decode_cudagraph_max_bs
+        ):
+            # Capture uses this builder's fixed buffers. Updating only the
+            # returned Python metadata would leave captured graph inputs stale.
+            batch_size = metadata.non_spec_state_indices_tensor.numel()
+            count = metadata.num_decodes
+            self.non_spec_state_indices_tensor[:count].copy_(indices, non_blocking=True)
+            indices = self.non_spec_state_indices_tensor[:batch_size]
+            indices[count:].fill_(NULL_BLOCK_ID)
+            self.non_spec_query_start_loc[: batch_size + 1].copy_(
+                query_starts, non_blocking=True
+            )
+            query_starts = self.non_spec_query_start_loc[: batch_size + 1]
+        prefill_indices = None
+        if metadata.num_prefills > 0:
+            prefill_indices = indices[metadata.num_decodes :]
+        return replace(
+            metadata,
+            non_spec_state_indices_tensor=indices,
+            non_spec_query_start_loc=query_starts,
+            prefill_state_indices=prefill_indices,
+        )
 
     def build(
         self,

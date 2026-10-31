@@ -245,6 +245,10 @@
     {
       "path": "runtime/backend/_metax/ops/index_select.py",
       "sha256": "a403e7a46f5596d0fb251fd6c806a3f36be81a7acfd04a74fe066d44c03e7147"
+    },
+    {
+      "path": "runtime/backend/_metax/ops/index_put.py",
+      "sha256": "11cec2ff61c7ff59aac54f93c4280226e46177c757e01fa8cd054d67e78e7db2"
     }
   ],
   "flaggems_vllm": [

@@ -38,7 +38,7 @@ from vllm.v1.kv_cache_interface import (
     MLAAttentionSpec,
 )
 
-from .qsa_packing import qsa_pack_row_groups
+from .qsa_packing import _cached_pack_rows
 
 
 def _spec_supports_block_stride_flag() -> bool:
@@ -469,6 +469,11 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
             else 1
         )
         self.storage_block_size = kv_cache_spec.storage_block_size
+        self.fused_metadata_enabled = (
+            vllm_config.additional_config.get("qwen38_fused_qsa_metadata", False)
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and device.type == "cuda"
+        )
         self.length_buckets = bool(
             vllm_config.additional_config.get("qwen38_qsa_length_buckets", False)
         )
@@ -498,57 +503,83 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
     ) -> PreparedQSAForwardMetadata:
         del common_prefix_len, fast_build
         num_tokens = common_attn_metadata.num_actual_tokens
-        token_to_req_fn = getattr(common_attn_metadata, "token_to_req_indices", None)
-        if token_to_req_fn is not None:
-            token_to_req = token_to_req_fn(self.token_to_req_buffer)[:num_tokens]
-        else:
-            # vLLM 0.24 predates the cached convenience method. Reproduce the
-            # same device-side mapping without changing CommonAttentionMetadata.
-            num_mapped = int(common_attn_metadata.query_start_loc_cpu[-1])
-            query_lens = (
-                common_attn_metadata.query_start_loc[1:]
-                - common_attn_metadata.query_start_loc[:-1]
-            )
-            mapped = torch.repeat_interleave(
-                torch.arange(
-                    query_lens.shape[0],
-                    dtype=torch.int32,
-                    device=self.token_to_req_buffer.device,
-                ),
-                query_lens,
-                output_size=num_mapped,
-            )
-            self.token_to_req_buffer[:num_mapped].copy_(mapped)
-            if num_mapped < num_tokens:
-                self.token_to_req_buffer[num_mapped:num_tokens].zero_()
-            token_to_req = self.token_to_req_buffer[:num_tokens]
-        num_mapped_tokens = int(common_attn_metadata.query_start_loc_cpu[-1])
+        token_to_req = self.token_to_req_buffer[:num_tokens]
         logical_positions = self.logical_positions_buffer[:num_tokens]
-        logical_positions[:num_mapped_tokens].copy_(
-            _logical_positions(
+        slot_mapping = (
+            common_attn_metadata.slot_mapping[:num_tokens]
+            if self.compress_ratio == 1
+            else self.slot_mapping_buffer[:num_tokens]
+        )
+        fused = False
+        if self.fused_metadata_enabled:
+            from ..gpu.ops.qsa import build_qsa_forward_metadata
+
+            fused = build_qsa_forward_metadata(
+                token_to_req,
                 common_attn_metadata.query_start_loc,
                 common_attn_metadata.seq_lens,
-                token_to_req[:num_mapped_tokens],
-                num_mapped_tokens,
-                self.arange_buffer,
-            )
-        )
-        if num_mapped_tokens < num_tokens:
-            logical_positions[num_mapped_tokens:].fill_(-1)
-        if self.compress_ratio == 1:
-            slot_mapping = common_attn_metadata.slot_mapping[:num_tokens]
-        else:
-            slot_mapping = compressed_qsa_slot_mapping(
                 common_attn_metadata.block_table_tensor,
-                token_to_req,
+                common_attn_metadata.slot_mapping[:num_tokens],
                 logical_positions,
+                self.slot_mapping_buffer[:num_tokens],
                 self.storage_block_size,
                 self.compress_ratio,
-                self.slot_mapping_buffer,
+                allow_uncompressed=True,
             )
-            slot_mapping.masked_fill_(
-                common_attn_metadata.slot_mapping[:num_tokens] < 0, -1
+        if not fused:
+            token_to_req_fn = getattr(
+                common_attn_metadata, "token_to_req_indices", None
             )
+            if token_to_req_fn is not None:
+                token_to_req = token_to_req_fn(self.token_to_req_buffer)[:num_tokens]
+            else:
+                # vLLM 0.24 predates the cached convenience method. Reproduce the
+                # same device-side mapping without changing CommonAttentionMetadata.
+                num_mapped = int(common_attn_metadata.query_start_loc_cpu[-1])
+                query_lens = (
+                    common_attn_metadata.query_start_loc[1:]
+                    - common_attn_metadata.query_start_loc[:-1]
+                )
+                mapped = torch.repeat_interleave(
+                    torch.arange(
+                        query_lens.shape[0],
+                        dtype=torch.int32,
+                        device=self.token_to_req_buffer.device,
+                    ),
+                    query_lens,
+                    output_size=num_mapped,
+                )
+                self.token_to_req_buffer[:num_mapped].copy_(mapped)
+                if num_mapped < num_tokens:
+                    self.token_to_req_buffer[num_mapped:num_tokens].zero_()
+                token_to_req = self.token_to_req_buffer[:num_tokens]
+            num_mapped_tokens = int(common_attn_metadata.query_start_loc_cpu[-1])
+            logical_positions = self.logical_positions_buffer[:num_tokens]
+            logical_positions[:num_mapped_tokens].copy_(
+                _logical_positions(
+                    common_attn_metadata.query_start_loc,
+                    common_attn_metadata.seq_lens,
+                    token_to_req[:num_mapped_tokens],
+                    num_mapped_tokens,
+                    self.arange_buffer,
+                )
+            )
+            if num_mapped_tokens < num_tokens:
+                logical_positions[num_mapped_tokens:].fill_(-1)
+            if self.compress_ratio == 1:
+                slot_mapping = common_attn_metadata.slot_mapping[:num_tokens]
+            else:
+                slot_mapping = compressed_qsa_slot_mapping(
+                    common_attn_metadata.block_table_tensor,
+                    token_to_req,
+                    logical_positions,
+                    self.storage_block_size,
+                    self.compress_ratio,
+                    self.slot_mapping_buffer,
+                )
+                slot_mapping.masked_fill_(
+                    common_attn_metadata.slot_mapping[:num_tokens] < 0, -1
+                )
         columns = None
         if self.length_buckets and self.compress_ratio > 1:
             capacity = (
@@ -575,16 +606,12 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
         ):
             # Under synchronous MTP-off this existing CPU mirror is exact.
             # Do not call the deprecated property that can synchronize CUDA.
-            groups = qsa_pack_row_groups(
-                common_attn_metadata.query_start_loc_cpu.tolist(),
-                seq_cpu.tolist(),
+            pack_rows = _cached_pack_rows(
+                common_attn_metadata.query_start_loc_cpu,
+                seq_cpu,
                 num_tokens,
+                self.token_to_req_buffer.device,
             )
-            if groups:
-                cpu_rows = torch.tensor(groups, dtype=torch.int32, pin_memory=True)
-                pack_rows = cpu_rows.to(
-                    self.token_to_req_buffer.device, non_blocking=True
-                )
 
         return PreparedQSAForwardMetadata(
             block_table=common_attn_metadata.block_table_tensor,

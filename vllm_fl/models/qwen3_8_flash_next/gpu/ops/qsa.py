@@ -6,17 +6,19 @@ from __future__ import annotations
 
 import torch
 from flaggems_vllm import (
-    qsa_mqa_paged,
-    qsa_store_cache_rows,
-    qsa_store_kv_cache_rows,
     qsa_compress_groups_with_ratio,
     qsa_compress_norm_mrope_store_groups,
+    qsa_mqa_paged,
     qsa_sparse_paged_attention as _qsa_sparse_paged_attention,
     qsa_sparse_split_count,
+    qsa_store_cache_rows,
+    qsa_store_kv_cache_rows,
 )
+
 from vllm.triton_utils import HAS_TRITON, tl, triton
 
 _LOGITS_WORKSPACE_BYTES = 128 * 1024 * 1024
+
 
 def _is_triton_device(tensor: torch.Tensor) -> bool:
     """Treat every non-host accelerator supported by FlagTree as eligible."""
@@ -24,12 +26,10 @@ def _is_triton_device(tensor: torch.Tensor) -> bool:
     return HAS_TRITON and tensor.device.type not in ("cpu", "meta")
 
 
-
 def qsa_forward_metadata_triton_supported(device: torch.device) -> bool:
     """Return whether this process can launch the vendor-neutral Triton path."""
 
     return HAS_TRITON and device.type not in ("cpu", "meta")
-
 
 
 @triton.jit
@@ -100,8 +100,8 @@ def _build_qsa_forward_metadata_kernel(
         other=0,
     ).to(tl.int64)
 
-    logical_positions = sequence_lengths - (query_ends - query_starts) + (
-        rows - query_starts
+    logical_positions = (
+        sequence_lengths - (query_ends - query_starts) + (rows - query_starts)
     )
     stored_positions = tl.where(mapped, logical_positions, -1)
     tl.store(
@@ -115,38 +115,44 @@ def _build_qsa_forward_metadata_kernel(
         mask=row_mask,
         other=-1,
     ).to(tl.int64)
-    nonnegative_positions = tl.maximum(logical_positions, 0)
-    compressed_positions = nonnegative_positions // COMPRESS_RATIO
-    logical_blocks = compressed_positions // STORAGE_BLOCK_SIZE
-    block_valid = (logical_blocks >= 0) & (logical_blocks < TABLE_WIDTH)
-    safe_blocks = tl.maximum(0, tl.minimum(logical_blocks, TABLE_WIDTH - 1))
-    physical_blocks = tl.load(
-        block_table_ptr
-        + safe_requests * block_table_req_stride
-        + safe_blocks * block_table_block_stride,
-        mask=mapped & block_valid,
-        other=-1,
-    ).to(tl.int64)
+    if COMPRESS_RATIO == 1:
+        tl.store(
+            qsa_slot_mapping_ptr + rows * qsa_slot_mapping_stride,
+            common_slots,
+            mask=row_mask,
+        )
+    else:
+        nonnegative_positions = tl.maximum(logical_positions, 0)
+        compressed_positions = nonnegative_positions // COMPRESS_RATIO
+        logical_blocks = compressed_positions // STORAGE_BLOCK_SIZE
+        block_valid = (logical_blocks >= 0) & (logical_blocks < TABLE_WIDTH)
+        safe_blocks = tl.maximum(0, tl.minimum(logical_blocks, TABLE_WIDTH - 1))
+        physical_blocks = tl.load(
+            block_table_ptr
+            + safe_requests * block_table_req_stride
+            + safe_blocks * block_table_block_stride,
+            mask=mapped & block_valid,
+            other=-1,
+        ).to(tl.int64)
 
-    complete_group = ((logical_positions + 1) % COMPRESS_RATIO) == 0
-    slot_valid = (
-        mapped
-        & (common_slots >= 0)
-        & (logical_positions >= 0)
-        & complete_group
-        & block_valid
-        & (physical_blocks >= 0)
-    )
-    compressed_slots = (
-        physical_blocks * STORAGE_BLOCK_SIZE
-        + compressed_positions % STORAGE_BLOCK_SIZE
-    )
-    tl.store(
-        qsa_slot_mapping_ptr + rows * qsa_slot_mapping_stride,
-        tl.where(slot_valid, compressed_slots, -1),
-        mask=row_mask,
-    )
-
+        complete_group = ((logical_positions + 1) % COMPRESS_RATIO) == 0
+        slot_valid = (
+            mapped
+            & (common_slots >= 0)
+            & (logical_positions >= 0)
+            & complete_group
+            & block_valid
+            & (physical_blocks >= 0)
+        )
+        compressed_slots = (
+            physical_blocks * STORAGE_BLOCK_SIZE
+            + compressed_positions % STORAGE_BLOCK_SIZE
+        )
+        tl.store(
+            qsa_slot_mapping_ptr + rows * qsa_slot_mapping_stride,
+            tl.where(slot_valid, compressed_slots, -1),
+            mask=row_mask,
+        )
 
 
 def build_qsa_forward_metadata(
@@ -159,6 +165,8 @@ def build_qsa_forward_metadata(
     qsa_slot_mapping: torch.Tensor,
     storage_block_size: int,
     compress_ratio: int,
+    *,
+    allow_uncompressed: bool = False,
 ) -> bool:
     """Try the graph-safe QSA metadata builder.
 
@@ -170,10 +178,14 @@ def build_qsa_forward_metadata(
     never enters this kernel because that cache aliases vLLM's common slots.
     """
 
-    if compress_ratio == 1 or not _is_triton_device(token_to_req):
+    if (compress_ratio == 1 and not allow_uncompressed) or not _is_triton_device(
+        token_to_req
+    ):
         return False
     if storage_block_size <= 0 or compress_ratio <= 0:
-        raise ValueError("QSA metadata block size and compression ratio must be positive")
+        raise ValueError(
+            "QSA metadata block size and compression ratio must be positive"
+        )
     rows = token_to_req.numel()
     if (
         token_to_req.ndim != 1
@@ -203,7 +215,7 @@ def build_qsa_forward_metadata(
         raise ValueError("QSA metadata tensors must be on the same device")
     if rows == 0:
         return True
-    if seq_lens.numel() == 0 or block_table.shape[1] == 0:
+    if seq_lens.numel() == 0 or (compress_ratio > 1 and block_table.shape[1] == 0):
         return False
 
     block = 256
@@ -234,7 +246,6 @@ def build_qsa_forward_metadata(
     return True
 
 
-
 @triton.jit
 def _expand_qsa_indices_kernel(
     block_indices_ptr,
@@ -246,6 +257,9 @@ def _expand_qsa_indices_kernel(
     stride_blocks_column,
     stride_output_row,
     stride_output_column,
+    stride_positions,
+    stride_lengths,
+    stride_requests,
     rows,
     num_requests,
     BLOCK_TOPK: tl.constexpr,
@@ -256,24 +270,24 @@ def _expand_qsa_indices_kernel(
 ) -> None:
     row = tl.program_id(0)
     columns = tl.program_id(1) * COLUMN_BLOCK + tl.arange(0, COLUMN_BLOCK)
-    query_position = tl.load(query_positions_ptr + row)
-    request = tl.load(token_to_req_ptr + row)
+    query_position = tl.load(query_positions_ptr + row * stride_positions).to(tl.int64)
+    request = tl.load(token_to_req_ptr + row * stride_requests).to(tl.int64)
     safe_request = tl.minimum(tl.maximum(request, 0), num_requests - 1)
     sequence_length = tl.load(
-        sequence_lengths_ptr + safe_request,
+        sequence_lengths_ptr + safe_request * stride_lengths,
         mask=(request >= 0) & (request < num_requests),
         other=0,
-    )
+    ).to(tl.int64)
     complete_blocks = tl.minimum(
         tl.minimum(
-            (query_position + 1) // COMPRESS_RATIO,
-            sequence_length // COMPRESS_RATIO,
+            tl.maximum(query_position + 1, 0) // COMPRESS_RATIO,
+            tl.maximum(sequence_length, 0) // COMPRESS_RATIO,
         ),
         BLOCK_TOPK,
     )
     expanded_count = complete_blocks * COMPRESS_RATIO
-    tail_start = ((query_position + 1) // COMPRESS_RATIO) * COMPRESS_RATIO
-    tail_count = (query_position + 1) - tail_start
+    tail_start = (tl.maximum(query_position + 1, 0) // COMPRESS_RATIO) * COMPRESS_RATIO
+    tail_count = tl.maximum((query_position + 1) - tail_start, 0)
 
     is_expanded = columns < expanded_count
     block_rank = columns // COMPRESS_RATIO
@@ -284,7 +298,7 @@ def _expand_qsa_indices_kernel(
         mask=(row < rows) & is_expanded,
         other=-1,
     )
-    expanded = block * COMPRESS_RATIO + offset
+    expanded = block.to(tl.int64) * COMPRESS_RATIO + offset
     tail_offset = columns - expanded_count
     is_tail = (
         (columns >= expanded_count)
@@ -298,13 +312,15 @@ def _expand_qsa_indices_kernel(
         & (is_expanded | is_tail)
         & (token >= 0)
         & (token < sequence_length)
+        & (token <= query_position)
+        & (request >= 0)
+        & (request < num_requests)
     )
     tl.store(
         output_ptr + row * stride_output_row + columns * stride_output_column,
         tl.where(valid, token, -1),
         mask=(row < rows) & (columns < OUTPUT_WIDTH),
     )
-
 
 
 def _qsa_get_split_workspace(
@@ -331,7 +347,6 @@ def _qsa_get_split_workspace(
         torch.empty(shape_stats, dtype=torch.float32, device=q.device),
         torch.empty(shape_stats, dtype=torch.float32, device=q.device),
     )
-
 
 
 def qsa_prepare_split_workspace(
@@ -402,7 +417,6 @@ def qsa_prepare_split_workspace(
     return num_splits, workspace
 
 
-
 def expand_qsa_block_indices(
     block_indices: torch.Tensor,
     query_positions: torch.Tensor,
@@ -416,12 +430,21 @@ def expand_qsa_block_indices(
 
     if not _is_triton_device(block_indices):
         raise RuntimeError("QSA index expansion requires an accelerator Triton backend")
-    if token_topk % compress_ratio:
-        raise ValueError("QSA token top-k must be divisible by compression ratio")
+    if compress_ratio <= 0 or token_topk <= 0 or token_topk % compress_ratio:
+        raise ValueError(
+            "QSA token top-k must be positive and divisible by a positive ratio"
+        )
     block_topk = token_topk // compress_ratio
     output_width = token_topk + compress_ratio - 1
     if block_indices.shape != (query_positions.numel(), block_topk):
         raise ValueError("QSA compressed top-k has an invalid shape")
+    tensors = (block_indices, query_positions, sequence_lengths, token_to_req)
+    if query_positions.ndim != 1:
+        raise ValueError("QSA query positions must be a vector")
+    if any(t.dtype not in (torch.int32, torch.int64) for t in tensors):
+        raise TypeError("QSA indices and lengths must be int32 or int64")
+    if any(t.device != block_indices.device for t in tensors):
+        raise ValueError("QSA index metadata must be on one device")
     if token_to_req.shape != query_positions.shape:
         raise ValueError("QSA request mapping must match query positions")
     if sequence_lengths.ndim != 1 or not sequence_lengths.shape[0]:
@@ -434,6 +457,8 @@ def expand_qsa_block_indices(
         )
     elif out.shape != (block_indices.shape[0], output_width):
         raise ValueError("QSA expansion output has an invalid shape")
+    if out.dtype != torch.int32 or out.device != block_indices.device:
+        raise ValueError("QSA expansion output must be int32 on the input device")
     if not block_indices.shape[0]:
         return out
     column_block = 256
@@ -449,6 +474,9 @@ def expand_qsa_block_indices(
         block_indices.stride(1),
         out.stride(0),
         out.stride(1),
+        query_positions.stride(0),
+        sequence_lengths.stride(0),
+        token_to_req.stride(0),
         block_indices.shape[0],
         sequence_lengths.shape[0],
         BLOCK_TOPK=block_topk,
@@ -459,7 +487,6 @@ def expand_qsa_block_indices(
         num_warps=4,
     )
     return out
-
 
 
 def _qsa_deterministic_block_topk(
@@ -490,7 +517,6 @@ def _qsa_deterministic_block_topk(
     result = torch.full((rows, block_topk), -1, dtype=torch.int32, device=logits.device)
     result[:, :width] = ordered.masked_fill(ordered == columns, -1).to(torch.int32)
     return result
-
 
 
 def qsa_select_all_paged_tokens(
@@ -526,7 +552,6 @@ def qsa_select_all_paged_tokens(
         token_topk,
         out,
     )
-
 
 
 def qsa_select_paged_tokens(
@@ -581,7 +606,6 @@ def qsa_select_paged_tokens(
     return out
 
 
-
 def qsa_sparse_paged_attention(
     q: torch.Tensor,
     k_cache: torch.Tensor,
@@ -599,7 +623,19 @@ def qsa_sparse_paged_attention(
         splits = qsa_sparse_split_count(q, k_cache, logical_indices.shape[1])
         if splits > 1:
             split_workspace = _qsa_get_split_workspace(q, splits)
-    return _qsa_sparse_paged_attention(q, k_cache, v_cache, logical_indices, block_table, token_to_req, softmax_scale=softmax_scale, out=out, gate=gate, split_workspace=split_workspace)
+    return _qsa_sparse_paged_attention(
+        q,
+        k_cache,
+        v_cache,
+        logical_indices,
+        block_table,
+        token_to_req,
+        softmax_scale=softmax_scale,
+        out=out,
+        gate=gate,
+        split_workspace=split_workspace,
+    )
+
 
 __all__ = [
     "build_qsa_forward_metadata",

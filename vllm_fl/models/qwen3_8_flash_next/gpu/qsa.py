@@ -17,7 +17,6 @@ from vllm.model_executor.layers.attention.attention import (
     set_default_quant_scales,
 )
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
-from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.layers.linear import QKVParallelLinear, RowParallelLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
@@ -46,6 +45,7 @@ from ..common.qsa_cache import (
     QSAForwardMetadata,
     QSAMetadataBuilder,
 )
+from .gemma_norm import Qwen38GemmaRMSNorm
 from .indexer_qsa import QSAIndexer
 from .nvidia_fast_paths import has_native_cache_update, native_cache_update
 from .quantization import without_modelopt_fp4
@@ -265,8 +265,15 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             max_position=config.max_position_embeddings,
             rope_parameters=config.rope_parameters,
         )
-        self.q_norm = GemmaRMSNorm(self.head_dim, eps=config.rms_norm_eps)
-        self.k_norm = GemmaRMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        fused_gemma = bool(
+            vllm_config.additional_config.get("qwen38_fused_gemma_norm", False)
+        )
+        self.q_norm = Qwen38GemmaRMSNorm(
+            self.head_dim, eps=config.rms_norm_eps, use_fused=fused_gemma
+        )
+        self.k_norm = Qwen38GemmaRMSNorm(
+            self.head_dim, eps=config.rms_norm_eps, use_fused=fused_gemma
+        )
 
         mm_config = model_config.multimodal_config
         text_only = mm_config is None or mm_config.language_model_only

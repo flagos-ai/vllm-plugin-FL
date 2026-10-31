@@ -52,6 +52,7 @@ def test_layout_provider_runs_only_before_mixed_native_gather(
     native_module.causal_conv1d_update = None
     native_module.is_conv_state_dim_first = None
     backend_module = ModuleType("vllm.v1.attention.backends.gdn_attn")
+    backend_module.NULL_BLOCK_ID = 0
     backend_module.GDNAttentionBackend = type("NativeBackend", (), {})
     backend_module.GDNAttentionMetadataBuilder = type("NativeBuilder", (), {})
     monkeypatch.setitem(sys.modules, backend_module.__name__, backend_module)
@@ -126,7 +127,10 @@ def _metadata_classes(monkeypatch):
     local = declarations(
         ROOT / "vllm_fl/models/qwen3_8_flash_next/gdn.py",
         "_qwen38_local_gdn_metadata_cpu",
-        {"GDNAttentionMetadataBuilder": native.GDNAttentionMetadataBuilder},
+        {
+            "GDNAttentionMetadataBuilder": native.GDNAttentionMetadataBuilder,
+            "NULL_BLOCK_ID": 0,
+        },
         names={"Qwen38GDNAttentionMetadataBuilder"},
     )
     return native.GDNAttentionMetadataBuilder, local.Qwen38GDNAttentionMetadataBuilder
@@ -272,3 +276,39 @@ def test_gdn_k1_zero_current_draft_restores_prior_accepted_state(monkeypatch, gr
     control = _metadata_builder(native, k=1).build(0, common, accepted, counts)
     assert control.num_accepted_tokens is None
     assert control.non_spec_state_indices_tensor[:2].tolist() == [1, 3]
+
+
+@pytest.mark.parametrize(
+    "enabled,vendor,device,spec,mode,backend,expected",
+    [
+        (True, "metax", "cuda", None, "none", "triton", True),
+        (False, "metax", "cuda", None, "none", "triton", False),
+        (True, "nvidia", "cuda", None, "none", "triton", False),
+        (True, "metax", "cpu", None, "none", "triton", False),
+        (True, "metax", "cuda", object(), "none", "triton", False),
+        (True, "metax", "cuda", None, "align", "triton", False),
+        (True, "metax", "cuda", None, "none", "cutedsl", False),
+    ],
+)
+def test_gdn_metadata_reuse_is_explicit_and_keeps_unvalidated_paths(
+    monkeypatch, enabled, vendor, device, spec, mode, backend, expected
+):
+    native, local = _metadata_classes(monkeypatch)
+
+    def init(self, kv_spec, names, config, dev):
+        self.speculative_config = config.speculative_config
+        self.gdn_prefill_backend = backend
+
+    monkeypatch.setattr(native, "__init__", init)
+    monkeypatch.setitem(
+        local.__init__.__globals__,
+        "current_platform",
+        SimpleNamespace(vendor_name=vendor),
+    )
+    config = SimpleNamespace(
+        additional_config={"qwen38_reuse_gdn_metadata": enabled},
+        speculative_config=spec,
+        cache_config=SimpleNamespace(mamba_cache_mode=mode),
+    )
+    builder = local(object(), [], config, SimpleNamespace(type=device))
+    assert builder.supports_update_block_table is expected

@@ -50,6 +50,7 @@ composition file. Native vLLM sources are unchanged by this optimization.
 The measured assembly additionally requires private FGV radix, generic
 sampling fallback, Top20 filtering, race reduction, QSA packing and BF16
 MCTlass implementations, plus the FG index_select CPU-overhead fix.
+The host-preparation stage also requires the FG index_put boolean-scalar fix.
 
 These remain separate operator-library changes. The model submission carries
 integration, policy and fingerprints; it is not fully reproducible from public
@@ -131,6 +132,15 @@ Defaults remain available; scoped provider choices retain the previous runtime:
 - Mixed GDN gathering makes the QKV slice contiguous at the required boundary.
 - HC keeps the validated materialized schedule and ATen/FG rounding on MetaX;
   the prerequisite's fused/deferred path remains the default elsewhere.
+
+- Host preparation uses batch-vectorized PLE hashing and CPU metadata
+  mirrors where valid; pure prefill can reuse CPU input IDs. Shared-table
+  barriers, pinned staging and H2D completion ordering remain intact.
+- GDN reuses metadata within the same runner step while every cache group
+  retains its own state indices and graph buffers. QSA metadata, packing-row
+  caching and block-index expansion avoid redundant preparation; packing
+  caches end with each metadata-build invocation.
+- Eligible MetaX QSA Gemma RMSNorm widths use the existing FGV implementation.
 
 The new choices are model/vendor policies over library primitives. No CPU
 affinity or communication change is selected.
@@ -228,11 +238,11 @@ groups. The width buckets and KV-cache layout remain unchanged.
 
 ## Validation and historical performance
 
-### Current reviewed stage: Optimize MetaX sampled inference hot paths
+### Current reviewed stage: Reduce Qwen host preparation and metadata overhead
 
 | Fixed workload | Comparison | Reviewed stage | Observed change |
 |---|---:|---:|---:|
-| P1024 / exact O1024 / C64 / N128 | 248.6844 tok/s | 307.1341 tok/s | +23.50% |
+| P1024 / exact O1024 / C64 / N128 | 307.1341 tok/s | 661.0880 tok/s | +115.24% |
 
 Both use checkpoint T1/p.95/k20, MTP off, BF16 TP8 and OMP/Torch4.
 The numbers belong to the corresponding frozen source snapshots. Cleanup

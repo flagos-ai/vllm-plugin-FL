@@ -4,10 +4,6 @@
 
 from __future__ import annotations
 
-from .runtime import is_metax
-from vllm_fl.dispatch import resolve_op
-from ..common.qsa_cache import PreparedQSAForwardMetadata, PreparedQSAMetadataBuilder
-
 from typing import Any, cast
 
 import torch
@@ -15,17 +11,20 @@ from torch import nn
 
 from vllm.config import VllmConfig
 from vllm.forward_context import get_forward_context
-from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 
 from ..common.qsa_cache import (
+    PreparedQSAForwardMetadata,
     QSACompressedKeyCache,
     QSAForwardMetadata,
     QSAKeyStateCache,
     canonical_qsa_rope_positions,
 )
+from .gemma_norm import Qwen38GemmaRMSNorm
 from .nvidia_fast_paths import fast_gemma_rmsnorm, fast_qsa_rope
+from .runtime import is_metax
+from vllm_fl.dispatch import resolve_op
 
 
 def apply_qsa_rope(
@@ -94,7 +93,9 @@ class QSAIndexer(nn.Module):
         super().__init__()
         self._metax = is_metax()
         if self._metax:
-            self._qsa_compress_groups_with_ratio = resolve_op("qsa_compress_groups_with_ratio")
+            self._qsa_compress_groups_with_ratio = resolve_op(
+                "qsa_compress_groups_with_ratio"
+            )
             self._qsa_select_paged_tokens = resolve_op("qsa_select_paged_tokens")
             self._qsa_store_cache_rows = resolve_op("qsa_store_cache_rows")
         if vllm_config.cache_config is None:
@@ -127,13 +128,18 @@ class QSAIndexer(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.index_qk_proj" if prefix else "index_qk_proj",
         )
-        self.q_layernorm = GemmaRMSNorm(
-            self.index_head_dim,
-            eps=float(getattr(config, "rms_norm_eps", 1e-6)),
+        fused_gemma = bool(
+            vllm_config.additional_config.get("qwen38_fused_gemma_norm", False)
         )
-        self.k_layernorm = GemmaRMSNorm(
+        self.q_layernorm = Qwen38GemmaRMSNorm(
             self.index_head_dim,
             eps=float(getattr(config, "rms_norm_eps", 1e-6)),
+            use_fused=fused_gemma,
+        )
+        self.k_layernorm = Qwen38GemmaRMSNorm(
+            self.index_head_dim,
+            eps=float(getattr(config, "rms_norm_eps", 1e-6)),
+            use_fused=fused_gemma,
         )
 
         cache_config = vllm_config.cache_config
@@ -253,7 +259,12 @@ class QSAIndexer(nn.Module):
         compressed_metadata: QSAForwardMetadata,
     ) -> None:
         if self._metax:
-            return self._update_and_compress_metax(token_k=token_k, positions=positions, raw_metadata=raw_metadata, compressed_metadata=compressed_metadata)
+            return self._update_and_compress_metax(
+                token_k=token_k,
+                positions=positions,
+                raw_metadata=raw_metadata,
+                compressed_metadata=compressed_metadata,
+            )
         num_tokens = raw_metadata.num_actual_tokens
         raw_key_cache = self.raw_key_cache.key_cache
         rope_position_cache = self.raw_key_cache.rope_position_cache
@@ -348,7 +359,9 @@ class QSAIndexer(nn.Module):
     ) -> torch.Tensor:
         """Return fixed-width request-relative token indices padded with ``-1``."""
         if self._metax:
-            return self.forward_metax(hidden_states=hidden_states, positions=positions, out=out)
+            return self.forward_metax(
+                hidden_states=hidden_states, positions=positions, out=out
+            )
 
         metadata = self._metadata()
         if metadata is None:
@@ -389,7 +402,6 @@ class QSAIndexer(nn.Module):
             compressed_metadata,
         )
         return self._select(q, compressed_metadata, out)
-
 
     def _metadata_metax(
         self,

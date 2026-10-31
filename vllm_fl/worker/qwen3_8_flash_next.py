@@ -105,7 +105,9 @@ class _HostInputBuffers:
         if not self.layers:
             raise RuntimeError("configured PLE layer not found in the loaded target")
 
-    def prepare(self, input_ids, query_start_loc, context, dummy=False):
+    def prepare(
+        self, input_ids, query_start_loc, context, dummy=False, use_cpu_metadata=False
+    ):
         nreq = query_start_loc.numel() - 1
         if nreq > self.context.shape[0]:
             raise ValueError("PLE requests exceed fixed buffers")
@@ -115,7 +117,10 @@ class _HostInputBuffers:
         self.context[:nreq].copy_(context)
         for layer in self.layers:
             layer.prepare_host_lookup(
-                input_ids, self.query_start_loc, self.context, dummy=dummy
+                input_ids,
+                query_start_loc if use_cpu_metadata else self.query_start_loc,
+                context if use_cpu_metadata else self.context,
+                dummy=dummy,
             )
         return dict(query_start_loc=self.query_start_loc, ngram_context=self.context)
 
@@ -150,8 +155,27 @@ def _mrv1_prepare(runner):
         buffers.context_len,
         int(config.eos_token_id),
     )
+    use_cpu_metadata = bool(
+        runner.vllm_config.additional_config.get("qwen38_ple_cpu_metadata", False)
+    )
+    lookup_ids = runner.input_ids.gpu
+    if (
+        use_cpu_metadata
+        and runner.speculative_config is None
+        and nreq > 0
+        and not getattr(runner, "enable_prompt_embeds", False)
+        and np.all(
+            batch.num_computed_tokens_cpu[:nreq] < batch.num_prompt_tokens[:nreq]
+        )
+    ):
+        # Pure prefill IDs are gathered into this pinned CPU mirror by MRV1.
+        # Decode/draft IDs can be updated only on GPU, so retain that source.
+        lookup_ids = runner.input_ids.cpu
     return buffers.prepare(
-        runner.input_ids.gpu, runner.query_start_loc.cpu[: nreq + 1], context
+        lookup_ids,
+        runner.query_start_loc.cpu[: nreq + 1],
+        context,
+        use_cpu_metadata=use_cpu_metadata,
     )
 
 
@@ -212,7 +236,18 @@ def install_qwen38_runner_hooks(runner_cls):
 
     @wraps(original_attn)
     def attention_metadata(self, *args, **kwargs):
-        if not _uses_ple(self) or self.speculative_config is None:
+        if not _uses_ple(self):
+            return original_attn(self, *args, **kwargs)
+        if self.speculative_config is None:
+            if self.vllm_config.additional_config.get(
+                "qwen38_fused_qsa_metadata", False
+            ):
+                from vllm_fl.models.qwen3_8_flash_next.common.qsa_packing import (
+                    qsa_metadata_build_scope,
+                )
+
+                with qsa_metadata_build_scope():
+                    return original_attn(self, *args, **kwargs)
             return original_attn(self, *args, **kwargs)
         _validate_base(self.vllm_config, require_sync=True)
         if not kwargs.get("for_cudagraph_capture", False):
