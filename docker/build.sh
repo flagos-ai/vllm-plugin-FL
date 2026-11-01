@@ -357,19 +357,13 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     PYTHON_VERSION="${ENFLAME_PYTHON_VERSION}"
     VLLM_VERSION="${ENFLAME_VLLM_VERSION}"
-    [[ "${VLLM_VERSION}" == "0.32.0" ]] || err "The Enflame recipe pins vLLM 0.32.0; use Dockerfile.v0.28.0 directly for the historical SDK."
+    [[ "${VLLM_VERSION}" == "0.32.0" ]] || err "The Enflame recipe pins vLLM 0.32.0; select a matching recipe for other versions."
     [[ "${PYTHON_VERSION}" == "3.12" ]] || err "The Enflame SDK recipe requires Python 3.12."
-    for build_arg in "${EXTRA_BUILD_ARGS[@]+"${EXTRA_BUILD_ARGS[@]}"}"; do
-        case "${build_arg}" in
-            VLLM_VERSION|VLLM_VERSION=*|VLLM_SOURCE_COMMIT|VLLM_SOURCE_COMMIT=*)
-                err "The Enflame recipe pins its upstream version and commit; they cannot be overridden with --build-arg." ;;
-        esac
-    done
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
     BUILD_ARGS+=(
-        --build-arg "ENFLAME_SDK_IMAGE=${ENFLAME_BASE_IMAGE}"
+        --build-arg "ENFLAME_BASE_IMAGE=${ENFLAME_BASE_IMAGE}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-${TARGET}"

@@ -32,25 +32,19 @@ FlagGems exclusions. Build instructions and the rationale for the temporary
 vendor adapters are in the [image recipe](../../docker/enflame/README.md).
 
 
-The prebuilt image is the pinned SDK baseline. The Enflame setup script builds
-vLLM 0.32 in a private virtualenv, installs the ten hash-pinned dependency
-overlays, and checks the effective dependency closure and every tracked vLLM
-Python file against the fixed upstream Git blobs. It preserves vendor Torch,
-FlagTree, Triton GCU and FlagGems. FlagTree supplies the `triton` namespace;
-its missing same-name distribution metadata is reported explicitly.
+The prebuilt image supplies the vendor SDK. CI and Docker use the same
+`docker/enflame/prepare_vllm032.sh VENV_PATH` installer to build the fixed
+upstream vLLM revision in empty mode and install pinned dependencies without
+replacing vendor Torch, FlagTree, Triton GCU, or FlagGems. The resulting
+virtualenv is selected through PATH, as in the standard setup flow.
 
-Use `VLLM_ENFLAME_VENV=/logs/.venv` when running setup in a container. Later
-`docker exec` commands must use `/logs/.venv/bin/python` or
+For a task container, run `bash docker/enflame/prepare_vllm032.sh /logs/.venv`.
+Later `docker exec` commands must use `/logs/.venv/bin/python` or
 `/logs/.venv/bin/vllm`; PATH changes inside one exec do not affect another.
 For Gate clients, prepend `/logs/.venv/bin` to PATH before `run_test.sh`.
-Set `VLLM_PYPI_INDEX_URL` only for that preparation command when a package
-mirror is needed; wheel hashes remain fixed. For offline preparation,
-`VLLM_ENFLAME_WHEELHOUSE` can point to the ten verified wheels, and
-`VLLM_SOURCE_REPOSITORY` to a read-only local upstream checkout at the fixed
-commit. Preparation clones that checkout before building.
 
 Runtime preparation and operator tests are separate from model acceptance.
-Run all original Gate scenarios for both panel models and both execution
+Run all original Gate scenarios for both models and both execution
 modes, retaining result JSON and checking every request's checks.
 
 ## 1. Check the host and choose devices
@@ -136,7 +130,6 @@ docker run --detach \
   -e TORCH_GCU_ENABLE_INT64_AND_UINT64=1 \
   -e ENABLE_I64_CHECK=0 \
   -e TORCHGCU_INDUCTOR_ENABLE=1 \
-  -e VLLM_ENFLAME_VENV=/logs/.venv \
   -e MODEL_NAME="$MODEL_NAME" \
   -e MODE="$MODE" \
   --entrypoint /bin/bash \
@@ -169,7 +162,7 @@ Inside the container:
 set -euo pipefail
 cd /workspace/vllm-plugin-FL
 bash .github/scripts/enflame/check.sh 2>&1 | tee /logs/check.log
-bash .github/scripts/enflame/setup.sh 2>&1 | tee /logs/setup.log
+bash .github/scripts/enflame/setup.sh /logs/.venv 2>&1 | tee /logs/setup.log
 export PATH="/logs/.venv/bin:$PATH"
 ```
 
@@ -182,7 +175,7 @@ export PATH="/logs/.venv/bin:$PATH"
   supported FlagGems release bytes used by the GCU `index_fill` adapter.
 
 It then installs this checkout with
-`python -m pip install --no-build-isolation --no-deps -e .` and checks imports.
+`python -m uv pip install --no-build-isolation --no-deps -e .` and checks imports.
 Do not resolve dependencies again with a generic `pip install -U`: a dependency
 can overwrite FlagTree's Triton files while leaving its package metadata intact.
 The guards detect that corruption; metadata versions alone do not prove that
@@ -216,11 +209,10 @@ esac
   "${mode_args[@]}" 2>&1 | tee "/logs/$MODEL_NAME-$MODE-server.log"
 ```
 
-The Enflame platform defaults `VLLM_DISABLE_SHARED_EXPERTS_STREAM=1` so MoE
-shared experts run on the graph capture stream. TorchGCU rejects allocations
-from the auxiliary shared-expert stream during capture with
-`topsErrorStreamCaptureUnsupported`. This keeps graph execution enabled.
-An explicit environment value is preserved for SDK compatibility experiments.
+The existing GCU patch entry point selects upstream's `NO_OVERLAP` path
+for shared experts, keeping them on the graph capture stream. TorchGCU
+cannot allocate on the auxiliary stream during capture. Model execution
+and graph capture otherwise follow the native vLLM runner.
 
 Cold-cache compilation and graph capture can take substantial time. The native
 S60 e2e jobs allow 120 minutes. Follow the service log and wait for startup to

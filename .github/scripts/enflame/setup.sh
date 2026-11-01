@@ -10,12 +10,11 @@ git config --global --add safe.directory "$(pwd)"
 
 # The digest-pinned CI image supplies the vendor SDK. Build the target vLLM
 # in a private virtualenv; leave its global SDK packages unchanged.
-env_output=$(mktemp)
-bash docker/enflame/prepare_vllm032.sh "$env_output"
-# shellcheck disable=SC1090
-source "$env_output"
+venv="${1:-$(mktemp -d)/.venv}"
+bash docker/enflame/prepare_vllm032.sh "$venv"
+export PATH="$venv/bin:$PATH"
 if [[ -n "${GITHUB_PATH:-}" ]]; then
-  printf '%s\n' "$VLLM_ENFLAME_VENV/bin" >> "$GITHUB_PATH"
+  printf '%s\n' "$venv/bin" >> "$GITHUB_PATH"
 fi
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
@@ -59,7 +58,8 @@ print("Enflame CI package versions match the vLLM 0.32 recipe")
 PY
 
 # The vendor runtime and FlagGems come from the pinned SDK image.
-"$VLLM_ENFLAME_UV" pip install --python "$VLLM_ENFLAME_VENV/bin/python" --no-build-isolation --no-deps -e .
+python -m uv pip install --python "$(python -c 'import sys; print(sys.executable)')" \
+  --no-build-isolation --no-deps -e .
 
 python .github/scripts/install_flaggems_vllm.py
 

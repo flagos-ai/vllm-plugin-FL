@@ -262,10 +262,12 @@ def test_gcu_shared_experts_capture_and_replay(device, dtype, monkeypatch):
         SharedExpertsOrder,
     )
 
-    from vllm_fl.platform import PlatformFL
+    from vllm_fl.dispatch.backends.vendor.gcu.patch import (
+        apply_shared_experts_gcu_patch,
+    )
 
     monkeypatch.delenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", raising=False)
-    PlatformFL.pre_register_and_update()
+    apply_shared_experts_gcu_patch()
     config = SimpleNamespace(
         moe_parallel_config=SimpleNamespace(
             enable_eplb=False,

@@ -640,11 +640,6 @@ class PlatformFL(Platform):
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
-        if cls.vendor_name in ("gcu", "enflame"):
-            # TorchGCU cannot allocate shared-expert outputs on the auxiliary
-            # stream during graph capture. Keep these experts on the capture
-            # stream; this preserves graph execution and upstream MoE routing.
-            os.environ.setdefault("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "1")
         if cls.device_name == "npu":
             # Upstream breakable graph wrappers are CUDA-specific. Ascend uses
             # vLLM's piecewise GraphWrapper path until those wrappers are made
