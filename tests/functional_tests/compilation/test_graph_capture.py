@@ -196,7 +196,7 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
     from vllm.config import CUDAGraphMode, VllmConfig
     from vllm.forward_context import BatchDescriptor, set_forward_context
 
-    from vllm_fl.compilation.enflame_graph import EnflameGraphWrapper
+    from vllm_fl.compilation.graph import GraphWrapper
 
     config = VllmConfig()
     descriptor = BatchDescriptor(num_tokens=2, num_reqs=2, uniform=True)
@@ -209,7 +209,7 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
     static_input = torch.arange(8, dtype=torch.float32, device=device).reshape(2, 4)
     runnable(static_input)
     calls.clear()
-    wrapper = EnflameGraphWrapper(
+    wrapper = GraphWrapper(
         runnable,
         config,
         CUDAGraphMode.FULL,

@@ -32,8 +32,8 @@ def test_gcu_hooks_bind_the_selected_model_runner(monkeypatch):
         SimpleNamespace(vendor_name="enflame", device_type="gcu"),
     )
 
-    def select(device_type):
-        calls.append(("select", device_type))
+    def select():
+        calls.append(("select",))
         return selected
 
     monkeypatch.setattr(runtime, "get_fl_model_runner_cls", select)
@@ -43,7 +43,7 @@ def test_gcu_hooks_bind_the_selected_model_runner(monkeypatch):
         lambda runner, utils: calls.append(("install", runner, utils)),
     )
     mamba_copy.apply_mamba_copy_gcu_patch()
-    assert calls == [("select", "gcu"), ("install", selected, mamba_utils)]
+    assert calls == [("select",), ("install", selected, mamba_utils)]
 
 
 class _Storage:

@@ -215,5 +215,5 @@ def apply_mamba_copy_gcu_patch() -> None:
 
     from vllm_fl.worker.runtime import get_fl_model_runner_cls
 
-    runner_type = get_fl_model_runner_cls(current_platform.device_type)
+    runner_type = get_fl_model_runner_cls()
     _install_mamba_hooks(runner_type, mamba_utils)

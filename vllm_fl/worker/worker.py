@@ -511,7 +511,7 @@ class WorkerFL(WorkerBase):
                 self.vllm_config, self.device
             )
         else:
-            model_runner_cls = get_fl_model_runner_cls(self.device.type)
+            model_runner_cls = get_fl_model_runner_cls()
             self.model_runner = model_runner_cls(self.vllm_config, self.device)
 
         if self.rank == 0:

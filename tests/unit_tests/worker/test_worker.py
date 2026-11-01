@@ -95,31 +95,34 @@ def test_pipeline_residual_layout_preserves_native_helper_result(monkeypatch):
     [
         ("gcu", "0.28.0+empty", False),
         ("gcu", "0.32.0+empty", True),
-        ("npu", "0.32.0", False),
-        ("cuda", "0.32.0", False),
+        ("npu", "0.32.0", True),
+        ("cuda", "0.32.0", True),
     ],
 )
-def test_model_runner_selection_keeps_other_backends_unchanged(
+def test_model_runner_selection_depends_on_version_only(
     monkeypatch, device_type, vllm_version, use_native
 ):
     import importlib.metadata
     import sys
     from types import ModuleType
 
+    import vllm.platforms
+
     from vllm_fl.worker.runtime import get_fl_model_runner_cls
 
+    monkeypatch.setattr(vllm.platforms.current_platform, "device_type", device_type)
     legacy = type("LegacyRunner", (), {})
     native = type("NativeRunner", (), {})
     for path, symbol, cls in [
         ("vllm_fl.worker.model_runner", "ModelRunnerFL", legacy),
-        ("vllm_fl.worker.enflame_model_runner", "EnflameModelRunner", native),
+        ("vllm_fl.worker.native_model_runner", "NativeModelRunnerFL", native),
     ]:
         module = ModuleType(path)
         setattr(module, symbol, cls)
         monkeypatch.setitem(sys.modules, path, module)
     monkeypatch.setattr(importlib.metadata, "version", lambda name: vllm_version)
 
-    assert get_fl_model_runner_cls(device_type) is (native if use_native else legacy)
+    assert get_fl_model_runner_cls() is (native if use_native else legacy)
 
 
 @pytest.fixture(autouse=True)
@@ -279,7 +282,7 @@ def test_worker_selects_v1_or_v2_model_runner():
 
     source = inspect.getsource(WorkerFL.init_device)
     assert "GPUModelRunnerV2" in source
-    assert "get_fl_model_runner_cls(self.device.type)" in source
+    assert "get_fl_model_runner_cls()" in source
 
 
 def test_platform_accepts_v2_model_runner(monkeypatch):

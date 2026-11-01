@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""Enflame integration with the upstream vLLM 0.32 V1 model runner."""
+"""Shared FL hooks around the upstream vLLM 0.32 V1 model runner."""
 
 from functools import wraps
 
@@ -27,7 +27,7 @@ def _io_aware_inference(method):
     return call
 
 
-class EnflameModelRunner(GPUModelRunner):
+class NativeModelRunnerFL(GPUModelRunner):
     execute_model = _io_aware_inference(GPUModelRunner.execute_model)
     _dummy_run = _io_aware_inference(GPUModelRunner._dummy_run)
 
@@ -45,9 +45,9 @@ class EnflameModelRunner(GPUModelRunner):
         init_io_dump_from_env(self.model_config.enforce_eager)
         output = super().load_model(load_dummy_weights, model=model)
         if isinstance(getattr(self, "model", None), CUDAGraphWrapper):
-            from vllm_fl.compilation.enflame_graph import adapt_enflame_graph_wrapper
+            from vllm_fl.compilation.graph import adapt_graph_wrapper
 
-            self.model = adapt_enflame_graph_wrapper(self.model)
+            self.model = adapt_graph_wrapper(self.model)
         if not load_dummy_weights:
             register_io_module_hooks(self.get_model())
         return output

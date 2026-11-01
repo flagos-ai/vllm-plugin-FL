@@ -397,3 +397,24 @@ def test_gcu_weak_ref_preserves_views_without_owning_storage(dtype_name):
     # Borrowed aliases stay alive but their original allocation must be released.
     # Never dereference either alias after its owning tensor/graph is released.
     assert torch.gcu.memory_allocated() <= baseline
+
+
+def test_native_graph_registry_can_clear_fl_captures(monkeypatch):
+    from vllm.compilation.cuda_graph import CUDAGraphWrapper
+    from vllm.config import CUDAGraphMode
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    monkeypatch.setattr(
+        graph_module.current_platform, "get_global_graph_pool", lambda: None
+    )
+    wrapper = graph_module.GraphWrapper(
+        lambda: None,
+        SimpleNamespace(compilation_config=SimpleNamespace()),
+        CUDAGraphMode.FULL,
+    )
+    assert isinstance(wrapper, CUDAGraphWrapper)
+    assert wrapper in CUDAGraphWrapper._all_instances
+    assert wrapper in graph_module.GraphWrapper._all_instances
+    wrapper.concrete_graph_entries["capture"] = object()
+    CUDAGraphWrapper.clear_all_graphs()
+    assert wrapper.concrete_graph_entries == {}

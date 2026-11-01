@@ -11,15 +11,15 @@ from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 logger = init_logger(__name__)
 
 
-def get_fl_model_runner_cls(device_type: str):
+def get_fl_model_runner_cls():
     from importlib.metadata import version
 
     from packaging.version import Version
 
-    if device_type == "gcu" and Version(version("vllm")) >= Version("0.32.0"):
-        from vllm_fl.worker.enflame_model_runner import EnflameModelRunner
+    if Version(version("vllm")) >= Version("0.32.0"):
+        from vllm_fl.worker.native_model_runner import NativeModelRunnerFL
 
-        return EnflameModelRunner
+        return NativeModelRunnerFL
 
     from vllm_fl.worker.model_runner import ModelRunnerFL
 

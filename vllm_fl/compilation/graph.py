@@ -15,6 +15,7 @@ import torch
 
 import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
+from vllm.compilation.cuda_graph import CUDAGraphWrapper
 from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.distributed.device_communicators.pynccl_allocator import set_graph_pool_id
@@ -200,7 +201,7 @@ class GraphOptions:
     weak_ref_output: bool = True
 
 
-class GraphWrapper:
+class GraphWrapper(CUDAGraphWrapper):
     """FL-specific graph wrapper that supports multiple device types (CUDA, NPU).
     Adapted from upstream CUDAGraphWrapper with platform-agnostic graph capture."""
 
@@ -244,6 +245,16 @@ class GraphWrapper:
         self.concrete_graph_entries: dict[BatchDescriptor, GraphEntry] = {}
 
         GraphWrapper._all_instances.add(self)
+        # Native runners discover FL captures during memory profiling/cleanup.
+        CUDAGraphWrapper._all_instances.add(self)
+
+    @property
+    def concrete_cudagraph_entries(self):
+        return self.concrete_graph_entries
+
+    @concrete_cudagraph_entries.setter
+    def concrete_cudagraph_entries(self, value):
+        self.concrete_graph_entries = value
 
     def __getattr__(self, key: str) -> Any:
         # allow accessing the attributes of the runnable.
@@ -381,3 +392,17 @@ class GraphWrapper:
             current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
         return entry.output
+
+
+def adapt_graph_wrapper(model):
+    """Replace the native runner's CUDA wrapper with the FL device wrapper."""
+    if isinstance(model, GraphWrapper):
+        return model
+    if isinstance(model, CUDAGraphWrapper):
+        return GraphWrapper(
+            adapt_graph_wrapper(model.runnable),
+            model.vllm_config,
+            model.runtime_mode,
+            model.cudagraph_options,
+        )
+    return model

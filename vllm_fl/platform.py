@@ -569,13 +569,6 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_static_graph_wrapper_cls(cls) -> str:
-        if cls.device_type == "gcu":
-            from importlib.metadata import version
-
-            from packaging.version import Version
-
-            if Version(version("vllm")) >= Version("0.32.0"):
-                return "vllm_fl.compilation.enflame_graph.EnflameGraphWrapper"
         return "vllm_fl.compilation.graph.GraphWrapper"
 
     @classmethod

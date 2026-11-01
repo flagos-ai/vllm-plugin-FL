@@ -6934,7 +6934,7 @@ class ModelRunnerFL(
             + list(GraphWrapper._all_instances)
             + list(BreakableCUDAGraphWrapper._all_instances)
         )
-        for instance in all_wrappers:
+        for instance in dict.fromkeys(all_wrappers):
             original_pools[id(instance)] = instance.graph_pool
             instance.graph_pool = profiling_pool
 
@@ -7034,7 +7034,7 @@ class ModelRunnerFL(
                 + list(GraphWrapper._all_instances)
                 + list(BreakableCUDAGraphWrapper._all_instances)
             )
-            for instance in all_wrappers:
+            for instance in dict.fromkeys(all_wrappers):
                 if id(instance) in original_pools:
                     instance.graph_pool = original_pools[id(instance)]
             for key_set in self.cudagraph_dispatcher.cudagraph_keys.values():
