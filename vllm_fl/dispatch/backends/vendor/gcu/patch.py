@@ -21,8 +21,8 @@ _patches_applied = False
 def apply_shared_experts_gcu_patch() -> None:
     from importlib.util import find_spec
 
-    # vLLM 0.32 moved shared experts into runner/. Reuse its NO_OVERLAP
-    # path: TorchGCU cannot allocate on the auxiliary stream during capture.
+    # Reuse upstream shared experts' NO_OVERLAP path: TorchGCU cannot
+    # allocate on the auxiliary stream during capture.
     if find_spec("vllm.model_executor.layers.fused_moe.runner") is not None:
         from vllm.model_executor.layers.fused_moe.runner import shared_experts
 
