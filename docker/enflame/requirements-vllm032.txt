@@ -2,7 +2,7 @@
 # Vendor Torch, FlagTree, Triton GCU and FlagGems remain in the pinned base image.
 # FlagTree supplies the triton namespace: do not install upstream triton.
 # Install with --no-deps --require-hashes to preserve the vendor SDK.
-aiohttp==3.14.3 --hash=sha256:543906c127fb1d929b95076db19b83fa2d46751006ff1e23b093aa5ac4d8db42
+aiohttp==3.14.5 --hash=sha256:20f085697d7e911f1f73c43ed03fafbed1e7121797e2eb5428efa80398060584
 mcp==2.0.0 --hash=sha256:1cb4c75d2d2c7b8c1d756355e5d82a39f2822cc7f13e22a2051d7ca3592349d6
 oss-harmony==0.0.11 --hash=sha256:d877c6b526cdbdf55068bae8f05c60398e929c9e296c7f69a1d533339708be80
 pillow==13.0.0 --hash=sha256:42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca
