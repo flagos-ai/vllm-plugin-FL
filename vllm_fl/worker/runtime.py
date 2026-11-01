@@ -2,10 +2,14 @@
 
 """Runtime initialization shared by the NVIDIA and multi-vendor workers."""
 
+from types import MethodType
+from typing import Any
+
 from vllm.logger import init_logger
 
 import vllm_fl.envs as fl_envs
 from vllm_fl.attention.utils import patch_mm_encoder_attention
+from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
@@ -17,9 +21,9 @@ def get_fl_model_runner_cls():
     from packaging.version import Version
 
     if Version(version("vllm")) >= Version("0.32.0"):
-        from vllm_fl.worker.native_model_runner import NativeModelRunnerFL
+        from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-        return NativeModelRunnerFL
+        return GPUModelRunner
 
     from vllm_fl.worker.model_runner import ModelRunnerFL
 
@@ -80,3 +84,57 @@ def _initialize_fl_runtime(rank: int) -> None:
     else:
         logger.info("[FlagGems] Enable all ops")
         flag_gems.enable(**common)
+
+
+_NATIVE_RUNNER_IO_METHODS = ("execute_model", "sample_tokens", "pool")
+
+
+def _install_native_runner_io_methods(
+    model_runner: Any, method_names=_NATIVE_RUNNER_IO_METHODS
+) -> None:
+    """Replace native runner inference-mode wrappers on one runner instance.
+
+    vLLM's NVIDIA V1 and V2 runners decorate their execution entry points
+    with ``torch.inference_mode``. IO dumping needs ``torch.no_grad`` while its
+    TorchDispatchMode is active. Unwrapping only that outer decorator keeps the
+    native runner implementation and any inner vLLM decorators unchanged.
+    """
+    for method_name in method_names:
+        bound_method = getattr(model_runner, method_name, None)
+        if bound_method is None or getattr(bound_method, "_vllm_fl_managed_io", False):
+            continue
+
+        method = getattr(bound_method, "__func__", bound_method)
+        native_impl = getattr(method, "__wrapped__", None)
+        if native_impl is None:
+            raise RuntimeError(
+                f"Native model runner method {method_name!r} no longer exposes "
+                "the vLLM inference-mode wrapper"
+            )
+
+        managed_impl = managed_inference_mode()(native_impl)
+        managed_impl._vllm_fl_managed_io = True
+        setattr(model_runner, method_name, MethodType(managed_impl, model_runner))
+
+
+def prepare_native_model_runner(model_runner, enforce_eager, load_dummy_weights):
+    """Install common FL hooks after the native V1 runner loads its model."""
+    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
+    if not isinstance(model_runner, GPUModelRunner):
+        return
+    from vllm_fl.compilation.graph import adapt_graph_wrapper
+    from vllm_fl.dispatch.io_dumper import (
+        init_io_dump_from_env,
+        is_dump_enabled,
+        register_io_module_hooks,
+    )
+
+    init_io_dump_from_env(enforce_eager)
+    model_runner.model = adapt_graph_wrapper(model_runner.model)
+    if is_dump_enabled():
+        _install_native_runner_io_methods(
+            model_runner, (*_NATIVE_RUNNER_IO_METHODS, "_dummy_run")
+        )
+        if not load_dummy_weights:
+            register_io_module_hooks(model_runner.get_model())

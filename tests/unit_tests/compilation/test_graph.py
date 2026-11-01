@@ -418,3 +418,40 @@ def test_native_graph_registry_can_clear_fl_captures(monkeypatch):
     wrapper.concrete_graph_entries["capture"] = object()
     CUDAGraphWrapper.clear_all_graphs()
     assert wrapper.concrete_graph_entries == {}
+
+
+def test_native_graph_wrapper_is_replaced_without_changing_runner_type():
+    from vllm.compilation.cuda_graph import CUDAGraphWrapper
+    from vllm.config import CUDAGraphMode
+    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
+    from vllm_fl.compilation.graph import GraphWrapper, adapt_graph_wrapper
+
+    model = object()
+    config = SimpleNamespace(compilation_config=SimpleNamespace())
+    original = CUDAGraphWrapper(model, config, CUDAGraphMode.FULL)
+    adapted = adapt_graph_wrapper(original)
+    assert isinstance(adapted, GraphWrapper)
+    assert isinstance(adapted, CUDAGraphWrapper)
+    assert adapted in CUDAGraphWrapper._all_instances
+    assert adapted in GraphWrapper._all_instances
+    assert adapted.runtime_mode == CUDAGraphMode.FULL
+    assert adapted.cudagraph_options is original.cudagraph_options
+    runner = object.__new__(GPUModelRunner)
+    runner.model = adapted
+    assert runner.get_model() is model
+    assert adapt_graph_wrapper(adapted) is adapted
+    assert adapt_graph_wrapper(model) is model
+    replacement = {}
+    adapted.concrete_cudagraph_entries = replacement
+    assert adapted.concrete_graph_entries is replacement
+
+
+@pytest.mark.parametrize("device_type", ["cuda", "npu", "gcu"])
+def test_all_platforms_share_the_graph_wrapper(monkeypatch, device_type):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", device_type)
+    assert PlatformFL.get_static_graph_wrapper_cls() == (
+        "vllm_fl.compilation.graph.GraphWrapper"
+    )

@@ -95,6 +95,7 @@ from vllm_fl.worker.runtime import (
     _initialize_fl_runtime,
     get_fl_model_runner_cls,
     is_residual_scattered_for_sp,
+    prepare_native_model_runner,
 )
 
 logger = init_logger(__name__)
@@ -532,6 +533,9 @@ class WorkerFL(WorkerBase):
             self._scoped_allocator_max_split(max_split_size_mb=20),
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
+            prepare_native_model_runner(
+                self.model_runner, self.model_config.enforce_eager, load_dummy_weights
+            )
 
         if self.vllm_config.weight_transfer_config is not None:
             self.weight_transfer_engine = WeightTransferEngineFactory.create_engine(
@@ -1156,7 +1160,15 @@ class WorkerFL(WorkerBase):
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
-        return self.model_runner.sample_tokens(grammar_output)
+        output = self.model_runner.sample_tokens(grammar_output)
+        if output is not None:
+            from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
+            if isinstance(self.model_runner, GPUModelRunner):
+                from vllm_fl.dispatch.io_dumper import advance_io_step
+
+                advance_io_step()
+        return output
 
     @managed_inference_mode()
     @with_gpu_sync_check

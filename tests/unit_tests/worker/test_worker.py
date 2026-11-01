@@ -115,7 +115,7 @@ def test_model_runner_selection_depends_on_version_only(
     native = type("NativeRunner", (), {})
     for path, symbol, cls in [
         ("vllm_fl.worker.model_runner", "ModelRunnerFL", legacy),
-        ("vllm_fl.worker.native_model_runner", "NativeModelRunnerFL", native),
+        ("vllm.v1.worker.gpu_model_runner", "GPUModelRunner", native),
     ]:
         module = ModuleType(path)
         setattr(module, symbol, cls)
@@ -398,3 +398,83 @@ def test_gcu_rejects_v2_auxiliary_routing_before_model_initialization(monkeypatc
     )
     with pytest.raises(ValueError, match="routed-expert auxiliary outputs"):
         PlatformFL.check_and_update_config(config)
+
+
+def test_native_runner_io_bridge_replaces_only_inference_mode():
+    import torch
+
+    from vllm_fl.dispatch.io_common import set_io_active
+    from vllm_fl.worker.runtime import _install_native_runner_io_methods
+
+    class NativeRunner:
+        @torch.inference_mode()
+        def execute_model(self):
+            return torch.is_inference_mode_enabled(), torch.is_grad_enabled()
+
+        @torch.inference_mode()
+        def sample_tokens(self):
+            return torch.is_inference_mode_enabled(), torch.is_grad_enabled()
+
+    runner = NativeRunner()
+    _install_native_runner_io_methods(runner)
+
+    try:
+        set_io_active(True)
+        assert runner.execute_model() == (False, False)
+        assert runner.sample_tokens() == (False, False)
+
+        set_io_active(False)
+        assert runner.execute_model() == (True, False)
+    finally:
+        set_io_active(False)
+
+
+@pytest.mark.parametrize("io_enabled", [False, True])
+@pytest.mark.parametrize("dummy", [False, True])
+def test_native_model_preparation_preserves_shared_io_hooks(
+    monkeypatch, io_enabled, dummy
+):
+    from importlib.metadata import version
+
+    from packaging.version import Version
+
+    if Version(version("vllm")) < Version("0.32.0"):
+        pytest.skip("Requires native V1 runner integration")
+    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
+    import vllm_fl.dispatch.io_dumper as io_dumper
+    import vllm_fl.worker.runtime as runtime
+
+    events = []
+    model = object()
+    runner = object.__new__(GPUModelRunner)
+    runner.model = model
+    monkeypatch.setattr(runner, "get_model", lambda: model)
+    monkeypatch.setattr(
+        io_dumper, "init_io_dump_from_env", lambda eager: events.append(("init", eager))
+    )
+    monkeypatch.setattr(io_dumper, "is_dump_enabled", lambda: io_enabled)
+    monkeypatch.setattr(
+        io_dumper,
+        "register_io_module_hooks",
+        lambda value: events.append(("hooks", value)),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_install_native_runner_io_methods",
+        lambda value, names: events.append(("methods", value, names)),
+    )
+    runtime.prepare_native_model_runner(runner, True, dummy)
+    expected = [("init", True)]
+    if io_enabled:
+        expected.append(
+            (
+                "methods",
+                runner,
+                ("execute_model", "sample_tokens", "pool", "_dummy_run"),
+            )
+        )
+        if not dummy:
+            expected.append(("hooks", model))
+    assert runner.model is model
+    assert events == expected

@@ -3,7 +3,6 @@
 """NVIDIA worker/platform contracts for the native vLLM CUDA wheel."""
 
 import pytest
-
 from tests.utils.device_utils import get_backend
 
 pytestmark = pytest.mark.skipif(
@@ -193,35 +192,6 @@ def test_nvidia_worker_delegates_to_target_version_gpu_worker():
 
     assert issubclass(NvidiaWorkerFL, NativeGPUWorker)
     assert NvidiaWorkerFL.load_model is NativeGPUWorker.load_model
-
-
-def test_native_runner_io_bridge_replaces_only_inference_mode():
-    import torch
-
-    from vllm_fl.dispatch.io_common import set_io_active
-    from vllm_fl.worker.nvidia_worker import _install_native_runner_io_methods
-
-    class NativeRunner:
-        @torch.inference_mode()
-        def execute_model(self):
-            return torch.is_inference_mode_enabled(), torch.is_grad_enabled()
-
-        @torch.inference_mode()
-        def sample_tokens(self):
-            return torch.is_inference_mode_enabled(), torch.is_grad_enabled()
-
-    runner = NativeRunner()
-    _install_native_runner_io_methods(runner)
-
-    try:
-        set_io_active(True)
-        assert runner.execute_model() == (False, False)
-        assert runner.sample_tokens() == (False, False)
-
-        set_io_active(False)
-        assert runner.execute_model() == (True, False)
-    finally:
-        set_io_active(False)
 
 
 def test_nvidia_worker_initializes_io_dump_once_after_model_load():
