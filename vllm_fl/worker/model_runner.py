@@ -5805,11 +5805,12 @@ class ModelRunnerFL(
 
         if (
             current_platform.device_type in ("npu", "musa")
-            and self.compilation_config.mode != CompilationMode.NONE
-        ):
+            or getattr(current_platform, "vendor_name", None) == "amd"
+        ) and self.compilation_config.mode != CompilationMode.NONE:
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
-            # because fullgraph compilation cannot enter that context manager.
+            # because fullgraph compilation cannot enter that context manager
+            # ("Dynamo does not know how to enter a `RLock` context manager").
             # Aliased on purpose: a plain import here would shadow the
             # module-level symbol used by the earlier warmup in this function.
             from vllm_fl.dispatch import warmup_cached_ops as _warmup_cached_ops
