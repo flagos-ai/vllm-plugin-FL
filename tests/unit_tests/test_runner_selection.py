@@ -2,6 +2,8 @@
 
 """Runner-selection contracts for vLLM 0.32.0."""
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -51,7 +53,7 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu"])
+@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "iluvatar"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os
@@ -77,7 +79,8 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
 
 
 @pytest.mark.parametrize(
-    "device_type,vendor", [("npu", "ascend"), ("gcu", "enflame"), ("gcu", "gcu")]
+    "device_type,vendor",
+    [("npu", "ascend"), ("gcu", "enflame"), ("gcu", "gcu"), ("cuda", "iluvatar")],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
     monkeypatch, device_type, vendor
@@ -264,10 +267,10 @@ def test_iluvatar_keeps_vendor_graph_config(monkeypatch, requested, expected):
     assert config.compilation_config.use_inductor_graph_partition is True
     assert config.compilation_config.pass_config.fuse_rope_kvcache_cat_mla is False
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
-    # Ascend-only fusion restrictions must not leak into the CoreX backend.
-    assert config.compilation_config.pass_config.fuse_norm_quant is True
-    assert config.compilation_config.pass_config.fuse_act_quant is True
-    assert config.compilation_config.pass_config.fuse_attn_quant is True
+    # 0.32 does not import these CUDA-only passes for the OOT CoreX platform.
+    assert config.compilation_config.pass_config.fuse_norm_quant is False
+    assert config.compilation_config.pass_config.fuse_act_quant is False
+    assert config.compilation_config.pass_config.fuse_attn_quant is False
 
 
 def test_ascend_revalidates_parallelism_after_glm_dense_fallback(monkeypatch):
@@ -407,3 +410,17 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
     )
 
     assert vllm_fl.register() == "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+
+
+@pytest.mark.parametrize('vendor', ['iluvatar', 'nvidia'])
+def test_ir_defaults_do_not_require_cuda_provider_on_iluvatar(monkeypatch, vendor):
+    from vllm.config.compilation import CompilationMode
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, 'vendor_name', vendor)
+    config = SimpleNamespace(compilation_config=SimpleNamespace(
+        backend='inductor', mode=CompilationMode.NONE))
+    priorities = PlatformFL.get_default_ir_op_priority(config)
+    expected = ['native'] if vendor == 'iluvatar' else ['vllm_c', 'native']
+    assert priorities.rms_norm == expected
+    assert priorities.fused_add_rms_norm == expected

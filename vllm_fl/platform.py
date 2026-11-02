@@ -222,6 +222,11 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.vendor_name == "iluvatar" and vllm_config.use_v2_model_runner:
+            raise ValueError(
+                "Iluvatar requires ModelRunnerFL; the upstream V2 runner needs "
+                "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
+            )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -372,9 +377,14 @@ class PlatformFL(Platform):
             _pc = getattr(compilation_config, "pass_config", None)
             if _pc is not None:
                 _pc.fuse_rope_kvcache_cat_mla = False
+                # OOT platforms do not import these CUDA-only fusion passes.
+                # Explicit custom_ops=['all'] otherwise enables them on 0.32.
+                _pc.fuse_norm_quant = False
+                _pc.fuse_act_quant = False
+                _pc.fuse_attn_quant = False
+            # Also retain the default for callers invoking this hook directly.
+            # Normal startup selects it earlier in register().
             os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
-            # Iluvatar lacks is_cuda_alike(): the vLLM UVA helper is
-            # unavailable while Model Runner V2 needs UvaBuffer. Use V1.
 
         if cls.device_type == "npu":
             if (
@@ -651,6 +661,11 @@ class PlatformFL(Platform):
             )
 
             patch_triton_chained_or_for_iluvatar()
+            from vllm_fl.dispatch.backends.vendor.iluvatar.moe_router import (
+                patch_moe_router,
+            )
+
+            patch_moe_router()
 
     @classmethod
     def supports_fp8(cls) -> bool:
@@ -742,7 +757,12 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        # EMPTY vendor builds do not register upstream CUDA providers.
+        default = (
+            ["native"]
+            if using_inductor or cls.vendor_name == "iluvatar"
+            else ["vllm_c", "native"]
+        )
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

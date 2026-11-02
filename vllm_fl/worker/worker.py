@@ -86,7 +86,7 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -126,6 +126,19 @@ def _apply_worker_vendor_patches() -> None:
     """Apply patches that must execute inside every worker process."""
     if getattr(current_platform, "vendor_name", "") != "iluvatar":
         return
+    from vllm_fl.dispatch.backends.vendor.iluvatar.moe_router import patch_moe_router
+
+    patch_moe_router()
+    from vllm_fl.dispatch.backends.vendor.iluvatar.vision_precision import (
+        patch_vision_precision,
+    )
+
+    patch_vision_precision()
+    from vllm_fl.dispatch.backends.vendor.iluvatar.autotune_memory import (
+        patch_autotune_memory,
+    )
+
+    patch_autotune_memory()
     try:
         from vllm_fl.dispatch.backends.vendor.iluvatar.iluvatar import (
             patch_sampler_compile_for_iluvatar,
@@ -507,7 +520,12 @@ class WorkerFL(WorkerBase):
                 self.vllm_config, self.device
             )
         else:
-            from vllm_fl.worker.model_runner import ModelRunnerFL
+            if getattr(current_platform, "vendor_name", "") == "iluvatar":
+                from vllm_fl.worker.iluvatar_model_runner import (
+                    IluvatarModelRunner as ModelRunnerFL,
+                )
+            else:
+                from vllm_fl.worker.model_runner import ModelRunnerFL
 
             self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
 
@@ -765,8 +783,11 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
-            self.model_runner.init_routed_experts_capturer()
+        # In 0.32 the V1 runner initializes routed-expert capture itself from
+        # aux_output_config; ModelConfig no longer owns this option.
+        if getattr(current_platform, "vendor_name", "") != "iluvatar":
+            if self.model_config.enable_return_routed_experts:
+                self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
@@ -1168,45 +1189,10 @@ class WorkerFL(WorkerBase):
 
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        all_gather_tensors = {}
-        compilation_config = self.vllm_config.compilation_config
-        parallel_config = self.vllm_config.parallel_config
-
-        if (
-            parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
-            and forward_pass
-        ):
-            # currently only supported by V1 GPUModelRunner
-            assert not self.use_v2_model_runner
-            num_scheduled_tokens_np = np.array(
-                list(scheduler_output.num_scheduled_tokens.values()),
-                dtype=np.int32,
-            )
-            # TODO(lucas): This is pretty gross; ideally we should only ever call
-            # `_determine_batch_execution_and_padding` once (will get called again
-            # in `execute_model`) but this requires a larger refactor of PP.
-            _, batch_desc, _, _, _ = (
-                self.model_runner._determine_batch_execution_and_padding(
-                    num_tokens=num_scheduled_tokens,
-                    num_reqs=len(num_scheduled_tokens_np),
-                    num_scheduled_tokens_np=num_scheduled_tokens_np,
-                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
-                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
-                )
-            )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
-
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
                 get_pp_group().irecv_tensor_dict(
                     all_gather_group=get_tp_group(),
-                    all_gather_tensors=all_gather_tensors,
                 )
             )
             assert tensor_dict is not None
@@ -1239,11 +1225,12 @@ class WorkerFL(WorkerBase):
         )
 
         # launch non-blocking send of intermediate tensors
-        self._pp_send_work = get_pp_group().isend_tensor_dict(
+        handles = get_pp_group().isend_tensor_dict(
             output.tensors,
             all_gather_group=get_tp_group(),
-            all_gather_tensors=all_gather_tensors,
         )
+        # Metadata is reaped by GroupCoordinator; only wait on device sends.
+        self._pp_send_work = handles[1:]
 
         return None
 
@@ -1510,7 +1497,7 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    from vllm.model_executor.determinism.batch_invariant import init_batch_invariance
 
     init_batch_invariance()
     override_envs_for_eplb(

@@ -162,11 +162,20 @@ jobs:
       container_options: ${{ fromJson(needs.setup.outputs.config).container_options }}
       timeout: 30
 
+  # Keep scarce Iluvatar hardware opt-in through the platform registry.
+  # Serialize with existing model jobs to avoid sharing accelerator memory.
+  iluvatar-gates:
+    needs: [setup, benchmark]
+    if: ${{ !cancelled() && inputs.platform == 'iluvatar' && needs.setup.result == 'success' }}
+    uses: ./.github/workflows/_iluvatar_gate.yml
+    with:
+      config: ${{ needs.setup.outputs.config }}
+
   # ============================================================
   # Feishu notification — per-platform status
   # ============================================================
   notify:
-    needs: [unit, functional, e2e, benchmark]
+    needs: [unit, functional, e2e, benchmark, iluvatar-gates]
     if: always()
     uses: ./.github/workflows/_notify_feishu.yml
     with:
@@ -175,11 +184,14 @@ jobs:
         ${{ (needs.unit.result == 'success' &&
              needs.functional.result == 'success' &&
              (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped'))
+             (needs.benchmark.result == 'success' || needs.benchmark.result == 'skipped') &&
+             (needs.iluvatar-gates.result == 'success' ||
+              (inputs.platform != 'iluvatar' && needs.iluvatar-gates.result == 'skipped')))
             && 'success'
             || (needs.unit.result == 'cancelled' ||
                 needs.functional.result == 'cancelled' ||
                 needs.e2e.result == 'cancelled' ||
-                needs.benchmark.result == 'cancelled')
+                needs.benchmark.result == 'cancelled' ||
+                needs.iluvatar-gates.result == 'cancelled')
                && 'cancelled'
                || 'failure' }}
