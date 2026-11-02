@@ -2,6 +2,7 @@
 
 """Behavioral contract tests for the vLLM 0.28 FlagCX communicator adapter."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,9 +17,79 @@ from vllm.distributed.device_communicators.cuda_communicator import (  # noqa: E
 )
 
 from vllm_fl.distributed.communicator import CommunicatorFL  # noqa: E402
+from vllm_fl.distributed.device_communicators import flagcx  # noqa: E402
 from vllm_fl.distributed.nvidia_communicator import (  # noqa: E402
     NvidiaCommunicatorFL,
 )
+
+
+@pytest.mark.parametrize("device_type", ["npu", "gcu"])
+def test_flagcx_initialization_uses_native_device_context(monkeypatch, device_type):
+    class Device:
+        type = device_type
+
+    class Group:
+        rank = 0
+        world_size = 2
+
+        def broadcast_obj(self, value, src):
+            assert src == 0
+            return value
+
+    device = Device()
+    stream = MagicMock()
+    backend = SimpleNamespace(
+        device=MagicMock(), current_stream=MagicMock(return_value=stream)
+    )
+    cuda_device = MagicMock(side_effect=AssertionError("native CUDA context used"))
+    fake_torch = SimpleNamespace(
+        device=Device,
+        cuda=SimpleNamespace(device=cuda_device),
+        zeros=MagicMock(),
+        **{device_type: backend},
+    )
+    library = MagicMock()
+    monkeypatch.setattr(flagcx, "torch", fake_torch)
+    monkeypatch.setattr(flagcx, "StatelessProcessGroup", Group)
+    monkeypatch.setattr(flagcx, "FLAGCXLibrary", MagicMock(return_value=library))
+    warmup = MagicMock()
+    monkeypatch.setattr(flagcx.PyFlagcxCommunicator, "all_reduce", warmup)
+
+    communicator = flagcx.PyFlagcxCommunicator(Group(), device, "/test/libflagcx.so")
+
+    assert communicator.available and not communicator.disabled
+    backend.device.assert_called_once_with(device)
+    backend.device.return_value.__enter__.assert_called_once()
+    backend.current_stream.assert_called_once_with(device)
+    stream.synchronize.assert_called_once()
+    warmup.assert_called_once()
+    cuda_device.assert_not_called()
+
+
+@pytest.mark.parametrize("device_type", ["npu", "gcu"])
+def test_flagcx_uses_current_native_stream_handle(monkeypatch, device_type):
+    streams = [
+        SimpleNamespace(**{f"{device_type}_stream": handle}) for handle in (11, 29)
+    ]
+    backend = SimpleNamespace(current_stream=MagicMock(side_effect=streams))
+    monkeypatch.setattr(flagcx, "torch", SimpleNamespace(**{device_type: backend}))
+    monkeypatch.setattr(
+        flagcx,
+        "current_stream",
+        MagicMock(side_effect=AssertionError("CUDA stream used")),
+    )
+    communicator = flagcx.PyFlagcxCommunicator.__new__(flagcx.PyFlagcxCommunicator)
+    communicator.device = SimpleNamespace(type=device_type)
+    handles = []
+    communicator.flagcx = SimpleNamespace(
+        adaptor_stream_copy=lambda stream: handles.append(stream.cuda_stream)
+    )
+
+    for _ in streams:
+        communicator._copy_flagcx_stream(communicator._current_stream())
+
+    assert handles == [11, 29]
+    assert backend.current_stream.call_count == 2
 
 
 @pytest.fixture
