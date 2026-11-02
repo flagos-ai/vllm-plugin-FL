@@ -1142,6 +1142,8 @@ def test_sparse_mapping(rows, width, dtype, strided):
     before = [a.clone() for a in args]
     actual = convert_sparse_indices(*args, 64)
     expected = _sparse_mapping_reference(*args, 64)
+    # Report reduction/count errors separately from compacted-store errors.
+    torch.testing.assert_close(actual[1].cpu(), expected[1], rtol=0, atol=0)
     for a, e in zip(actual, expected):
         torch.testing.assert_close(a.cpu(), e, rtol=0, atol=0)
         assert a.dtype == torch.int32 and a.is_contiguous()
@@ -1174,6 +1176,27 @@ def test_no_pages_and_all_invalid():
     ]:
         out, lengths = convert_sparse_indices(req, table, indices, 64)
         assert (out == -1).all().item() and (lengths == 0).all().item()
+
+
+@pytest.mark.parametrize("request_id", [0, -1])
+@pytest.mark.parametrize("dtype", [torch.int32, torch.int64])
+@pytest.mark.gpu
+def test_compaction_masks_literal_with_offset_inputs(request_id, dtype):
+    # Sentinel guards expose tail-lane reads and writes beyond logical views.
+    req = torch.tensor([737, request_id, 737], dtype=dtype, device="cuda")[1:2]
+    pages = torch.tensor([737, 10, -1, 12, 737], dtype=dtype, device="cuda")[1:4][
+        None, :
+    ]
+    tokens = torch.tensor(
+        [737, -1, 0, 64, 128, 1, 192, 737], dtype=dtype, device="cuda"
+    )[1:7][None, :]
+    before = [x.clone() for x in (req, pages, tokens)]
+    out, lengths = convert_sparse_indices(req, pages, tokens, 64)
+    assert lengths.cpu().tolist() == [3]
+    assert out.cpu().tolist() == [[640, 768, 641, -1, -1, -1]]
+    assert out.is_contiguous() and out.untyped_storage().nbytes() == out.numel() * 4
+    for value, original in zip((req, pages, tokens), before):
+        torch.testing.assert_close(value, original, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("width", [17, 2048, 8195])

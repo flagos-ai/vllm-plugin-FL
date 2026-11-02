@@ -14,6 +14,7 @@ def _convert_sparse_indices_kernel(
     Indices,
     Physical,
     Lengths,
+    Discard,
     request_stride: tl.constexpr,
     block_row_stride: tl.constexpr,
     block_col_stride: tl.constexpr,
@@ -30,36 +31,39 @@ def _convert_sparse_indices_kernel(
     # Match PyTorch's negative row indexing for otherwise legal request IDs.
     req = tl.where(req < 0, req + N_REQUESTS, req)
     row_valid = (req >= 0) & (req < N_REQUESTS)
+    safe_req = tl.minimum(tl.maximum(req, 0), N_REQUESTS - 1)
     lane = tl.arange(0, TILE)
     count = tl.full((), 0, tl.int32)
     for start in range(tl.cdiv(WIDTH, TILE)):
         col = start * TILE + lane
+        # Form only in-bounds load addresses, including inactive tail lanes.
+        safe_col = tl.minimum(col, WIDTH - 1).to(tl.int64)
         token = tl.load(
-            Indices + row * index_row_stride + col.to(tl.int64) * index_col_stride,
-            col < WIDTH,
-            other=-1,
+            Indices + row * index_row_stride + safe_col * index_col_stride,
         ).to(tl.int64)
-        logical_block = token // BLOCK_SIZE
+        token = tl.where(col < WIDTH, token, -1)
+        logical_block = tl.maximum(token, 0) // BLOCK_SIZE
         valid = (col < WIDTH) & (token >= 0) & (logical_block < N_BLOCKS)
         valid = valid & row_valid
-        block = tl.load(
-            Blocks + req * block_row_stride + logical_block * block_col_stride,
-            valid,
-            other=-1,
-        ).to(tl.int64)
+        if N_BLOCKS > 0:
+            safe_block = tl.minimum(logical_block, N_BLOCKS - 1)
+            block = tl.load(
+                Blocks + safe_req * block_row_stride + safe_block * block_col_stride,
+            ).to(tl.int64)
+        else:
+            block = tl.full((TILE,), -1, tl.int64)
         valid = valid & (block >= 0)
         dst = count + tl.cumsum(valid.to(tl.int32), 0) - 1
         physical = block * BLOCK_SIZE + token % BLOCK_SIZE
-        tl.store(Physical + row * WIDTH + dst.to(tl.int64), physical, valid)
-        count += tl.sum(valid.to(tl.int32), 0)
-    # Tail and compact prefix are disjoint: no racing initialization/scatter.
-    for start in range(tl.cdiv(WIDTH, TILE)):
-        col = start * TILE + lane
-        tl.store(
-            Physical + row * WIDTH + col.to(tl.int64),
-            -1,
-            (col < WIDTH) & (col >= count),
+        # Inactive scatter lanes get distinct, in-bounds discard slots. This
+        # avoids masked scatter lowering and any racing writes to valid data.
+        destination = tl.where(
+            valid,
+            Physical + row * WIDTH + tl.maximum(dst, 0).to(tl.int64),
+            Discard + row * TILE + lane,
         )
+        tl.store(destination, physical)
+        count += tl.sum(valid.to(tl.int32), 0)
     tl.store(Lengths + row, count)
 
 
@@ -92,10 +96,18 @@ def convert_sparse_indices(request_ids, block_table, token_indices, block_size):
     rows, width = token_indices.shape
     if rows and not block_table.shape[0]:
         raise ValueError("nonempty indices require at least one page-table row")
-    output = torch.empty((rows, width), dtype=torch.int32, device=token_indices.device)
-    lengths = torch.empty((rows,), dtype=torch.int32, device=token_indices.device)
-    if rows:
+    # Initialize before compaction; a separate launch cannot overwrite its
+    # compact prefix even on backends with restricted masked-store lowering.
+    output = torch.full(
+        (rows, width), -1, dtype=torch.int32, device=token_indices.device
+    )
+    lengths = torch.zeros((rows,), dtype=torch.int32, device=token_indices.device)
+    if rows and width:
         # A fixed-size scan bounds metadata workspace independently of width.
+        tile = min(1024, triton.next_power_of_2(width))
+        discard = torch.empty(
+            (rows, tile), dtype=torch.int32, device=token_indices.device
+        )
         with torch.get_device_module(token_indices.device).device(token_indices.device):
             _convert_sparse_indices_kernel[(rows,)](
                 request_ids,
@@ -103,6 +115,7 @@ def convert_sparse_indices(request_ids, block_table, token_indices, block_size):
                 token_indices,
                 output,
                 lengths,
+                discard,
                 request_ids.stride(0),
                 *block_table.stride(),
                 *token_indices.stride(),
@@ -110,7 +123,7 @@ def convert_sparse_indices(request_ids, block_table, token_indices, block_size):
                 block_table.shape[1],
                 width,
                 block_size,
-                1024,
+                tile,
                 num_warps=4,
             )
     return output, lengths
