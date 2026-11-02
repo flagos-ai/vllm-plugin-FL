@@ -83,9 +83,8 @@ def fused_topk(
     # kernel computes weights for every row; invalidate padded expert IDs
     # afterward, matching upstream topk_softmax without changing its weights.
     padding_mask = _get_padding_mask(hidden_states.shape[0])
-    if (
-        scoring_func != "softmax"
-        or (padding_mask is not None and gating_output.device.type != "gcu")
+    if scoring_func != "softmax" or (
+        padding_mask is not None and gating_output.device.type != "gcu"
     ):
         return upstream_fused_topk(
             hidden_states=hidden_states,

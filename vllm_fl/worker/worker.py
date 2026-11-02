@@ -91,9 +91,9 @@ from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
 from vllm_fl.dispatch.io_common import managed_inference_mode
+from vllm_fl.worker.model_runner import ModelRunnerFL
 from vllm_fl.worker.runtime import (
     _initialize_fl_runtime,
-    get_fl_model_runner_cls,
     is_residual_scattered_for_sp,
     prepare_native_model_runner,
 )
@@ -501,6 +501,11 @@ class WorkerFL(WorkerBase):
             _num_workspace_lanes(self.vllm_config, self.use_v2_model_runner),
         )
 
+        from vllm_fl.patches.qsa_cache_hint import patch_qsa_cache_hint
+
+        if patch_qsa_cache_hint(self.model_config, self.device):
+            logger.info("Applied the FlagTree QSA K-cache hint workaround")
+
         # Construct the model runner
         if self.use_v2_model_runner:
             from vllm.v1.worker.gpu.model_runner import (
@@ -512,8 +517,7 @@ class WorkerFL(WorkerBase):
                 self.vllm_config, self.device
             )
         else:
-            model_runner_cls = get_fl_model_runner_cls()
-            self.model_runner = model_runner_cls(self.vllm_config, self.device)
+            self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -534,7 +538,10 @@ class WorkerFL(WorkerBase):
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
             prepare_native_model_runner(
-                self.model_runner, self.model_config.enforce_eager, load_dummy_weights
+                self.model_runner,
+                self.model_config.enforce_eager,
+                load_dummy_weights,
+                self.use_v2_model_runner,
             )
 
         if self.vllm_config.weight_transfer_config is not None:
@@ -1160,15 +1167,7 @@ class WorkerFL(WorkerBase):
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
-        output = self.model_runner.sample_tokens(grammar_output)
-        if output is not None:
-            from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-
-            if isinstance(self.model_runner, GPUModelRunner):
-                from vllm_fl.dispatch.io_dumper import advance_io_step
-
-                advance_io_step()
-        return output
+        return self.model_runner.sample_tokens(grammar_output)
 
     @managed_inference_mode()
     @with_gpu_sync_check

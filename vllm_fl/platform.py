@@ -58,9 +58,18 @@ dist_backend_dict = {
 }
 
 
-class PlatformFL(Platform):
-    _enum = PlatformEnum.OOT
-    device_info = DeviceInfo()
+_device_info = DeviceInfo()
+if _device_info.vendor_name == "nvidia":
+    from vllm.platforms.cuda import CudaPlatform as _DevicePlatform
+else:
+    _DevicePlatform = Platform
+
+
+class PlatformFL(_DevicePlatform):
+    _enum = (
+        PlatformEnum.CUDA if _device_info.vendor_name == "nvidia" else PlatformEnum.OOT
+    )
+    device_info = _device_info
     vendor_name = device_info.vendor_name
     device_type = get_device_type(vendor_name)
     device_name = get_device_name(vendor_name)
@@ -70,7 +79,7 @@ class PlatformFL(Platform):
         device_info.vendor_name
         if (
             device_info.device_type == "cuda"
-            and device_info.vendor_name not in ("iluvatar", "hygon")
+            and device_info.vendor_name not in ("nvidia", "iluvatar", "hygon")
         )
         else device_info.device_type
     )
@@ -222,6 +231,16 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.vendor_name == "nvidia":
+            # Preserve CUDA's native configuration and compile-pass defaults;
+            # execution uses the same worker/model-runner entry as other devices.
+            use_flagcx = cls._refresh_dist_backend()
+            super().check_and_update_config(vllm_config)
+            if use_flagcx:
+                vllm_config.parallel_config.disable_custom_all_reduce = True
+                vllm_config.compilation_config.pass_config.fuse_allreduce_rms = False
+            vllm_config.parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+            return
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -461,6 +480,21 @@ class PlatformFL(Platform):
         num_heads: int | None = None,
     ) -> str:
         """Get the attention backend class path using the dispatch mechanism."""
+        if cls.vendor_name == "nvidia":
+            if os.environ.get("VLLM_FL_USE_FLAGGEMS_ATTN", "0").lower() not in (
+                "1",
+                "true",
+                "yes",
+            ):
+                return super().get_attn_backend_cls(
+                    selected_backend, attn_selector_config, num_heads
+                )
+            from vllm_fl.dispatch.backends.flaggems.flaggems import FlagGemsBackend
+
+            return FlagGemsBackend().attention_backend(
+                use_mla=attn_selector_config.use_mla,
+                use_sparse=attn_selector_config.use_sparse,
+            )
         from vllm_fl.dispatch import call_op
 
         use_mla = attn_selector_config.use_mla
@@ -486,6 +520,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_supported_vit_attn_backends(cls) -> list["AttentionBackendEnum"]:
+        if cls.vendor_name == "nvidia":
+            return super().get_supported_vit_attn_backends()
         return [
             AttentionBackendEnum.TORCH_SDPA,
             AttentionBackendEnum.FLASH_ATTN,
@@ -498,6 +534,8 @@ class PlatformFL(Platform):
         dtype: torch.dtype,
         backend: "AttentionBackendEnum | None" = None,
     ) -> "AttentionBackendEnum":
+        if cls.vendor_name == "nvidia":
+            return super().get_vit_attn_backend(head_size, dtype, backend)
         from vllm_fl.attention.utils import patch_mm_encoder_attention
 
         patch_mm_encoder_attention()
@@ -560,6 +598,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
+        if cls.vendor_name == "nvidia":
+            if cls._refresh_dist_backend():
+                return "vllm_fl.distributed.nvidia_communicator.NvidiaCommunicatorFL"
+            return super().get_device_communicator_cls()
         if cls.dist_backend == "flagcx":
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
@@ -629,6 +671,10 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_allreduce(cls) -> bool:
+        if cls.vendor_name == "nvidia":
+            if cls._refresh_dist_backend():
+                return False
+            return super().use_custom_allreduce()
         return cls.vendor_name != "hygon" and cls.dist_backend != "flagcx"
 
     @classmethod
@@ -739,6 +785,8 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
+        if cls.vendor_name == "nvidia":
+            return super().get_default_ir_op_priority(vllm_config)
         """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
@@ -824,3 +872,11 @@ class PlatformFL(Platform):
     def is_integrated_gpu(cls, device_id: int = 0) -> bool:
         """Returns whether the GPU is an integrated (UMA) device."""
         return False
+
+    @classmethod
+    def _refresh_dist_backend(cls) -> bool:
+        use_flagcx = "FLAGCX_PATH" in os.environ
+        cls.dist_backend = (
+            "flagcx" if use_flagcx else dist_backend_dict.get(cls.device_type, "nccl")
+        )
+        return use_flagcx

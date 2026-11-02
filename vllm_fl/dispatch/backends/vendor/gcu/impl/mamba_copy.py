@@ -213,7 +213,6 @@ def apply_mamba_copy_gcu_patch() -> None:
         return
     from vllm.v1.worker import mamba_utils
 
-    from vllm_fl.worker.runtime import get_fl_model_runner_cls
+    from vllm_fl.worker.model_runner import ModelRunnerFL
 
-    runner_type = get_fl_model_runner_cls()
-    _install_mamba_hooks(runner_type, mamba_utils)
+    _install_mamba_hooks(ModelRunnerFL, mamba_utils)

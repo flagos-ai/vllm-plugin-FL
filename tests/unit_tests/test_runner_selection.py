@@ -388,7 +388,7 @@ def test_register_preserves_explicit_v1_request(monkeypatch):
     assert __import__("os").environ["VLLM_USE_V2_MODEL_RUNNER"] == "0"
 
 
-def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
+def test_register_selects_common_platform_with_native_cuda_imports(monkeypatch):
     from types import SimpleNamespace
 
     import vllm_fl
@@ -406,4 +406,4 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
         lambda: SimpleNamespace(vendor_name="nvidia"),
     )
 
-    assert vllm_fl.register() == "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+    assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"

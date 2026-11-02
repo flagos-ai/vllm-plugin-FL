@@ -136,6 +136,14 @@ general ATen registration remains with FlagGems.
 
 ### Runtime compatibility hooks
 
+All accelerator backends register `PlatformFL` and use the common `WorkerFL`
+execution path. V1 uses the `ModelRunnerFL` entry point, which binds to upstream
+vLLM 0.32 or the retained legacy implementation according to the installed
+vLLM version. V2 selection follows the same vLLM configuration for every
+backend. Graph capture uses `GraphWrapper`; device operations remain behind
+platform interfaces and vendor dispatch implementations.
+
+
 The plugin installs runtime compatibility hooks through vLLM's plugin entry
 points without modifying the installed vLLM package. Model configs and classes
 that are native in vLLM 0.28.0 and Transformers 5 are not duplicated here.

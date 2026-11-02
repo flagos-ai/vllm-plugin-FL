@@ -26,7 +26,7 @@ import torch
 def has_vllm_model_runner():
     """Check if vllm model runner dependencies are available."""
     try:
-        from vllm_fl.worker.model_runner import ModelRunnerFL  # noqa: F401
+        from vllm_fl.worker._legacy_model_runner import ModelRunnerFL  # noqa: F401
 
         return True
     except (ImportError, AttributeError):
@@ -35,7 +35,8 @@ def has_vllm_model_runner():
 
 # Skip all tests if vllm model runner is not available
 pytestmark = pytest.mark.skipif(
-    not has_vllm_model_runner(), reason="vllm_fl.worker.model_runner not available"
+    not has_vllm_model_runner(),
+    reason="vllm_fl.worker._legacy_model_runner not available",
 )
 
 
@@ -44,7 +45,7 @@ def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context
     from contextlib import nullcontext
     from types import SimpleNamespace
 
-    model_runner = import_module("vllm_fl.worker.model_runner")
+    model_runner = import_module("vllm_fl.worker._legacy_model_runner")
 
     capture_stream = MagicMock()
     current_stream = object()
@@ -80,7 +81,7 @@ class TestExecuteModelState:
 
     def test_fields_match_expected_contract(self):
         """Verify ExecuteModelState has exact fields required by execute_model pipeline."""
-        from vllm_fl.worker.model_runner import ExecuteModelState
+        from vllm_fl.worker._legacy_model_runner import ExecuteModelState
 
         expected_fields = (
             "scheduler_output",
@@ -100,7 +101,7 @@ class TestExecuteModelState:
 
     def test_immutability_prevents_accidental_mutation(self):
         """Ensure state cannot be mutated after creation (important for pipeline safety)."""
-        from vllm_fl.worker.model_runner import ExecuteModelState
+        from vllm_fl.worker._legacy_model_runner import ExecuteModelState
 
         state = ExecuteModelState(
             scheduler_output=MagicMock(),
@@ -120,7 +121,7 @@ class TestExecuteModelState:
 
     def test_unpacking_for_downstream_processing(self):
         """Test that state can be unpacked correctly for downstream use."""
-        from vllm_fl.worker.model_runner import ExecuteModelState
+        from vllm_fl.worker._legacy_model_runner import ExecuteModelState
 
         mock_scheduler = MagicMock()
         mock_logits = torch.randn(4, 1000)
@@ -155,7 +156,7 @@ class TestGetCumsumAndArange:
     @pytest.fixture
     def mock_model_runner(self):
         """Create a minimal mock of ModelRunnerFL for testing."""
-        from vllm_fl.worker.model_runner import ModelRunnerFL
+        from vllm_fl.worker._legacy_model_runner import ModelRunnerFL
 
         mock_runner = MagicMock(spec=ModelRunnerFL)
         mock_runner.arange_np = np.arange(10000)
@@ -234,7 +235,7 @@ class TestPadForSequenceParallelism:
     @pytest.fixture
     def mock_model_runner(self):
         """Create mock model runner for padding tests."""
-        from vllm_fl.worker.model_runner import ModelRunnerFL
+        from vllm_fl.worker._legacy_model_runner import ModelRunnerFL
 
         mock_runner = MagicMock(spec=ModelRunnerFL)
         mock_runner.vllm_config = MagicMock()
@@ -296,7 +297,7 @@ class TestGetPositions:
     @pytest.fixture
     def mock_model_runner(self):
         """Create mock model runner for position tests."""
-        from vllm_fl.worker.model_runner import ModelRunnerFL
+        from vllm_fl.worker._legacy_model_runner import ModelRunnerFL
 
         mock_runner = MagicMock(spec=ModelRunnerFL)
 

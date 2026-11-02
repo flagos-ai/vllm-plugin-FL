@@ -109,7 +109,7 @@ CUDA_VISIBLE_DEVICES=0 VLLM_USE_V2_MODEL_RUNNER=0 \
 ```
 
 Set `VLLM_USE_V2_MODEL_RUNNER=1` to select V2 explicitly. Both runners are
-inherited from upstream through `NvidiaWorkerFL`; confirm the selected runner
+selected by the common `WorkerFL` using upstream implementations; confirm the selected runner
 in the worker logs. `--enforce-eager` is optional for debugging and is independent
 of runner selection.
 

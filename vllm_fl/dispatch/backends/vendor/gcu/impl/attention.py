@@ -14,21 +14,25 @@ from typing import ClassVar
 import numpy as np
 import torch
 
+from vllm.model_executor.layers.attention.attention import Attention
+from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionImpl,
     AttentionType,
     MultipleOf,
 )
-from vllm.utils.torch_utils import is_quantized_kv_cache
-from vllm.model_executor.layers.attention.attention import Attention
 
 if find_spec("vllm.v1.attention.ops.dcp") is not None:
     from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
 else:
     from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
-from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
-
+# GCU: use Enflame-native flash_attn_varlen_func for best performance,
+# plus PyTorch native reshape_and_cache_flash (upstream triton kernel has
+# GCU compatibility issues — see reshape_and_cache.py for details).
+from flash_attn.vllm_flash_attn import (  # type: ignore[import]
+    flash_attn_varlen_func,  # Enflame native kernel
+)
 
 from vllm.config import (
     VllmConfig,
@@ -38,7 +42,6 @@ from vllm.config import (
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm_fl.utils import get_batch_invariant_module
 from vllm.utils.math_utils import cdiv
 from vllm.v1.attention.backend import (
     AttentionCGSupport,
@@ -48,14 +51,10 @@ from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
 )
+from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
 
-# GCU: use Enflame-native flash_attn_varlen_func for best performance,
-# plus PyTorch native reshape_and_cache_flash (upstream triton kernel has
-# GCU compatibility issues — see reshape_and_cache.py for details).
-from flash_attn.vllm_flash_attn import (  # type: ignore[import]
-    flash_attn_varlen_func,  # Enflame native kernel
-)
+from vllm_fl.utils import get_batch_invariant_module
 
 # AOT scheduler metadata generation (FA3 feature).
 # Enflame .so exposes scheduler_metadata parameter; upstream fa_utils

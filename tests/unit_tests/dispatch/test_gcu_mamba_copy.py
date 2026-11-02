@@ -22,7 +22,7 @@ from vllm_fl.dispatch.backends.vendor.gcu.impl import mamba_copy
 def test_gcu_hooks_bind_the_selected_model_runner(monkeypatch):
     import vllm.platforms
 
-    import vllm_fl.worker.runtime as runtime
+    import vllm_fl.worker.model_runner as model_runner
 
     selected = object()
     calls = []
@@ -32,18 +32,14 @@ def test_gcu_hooks_bind_the_selected_model_runner(monkeypatch):
         SimpleNamespace(vendor_name="enflame", device_type="gcu"),
     )
 
-    def select():
-        calls.append(("select",))
-        return selected
-
-    monkeypatch.setattr(runtime, "get_fl_model_runner_cls", select)
+    monkeypatch.setattr(model_runner, "ModelRunnerFL", selected)
     monkeypatch.setattr(
         mamba_copy,
         "_install_mamba_hooks",
         lambda runner, utils: calls.append(("install", runner, utils)),
     )
     mamba_copy.apply_mamba_copy_gcu_patch()
-    assert calls == [("select",), ("install", selected, mamba_utils)]
+    assert calls == [("install", selected, mamba_utils)]
 
 
 class _Storage:

@@ -5,10 +5,11 @@ from __future__ import annotations
 import sys
 
 import torch
-from vllm.triton_utils import tl, triton
 from flag_gems.fused.reshape_and_cache_flash import (
     reshape_and_cache_flash as _gems_reshape_and_cache_flash,
 )
+
+from vllm.triton_utils import tl, triton
 
 _INT32_MAX = 2**31 - 1
 _MAX_GRID_X = 65535

@@ -103,18 +103,18 @@ def test_model_runner_selection_depends_on_version_only(
     monkeypatch, device_type, vllm_version, use_native
 ):
     import importlib.metadata
+    import importlib.util
     import sys
+    from pathlib import Path
     from types import ModuleType
 
     import vllm.platforms
-
-    from vllm_fl.worker.runtime import get_fl_model_runner_cls
 
     monkeypatch.setattr(vllm.platforms.current_platform, "device_type", device_type)
     legacy = type("LegacyRunner", (), {})
     native = type("NativeRunner", (), {})
     for path, symbol, cls in [
-        ("vllm_fl.worker.model_runner", "ModelRunnerFL", legacy),
+        ("vllm_fl.worker._legacy_model_runner", "ModelRunnerFL", legacy),
         ("vllm.v1.worker.gpu_model_runner", "GPUModelRunner", native),
     ]:
         module = ModuleType(path)
@@ -122,68 +122,13 @@ def test_model_runner_selection_depends_on_version_only(
         monkeypatch.setitem(sys.modules, path, module)
     monkeypatch.setattr(importlib.metadata, "version", lambda name: vllm_version)
 
-    assert get_fl_model_runner_cls() is (native if use_native else legacy)
-
-
-@pytest.fixture(autouse=True)
-def native_cuda_platform_imports_on_empty_wheels(request, monkeypatch):
-    """Load the real CUDA platform for metadata contracts on empty wheels.
-
-    These six tests patch CUDA operations themselves. The optional extension's
-    import only registers native ops, which empty backend wheels do not ship.
-    Keep import failures from an installed extension visible, and restore every
-    module/package attribute introduced by this temporary import environment.
-    """
-    if not request.node.name.startswith("test_nvidia_platform_"):
-        yield
-        return
-
-    import importlib.util
-    import sys
-    from types import ModuleType
-
-    import torch
-
-    import vllm
-    import vllm.platforms
-
-    import vllm_fl
-
-    extension = "vllm._C_stable_libtorch"
-    if extension in sys.modules or importlib.util.find_spec(extension) is not None:
-        yield
-        return
-
-    imported_modules = ("vllm.platforms.cuda", "vllm_fl.nvidia_platform")
-    previous_modules = {
-        name: sys.modules[name] for name in imported_modules if name in sys.modules
-    }
-    missing = object()
-    package_attributes = (
-        (vllm, "_C_stable_libtorch"),
-        (vllm.platforms, "cuda"),
-        (vllm_fl, "nvidia_platform"),
+    spec = importlib.util.spec_from_file_location(
+        "test_fl_runner_entry",
+        Path(__file__).parents[3] / "vllm_fl/worker/model_runner.py",
     )
-    previous_attributes = [
-        (package, name, getattr(package, name, missing))
-        for package, name in package_attributes
-    ]
-    cudnn_sdp = torch.backends.cuda.cudnn_sdp_enabled()
-    with monkeypatch.context() as imports:
-        imports.setitem(sys.modules, extension, ModuleType(extension))
-        try:
-            yield
-        finally:
-            for name in imported_modules:
-                if name not in previous_modules:
-                    sys.modules.pop(name, None)
-            for package, name, value in previous_attributes:
-                if value is missing:
-                    if hasattr(package, name):
-                        delattr(package, name)
-                else:
-                    setattr(package, name, value)
-            torch.backends.cuda.enable_cudnn_sdp(cudnn_sdp)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.ModelRunnerFL is (native if use_native else legacy)
 
 
 def has_vllm_worker() -> bool:
@@ -282,7 +227,7 @@ def test_worker_selects_v1_or_v2_model_runner():
 
     source = inspect.getsource(WorkerFL.init_device)
     assert "GPUModelRunnerV2" in source
-    assert "get_fl_model_runner_cls()" in source
+    assert "ModelRunnerFL(" in source
 
 
 def test_platform_accepts_v2_model_runner(monkeypatch):
@@ -478,3 +423,32 @@ def test_native_model_preparation_preserves_shared_io_hooks(
             expected.append(("hooks", model))
     assert runner.model is model
     assert events == expected
+
+
+@pytest.mark.parametrize("method_name", ["execute_model", "sample_tokens"])
+@pytest.mark.parametrize("has_output", [False, True])
+def test_shared_native_io_hooks_advance_once_for_completed_output(
+    monkeypatch, method_name, has_output
+):
+    import torch
+
+    import vllm_fl.dispatch.io_dumper as io_dumper
+    from vllm_fl.worker.runtime import _install_native_runner_io_methods
+
+    class NativeRunner:
+        @torch.inference_mode()
+        def execute_model(self, output):
+            return output
+
+        @torch.inference_mode()
+        def sample_tokens(self, output):
+            return output
+
+    events = []
+    monkeypatch.setattr(io_dumper, "advance_io_step", lambda: events.append("step"))
+    runner = NativeRunner()
+    _install_native_runner_io_methods(runner)
+    _install_native_runner_io_methods(runner)
+    output = object() if has_output else None
+    assert getattr(runner, method_name)(output) is output
+    assert events == (["step"] if has_output else [])

@@ -2,6 +2,7 @@
 
 """Runtime initialization shared by the NVIDIA and multi-vendor workers."""
 
+from functools import wraps
 from types import MethodType
 from typing import Any
 
@@ -13,21 +14,6 @@ from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 logger = init_logger(__name__)
-
-
-def get_fl_model_runner_cls():
-    from importlib.metadata import version
-
-    from packaging.version import Version
-
-    if Version(version("vllm")) >= Version("0.32.0"):
-        from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-
-        return GPUModelRunner
-
-    from vllm_fl.worker.model_runner import ModelRunnerFL
-
-    return ModelRunnerFL
 
 
 def is_residual_scattered_for_sp(vllm_config, num_input_tokens: int) -> bool:
@@ -112,16 +98,20 @@ def _install_native_runner_io_methods(
                 "the vLLM inference-mode wrapper"
             )
 
-        managed_impl = managed_inference_mode()(native_impl)
+        managed_impl = _native_runner_io_method(
+            native_impl, method_name in ("execute_model", "sample_tokens")
+        )
         managed_impl._vllm_fl_managed_io = True
         setattr(model_runner, method_name, MethodType(managed_impl, model_runner))
 
 
-def prepare_native_model_runner(model_runner, enforce_eager, load_dummy_weights):
+def prepare_native_model_runner(
+    model_runner, enforce_eager, load_dummy_weights, use_v2_model_runner=False
+):
     """Install common FL hooks after the native V1 runner loads its model."""
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
-    if not isinstance(model_runner, GPUModelRunner):
+    if not use_v2_model_runner and not isinstance(model_runner, GPUModelRunner):
         return
     from vllm_fl.compilation.graph import adapt_graph_wrapper
     from vllm_fl.dispatch.io_dumper import (
@@ -134,7 +124,24 @@ def prepare_native_model_runner(model_runner, enforce_eager, load_dummy_weights)
     model_runner.model = adapt_graph_wrapper(model_runner.model)
     if is_dump_enabled():
         _install_native_runner_io_methods(
-            model_runner, (*_NATIVE_RUNNER_IO_METHODS, "_dummy_run")
+            model_runner,
+            _NATIVE_RUNNER_IO_METHODS
+            if use_v2_model_runner
+            else (*_NATIVE_RUNNER_IO_METHODS, "_dummy_run"),
         )
         if not load_dummy_weights:
             register_io_module_hooks(model_runner.get_model())
+
+
+def _native_runner_io_method(native_impl, advance_step):
+    @wraps(native_impl)
+    @managed_inference_mode()
+    def call(*args, **kwargs):
+        output = native_impl(*args, **kwargs)
+        if advance_step and output is not None:
+            from vllm_fl.dispatch.io_dumper import advance_io_step
+
+            advance_io_step()
+        return output
+
+    return call
