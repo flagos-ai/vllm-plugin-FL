@@ -76,6 +76,58 @@ def test_vllm_functional_experts_changes_the_triton_input_contract():
     )
 
 
+@pytest.mark.parametrize(
+    "parameters",
+    [{}, {"swiglu_limit": None, "swiglu_alpha": None, "swiglu_beta": None}],
+)
+def test_native_fallback_preserves_original_config_without_activation_parameters(
+    monkeypatch,
+    parameters,
+):
+    original = _quant_config()
+    config = SimpleNamespace(**parameters)
+    calls = []
+
+    def init(self, moe_config, quant_config):
+        calls.append((moe_config, quant_config))
+
+    monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
+    instance = moe_experts.VllmFunctionalW8A8Experts(config, original)
+    assert calls[0][0] is config
+    assert calls[0][1] is original
+    assert instance._use_modular is False
+
+
+def test_modular_fallback_copies_activation_parameters(monkeypatch):
+    from vllm.model_executor.layers.fused_moe.config import int8_w8a8_moe_quant_config
+
+    original = int8_w8a8_moe_quant_config(
+        w1_scale=torch.ones((2, 8, 1)),
+        w2_scale=torch.ones((2, 4, 1)),
+        a1_scale=None,
+        a2_scale=None,
+        per_act_token_quant=True,
+    )
+    config = SimpleNamespace(swiglu_limit=7.0, swiglu_alpha=1.702, swiglu_beta=1.0)
+    calls = []
+
+    def init(self, moe_config, quant_config):
+        calls.append((moe_config, quant_config))
+
+    monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
+    moe_experts.VllmFunctionalW8A8Experts(config, original)
+    forwarded = calls[0][1]
+    assert calls[0][0] is config
+    assert forwarded is not original
+    assert forwarded.gemm1_clamp_limit == 7.0
+    assert forwarded.gemm1_alpha == 1.702
+    assert forwarded.gemm1_beta == 1.0
+    assert forwarded.use_int8_w8a8 and forwarded.per_act_token_quant
+    assert original.gemm1_clamp_limit is None
+    assert original.gemm1_alpha is None
+    assert original.gemm1_beta is None
+
+
 def test_vllm_functional_experts_call_only_native_vllm(monkeypatch):
     calls = []
 
@@ -97,7 +149,7 @@ def test_vllm_functional_experts_call_only_native_vllm(monkeypatch):
     arguments = _apply_arguments()
 
     moe_experts.VllmFunctionalW8A8Experts.apply(
-        SimpleNamespace(quant_config=quant_config),
+        SimpleNamespace(quant_config=quant_config, _use_modular=False),
         **arguments,
     )
 
@@ -208,3 +260,53 @@ def test_functional_experts_rejects_incompatible_weight_scale(
 
     with pytest.raises((TypeError, ValueError), match="weight scales|scale must"):
         moe_experts.FlagGemsW8A8Experts.apply(instance, **_apply_arguments())
+
+
+@pytest.mark.parametrize(
+    "activation,parameters",
+    [
+        (MoEActivation.GELU, {}),
+        (MoEActivation.SILU, {"swiglu_limit": 7.0}),
+        (MoEActivation.SILU, {"swiglu_alpha": 1.702, "swiglu_beta": 1.0}),
+    ],
+)
+def test_native_experts_delegate_configurable_activation(
+    monkeypatch, activation, parameters
+):
+    calls = []
+
+    def init(self, moe_config, quant_config):
+        self.quant_config = quant_config
+
+    monkeypatch.setattr(moe_experts.TritonExperts, "__init__", init)
+    monkeypatch.setattr(
+        moe_experts.TritonExperts,
+        "apply",
+        lambda self, **kwargs: calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        moe_experts,
+        "_vllm_fused_experts",
+        lambda **kwargs: pytest.fail(
+            "Configurable activation must use modular experts"
+        ),
+    )
+    from vllm.model_executor.layers.fused_moe.config import int8_w8a8_moe_quant_config
+
+    quant_config = int8_w8a8_moe_quant_config(
+        w1_scale=torch.ones((2, 8, 1)),
+        w2_scale=torch.ones((2, 4, 1)),
+        a1_scale=None,
+        a2_scale=None,
+        per_act_token_quant=True,
+    )
+    instance = moe_experts.VllmFunctionalW8A8Experts(
+        SimpleNamespace(**parameters),
+        quant_config,
+    )
+    arguments = _apply_arguments()
+    arguments["activation"] = activation
+    instance.apply(**arguments)
+    assert len(calls) == 1
+    assert calls[0].keys() == arguments.keys()
+    assert all(calls[0][name] is value for name, value in arguments.items())

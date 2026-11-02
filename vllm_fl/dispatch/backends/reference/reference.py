@@ -52,21 +52,6 @@ class ReferenceBackend(Backend):
 
         return dynamic_per_token_quant_int8_torch(x)
 
-    def bf16_indexer_cache_write(
-        self,
-        keys: torch.Tensor,
-        cache: torch.Tensor,
-        slot_mapping: torch.Tensor,
-    ) -> None:
-        from .impl.bf16_indexer import bf16_indexer_cache_write_torch
-
-        bf16_indexer_cache_write_torch(keys, cache, slot_mapping)
-
-    def bf16_indexer_decode(self, *args, **kwargs) -> None:
-        from .impl.bf16_indexer import bf16_indexer_decode_torch
-
-        bf16_indexer_decode_torch(*args, **kwargs)
-
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.
@@ -81,6 +66,11 @@ class ReferenceBackend(Backend):
         from .impl.activation import silu_and_mul_torch
 
         return silu_and_mul_torch(obj, x)
+
+    def silu_and_mul_with_clamp(self, obj, x: torch.Tensor) -> torch.Tensor:
+        from .impl.activation import silu_and_mul_with_clamp_torch
+
+        return silu_and_mul_with_clamp_torch(obj, x)
 
     def gelu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
@@ -157,6 +147,13 @@ class ReferenceBackend(Backend):
             rotary_interleaved=rotary_interleaved,
             inplace=inplace,
         )
+
+    def apply_rotary_emb(
+        self, obj, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+    ) -> torch.Tensor:
+        from .impl.rotary import apply_rotary_emb_torch
+
+        return apply_rotary_emb_torch(obj, x, cos, sin)
 
     def attention_backend(self, use_mla: bool = False, use_sparse: bool = False) -> str:
         """

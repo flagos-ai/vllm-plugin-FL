@@ -47,6 +47,32 @@ class AscendBackend(Backend):
         return AscendBackend._available
 
     # ==================== Operator Implementations ====================
+    def gdn_decode(self, *args, **kwargs):
+        from .impl.gdn_reference import gdn_decode
+
+        return gdn_decode(*args, **kwargs)
+
+    def gdn_prefill(self, *args, **kwargs):
+        from .impl.gdn_reference import gdn_prefill
+
+        return gdn_prefill(*args, **kwargs)
+
+    def fused_experts(self, *args, **kwargs):
+        """Stable expert-call seam; implementation owns routing and math."""
+        from .impl.fused_moe import fused_experts_impl
+
+        return fused_experts_impl(*args, **kwargs)
+
+    def topk_softmax(
+        self, topk_weights, topk_ids, token_expert_indices, gating_output,
+        renormalize: bool,
+    ):
+        from .impl.fused_moe import topk_softmax
+
+        return topk_softmax(
+            topk_weights, topk_ids, token_expert_indices, gating_output, renormalize
+        )
+
     def silu_and_mul(self, obj, x: torch.Tensor) -> torch.Tensor:
         """
         SiLU activation followed by element-wise multiplication.

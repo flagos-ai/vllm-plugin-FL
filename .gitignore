@@ -3,7 +3,6 @@ __pycache__/
 build/
 dist/
 vllm_fl/_version.py
-vllm_fl/dispatch/backends/vendor/thead/lib/*.so
 
 # Coverage
 .coverage
@@ -15,3 +14,4 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
+pytest-diagnostics/

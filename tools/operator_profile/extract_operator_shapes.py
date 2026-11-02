@@ -15,6 +15,13 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
+    from .eager_reference import (
+        DETAIL_REFERENCE_FIELDS,
+        attach_eager_reference,
+        load_eager_reference,
+        reference_operator_name,
+        reference_operator_rows,
+    )
     from .rule.rule_map import (
         OperatorIdentity,
         kernel_callable_identity_name,
@@ -22,6 +29,13 @@ if __package__:
         staged_kernel_family_name,
     )
 else:
+    from eager_reference import (
+        DETAIL_REFERENCE_FIELDS,
+        attach_eager_reference,
+        load_eager_reference,
+        reference_operator_name,
+        reference_operator_rows,
+    )
     from rule.rule_map import (
         OperatorIdentity,
         kernel_callable_identity_name,
@@ -486,10 +500,13 @@ def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, Any]]) -> 
 
 
 def summary_csv_rows(
-    kernel_report: dict[str, Any], kernel_total_ns: int
+    kernel_report: dict[str, Any],
+    kernel_total_ns: int,
+    eager_index: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     relation_count: Counter[tuple[str | None, str]] = Counter()
     relation_ns: Counter[tuple[str | None, str]] = Counter()
+    referenced_relations: set[tuple[str | None, str]] = set()
     for kernel_name, report in kernel_report.items():
         for operator, variants in report["operator_variants"].items():
             for row in variants:
@@ -497,7 +514,12 @@ def summary_csv_rows(
                 relation_count[key] += row["kernel_event_count"]
                 relation_ns[key] += round(row["kernel_time_us"] * 1000)
         for row in report["unattributed_variants"]:
-            key = (None, kernel_name)
+            reference = reference_operator_name(
+                "null", kernel_name, eager_index, row.get("candidate_operators")
+            )
+            key = (None if reference == "null" else reference, kernel_name)
+            if reference != "null":
+                referenced_relations.add(key)
             relation_count[key] += row["kernel_event_count"]
             relation_ns[key] += round(row["kernel_time_us"] * 1000)
 
@@ -513,6 +535,11 @@ def summary_csv_rows(
     return [
         {
             "operator_name": operator if operator is not None else "null",
+            "refer": (
+                "eager-refer"
+                if (operator, kernel_name) in referenced_relations
+                else "null"
+            ),
             "kernel_name": kernel_name,
             "kernel_call_count": relation_count[(operator, kernel_name)],
             "kernel_time_us": ns_to_us(relation_ns[(operator, kernel_name)]),
@@ -524,7 +551,30 @@ def summary_csv_rows(
     ]
 
 
-def operator_list_rows(summary_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def inventory_descriptor(
+    source_name: str,
+    kernel_name: str,
+    eager_index: dict[str, list[dict[str, Any]]] | None = None,
+) -> tuple[str, str, OperatorIdentity]:
+    name, kind, identity = operator_descriptor(source_name, kernel_name)
+    if eager_index is None or kind != "unattributed":
+        return name, kind, identity
+    row = reference_operator_rows(
+        [{"operator_name": name, "operator_kind": kind, "kernel_name": kernel_name}],
+        eager_index,
+    )[0]
+    name, kind = row["operator_name"], row["operator_kind"]
+    # Only a unique ATen API can share the identity of a direct ATen mapping.
+    # Ambiguous candidates and custom kernel identities must remain separate.
+    if kind == "eager-refer" and name.startswith("aten::") and "," not in name:
+        identity = operator_descriptor(name, kernel_name)[2]
+    return name, kind, identity
+
+
+def operator_list_rows(
+    summary_rows: list[dict[str, Any]],
+    eager_index: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
     custom_apis_by_kernel: dict[str, set[str]] = defaultdict(set)
     for summary_row in summary_rows:
         source_name = summary_row["operator_name"]
@@ -546,8 +596,8 @@ def operator_list_rows(summary_rows: list[dict[str, Any]]) -> list[dict[str, Any
         matching_apis = custom_apis_by_kernel[kernel_name]
         if source_name == "null" and len(matching_apis) == 1:
             source_name = next(iter(matching_apis))
-        operator_name, operator_kind, identity = operator_descriptor(
-            source_name, kernel_name
+        operator_name, operator_kind, identity = inventory_descriptor(
+            source_name, kernel_name, eager_index
         )
         if identity[0] == "kernel_family" and operator_name != "null":
             known_apis_by_family[identity].add(operator_name)
@@ -590,6 +640,7 @@ def operator_list_rows(summary_rows: list[dict[str, Any]]) -> list[dict[str, Any
         operator_name, operator_kind = min(
             operator_descriptors,
             key=lambda descriptor: (
+                descriptor[1] == "eager-refer",
                 descriptor[0] == "null",
                 descriptor[0],
                 descriptor[1],
@@ -654,6 +705,8 @@ def validate_csv_outputs(
     kernel_shape_dtype_path: Path,
     operator_list_path: Path,
     kernel_summary: dict[str, Any],
+    kernel_report: dict[str, Any],
+    eager_index: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, bool]:
     with kernel_time_path.open(encoding="utf-8", newline="") as source:
         summary_rows = list(csv.DictReader(source))
@@ -693,7 +746,15 @@ def validate_csv_outputs(
         (row["operator_name"], row["operator_kind"], row["kernel_name"])
         for row in operator_rows
     ]
-    expected_operator_rows = operator_list_rows(summary_rows)
+    total_ns = sum(expected_ns.values())
+    raw_summary_rows = summary_csv_rows(kernel_report, total_ns)
+    expected_summary_rows = summary_csv_rows(kernel_report, total_ns, eager_index)
+    expected_details_rows = details_csv_rows(kernel_report)
+    if eager_index is not None:
+        _, expected_details_rows, _ = attach_eager_reference(
+            [], expected_details_rows, eager_index
+        )
+    expected_operator_rows = operator_list_rows(raw_summary_rows, eager_index)
     normalized_operator_rows = [
         {
             **row,
@@ -710,12 +771,14 @@ def validate_csv_outputs(
     operator_ids_stable = True
     operator_classification_matches = True
     for row in operator_rows:
-        operator_name = row["operator_name"]
-        operator_kind = row["operator_kind"]
         kernel_name = row["kernel_name"]
         operator_id = row["operator_id"]
-        expected_name, expected_kind, identity = operator_descriptor(
-            operator_name, kernel_name
+        operator_name = row["operator_name"]
+        operator_kind = row["operator_kind"]
+        expected_name, expected_kind, identity = inventory_descriptor(
+            "null" if operator_kind == "eager-refer" else operator_name,
+            kernel_name,
+            eager_index,
         )
         operator_classification_matches &= (
             expected_name == operator_name and expected_kind == operator_kind
@@ -737,7 +800,11 @@ def validate_csv_outputs(
     aten_rows_first = True
     for row in operator_rows:
         is_communication = row["operator_kind"] == "communication"
-        is_aten = row["operator_kind"] == "aten"
+        is_aten = row["operator_kind"] == "aten" or (
+            row["operator_kind"] == "eager-refer"
+            and row["operator_name"].startswith("aten::")
+            and "," not in row["operator_name"]
+        )
         if seen_non_aten and is_aten:
             aten_rows_first = False
         seen_non_aten |= not is_aten
@@ -806,6 +873,16 @@ def validate_csv_outputs(
         "csv_summary_relations_unique": (
             len(summary_relations) == len(set(summary_relations))
         ),
+        "csv_summary_rows_match_expected": summary_rows
+        == [
+            {key: str(value) for key, value in row.items()}
+            for row in expected_summary_rows
+        ],
+        "csv_details_rows_match_expected": details_rows
+        == [
+            {key: str(value) for key, value in row.items()}
+            for row in expected_details_rows
+        ],
         "csv_summary_detail_relations_match": (
             set(summary_relations) == details_relations
         ),
@@ -840,20 +917,33 @@ def validate_csv_outputs(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runtime", required=True, type=Path)
+    parser.add_argument("--trace-dir", required=True, type=Path)
     parser.add_argument("--rank", type=int, default=0)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument(
+        "--eager-reference",
+        type=Path,
+        help="same-environment eager results directory; references only, not timing",
+    )
     args = parser.parse_args()
+    eager_index = None
+    eager_summary = None
+    if args.eager_reference is not None:
+        if args.eager_reference.resolve() == args.output_dir.resolve():
+            raise ValueError("eager reference must differ from the output directory")
+        eager_index, eager_summary = load_eager_reference(
+            args.eager_reference, args.rank
+        )
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     runtime_files = [
         file
-        for file in runtime_trace_files(args.runtime)
+        for file in runtime_trace_files(args.trace_dir)
         if rank_in_filename(file) == args.rank
     ]
     if not runtime_files:
         raise FileNotFoundError(
-            f"no rank-{args.rank} runtime profiler traces under {args.runtime}"
+            f"no rank-{args.rank} runtime profiler traces under {args.trace_dir}"
         )
 
     kernel_summary, kernel_report, summary = collect_runtime(runtime_files, args.rank)
@@ -871,16 +961,26 @@ def main() -> None:
     summary_rows = summary_csv_rows(
         kernel_report, round(summary["kernel_time_total_us"] * 1000)
     )
+    operator_rows = operator_list_rows(summary_rows, eager_index)
+    detail_rows = details_csv_rows(kernel_report)
+    if eager_index is not None:
+        operator_rows, detail_rows, reference_counts = attach_eager_reference(
+            operator_rows, detail_rows, eager_index
+        )
+        summary["eager_reference"] = {**eager_summary, **reference_counts}
     write_csv(
         kernel_time_path,
         [
             "operator_name",
+            "refer",
             "kernel_name",
             "kernel_call_count",
             "kernel_time_us",
             "percent",
         ],
-        summary_rows,
+        summary_csv_rows(
+            kernel_report, round(summary["kernel_time_total_us"] * 1000), eager_index
+        ),
     )
     write_csv(
         kernel_shape_dtype_path,
@@ -894,8 +994,9 @@ def main() -> None:
             "candidate_operators",
             "kernel_event_count",
             "kernel_time_us",
-        ],
-        details_csv_rows(kernel_report),
+        ]
+        + (DETAIL_REFERENCE_FIELDS if eager_index is not None else []),
+        detail_rows,
     )
     write_csv(
         operator_list_path,
@@ -906,7 +1007,7 @@ def main() -> None:
             "kernel_name",
             "kernel_time_percent(%)",
         ],
-        operator_list_rows(summary_rows),
+        operator_rows,
     )
     summary["conservation"].update(
         validate_csv_outputs(
@@ -914,6 +1015,8 @@ def main() -> None:
             kernel_shape_dtype_path,
             operator_list_path,
             kernel_summary,
+            kernel_report,
+            eager_index,
         )
     )
     failed_checks = [

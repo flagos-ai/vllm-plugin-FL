@@ -24,9 +24,14 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: "Platform name (e.g., cuda, ascend)"
+        description: "Platform name (e.g., nvidia, ascend)"
         required: true
         type: string
+      branch:
+        description: "Branch/ref under test (empty = caller ref)"
+        required: false
+        type: string
+        default: ""
       ci_image:
         description: "Docker image for the test container"
         required: true
@@ -50,6 +55,11 @@ on:
         required: false
         type: number
         default: 30
+      ci_stage:
+        description: "CI stage: pr / nightly / weekly"
+        required: false
+        type: string
+        default: "nightly"
 
 jobs:
   benchmark-test:
@@ -65,15 +75,21 @@ jobs:
       - name: Checkout (attempt 1)
         id: checkout1
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 2)
         id: checkout2
         if: steps.checkout1.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
         continue-on-error: true
       - name: Checkout (attempt 3)
         if: steps.checkout2.outcome == 'failure'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: Check device availability
         run: bash .github/scripts/${{ inputs.platform }}/check.sh
@@ -85,7 +101,8 @@ jobs:
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
-            --scope benchmark
+            --scope benchmark \
+            --stage ${{ inputs.ci_stage }}
 
       - name: Upload test results
         if: always()

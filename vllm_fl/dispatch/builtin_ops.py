@@ -164,3 +164,4 @@ def register_builtins(registry: OpRegistry) -> None:
     except Exception as e:
         logger.debug(f"Plugin discovery failed: {e}")
 
+

@@ -8,15 +8,23 @@ without modifying either the checkpoint or the installed vLLM package.
 
 from __future__ import annotations
 
-import logging
+import inspect
+from copy import copy
 from typing import TYPE_CHECKING
 
+from vllm.logger import init_logger
 from vllm.model_executor.models.config import Qwen3_5ForConditionalGenerationConfig
+from vllm.multimodal.video import VIDEO_LOADER_REGISTRY, Qwen3VLVideoBackend
+
+from vllm_fl.models.qwen3_8_flash_next.common.multimodal import (
+    validate_video_fps,
+    validate_video_pruning,
+)
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig, VllmConfig
 
-logger = logging.getLogger(__name__)
+logger = init_logger(__name__)
 
 
 def _strip_mrope(model_config: ModelConfig) -> None:
@@ -39,6 +47,29 @@ class Qwen3_8FlashNextForConditionalGenerationConfig(
     Qwen3_5ForConditionalGenerationConfig
 ):
     """Apply the hybrid-cache and unsupported-feature contract."""
+
+    @staticmethod
+    def get_flag_gems_blacklist(*, vendor_name: str | None) -> list[str]:
+        if vendor_name != "nvidia":
+            return []
+        # Keep history gather and QSA selection native. The generic
+        # repeat-interleave path synchronizes to infer output_size; dense
+        # GEMM and stable sorting also regress on the measured H100 workload.
+        return [
+            "index_select",
+            "repeat_interleave_tensor",
+            "repeat_interleave_self_tensor",
+            "linear",
+            "mm",
+            "mm_out",
+            "addmm",
+            "addmm_out",
+            "addmm_",
+            "addmm_dtype",
+            "addmm_dtype_out",
+            "sort",
+            "sort_stable",
+        ]
 
     @staticmethod
     def verify_and_update_config(vllm_config: VllmConfig) -> None:
@@ -87,6 +118,7 @@ class Qwen3_8FlashNextForConditionalGenerationConfig(
             )
 
         multimodal_config = vllm_config.model_config.multimodal_config
+        validate_video_pruning(multimodal_config)
         if multimodal_config is not None and multimodal_config.language_model_only:
             _strip_mrope(vllm_config.model_config)
 
@@ -96,6 +128,9 @@ class Qwen3_8FlashNextForConditionalGenerationConfig(
                 "Qwen4Exp Day0 serves normal next-token generation first; "
                 "native MTP/speculative decoding is a separate follow-up gate"
             )
+
+        if multimodal_config is not None and not multimodal_config.language_model_only:
+            _configure_qwen3_8_video_loader(vllm_config.model_config)
 
 
 class Qwen3_8FlashNextForCausalLMConfig(Qwen3_8FlashNextForConditionalGenerationConfig):
@@ -111,20 +146,88 @@ _ARCHITECTURES = {
     "Qwen3_8FlashNextForCausalLM": (
         "Qwen3_8FlashNextForCausalLM",
         Qwen3_8FlashNextForCausalLMConfig,
+        "text",
     ),
     "Qwen3_8FlashNextForConditionalGeneration": (
         "Qwen3_8FlashNextForConditionalGeneration",
         Qwen3_8FlashNextForConditionalGenerationConfig,
+        "multimodal",
     ),
     "Qwen4ExpForCausalLM": (
         "Qwen4ExpForCausalLM",
         Qwen3_8FlashNextForCausalLMConfig,
+        "text",
     ),
     "Qwen4ExpForConditionalGeneration": (
         "Qwen4ExpForConditionalGeneration",
         Qwen3_8FlashNextForConditionalGenerationConfig,
+        "multimodal",
     ),
 }
+
+
+def _patch_common_attention_token_to_req_cache() -> None:
+    """Backport vLLM's shared per-token request-index cache to v0.24."""
+    import torch
+
+    from vllm.v1.attention.backend import CommonAttentionMetadata
+
+    if hasattr(CommonAttentionMetadata, "token_to_req_indices"):
+        return
+
+    def token_to_req_indices(self, buffer: torch.Tensor) -> torch.Tensor:
+        num_tokens = self.num_actual_tokens
+        cached = getattr(self, "_token_to_req_indices_cache", None)
+        if cached is not None:
+            assert cached.device == buffer.device
+            assert cached.dtype == torch.int32
+            assert cached.shape[0] >= num_tokens
+            return cached[:num_tokens]
+
+        num_mapped_tokens = int(self.query_start_loc_cpu[-1])
+        query_lens = self.query_start_loc[1:] - self.query_start_loc[:-1]
+        assert buffer.shape[0] >= max(num_mapped_tokens, num_tokens)
+        mapping = torch.repeat_interleave(
+            torch.arange(query_lens.shape[0], dtype=torch.int32, device=buffer.device),
+            query_lens,
+            output_size=num_mapped_tokens,
+        )
+        buffer[:num_mapped_tokens].copy_(mapping)
+        if num_mapped_tokens < num_tokens:
+            buffer[num_mapped_tokens:num_tokens].zero_()
+        cached = buffer[: max(num_mapped_tokens, num_tokens)]
+        self._token_to_req_indices_cache = cached
+        return cached[:num_tokens]
+
+    CommonAttentionMetadata.token_to_req_indices = token_to_req_indices
+
+
+def _patch_ple_metadata_bridge() -> None:
+    """Teach the v0.24 hybrid state to pass spec fields to PLE metadata."""
+    from vllm.v1.worker.gpu.model_states.mamba_hybrid import MambaHybridAttnMetadata
+
+    from vllm_fl.models.qwen3_8_flash_next.common.short_conv_attn import (
+        PleShortConvAttentionMetadataBuilder,
+    )
+
+    original = MambaHybridAttnMetadata.get_extra_attn_kwargs
+    if getattr(original, "_vllm_fl_qwen38_ple", False):
+        return
+
+    def get_extra_attn_kwargs(self, attn_metadata_builder, num_reqs):
+        if isinstance(attn_metadata_builder, PleShortConvAttentionMetadataBuilder):
+            return {
+                "num_accepted_tokens": None
+                if self.num_accepted_tokens is None
+                else self.num_accepted_tokens[:num_reqs],
+                "num_decode_draft_tokens_cpu": None
+                if self.num_decode_draft_tokens_cpu is None
+                else self.num_decode_draft_tokens_cpu[:num_reqs],
+            }
+        return original(self, attn_metadata_builder, num_reqs)
+
+    get_extra_attn_kwargs._vllm_fl_qwen38_ple = True
+    MambaHybridAttnMetadata.get_extra_attn_kwargs = get_extra_attn_kwargs
 
 
 def _register_compilation_boundaries() -> None:
@@ -138,15 +241,72 @@ def _register_compilation_boundaries() -> None:
             CompilationConfig._attention_ops.append(op)
 
 
+class Qwen3_8FlashNextVideoBackend(Qwen3VLVideoBackend):
+    """Keep Qwen3.8 FPS validation local to its video backend."""
+
+    @classmethod
+    def compute_frames_index_to_sample(cls, source, target, **kwargs):
+        validate_video_fps(source.original_fps, name="source video fps")
+        validate_video_fps(target.fps, name="target video fps")
+        return super().compute_frames_index_to_sample(source, target, **kwargs)
+
+
+def _configure_qwen3_8_video_loader(model_config: ModelConfig) -> None:
+    """Select a model-local loader through vLLM's media I/O configuration."""
+    multimodal_config = model_config.multimodal_config
+    media_io_kwargs = multimodal_config.media_io_kwargs
+    video_kwargs = media_io_kwargs.get("video", {})
+    backend = video_kwargs.get("video_backend")
+    name = "qwen3_8_flash_next"
+    # Retain explicit alternate loaders, including empty/None (env fallback),
+    # and vLLM's config/request override precedence. Never remap a shared
+    # processor name to a model-specific backend.
+    if "video_backend" in video_kwargs and backend not in ("qwen3_vl", name):
+        return
+
+    original = getattr(
+        Qwen3VLVideoBackend.compute_frames_index_to_sample, "__func__", None
+    )
+    if not callable(original):
+        raise TypeError("Qwen3 video frame selection must be a class method")
+    signature = inspect.signature(original)
+    signature.bind(Qwen3VLVideoBackend, object(), object(), min_frames=4)
+    if not any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    ):
+        raise TypeError("Qwen3 video frame selection must accept keyword options")
+
+    registered = VIDEO_LOADER_REGISTRY.name2class.get(name)
+    if registered is not None and registered is not Qwen3_8FlashNextVideoBackend:
+        raise ValueError(f"Video backend {name!r} is already registered")
+    # A config may be shared by another model or passed to another process.
+    # Copy only the containers changed here; all other modality settings stay.
+    updated_config = copy(multimodal_config)
+    updated_config.media_io_kwargs = {
+        **media_io_kwargs,
+        "video": {**video_kwargs, "video_backend": name},
+    }
+    try:
+        if registered is None:
+            VIDEO_LOADER_REGISTRY.register(name)(Qwen3_8FlashNextVideoBackend)
+        if backend != name:
+            model_config.multimodal_config = updated_config
+    except Exception:
+        if registered is None:
+            VIDEO_LOADER_REGISTRY.name2class.pop(name, None)
+        raise
+
+
 def apply_qwen3_8_flash_next_patches() -> bool:
-    """Install config/model registrations and opaque compilation boundaries."""
+    """Install idempotent config, model and v0.24 metadata registrations."""
     from vllm.model_executor.models import (
         config as model_config,
         registry as model_registry,
     )
     from vllm.transformers_utils import config as transformers_config
 
-    from vllm_fl.models.qwen3_8_flash_next import (
+    from vllm_fl.models.qwen3_8_flash_next.config import (
         Qwen3_8FlashNextConfig,
         Qwen3_8FlashNextTextConfig,
     )
@@ -163,17 +323,21 @@ def apply_qwen3_8_flash_next_patches() -> bool:
     config_registry.setdefault("qwen4_exp_text", Qwen3_8FlashNextTextConfig)
 
     module = "vllm_fl.models.qwen3_8_flash_next"
-    supported_architectures = set(
-        model_registry.ModelRegistry.get_supported_archs()
-    )
-    for architecture, (class_name, verifier) in _ARCHITECTURES.items():
-        model_config.MODELS_CONFIG_MAP.setdefault(architecture, verifier)
-        if architecture not in supported_architectures:
-            model_registry.ModelRegistry.register_model(
-                architecture, f"{module}:{class_name}"
-            )
-            supported_architectures.add(architecture)
+    for architecture, (class_name, verifier, family) in _ARCHITECTURES.items():
+        model_config.MODELS_CONFIG_MAP[architecture] = verifier
+        target_map = (
+            model_registry._MULTIMODAL_MODELS
+            if family == "multimodal"
+            else model_registry._TEXT_GENERATION_MODELS
+        )
+        target_map.setdefault(architecture, (module, class_name))
+        model_registry._VLLM_MODELS.setdefault(architecture, (module, class_name))
+        model_registry.ModelRegistry.register_model(
+            architecture, f"{module}:{class_name}"
+        )
 
+    _patch_common_attention_token_to_req_cache()
+    _patch_ple_metadata_bridge()
     _register_compilation_boundaries()
     logger.info("Installed Qwen3.8-Flash-Next / Qwen4Exp Day0 runtime support")
     return True

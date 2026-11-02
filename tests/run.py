@@ -37,9 +37,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -50,6 +55,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from tests.utils.cleanup import device_cleanup, wait_for_memory
+from tests.utils.device_scheduler import DeviceScheduler
+from tests.utils.device_utils import get_device_count, get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
 from tests.utils.platform_config import PlatformConfig
 from tests.utils.report import TestReport, TestResult
@@ -70,6 +77,10 @@ class TestCase:
     case: str = ""
     extra_args: list[str] = field(default_factory=list)
     extra_env: dict[str, str] = field(default_factory=dict)
+    # Total devices this case occupies (tensor_parallel_size * pipeline_parallel_size).
+    # 0 = does not use DeviceScheduler (unit tests, functional tests via xdist).
+    # >0 = DeviceScheduler allocates this many contiguous slots before running.
+    num_devices: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +103,7 @@ class TestRunner:
         platform: str,
         device: str | None = None,
         scope: str = "all",
+        stage: str = "nightly",
         task: str | None = None,
         model: str | None = None,
         case: str | None = None,
@@ -103,6 +115,7 @@ class TestRunner:
     ):
         self.config = PlatformConfig.load(platform, device)
         self.scope = scope
+        self.stage = stage
         self.task = task
         self.model = model
         self.case = case
@@ -138,14 +151,17 @@ class TestRunner:
         print(f"[run] Cases:    {len(test_cases)}")
         print()
 
-        for tc in test_cases:
+        # Split cases: e2e cases go through the device scheduler (parallel);
+        # everything else (unit, functional, benchmark) runs serially as before.
+        e2e_cases = [tc for tc in test_cases if tc.num_devices > 0]
+        other_cases = [tc for tc in test_cases if tc.num_devices == 0]
+
+        for tc in other_cases:
             result = self._run_single(tc)
             self.report.results.append(result)
 
-            # Clean up device resources between e2e tests to prevent
-            # GPU/NPU memory leaks from cascading into subsequent cases
-            if tc.task in ("inference", "serving"):
-                device_cleanup(self.config.platform)
+        if e2e_cases:
+            self._run_e2e_parallel(e2e_cases)
 
         self.report.finalize()
         self.report.print_summary()
@@ -160,6 +176,155 @@ class TestRunner:
 
         return 0 if self.report.all_passed else 1
 
+    def _run_e2e_parallel(self, cases: list[TestCase]) -> None:
+        """Run e2e cases in parallel, limited by available device slots.
+
+        Uses a DeviceScheduler to hand out non-overlapping device index sets.
+        Each case gets exactly ``tc.num_devices`` contiguous slots; the
+        VISIBLE_DEVICES env var for that subprocess is set to those indices so
+        the test process only sees its own cards.
+
+        Degree of parallelism is determined automatically:
+          - total_devices=8, tp=2  → up to 4 cases run at once
+          - total_devices=8, tp=4  → up to 2 cases run at once
+          - total_devices=8, tp=8  → 1 case at a time (serial)
+        """
+        total_devices = get_device_count()
+        visible_env_var = get_visible_device_env_var()
+
+        def _run_serial() -> None:
+            for tc in cases:
+                result = self._run_single(tc)
+                self.report.results.append(result)
+                device_cleanup(self.config.platform)
+
+        if self.config.e2e_serial:
+            # The platform declared its runtime cannot host concurrent
+            # engines (e.g. musa MCCL dies when two TP groups initialize
+            # at once) — serial execution with inherited visibility.
+            print(
+                f"[run] E2E parallel: platform '{self.config.platform}' "
+                "requests serial execution (e2e_serial); running serially"
+            )
+            _run_serial()
+            return
+
+        if total_devices == 0:
+            # No accelerators detected — run serially without device pinning.
+            # In CI this usually means device counting is missing a vendor
+            # branch (the runner knows the platform, the counter guessed);
+            # surface it in the job's annotation summary instead of only
+            # in the log stream.
+            platform = os.environ.get("FL_TEST_PLATFORM", "")
+            print(
+                f"::warning::No accelerators detected for platform "
+                f"'{platform}' ({visible_env_var} is unset or the vendor "
+                "device layer is not wired into get_device_count); "
+                "e2e cases run serially without device pinning."
+            )
+            print("[run] E2E parallel: no accelerators detected, running serially")
+            _run_serial()
+            return
+
+        # A visible-devices mask naming a subset of the physical cards (e.g.
+        # a locally pinned run, or a host partition policy expressed as env)
+        # means the counted devices are subset-relative: re-pinning a case
+        # with slot indices could be reinterpreted against physical cards.
+        # Keep the inherited visibility and run serially instead.
+        mask = os.environ.get(visible_env_var, "").strip()
+        if mask and mask.lower() != "all":
+            try:
+                masked = {int(x) for x in mask.split(",") if x.strip()}
+            except ValueError:
+                masked = None
+            if masked is not None and masked != set(range(total_devices)):
+                print(
+                    f"[run] E2E parallel: {visible_env_var}={mask} pins a "
+                    f"subset of the {total_devices} counted devices; keeping "
+                    "inherited visibility and running serially"
+                )
+                _run_serial()
+                return
+
+        scheduler = DeviceScheduler(total_devices)
+
+        # Max workers = total_devices (worst case: all tp=1 cases)
+        max_workers = total_devices
+
+        # --- 调度总览 ---
+        max_concurrent = max(total_devices // tc.num_devices for tc in cases)
+        print()
+        print(f"[run] {'=' * 60}")
+        print("[run] E2E parallel schedule")
+        print(f"[run]   Total devices : {total_devices}  ({visible_env_var})")
+        print(f"[run]   Cases         : {len(cases)}")
+        print(f"[run]   Max concurrent: {max_concurrent}  (limited by largest tp)")
+        print(f"[run] {'─' * 60}")
+        print(f"[run]   {'Case':<40} {'devices':>7}")
+        print(f"[run]   {'─' * 40} {'─' * 7}")
+        for tc in cases:
+            print(f"[run]   {tc.name:<40} {tc.num_devices:>7}")
+        print(f"[run] {'=' * 60}")
+        print()
+
+        results: list[TestResult] = []
+        results_lock = threading.Lock()
+
+        def _ts() -> str:
+            return time.strftime("%H:%M:%S")
+
+        def _run_one(tc: TestCase) -> None:
+            slots = scheduler.acquire(tc.num_devices)
+            visible = ",".join(str(s) for s in slots)
+            print(
+                f"[run] [{_ts()}] START  {tc.name}  "
+                f"{visible_env_var}={visible}  (devices={tc.num_devices}, stdout buffered until done)",
+                flush=True,
+            )
+            status = "FAIL"
+            try:
+                device_env = {visible_env_var: visible}
+                # Co-scheduled engines each bind HCCL's default port
+                # (16666); the second bind dies with
+                # Communication_Error_Bind_IP_Port. Give every case a
+                # disjoint port range derived from its (exclusive) first
+                # slot so NPU-family engines never collide. Vendors whose
+                # stack ignores this variable are unaffected.
+                port_base = 18000 + slots[0] * 20
+                device_env["HCCL_NPU_SOCKET_PORT_RANGE"] = (
+                    f"{port_base}-{port_base + 19}"
+                )
+                result = self._run_single(
+                    tc, extra_env_override=device_env, _quiet=True
+                )
+                status = "PASS" if result.passed else "FAIL"
+                # Flush captured subprocess output with per-case prefix so
+                # parallel outputs don't interleave in the terminal/CI log.
+                if result.stdout:
+                    for line in result.stdout.splitlines():
+                        print(f"[{tc.name}] {line}", flush=True)
+                device_cleanup(self.config.platform, slots=slots)
+            finally:
+                scheduler.release(slots)
+                print(
+                    f"[run] [{_ts()}] {status:<6} {tc.name}  "
+                    f"released {visible_env_var}={visible}",
+                    flush=True,
+                )
+            with results_lock:
+                results.append(result)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(_run_one, tc) for tc in cases]
+            for fut in as_completed(futures):
+                # Propagate exceptions from worker threads
+                fut.result()
+
+        # Preserve original case ordering in the report
+        order = {tc.name: i for i, tc in enumerate(cases)}
+        results.sort(key=lambda r: order.get(r.name, 0))
+        self.report.results.extend(results)
+
     # --- Test discovery ------------------------------------------------------
 
     def discover_tests(self) -> list[TestCase]:
@@ -169,7 +334,7 @@ class TestRunner:
         - ``unit``: unit tests
         - ``functional``: component-level GPU tests (ops, compilation, distributed)
         - ``e2e``: end-to-end model tests (inference, serving)
-        - ``benchmark``: benchmark smoke tests
+        - ``benchmark``: benchmark tests selected by platform YAML
         - ``all``: all of the above
         """
         cases: list[TestCase] = []
@@ -193,14 +358,31 @@ class TestRunner:
         unit_filter = self.config.get_unit_filter()
         test_path = "tests/unit_tests/"
 
+        # Use explicit CPU count so the log shows the exact parallelism level.
+        # os.cpu_count() can return None on exotic systems; fallback to 1.
+        # Cap at 16: beyond 16 workers the
+        # per-process import overhead (torch, vllm_fl) outweighs the parallelism
+        # benefit and can cause memory pressure on large CI machines.
+        cpu_workers = min(os.cpu_count() or 1, 16)
+        isolate_gpu = self.config.platform == "metax"
+
         extra_args = [
             "--tb=short",
+            "-q",
+            "-n",
+            str(cpu_workers),
+            # multi_gpu tests spawn their own worker processes that pin
+            # concrete device ordinals (e.g. torch.cuda.set_device(rank));
+            # running them concurrently with 16 xdist workers corrupts the
+            # vendor device layer (kunlunxin: "CUDA error: invalid device
+            # ordinal").  They run serially in a second pass below instead.
+            "-m",
+            "not gpu and not multi_gpu" if isolate_gpu else "not multi_gpu",
             "--cov=vllm_fl",
             "--cov-report=term-missing",
             f"--cov-report=json:coverage-{self.config.platform}.json",
             "--json-report",
             f"--json-report-file=report-{self.config.platform}.json",
-            "-q",
         ]
 
         # Apply exclude patterns
@@ -212,14 +394,74 @@ class TestRunner:
             include_expr = " or ".join(unit_filter.include)
             extra_args.extend(["-k", include_expr])
 
-        return [
+        serial_args = [
+            "--tb=short",
+            "-q",
+            "-m",
+            "multi_gpu",
+            "--cov=vllm_fl",
+            "--cov-append",
+            "--cov-report=term-missing",
+            f"--cov-report=json:coverage-{self.config.platform}.json",
+            "--json-report",
+            f"--json-report-file=report-{self.config.platform}-multigpu.json",
+        ]
+        for pattern in unit_filter.exclude:
+            serial_args.extend(["--ignore", f"tests/unit_tests/{pattern}"])
+        if unit_filter.include != "*" and isinstance(unit_filter.include, list):
+            serial_args.extend(["-k", " or ".join(unit_filter.include)])
+
+        print(
+            f"[run] Unit tests parallel: {cpu_workers} workers (no device pinning); "
+            "multi_gpu spawn tests run serially afterwards"
+        )
+
+        cases = [
             TestCase(
                 name=f"unit ({self.config.platform})",
                 pytest_path=test_path,
                 task="unit",
+                case="cpu" if isolate_gpu else "",
                 extra_args=extra_args,
-            )
+            ),
+            TestCase(
+                name=f"unit-multi-gpu ({self.config.platform})",
+                pytest_path=test_path,
+                task="unit",
+                case="multi-gpu" if isolate_gpu else "",
+                extra_args=serial_args,
+            ),
         ]
+        if isolate_gpu:
+            gpu_workers = max(1, min(get_device_count(), 8))
+            gpu_args = extra_args.copy()
+            gpu_args[gpu_args.index("-n") + 1] = str(gpu_workers)
+            gpu_args[gpu_args.index("-m") + 1] = "gpu and not multi_gpu"
+            gpu_args[
+                gpu_args.index(f"--json-report-file=report-{self.config.platform}.json")
+            ] = f"--json-report-file=report-{self.config.platform}-gpu.json"
+            gpu_args.extend(
+                [
+                    "--cov-append",
+                    "-p",
+                    "tests.utils.xdist_devices",
+                    f"--test-device-env={get_visible_device_env_var()}",
+                ]
+            )
+            cases.insert(
+                1,
+                TestCase(
+                    name=f"unit-gpu ({self.config.platform})",
+                    pytest_path=test_path,
+                    task="unit",
+                    case="gpu",
+                    extra_args=gpu_args,
+                ),
+            )
+            print(
+                f"[run] GPU unit tests: {gpu_workers} workers, one visible device each"
+            )
+        return cases
 
     def _discover_from_yaml(
         self,
@@ -227,17 +469,18 @@ class TestRunner:
     ) -> list[TestCase]:
         """Build test cases from platform YAML config for e2e tests.
 
-        For inference tasks, routes to the unified ``test_inference_smoke.py``
-        and injects ``FL_TEST_MODEL``/``FL_TEST_CASE`` env vars so the smoke
-        test can load the correct model YAML config.
+        For inference/serving/concurrent tasks, routes to the unified smoke
+        tests (``test_inference_smoke.py`` etc.) and injects
+        ``FL_TEST_MODEL``/``FL_TEST_CASE`` env vars so the smoke test can
+        load the correct model YAML config.
 
-        For other tasks (serving), falls back to ``-k model`` filtering.
+        For other tasks, falls back to ``-k model`` filtering.
 
         Args:
             base_dir: Root directory (e.g. ``tests/e2e_tests``).
         """
         func = self.config.get_e2e_tests()
-        raw_cases = func.get_cases(task=self.task, model=self.model)
+        raw_cases = func.get_cases(stage=self.stage, task=self.task, model=self.model)
 
         # Filter by case name if specified
         if self.case:
@@ -281,24 +524,64 @@ class TestRunner:
                     "FL_TEST_MODEL": model,
                     "FL_TEST_CASE": case,
                 }
+            elif task == "concurrent":
+                # Route to unified concurrent smoke test with env-based config
+                pytest_path = f"{test_dir}/test_concurrent_smoke.py"
+                extra_env = {
+                    "FL_TEST_MODEL": model,
+                    "FL_TEST_CASE": case,
+                }
             else:
                 # Other tasks: use directory with -k filter
                 pytest_path = test_dir
                 if model:
                     extra_args.extend(["-k", model])
 
-            name = f"{task}/{model}/{case}"
-            cases.append(
-                TestCase(
-                    name=name,
-                    pytest_path=pytest_path,
-                    task=task,
-                    model=model,
-                    case=case,
-                    extra_args=extra_args,
-                    extra_env=extra_env,
+            # Compute device footprint for the scheduler.
+            # Load the model YAML to read tp/pp sizes so the scheduler can
+            # allocate the right number of contiguous device slots.
+            num_devices = 1
+            try:
+                cfg = ModelConfig.load(
+                    model,
+                    case,
+                    platform=self.config.platform,
+                    device=self.config.device,
                 )
-            )
+                tp = cfg.engine.get("tensor_parallel_size", 1)
+                pp = cfg.engine.get("pipeline_parallel_size", 1)
+                num_devices = int(tp) * int(pp)
+            except Exception:
+                # Best-effort scheduling hint only: a malformed or missing
+                # model YAML falls back to num_devices=1 rather than
+                # dropping the case from the run.
+                pass
+
+            name = f"{task}/{model}/{case}"
+            # Case-level variants (e.g. the NVIDIA fused-operator dual-run):
+            # every case runs once per declared platform variant, with the
+            # variant's env merged into the case's pytest subprocess and a
+            # suffix in the result name. Platforms without variants get one
+            # suffix-less, env-less pass — identical to the previous
+            # behavior. This keeps the job count fixed regardless of how
+            # many variant dimensions a platform declares.
+            variants = self.config.get_e2e_variants() or [{}]
+            for variant in variants:
+                suffix = variant.get("suffix", "")
+                merged_env = dict(extra_env)
+                merged_env.update(variant.get("env") or {})
+                cases.append(
+                    TestCase(
+                        name=f"{name}[{suffix}]" if suffix else name,
+                        pytest_path=pytest_path,
+                        task=task,
+                        model=model,
+                        case=case,
+                        extra_args=extra_args,
+                        extra_env=merged_env,
+                        num_devices=num_devices,
+                    )
+                )
 
         return cases
 
@@ -311,7 +594,33 @@ class TestRunner:
         func_filter = self.config.get_functional_filter()
         test_path = "tests/functional_tests/"
 
-        extra_args = ["-v", "--tb=short", "-s"]
+        # Parallelize across available devices: each xdist worker gets one device.
+        # device_count() returns the number of accelerators visible inside the
+        # container, so we never exceed available hardware.
+        from tests.utils.device_utils import get_device_count
+
+        num_devices = get_device_count()
+        workers = max(num_devices, 1)
+
+        visible_env_var = get_visible_device_env_var()
+        print(
+            f"[run] Functional tests parallel: {workers} workers, "
+            f"device isolation via {visible_env_var}"
+        )
+        for i in range(workers):
+            print(f"[run]   worker gw{i} → {visible_env_var}={i}")
+
+        extra_args = [
+            "-v",
+            "--tb=short",
+            "-s",
+            "-n",
+            str(workers),
+            "--cov=vllm_fl",
+            "--cov-append",
+            "--cov-report=term-missing",
+            f"--cov-report=json:coverage-{self.config.platform}.json",
+        ]
 
         # Apply exclude patterns
         for pattern in func_filter.exclude:
@@ -337,18 +646,18 @@ class TestRunner:
 
     def _discover_benchmark_tests(self) -> list[TestCase]:
         """Benchmark smoke tests selected by platform YAML."""
-        benchmark = self.config.get_benchmark_tests()
+        benchmark = self.config.get_benchmark_tests(self.stage)
         if not benchmark.get("enabled", False):
             return []
-        selected_smoke = benchmark.get("smoke", [])
+        selected_types = benchmark.get("types", [])
 
-        if not selected_smoke:
+        if not selected_types:
             return []
 
-        if isinstance(selected_smoke, str):
-            selected_types = {selected_smoke}
+        if isinstance(selected_types, str):
+            selected_types = {selected_types}
         else:
-            selected_types = set(selected_smoke)
+            selected_types = set(selected_types)
 
         config_path = Path(
             benchmark.get(
@@ -434,15 +743,32 @@ class TestRunner:
 
     # --- Test execution ------------------------------------------------------
 
-    def _run_single(self, tc: TestCase) -> TestResult:
-        """Run a single test case via pytest subprocess."""
+    def _run_single(
+        self,
+        tc: TestCase,
+        extra_env_override: dict[str, str] | None = None,
+        _quiet: bool = False,
+    ) -> TestResult:
+        """Run a single test case via pytest subprocess.
+
+        Args:
+            tc: The test case descriptor.
+            extra_env_override: Additional env vars merged last (highest priority).
+                Used by the device scheduler to inject VISIBLE_DEVICES.
+            _quiet: If True, skip the header/command log lines (used by the
+                parallel e2e path, which already emits a timestamped START line).
+        """
         cmd = self._build_pytest_cmd(tc)
 
-        print(f"[run] --- {tc.name} ---")
-        if tc.extra_env:
-            env_str = " ".join(f"{k}={v}" for k, v in tc.extra_env.items())
-            print(f"[run] Env:     {env_str}")
-        print(f"[run] Command: {' '.join(cmd)}")
+        if not _quiet:
+            print(f"[run] --- {tc.name} ---")
+            if tc.extra_env:
+                env_str = " ".join(f"{k}={v}" for k, v in tc.extra_env.items())
+                print(f"[run] Env:     {env_str}")
+            if extra_env_override:
+                dev_str = " ".join(f"{k}={v}" for k, v in extra_env_override.items())
+                print(f"[run] Devices: {dev_str}")
+            print(f"[run] Command: {' '.join(cmd)}")
 
         if self.dry_run:
             print("[run] (dry-run, skipping)")
@@ -455,7 +781,9 @@ class TestRunner:
                 message="dry-run",
             )
 
-        # Wait for sufficient device memory before e2e tests
+        # Wait for sufficient device memory before e2e tests.
+        # When running in parallel the memory check runs under the already-acquired
+        # device slots, so we only look at the assigned cards.
         if tc.task in ("inference", "serving") and tc.model and tc.case:
             gpu_util = ModelConfig.load(
                 tc.model,
@@ -463,7 +791,23 @@ class TestRunner:
                 platform=self.config.platform,
                 device=self.config.device,
             ).engine.get("gpu_memory_utilization", 0.9)
-            ok, info = wait_for_memory(self.config.platform, gpu_util)
+            # Extract device indices from VISIBLE_DEVICES override so the
+            # memory check only inspects this case's assigned slots and does
+            # not block on memory held by other concurrently running cases.
+            device_indices: list[int] | None = None
+            if extra_env_override:
+                for val in extra_env_override.values():
+                    parsed = [
+                        int(x)
+                        for x in val.split(",")
+                        if x.strip().lstrip("-").isdigit()
+                    ]
+                    if parsed:
+                        device_indices = parsed
+                        break
+            ok, info = wait_for_memory(
+                self.config.platform, gpu_util, device_indices=device_indices
+            )
             if not ok:
                 print("[run] FAILED: timed out waiting for device memory")
                 return TestResult(
@@ -476,22 +820,55 @@ class TestRunner:
                     case=tc.case,
                 )
 
-        # Merge extra env vars (e.g. FL_TEST_MODEL/FL_TEST_CASE for inference)
-        env = None
+        # Build subprocess env: process env → tc.extra_env → extra_env_override
+        env = {**os.environ}
         if tc.extra_env:
-            env = {**os.environ, **tc.extra_env}
+            env.update(tc.extra_env)
+        if extra_env_override:
+            env.update(extra_env_override)
+
+        case_log_dir = None
+        if (
+            tc.task == "serving"
+            and tc.model
+            and tc.case
+            and not any(
+                arg == "--basetemp" or arg.startswith("--basetemp=") for arg in cmd
+            )
+        ):
+            log_root = (
+                self.output_dir / f"test-results-{self.config.platform}-logs"
+            ).resolve()
+            log_root.mkdir(parents=True, exist_ok=True)
+            case_log_dir = Path(tempfile.mkdtemp(prefix="serving-", dir=log_root))
+            cmd.extend(["--basetemp", str(case_log_dir)])
 
         start = time.time()
-        result = subprocess.run(
-            cmd,
-            capture_output=False,
-            cwd=str(_REPO_ROOT),
-            env=env,
-        )
+        with ExitStack() as cleanup:
+            if self.config.platform == "hygon" and tc.task in ("inference", "serving"):
+                # TP workers tune concurrently. Each Python process gets its
+                # own FlagGems SQLite database before importing the provider.
+                # Kernel compilation caches and autotuning remain enabled.
+                env["FLAGGEMS_CACHE_DIR"] = cleanup.enter_context(
+                    tempfile.TemporaryDirectory(prefix="fl-hygon-cache-")
+                )
+                startup = str(_REPO_ROOT / "tests/utils/isolated_cache")
+                env["PYTHONPATH"] = os.pathsep.join(
+                    path for path in (startup, env.get("PYTHONPATH")) if path
+                )
+            proc = subprocess.run(
+                cmd,
+                capture_output=_quiet,
+                text=_quiet,
+                cwd=str(_REPO_ROOT),
+                env=env,
+            )
         duration = time.time() - start
 
-        passed = result.returncode == 0
-        message = "" if passed else f"pytest exited with code {result.returncode}"
+        passed = proc.returncode == 0
+        if passed and case_log_dir is not None:
+            shutil.rmtree(case_log_dir)
+        message = "" if passed else f"pytest exited with code {proc.returncode}"
 
         return TestResult(
             name=tc.name,
@@ -501,11 +878,25 @@ class TestRunner:
             task=tc.task,
             model=tc.model,
             case=tc.case,
+            stdout=proc.stdout if _quiet else "",
         )
 
     def _build_pytest_cmd(self, tc: TestCase) -> list[str]:
         """Build the full pytest command for a test case."""
-        cmd = [sys.executable, "-m", "pytest", tc.pytest_path]
+        cmd = [
+            sys.executable,
+            # Suppress DeprecationWarnings that fire before conftest.py is
+            # loaded (pytest assertion rewriter using deprecated ast.Str on
+            # Python 3.12). The module= filter in -W uses regex matching on
+            # the __name__ of the warning's origin module, but rewriter
+            # warnings come from frozen importlib frames where the module name
+            # is not "_pytest", so a broad DeprecationWarning filter is needed.
+            "-W",
+            "ignore::DeprecationWarning",
+            "-m",
+            "pytest",
+            tc.pytest_path,
+        ]
 
         # Inject platform/device as pytest options
         cmd.extend(
@@ -520,6 +911,15 @@ class TestRunner:
             cmd.append("--save-gold")
 
         cmd.extend(tc.extra_args)
+        if self.config.platform == "metax" and tc.task in ("unit", "functional"):
+            cmd.extend(
+                [
+                    "-vv",
+                    "-p",
+                    "tests.utils.pytest_diagnostics",
+                    f"--test-diagnostics-dir=pytest-diagnostics/metax/{tc.task}-{tc.case or 'all'}",
+                ]
+            )
         cmd.extend(self.extra_pytest_args)
 
         return cmd
@@ -552,6 +952,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="all",
         help="Which test scope to run: unit, functional (ops/compilation/"
         "distributed), e2e (inference/serving), benchmark, or all (default: all)",
+    )
+    parser.add_argument(
+        "--stage",
+        choices=["pr", "nightly", "weekly"],
+        default="nightly",
+        help="CI stage for e2e test selection: pr (pr subset), nightly (full), "
+        "weekly (extended, falls back to nightly if not defined) (default: nightly)",
     )
     parser.add_argument(
         "--task",
@@ -604,6 +1011,7 @@ def main(argv: list[str] | None = None) -> int:
         platform=args.platform,
         device=args.device,
         scope=args.scope,
+        stage=args.stage,
         task=args.task,
         model=args.model,
         case=args.case,

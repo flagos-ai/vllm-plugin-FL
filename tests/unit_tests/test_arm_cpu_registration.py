@@ -87,6 +87,9 @@ class TestArmCpuRegistration(unittest.TestCase):
 
         with (
             patch("platform.machine", return_value="aarch64"),
+            # Model hooks have their own tests; avoid importing them under a fake platform.
+            patch("vllm_fl.models.hy4.registration.register_hy_v4_support"),
+            patch("vllm_fl.models.minimax_m3_registration.register_minimax_m3_support"),
             patch(
                 "vllm_fl.patches.qwen3_5_text.apply_qwen3_5_text_patches"
             ) as qwen_compat,
@@ -131,6 +134,11 @@ class TestArmCpuRegistration(unittest.TestCase):
             platforms.current_platform.device_type = device_type
             with (
                 patch("platform.machine", return_value="x86_64"),
+                # Model hooks have their own tests; avoid importing them under a fake platform.
+                patch("vllm_fl.models.hy4.registration.register_hy_v4_support"),
+                patch(
+                    "vllm_fl.models.minimax_m3_registration.register_minimax_m3_support"
+                ),
                 patch("vllm_fl.patches.qwen3_5_text.apply_qwen3_5_text_patches"),
                 patch("vllm_fl.patches.moe_sum.patch_vllm_moe_sum") as moe_sum,
                 patch.object(vllm_fl, "_register_flagcx_connector"),

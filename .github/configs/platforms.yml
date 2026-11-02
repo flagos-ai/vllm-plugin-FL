@@ -15,26 +15,140 @@
 # Platform registry — controls which platforms are tested in CI.
 #
 # Each key under `platforms` must match a config file name in this directory
-# (e.g., "cuda" -> cuda.yml, "ascend" -> ascend.yml).
+# (e.g., "nvidia" -> nvidia.yml, "ascend" -> ascend.yml).
 #
 # Set `enabled: false` to skip a platform without removing its config file.
+#
+# trigger_paths: PR diff-based platform routing. If a changed file matches any
+# path in trigger_paths, this platform is included in PR CI. If the changed
+# file matches global_trigger_paths, ALL enabled platforms are included.
+# Leave trigger_paths empty ([]) to always include a platform when enabled.
+#
+# exempt_from_global: vendor carve-out. A changed file under one of these
+# prefixes never counts toward global_trigger_paths — its diff routes only via
+# the owning platform's trigger_paths — so vendor-specific code (dispatch
+# configs, backends/vendor/<dir>/ backends) does not fan out to every platform.
+# Every entry must also appear in the same platform's trigger_paths:
+# detect_platforms.py errors on an exempt-only entry (it would route files to
+# no platform) and warns on a trigger-only entry under a global prefix (it
+# would over-trigger a full run).
+
+# Paths that trigger ALL enabled platforms when changed.
+global_trigger_paths:
+  - vllm_fl/attention/
+  - vllm_fl/compilation/
+  - vllm_fl/configs/
+  # Shared Python tree; per-platform files (dispatch configs and vendor
+  # backend dirs) are carved out by each platform's exempt_from_global.
+  - vllm_fl/dispatch/
+  - vllm_fl/distributed/
+  - vllm_fl/models/
+  - vllm_fl/ops/
+  - vllm_fl/patches/
+  - vllm_fl/quantization/
+  - vllm_fl/worker/
+  - vllm_fl/__init__.py
+  - vllm_fl/utils.py
+  - vllm_fl/envs.py
+  - vllm_fl/platform.py
+  - vllm_fl/version.py
+  - tests/unit_tests/
+  - tests/functional_tests/
+  - tests/e2e_tests/
+  - tests/models/
+  - tests/utils/
+  - tests/benchmarks/
+  - tests/run.py
+  - tests/conftest.py
+  - benchmarks/
+  - .github/scripts/
+  - .github/configs/
+  - .github/workflows/
+  - csrc/
+  - docker/
+  - requirements/
+  - tools/
+  - pyproject.toml
+  - setup.py
+  - setup.cfg
 
 platforms:
-  cuda:
+  nvidia:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/nvidia.yaml
+      - vllm_fl/dispatch/config/nvidia_hopper.yaml
+      - vllm_fl/dispatch/backends/vendor/cuda/
+      - tests/platforms/nvidia.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/nvidia.yaml
+      - vllm_fl/dispatch/config/nvidia_hopper.yaml
+      - vllm_fl/dispatch/backends/vendor/cuda/
   ascend:
     enabled: false
+    trigger_paths:
+      - vllm_fl/dispatch/config/ascend.yaml
+      - tests/platforms/ascend.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/ascend.yaml
   hygon:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/hygon.yaml
+      - tests/platforms/hygon.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/hygon.yaml
   metax:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/metax.yaml
+      - vllm_fl/dispatch/backends/vendor/metax/
+      - tests/platforms/metax.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/metax.yaml
+      - vllm_fl/dispatch/backends/vendor/metax/
   musa:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/musa.yaml
+      - vllm_fl/dispatch/backends/vendor/musa/
+      - tests/platforms/musa.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/musa.yaml
+      - vllm_fl/dispatch/backends/vendor/musa/
   enflame:
     enabled: true
-  iluvatar:
-    enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/enflame.yaml
+      - vllm_fl/dispatch/backends/vendor/gcu/
+      - tests/platforms/enflame.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/enflame.yaml
+      - vllm_fl/dispatch/backends/vendor/gcu/
   kunlunxin:
-    enabled: false
+    enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/kunlunxin.yaml
+      - vllm_fl/dispatch/backends/vendor/kunlunxin/
+      - tests/platforms/kunlunxin.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/kunlunxin.yaml
+      - vllm_fl/dispatch/backends/vendor/kunlunxin/
   thead:
     enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/thead.yaml
+      - vllm_fl/dispatch/backends/vendor/thead/
+      - tests/platforms/thead.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/thead.yaml
+      - vllm_fl/dispatch/backends/vendor/thead/
+  iluvatar:
+    enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/iluvatar.yaml
+      - vllm_fl/dispatch/backends/vendor/iluvatar/
+      - tests/platforms/iluvatar.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/iluvatar.yaml
+      - vllm_fl/dispatch/backends/vendor/iluvatar/

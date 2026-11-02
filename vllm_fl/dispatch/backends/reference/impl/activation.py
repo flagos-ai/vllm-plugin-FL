@@ -41,3 +41,9 @@ def gelu_and_mul_torch(obj, x: torch.Tensor) -> torch.Tensor:
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
     return F.gelu(x1, approximate=approximate) * x2
+
+
+def silu_and_mul_with_clamp_torch(obj, x: torch.Tensor) -> torch.Tensor:
+    from vllm.model_executor.layers.activation import SiluAndMulWithClamp
+
+    return SiluAndMulWithClamp.forward_native(obj, x)

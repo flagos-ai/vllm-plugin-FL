@@ -2,8 +2,6 @@
 
 import logging
 
-import vllm
-
 logger = logging.getLogger(__name__)
 _patches_applied = False
 
@@ -18,13 +16,54 @@ def apply_ascend_patches():
     patch_fla_ops()
     patch_op_cls()
     patch_fused_moe()
+    patch_gdn()
+    patch_vision_position_interpolation()
+    patch_sampler_filter()
+    from .patches.patch_mamba_utils import apply_mamba_copy_patch
 
-def patch_mamba_config():
-    """Patch HybridAttentionMambaModelConfig for Ascend."""
-    from .patches.patch_mamba_config import verify_and_update_config
+    apply_mamba_copy_patch()
 
-    vllm.model_executor.models.config.HybridAttentionMambaModelConfig.verify_and_update_config = verify_and_update_config
-    logger.info("Patched HybridAttentionMambaModelConfig for Ascend")
+
+def patch_sampler_filter():
+    """Use the packaged A2/A3 filter while retaining vLLM's sampler contract."""
+    import torch_npu
+    from vllm.v1.sample.ops import topk_topp_sampler
+
+    def apply_top_k_top_p(logits, k, p):
+        if k is None and p is None:
+            return logits
+        # vLLM's metadata uses int64; CANN's filter accepts int32 only.
+        if k is not None:
+            import torch
+
+            k = k.to(torch.int32)
+        return torch_npu.npu_top_k_top_p(logits, k=k, p=p)
+
+    # vLLM chooses its CUDA-oriented Triton filter for batches >=8 even on
+    # OOT platforms. Match rc1's built-in A2/A3 filtering path instead.
+    topk_topp_sampler.apply_top_k_top_p = apply_top_k_top_p
+
+
+def patch_vision_position_interpolation():
+    """Use vLLM's tensor reference instead of the CUDA-oriented launch grid."""
+    from vllm.model_executor.models import qwen3_vl
+
+    # The Triton implementation launches one block per spatial patch. Vision
+    # profiling can exceed Ascend's 65535-block limit; the upstream tensor
+    # implementation has the same interpolation/spatial-merge contract.
+    qwen3_vl.triton_pos_embed_interpolate = qwen3_vl.pos_embed_interpolate_native
+
+
+def patch_gdn():
+    """Keep the current upstream GDN model, replacing its numerical core."""
+    from vllm.model_executor.custom_op import PluggableLayer
+
+    from .impl.gdn import AscendQwenGatedDeltaNetAttention
+
+    PluggableLayer.register_oot(
+        _decorated_layer_cls=AscendQwenGatedDeltaNetAttention,
+        name="QwenGatedDeltaNetAttention",
+    )
 
 def patch_causal_conv1d():
     """Patch causal_conv1d ops with Ascend implementations."""
@@ -125,8 +164,8 @@ def refresh_block_size(vllm_config, block_size = 128):
     if not scheduler_config or not model_config:
         return
 
-    # TODO(MengqingCao): Remove the model_type check, after resolving the hidden error in get_kv_cache_groups.
-    if model_config.hf_text_config.model_type != "qwen3_next" and cache_config.block_size != block_size:
+    # Hybrid state pages are aligned by the Mamba configuration verifier.
+    if not model_config.is_hybrid and cache_config.block_size != block_size:
         if cache_config.enable_prefix_caching or scheduler_config.enable_chunked_prefill:
             logger.info(f"Block size is set to {block_size} if prefix cache or chunked prefill is enabled.")
             cache_config.block_size = block_size

@@ -14,29 +14,50 @@ It must run earlier — in register_model() — before any FLA module import,
 to prevent torch.xpu.get_device_name crash. See vllm_fl/__init__.py.
 """
 
+import inspect
 import logging
+import os
 
 import torch
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
+_patches_initializing = False
+_legacy_patches_applied = False
 
 
 def apply_kunlunxin_patches():
     """Apply all Kunlunxin-specific patches. Idempotent."""
-    global _patches_applied
-    if _patches_applied:
+    global _patches_applied, _patches_initializing
+    if _patches_applied or _patches_initializing:
         return
-    _patches_applied = True
+    _patches_initializing = True
+    try:
+        _apply_kunlunxin_patches()
+        _patches_applied = True
+    finally:
+        # Keep circular-import protection separate from successful installation.
+        _patches_initializing = False
 
+
+def _apply_kunlunxin_patches():
+    global _legacy_patches_applied
+    if not _legacy_patches_applied:
+        _apply_legacy_kunlunxin_patches()
+        _legacy_patches_applied = True
+    # Legacy source-replacement patches need not be reapplied when graph
+    # preflight fails. A retry starts from the same saved wrapper owners.
+    patch_graph_adaptations()
+    logger.info("Applied all Kunlunxin patches")
+
+
+def _apply_legacy_kunlunxin_patches():
     # Disable Triton kernels incompatible with Kunlunxin XPU
-    import os
     os.environ.setdefault("VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE", "0")
 
     # RESTORED from old version: Critical Triton kernel compatibility patches
     patch_block_table_slot_mapping()
     patch_attention_backend_registry()
-    patch_cudagraph_dispatcher()
     patch_topk_topp_sampler()
     patch_fused_moe()
 
@@ -46,19 +67,176 @@ def apply_kunlunxin_patches():
     patch_fused_gdn_gating()
     patch_ssm_cache_update()
     patch_sampler_rng()
-    patch_decode_attention()
-    logger.info("Applied all Kunlunxin patches")
 
 
-def patch_cudagraph_dispatcher():
-    """Use FULL graphs only for exact-size uniform decode batches.
+def _install_graph_patch(owner, name, replacement, replacements):
+    if replacements is None:
+        setattr(owner, name, replacement)
+    else:
+        replacements.append(
+            (owner, name, getattr(owner, name), replacement, name in vars(owner))
+        )
 
-    vLLM normally rounds an uncaptured token count up to the next CUDA Graph
-    capture size.  That is unsafe for Kunlunxin recurrent models because the
-    synthetic padding rows can participate in GDN/SSM state updates.  Keep the
-    profitable FULL graph path for exact-size decode batches, but exclude FULL
-    for mixed batches and non-exact decode sizes.  The native dispatcher then
-    falls back to PIECEWISE (or NONE when PIECEWISE is not configured).
+
+def patch_graph_adaptations():
+    """Preflight and stage the dependent graph patches before publishing any."""
+    try:
+        import vllm.compilation.breakable_cudagraph as breakable
+        import vllm.v1.worker.gpu_model_runner as gpu_model_runner
+        from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
+
+        import vllm_fl.worker.model_runner as fl_model_runner
+        from vllm_fl.distributed.communicator import CommunicatorFL
+
+        capture = breakable.BreakableCUDAGraphCapture
+        wrapper = breakable.BreakableCUDAGraphWrapper
+        required = (
+            (
+                CudagraphDispatcher.dispatch,
+                (
+                    "self",
+                    "num_tokens",
+                    "uniform_decode",
+                    "has_lora",
+                    "num_active_loras",
+                    "valid_modes",
+                    "invalid_modes",
+                ),
+            ),
+            (wrapper.__init__, ("self", "runnable", "vllm_config")),
+            (wrapper.__call__, ("self",)),
+            (capture.current, ()),
+            (capture._begin_segment, ("self",)),
+            (capture._end_segment, ("self",)),
+            (capture.add_eager, ("self", "fn")),
+            (CommunicatorFL.all_reduce, ("self", "input_")),
+            (CommunicatorFL.all_gather, ("self", "input_", "dim")),
+            (breakable.is_breakable_cudagraph_enabled, ()),
+            (gpu_model_runner.is_breakable_cudagraph_enabled, ()),
+            (fl_model_runner.is_breakable_cudagraph_enabled, ()),
+        )
+        for function, parameters in required:
+            signature = inspect.signature(function)
+            if not set(parameters) <= signature.parameters.keys():
+                raise TypeError(f"Unsupported graph API: {function} {signature}")
+            signature.bind(**dict.fromkeys(parameters))
+
+        replacements = []
+        for prepare in (
+            patch_cudagraph_dispatcher,
+            patch_breakable_cudagraph_mode,
+            patch_breakable_private_pools,
+            patch_breakable_full_only,
+            patch_graph_all_reduce,
+            patch_eager_all_gather,
+            patch_native_piecewise_boundaries,
+        ):
+            prepare(replacements)
+    except Exception as exc:
+        raise RuntimeError("Kunlunxin graph adaptation preflight failed") from exc
+
+    published = []
+    try:
+        for owner, name, original, replacement, owned in replacements:
+            # Restore the actual entry-point object, including other wrappers.
+            published.append((owner, name, original, owned))
+            setattr(owner, name, replacement)
+    except Exception as exc:
+        for owner, name, original, owned in reversed(published):
+            if owned:
+                setattr(owner, name, original)
+            elif name in vars(owner):
+                delattr(owner, name)
+        raise RuntimeError("Kunlunxin graph adaptation installation failed") from exc
+
+
+def patch_native_piecewise_boundaries(replacements=None):
+    """Cover vendor ops imported before upstream Breakable was enabled.
+
+    Upstream's decorator is an import-time no-op when disabled. Keep native
+    PIECEWISE eager boundaries local to the vendor, leaving FULL captured.
+    """
+    from functools import wraps
+
+    from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphCapture
+    from vllm.config import CUDAGraphMode
+    from vllm.forward_context import get_forward_context
+    from vllm.model_executor.layers.attention.attention import get_attention_context
+    from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
+        QwenGatedDeltaNetAttention,
+    )
+    from vllm.utils.torch_utils import weak_ref_tensor
+
+    from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+        KunlunxinAttentionBackendImpl,
+    )
+
+    for owner, name, attention in (
+        (KunlunxinAttentionBackendImpl, "forward", True),
+        (QwenGatedDeltaNetAttention, "_forward_core", False),
+    ):
+        original = getattr(owner, name)
+        if getattr(original, "_kunlunxin_piecewise_boundary", False):
+            continue
+        parameters = inspect.signature(original).parameters
+        if (
+            not (
+                {"self", "layer", "attn_metadata", "output"}
+                if attention
+                else {"self", "core_attn_out"}
+            )
+            <= parameters.keys()
+        ):
+            raise TypeError(f"Unsupported native PIECEWISE boundary: {original}")
+
+        def make_boundary(original, attention):
+            @wraps(original)
+            def boundary(*args, **kwargs):
+                capture = BreakableCUDAGraphCapture.current()
+                if (
+                    capture is None
+                    or not capture._capturing
+                    or get_forward_context().cudagraph_runtime_mode
+                    != CUDAGraphMode.PIECEWISE
+                ):
+                    return original(*args, **kwargs)
+                bound = inspect.signature(original).bind(*args, **kwargs)
+                arguments = {
+                    name: weak_ref_tensor(value)
+                    if isinstance(value, torch.Tensor)
+                    else value
+                    for name, value in bound.arguments.items()
+                    if not attention or name != "attn_metadata"
+                }
+
+                def replay():
+                    current = dict(arguments)
+                    if attention:
+                        # Layer metadata changes each step; never retain the
+                        # profiling/capture metadata object in an eager segment.
+                        current["attn_metadata"] = get_attention_context(
+                            current["layer"].layer_name
+                        )[0]
+                    return original(**current)
+
+                return capture.add_eager(replay)
+
+            boundary._kunlunxin_piecewise_boundary = True
+            return boundary
+
+        _install_graph_patch(
+            owner, name, make_boundary(original, attention), replacements
+        )
+
+
+def patch_cudagraph_dispatcher(replacements=None):
+    """Keep uniform decode on FULL graphs, including padded batches.
+
+    Padding rows are isolated by the attention cache-write mask and vLLM's
+    reserved NULL recurrent-state slot. Tensor-parallel collectives use the
+    graph-aware ProcessGroup path, so padding is no longer a reason to drop
+    decode to PIECEWISE. Mixed/non-uniform batches remain outside FULL because
+    their control flow is not shape-stable.
     """
     try:
         from functools import wraps
@@ -67,11 +245,11 @@ def patch_cudagraph_dispatcher():
         from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
         original_dispatch = CudagraphDispatcher.dispatch
-        if getattr(original_dispatch, "_kunlunxin_exact_full", False):
+        if getattr(original_dispatch, "_kunlunxin_uniform_full", False):
             return
 
         @wraps(original_dispatch)
-        def dispatch_exact_full(
+        def dispatch_uniform_full(
             self,
             num_tokens,
             uniform_decode=False,
@@ -80,25 +258,14 @@ def patch_cudagraph_dispatcher():
             valid_modes=None,
             invalid_modes=None,
         ):
-            padding_map = getattr(self, "_bs_to_padded_graph_size", None)
-            full_is_exact = (
-                uniform_decode
-                and padding_map is not None
-                and 0 <= num_tokens < len(padding_map)
-                and padding_map[num_tokens] == num_tokens
-            )
-
-            if not full_is_exact:
+            if not uniform_decode:
                 invalid_modes = set(invalid_modes or ())
                 invalid_modes.add(CUDAGraphMode.FULL)
 
-                # A DP re-dispatch can constrain valid_modes to the mode chosen
-                # across ranks.  If that mode is FULL but this local batch is
-                # non-exact, choose the safe no-graph fallback rather than
-                # leaving the native dispatcher with an empty allowed set.
-                if valid_modes is not None and set(valid_modes) <= {
-                    CUDAGraphMode.FULL
-                }:
+                # A DP re-dispatch can constrain valid_modes to FULL after the
+                # cross-rank decision.  Keep the allowed set non-empty; NONE is
+                # the only safe local fallback in that special case.
+                if valid_modes is not None and set(valid_modes) <= {CUDAGraphMode.FULL}:
                     valid_modes = {CUDAGraphMode.NONE}
                     invalid_modes.discard(CUDAGraphMode.NONE)
 
@@ -112,14 +279,307 @@ def patch_cudagraph_dispatcher():
                 invalid_modes=invalid_modes,
             )
 
-        dispatch_exact_full._kunlunxin_exact_full = True
-        CudagraphDispatcher.dispatch = dispatch_exact_full
+        dispatch_uniform_full._kunlunxin_uniform_full = True
+        _install_graph_patch(
+            CudagraphDispatcher, "dispatch", dispatch_uniform_full, replacements
+        )
         logger.info(
-            "Patched CudagraphDispatcher: FULL only for exact-size uniform "
-            "decode batches; non-exact batches fall back safely"
+            "Patched CudagraphDispatcher: uniform padded decode keeps FULL; "
+            "mixed batches exclude FULL"
         )
     except Exception as e:
-        logger.warning("Failed to patch CudagraphDispatcher: %s", e)
+        raise RuntimeError("Failed to patch CudagraphDispatcher") from e
+
+
+def patch_breakable_cudagraph_mode(replacements=None):
+    """Enable vLLM's breakable wrapper without a process-wide env switch.
+
+    Setting ``VLLM_USE_BREAKABLE_CUDAGRAPH`` changes compilation behavior for
+    every platform.  Patch only the already imported Kunlunxin execution path
+    so PIECEWISE remains the compiled path and FULL can split into bounded
+    graph-only segments for FlagCX collectives.
+    """
+    try:
+        import vllm.compilation.breakable_cudagraph as breakable
+        import vllm.v1.worker.gpu_model_runner as gpu_model_runner
+
+        import vllm_fl.worker.model_runner as fl_model_runner
+
+        def enabled() -> bool:
+            return True
+
+        for owner in (breakable, gpu_model_runner, fl_model_runner):
+            _install_graph_patch(
+                owner, "is_breakable_cudagraph_enabled", enabled, replacements
+            )
+        logger.info("Enabled breakable cudagraph for Kunlunxin FULL graphs")
+    except Exception as e:
+        raise RuntimeError("Failed to enable breakable cudagraph") from e
+
+
+def patch_breakable_private_pools(replacements=None):
+    """Give each FULL batch descriptor an independent graph memory pool.
+
+    Kunlunxin can replay one FULL graph reliably, but graphs with different
+    static shapes cannot safely alias allocations from vLLM's global graph
+    pool. Leaving ``graph_pool`` unset makes each CUDAGraph own its captured
+    activation storage while model parameters remain shared.
+    """
+    try:
+        from functools import wraps
+
+        from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
+
+        original_init = BreakableCUDAGraphWrapper.__init__
+        if getattr(original_init, "_kunlunxin_private_pools", False):
+            return
+
+        @wraps(original_init)
+        def init_with_private_pools(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            self.graph_pool = None
+
+        init_with_private_pools._kunlunxin_private_pools = True
+        _install_graph_patch(
+            BreakableCUDAGraphWrapper, "__init__", init_with_private_pools, replacements
+        )
+        logger.info("Enabled per-descriptor FULL graph memory pools")
+    except Exception as e:
+        raise RuntimeError("Failed to isolate FULL graph memory pools") from e
+
+
+def _has_compiled_piecewise_runner(wrapper):
+    from vllm.compilation.wrapper import TorchCompileWithNoGuardsWrapper
+    from vllm.config import CompilationMode
+    from vllm.forward_context import get_forward_context
+
+    if (
+        wrapper.compilation_config.mode != CompilationMode.VLLM_COMPILE
+        or not wrapper.compilation_config.cudagraph_mode.has_piecewise_cudagraphs()
+        or get_forward_context().skip_compiled
+    ):
+        return False
+    runnable = wrapper.runnable
+    modules = (
+        runnable.modules() if isinstance(runnable, torch.nn.Module) else (runnable,)
+    )
+    return any(
+        isinstance(module, TorchCompileWithNoGuardsWrapper)
+        and not getattr(module, "do_not_compile", True)
+        and (
+            (
+                getattr(module, "compiled", False)
+                and (
+                    getattr(module, "_compiled_bytecode", None) is not None
+                    or hasattr(
+                        getattr(module, "_compiled_callable", None),
+                        "_torchdynamo_orig_callable",
+                    )
+                )
+            )
+            or getattr(module, "aot_compiled_fn", None) is not None
+        )
+        for module in modules
+    )
+
+
+def patch_breakable_full_only(replacements=None):
+    """Avoid nested PIECEWISE capture only when a compiled runner owns it."""
+    try:
+        from functools import wraps
+
+        from vllm.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
+        from vllm.config import CUDAGraphMode
+        from vllm.forward_context import (
+            get_forward_context,
+            is_forward_context_available,
+        )
+
+        original_call = BreakableCUDAGraphWrapper.__call__
+        if getattr(original_call, "_kunlunxin_full_only", False):
+            return
+
+        @wraps(original_call)
+        def call_full_only(self, *args, **kwargs):
+            if not is_forward_context_available():
+                return original_call(self, *args, **kwargs)
+
+            forward_context = get_forward_context()
+            if (
+                forward_context.cudagraph_runtime_mode == CUDAGraphMode.PIECEWISE
+                and _has_compiled_piecewise_runner(self)
+            ):
+                return self.runnable(*args, **kwargs)
+
+            if (
+                forward_context.cudagraph_runtime_mode == CUDAGraphMode.PIECEWISE
+                and forward_context.batch_descriptor not in self.entries
+            ):
+                from vllm.platforms import current_platform
+
+                # Reuse allocations between the ordered eager-break segments
+                # of this ONE descriptor. Sharing across different shapes is
+                # still prohibited. A separate pool per segment otherwise
+                # pays allocator minimum blocks once per layer and descriptor.
+                original_pool = self.graph_pool
+                self.graph_pool = current_platform.graph_pool_handle()
+                try:
+                    return original_call(self, *args, **kwargs)
+                finally:
+                    self.graph_pool = original_pool
+
+            return original_call(self, *args, **kwargs)
+
+        call_full_only._kunlunxin_full_only = True
+        _install_graph_patch(
+            BreakableCUDAGraphWrapper, "__call__", call_full_only, replacements
+        )
+        logger.info("Kept native Breakable capture unless compiled PIECEWISE owns it")
+    except Exception as e:
+        raise RuntimeError("Failed to restrict breakable cudagraph mode") from e
+
+
+def patch_graph_all_reduce(replacements=None):
+    """Capture FULL decode in bounded ProcessGroup graph segments.
+
+    The direct FlagCX ctypes path is retained outside Breakable capture.
+    FULL and native PIECEWISE use the registered FlagCX ProcessGroup so the collective is
+    recorded in the decode graph instead of producing eager communication
+    breaks. FlagCX initializes that ProcessGroup lazily, but XCCL cannot create
+    its communicator while a graph capture is active. End the first segment,
+    initialize the communicator once outside capture, then resume capture and
+    record the real collective. The one-time warm-up is not part of replay.
+
+    A full model forward contains roughly 128 all-reduces, which exceeds
+    XCCL's per-graph allocation limit when the leaking KL3 event mode is
+    disabled. End the current graph after a bounded number of collectives and
+    immediately begin the next graph-only segment. Replay remains entirely
+    captured and preserves stream ordering between segments.
+    """
+    try:
+        from functools import wraps
+
+        import torch.distributed as dist
+
+        from vllm.compilation.breakable_cudagraph import (
+            BreakableCUDAGraphCapture,
+        )
+
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention import (
+            _is_full_graph_runtime,
+        )
+        from vllm_fl.distributed.communicator import CommunicatorFL
+
+        original_all_reduce = CommunicatorFL.all_reduce
+        if getattr(original_all_reduce, "_kunlunxin_graph_safe", False):
+            return
+
+        @wraps(original_all_reduce)
+        def graph_safe_all_reduce(self, input_):
+            capture = BreakableCUDAGraphCapture.current()
+            use_graph_collective = torch.cuda.is_current_stream_capturing() and (
+                _is_full_graph_runtime() or capture is not None
+            )
+            if not use_graph_collective:
+                return original_all_reduce(self, input_)
+
+            if (
+                not getattr(self, "_kunlunxin_graph_pg_warmed", False)
+                and capture is not None
+                and capture._capturing
+            ):
+                # ProcessGroupFlagCX creates its XCCL communicator on the
+                # first collective. That allocation fails inside capture, so
+                # initialize it once between graph segments. Do not register
+                # this warm-up as an eager replay segment: the actual
+                # all-reduce below is still captured and replay remains FULL.
+                capture._end_segment()
+                warmup = input_.clone()
+                dist.all_reduce(warmup, group=self.device_group)
+                torch.cuda.synchronize()
+                del warmup
+                self._kunlunxin_graph_pg_warmed = True
+                capture._begin_segment()
+
+            output = input_.clone()
+            dist.all_reduce(output, group=self.device_group)
+
+            if capture is not None and capture._capturing:
+                collectives = getattr(capture, "_kunlunxin_segment_all_reduces", 0) + 1
+                if collectives >= 16:
+                    capture._kunlunxin_segment_all_reduces = 0
+                    capture._end_segment()
+                    capture._begin_segment()
+                else:
+                    capture._kunlunxin_segment_all_reduces = collectives
+            return output
+
+        graph_safe_all_reduce._kunlunxin_graph_safe = True
+        _install_graph_patch(
+            CommunicatorFL, "all_reduce", graph_safe_all_reduce, replacements
+        )
+        logger.info("Patched FULL graph all-reduce into bounded FlagCX graph segments")
+    except Exception as e:
+        raise RuntimeError("Failed to patch graph-time all-reduce") from e
+
+
+def patch_eager_all_gather(replacements=None):
+    """Keep post-graph TP all-gather off the ProcessGroup event path.
+
+    FULL replay itself needs the graph-aware ProcessGroup for collectives, but
+    logits all-gather runs after replay on every decode step.  FlagCX's
+    ProcessGroup creates a CUDA event for each such call and eventually
+    exhausts the device event pool during a long-running concurrency sweep.
+    Use the existing direct FlagCX communicator outside capture; retain the
+    ProcessGroup implementation if capture is active or direct FlagCX is not
+    available.
+    """
+    try:
+        from functools import wraps
+
+        from vllm_fl.distributed.communicator import CommunicatorFL
+
+        original_all_gather = CommunicatorFL.all_gather
+        if getattr(original_all_gather, "_kunlunxin_direct_eager", False):
+            return
+
+        @wraps(original_all_gather)
+        def direct_eager_all_gather(self, input_, dim=-1):
+            pyflagcx_comm = getattr(self, "pyflagcx_comm", None)
+            if (
+                torch.cuda.is_current_stream_capturing()
+                or pyflagcx_comm is None
+                or pyflagcx_comm.disabled
+            ):
+                return original_all_gather(self, input_, dim)
+
+            if self.world_size == 1:
+                return input_
+            if dim < 0:
+                dim += input_.dim()
+            if not 0 <= dim < input_.dim():
+                raise IndexError(f"Invalid dim ({dim}) for input shape {input_.shape}")
+
+            input_tensor = input_.movedim(dim, 0).contiguous()
+            output_shape = (
+                input_tensor.shape[0] * self.world_size,
+                *input_tensor.shape[1:],
+            )
+            output_tensor = torch.empty(
+                output_shape,
+                dtype=input_tensor.dtype,
+                device=input_tensor.device,
+            )
+            pyflagcx_comm.all_gather(output_tensor, input_tensor)
+            return output_tensor.movedim(0, dim).contiguous()
+
+        direct_eager_all_gather._kunlunxin_direct_eager = True
+        _install_graph_patch(
+            CommunicatorFL, "all_gather", direct_eager_all_gather, replacements
+        )
+        logger.info("Patched eager TP all-gather to use direct FlagCX")
+    except Exception as e:
+        raise RuntimeError("Failed to patch eager TP all-gather") from e
 
 
 # ── RESTORED: block_table slot_mapping (Triton kernel bypass) ──
@@ -131,6 +591,7 @@ def patch_block_table_slot_mapping():
     """
     try:
         import torch
+
         from vllm.v1.worker.block_table import BlockTable
 
         PAD_SLOT_ID = -1
@@ -143,7 +604,7 @@ def patch_block_table_slot_mapping():
             total_cp_rank = self.pcp_rank * self.dcp_world_size + self.dcp_rank
 
             # Build req_indices: repeat_interleave on XPU, no CPU copy
-            counts = query_start_loc[1:num_reqs + 1] - query_start_loc[:num_reqs]
+            counts = query_start_loc[1 : num_reqs + 1] - query_start_loc[:num_reqs]
             req_indices = torch.repeat_interleave(
                 torch.arange(num_reqs, device=device), counts
             )
@@ -158,8 +619,10 @@ def patch_block_table_slot_mapping():
                 block_numbers = self.block_table.gpu.view(-1)[bt_indices]
                 virtual_block_offsets = positions % virtual_block_size
                 mask = (
-                    virtual_block_offsets // self.cp_kv_cache_interleave_size
-                    % total_cp_world_size == total_cp_rank
+                    virtual_block_offsets
+                    // self.cp_kv_cache_interleave_size
+                    % total_cp_world_size
+                    == total_cp_rank
                 )
                 block_offsets = (
                     virtual_block_offsets
@@ -169,8 +632,9 @@ def patch_block_table_slot_mapping():
                 )
                 slot_vals = block_numbers * self.block_size + block_offsets
                 self.slot_mapping.gpu[:num_tokens] = torch.where(
-                    mask, slot_vals,
-                    torch.full((), PAD_SLOT_ID, dtype=slot_vals.dtype, device=device)
+                    mask,
+                    slot_vals,
+                    torch.full((), PAD_SLOT_ID, dtype=slot_vals.dtype, device=device),
                 )
             else:
                 bt_indices = (
@@ -184,10 +648,14 @@ def patch_block_table_slot_mapping():
                 )
 
             # Pad remaining slots
-            self.slot_mapping.gpu[num_tokens:self.max_num_batched_tokens] = PAD_SLOT_ID
+            self.slot_mapping.gpu[num_tokens : self.max_num_batched_tokens] = (
+                PAD_SLOT_ID
+            )
 
         BlockTable.compute_slot_mapping = compute_slot_mapping_xpu
-        logger.info("Patched BlockTable.compute_slot_mapping to XPU torch path for Kunlunxin")
+        logger.info(
+            "Patched BlockTable.compute_slot_mapping to XPU torch path for Kunlunxin"
+        )
     except Exception as e:
         logger.warning("Failed to patch compute_slot_mapping: %s", e)
 
@@ -204,9 +672,10 @@ def patch_attention_backend_registry():
             AttentionBackendEnum,
             register_backend,
         )
+
         register_backend(
             AttentionBackendEnum.CUSTOM,
-            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention.KunlunxinAttentionBackend"
+            "vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention.KunlunxinAttentionBackend",
         )
         logger.info("Registered KunlunxinAttentionBackend as CUSTOM attention backend")
     except Exception as e:
@@ -226,7 +695,9 @@ def patch_topk_topp_sampler():
         from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p_pytorch
 
         sampler_mod.apply_top_k_top_p = apply_top_k_top_p_pytorch
-        logger.info("Patched apply_top_k_top_p to use PyTorch-native path for Kunlunxin")
+        logger.info(
+            "Patched apply_top_k_top_p to use PyTorch-native path for Kunlunxin"
+        )
     except Exception as e:
         logger.warning("Failed to patch top-k/top-p sampler for Kunlunxin: %s", e)
 
@@ -235,10 +706,10 @@ def patch_topk_topp_sampler():
 def patch_fused_moe():
     """Replace fused_experts_impl with Kunlunxin implementation."""
     try:
+        import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_moe.fused_moe import (
             fused_experts_impl as klx_fused_experts_impl,
         )
-        import vllm_fl.ops.fused_moe.fused_moe as fused_moe_lib
 
         fused_moe_lib.fused_experts_impl = klx_fused_experts_impl
         logger.info("Patched fused_moe for Kunlunxin")
@@ -270,14 +741,11 @@ def patch_sampler_rng():
 
         _orig_random_sample = _sampler_mod.random_sample
 
-        def _broadcast_random_sample(
-            probs, generators, use_fp64_gumbel=False
-        ):
-            sampled_tokens = _orig_random_sample(
-                probs, generators, use_fp64_gumbel
-            )
+        def _broadcast_random_sample(probs, generators, use_fp64_gumbel=False):
+            sampled_tokens = _orig_random_sample(probs, generators, use_fp64_gumbel)
             try:
                 from vllm.distributed import get_tp_group
+
                 tp_group = get_tp_group()
                 if tp_group.world_size > 1:
                     tp_group.broadcast(sampled_tokens, src=0)
@@ -306,8 +774,8 @@ def patch_causal_conv1d():
     The wrappers bridge NCW ↔ NWC so the model code follows the upstream convention.
     """
     try:
-        import vllm.model_executor.layers.mamba.ops.causal_conv1d as _conv1d_lib
         import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as _gdn_lib
+        import vllm.model_executor.layers.mamba.ops.causal_conv1d as _conv1d_lib
 
         from vllm_fl.dispatch import resolve_op
 
@@ -342,7 +810,9 @@ def patch_causal_conv1d():
         if hasattr(_gdn_lib, "causal_conv1d_update"):
             _gdn_lib.causal_conv1d_update = causal_conv1d_update_adapter
 
-        logger.info("Patched causal_conv1d ops for Kunlunxin (including gdn_linear_attn)")
+        logger.info(
+            "Patched causal_conv1d ops for Kunlunxin (including gdn_linear_attn)"
+        )
     except Exception as e:
         logger.warning("Failed to patch causal_conv1d ops: %s", e)
 
@@ -387,11 +857,11 @@ def patch_fused_gdn_gating():
     try:
         import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as _gdn_lib
 
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_gdn_gating import (
-            fused_gdn_gating_kunlunxin,
-        )
         from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fla.fused_recurrent import (
             fused_recurrent_gated_delta_rule as klx_fused_recurrent,
+        )
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.impl.fused_gdn_gating import (
+            fused_gdn_gating_kunlunxin,
         )
 
         def fused_post_conv_prep_kunlunxin(
@@ -411,9 +881,7 @@ def patch_fused_gdn_gating():
             q_size = num_k_heads * head_k_dim
             k_size = num_k_heads * head_k_dim
             v_size = num_v_heads * head_v_dim
-            q, k, v = torch.split(
-                conv_output, (q_size, k_size, v_size), dim=-1
-            )
+            q, k, v = torch.split(conv_output, (q_size, k_size, v_size), dim=-1)
             q = q.reshape(-1, num_k_heads, head_k_dim).contiguous()
             k = k.reshape(-1, num_k_heads, head_k_dim).contiguous()
             v = v.reshape(-1, num_v_heads, head_v_dim).contiguous()
@@ -471,9 +939,8 @@ def patch_fused_gdn_gating():
                 and ssm_state_indices is not None
                 and ssm_state_indices.ndim == 1
             ):
-                ssm_state_indices = ssm_state_indices[
-                    : cu_seqlens.shape[0] - 1
-                ]
+                ssm_state_indices = ssm_state_indices[: cu_seqlens.shape[0] - 1]
+
             return klx_fused_recurrent(
                 q=q,
                 k=k,
@@ -494,9 +961,7 @@ def patch_fused_gdn_gating():
         _gdn_lib.fused_sigmoid_gating_delta_rule_update = (
             fused_sigmoid_gating_delta_rule_update_kunlunxin
         )
-        logger.info(
-            "Patched GDN post-conv, gating, and recurrent update for Kunlunxin"
-        )
+        logger.info("Patched GDN post-conv, gating, and recurrent update for Kunlunxin")
     except Exception as e:
         logger.warning("Failed to patch fused_gdn_gating: %s", e)
 
@@ -511,6 +976,7 @@ def patch_ssm_cache_update():
         import textwrap
 
         import vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn as gdn_mod
+
         from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_forward_core import (
             _kunlunxin_write_ssm_cache,
         )
@@ -526,139 +992,23 @@ def patch_ssm_cache_update():
             "prefill_state_indices)"
         )
         if source.count(original_write) != 1:
-            raise RuntimeError(
-                "Unexpected vLLM 0.24 GDN cache-write implementation"
-            )
+            raise RuntimeError("Unexpected vLLM 0.24 GDN cache-write implementation")
         source = source.replace(original_write, replacement_write)
         namespace = dict(vars(gdn_mod))
         namespace["_kunlunxin_write_ssm_cache"] = _kunlunxin_write_ssm_cache
         exec(source, namespace)
         cls._forward_core = namespace["_forward_core"]
-        logger.info(
-            "Patched vLLM 0.24 GDN core to use Kunlunxin SSM cache write"
-        )
+        logger.info("Patched vLLM 0.24 GDN core to use Kunlunxin SSM cache write")
         return
     except ImportError:
         pass
 
     try:
-        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_forward_core import apply_ssm_patch
+        from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_forward_core import (
+            apply_ssm_patch,
+        )
+
         apply_ssm_patch()
         logger.info("Patched GatedDeltaNetAttention._forward_core for Kunlunxin")
     except Exception as e:
         logger.warning("Failed to patch _forward_core: %s", e)
-
-
-# ── decode_paged_attention NaN workaround ──
-def patch_decode_attention():
-    """Replace decode_paged_attention with prefill_attention (prefix_cache mode).
-
-    xtorch_ops.decode_paged_attention produces NaN on certain layers during
-    decode (observed on layer 43+ of Qwen3.6-27B). Using prefill_attention
-    with is_prefix_cache=True provides correct results.
-    """
-    try:
-        import vllm_fl.dispatch.backends.vendor.kunlunxin.impl.attention as attn_mod
-        import xtorch_ops
-
-        original_forward_decode = attn_mod.KunlunxinPagedAttention.forward_decode
-        def use_native_decode_for_cudagraph() -> bool:
-            try:
-                from vllm.config import CUDAGraphMode
-                from vllm.forward_context import (
-                    get_forward_context,
-                    is_forward_context_available,
-                )
-                if not is_forward_context_available():
-                    return False
-                return (
-                    get_forward_context().cudagraph_runtime_mode
-                    == CUDAGraphMode.FULL
-                )
-            except Exception:
-                # Keep the patch usable across vLLM minor versions that do
-                # not expose the runtime-mode field.
-                return False
-
-        @staticmethod
-        def patched_forward_decode(
-            query, key_cache, value_cache, block_tables,
-            seq_lens, seq_lens_host, max_seq_len, num_decode_tokens,
-            kv_cache_dtype, num_kv_heads, scale, alibi_slopes,
-            k_scale, v_scale, max_window_size=-1, output=None
-        ):
-            """Use prefill_attention in prefix_cache mode for decode."""
-            import torch
-
-            if use_native_decode_for_cudagraph():
-                return original_forward_decode(
-                    query,
-                    key_cache,
-                    value_cache,
-                    block_tables,
-                    seq_lens,
-                    seq_lens_host,
-                    max_seq_len,
-                    num_decode_tokens,
-                    kv_cache_dtype,
-                    num_kv_heads,
-                    scale,
-                    alibi_slopes,
-                    k_scale,
-                    v_scale,
-                    max_window_size=max_window_size,
-                    output=output,
-                )
-
-            if output is None:
-                output = torch.empty_like(query)
-
-            decode_query = query[:num_decode_tokens]
-            decode_output = output[:num_decode_tokens]
-
-            # Build query_start_loc: each decode token has query_len=1
-            query_start_loc_host = torch.arange(
-                num_decode_tokens + 1, dtype=torch.int32, device='cpu'
-            )
-            query_start_loc = query_start_loc_host.to(decode_query.device)
-
-            # Build kv_prefix_start_loc from seq_lens
-            sl = seq_lens_host[:num_decode_tokens].to(torch.int32)
-            kv_prefix_start_loc_host = torch.zeros(
-                num_decode_tokens + 1, dtype=torch.int32, device='cpu'
-            )
-            kv_prefix_start_loc_host[1:] = torch.cumsum(sl, dim=0)
-            kv_prefix_start_loc = kv_prefix_start_loc_host.to(decode_query.device)
-
-            window_left = -1
-            window_right = -1
-            if max_window_size > 0:
-                window_left = max_window_size
-                window_right = 0
-            alpha = scale * (float(decode_query.shape[2]) ** 0.5)
-            xtorch_ops.prefill_attention(
-                decode_query,
-                key_cache,
-                value_cache,
-                decode_output,
-                is_causal=True,
-                is_prefix_cache=True,
-                alpha=alpha,
-                context_qlen_lod_cpu=query_start_loc_host,
-                context_qlen_lod_xpu=query_start_loc,
-                context_kvlen_lod_cpu=kv_prefix_start_loc_host,
-                context_kvlen_lod_xpu=kv_prefix_start_loc,
-                block_table=block_tables,
-                alibi_slopes=alibi_slopes,
-                swa_left=window_left,
-                swa_right=window_right,
-            )
-            return output
-
-        attn_mod.KunlunxinPagedAttention.forward_decode = patched_forward_decode
-        logger.info(
-            "Patched KunlunxinPagedAttention.forward_decode: "
-            "using prefill_attention (prefix_cache) to fix decode NaN"
-        )
-    except Exception as e:
-        logger.warning("Failed to patch decode attention: %s", e)

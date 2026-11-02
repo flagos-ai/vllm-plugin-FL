@@ -73,6 +73,7 @@ def test_reference_registration_keeps_implemented_fallbacks():
         "gelu_and_mul",
         "rms_norm",
         "rotary_embedding",
+        "apply_rotary_emb",
         "attention_backend",
         "invoke_fused_moe_triton_kernel",
     }

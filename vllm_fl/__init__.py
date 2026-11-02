@@ -6,73 +6,6 @@ import os
 import sys
 
 
-def _get_explicit_vendor_for_triton_compat():
-    """Read an early vendor selection without importing vLLM or FlagGems."""
-    platform = os.environ.get("VLLM_FL_PLATFORM", "").strip().lower()
-    # ``cuda`` is a device type shared by NVIDIA and Kunlunxin, so it cannot
-    # decide whether the Kunlunxin compatibility patch is needed.
-    if platform and platform not in {"auto", "cuda"}:
-        return platform
-
-    vendor = os.environ.get("GEMS_VENDOR", "").strip().lower()
-    return vendor or None
-
-
-def _should_patch_flag_gems_triton_import_compat():
-    """Keep auto detection, but respect an explicitly selected vendor."""
-    vendor = _get_explicit_vendor_for_triton_compat()
-    return vendor is None or vendor == "kunlunxin"
-
-
-def _patch_flag_gems_triton_import_compat():
-    """Allow newer FlagGems to load with the Kunlunxin Triton runtime.
-
-    The hook runs before vLLM platform registration, so it must only use
-    environment variables for early vendor selection.  When no vendor is
-    explicit, retain the existing probe for Kunlunxin auto detection.
-
-    FlagGems 5.4 registers ``_dirichlet_grad`` at import time and asks Triton
-    to resolve ``tl.map_elementwise`` while computing the JIT cache key.  The
-    Kunlunxin Triton runtime does not expose that builtin.  vLLM does not use
-    this operator and the Kunlunxin dispatch config blacklists it, so provide
-    only an import-time sentinel.  If it is ever invoked, fail explicitly
-    instead of silently producing an incorrect result.
-    """
-    if not _should_patch_flag_gems_triton_import_compat():
-        return
-
-    try:
-        import triton
-        import triton.language as tl
-    except ImportError:
-        return
-    if not hasattr(tl, "map_elementwise"):
-        def _unsupported_map_elementwise(*args, **kwargs):
-            raise NotImplementedError(
-                "triton.language.map_elementwise is unavailable on Kunlunxin; "
-                "the FlagGems _dirichlet_grad operator must remain blacklisted"
-            )
-
-        _unsupported_map_elementwise.__name__ = "map_elementwise"
-        _unsupported_map_elementwise.__module__ = "triton.language"
-        _unsupported_map_elementwise.__triton_builtin__ = True
-        tl.map_elementwise = _unsupported_map_elementwise
-
-    try:
-        importlib.import_module("triton.knobs")
-    except ModuleNotFoundError as exc:
-        if exc.name != "triton.knobs":
-            raise
-        import types
-
-        knobs = types.ModuleType("triton.knobs")
-        knobs.autotuning = types.SimpleNamespace(adjust_block_size=True)
-        sys.modules[knobs.__name__] = knobs
-        triton.knobs = knobs
-
-
-_patch_flag_gems_triton_import_compat()
-
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.
@@ -82,12 +15,24 @@ if "torch" in sys.modules:
         _torch.float4_e2m1fn_x2 = _torch.uint8
 else:
     import torch as _torch
+
     if not hasattr(_torch, "float4_e2m1fn_x2"):
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
 
+try:
+    from vllm_fl.utils import get_op_config as _get_op_config
+except ModuleNotFoundError as exc:
+    # The native GLM5-Next baseline reuses only this package's config/model
+    # modules and deliberately does not install or activate FlagGems.
+    if exc.name != "flag_gems":
+        raise
+
+    def _get_op_config():
+        return None
+
+
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
-from vllm_fl.utils import get_op_config as _get_op_config
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +51,7 @@ def _arm_cpu_platform() -> str | None:
 def __getattr__(name):
     if name == "distributed":
         import importlib
+
         module = importlib.import_module(f".{name}", __name__)
         globals()[name] = module
         return module
@@ -115,10 +61,9 @@ def __getattr__(name):
 def _patch_transformers_compat():
     """Patch transformers compatibility for ALLOWED_LAYER_TYPES and tokenizer."""
     import transformers.configuration_utils as cfg
+
     if not hasattr(cfg, "ALLOWED_LAYER_TYPES"):
-        cfg.ALLOWED_LAYER_TYPES = getattr(
-            cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ()
-        )
+        cfg.ALLOWED_LAYER_TYPES = getattr(cfg, "ALLOWED_ATTENTION_LAYER_TYPES", ())
 
 
 def _register_flagcx_connector():
@@ -138,6 +83,7 @@ def _register_flagcx_connector():
 def _patch_flash_attn_import():
     """Stub vllm.vllm_flash_attn if CUDA flash attention C extensions are missing."""
     import sys
+
     if "vllm.vllm_flash_attn" in sys.modules:
         return
     try:
@@ -156,7 +102,9 @@ def _patch_flash_attn_import():
         stub = types.ModuleType("vllm.vllm_flash_attn")
         stub.FA2_AVAILABLE = False
         stub.FA3_AVAILABLE = False
-        stub.fa_version_unsupported_reason = lambda *a, **kw: "flash_attn C extensions not available"
+        stub.fa_version_unsupported_reason = lambda *a, **kw: (
+            "flash_attn C extensions not available"
+        )
         stub.flash_attn_varlen_func = None
         stub.get_scheduler_metadata = None
         stub.is_fa_version_supported = lambda *a, **kw: False
@@ -178,6 +126,7 @@ def _patch_custom_ops():
         logger.debug("Failed to import vllm_fl._C: %s", e)
 
     from vllm_fl.ops._C_ops_registry import register_op_schemas
+
     register_op_schemas()
 
 
@@ -185,7 +134,16 @@ def _init_vendor_device():
     """Apply compatibility hooks that must run before vLLM model imports."""
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "kunlunxin":
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "nvidia":
+        # FlashInfer chooses the first loaded libcudart by name. Bind it to
+        # Torch's CUDA runtime before optional TileLang probes load a stub
+        # with the same prefix but an incomplete CUDA runtime ABI.
+        try:
+            importlib.import_module("flashinfer.comm")
+        except (ImportError, OSError) as error:
+            logger.debug("Optional FlashInfer communication is unavailable: %s", error)
+    elif vendor_name == "kunlunxin":
         from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
             _patch_xpu_get_device,
         )
@@ -210,6 +168,7 @@ def register():
 
     # Model-specific platform patches
     from vllm_fl.patches.glm_moe_dsa import apply_platform_patches as glm5_platform
+
     glm5_platform()
 
     # Note: FlagCX connector registration is deferred to register_model()
@@ -223,25 +182,32 @@ def register():
 
     return "vllm_fl.platform.PlatformFL"
 
+
 def register_quant_linear():
     from vllm.platforms import current_platform
+
     # vllm.model_executor.kernels.linear triggers cutlass_scaled_mm_supports_fp8
     # at module level, which requires torch.ops._C — not available on these
     # platforms.
     if current_platform.device_type in {"musa", "gcu"}:
         return
     from vllm_fl.quantization.quant_linear import add_oot_quant_kernel
+
     add_oot_quant_kernel()
+
 
 def register_router():
     from vllm.platforms import current_platform
+
     # fused_moe import chain triggers cutlass_scaled_mm_supports_fp8 on MUSA
     if current_platform.device_type == "musa":
         return
     from vllm_fl.utils import is_oot_enabled
+
     if not is_oot_enabled():
         return
     from vllm_fl.ops.fused_moe.router import replace_router_with_fl
+
     replace_router_with_fl()
 
 
@@ -263,15 +229,43 @@ def _register_gdn_packed_decode_patch() -> bool:
     return patch_fn()
 
 
+def _patch_ascend_torch_accelerator() -> None:
+    """Install the Ascend memory shim in every general-plugin process."""
+    from vllm.platforms import current_platform
+
+    if (
+        current_platform.device_type == "npu"
+        and getattr(current_platform, "vendor_name", None) == "ascend"
+    ):
+        from vllm_fl.dispatch.backends.vendor.ascend.patches.patch_torch_accelerator import (
+            patch_torch_accelerator,
+        )
+
+        patch_torch_accelerator()
+
+
 def register_model():
     """Register FL-specific models not yet upstream."""
+    _patch_ascend_torch_accelerator()
+
     # General plugins are loaded independently in spawned model-inspection and
     # worker processes, so all runtime compatibility hooks must be idempotent.
+    from vllm_fl.models.glm5.runtime import (
+        register_glm5_next_support,
+    )
     from vllm_fl.patches.qwen3_5_text import apply_qwen3_5_text_patches
+    from vllm_fl.patches.qwen3_8_flash_next import (
+        apply_qwen3_8_flash_next_patches,
+    )
 
+    # GLM5-Next is intentionally registered only by its vLLM-0.24 adapter;
+    # the plugin main branch is ABI-pinned to that release line.
+    register_glm5_next_support()
     apply_qwen3_5_text_patches()
+    apply_qwen3_8_flash_next_patches()
 
     from vllm.platforms import current_platform
+
     if current_platform.device_type == "cpu" and _arm_cpu_platform() is not None:
         from vllm_fl.patches.arm_cpu_gdn import (
             apply_arm_cpu_gdn_state_indices_patch,
@@ -306,10 +300,15 @@ def register_model():
         install_arm_cpu_packed_w4a8()
         return
 
-    _register_flagcx_connector()
+    from vllm_fl.models.hy4.registration import register_hy_v4_support
 
-    from vllm_fl.patches.qwen3_8_flash_next import apply_qwen3_8_flash_next_patches
-    apply_qwen3_8_flash_next_patches()
+    register_hy_v4_support()
+
+    from vllm_fl.models.minimax_m3_registration import register_minimax_m3_support
+
+    register_minimax_m3_support()
+
+    _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
     register_quant_linear()
@@ -322,48 +321,10 @@ def register_model():
         from vllm.transformers_utils.config import _CONFIG_REGISTRY
 
         from vllm_fl.configs.glm_moe_dsa import GlmMoeDsaConfig
+
         _CONFIG_REGISTRY["glm_moe_dsa"] = GlmMoeDsaConfig
 
-        #from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
-        #glm5_model()
+        # from vllm_fl.patches.glm_moe_dsa import apply_model_patches as glm5_model
+        # glm5_model()
     except Exception as e:
         logger.error(f"Register GlmMoeDsa model error: {str(e)}")
-
-    from vllm import ModelRegistry
-    from vllm.model_executor import model_loader
-    from vllm.reasoning import ReasoningParserManager
-    from vllm.transformers_utils.config import _CONFIG_REGISTRY
-    from vllm.transformers_utils.model_arch_config_convertor import (
-        MODEL_ARCH_CONFIG_CONVERTORS,
-        ModelArchConfigConvertorBase,
-    )
-
-    from vllm_fl.configs.hy_v4 import HYV4Config
-    from vllm_fl.model_loader.hy_v4_loader import HYV4SafetensorsLoader
-
-    # Keep the converter in the registration phase to avoid importing vLLM's
-    # config conversion machinery from the Hugging Face config module.
-    class HYV4ModelArchConfigConvertor(ModelArchConfigConvertorBase):
-        def get_head_size(self) -> int:
-            return int(self.hf_text_config.kv_lora_rank) + int(
-                self.hf_text_config.qk_rope_head_dim
-            )
-
-        def is_deepseek_mla(self) -> bool:
-            return True
-
-    _CONFIG_REGISTRY["hy_v4"] = HYV4Config
-    MODEL_ARCH_CONFIG_CONVERTORS["hy_v4"] = HYV4ModelArchConfigConvertor
-    ModelRegistry.register_model(
-        "HYV4ForCausalLM", "vllm_fl.models.hy_v4:HYV4ForCausalLM"
-    )
-    ReasoningParserManager.register_lazy_module(
-        "hy_v4",
-        "vllm_fl.reasoning.hy_v4_reasoning",
-        "HYV4ReasoningParser",
-    )
-
-    load_format = "hy4_safetensors"
-    registered_loaders = model_loader._LOAD_FORMAT_TO_MODEL_LOADER
-    if registered_loaders.get(load_format) is not HYV4SafetensorsLoader:
-        model_loader.register_model_loader(load_format)(HYV4SafetensorsLoader)

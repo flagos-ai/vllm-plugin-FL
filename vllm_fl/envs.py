@@ -1,7 +1,8 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from vllm_fl.utils import use_flaggems
 
@@ -13,6 +14,9 @@ fl_vllm_environment_variables: dict[str, Callable[[], Any]] = {
         "FLAGGEMS_ENABLE_OPLIST_PATH", "/tmp/flaggems_enable_oplist.txt"
     ),
     "USE_FLAGGEMS": use_flaggems,
+    "VLLM_FL_USE_FLAGGEMS_VLLM": lambda: (
+        os.environ.get("VLLM_FL_USE_FLAGGEMS_VLLM", "0").lower() in ("1", "true")
+    ),
 }
 
 

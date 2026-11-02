@@ -1,13 +1,14 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 
 import logging
-from typing import Optional, List
+import sys
 
 from vllm.model_executor.custom_op import CustomOp, PluggableLayer
-from .layernorm import *  # noqa F403 F401
+
 from .activation import *  # noqa F403 F401
-from .rotary_embedding import *  # noqa F403 F401
 from .fused_moe import *  # noqa F403 F401
+from .layernorm import *  # noqa F403 F401
+from .rotary_embedding import *  # noqa F403 F401
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,10 @@ logger = logging.getLogger(__name__)
 # when looking up the OOT op (typically the base class name).
 # item example as follows:
 # op_name: (class, registration_name of vllm's CustomOp.register_oot)
-# note: cannot control inner gems op of UnquantizedFusedMoEMethodFL via env variable.
+# fused_moe is handled separately because vLLM exposes it as a factory function.
 OOT_OPS = {
     "silu_and_mul": (SiluAndMulFL, "SiluAndMul"),  # noqa F405
+    "silu_and_mul_with_clamp": (SiluAndMulWithClampFL, "SiluAndMulWithClamp"),  # noqa F405
     "gelu_and_mul": (GeluAndMulFL, "GeluAndMul"),  # noqa F405
     "rms_norm": (RMSNormFL, "RMSNorm"),  # noqa F405
     "rotary_embedding": (RotaryEmbeddingFL, "RotaryEmbedding"),  # noqa F405
@@ -32,7 +34,8 @@ OOT_OPS = {
     # "unquantized_fused_moe_method": (UnquantizedFusedMoEMethodFL, "UnquantizedFusedMoEMethod"),
 }
 
-def _patch_unquantized_moe_oracle() -> None:
+
+def _patch_unquantized_moe_oracle(*, prefer_flaggems_experts: bool) -> None:
     """
     Monkey-patch the upstream select_unquantized_moe_backend so it does not
     short-circuit to (OOT, None) on our platform.  Instead it falls through
@@ -44,15 +47,30 @@ def _patch_unquantized_moe_oracle() -> None:
     would get (OOT, None), skip _setup_kernel, and crash at inference time.
     """
     import vllm.model_executor.layers.fused_moe.oracle.unquantized as _oracle_mod
-    from vllm_fl.ops.fused_moe.fused_moe_utils import select_unquantized_moe_backend_oot
-    _oracle_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
+
+    from vllm_fl.ops.fused_moe.fused_moe_utils import (
+        select_unquantized_moe_backend_oot,
+    )
+
+    def select_backend(moe_config):
+        return select_unquantized_moe_backend_oot(
+            moe_config,
+            prefer_flaggems_experts=prefer_flaggems_experts,
+        )
+
+    _oracle_mod.select_unquantized_moe_backend = select_backend
     # Also patch the import in unquantized_fused_moe_method module
     import vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method as _method_mod
-    _method_mod.select_unquantized_moe_backend = select_unquantized_moe_backend_oot
-    logger.info("Patched select_unquantized_moe_backend to bypass OOT short-circuit")
+
+    _method_mod.select_unquantized_moe_backend = select_backend
+    logger.info(
+        "Patched select_unquantized_moe_backend for OOT execution "
+        "(prefer_flaggems_experts=%s)",
+        prefer_flaggems_experts,
+    )
 
 
-def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
+def register_oot_ops(whitelist: list[str] | None = None) -> None:
     """
     Register OOT (out-of-tree) custom operators.
 
@@ -68,12 +86,17 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     the upstream select_unquantized_moe_backend oracle is monkey-patched
     so it picks native CUDA backends instead of returning (OOT, None).
     """
-    from vllm_fl.utils import get_oot_blacklist, get_oot_whitelist, is_oot_enabled, use_flaggems_op
+    from vllm_fl.utils import (
+        get_oot_blacklist,
+        get_oot_whitelist,
+        is_oot_enabled,
+        use_flaggems_op,
+    )
 
     # Check if OOT registration is enabled
     if not is_oot_enabled():
         # Patch the upstream oracle so in-tree FusedMoE works on this platform.
-        _patch_unquantized_moe_oracle()
+        _patch_unquantized_moe_oracle(prefer_flaggems_experts=False)
         return
 
     # Get blacklist (from env var or platform config)
@@ -88,13 +111,20 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     else:
         ops_to_register = list(OOT_OPS.keys())
 
-    # Apply blacklist
+    # FusedMoE is not present in OOT_OPS because it is a factory, but it still
+    # follows the same whitelist/blacklist policy as registered OOT classes.
+    active_whitelist = env_whitelist if env_whitelist is not None else whitelist
+    fused_moe_enabled = (
+        active_whitelist is None or "fused_moe" in active_whitelist
+    ) and "fused_moe" not in blacklist
+
+    # Apply blacklist to class-based OOT ops.
     ops_to_register = [op for op in ops_to_register if op not in blacklist]
 
-    # If fused_moe is excluded (blacklisted or not in whitelist), patch the
-    # upstream oracle so the in-tree FusedMoE doesn't crash on OOT platforms.
-    if "fused_moe" not in ops_to_register:
-        _patch_unquantized_moe_oracle()
+    # If fused_moe is excluded (blacklisted or not in the active whitelist),
+    # patch the upstream oracle so in-tree FusedMoE works on OOT platforms.
+    if not fused_moe_enabled:
+        _patch_unquantized_moe_oracle(prefer_flaggems_experts=False)
 
     for op_name in ops_to_register:
         if op_name not in OOT_OPS:
@@ -109,9 +139,15 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
         op_cls, registration_name = OOT_OPS[op_name]
         logger.info(f"Registering oot op: {op_name} as '{registration_name}'")
         if issubclass(op_cls, PluggableLayer):
-            PluggableLayer.register_oot(_decorated_layer_cls=op_cls, name=registration_name)
+            PluggableLayer.register_oot(
+                _decorated_layer_cls=op_cls, name=registration_name
+            )
         else:
             CustomOp.register_oot(_decorated_op_cls=op_cls, name=registration_name)
+            if op_name == "silu_and_mul_with_clamp":
+                # The OOT lookup key is a class name; public controls use the
+                # upstream snake_case name. The replacement accepts both aliases.
+                op_cls.name = op_name
 
     # Apply platform-specific monkey-patches unconditionally (outside the OOT
     # registration loop) so they run even when the whitelist is empty or all ops
@@ -123,16 +159,19 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     # Ascend implementations that bypass the CustomOp/dispatch path.
     if current_platform.device_type == "npu":
         from vllm_fl.dispatch.backends.vendor.ascend.patch import apply_ascend_patches
+
         apply_ascend_patches()
 
     # Apply Sunrise/PTPU monkey-patches if running on PTPU.
     if current_platform.device_type == "ptpu":
         from vllm_fl.dispatch.backends.vendor.sunrise.patch import apply_sunrise_patches
+
         apply_sunrise_patches()
 
     # Apply GCU monkey-patches (Triton grid limits, etc.).
     if getattr(current_platform, "vendor_name", None) in ("gcu", "enflame"):
         from vllm_fl.dispatch.backends.vendor.gcu.patch import apply_gcu_patches
+
         apply_gcu_patches()
 
     # Kunlunxin patches must run even when no OOT operator was selected.
@@ -150,14 +189,19 @@ def register_oot_ops(whitelist: Optional[List[str]] = None) -> None:
     # subclass, so it cannot be registered via CustomOp/PluggableLayer.register_oot.
     # Instead we replace the factory function in the two places vllm imports it
     # from, so all model code transparently gets FusedMoEFL.
-    if "fused_moe" not in (blacklist or []):
+    if fused_moe_enabled:
+        # Some model modules import the upstream FusedMoE factory before the
+        # WorkerFL constructor runs.  Patching only the package-level factory
+        # cannot rewrite those already-bound symbols.  Patch the method's
+        # backend oracle as the authoritative v0.24 path as well, so both new
+        # and already-imported factories select TritonExpertsFL.
+        _patch_unquantized_moe_oracle(prefer_flaggems_experts=True)
         _patch_fused_moe_factory()
 
 
 def _patch_fused_moe_factory() -> None:
     """Replace the FusedMoE factory function with FusedMoEFL in all relevant
     vllm modules so that model code picks up the FL version automatically."""
-    import inspect
     import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
     import vllm.model_executor.layers.fused_moe.layer as _fused_moe_layer
 
@@ -165,7 +209,27 @@ def _patch_fused_moe_factory() -> None:
         # Already patched — idempotent.
         return
 
-    # Patch at the module level so `from vllm...fused_moe import FusedMoE` picks it up.
+    native_factory = _fused_moe_layer.FusedMoE
+
+    # Model modules such as qwen3_next may execute
+    # ``from vllm...fused_moe import FusedMoE`` during registry inspection,
+    # before WorkerFL installs OOT operators.  Replacing only the defining
+    # modules leaves those already-bound globals pointing at the native
+    # factory.  Rewrite exact identity matches in loaded vLLM model modules;
+    # do not touch unrelated callables that merely share the same name.
+    patched_model_modules = 0
+    for module_name, module in tuple(sys.modules.items()):
+        if not module_name.startswith("vllm.model_executor.models."):
+            continue
+        if getattr(module, "FusedMoE", None) is native_factory:
+            setattr(module, "FusedMoE", FusedMoEFL)  # noqa F405
+            patched_model_modules += 1
+
+    # Patch defining modules for imports that occur after this point.
     _fused_moe_layer.FusedMoE = FusedMoEFL  # noqa F405
-    _fused_moe_pkg.FusedMoE = FusedMoEFL   # noqa F405
-    logger.info("Monkey-patched FusedMoE factory -> FusedMoEFL")
+    _fused_moe_pkg.FusedMoE = FusedMoEFL  # noqa F405
+    logger.info(
+        "Monkey-patched FusedMoE factory -> FusedMoEFL "
+        "(already-bound model modules=%d)",
+        patched_model_modules,
+    )

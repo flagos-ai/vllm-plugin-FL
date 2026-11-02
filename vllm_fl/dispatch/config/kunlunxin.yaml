@@ -79,35 +79,25 @@ op_backends:
 # FlagOS operator blacklist
 # These operators will NOT use FlagOS implementation even if FlagOS is enabled.
 flagos_blacklist:
-  # --- FlagGems ATen ops known broken on this platform ---
-  - _dirichlet_grad
-  - _flash_attention_backward
+  # FlagTree xpu3.6 kernel launch / SDNN lowering failures.
   - _safe_softmax
   - _scaled_dot_product_attention_math
-  - _scaled_dot_product_flash_attention_backward
-  - argmax
-  - bmm
-  - index_put_
-  - normal_
-  - copy_
-  - gelu
-  - masked_scatter_
-  - scatter
-  - scatter_
-  - scatter_add_
-  - select_scatter
-  - slice
-  - slice_scatter
+  - _scaled_dot_product_flash_attention
   - softmax
   - sort
-  - topk_softmax
+  # Incorrect reduction indices; bmm autotuning fails with a zero estimate.
+  - argmax
+  - bmm
+  # BF16 broadcast mul corrupts Q-head RMSNorm at larger prefill batches.
+  - mul
+  # FlagTree xpu3.6 cannot lower FlagGems' masked scalar-base pow kernel.
+  - pow_scalar
+  # Strided copy leaves the destination unchanged.
+  - copy_
+  # FlagGems slice rejects torch.bool views used by multimodal attention.
+  - slice
+  # FlagOS attention exceeds the XPU pipeline event limit during FULL capture.
   - attention_backend
-  # --- OOT ops never registered through FlagGems ---
-  - chunk_gated_delta_rule_fwd
-  - fused_recurrent_gated_delta_rule_fwd
-  - causal_conv1d_fn
-  - causal_conv1d_update
-  - fused_gdn_gating
 
 
 # OOT (Out-of-Tree) operator blacklist

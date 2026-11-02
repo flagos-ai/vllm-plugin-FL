@@ -15,9 +15,22 @@ It provides:
 
 import os
 import tempfile
+import warnings
 
 import pytest
 import torch
+
+# Suppress pkg_resources deprecation warning emitted by hypothesis entry_points
+# before pytest's own filterwarnings takes effect.
+warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")
+# Suppress DeprecationWarning from pytest's assertion rewriter on Python 3.12+:
+# "Attribute s is deprecated; use value instead" (ast.Str.s removal in 3.14).
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="_pytest")
+# Suppress RuntimeWarning from unittest on Python 3.12+:
+# "TestResult has no addDuration method" — harmless compatibility shim noise.
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="unittest")
+# Suppress enflame GCU ImportWarning about torch.cuda.* monkey-patching.
+warnings.filterwarnings("ignore", category=ImportWarning, module="torch_gcu")
 
 from tests.utils.device_utils import (
     get_backend,
