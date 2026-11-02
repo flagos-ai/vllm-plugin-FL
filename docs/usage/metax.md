@@ -93,15 +93,14 @@ docker exec "$CONTAINER" bash -lc '
     --host 127.0.0.1 --port 8000 \
     --tensor-parallel-size 4 \
     --max-model-len 8192 \
-    --gpu-memory-utilization 0.85 \
     --disable-custom-all-reduce'
 ```
 
 Notes:
 
-- `--gpu-memory-utilization 0.85` is required for the 35B-A3B model at 8192
-  context on a 64 GiB card; `0.95` asks for ~60.4 GiB of the 59.5 GiB that is
-  actually free.
+- `--gpu-memory-utilization` can stay at the vLLM default (`0.9`) for 27B and
+  35B-A3B at 8192 context: it reserves ~57.6 GiB of the 59.5 GiB that are
+  actually free on a 64 GiB C550. `0.95` does not fit (it asks for ~60.8 GiB).
 - Without graph flags the plugin selects `cudagraph_mode=PIECEWISE` through
   `PlatformFL.apply_config_platform_defaults`. Add `--enforce-eager` for the
   eager configuration; the explicit `NONE` mode is preserved.
