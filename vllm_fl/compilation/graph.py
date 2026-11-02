@@ -417,17 +417,3 @@ class GraphWrapper(CUDAGraphWrapper):
             current_platform.torch_device_fn.synchronize()
         entry.graph.replay()
         return entry.output
-
-
-def adapt_graph_wrapper(model):
-    """Replace the native runner's CUDA wrapper with the FL device wrapper."""
-    if isinstance(model, GraphWrapper):
-        return model
-    if isinstance(model, CUDAGraphWrapper):
-        return GraphWrapper(
-            adapt_graph_wrapper(model.runnable),
-            model.vllm_config,
-            model.runtime_mode,
-            model.cudagraph_options,
-        )
-    return model

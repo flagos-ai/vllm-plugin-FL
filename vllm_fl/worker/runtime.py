@@ -107,7 +107,6 @@ def _install_native_runner_io_methods(
 
 def prepare_native_model_runner(model_runner, enforce_eager, load_dummy_weights):
     """Preserve FL hooks for the explicitly selected upstream V2 runner."""
-    from vllm_fl.compilation.graph import adapt_graph_wrapper
     from vllm_fl.dispatch.io_dumper import (
         init_io_dump_from_env,
         is_dump_enabled,
@@ -115,7 +114,6 @@ def prepare_native_model_runner(model_runner, enforce_eager, load_dummy_weights)
     )
 
     init_io_dump_from_env(enforce_eager)
-    model_runner.model = adapt_graph_wrapper(model_runner.model)
     if is_dump_enabled():
         _install_native_runner_io_methods(
             model_runner,
