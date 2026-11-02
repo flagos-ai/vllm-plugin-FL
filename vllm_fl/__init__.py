@@ -165,6 +165,11 @@ def register_model():
     apply_qwen3_5_text_patches()
     patch_vllm_moe_sum()
 
+    # FlagOS S2: retune vLLM unified_attention launch parameters.
+    # Runtime source-level adaptation -- the vllm wheel on disk is untouched.
+    from vllm_fl.patches.unified_attn_launch import patch_vllm_unified_attention
+    patch_vllm_unified_attention()
+
     _register_flagcx_connector()
 
     # Register OOT quant kernels so kernel selection can find them
