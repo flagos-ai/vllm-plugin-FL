@@ -37,7 +37,15 @@ def _initialize_fl_runtime(rank: int) -> None:
         flag_gems.only_enable(include=whitelist, **common)
     elif blacklist:
         logger.info("[FlagGems] Disable the following ops: %s", blacklist)
-        _enable_except(flag_gems, blacklist, common)
+        from vllm.platforms import current_platform
+
+        if getattr(current_platform, "vendor_name", None) == "amd":
+            # enable(unused=...) does not actually exclude every operator in
+            # FlagGems 5.4.0, which AMD depends on; see _enable_except. Scoped
+            # to AMD so the other backends keep their proven call unchanged.
+            _enable_except(flag_gems, blacklist, common)
+        else:
+            flag_gems.enable(unused=blacklist, **common)
     else:
         logger.info("[FlagGems] Enable all ops")
         flag_gems.enable(**common)
@@ -52,6 +60,10 @@ def _enable_except(flag_gems, blacklist: list[str], common: dict) -> None:
     rejects the generated code. Deriving an explicit whitelist from the full
     operator list keeps the exclusion effective, and falls back to ``unused=``
     when the operator list cannot be read.
+
+    Only AMD calls this today: the other backends have a working
+    ``enable(unused=...)`` path on their own stacks and this has not been
+    validated on their hardware, so their behaviour is left untouched.
     """
     excluded = set(blacklist)
     try:
