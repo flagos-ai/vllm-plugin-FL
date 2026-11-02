@@ -70,7 +70,7 @@ def _patch_select(mod):
     if orig is None or getattr(mod, "_fl_metax_select_backend_patched", False):
         return
     try:
-        from vllm.model_executor.layers.fused_moe.experts.triton_experts import (
+        from vllm.model_executor.layers.fused_moe.experts.triton_moe import (
             TritonExperts,
         )
     except Exception:
@@ -79,14 +79,6 @@ def _patch_select(mod):
     def _select(*args, **kwargs):
         backend, cls = orig(*args, **kwargs)
         if cls is None and TritonExperts is not None:
-            try:
-                from vllm_metax.utils.fused_moe import get_triton_experts_cls
-
-                cls2 = get_triton_experts_cls()
-                if cls2 is not None:
-                    return (backend, cls2)
-            except Exception:
-                pass
             return (backend, TritonExperts)
         return (backend, cls)
 
@@ -136,7 +128,14 @@ class _Loader(_abc.Loader):
         try:
             _patch(module)
         finally:
-            _detach()
+            # Keep the finder armed until every target has been patched: the
+            # modules import each other, so detaching after the first one left
+            # the second unpatched.
+            if all(
+                getattr(_sys.modules.get(n), _MARK, False) is True
+                for n in _TARGETS
+            ):
+                _detach()
 
 
 class _Finder(_abc.MetaPathFinder):

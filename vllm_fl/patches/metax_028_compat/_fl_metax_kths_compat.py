@@ -1,7 +1,7 @@
 """FL MetaX boot shim - triton 3.0 NameError across constexpr-if.
 
 Root cause (measured 2026-09-21, mx_plugin_028, triton 3.0.0, E7_eager_r14):
-  vllm_metax/.../triton_unified_attention.py  kernel_unified_attention
+  vllm/v1/attention/ops/triton_unified_attention.py  kernel_unified_attention
     first  if USE_PER_TOKEN_HEAD_SCALES:  k/v_token_head_scales = tl.load(...)
     later  if USE_PER_TOKEN_HEAD_SCALES:  uses those names
   Triton 3.0 does not leak names assigned inside one constexpr-if into another,
@@ -20,7 +20,7 @@ import importlib.abc as _abc
 import os as _os
 import sys as _sys
 
-_TARGET = "vllm_metax.v1.attention.ops.triton_unified_attention"
+_TARGET = "vllm.v1.attention.ops.triton_unified_attention"
 _MARK = "_fl_metax_kths_patched"
 _NAMES = ("k_token_head_scales", "v_token_head_scales")
 _GATE = ("k_token_head_scales", "USE_PER_TOKEN_HEAD_SCALES")

@@ -49,7 +49,7 @@ def _vendor_artifacts():
     if not pkg:
         return False
     sp = os.path.dirname(pkg)
-    for name in ("mcoplib", "maca", "vllm_metax"):
+    for name in ("mcoplib", "maca"):
         if os.path.isdir(os.path.join(sp, name)):
             return True
     return False
