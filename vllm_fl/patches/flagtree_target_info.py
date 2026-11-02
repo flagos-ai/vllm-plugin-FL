@@ -33,11 +33,11 @@ catches up.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
-
-_installed = False
 
 # Architecture families queried by vLLM's bundled Triton kernels but absent
 # from FlagTree's target_info, mapped to the gfx prefixes that satisfy them.
@@ -82,19 +82,18 @@ def _make_predicate(target_info, name: str, prefixes: tuple[str, ...]):
     return predicate
 
 
+@lru_cache(maxsize=1)
 def apply_flagtree_target_info() -> bool:
     """Add the missing AMD predicates to ``triton.language.target_info``.
 
-    Idempotent, and a no-op when FlagTree already defines them.
+    Cached, so repeat calls are free, and a no-op when FlagTree already
+    defines them. Caching the negative result is safe because Triton's
+    importability does not change within a process.
 
     Returns:
         True when the module is importable (whether or not anything was
         added), False when Triton is unavailable.
     """
-    global _installed
-    if _installed:
-        return True
-
     try:
         import triton.language.target_info as target_info
     except ImportError as e:
@@ -107,7 +106,6 @@ def apply_flagtree_target_info() -> bool:
             setattr(target_info, name, _make_predicate(target_info, name, prefixes))
             added.append(name)
 
-    _installed = True
     if added:
         logger.info(
             "AMD: added %d architecture predicate(s) missing from this Triton's "

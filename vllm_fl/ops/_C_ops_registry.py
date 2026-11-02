@@ -7,12 +7,11 @@
 import logging
 import os
 from contextlib import suppress
+from functools import lru_cache
 
 import torch
 
 logger = logging.getLogger(__name__)
-
-_logged_amd_host_view = False
 
 # These optional kernels use schema presence as an upstream capability probe.
 # They are not needed by compilation pattern imports. Defining only a schema
@@ -27,6 +26,14 @@ _OPTIONAL_NATIVE_ONLY_OPS = frozenset(
         "kimi_k3_attn_res",
     }
 )
+
+
+@lru_cache(maxsize=1)
+def _log_amd_host_view_once() -> None:
+    logger.info(
+        "Using the AMD ROCm zero-copy host mapping for "
+        "_C::get_cuda_view_from_cpu_tensor."
+    )
 
 
 def _unavailable_cuda_view(tensor):
@@ -67,13 +74,7 @@ def _accelerator_view_from_cpu_tensor(tensor):
             get_cuda_view_from_cpu_tensor_amd,
         )
 
-        global _logged_amd_host_view
-        if not _logged_amd_host_view:
-            _logged_amd_host_view = True
-            logger.info(
-                "Using the AMD ROCm zero-copy host mapping for "
-                "_C::get_cuda_view_from_cpu_tensor."
-            )
+        _log_amd_host_view_once()
         return get_cuda_view_from_cpu_tensor_amd(tensor)
 
     return _unavailable_cuda_view(tensor)
