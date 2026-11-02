@@ -164,6 +164,8 @@ class PlatformFL(_DevicePlatform):
     def get_current_memory_usage(
         cls, device: torch.types.Device | None = None
     ) -> float:
+        if cls.vendor_name == "nvidia":
+            return super().get_current_memory_usage(device)
         cls.torch_device_fn.empty_cache()
         cls.torch_device_fn.reset_peak_memory_stats(device)
         return cls.torch_device_fn.max_memory_allocated(device)
@@ -184,6 +186,8 @@ class PlatformFL(_DevicePlatform):
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
+        if cls.vendor_name == "nvidia":
+            return super().get_device_name(device_id)
         return cls.device_name
 
     ### TODO(lms): change pin_memory depend device
@@ -227,6 +231,8 @@ class PlatformFL(_DevicePlatform):
     @classmethod
     def import_ir_kernels(cls) -> None:
         """Import IR kernel modules. OOT platforms override to import their own."""
+        if cls.vendor_name == "nvidia":
+            return super().import_ir_kernels()
         import vllm.kernels  # noqa: F401
 
     @classmethod
@@ -594,6 +600,8 @@ class PlatformFL(_DevicePlatform):
     @classmethod
     def get_punica_wrapper(cls) -> str:
         # TODO(lms): support fl PunicaWrapper
+        if cls.vendor_name == "nvidia":
+            return super().get_punica_wrapper()
         return "vllm.lora.punica_wrapper.punica_gpu.PunicaWrapperGPU"
 
     @classmethod
@@ -704,11 +712,15 @@ class PlatformFL(_DevicePlatform):
     @classmethod
     def supports_fp8(cls) -> bool:
         if cls.vendor_name == "nvidia":
+            return super().supports_fp8()
+        if cls.vendor_name == "nvidia":
             return cls.has_device_capability(89)
         return False
 
     @classmethod
     def get_device_uuid(cls, device_id: int = 0) -> str:
+        if cls.vendor_name == "nvidia":
+            return super().get_device_uuid(device_id)
         if cls.device_type == "cuda" and cls.vendor_name == "iluvatar":
             # Iluvatar is CUDA-compatible but has no NVML library.
             # Return a synthetic UUID based on device index.
@@ -732,6 +744,8 @@ class PlatformFL(_DevicePlatform):
 
     @classmethod
     def get_device_total_memory(cls, device_id: int = 0) -> int:
+        if cls.vendor_name == "nvidia":
+            return super().get_device_total_memory(device_id)
         return cls.torch_device_fn.get_device_properties(device_id).total_memory
 
     @classmethod
@@ -740,6 +754,8 @@ class PlatformFL(_DevicePlatform):
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:
+        if cls.vendor_name == "nvidia":
+            return super().num_compute_units(device_id)
         return cls.torch_device_fn.get_device_properties(
             device_id
         ).multi_processor_count
@@ -747,6 +763,8 @@ class PlatformFL(_DevicePlatform):
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
         # TODO(yxa): For NPU/Ascend devices, return None (no capability version like CUDA)
+        if cls.vendor_name == "nvidia":
+            return super().get_device_capability(device_id)
         if cls.device_type == "npu":
             return None
         if cls.device_type == "musa":
@@ -807,6 +825,8 @@ class PlatformFL(_DevicePlatform):
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:
+        if cls.vendor_name == "nvidia":
+            return super().is_arch_support_pdl()
         if cls.vendor_name != "nvidia":
             return False
         try:
@@ -818,6 +838,8 @@ class PlatformFL(_DevicePlatform):
 
     @classmethod
     def is_fully_connected(cls, physical_device_ids: list[int]) -> bool:
+        if cls.vendor_name == "nvidia":
+            return super().is_fully_connected(physical_device_ids)
         try:
             import pynvml
 
@@ -871,6 +893,8 @@ class PlatformFL(_DevicePlatform):
     @classmethod
     def is_integrated_gpu(cls, device_id: int = 0) -> bool:
         """Returns whether the GPU is an integrated (UMA) device."""
+        if cls.vendor_name == "nvidia":
+            return super().is_integrated_gpu(device_id)
         return False
 
     @classmethod

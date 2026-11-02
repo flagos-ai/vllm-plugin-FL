@@ -239,3 +239,22 @@ def test_nvidia_compilation_preserves_supported_passes_and_graphs(monkeypatch, f
     assert compilation.pass_config.eliminate_noops is True
     assert compilation.mode == CompilationMode.VLLM_COMPILE
     assert compilation.cudagraph_mode == CUDAGraphMode.FULL_AND_PIECEWISE
+
+
+def test_common_cuda_metadata_queries_do_not_initialize_cuda(monkeypatch):
+    import torch
+
+    from vllm.platforms.cuda import NvmlCudaPlatform
+
+    from vllm_fl.platform import PlatformFL
+
+    if not issubclass(PlatformFL, NvmlCudaPlatform):
+        pytest.skip("Requires the native NVML platform")
+
+    def reject_cuda_initialization():
+        raise AssertionError("Metadata queries must preserve native NVML lookup")
+
+    monkeypatch.setattr(torch.cuda, "_lazy_init", reject_cuda_initialization)
+    assert PlatformFL.get_device_capability(0).major > 0
+    assert PlatformFL.get_device_name(0)
+    assert PlatformFL.get_device_total_memory(0) > 0
