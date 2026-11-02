@@ -39,6 +39,8 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.94
       disable_custom_all_reduce: false
+      compilation_config:
+        custom_ops: ["none", "+SiluAndMul"]
     serve:
       # Cold S60 compilation and graph capture can exceed 240 readiness polls.
       # Keep the existing 120-minute CI job limit as the outer deadline.
@@ -51,6 +53,7 @@ env_defaults:
   TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
   ENABLE_I64_CHECK: "0"
   TORCHGCU_INDUCTOR_ENABLE: "1"
+  TORCHINDUCTOR_EMULATE_PRECISION_CASTS: "1"
 
 s60:
   name: "s60"

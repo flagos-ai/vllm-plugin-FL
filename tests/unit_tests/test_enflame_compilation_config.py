@@ -110,3 +110,26 @@ def test_partial_compilation_metadata_preserves_platform_config_contract(monkeyp
         "compile_sizes": [1, 8],
         "cudagraph_mode": CUDAGraphMode.FULL_AND_PIECEWISE,
     }
+
+
+@pytest.mark.parametrize("vendor", ["enflame", "gcu"])
+def test_codegen_version_invalidates_cache_preserving_user_config(monkeypatch, vendor):
+    config = config_for_platform()
+    user = {"customer_option": [1, 3]}
+    config.additional_config = user
+    simulate_platform(monkeypatch, vendor)
+    PlatformFL.check_and_update_config(config)
+    assert config.additional_config == {
+        "customer_option": [1, 3], "fl_gcu_codegen": "preserve_dtype_v1"
+    }
+    assert user == {"customer_option": [1, 3]}
+    PlatformFL.check_and_update_config(config)
+    assert len(config.additional_config) == 2
+
+
+def test_other_vendor_does_not_change_additional_config(monkeypatch):
+    config = config_for_platform()
+    config.additional_config = {"customer_option": 4}
+    simulate_platform(monkeypatch, "iluvatar")
+    PlatformFL.check_and_update_config(config)
+    assert config.additional_config == {"customer_option": 4}

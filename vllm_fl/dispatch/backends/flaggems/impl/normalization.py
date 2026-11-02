@@ -27,6 +27,12 @@ def rms_norm_flaggems(
     Returns:
         Normalized tensor, or tuple of (normalized, residual) if residual is provided
     """
+    if x.device.type == "gcu":
+        # Keep the CUDA rounding contract across GCU dispatch preferences.
+        from ...vendor.gcu.impl.normalization import rms_norm_gcu
+
+        return rms_norm_gcu(obj, x, residual)
+
     from flag_gems.modules.normalization import gems_rms_forward
 
     # Get weight and epsilon from obj

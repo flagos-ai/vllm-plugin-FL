@@ -135,6 +135,8 @@ class PyFlagcxCommunicator:
             device_ctx = torch.musa.device(self.device)
         elif self.device.type == "npu":
             device_ctx = torch.npu.device(self.device)
+        elif self.device.type == "gcu":
+            device_ctx = torch.gcu.device(self.device)
         elif self.device.type == "ptpu":
             device_ctx = torch.device(self.device)
         elif self.device.type == "txda":
@@ -162,12 +164,17 @@ class PyFlagcxCommunicator:
     def _current_stream(self):
         if self.device.type == "npu":
             return torch.npu.current_stream(self.device)
+        if self.device.type == "gcu":
+            return torch.gcu.current_stream(self.device)
         return current_stream()
 
     def _copy_flagcx_stream(self, stream):
         if self.device.type == "npu":
             # FlagCX v0.13.0's wrapper reads cuda_stream even for NPU streams.
             stream = SimpleNamespace(cuda_stream=stream.npu_stream)
+        elif self.device.type == "gcu":
+            # FlagCX's Python wrapper does not recognize gcu_stream.
+            stream = SimpleNamespace(cuda_stream=stream.gcu_stream)
         return self.flagcx.adaptor_stream_copy(stream)
 
     def all_reduce(self,

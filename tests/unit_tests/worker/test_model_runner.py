@@ -224,68 +224,6 @@ class TestGetCumsumAndArange:
 
 
 # =============================================================================
-# Layer 2: _pad_for_sequence_parallelism Logic Tests
-# =============================================================================
-
-
-class TestPadForSequenceParallelism:
-    """Test sequence parallelism padding logic."""
-
-    @pytest.fixture
-    def mock_model_runner(self):
-        """Create mock model runner for padding tests."""
-        from vllm_fl.worker.model_runner import ModelRunnerFL
-
-        mock_runner = MagicMock(spec=ModelRunnerFL)
-        mock_runner.vllm_config = MagicMock()
-        mock_runner.vllm_config.parallel_config = MagicMock()
-        mock_runner.compilation_config = MagicMock()
-        mock_runner.compilation_config.pass_config = MagicMock()
-        mock_runner._pad_for_sequence_parallelism = (
-            ModelRunnerFL._pad_for_sequence_parallelism.__get__(
-                mock_runner, ModelRunnerFL
-            )
-        )
-        return mock_runner
-
-    def test_no_padding_when_sp_disabled(self, mock_model_runner):
-        """SP disabled should return original token count."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 4
-        mock_model_runner.compilation_config.pass_config.enable_sp = False
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    def test_no_padding_when_tp_size_1(self, mock_model_runner):
-        """TP size 1 means no parallelism, no padding needed."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 1
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    @pytest.mark.parametrize(
-        "num_tokens,tp_size,expected",
-        [
-            (10, 4, 12),  # 10 -> ceil to multiple of 4
-            (8, 4, 8),  # 8 already multiple of 4
-            (10, 8, 16),  # 10 -> ceil to multiple of 8
-            (1, 4, 4),  # 1 -> ceil to multiple of 4
-            (15, 8, 16),  # 15 -> ceil to multiple of 8
-        ],
-    )
-    def test_padding_calculation(
-        self, mock_model_runner, num_tokens, tp_size, expected
-    ):
-        """Verify padding rounds up to next multiple of tp_size."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = tp_size
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        result = mock_model_runner._pad_for_sequence_parallelism(num_tokens)
-
-        assert result == expected
-        assert result % tp_size == 0  # Must be divisible
-
-
-# =============================================================================
 # Layer 2: _get_positions Routing Tests
 # =============================================================================
 
@@ -307,12 +245,7 @@ class TestGetPositions:
         mock_runner.mrope_positions = MagicMock()
         mock_runner.mrope_positions.gpu = torch.arange(300).reshape(3, 100)
 
-        # XDRoPE positions (2D)
-        mock_runner.xdrope_positions = MagicMock()
-        mock_runner.xdrope_positions.gpu = torch.arange(200).reshape(2, 100)
-
         mock_runner.uses_mrope = False
-        mock_runner.uses_xdrope_dim = 0
 
         mock_runner._get_positions = ModelRunnerFL._get_positions.__get__(
             mock_runner, ModelRunnerFL
@@ -341,12 +274,11 @@ class TestGetPositions:
         assert result.shape == (3, 10)
         torch.testing.assert_close(result, expected)
 
-    def test_xdrope_returns_2d_positions(self, mock_model_runner):
-        """XDRoPE: returns [2, num_tokens] positions."""
-        mock_model_runner.uses_xdrope_dim = 64
-
-        result = mock_model_runner._get_positions(10)
-
-        expected = mock_model_runner.xdrope_positions.gpu[:, :10]
-        assert result.shape == (2, 10)
+    def test_mrope_returns_indexed_positions(self, mock_model_runner):
+        """0.32 routes indexed multimodal positions through MRoPE."""
+        mock_model_runner.uses_mrope = True
+        indices = torch.tensor([15, 0, 99, 5])
+        result = mock_model_runner._get_positions(indices)
+        expected = mock_model_runner.mrope_positions.gpu[:, indices]
+        assert result.shape == (3, 4)
         torch.testing.assert_close(result, expected)

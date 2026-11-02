@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -378,7 +379,8 @@ class ModelConfig:
                 if value:
                     args.append(flag)
             else:
-                args.extend([flag, str(value)])
+                serialized = json.dumps(value) if isinstance(value, dict) else str(value)
+                args.extend([flag, serialized])
 
         return args
 
