@@ -271,6 +271,7 @@ def test_gcu_ir_defaults_only_select_registered_native_providers(monkeypatch, mo
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "gcu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "enflame")
     config = SimpleNamespace(
         compilation_config=SimpleNamespace(
             backend="inductor", mode=getattr(CompilationMode, mode)
@@ -337,6 +338,7 @@ def test_gcu_rejects_v2_auxiliary_routing_before_model_initialization(monkeypatc
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "gcu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "enflame")
     config = SimpleNamespace(
         use_v2_model_runner=False,
         aux_output_config=SimpleNamespace(enable_return_routed_experts=True),
