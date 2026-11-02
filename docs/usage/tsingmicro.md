@@ -110,6 +110,87 @@ The FlagGems-vllm installer pins release `v0.2.0` at commit
 `--no-deps --no-build-isolation`, and checks that the vendor runtime versions
 remain unchanged. It installs missing Python support packages separately.
 
+## Optional: build the FlagTree compiler instead of stock Triton
+
+The reference image above ships stock Triton (a `treenone` image). To run the
+FlagTree compiler instead, build it from source. Use the official builder image
+rather than a public LLVM tarball: FlagTree's build requires `clang++` on `PATH`
+at the exact LLVM revision pinned in `cmake/llvm-hash.txt`, and the public
+prebuilt LLVM packages do not ship `clang`. Building with a different clang
+links cleanly and then fails at import with `undefined symbol` errors such as
+`llvm::TargetInstrInfo::getRegClass`, because the C++ ABI does not match.
+
+```bash
+docker run -d --name flagtree-build --privileged \
+  -v /root/ft-build:/work/task \
+  harbor.baai.ac.cn/flagos-dev/flagtree-builder-tsingmicro:2.3.0 tail -f /dev/null
+```
+
+The builder image supplies the matching toolchain at
+`/root/.flagtree/tsingmicro/tsingmicro-llvm22` (clang 22 at the pinned revision)
+plus `tx8_deps`. Two gaps have to be filled by hand, and the container has no
+outbound network, so stage these from the host first:
+
+| Gap | Why | What to stage |
+| --- | --- | --- |
+| `flir`, `FlagPrism` | cloned by `setup.py`; required for the tsingmicro backend | clone both into one directory, pass it as `FLAGTREE_OFFLINE_BUILD_DIR` |
+| nlohmann/json headers | required, fetched over the network otherwise | unpack `include.zip` from json `v3.11.3`, pass it as `JSON_SYSPATH` |
+| no `python` on `PATH` | image provides `python3` only | call `python3` explicitly |
+| `pybind11` missing | metadata generation fails before compiling | `pip install pybind11` into the builder |
+
+```bash
+# inside the builder container
+L=/root/.flagtree/tsingmicro/tsingmicro-llvm22
+export LLVM_SYSPATH="$L" LLVM_INCLUDE_DIRS="$L/include" LLVM_LIBRARY_DIR="$L/lib"
+export PATH="$L/bin:$PATH" CC="$L/bin/clang" CXX="$L/bin/clang++"
+export FLAGTREE_BACKEND=tsingmicro
+export TX8_DEPS_ROOT=/root/.flagtree/tsingmicro/tx8_deps
+export TRITON_OFFLINE_BUILD=ON              # must be "ON"; "1" is ignored
+export FLAGTREE_OFFLINE_BUILD_DIR=/work/task/offline   # holds flir/ and FlagPrism/
+export JSON_SYSPATH=/work/task/json
+export MAX_JOBS=48
+cd /work/task/FlagTree && python3 -m pip install --no-build-isolation --no-deps .
+```
+
+Verify the artifact before using it — a successful build is not sufficient:
+
+```bash
+nm -D /usr/local/lib/python3.10/dist-packages/triton/_C/libtriton.so \
+  | grep '^ *U ' | grep -c llvm      # must be 0
+cd /tmp && python3 -c "import triton; print(triton.__version__)"
+```
+
+Run that import from a writable directory. The tsingmicro backend's logger opens
+`tsingmicro_launch.log` relative to the current directory during
+`import triton.backends.tsingmicro`, so importing from a read-only path aborts
+with `OSError: [Errno 30] Read-only file system`. This happens inside the package
+import, so it cannot be worked around from plugin code — keep the working
+directory writable, and do not mount the plugin checkout read-only as the
+container's working directory.
+
+To use the result, copy `triton/`, `flagtree/` and the `flagtree-*.dist-info`
+directory from the builder's `dist-packages` into the serving container.
+
+### Supported scope under FlagTree
+
+FlagTree has been exercised with FlagGems `main` on TX8110 and is **not** at
+parity with the stock-Triton configuration. What was verified:
+
+| Case | Status |
+| --- | --- |
+| Build, import, tsingmicro backend load | works |
+| Single-device FlagGems operators | works |
+| TP2 server startup and single-request inference | works |
+| TP2 multi-request inference | fails: corrupted `logits_indices` → `IndexError` |
+| TP4 / TP8 startup | fails: hang, or `HPGR: failed to submit compute job` |
+
+Use `--enforce-eager` as everywhere else on TXDA. For multi-request or
+multi-device serving, use the stock-Triton configuration until the upstream
+issues are resolved: FlagTree
+[#1485](https://github.com/flagos-ai/FlagTree/issues/1485),
+[#1486](https://github.com/flagos-ai/FlagTree/issues/1486) and
+[#1491](https://github.com/flagos-ai/FlagTree/issues/1491).
+
 ## Configure the runtime
 
 Save the following as `$task_root/env.sh`. The FlagCX root shown here is the
@@ -145,10 +226,20 @@ timeout is logged. The vendor Abort API does not release all FlagCX host
 bookkeeping, so this is not a guarantee of complete resource reclamation or safe
 in-process reinitialization. Other backends retain their existing teardown.
 
-On the reference host, some groups stalled during FlagCX warmup even with the
-original 0.24 image. The tested MoE group used `NCCL_P2P_DISABLE=1`, selecting
-socket transport; verify successful collectives on every allocated rank before
-starting a model. This option is process-local and is not forced by the plugin.
+Set `NCCL_P2P_DISABLE=1` for multi-device runs. Without it, FlagCX warmup can
+hot-spin in `stream.synchronize()` and never complete: the ranks all reach
+distributed init, one worker burns CPU indefinitely and the server never becomes
+ready. This was reproduced on the reference host at TP8, and setting the variable
+fixed it; the TP8 gate results below were produced with it set. It selects socket
+transport, is process-local, and is not forced by the plugin. Verify successful
+collectives on every allocated rank before starting a model.
+
+Chip selection also matters on a multi-card host. `TXDA_VISIBLE_DEVICES` groups
+are not interchangeable: on the reference host, some groups complete the gate
+while others fail at the first kernel submission with
+`HPGR: failed to submit compute job: Connection timed out`. A per-chip
+`torch.empty` check is not sufficient to tell them apart — validate the group you
+intend to serve on with a short TP2 startup before committing to a long run.
 
 An explicit `--kv-cache-memory-bytes` takes priority over the legacy
 `VLLM_TXDA_KV_CACHE_SIZE` environment variable. If neither is set, TXDA retains
