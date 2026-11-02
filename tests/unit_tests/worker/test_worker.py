@@ -90,45 +90,23 @@ def test_pipeline_residual_layout_preserves_native_helper_result(monkeypatch):
     assert calls == [(config, 4)]
 
 
-@pytest.mark.parametrize(
-    "device_type,vllm_version,use_native",
-    [
-        ("gcu", "0.28.0+empty", False),
-        ("gcu", "0.32.0+empty", True),
-        ("npu", "0.32.0", True),
-        ("cuda", "0.32.0", True),
-    ],
-)
-def test_model_runner_selection_depends_on_version_only(
-    monkeypatch, device_type, vllm_version, use_native
-):
-    import importlib.metadata
-    import importlib.util
-    import sys
-    from pathlib import Path
-    from types import ModuleType
-
+@pytest.mark.parametrize("device_type", ["gcu", "npu", "cuda", "musa"])
+def test_common_runner_is_owned_by_fl_for_every_platform(monkeypatch, device_type):
     import vllm.platforms
+    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+    from vllm_fl.worker.model_runner import ModelRunnerFL
 
     monkeypatch.setattr(vllm.platforms.current_platform, "device_type", device_type)
-    legacy = type("LegacyRunner", (), {})
-    native = type("NativeRunner", (), {})
-    for path, symbol, cls in [
-        ("vllm_fl.worker._legacy_model_runner", "ModelRunnerFL", legacy),
-        ("vllm.v1.worker.gpu_model_runner", "GPUModelRunner", native),
-    ]:
-        module = ModuleType(path)
-        setattr(module, symbol, cls)
-        monkeypatch.setitem(sys.modules, path, module)
-    monkeypatch.setattr(importlib.metadata, "version", lambda name: vllm_version)
-
-    spec = importlib.util.spec_from_file_location(
-        "test_fl_runner_entry",
-        Path(__file__).parents[3] / "vllm_fl/worker/model_runner.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert module.ModelRunnerFL is (native if use_native else legacy)
+    assert ModelRunnerFL is not GPUModelRunner
+    assert not issubclass(ModelRunnerFL, GPUModelRunner)
+    for name in (
+        "__init__",
+        "load_model",
+        "execute_model",
+        "sample_tokens",
+        "capture_model",
+    ):
+        assert getattr(ModelRunnerFL, name).__module__ == "vllm_fl.worker.model_runner"
 
 
 def has_vllm_worker() -> bool:
@@ -302,25 +280,17 @@ def test_batch_invariant_module_resolves_installed_upstream_api():
     assert isinstance(module._batch_invariant_MODE, bool)
 
 
-@pytest.mark.parametrize("legacy_flag", [None, False, True])
-def test_worker_initializes_cache_with_legacy_or_relocated_routing_config(
-    monkeypatch, legacy_flag
-):
+def test_worker_initializes_cache_with_current_runner_contract(monkeypatch):
     from contextlib import nullcontext
     from unittest.mock import Mock
 
     from vllm_fl.worker import worker as module
 
     worker = object.__new__(module.WorkerFL)
-    fields = (
-        {} if legacy_flag is None else {"enable_return_routed_experts": legacy_flag}
-    )
-    worker.model_config = SimpleNamespace(**fields)
+    worker.model_config = SimpleNamespace()
     worker.cache_config = SimpleNamespace()
     worker.vllm_config = SimpleNamespace()
-    worker.model_runner = SimpleNamespace(
-        initialize_kv_cache=Mock(), init_routed_experts_capturer=Mock()
-    )
+    worker.model_runner = SimpleNamespace(initialize_kv_cache=Mock())
     worker._maybe_get_memory_pool_context = lambda **kwargs: nullcontext()
     transfer = Mock()
     monkeypatch.setattr(module, "ensure_kv_transfer_initialized", transfer)
@@ -329,9 +299,6 @@ def test_worker_initializes_cache_with_legacy_or_relocated_routing_config(
     transfer.assert_called_once_with(worker.vllm_config, config)
     worker.model_runner.initialize_kv_cache.assert_called_once_with(config)
     assert worker.cache_config.num_gpu_blocks == 7
-    assert worker.model_runner.init_routed_experts_capturer.call_count == int(
-        legacy_flag is True
-    )
 
 
 def test_gcu_rejects_v2_auxiliary_routing_before_model_initialization(monkeypatch):
@@ -378,23 +345,15 @@ def test_native_runner_io_bridge_replaces_only_inference_mode():
 
 @pytest.mark.parametrize("io_enabled", [False, True])
 @pytest.mark.parametrize("dummy", [False, True])
-def test_native_model_preparation_preserves_shared_io_hooks(
+def test_explicit_v2_preparation_preserves_shared_io_hooks(
     monkeypatch, io_enabled, dummy
 ):
-    from importlib.metadata import version
-
-    from packaging.version import Version
-
-    if Version(version("vllm")) < Version("0.32.0"):
-        pytest.skip("Requires native V1 runner integration")
-    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-
     import vllm_fl.dispatch.io_dumper as io_dumper
     import vllm_fl.worker.runtime as runtime
 
     events = []
     model = object()
-    runner = object.__new__(GPUModelRunner)
+    runner = SimpleNamespace()
     runner.model = model
     monkeypatch.setattr(runner, "get_model", lambda: model)
     monkeypatch.setattr(
@@ -418,7 +377,7 @@ def test_native_model_preparation_preserves_shared_io_hooks(
             (
                 "methods",
                 runner,
-                ("execute_model", "sample_tokens", "pool", "_dummy_run"),
+                ("execute_model", "sample_tokens", "pool"),
             )
         )
         if not dummy:

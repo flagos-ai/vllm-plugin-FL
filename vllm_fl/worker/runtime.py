@@ -105,14 +105,8 @@ def _install_native_runner_io_methods(
         setattr(model_runner, method_name, MethodType(managed_impl, model_runner))
 
 
-def prepare_native_model_runner(
-    model_runner, enforce_eager, load_dummy_weights, use_v2_model_runner=False
-):
-    """Install common FL hooks after the native V1 runner loads its model."""
-    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-
-    if not use_v2_model_runner and not isinstance(model_runner, GPUModelRunner):
-        return
+def prepare_native_model_runner(model_runner, enforce_eager, load_dummy_weights):
+    """Preserve FL hooks for the explicitly selected upstream V2 runner."""
     from vllm_fl.compilation.graph import adapt_graph_wrapper
     from vllm_fl.dispatch.io_dumper import (
         init_io_dump_from_env,
@@ -125,9 +119,7 @@ def prepare_native_model_runner(
     if is_dump_enabled():
         _install_native_runner_io_methods(
             model_runner,
-            _NATIVE_RUNNER_IO_METHODS
-            if use_v2_model_runner
-            else (*_NATIVE_RUNNER_IO_METHODS, "_dummy_run"),
+            _NATIVE_RUNNER_IO_METHODS,
         )
         if not load_dummy_weights:
             register_io_module_hooks(model_runner.get_model())
