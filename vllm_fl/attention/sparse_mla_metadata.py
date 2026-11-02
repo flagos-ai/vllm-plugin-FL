@@ -57,11 +57,13 @@ def _convert_sparse_indices_kernel(
         physical = block * BLOCK_SIZE + token % BLOCK_SIZE
         # Inactive scatter lanes get distinct, in-bounds discard slots. This
         # avoids masked scatter lowering and any racing writes to valid data.
+        # Select 64-bit addresses rather than pointers with different bases;
+        # pointer canonicalization need not merge two allocation origins.
         destination = tl.where(
             valid,
-            Physical + row * WIDTH + tl.maximum(dst, 0).to(tl.int64),
-            Discard + row * TILE + lane,
-        )
+            (Physical + row * WIDTH + tl.maximum(dst, 0).to(tl.int64)).to(tl.uint64),
+            (Discard + row * TILE + lane).to(tl.uint64),
+        ).to(tl.pointer_type(tl.int32))
         tl.store(destination, physical)
         count += tl.sum(valid.to(tl.int32), 0)
     tl.store(Lengths + row, count)
