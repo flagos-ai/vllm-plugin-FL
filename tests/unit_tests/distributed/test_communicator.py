@@ -92,6 +92,37 @@ def test_flagcx_uses_current_native_stream_handle(monkeypatch, device_type):
     assert backend.current_stream.call_count == 2
 
 
+@pytest.mark.parametrize("vendor", ["enflame", "ascend"])
+def test_flagcx_collectives_opt_into_native_opaque_ops(monkeypatch, vendor):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "dist_backend", "flagcx")
+
+    assert PlatformFL.use_custom_op_collectives() is True
+
+
+@pytest.mark.parametrize(
+    ("vendor", "backend", "expected"),
+    [
+        ("nvidia", "nccl", True),
+        ("thead", "tccl", True),
+        ("iluvatar", "nccl", True),
+        ("enflame", "eccl", False),
+        ("ascend", "hccl", False),
+    ],
+)
+def test_non_flagcx_collectives_preserve_platform_policy(
+    monkeypatch, vendor, backend, expected
+):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "dist_backend", backend)
+
+    assert PlatformFL.use_custom_op_collectives() is expected
+
+
 @pytest.fixture
 def mocked_base_init(monkeypatch):
     received = {}

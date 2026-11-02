@@ -750,7 +750,13 @@ class PlatformFL(_DevicePlatform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
+        # Hide FlagCX's ctypes and stream objects from Dynamo behind the same
+        # upstream opaque collective ops used by the native CUDA platform.
+        return cls.dist_backend == "flagcx" or cls.vendor_name in (
+            "nvidia",
+            "thead",
+            "iluvatar",
+        )
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:
