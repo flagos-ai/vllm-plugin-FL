@@ -40,7 +40,7 @@ below explain what is already included, rather than extra installation steps.
 | [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973) | Device-selection corrections for pinning and shared attention. | Keep the supplied FlagGems wheel; no manual patch. |
 | [FlagGems #7005](https://github.com/flagos-ai/FlagGems/issues/7005) | Propagate recognized fatal MUSA illegal-memory errors instead of treating them as recoverable tuning failures. | No extra setting or patch. If a native error occurs, stop that process; do not keep using its device context. |
 | [FlagTree #1344](https://github.com/flagos-ai/FlagTree/issues/1344) | The optional-profiler OFF/OFF header guard is included in the prebuilt FlagTree wheel. | Relevant when building FlagTree from source, not a step needed to use this image. |
-| [FlagTree #1346](https://github.com/flagos-ai/FlagTree/issues/1346) | The supplied FlagGems MUSA ND path uses the tested BLOCK512 workaround. | Keep the supplied wheels. This is a workaround, not a confirmed compiler repair. |
+| [FlagTree #1346](https://github.com/flagos-ai/FlagTree/issues/1346) | The supplied FlagGems MUSA multidimensional multiplication path uses the tested BLOCK512 workaround. | Keep the supplied wheels. This is a workaround, not a confirmed compiler repair. |
 
 Installing the current plugin does not apply these patches to another environment.
 An unpatched upstream install or another dependency version needs separate
