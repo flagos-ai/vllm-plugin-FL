@@ -181,6 +181,9 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     forward_context = SimpleNamespace(
         batch_descriptor=descriptor, cudagraph_runtime_mode=mode
     )
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
     monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
     monkeypatch.setattr(graph_module, "get_forward_context", lambda: forward_context)
     monkeypatch.setattr(
@@ -198,7 +201,9 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
 
     wrapper = graph_module.GraphWrapper(
         runnable,
-        SimpleNamespace(compilation_config=SimpleNamespace()),
+        SimpleNamespace(
+            compilation_config=SimpleNamespace(), use_cumem_cudagraph_pool=False
+        ),
         mode,
         graph_module.GraphOptions(weak_ref_output=weak_ref_output),
     )
@@ -409,7 +414,9 @@ def test_native_graph_registry_can_clear_fl_captures(monkeypatch):
     )
     wrapper = graph_module.GraphWrapper(
         lambda: None,
-        SimpleNamespace(compilation_config=SimpleNamespace()),
+        SimpleNamespace(
+            compilation_config=SimpleNamespace(), use_cumem_cudagraph_pool=False
+        ),
         CUDAGraphMode.FULL,
     )
     assert isinstance(wrapper, CUDAGraphWrapper)
@@ -428,7 +435,9 @@ def test_native_graph_wrapper_is_replaced_without_changing_runner_type():
     from vllm_fl.compilation.graph import GraphWrapper, adapt_graph_wrapper
 
     model = object()
-    config = SimpleNamespace(compilation_config=SimpleNamespace())
+    config = SimpleNamespace(
+        compilation_config=SimpleNamespace(), use_cumem_cudagraph_pool=False
+    )
     original = CUDAGraphWrapper(model, config, CUDAGraphMode.FULL)
     adapted = adapt_graph_wrapper(original)
     assert isinstance(adapted, GraphWrapper)
@@ -455,3 +464,80 @@ def test_all_platforms_share_the_graph_wrapper(monkeypatch, device_type):
     assert PlatformFL.get_static_graph_wrapper_cls() == (
         "vllm_fl.compilation.graph.GraphWrapper"
     )
+
+
+@pytest.mark.parametrize("offloader_fails", [False, True])
+def test_capture_uses_native_pool_context_and_preserves_offloader_errors(
+    monkeypatch, offloader_fails
+):
+    from contextlib import contextmanager
+
+    from vllm.config import CUDAGraphMode
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    events = []
+    original_pool, capture_pool = (1, 2), (3, 4)
+
+    @contextmanager
+    def native_pool(pool, config):
+        assert pool == original_pool
+        events.append("pool-enter")
+        try:
+            yield capture_pool
+        finally:
+            events.append("pool-exit")
+
+    @contextmanager
+    def graph_context(graph, *, pool, stream):
+        assert pool == capture_pool
+        events.append("capture")
+        yield
+
+    def sync():
+        if offloader_fails:
+            raise RuntimeError("offloader failed")
+
+    platform = SimpleNamespace(
+        device_type="gcu",
+        get_global_graph_pool=lambda: original_pool,
+        torch_device_fn=SimpleNamespace(
+            current_stream=lambda: None, graph=graph_context
+        ),
+    )
+    descriptor = object()
+    context = SimpleNamespace(
+        batch_descriptor=descriptor, cudagraph_runtime_mode=CUDAGraphMode.FULL
+    )
+    monkeypatch.setattr(graph_module, "current_platform", platform)
+    monkeypatch.setattr(graph_module, "capture_pool", native_pool)
+    monkeypatch.setattr(graph_module.Graph, "graph", lambda: object())
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
+    monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
+    monkeypatch.setattr(graph_module, "get_forward_context", lambda: context)
+    monkeypatch.setattr(graph_module, "weak_ref_tensors", lambda value: value)
+    monkeypatch.setattr(
+        graph_module,
+        "get_offloader",
+        lambda: SimpleNamespace(sync_prev_onload=sync, join_after_forward=lambda: None),
+    )
+    monkeypatch.setattr(graph_module.compilation_counter, "num_cudagraph_captured", 0)
+    output = object()
+    wrapper = graph_module.GraphWrapper(
+        lambda: output,
+        SimpleNamespace(
+            compilation_config=SimpleNamespace(), use_cumem_cudagraph_pool=False
+        ),
+        CUDAGraphMode.FULL,
+        graph_module.GraphOptions(debug_log_enable=False),
+    )
+    if offloader_fails:
+        with pytest.raises(RuntimeError, match="offloader failed"):
+            wrapper()
+        assert events == ["pool-enter", "pool-exit"]
+    else:
+        assert wrapper() is output
+        assert events == ["pool-enter", "capture", "pool-exit"]
+        entry = wrapper.concrete_graph_entries[descriptor]
+        assert entry.cudagraph is entry.graph
