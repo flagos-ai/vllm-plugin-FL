@@ -29,7 +29,7 @@
 # - unsupported_features: Exclude test cases matching specific feature tags
 #
 # ---- Platform-level settings ------------------------------------------------
-platform: cuda
+platform: nvidia
 vendor: nvidia
 
 device_types:
@@ -83,18 +83,43 @@ env_defaults:
   CUDA_DEVICE_MAX_CONNECTIONS: "1"
   NCCL_ALGO: "Ring"
 
+# E2E case variants: every e2e case runs once per entry below, inside the same
+# job, with the entry's env injected into that case's pytest subprocess and the
+# suffix appended to its result name. Dual-mode coverage (FlagGems-vllm fused
+# operators on/off) therefore lives at case level; the CI matrix does not
+# duplicate jobs per mode.
+e2e_variants:
+  - suffix: ""
+    env:
+      VLLM_FL_USE_FLAGGEMS_VLLM: "0"
+  - suffix: "fused"
+    env:
+      VLLM_FL_USE_FLAGGEMS_VLLM: "1"
+
 # ---- Device-specific test configurations ------------------------------------
 a100:
   name: "a100"
   tests:
     e2e:
       # Add or remove test cases per model
-      inference:
-        qwen3: ["4b_tp2", "next_tp8"]
-        qwen3_5: ["35b_tp4"]
-        minicpm: ["o45_tp4"]
-      serving:
-        qwen3: ["next_tp8"]
+      pr:
+        inference:
+          qwen3:
+            - 4b_tp2
+          minicpm:
+            - o45_tp4
+      nightly:
+        inference:
+          qwen3:
+            - 4b_tp2
+            - next_tp8
+          qwen3_5:
+            - 35b_tp4
+          minicpm:
+            - o45_tp4
+        serving:
+          qwen3:
+            - next_tp8
     functional:
       include: "*"
       exclude: []
@@ -102,14 +127,16 @@ a100:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["throughput", "latency", "serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - throughput
+          - latency
+          - serve
 
-h20:
-  name: "h20"
-  tests:
-    e2e:
-      inference:
-        qwen3_6: ["27b_tp2_eager", "35b_a3b_tp2_graph"]
-      serving:
-        qwen3_6: ["27b_tp2_graph", "35b_a3b_tp2_eager"]
+# H20 CI cases are not scheduled: the runner allocation has expired.
+# Restore the H20 device test section when replacement resources are available.

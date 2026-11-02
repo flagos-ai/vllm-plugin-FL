@@ -32,10 +32,10 @@ Usage::
 
     # Apply device-specific case overrides from platform YAML.
     # This first loads tests/models/qwen3_6/27b_tp2_eager.yaml, then looks up
-    # tests/platforms/cuda.yaml -> device_overrides.h20. If the device's
+    # tests/platforms/nvidia.yaml -> device_overrides.h20. If the device's
     # cases list contains qwen3_6/27b_tp2_eager, its llm/serve overrides are
     # merged into the base model config.
-    cfg = ModelConfig.load("qwen3_6", "27b_tp2_eager", platform="cuda", device="h20")
+    cfg = ModelConfig.load("qwen3_6", "27b_tp2_eager", platform="nvidia", device="h20")
 
 """
 
@@ -220,6 +220,33 @@ class ServeConfig:
 
 
 # ---------------------------------------------------------------------------
+# Concurrent config (test-specific)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ConcurrentConfig:
+    """Concurrent test configuration parsed from the ``concurrent`` section.
+
+    All fields are optional; defaults keep the CI smoke small (8 requests,
+    64 tokens each). Text-only by design — the qwen3.6 e2e cases are text
+    models.
+    """
+
+    concurrent_n: int = 8
+    text_prompts: list[Any] = field(default_factory=list)
+    text_sampling: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> ConcurrentConfig:
+        return cls(
+            concurrent_n=int(raw.get("concurrent_n", 8)),
+            text_prompts=raw.get("text_prompts", []),
+            text_sampling=raw.get("text_sampling", {}),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Model config
 # ---------------------------------------------------------------------------
 
@@ -256,6 +283,7 @@ class ModelConfig:
     sampling: dict[str, Any] = field(default_factory=dict)
     generate: GenerateConfig = field(default_factory=GenerateConfig)
     serve: ServeConfig = field(default_factory=ServeConfig)
+    concurrent: ConcurrentConfig = field(default_factory=ConcurrentConfig)
 
     @classmethod
     def load(
@@ -335,12 +363,16 @@ class ModelConfig:
         serve_raw = raw.get("serve", {})
         serve = ServeConfig.from_dict(serve_raw) if serve_raw else ServeConfig()
 
+        # Concurrent config (optional; defaults apply when absent)
+        concurrent = ConcurrentConfig.from_dict(raw.get("concurrent") or {})
+
         return cls(
             model=model,
             engine=engine,
             sampling=sampling,
             generate=generate,
             serve=serve,
+            concurrent=concurrent,
         )
 
     def engine_kwargs(self, **overrides: Any) -> dict[str, Any]:
