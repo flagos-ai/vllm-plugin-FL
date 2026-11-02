@@ -23,7 +23,7 @@ on:
         required: true
         type: string
       platform:
-        description: "Platform name (e.g. cuda, ascend). Included in the notification title when set."
+        description: "Platform name (e.g. nvidia, ascend). Included in the notification title when set."
         required: false
         type: string
         default: ""

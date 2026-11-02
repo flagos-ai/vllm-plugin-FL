@@ -10,12 +10,26 @@ so that downstream GitHub Actions jobs can use ``fromJson()`` to fan out.
 Usage (in a workflow step)::
 
     - id: matrix
-      run: python .github/scripts/generate_matrix.py --platform ${{ inputs.platform }}
+      run: |
+        python .github/scripts/generate_matrix.py \\
+          --platform ${{ inputs.platform }} \\
+          --ci-stage pr     # or nightly / weekly
 
 Outputs:
     functional — JSON array of ``{device, timeout}`` objects (one per device, runs all functional tests).
     e2e        — JSON array of ``{task, device, timeout}`` objects grouped by (task, device).
     unit       — JSON array of ``{device, include, exclude}`` objects.
+
+CI stage semantics
+------------------
+pr
+    E2E uses the ``pr`` sub-key of each device's ``tests.e2e`` block.
+    PR cases are a small subset declared by each platform YAML.
+    Skips platforms/devices with no ``pr`` key defined.
+
+nightly / weekly (default)
+    E2E uses the ``nightly`` key.  ``weekly`` falls back to ``nightly``
+    if no ``weekly`` key is defined in the YAML.
 """
 
 from __future__ import annotations
@@ -41,6 +55,7 @@ TASK_DIR_MAP: dict[str, str] = {
 DEFAULT_TIMEOUT: dict[str, int] = {
     "inference": 60,
     "serving": 60,
+    "concurrent": 60,
 }
 
 
@@ -85,13 +100,18 @@ def build_e2e_matrix(
     config: dict,
     devices: list[str],
     unsupported: list[str],
+    ci_stage: str = "nightly",
 ) -> list[dict]:
-    """End-to-end model tests (inference, serving).
+    """End-to-end model tests (inference, serving, concurrent).
 
     These are slow and require model files.  Entries are grouped by
     ``(task, device)`` so that all model/case combos for the same task
     run inside a single job, avoiding repeated container startup and
     project installation.
+
+    The ``e2e`` block in each device's YAML is keyed by CI stage
+    (``pr`` / ``nightly`` / ``weekly``).  In ``weekly`` stage, falls back
+    to ``nightly`` if no ``weekly`` key is defined.
     """
     # Collect per-(task, device) groups
     groups: dict[tuple[str, str], list[dict]] = {}
@@ -99,7 +119,18 @@ def build_e2e_matrix(
         section = config[device]
         e2e = section.get("tests", {}).get("e2e", {})
 
-        for task_key, models in e2e.items():
+        if ci_stage == "pr":
+            # PR stage: read the 'pr' sub-key
+            stage_block = e2e.get("pr", {})
+            if not stage_block:
+                continue
+            task_models_iter = stage_block.items()
+        else:
+            # nightly/weekly: read the matching stage key; weekly falls back to nightly
+            stage_block = e2e.get(ci_stage) or e2e.get("nightly", {})
+            task_models_iter = stage_block.items()
+
+        for task_key, models in task_models_iter:
             if not isinstance(models, dict):
                 continue
             task_dir = resolve_task_dir(task_key)
@@ -303,6 +334,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Platform name (must match tests/platforms/<platform>.yaml)",
     )
     parser.add_argument(
+        "--ci-stage",
+        default="nightly",
+        choices=["pr", "nightly", "weekly"],
+        help="CI stage: 'pr' uses the pr subset, 'nightly'/'weekly' use full cases.",
+    )
+    parser.add_argument(
         "--changed-files",
         default=None,
         help="Path to a newline-delimited file listing changed paths. "
@@ -345,14 +382,22 @@ def main(argv: list[str] | None = None) -> int:
     if not devices:
         print(f"::warning::No device sections found in {args.platform}.yaml")
 
-    e2e_matrix = build_e2e_matrix(config, devices, unsupported)
+    ci_stage = args.ci_stage
+    e2e_matrix = build_e2e_matrix(config, devices, unsupported, ci_stage=ci_stage)
     unit_matrix = build_unit_matrix(config, devices)
 
-    # Apply PR smart-skip filtering when changed files are provided
-    if args.changed_files:
+    # Apply PR smart-skip filtering when changed files are provided.
+    # Only meaningful for nightly/weekly full runs; in pr stage the pr subset
+    # is already narrow, so we skip the filter to avoid hiding pr cases.
+    if args.changed_files and ci_stage != "pr":
         changed = load_changed_files(args.changed_files)
         if changed:
             e2e_matrix = filter_e2e_by_changes(e2e_matrix, changed)
+
+    # The NVIDIA fused-operator dual-run (VLLM_FL_USE_FLAGGEMS_VLLM 0/1) is a
+    # case-level variant declared in tests/platforms/nvidia.yaml
+    # (e2e_variants) and expanded by tests/run.py — the matrix does not
+    # duplicate jobs per mode.
 
     e2e_json = json.dumps(e2e_matrix, separators=(",", ":"))
     unit_json = json.dumps(unit_matrix, separators=(",", ":"))
@@ -362,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Human-readable summary for CI logs
     print(f"Platform:    {args.platform}")
+    print(f"Stage:       {ci_stage}")
     print(f"Devices:     {devices}")
     print(f"E2E:         {len(e2e_matrix)} job(s)")
     for entry in e2e_matrix:
