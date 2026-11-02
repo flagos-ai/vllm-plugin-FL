@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mla contracts and regression coverage."""
 
+import importlib
 import itertools
 from types import ModuleType, SimpleNamespace
 
@@ -20,7 +21,7 @@ from vllm_fl.attention import sparse_mla_metadata
 from vllm_fl.attention.sparse_mla_metadata import convert_sparse_indices
 from vllm_fl.dispatch import capabilities
 from vllm_fl.dispatch.backends.flaggems.impl import mla as mla_sparse
-from vllm_fl.dispatch.manager import OpManager
+from vllm_fl.dispatch.manager import OpManager, reset_default_manager
 from vllm_fl.dispatch.policy import SelectionPolicy, policy_context
 from vllm_fl.models.glm5 import indexer_backend, runtime as glm5_patch
 from vllm_fl.models.glm5.sparse_indexer import (
@@ -28,6 +29,15 @@ from vllm_fl.models.glm5.sparse_indexer import (
 )
 
 _install_mla_boundary_compat_ops = glm5_patch._install_mla_boundary_compat_ops
+
+
+@pytest.fixture(autouse=True)
+def clean_sparse_dispatch_state():
+    # Load providers before capability mocks can escape through lazy imports.
+    importlib.import_module("vllm_fl.dispatch.backends.flaggems.impl.mla_ops")
+    reset_default_manager()
+    yield
+    reset_default_manager()
 
 
 @pytest.fixture(autouse=False)
