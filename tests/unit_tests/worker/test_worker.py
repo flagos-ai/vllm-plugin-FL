@@ -94,6 +94,7 @@ def test_pipeline_residual_layout_preserves_native_helper_result(monkeypatch):
 def test_common_runner_is_owned_by_fl_for_every_platform(monkeypatch, device_type):
     import vllm.platforms
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
     from vllm_fl.worker.model_runner import ModelRunnerFL
 
     monkeypatch.setattr(vllm.platforms.current_platform, "device_type", device_type)
@@ -413,3 +414,22 @@ def test_shared_native_io_hooks_advance_once_for_completed_output(
     output = object() if has_output else None
     assert getattr(runner, method_name)(output) is output
     assert events == (["step"] if has_output else [])
+
+
+def test_worker_config_update_keeps_runner_and_shared_config_in_sync():
+    from vllm.config import LoadConfig
+
+    from vllm_fl.worker.worker import WorkerFL
+
+    worker = object.__new__(WorkerFL)
+    worker.load_config = LoadConfig()
+    worker.vllm_config = SimpleNamespace(load_config=worker.load_config)
+    worker.model_runner = SimpleNamespace(load_config=worker.load_config)
+
+    worker.update_config({"load_config": {"download_dir": "/tmp/fl-config-test"}})
+
+    assert worker.load_config.download_dir == "/tmp/fl-config-test"
+    assert worker.load_config is worker.vllm_config.load_config
+    assert worker.load_config is worker.model_runner.load_config
+    with pytest.raises(ValueError, match="cache_config"):
+        worker.update_config({"cache_config": {}})

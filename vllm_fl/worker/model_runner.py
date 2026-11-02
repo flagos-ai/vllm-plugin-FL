@@ -329,7 +329,9 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
 
         # Event on the copy stream so we can synchronize the non-blocking copy.
         # Blocking (sleep) event to avoid busy-polling the CUDA driver lock.
-        self.async_copy_ready_event = current_platform.torch_device_fn.Event(blocking=True)
+        self.async_copy_ready_event = current_platform.torch_device_fn.Event(
+            blocking=True
+        )
 
         # Keep a reference to the device tensor to avoid it being
         # deallocated until we finish copying it to the host.
@@ -467,7 +469,9 @@ class AsyncGPUPoolingModelRunnerOutput(AsyncModelRunnerOutput):
 
         # Event on the copy stream so we can synchronize the non-blocking copy.
         # Blocking (sleep) event to avoid busy-polling the CUDA driver lock.
-        self.async_copy_ready_event = current_platform.torch_device_fn.Event(blocking=True)
+        self.async_copy_ready_event = current_platform.torch_device_fn.Event(
+            blocking=True
+        )
 
         # Keep a reference to the device tensors to avoid them being
         # deallocated until we finish copying it to the host.
@@ -788,7 +792,9 @@ class ModelRunnerFL(
 
         # Separate cuda stream for overlapping transfer of sampled token ids from
         # GPU to CPU when async scheduling is enabled.
-        self.async_output_copy_stream: current_platform.torch_device_fn.Stream | None = None
+        self.async_output_copy_stream: (
+            current_platform.torch_device_fn.Stream | None
+        ) = None
         # cuda event to synchronize use of reused CPU tensors between steps
         # when async scheduling is enabled.
         self.prepare_inputs_event: torch.Event | None = None
@@ -796,7 +802,9 @@ class ModelRunnerFL(
             self.async_output_copy_stream = current_platform.torch_device_fn.Stream()
             # Blocking (sleep) event to avoid busy-polling the CUDA driver lock;
             # under TP contention that spin can balloon and make the rank a straggler.
-            self.prepare_inputs_event = current_platform.torch_device_fn.Event(blocking=True)
+            self.prepare_inputs_event = current_platform.torch_device_fn.Event(
+                blocking=True
+            )
 
         # self.cudagraph_batch_sizes sorts in ascending order.
         if (
@@ -938,8 +946,12 @@ class ModelRunnerFL(
         # N-gram GPU path: async D2H buffer/event for per-request valid draft counts.
         self._num_valid_draft_tokens: torch.Tensor | None = None
         self._num_valid_draft_tokens_cpu: torch.Tensor | None = None
-        self._num_valid_draft_tokens_event: current_platform.torch_device_fn.Event | None = None
-        self._num_valid_draft_tokens_copy_stream: current_platform.torch_device_fn.Stream | None = None
+        self._num_valid_draft_tokens_event: (
+            current_platform.torch_device_fn.Event | None
+        ) = None
+        self._num_valid_draft_tokens_copy_stream: (
+            current_platform.torch_device_fn.Stream | None
+        ) = None
         if (
             self.speculative_config is not None
             and self.speculative_config.use_ngram_gpu()
@@ -947,8 +959,12 @@ class ModelRunnerFL(
             self._num_valid_draft_tokens_cpu = torch.empty(
                 self.max_num_reqs, dtype=torch.int32, pin_memory=PIN_MEMORY
             )
-            self._num_valid_draft_tokens_event = current_platform.torch_device_fn.Event()
-            self._num_valid_draft_tokens_copy_stream = current_platform.torch_device_fn.Stream()
+            self._num_valid_draft_tokens_event = (
+                current_platform.torch_device_fn.Event()
+            )
+            self._num_valid_draft_tokens_copy_stream = (
+                current_platform.torch_device_fn.Stream()
+            )
 
         self._draft_token_req_ids: list[str] | None = None
         self.transfer_event = torch.Event()
@@ -962,11 +978,15 @@ class ModelRunnerFL(
         # Pre-allocated tensor for copying valid sampled token counts to CPU,
         # with dedicated stream for overlapping and event for coordination.
         self.valid_sampled_token_count_event: torch.Event | None = None
-        self.valid_sampled_token_count_copy_stream: current_platform.torch_device_fn.Stream | None = None
+        self.valid_sampled_token_count_copy_stream: (
+            current_platform.torch_device_fn.Stream | None
+        ) = None
         # We also copy the drafted tokens to the CPU asynchronously,
         # in case we need them for structured outputs.
         self.draft_token_ids_event: torch.Event | None = None
-        self.draft_token_ids_copy_stream: current_platform.torch_device_fn.Stream | None = None
+        self.draft_token_ids_copy_stream: (
+            current_platform.torch_device_fn.Stream | None
+        ) = None
         self.valid_sampled_token_count_cpu: torch.Tensor | None = None
         self.draft_token_ids_cpu: torch.Tensor | None = None
         self.num_accepted_tokens_event: torch.Event | None = None
@@ -982,7 +1002,9 @@ class ModelRunnerFL(
             )
             if self.use_async_scheduling:
                 self.valid_sampled_token_count_event = torch.Event()
-                self.valid_sampled_token_count_copy_stream = current_platform.torch_device_fn.Stream()
+                self.valid_sampled_token_count_copy_stream = (
+                    current_platform.torch_device_fn.Stream()
+                )
                 self.valid_sampled_token_count_cpu = torch.empty(
                     self.max_num_reqs,
                     dtype=torch.int32,
@@ -1192,7 +1214,9 @@ class ModelRunnerFL(
     def _sync_device(self) -> None:
         _accelerator_synchronize()
 
-    def _get_or_create_async_output_copy_stream(self) -> current_platform.torch_device_fn.Stream:
+    def _get_or_create_async_output_copy_stream(
+        self,
+    ) -> current_platform.torch_device_fn.Stream:
         stream = self.async_output_copy_stream
         if stream is None:
             stream = current_platform.torch_device_fn.Stream()
@@ -4739,7 +4763,9 @@ class ModelRunnerFL(
         default_stream = current_platform.torch_device_fn.current_stream()
         # Initialize a new stream to overlap the copy operation with
         # prepare_input of draft model.
-        with current_platform.torch_device_fn.stream(self.valid_sampled_token_count_copy_stream):
+        with current_platform.torch_device_fn.stream(
+            self.valid_sampled_token_count_copy_stream
+        ):
             self.valid_sampled_token_count_copy_stream.wait_stream(default_stream)  # type: ignore
             counts = valid_sampled_tokens_count
             counts_cpu = self.valid_sampled_token_count_cpu
