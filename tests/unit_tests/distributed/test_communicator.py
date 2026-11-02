@@ -18,9 +18,6 @@ from vllm.distributed.device_communicators.cuda_communicator import (  # noqa: E
 
 from vllm_fl.distributed.communicator import CommunicatorFL  # noqa: E402
 from vllm_fl.distributed.device_communicators import flagcx  # noqa: E402
-from vllm_fl.distributed.nvidia_communicator import (  # noqa: E402
-    NvidiaCommunicatorFL,
-)
 
 
 @pytest.mark.parametrize("device_type", ["npu", "gcu"])
@@ -249,19 +246,21 @@ def test_all2all_calls_use_vllm_028_signatures(method_name, arguments):
     assert result is expected
 
 
-def test_nvidia_bridge_satisfies_cuda_graph_contract(mocked_base_init):
-    communicator = NvidiaCommunicatorFL(cpu_group=object())
+def test_common_flagcx_satisfies_native_graph_contract(monkeypatch, mocked_base_init):
+    native_init = MagicMock(
+        side_effect=AssertionError("second native communication stack")
+    )
+    monkeypatch.setattr(CudaCommunicator, "__init__", native_init)
+    communicator = CommunicatorFL(cpu_group=object())
 
     assert isinstance(communicator, CudaCommunicator)
     assert communicator.ca_comm is None
     assert communicator.pynccl_comm is None
     assert communicator.pyflagcx_comm is None
-    assert NvidiaCommunicatorFL.all_reduce is CommunicatorFL.all_reduce
-    assert NvidiaCommunicatorFL.all_gather is CommunicatorFL.all_gather
-    assert NvidiaCommunicatorFL.broadcast is CommunicatorFL.broadcast
+    native_init.assert_not_called()
 
 
-def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init):
+def test_common_flagcx_enters_native_graph_capture(monkeypatch, mocked_base_init):
     from contextlib import nullcontext
     from types import SimpleNamespace
 
@@ -269,7 +268,7 @@ def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init
 
     from vllm.distributed.parallel_state import GroupCoordinator
 
-    communicator = NvidiaCommunicatorFL(cpu_group=object())
+    communicator = CommunicatorFL(cpu_group=object())
     coordinator = SimpleNamespace(device_communicator=communicator)
     stream = object()
     capture_context = SimpleNamespace(stream=stream)

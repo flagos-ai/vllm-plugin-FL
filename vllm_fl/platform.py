@@ -608,7 +608,7 @@ class PlatformFL(_DevicePlatform):
     def get_device_communicator_cls(cls) -> str:
         if cls.vendor_name == "nvidia":
             if cls._refresh_dist_backend():
-                return "vllm_fl.distributed.nvidia_communicator.NvidiaCommunicatorFL"
+                return "vllm_fl.distributed.communicator.CommunicatorFL"
             return super().get_device_communicator_cls()
         if cls.dist_backend == "flagcx":
             logger.info("Using CommunicatorFL for communication.")
