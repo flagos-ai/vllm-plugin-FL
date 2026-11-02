@@ -13,7 +13,9 @@ git config --global --add safe.directory "$(pwd)"
 env -u VLLM_VENDOR python -m pip install --no-build-isolation --no-deps .
 
 # tests/run.py requires reporting and timeout plugins declared in the test extra.
+# Use the PyPI mirror reachable from the MUSA runners for these test packages.
 python -m pip install \
+    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
     "pytest-cov==7.1.0" \
     "pytest-json-report==1.5.0" \
     "pytest-timeout==2.4.0"
