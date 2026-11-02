@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+from functools import lru_cache
 
 import torch
 
@@ -26,20 +27,13 @@ logger = logging.getLogger(__name__)
 
 _HIP_SONAMES = ("libamdhip64.so", "libamdhip64.so.7", "libamdhip64.so.6")
 
-_hip_runtime: ctypes.CDLL | None = None
-_hip_runtime_loaded = False
 
-
+@lru_cache(maxsize=1)
 def _load_hip_runtime() -> ctypes.CDLL | None:
     """Load and cache the HIP runtime shared library."""
-    global _hip_runtime, _hip_runtime_loaded
-    if _hip_runtime_loaded:
-        return _hip_runtime
-    _hip_runtime_loaded = True
     for soname in _HIP_SONAMES:
         try:
-            _hip_runtime = ctypes.CDLL(soname)
-            return _hip_runtime
+            return ctypes.CDLL(soname)
         except OSError:
             continue
     logger.warning(
