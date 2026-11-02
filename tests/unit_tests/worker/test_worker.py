@@ -354,9 +354,7 @@ def test_explicit_v2_preparation_preserves_shared_io_hooks(
 
     events = []
     model = object()
-    runner = SimpleNamespace()
-    runner.model = model
-    monkeypatch.setattr(runner, "get_model", lambda: model)
+    runner = SimpleNamespace(model=model, get_model=lambda: model)
     monkeypatch.setattr(
         io_dumper, "init_io_dump_from_env", lambda eager: events.append(("init", eager))
     )
