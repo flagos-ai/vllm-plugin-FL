@@ -28,47 +28,181 @@ MUSA dependency wheels. Preserve its Torch, TorchMUSA and SDK packages when
 installing the plugin. Generic PyPI Torch, CUDA wheels or an unpatched FlagTree
 build are not substitutes for this MUSA stack.
 
-## Install the current plugin
+## Required dependencies and issue handling
 
-Start the image with the MUSA runtime and the devices assigned to your job.
-Mount model data read-only. Set `MTHREADS_VISIBLE_DEVICES` to the allocated
-physical cards and `MUSA_VISIBLE_DEVICES` to their logical order.
+**Use the pinned image above for this guide. Its corrected FlagGems and FlagTree
+wheels are required parts of this tested runtime; no additional dependency source
+edits, cherry-picks or issue reproducer commands are needed.** The issue links
+below explain what is already included, rather than extra installation steps.
 
-Inside the container, build and install the current checkout as an ordinary
-wheel using the image's interpreter. Use a new output directory and leave
-setuptools-scm version overrides unset:
+| Issue | Treatment in the pinned image | Action when following this guide |
+|---|---|---|
+| [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973) | Device-selection corrections for pinning and shared attention. | Keep the supplied FlagGems wheel; no manual patch. |
+| [FlagGems #7005](https://github.com/flagos-ai/FlagGems/issues/7005) | Propagate recognized fatal MUSA illegal-memory errors instead of treating them as recoverable tuning failures. | No extra setting or patch. If a native error occurs, stop that process; do not keep using its device context. |
+| [FlagTree #1344](https://github.com/flagos-ai/FlagTree/issues/1344) | The optional-profiler OFF/OFF header guard is included in the prebuilt FlagTree wheel. | Relevant when building FlagTree from source, not a step needed to use this image. |
+| [FlagTree #1346](https://github.com/flagos-ai/FlagTree/issues/1346) | The supplied FlagGems MUSA ND path uses the tested BLOCK512 workaround. | Keep the supplied wheels. This is a workaround, not a confirmed compiler repair. |
+
+Installing the current plugin does not apply these patches to another environment.
+An unpatched upstream install or another dependency version needs separate
+validation; an issue being closed does not make it interchangeable with these
+wheels. This guide does not require rebuilding TorchMUSA, FlagTree or FlagGems.
+
+## Prepare the host and model
+
+The commands below run a single-card Qwen3-0.6B server. Host prerequisites are a
+working MUSA driver/container runtime, Docker, Git, curl, registry pull access and
+network access to GitHub. Downloading the example model also requires access to
+Hugging Face. All paths supplied to Docker must be absolute.
+
+Run on the **host**, choosing an idle card assigned to your job and a local model
+directory:
 
 ```bash
-export GEMS_VENDOR=mthreads
-export VLLM_PLUGINS=fl
-export USE_FLAGGEMS=1
+set -euo pipefail
+IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+MODEL_DIR="$HOME/models/Qwen3-0.6B"
+SOURCE_DIR="$PWD/vllm-plugin-FL"
+PHYSICAL_DEVICE=0  # Replace with the host card allocated to your job.
+
+mthreads-gmi
+docker pull "$IMAGE"
+git clone --depth 1 https://github.com/flagos-ai/vllm-plugin-FL.git "$SOURCE_DIR"
+# While this adaptation is under review, select its public PR head instead of main.
+git -C "$SOURCE_DIR" fetch --depth 1 origin pull/575/head
+git -C "$SOURCE_DIR" checkout --detach FETCH_HEAD
+mkdir -p "$MODEL_DIR"
+```
+
+If the model is not already present, download it once with a CPU-only container.
+This writes model assets, without changing the runtime image:
+
+```bash
+docker run --rm --runtime=runc \
+  --env MTHREADS_VISIBLE_DEVICES= --env MUSA_VISIBLE_DEVICES= \
+  --mount "type=bind,src=$MODEL_DIR,dst=/model" \
+  --entrypoint /opt/musa/venv/bin/python "$IMAGE" -I -B -c \
+  'from huggingface_hub import snapshot_download; snapshot_download(repo_id="Qwen/Qwen3-0.6B", revision="c1899de289a04d12100db370d81485cdf75e47ca", local_dir="/model")'
+```
+
+An existing model directory must contain its complete config, tokenizer and
+weights; pointing to a cache parent or an empty directory is insufficient. The
+following container mounts the model read-only and publishes the API only on the
+host's loopback interface:
+
+```bash
+test -f "$MODEL_DIR/config.json"
+test -f "$MODEL_DIR/model.safetensors"
+docker run --rm -it \
+  --runtime=mthreads --ipc=private --shm-size=64g \
+  --env GEMS_VENDOR=mthreads --env VLLM_PLUGINS=fl \
+  --env "MTHREADS_VISIBLE_DEVICES=$PHYSICAL_DEVICE" \
+  --env MUSA_VISIBLE_DEVICES=0 --env MODEL_DIR=/model \
+  --mount "type=bind,src=$SOURCE_DIR,dst=/workspace/vllm-plugin-FL" \
+  --mount "type=bind,src=$MODEL_DIR,dst=/model,readonly" \
+  --workdir /workspace/vllm-plugin-FL \
+  --publish 127.0.0.1:8000:8000 \
+  --entrypoint bash "$IMAGE"
+```
+
+Set the physical allocation when creating the container; changing it in a running
+container does not change which host devices are passed through. The environment
+variables serve different layers:
+
+| Variable | Purpose |
+|---|---|
+| `GEMS_VENDOR=mthreads` | Select the Mthreads backend in FlagGems. |
+| `VLLM_PLUGINS=fl` | Enable the FL platform/model plugin in vLLM. |
+| `MTHREADS_VISIBLE_DEVICES` | Give the Mthreads container runtime the allocated **host physical** card IDs. Never replace a job's allocation with `all`. |
+| `MUSA_VISIBLE_DEVICES` | Limit the MUSA SDK/TorchMUSA logical device IDs inside the container. The single exposed card in this example is logical `0`, even when its host ID is different. |
+
+The CI runner has a separate fixed four-card allocation: host cards `4,5,6,7`
+become logical cards `0,1,2,3`. These numbers are runner-specific, not a requirement
+to use the plugin. For a four-card deployment, supply your assigned four host IDs,
+set the logical mask to `0,1,2,3`, and use `--tensor-parallel-size 4` with a model
+that supports that parallelism. `USE_FLAGGEMS=1` is unnecessary here because the
+plugin enables FlagGems by default. `FLAGCX_PATH` is not required for native MCCL.
+
+## Install the current plugin
+
+Run **inside the container**, from `/workspace/vllm-plugin-FL`. Use the image's
+interpreter for both installation and serving. Install an ordinary wheel so fresh
+serving workers use this checkout rather than the image's older plugin:
+
+```bash
+set -euo pipefail
 PYTHON=/opt/musa/venv/bin/python
+unset SETUPTOOLS_SCM_PRETEND_VERSION SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL
 WHEEL_DIR=$(mktemp -d)
 env -u VLLM_VENDOR "$PYTHON" -I -B -m pip wheel \
   --no-deps --no-build-isolation --wheel-dir "$WHEEL_DIR" .
-"$PYTHON" -I -B -m pip install --no-deps "$WHEEL_DIR"/vllm_plugin_fl-*.whl
+"$PYTHON" -I -B -m pip install --no-deps --force-reinstall \
+  "$WHEEL_DIR"/vllm_plugin_fl-*.whl
 "$PYTHON" -I -B .github/scripts/install_flaggems_vllm.py
 ```
 
-The last command installs the shared FlagGems-vllm provider at the release
-pinned by the repository. It checks that the existing runtime package versions
-remain unchanged. Run it with the same interpreter that runs vLLM.
+The last command is **required**: it installs the shared FlagGems-vllm provider
+from the repository's fixed `v0.2.0` commit
+`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`, unless that exact source is already
+installed. It checks that the existing runtime package versions remain unchanged.
+This provider is separate from the corrected FlagGems wheel already in the image.
+Do not install generic PyPI Torch/CUDA packages or replace the image's dependencies.
 
-The [MUSA setup script](../../.github/scripts/musa/setup.sh) uses the image's
-existing interpreter. It installs the current checkout with `VLLM_VENDOR` unset,
-adds the reporting and timeout plugins required by the shared test runner, and
-installs the shared FlagGems-vllm provider. Preserve the image's vendor Torch,
-TorchMUSA and SDK packages.
-
-## Run inference
-
-Use a local model directory and set tensor parallelism to the number of cards
-allocated to this process. For example, a four-card server uses:
+Check the runtime before loading the model:
 
 ```bash
-"$PYTHON" -m vllm.entrypoints.openai.api_server \
-  --model "$MODEL_DIR" --tensor-parallel-size 4
+"$PYTHON" -I -B - <<'PY'
+import sys
+from pathlib import Path
+from importlib.metadata import version
+import torch
+import torch_musa
+import vllm_fl
+from vllm.platforms import current_platform
+
+expected = {
+    "vllm": "0.28.0+empty",
+    "flag-gems": "5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2",
+    "flagtree": "0.7.0+mthreads3.6.git69148faf.profilefix1",
+}
+for package, wanted in expected.items():
+    assert version(package) == wanted, (package, version(package))
+assert torch.musa.is_available(), "Check the host driver and allocated devices"
+assert torch.musa.device_count() == 1, "This example expects one exposed card"
+assert current_platform.device_type == "musa", current_platform
+assert Path(vllm_fl.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+print("MUSA runtime ready:", vllm_fl.__file__)
+PY
 ```
+
+The [CI setup script](../../.github/scripts/musa/setup.sh) additionally installs
+test-reporting plugins. Running that script is not required for this deployment.
+
+## Start the server and send a request
+
+In the same **container shell**, run:
+
+```bash
+"$PYTHON" -I -B -m vllm.entrypoints.openai.api_server \
+  --model "$MODEL_DIR" --served-model-name musa-smoke \
+  --tensor-parallel-size 1 --dtype bfloat16 --max-model-len 2048 \
+  --host 0.0.0.0 --port 8000
+```
+
+Wait for `Application startup complete` in the server log. The first start can
+take longer while kernels compile and graphs capture. In a second **host shell**,
+check readiness and request a completion:
+
+```bash
+curl --fail --show-error http://127.0.0.1:8000/health
+curl --fail --show-error http://127.0.0.1:8000/v1/chat/completions \
+  --header 'Content-Type: application/json' \
+  --data '{"model":"musa-smoke","messages":[{"role":"user","content":"What is 2 + 2?"}],"temperature":0,"max_tokens":32,"chat_template_kwargs":{"enable_thinking":false}}'
+```
+
+Success means `/health` returns HTTP 200 and the completion JSON contains a
+non-empty `choices[0].message.content`. Stop the server with Ctrl-C, then `exit`
+the container shell; `--rm` removes this container. If port 8000 is occupied,
+change the host side of `--publish` and the two curl URLs together.
 
 MUSA selects the V1 runner and MCCL communication. The default compiler adapter
 is FX/eager: Dynamo tracing, piecewise splitting and native graph replay remain
@@ -122,12 +256,5 @@ come from the platform test configuration. Keep the original model checks,
 capture sizes, memory budgets and timeouts when validating changes. Consult the
 actual CI run for its source, platform results and conditional skips.
 
-## Dependency limitations
-
-The pinned MUSA dependency profiles include corrections beyond generic upstream
-releases. Track their individual scope in [FlagGems #6973](https://github.com/flagos-ai/FlagGems/issues/6973),
-[FlagGems #7005](https://github.com/flagos-ai/FlagGems/issues/7005),
-[FlagTree #1344](https://github.com/flagos-ai/FlagTree/issues/1344) and
-[FlagTree #1346](https://github.com/flagos-ai/FlagTree/issues/1346).
 Installation checks or CPU tests alone do not establish device-kernel,
 multimodal-model, native ABI or performance acceptance.

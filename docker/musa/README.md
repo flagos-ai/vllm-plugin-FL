@@ -19,9 +19,11 @@ The default CI output is `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-c
 
 CI creates a private environment and installs the checked-out plugin there; it
 runs the existing unit, functional, inference, serving and benchmark suites in
-one allocated four-device container. A successful image build does not certify
-the current plugin source or hardware execution.
+each applicable job's allocated four-device container. A successful image build
+does not certify the current plugin source or hardware execution.
 
 See the [MUSA usage guide](../../docs/usage/musa.md) for installation,
-configuration and runtime limitations. Reconstructing the published dependency
+configuration, issue handling and a complete server/request example. The pinned
+image already contains the required dependency corrections; users do not need to
+apply the linked issue patches manually. Reconstructing the published dependency
 image and its historical source attestations is outside this adaptation.
