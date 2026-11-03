@@ -4,6 +4,10 @@
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
+# shellcheck source=.github/scripts/cuda/runner_devices.sh
+source "$HERE/runner_devices.sh"
+configure_cuda_runner_devices
+
 git config --global --add safe.directory "$(pwd)"
 
 # DSW job containers can retain a 64 MiB /dev/shm despite Docker IPC options.
@@ -42,6 +46,7 @@ env -u VLLM_VENDOR python -m uv pip install \
     -e .
 
 python -I -B "$HERE/stack.py"
+report_cuda_runner_devices
 
 python - <<'PY'
 import av
