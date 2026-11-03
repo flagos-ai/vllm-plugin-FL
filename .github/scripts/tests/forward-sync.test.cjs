@@ -22,8 +22,10 @@ const forwardSync = require("../forward-sync.cjs");
 const { SOURCE, TARGET, SYNC_PREFIX, MARKER } = forwardSync.constants;
 const SHA = (letter) => letter.repeat(40);
 const S = SHA("a"), T = SHA("b"), H = SHA("c"), OLD = SHA("d"), MERGED = SHA("e");
+const ACK = SHA("f"), TARGET_TREE = SHA("1");
 const SYNC = SYNC_PREFIX + S, OLD_BRANCH = SYNC_PREFIX + OLD;
 const sourceMarker = (sha) => "<!-- forward-sync-source: " + sha + " -->";
+const pendingMarker = (sha) => "<!-- forward-sync-pending: " + sha + " -->";
 
 function pr(overrides = {}) {
   return {
@@ -34,22 +36,29 @@ function pr(overrides = {}) {
   };
 }
 
-function mergedPr() {
+function mergedPr(overrides = {}) {
   return pr({
     state: "closed", merged_at: "2026-10-19T00:00:00Z",
     head: { sha: H, ref: OLD_BRANCH, repo: { full_name: "flagos-ai/vllm-plugin-FL" } },
+    ...overrides,
   });
 }
 
 function fixture(options = {}) {
   const refs = {
-    ["heads/" + SOURCE]: S, ["heads/" + TARGET]: T,
+    ["heads/" + SOURCE]: options.source || S, ["heads/" + TARGET]: T,
     ...(options.sync ? { ["heads/" + SYNC]: options.sync } : {}),
     ...(options.oldTip ? { ["heads/" + OLD_BRANCH]: options.oldTip } : {}),
+    ...(options.refs || {}),
   };
   const prs = structuredClone(options.prs || []);
   const comparisons = {
     [T + "..." + S]: "diverged", [S + "..." + OLD]: "behind",
+    [T + "..." + H]: "behind", [T + "..." + OLD]: "diverged",
+    [H + "..." + OLD]: "behind",
+    [ACK + "..." + S]: "diverged", [ACK + "..." + H]: "behind",
+    [ACK + "..." + OLD]: "behind", [MERGED + "..." + S]: "behind",
+    [MERGED + "..." + H]: "behind", [MERGED + "..." + OLD]: "behind",
     ...(options.comparisons || {}),
   };
   const errors = { ...(options.errors || {}) };
@@ -63,6 +72,15 @@ function fixture(options = {}) {
   const github = {
     rest: {
       git: {
+        getCommit: method("getCommit", ({ commit_sha }) => {
+          assert.equal(commit_sha, T);
+          return { sha: T, tree: { sha: TARGET_TREE } };
+        }),
+        createCommit: method("createCommit", ({ tree, parents }) => {
+          assert.equal(tree, TARGET_TREE);
+          assert.equal(parents[0], T);
+          return { sha: ACK };
+        }),
         getRef: method("getRef", ({ ref }) => {
           if (!refs[ref]) throw fail(404);
           return { object: { sha: refs[ref] } };
@@ -127,9 +145,9 @@ function fixture(options = {}) {
     repo: { owner: "flagos-ai", repo: "vllm-plugin-FL" }, payload: options.payload || {},
   };
   return {
-    run: () => forwardSync({ github, context, core }), calls, refs, prs, warnings, failures, outputs, errors,
+    run: () => forwardSync({ github, context, core }), calls, refs, prs, warnings, failures, outputs, errors, comparisons,
     mutations: () => calls.filter(({ name }) => [
-      "createRef", "updateRef", "merge", "createPR", "updatePR",
+      "createCommit", "createRef", "updateRef", "merge", "createPR", "updatePR",
     ].includes(name)),
   };
 }
@@ -198,6 +216,10 @@ test("a source conflict preserves the branch and keeps the existing PR", async (
   assert.equal(f.failures.length, 1);
   assert.ok(f.failures[0].includes(f.prs[0].html_url));
   assert.equal(f.calls.some((c) => c.name === "createPR"), false);
+  assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
+  assert.ok(!f.prs[0].body.includes(sourceMarker(S)));
+  assert.ok(f.prs[0].body.includes(pendingMarker(S)));
+  assert.match(f.prs[0].body, /Maintainer notes: preserve this/);
 });
 
 test("a branch already containing source does not receive a redundant merge", async () => {
@@ -235,24 +257,33 @@ test("a merged PR with lost ancestry stops instead of replaying squash-merged hi
   assert.deepEqual(f.mutations(), []);
 });
 
-test("a new cycle starts from source even if it conflicts with previous resolution history", async () => {
-  const f = fixture({
-    oldTip: H, prs: [mergedPr()],
-    comparisons: { [T + "..." + H]: "behind", [H + "..." + S]: "diverged" },
-  });
+test("a new cycle preserves reviewed exclusions instead of restarting from the source tree", async () => {
+  const f = fixture({ oldTip: H, prs: [mergedPr()] });
   assert.equal((await f.run()).status, "pr-created");
-  assert.deepEqual(f.mutations().map((c) => c.name), ["createRef", "createPR"]);
-  assert.equal(f.refs["heads/" + SYNC], S);
+  assert.deepEqual(f.mutations().map((c) => c.name), [
+    "createCommit", "createRef", "merge", "createPR",
+  ]);
+  const acknowledgment = f.calls.find((c) => c.name === "createCommit").args;
+  // The source checkpoint can include deliberately excluded commits. Recording
+  // its ancestry must preserve the reviewed target tree, not copy source files.
+  assert.equal(acknowledgment.tree, TARGET_TREE);
+  assert.deepEqual(acknowledgment.parents, [T, OLD]);
+  assert.match(acknowledgment.message, /PR #12/);
+  assert.equal(f.calls.find((c) => c.name === "createRef").args.sha, ACK);
+  assert.equal(f.calls.find((c) => c.name === "merge").args.head, S);
+  assert.equal(f.refs["heads/" + SYNC], MERGED);
   assert.equal(f.refs["heads/" + OLD_BRANCH], H);
+  assert.equal(f.refs["heads/" + TARGET], T);
+  assert.equal(f.outputs.reviewed_source_sha, OLD);
 });
 
-test("a deleted merged branch is recreated only after validating its historical head", async () => {
-  const f = fixture({
-    prs: [mergedPr()],
-    comparisons: { [T + "..." + H]: "behind" },
-  });
+test("a deleted merged branch starts a new incremental sync after historical-head validation", async () => {
+  const f = fixture({ prs: [mergedPr()] });
   assert.equal((await f.run()).status, "pr-created");
-  assert.deepEqual(f.mutations().map((c) => c.name), ["createRef", "createPR"]);
+  assert.deepEqual(f.mutations().map((c) => c.name), [
+    "createCommit", "createRef", "merge", "createPR",
+  ]);
+  assert.equal(f.refs["heads/" + OLD_BRANCH], undefined);
 });
 
 test("source history rewrite detected from the prior checkpoint stops all mutations", async () => {
@@ -309,17 +340,16 @@ test("unexpected merge failures propagate and never create a replacement PR", as
   assert.equal(f.calls.some((c) => c.name === "createPR"), false);
 });
 
-test("a new-cycle PR creation failure can be retried without touching the merged branch", async () => {
-  const f = fixture({
-    oldTip: H, prs: [mergedPr()], comparisons: { [T + "..." + H]: "behind" },
-    errors: { createPR: 403 },
-  });
+test("a new-cycle PR creation failure reuses the reviewed branch without duplicate merges", async () => {
+  const f = fixture({ oldTip: H, prs: [mergedPr()], errors: { createPR: 403 } });
   await assert.rejects(f.run(), { status: 403 });
-  assert.equal(f.refs["heads/" + SYNC], S);
+  assert.equal(f.refs["heads/" + SYNC], MERGED);
   delete f.errors.createPR;
   assert.equal((await f.run()).status, "pr-created");
   assert.equal(f.refs["heads/" + OLD_BRANCH], H);
-  assert.equal(f.calls.filter((c) => c.name === "createRef").length, 1);
+  for (const method of ["createCommit", "createRef", "merge"]) {
+    assert.equal(f.calls.filter((c) => c.name === method).length, 1);
+  }
 });
 
 test("manual commits added after a merged PR are not silently abandoned", async () => {
@@ -366,4 +396,181 @@ test("a PR closed during its branch update fails visibly instead of reporting su
   assert.equal(f.refs["heads/" + SYNC], S);
   assert.equal(f.outputs.status, undefined);
   assert.equal(f.calls.some((c) => c.name === "createPR"), false);
+});
+
+
+test("an unchanged reviewed checkpoint creates no PR even when source ancestry was intentionally excluded", async () => {
+  const f = fixture({ source: OLD, oldTip: H, prs: [mergedPr()] });
+  assert.equal((await f.run()).status, "already-processed");
+  assert.deepEqual(f.mutations(), []);
+  assert.equal(f.calls.some((c) => c.name === "getCommit"), false);
+});
+
+test("a target already containing the reviewed checkpoint needs no acknowledgment commit", async () => {
+  const f = fixture({
+    prs: [mergedPr()], comparisons: { [T + "..." + OLD]: "behind" },
+  });
+  assert.equal((await f.run()).status, "pr-created");
+  assert.deepEqual(f.mutations().map((c) => c.name), ["createRef", "merge", "createPR"]);
+  assert.equal(f.calls.find((c) => c.name === "createRef").args.sha, T);
+  assert.equal(f.calls.some((c) => c.name === "getCommit"), false);
+});
+
+test("a conflicting new increment keeps its reviewed branch without creating an empty PR", async () => {
+  const f = fixture({ prs: [mergedPr()], errors: { merge: 409 } });
+  const result = await f.run();
+  assert.equal(result.status, "conflict-needs-resolution");
+  assert.equal(result.pullRequest, null);
+  assert.equal(result.pullRequestUrl, null);
+  assert.equal(f.refs["heads/" + SYNC], ACK);
+  assert.equal(f.prs.length, 1);
+  assert.deepEqual(f.mutations().map((c) => c.name), ["createCommit", "createRef", "merge"]);
+  assert.equal(f.outputs.pull_request_number, undefined);
+  assert.match(f.failures[0], /No PR was created before resolution/);
+  assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
+});
+
+test("a new increment can retry from its preserved acknowledgment after a merge conflict", async () => {
+  const f = fixture({ prs: [mergedPr()], errors: { merge: 409 } });
+  assert.equal((await f.run()).status, "conflict-needs-resolution");
+  delete f.errors.merge;
+  assert.equal((await f.run()).status, "pr-created");
+  assert.equal(f.refs["heads/" + SYNC], MERGED);
+  assert.equal(f.calls.filter((c) => c.name === "createCommit").length, 1);
+  assert.equal(f.calls.filter((c) => c.name === "createRef").length, 1);
+  assert.ok(f.prs[0].body.includes(sourceMarker(S)));
+});
+
+test("retrying an open conflict never advances its checkpoint or duplicates the pending marker", async () => {
+  const f = fixture({
+    sync: H, prs: [pr()], comparisons: { [H + "..." + S]: "diverged" },
+    errors: { merge: 409 },
+  });
+  assert.equal((await f.run()).status, "conflict-needs-resolution");
+  assert.equal((await f.run()).status, "conflict-needs-resolution");
+  assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
+  assert.equal(f.prs[0].body.split(pendingMarker(S)).length - 1, 1);
+  assert.equal(f.calls.filter((c) => c.name === "updatePR").length, 1);
+});
+
+test("successful conflict resolution advances the checkpoint and removes its pending marker", async () => {
+  const f = fixture({
+    sync: H, prs: [pr({ body: MARKER + "\n" + sourceMarker(OLD) + "\n" + pendingMarker(S) })],
+    comparisons: { [H + "..." + S]: "behind" },
+  });
+  assert.equal((await f.run()).status, "pr-updated");
+  assert.ok(f.prs[0].body.includes(sourceMarker(S)));
+  assert.ok(!f.prs[0].body.includes("forward-sync-pending"));
+  assert.equal(f.calls.some((c) => c.name === "merge"), false);
+});
+
+test("an open PR still validates the last merged checkpoint and exposes it separately", async () => {
+  const f = fixture({
+    sync: H, prs: [pr({ body: MARKER + "\n" + sourceMarker(S) }), mergedPr({ number: 11 })],
+    comparisons: { [H + "..." + S]: "behind" },
+  });
+  assert.equal((await f.run()).status, "pr-updated");
+  assert.equal(f.outputs.reviewed_source_sha, OLD);
+  assert.ok(f.calls.some((c) => c.name === "compare" && c.args.basehead === T + "..." + H));
+  assert.equal(f.calls.some((c) => c.name === "createCommit"), false);
+});
+
+test("an open PR cannot hide lost ancestry from the last merged sync", async () => {
+  const f = fixture({
+    sync: H, prs: [pr(), mergedPr({ number: 11 })],
+    comparisons: { [T + "..." + H]: "diverged" },
+  });
+  await assert.rejects(f.run(), /squash\/rebase merge/);
+  assert.deepEqual(f.mutations(), []);
+});
+
+test("an open PR cannot replace a missing merged checkpoint with its observed source SHA", async () => {
+  const f = fixture({
+    sync: H, prs: [pr(), mergedPr({ number: 11, body: MARKER })],
+  });
+  await assert.rejects(f.run(), /no unique source SHA marker/);
+  assert.deepEqual(f.mutations(), []);
+});
+
+test("the most recently merged checkpoint wins over PR creation order", async () => {
+  const reviewed = SHA("2"), reviewedHead = SHA("3");
+  const f = fixture({
+    prs: [mergedPr(), mergedPr({
+      number: 11, merged_at: "2026-10-20T00:00:00Z",
+      body: MARKER + "\n" + sourceMarker(reviewed),
+      head: { sha: reviewedHead, ref: SYNC_PREFIX + reviewed,
+        repo: { full_name: "flagos-ai/vllm-plugin-FL" } },
+    })],
+    comparisons: {
+      [S + "..." + reviewed]: "behind", [T + "..." + reviewedHead]: "behind",
+      [T + "..." + reviewed]: "diverged",
+    },
+  });
+  assert.equal((await f.run()).status, "pr-created");
+  assert.deepEqual(f.calls.find((c) => c.name === "createCommit").args.parents, [T, reviewed]);
+  assert.equal(f.outputs.reviewed_source_sha, reviewed);
+});
+
+test("a pending source marker is never used as the reviewed checkpoint", async () => {
+  const f = fixture({
+    prs: [mergedPr({ body: MARKER + "\n" + sourceMarker(OLD) + "\n" + pendingMarker(S) })],
+  });
+  assert.equal((await f.run()).status, "pr-created");
+  assert.deepEqual(f.calls.find((c) => c.name === "createCommit").args.parents, [T, OLD]);
+});
+
+test("a checkpoint-aware retry rejects a branch missing the reviewed source ancestry", async () => {
+  const f = fixture({
+    sync: ACK, prs: [mergedPr()], comparisons: { [ACK + "..." + OLD]: "diverged" },
+  });
+  await assert.rejects(f.run(), /unexpected commits/);
+  assert.deepEqual(f.mutations(), []);
+});
+
+test("a checkpoint-aware retry rejects a branch missing the merged PR head", async () => {
+  const f = fixture({
+    sync: ACK, prs: [mergedPr()], comparisons: { [ACK + "..." + H]: "diverged" },
+  });
+  await assert.rejects(f.run(), /unexpected commits/);
+  assert.deepEqual(f.mutations(), []);
+});
+
+test("an acknowledgment API failure never publishes a source snapshot as a fallback", async () => {
+  const f = fixture({ prs: [mergedPr()], errors: { createCommit: 403 } });
+  await assert.rejects(f.run(), { status: 403 });
+  assert.equal(f.refs["heads/" + SYNC], undefined);
+  assert.equal(f.calls.some((c) => c.name === "createRef" || c.name === "createPR"), false);
+});
+
+
+test("a legacy source-only branch without a PR cannot bypass the reviewed target checkpoint", async () => {
+  const f = fixture({
+    sync: S, prs: [mergedPr()], comparisons: { [S + "..." + H]: "diverged" },
+  });
+  await assert.rejects(f.run(), /legacy source snapshot/);
+  assert.deepEqual(f.mutations(), []);
+  assert.equal(f.refs["heads/" + SYNC], S);
+});
+
+test("a legacy open source snapshot is preserved for migration instead of replaying exclusions", async () => {
+  const f = fixture({
+    sync: S, prs: [pr({ body: MARKER + "\n" + sourceMarker(S) }), mergedPr({ number: 11 })],
+    comparisons: { [S + "..." + H]: "diverged" },
+  });
+  await assert.rejects(f.run(), /legacy source snapshot/);
+  assert.deepEqual(f.mutations(), []);
+  assert.equal(f.refs["heads/" + SYNC], S);
+});
+
+test("rewriting an open sync cannot discard its source checkpoint before the next update", async () => {
+  for (const hasCompleted of [false, true]) {
+    const f = fixture({
+      sync: H, prs: [pr(), ...(hasCompleted ? [mergedPr({ number: 11 })] : [])],
+      comparisons: { [H + "..." + OLD]: "diverged" },
+    });
+    await assert.rejects(f.run(), /no longer contains its recorded source checkpoint/);
+    assert.deepEqual(f.mutations(), []);
+    assert.equal(f.refs["heads/" + SYNC], H);
+    assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
+  }
 });

@@ -33,6 +33,8 @@ from pathlib import Path
 import pytest
 import requests
 
+from tests.utils.device_utils import get_visible_device_env_var
+
 # Bypass HTTP proxies for local server connections.
 _NO_PROXY = {"http": None, "https": None}
 
@@ -82,14 +84,26 @@ class VllmServer:
             "--port",
             str(self.port),
         ]
+        # Keep secrets out of the diagnostic command while preserving the
+        # exact executable command passed to subprocess.Popen.
+        display_cmd = list(cmd)
         if self.api_key:
             cmd.extend(["--api-key", self.api_key])
+            display_cmd.extend(["--api-key", "***"])
         if self.served_model_name:
             cmd.extend(["--served-model-name", self.served_model_name])
+            display_cmd.extend(["--served-model-name", self.served_model_name])
         cmd.extend(self.extra_args)
+        display_cmd.extend(self.extra_args)
 
         model_short = os.path.basename(self.model)
-        print(f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size})")
+        visible_env_var = get_visible_device_env_var()
+        visible_devices = os.environ.get(visible_env_var, "(not set)")
+        print(
+            f"\n[Setup] Starting vLLM ({model_short}, TP={self.tp_size}, "
+            f"{visible_env_var}={visible_devices})"
+        )
+        print(f"[Setup] Command: {self._redact(' '.join(display_cmd))}")
 
         log_dir = Path("test-results/logs").resolve()
         log_dir.mkdir(parents=True, exist_ok=True)
