@@ -13,7 +13,15 @@ import pytest
 @pytest.fixture
 def device_utils(monkeypatch):
     def load(
-        *, explicit="", vendor="", installed=False, gcu=False, cuda=False, npu=False
+        *,
+        explicit="",
+        vendor="",
+        installed=False,
+        gcu=False,
+        cuda=False,
+        npu=False,
+        txda_installed=False,
+        txda=False,
     ):
         torch = ModuleType("torch")
         torch.cuda = SimpleNamespace(
@@ -24,6 +32,10 @@ def device_utils(monkeypatch):
             is_available=Mock(return_value=gcu),
             device_count=Mock(return_value=8),
         )
+        torch.txda = SimpleNamespace(
+            is_available=Mock(return_value=txda),
+            device_count=Mock(return_value=8),
+        )
         torch.npu = SimpleNamespace(is_available=Mock(return_value=npu))
         torch.device = Mock(side_effect=lambda name: name)
         monkeypatch.setitem(sys.modules, "torch", torch)
@@ -32,6 +44,11 @@ def device_utils(monkeypatch):
         )
         monkeypatch.setitem(
             sys.modules, "torch_npu", ModuleType("torch_npu") if npu else None
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "torch_txda",
+            ModuleType("torch_txda") if txda_installed else None,
         )
         monkeypatch.setenv("FL_BACKEND", explicit)
         monkeypatch.setenv("GEMS_VENDOR", vendor)
@@ -157,3 +174,36 @@ def test_hygon_vendor_requires_available_hardware(device_utils):
     utils, _ = device_utils(vendor="hygon")
     assert utils.get_backend() == "cpu"
     assert not utils.is_accelerator_available()
+
+
+@pytest.mark.parametrize("explicit", ["", "tsingmicro", "txda"])
+def test_txda_device_and_count_do_not_use_cuda_alias(device_utils, explicit):
+    utils, torch = device_utils(
+        explicit=explicit, txda_installed=True, txda=True, cuda=True
+    )
+    assert utils.get_backend() == "tsingmicro"
+    assert utils.get_device(3) == "txda:3"
+    assert utils.get_device_count() == 8
+    assert utils.is_accelerator_available()
+    torch.cuda.is_available.assert_not_called()
+    torch.cuda.device_count.assert_not_called()
+    utils.find_spec.assert_not_called()
+
+    @utils.skip_if_not_nvidia
+    def nvidia_only():
+        pass
+
+    (mark,) = nvidia_only.pytestmark
+    assert mark.name == "skipif"
+    assert mark.args == (True,)
+
+
+@pytest.mark.parametrize("txda_installed", [False, True])
+@pytest.mark.parametrize("gcu", [False, True])
+def test_unavailable_txda_preserves_other_backend_detection(
+    device_utils, txda_installed, gcu
+):
+    utils, _ = device_utils(
+        txda_installed=txda_installed, installed=gcu, gcu=gcu, cuda=True
+    )
+    assert utils.get_backend() == ("enflame" if gcu else "nvidia")
