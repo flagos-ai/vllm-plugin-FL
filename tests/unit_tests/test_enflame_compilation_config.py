@@ -10,6 +10,7 @@ from vllm_fl.platform import PlatformFL
 
 
 def simulate_platform(monkeypatch, vendor):
+    monkeypatch.setattr(PlatformFL, "dist_backend", PlatformFL.dist_backend)
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
     monkeypatch.setattr(
         PlatformFL, "device_type", "gcu" if vendor in {"enflame", "gcu"} else "cuda"
