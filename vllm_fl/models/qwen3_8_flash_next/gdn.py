@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, fields, replace
 
 import torch
 from torch import nn
 
-from vllm.forward_context import get_forward_context
+from vllm.forward_context import get_forward_context, is_forward_context_available
 from vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
     GDNAttentionMetadata,
     QwenGatedDeltaNetAttention,
@@ -27,6 +27,34 @@ from vllm.v1.attention.backends.gdn_attn import (
 from vllm_fl.dispatch import resolve_op
 
 
+def chunk_skew_bucket_from_query_starts(
+    starts, num_decodes: int, num_prefills: int, chunk_size: int
+) -> int:
+    """Mirror the MetaX tuning key using already available host request lengths."""
+    if num_decodes < 0 or num_prefills < 0 or chunk_size <= 0:
+        raise ValueError("Invalid GDN chunk geometry")
+    if len(starts) < num_decodes + num_prefills + 1:
+        raise ValueError("Missing host query boundaries")
+    lengths = [
+        int(starts[i + 1]) - int(starts[i])
+        for i in range(num_decodes, num_decodes + num_prefills)
+    ]
+    if any(length < 0 for length in lengths):
+        raise ValueError("GDN query boundaries must be nondecreasing")
+    counts = [(length + chunk_size - 1) // chunk_size for length in lengths]
+    total = sum(counts)
+    if num_prefills <= 1 or total <= 0:
+        return 0
+    skew = max(counts) / (total / num_prefills)
+    return 0 if skew <= 1.15 else 1 if skew <= 1.5 else 2 if skew <= 2.5 else 3
+
+
+@dataclass
+class Qwen38GDNAttentionMetadata(GDNAttentionMetadata):
+    # A launch-configuration hint only; Q/K/V, gates and FP32 states are unchanged.
+    chunk_skew_bucket: int | None = None
+
+
 class Qwen38GDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
     """Restore the accepted state even when this step has no draft tokens."""
 
@@ -39,6 +67,10 @@ class Qwen38GDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
             and self.speculative_config is None
             and vllm_config.cache_config.mamba_cache_mode == "none"
             and self.gdn_prefill_backend == "triton"
+        )
+        self.use_host_chunk_metadata = bool(
+            self.supports_update_block_table
+            and vllm_config.additional_config.get("qwen38_gdn_host_metadata", False)
         )
 
     def update_block_table(self, metadata, blk_table, slot_mapping):
@@ -101,12 +133,39 @@ class Qwen38GDNAttentionMetadataBuilder(GDNAttentionMetadataBuilder):
                 1,
                 num_decode_draft_tokens_cpu,
             )
-        return super().build(
+        metadata = super().build(
             common_prefix_len,
             common_attn_metadata,
             num_accepted_tokens,
             num_decode_draft_tokens_cpu,
             fast_build,
+        )
+        if (
+            not self.use_host_chunk_metadata
+            or metadata.num_prefills == 0
+            or metadata.spec_sequence_masks is not None
+        ):
+            return metadata
+        from vllm.model_executor.layers.fla.ops.utils import FLA_CHUNK_SIZE
+
+        starts = common_attn_metadata.query_start_loc_cpu
+        if starts.device.type != "cpu":
+            raise ValueError("Host GDN tuning metadata must not read device tensors")
+        if (
+            metadata.chunk_indices is None
+            or metadata.chunk_offsets is None
+            or metadata.chunk_offsets.numel() != metadata.num_prefills + 1
+        ):
+            raise ValueError("Missing upstream precomputed GDN chunk metadata")
+        bucket = chunk_skew_bucket_from_query_starts(
+            starts.tolist(),
+            metadata.num_decodes,
+            metadata.num_prefills,
+            FLA_CHUNK_SIZE,
+        )
+        return Qwen38GDNAttentionMetadata(
+            **{field.name: getattr(metadata, field.name) for field in fields(metadata)},
+            chunk_skew_bucket=bucket,
         )
 
 
@@ -119,8 +178,9 @@ class Qwen38GDNAttentionBackend(GDNAttentionBackend):
 class _FGVPrefill(nn.Module):
     """Use the upstream per-instance chunk hook, without replacing other models."""
 
-    def __init__(self):
+    def __init__(self, prefix=None):
         super().__init__()
+        self.prefix = prefix
         self._implementation = resolve_op("gdn_prefill")
 
     def forward(
@@ -138,6 +198,16 @@ class _FGVPrefill(nn.Module):
         use_qk_l2norm_in_kernel=True,
         core_attn_out=None,
     ):
+        hints = {}
+        if self.prefix is not None and is_forward_context_available():
+            metadata = get_forward_context().attn_metadata
+            if isinstance(metadata, dict):
+                metadata = metadata.get(self.prefix)
+            if (
+                isinstance(metadata, Qwen38GDNAttentionMetadata)
+                and metadata.chunk_skew_bucket is not None
+            ):
+                hints["chunk_skew_bucket"] = metadata.chunk_skew_bucket
         return self._implementation(
             q=q,
             k=k,
@@ -151,6 +221,7 @@ class _FGVPrefill(nn.Module):
             chunk_offsets=chunk_offsets,
             use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
             core_attn_out=core_attn_out,
+            **hints,
         )
 
 
@@ -177,7 +248,7 @@ class Qwen38GatedDeltaNetAttention(QwenGatedDeltaNetAttention):
             prefix=prefix,
             gqa_interleaved_layout=gqa_interleaved_layout,
         )
-        self.chunk_gated_delta_rule = _FGVPrefill()
+        self.chunk_gated_delta_rule = _FGVPrefill(self.prefix)
         # Retain the upstream metadata-builder backend vocabulary. The exact
         # numerical provider is recorded separately below.
         self.gdn_prefill_backend = "triton"

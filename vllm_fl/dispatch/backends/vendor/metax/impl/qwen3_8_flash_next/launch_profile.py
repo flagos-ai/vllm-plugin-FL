@@ -371,7 +371,17 @@ def install_qwen38_launch_profile(vllm_config=None):
     wy.recompute_w_u_fwd_kernel = _Launch(wy.recompute_w_u_fwd_kernel, _wy)
     original_wy = wy.recompute_w_u_fwd
 
-    def recompute_w_u(k, v, beta, g_cumsum, A, cu_seqlens, block_v=None, pipe_stages=2):
+    def recompute_w_u(
+        k,
+        v,
+        beta,
+        g_cumsum,
+        A,
+        cu_seqlens,
+        block_v=None,
+        pipe_stages=2,
+        chunk_indices=None,
+    ):
         if (
             block_v is None
             and k.shape[1] >= 512
@@ -382,7 +392,17 @@ def install_qwen38_launch_profile(vllm_config=None):
             and k.dtype == torch.bfloat16
         ):
             block_v = 32
-        return original_wy(k, v, beta, g_cumsum, A, cu_seqlens, block_v, pipe_stages)
+        return original_wy(
+            k,
+            v,
+            beta,
+            g_cumsum,
+            A,
+            cu_seqlens,
+            block_v,
+            pipe_stages,
+            chunk_indices=chunk_indices,
+        )
 
     wy.recompute_w_u_fwd = recompute_w_u
     chunk = import_module("flaggems_vllm.runtime.backend._metax.fused.gdn_chunk")

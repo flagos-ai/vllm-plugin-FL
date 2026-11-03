@@ -25,6 +25,7 @@ def gdn_prefill(
     chunk_offsets=None,
     use_qk_l2norm_in_kernel=True,
     core_attn_out=None,
+    chunk_skew_bucket=None,
 ):
     """Adapt FGV's MetaX V-major chunk result to the vLLM layer contract.
 
@@ -56,6 +57,7 @@ def gdn_prefill(
         cu_seqlens=cu_seqlens,
         chunk_indices=chunk_indices,
         chunk_offsets=chunk_offsets,
+        chunk_skew_bucket=chunk_skew_bucket,
     )
     output, final_state = result[1], result[3]
     if core_attn_out is not None:

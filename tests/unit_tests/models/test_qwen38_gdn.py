@@ -44,6 +44,7 @@ def test_layout_provider_runs_only_before_mixed_native_gather(
     metadata = None if case == "profile" else {prefix: NativeMetadata()}
     context_module = ModuleType("vllm.forward_context")
     context_module.get_forward_context = lambda: SimpleNamespace(attn_metadata=metadata)
+    context_module.is_forward_context_available = lambda: True
     native_module = ModuleType(
         "vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn"
     )
@@ -140,6 +141,7 @@ def _metadata_builder(cls, k=3, graph=False):
     builder = cls.__new__(cls)
     builder.num_spec = k
     builder.use_spec_decode = k > 0
+    builder.use_host_chunk_metadata = False
     builder.use_full_cuda_graph = graph
     builder.kv_cache_spec = object()
     builder.vllm_config = SimpleNamespace(

@@ -341,4 +341,6 @@ Build the optional native mapping extension with `VLLM_VENDOR=metax python setup
 
 MTP-off serving accepts `--max-num-batched-tokens 4096` or `8192`; the compatibility default is 2048. Large prefill rows and long score buckets select the validated HC/projection/expert/attention paths. Larger MBT consumes more workspace and may worsen tail latency. Prefill stays eager.
 
+The default MTP-off GDN host-metadata path reuses framework chunk boundaries and supplies a host-derived skew hint to the source-locked FGV interface. `--no-gdn-host-metadata` retains its fallback. Metadata groups keep separate state addresses; numerical GDN kernels and FP32 state dtype are unchanged.
+
 These performance paths require the exact dependency composition in `metax_tuning/operator_dependencies.json`; not all numeric operator components are public revisions yet.

@@ -109,6 +109,22 @@
       "purpose": "Generic BF16/int32/FP32 mapped-host row gather with optional head-column selection and int64 large-table addressing",
       "introduced": "UVA lookup integration",
       "status": "Source-locked model integration validated; standalone operator publication pending review"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "ops/FLA/wy_fast.py",
+      "sha256": "a7adff278d0c51958b9edc736ba463e81320e622cc30e48a8e1f3a91abab2ec8",
+      "purpose": "Reuse caller chunk indices and optional host-derived skew; preserve existing kernels and fallback",
+      "introduced": "p4k-gdn-host-metadata-20261102",
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/fused/gdn_chunk.py",
+      "sha256": "f1338b987757ac9dfb903f41fe6ffc6ff88fc0104a185f8c062d0cb5b9f1a7e6",
+      "purpose": "Reuse caller chunk indices and optional host-derived skew; preserve existing kernels and fallback",
+      "introduced": "p4k-gdn-host-metadata-20261102",
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     }
   ],
   "active_launch_source_guards": {
@@ -141,7 +157,7 @@
     "flaggems_vllm": [
       {
         "path": "ops/FLA/wy_fast.py",
-        "sha256": "dcef959727bc947db23374da466df2829c97846c22999c9aec50be8c420b33e3"
+        "sha256": "a7adff278d0c51958b9edc736ba463e81320e622cc30e48a8e1f3a91abab2ec8"
       },
       {
         "path": "ops/qwen4/ple_conv.py",
@@ -153,7 +169,7 @@
       },
       {
         "path": "runtime/backend/_metax/fused/gdn_chunk.py",
-        "sha256": "f4a6bd6cf6db191439fa3bdc1e6b25d432b739c1a0700b85a2da78e427a3d75a"
+        "sha256": "f1338b987757ac9dfb903f41fe6ffc6ff88fc0104a185f8c062d0cb5b9f1a7e6"
       },
       {
         "path": "runtime/backend/_metax/heuristics_config_utils.py",

@@ -66,6 +66,7 @@ def test_mtp_configuration_contract(launcher, mode, k):
         "qwen38_hc_small_fusions": not bool(k),
         "qwen38_qsa_long_context": not bool(k),
         "qwen38_reuse_gdn_metadata": not bool(k),
+        "qwen38_gdn_host_metadata": not bool(k),
         "qwen38_ple_cpu_metadata": not bool(k),
         "qwen38_ngram_mode": "shared_buffer",
         "qwen38_mtp_graph": bool(k),
@@ -396,3 +397,16 @@ def test_large_mbt_is_an_explicit_native_mtp_off_option(launcher, mbt):
             launcher.build_config("/checkpoint", mode, max_num_batched_tokens=mbt)
     with pytest.raises(ValueError, match="MBT"):
         launcher.build_config("/checkpoint", max_num_batched_tokens=16384)
+
+
+@pytest.mark.parametrize("mode", ["off", "k1", "k2", "k3"])
+def test_host_chunk_metadata_can_be_disabled(launcher, mode):
+    config = launcher.build_config("/checkpoint", mode, gdn_host_metadata=False)
+    assert config["additional_config"]["qwen38_gdn_host_metadata"] is False
+
+
+def test_host_chunk_metadata_cli_disable(launcher, launch_paths, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [str(LAUNCHER), "--no-gdn-host-metadata"])
+    launcher.main()
+    record, _ = json.JSONDecoder().raw_decode(capsys.readouterr().out)
+    assert record["config"]["additional_config"]["qwen38_gdn_host_metadata"] is False
