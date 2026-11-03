@@ -556,7 +556,6 @@ class TestTorchDispatchMode:
         not HAS_TORCH_DISPATCH_MODE,
         reason="TorchDispatchMode not available in this PyTorch version",
     )
-    @pytest.mark.serial
     def test_dispatch_mode_creates_files(self, dump_dir):
         """TorchDispatchMode should dump files when dump is enabled."""
         enable_io_dump(dump_dir, modules={"Linear"}, with_values=True, with_metas=True)
@@ -568,8 +567,6 @@ class TestTorchDispatchMode:
             model(x)
         finally:
             pop_module_context()
-
-        io_dumper._wait_and_flush()
 
         # Step stays at 0 (step is advanced by model_runner.execute_model)
         step_dir = os.path.join(dump_dir, "rank_0000", "step_0000")
@@ -641,7 +638,6 @@ class TestDumpTorchFunctionMode:
         not HAS_TORCH_FUNC_MODE,
         reason="TorchFunctionMode not available in this PyTorch version",
     )
-    @pytest.mark.serial
     def test_torch_func_mode_dumps_matmul(self, dump_dir):
         enable_io_dump(
             dump_dir,
@@ -654,8 +650,6 @@ class TestDumpTorchFunctionMode:
         a = torch.randn(2, 3)
         b = torch.randn(3, 4)
         torch.matmul(a, b)
-
-        io_dumper._wait_and_flush()
 
         # Check that files were created under torch.matmul directory
         step_dir = os.path.join(dump_dir, "rank_0000", "step_0000")

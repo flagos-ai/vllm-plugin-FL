@@ -21,7 +21,6 @@ import os
 
 import pytest
 
-from tests.utils.device_utils import get_visible_device_env_var
 from tests.utils.model_config import ModelConfig
 from vllm import LLM, SamplingParams
 from vllm.distributed import cleanup_dist_env_and_memory
@@ -230,6 +229,17 @@ def _run_multimodal_test(llm: LLM, sampling_params: SamplingParams) -> None:
 
         print(f"  [{gen.modality} count={asset_count}] Q: {question}")
         print(f"  Output: {text!r}")
+        assert text.strip(), f"Empty output for prompt[{i}]: {question}"
+
+        # A successful generation call alone also accepts random-weight output.
+        # Multimodal cases can require keywords from the answer or transcription.
+        expected = prompt_cfg.get("expected", [])
+        if isinstance(expected, str):
+            expected = [expected]
+        for keyword in expected:
+            assert keyword.casefold() in text.casefold(), (
+                f"Expected {keyword!r} in output for prompt[{i}], got: {text!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +264,10 @@ def test_inference(combo: dict) -> None:
 
     # Build LLM kwargs with parametrize overrides
     llm_kwargs = _CFG.engine_kwargs(**combo)
+    assert llm_kwargs.get("load_format") != "dummy", (
+        "E2E inference requires checkpoint weights; load_format='dummy' "
+        "generates random-weight output."
+    )
 
     # For multimodal: inject limit_mm_per_prompt
     max_assets = _get_max_asset_count()
@@ -271,10 +285,6 @@ def test_inference(combo: dict) -> None:
     combo_desc = ", ".join(f"{k}={v}" for k, v in combo.items()) or "default"
     print(f"\n[{_MODEL}/{_CASE}] combo: {combo_desc}")
     print(f"[{_MODEL}/{_CASE}] model: {_CFG.model}")
-    _visible_env_var = get_visible_device_env_var()
-    print(
-        f"[{_MODEL}/{_CASE}] devices: {_visible_env_var}={os.environ.get(_visible_env_var, '(not set)')}"
-    )
 
     llm = None
     try:

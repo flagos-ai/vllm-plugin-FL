@@ -16,7 +16,7 @@ name: Feishu Notification (post-CI)
 
 on:
   workflow_run:
-    workflows: ["CI", "Nightly", "Weekly"]
+    workflows: ["CI"]
     types: [completed]
 
 jobs:

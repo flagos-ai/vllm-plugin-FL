@@ -227,12 +227,13 @@ def test_body_error_propagates_and_restores_stream(helper_and_backend, supplied)
     context = _CaptureContext(_Stream(backend, "supplied"))
     kwargs = {"graph_capture_context": context} if supplied else {}
     error = RuntimeError("body sentinel")
-    with (
-        pytest.raises(RuntimeError) as caught,
-        helper(device=object(), **kwargs) as yielded,
-    ):
-        assert backend.current is yielded.stream
-        raise error
+
+    def raise_in_capture():
+        with helper(device=object(), **kwargs) as yielded:
+            assert backend.current is yielded.stream
+            raise error
+
+    caught = pytest.raises(RuntimeError, raise_in_capture)
     assert caught.value is error
     assert backend.current is previous
     assert [event[0] for event in backend.events].count("exit") == 1
