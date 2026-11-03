@@ -292,7 +292,9 @@ def boundary():
 
 
 @pytest.fixture(autouse=True)
-def isolated_compile(boundary):
+def isolated_compile(boundary, monkeypatch):
+    # CPU contracts must not initialize the host accelerator stream.
+    monkeypatch.setattr(torch.accelerator, "is_available", lambda: False)
     boundary.platform.device_type = "musa"
     boundary.config_module.use_c_extension = False
     torch._dynamo.reset()
