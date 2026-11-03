@@ -15,8 +15,10 @@ from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vll
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
+from vllm.model_executor.determinism.batch_invariant import (
+    _batch_invariant_MODE as _bi_mode,
+)
 from vllm.model_executor.layers.attention.attention import Attention
-from vllm.model_executor.layers.batch_invariant import _batch_invariant_MODE as _bi_mode
 from vllm.platforms.interface import DeviceCapability
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import is_quantized_kv_cache
@@ -32,9 +34,8 @@ from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_b
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
-    get_kv_cache_layout,
 )
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
 
@@ -111,27 +112,6 @@ class AttentionFLBackend(AttentionBackend):
         if block_size % 16 != 0:
             raise ValueError("Block size must be a multiple of 16.")
         return (2, num_blocks, block_size, num_kv_heads, head_size)
-
-    @staticmethod
-    def get_kv_cache_stride_order(
-        include_num_layers_dimension: bool = False,
-    ) -> tuple[int, ...]:
-        # `stride_order` indicates the permutation that gets
-        # us from `get_kv_cache_shape` to the actual memory layout we want.
-        cache_layout = get_kv_cache_layout()
-        if cache_layout == "NHD" and include_num_layers_dimension:
-            # (num_blocks, num_layers, 2, block_size, num_kv_heads, head_size)
-            return (2, 0, 1, 3, 4, 5)
-        elif cache_layout == "NHD":
-            stride_order = (0, 1, 2, 3, 4)
-        elif cache_layout == "HND" and include_num_layers_dimension:
-            # (num_blocks, num_kv_heads, num_layers, 2, block_size, head_size)
-            return (2, 4, 0, 1, 3, 5)
-        elif cache_layout == "HND":
-            stride_order = (0, 1, 3, 2, 4)
-        else:
-            raise ValueError(f"Unknown cache layout format {cache_layout}.")
-        return stride_order
 
     @classmethod
     def supports_head_size(cls, head_size: int) -> bool:

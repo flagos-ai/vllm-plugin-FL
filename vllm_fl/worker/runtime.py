@@ -17,14 +17,7 @@ logger = init_logger(__name__)
 
 
 def is_residual_scattered_for_sp(vllm_config, num_input_tokens: int) -> bool:
-    """Keep the FL pipeline tensor-layout contract across vLLM versions."""
-    from vllm.v1.worker import utils as worker_utils
-
-    native = getattr(worker_utils, "is_residual_scattered_for_sp", None)
-    if native is not None:
-        return native(vllm_config, num_input_tokens)
-
-    # vLLM 0.32 removed this helper; FL still prepares legacy PP transfers.
+    """Determine the residual tensor layout for FL pipeline transfers."""
     compilation = vllm_config.compilation_config
     if not compilation.pass_config.enable_sp:
         return False

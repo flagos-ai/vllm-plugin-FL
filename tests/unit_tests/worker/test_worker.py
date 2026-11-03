@@ -27,67 +27,22 @@ def _sequence_parallel_config(enabled, tp, *, partition=False, splitting_ops=())
         (True, 2, 4, True, True),
     ],
 )
-def test_legacy_pipeline_residual_layout_when_upstream_helper_is_absent(
-    monkeypatch, enabled, tp, tokens, partition, expected
-):
-    from vllm.v1.worker import utils as worker_utils
-
+def test_pipeline_residual_layout(enabled, tp, tokens, partition, expected):
     from vllm_fl.worker.runtime import is_residual_scattered_for_sp
 
-    monkeypatch.delattr(worker_utils, "is_residual_scattered_for_sp", raising=False)
     config = _sequence_parallel_config(enabled, tp, partition=partition)
     assert is_residual_scattered_for_sp(config, tokens) is expected
 
 
 @pytest.mark.parametrize("tokens,splitting_ops", [(3, ()), (4, ("split",))])
-def test_legacy_pipeline_residual_layout_rejects_invalid_sp_configuration(
-    monkeypatch, tokens, splitting_ops
+def test_pipeline_residual_layout_rejects_invalid_sp_configuration(
+    tokens, splitting_ops
 ):
-    from vllm.v1.worker import utils as worker_utils
-
     from vllm_fl.worker.runtime import is_residual_scattered_for_sp
 
-    monkeypatch.delattr(worker_utils, "is_residual_scattered_for_sp", raising=False)
     config = _sequence_parallel_config(True, 2, splitting_ops=splitting_ops)
     with pytest.raises(AssertionError, match="Sequence parallelism requires"):
         is_residual_scattered_for_sp(config, tokens)
-
-
-def test_pipeline_residual_layout_preserves_native_helper_errors(monkeypatch):
-    from vllm.v1.worker import utils as worker_utils
-
-    from vllm_fl.worker.runtime import is_residual_scattered_for_sp
-
-    error = RuntimeError("native layout failure")
-
-    def native(config, tokens):
-        raise error
-
-    monkeypatch.setattr(
-        worker_utils, "is_residual_scattered_for_sp", native, raising=False
-    )
-    with pytest.raises(RuntimeError) as caught:
-        is_residual_scattered_for_sp(_sequence_parallel_config(True, 2), 4)
-    assert caught.value is error
-
-
-def test_pipeline_residual_layout_preserves_native_helper_result(monkeypatch):
-    from vllm.v1.worker import utils as worker_utils
-
-    from vllm_fl.worker.runtime import is_residual_scattered_for_sp
-
-    calls = []
-
-    def native(config, tokens):
-        calls.append((config, tokens))
-        return False
-
-    monkeypatch.setattr(
-        worker_utils, "is_residual_scattered_for_sp", native, raising=False
-    )
-    config = _sequence_parallel_config(True, 2)
-    assert is_residual_scattered_for_sp(config, 4) is False
-    assert calls == [(config, 4)]
 
 
 @pytest.mark.parametrize("device_type", ["gcu", "npu", "cuda", "musa"])
@@ -263,22 +218,6 @@ def test_gcu_ir_defaults_only_select_registered_native_providers(monkeypatch, mo
         assert all(
             provider in IrOp.registry[field.name].impls for provider in providers
         )
-
-
-def test_batch_invariant_module_resolves_installed_upstream_api():
-    from importlib.metadata import version
-
-    from packaging.version import Version
-
-    from vllm_fl.utils import get_batch_invariant_module
-
-    module = get_batch_invariant_module()
-    parent = (
-        "determinism" if Version(version("vllm")) >= Version("0.32.0") else "layers"
-    )
-    assert module.__name__ == f"vllm.model_executor.{parent}.batch_invariant"
-    assert callable(module.init_batch_invariance)
-    assert isinstance(module._batch_invariant_MODE, bool)
 
 
 def test_worker_initializes_cache_with_current_runner_contract(monkeypatch):

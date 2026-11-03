@@ -9,6 +9,7 @@ from typing import ClassVar
 import numpy as np
 import torch
 
+from vllm.model_executor.layers.attention.attention import Attention
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionImpl,
@@ -16,9 +17,8 @@ from vllm.v1.attention.backend import (
     MultipleOf,
     get_kv_quant_mode,
 )
+from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
 from vllm.v1.kv_cache_interface import KVQuantMode
-from vllm.model_executor.layers.attention.attention import Attention
-from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 
 # --------------------------------------------------------------
 # Note: use Maca's merge_attn_states to get cuda kernel invoked
@@ -34,15 +34,15 @@ if is_flash_attn_varlen_func_available():
     from .utils.fa_utils import (
         flash_attn_supports_sinks,
         flash_attn_varlen_func,
+        flash_attn_with_kvcache,  # used for prefill decode split
         get_scheduler_metadata,
         reshape_and_cache_flash,
-        flash_attn_with_kvcache,  # used for prefill decode split
     )
 from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm.model_executor.layers.batch_invariant import (
+from vllm.model_executor.determinism.batch_invariant import (
     _batch_invariant_MODE as _bi_mode,
 )
 from vllm.platforms.interface import DeviceCapability
@@ -51,15 +51,14 @@ from vllm.v1.attention.backend import (
     AttentionCGSupport,
     AttentionMetadataBuilder,
 )
+from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
-    get_kv_cache_layout,
-    split_decodes_and_prefills,  # used for prefill decode split
     reshape_attn_output_for_spec_decode,  # used for prefill decode split with mtp
     reshape_query_for_spec_decode,  # used for prefill decode split with mtp
+    split_decodes_and_prefills,  # used for prefill decode split
 )
-from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 from vllm.v1.kv_cache_interface import AttentionSpec
 
 # --------------------------------------------------------------
@@ -128,27 +127,6 @@ class MacaFlashAttentionBackend(AttentionBackend):
         if block_size % 16 != 0:
             raise ValueError("Block size must be a multiple of 16.")
         return (2, num_blocks, block_size, num_kv_heads, head_size)
-
-    @staticmethod
-    def get_kv_cache_stride_order(
-        include_num_layers_dimension: bool = False,
-    ) -> tuple[int, ...]:
-        # `stride_order` indicates the permutation that gets
-        # us from `get_kv_cache_shape` to the actual memory layout we want.
-        cache_layout = get_kv_cache_layout()
-        if cache_layout == "NHD" and include_num_layers_dimension:
-            # (num_blocks, num_layers, 2, block_size, num_kv_heads, head_size)
-            return (2, 0, 1, 3, 4, 5)
-        elif cache_layout == "NHD":
-            stride_order = (0, 1, 2, 3, 4)
-        elif cache_layout == "HND" and include_num_layers_dimension:
-            # (num_blocks, num_kv_heads, num_layers, 2, block_size, head_size)
-            return (2, 4, 0, 1, 3, 5)
-        elif cache_layout == "HND":
-            stride_order = (0, 1, 3, 2, 4)
-        else:
-            raise ValueError(f"Unknown cache layout format {cache_layout}.")
-        return stride_order
 
     @staticmethod
     def get_fp8_dtype_for_flashattn(kv_cache_dtype: str) -> torch.dtype:
@@ -650,7 +628,10 @@ class FlashAttentionImpl(AttentionImpl):
         # Cache the batch invariant result for use in forward passes
         self.batch_invariant_enabled = _bi_mode
 
-        if get_kv_quant_mode(self.kv_cache_dtype) != KVQuantMode.NONE and not flash_attn_supports_fp8():
+        if (
+            get_kv_quant_mode(self.kv_cache_dtype) != KVQuantMode.NONE
+            and not flash_attn_supports_fp8()
+        ):
             raise NotImplementedError(
                 "FlashAttention does not support fp8 kv-cache on this device."
             )
@@ -771,11 +752,6 @@ class FlashAttentionImpl(AttentionImpl):
 
         if not attn_metadata.use_cascade:
             cu_seqlens_q = attn_metadata.query_start_loc
-            seqused_k = attn_metadata.seq_lens
-            max_seqlen_q = attn_metadata.max_query_len
-            max_seqlen_k = attn_metadata.max_seq_len
-            block_table = attn_metadata.block_table
-            scheduler_metadata = attn_metadata.scheduler_metadata
 
             descale_shape = (cu_seqlens_q.shape[0] - 1, self.num_kv_heads)
 
@@ -998,11 +974,6 @@ class FlashAttentionImpl(AttentionImpl):
         max_seqlen_q = attn_metadata.max_query_len
         max_seqlen_k = attn_metadata.max_query_len
 
-        descale_shape = (
-            cu_seqlens_q.shape[0] - 1,  # type: ignore[union-attr]
-            self.num_kv_heads,
-        )
-
         num_actual_tokens = attn_metadata.num_actual_tokens
         # Call flash attention directly on Q, K, V tensors
         output[:num_actual_tokens] = flash_attn_varlen_func(
@@ -1144,7 +1115,6 @@ def cascade_attention(
     assert common_prefix_len % block_size == 0
     num_common_kv_blocks = common_prefix_len // block_size
     assert num_common_kv_blocks > 0
-    descale_shape = (cu_prefix_query_lens.shape[0] - 1, key_cache.shape[-2])
 
     # /------------------------  Metax Modification -------------------------\
     cu_prefix_kv_lens = torch.tensor(
@@ -1171,7 +1141,6 @@ def cascade_attention(
     )
     # \------------------------- Metax Modification -------------------------/
 
-    descale_shape = (cu_query_lens.shape[0] - 1, key_cache.shape[-2])
     # /------------------------  Metax Modification -------------------------\
     cu_suffix_kv_lens = torch.tensor(
         [0] + suffix_kv_lens.tolist(), device=suffix_kv_lens.device, dtype=torch.int32

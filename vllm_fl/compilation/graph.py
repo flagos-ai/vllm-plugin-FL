@@ -6,7 +6,7 @@
 
 import dataclasses
 from collections.abc import Callable
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from typing import Any
 from unittest.mock import patch
 
@@ -15,44 +15,22 @@ import torch
 import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
 from vllm.compilation.cuda_graph import CUDAGraphWrapper
+from vllm.compilation.cudagraph_pool import capture_pool
 from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
 from vllm.config import CUDAGraphMode, VllmConfig
-from vllm.distributed.device_communicators.pynccl_allocator import set_graph_pool_id
 from vllm.forward_context import (
     BatchDescriptor,
     get_forward_context,
     is_forward_context_available,
 )
 from vllm.logger import init_logger
+from vllm.model_executor.offloader.base import get_offloader
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import current_stream
 
-try:
-    from vllm.model_executor.offloader.base import get_offloader
-except ModuleNotFoundError as exc:
-    if exc.name not in (
-        "vllm.model_executor.offloader",
-        "vllm.model_executor.offloader.base",
-    ):
-        raise
-    get_offloader = None
-
 logger = init_logger(__name__)
 
-try:
-    from vllm.compilation.cudagraph_pool import capture_pool
-except ModuleNotFoundError as exc:
-    if exc.name != "vllm.compilation.cudagraph_pool":
-        raise
 
-    @contextmanager
-    def capture_pool(pool, vllm_config):
-        # Older runtimes do not provide the shared CuMem pool context.
-        set_graph_pool_id(pool or current_platform.graph_pool_handle())
-        yield pool
-
-
-# FL-specific: platform-agnostic weak_ref_tensors
 def _weak_ref_npu_tensor(value: Any) -> Any:
     if isinstance(value, torch.Tensor) and value.device.type == "npu":
         import torch_npu
@@ -200,10 +178,6 @@ class Graph:
         raise NotImplementedError("not support graph")
 
 
-# Re-export CUDAGraphStat for compatibility
-from vllm.compilation.cuda_graph import CUDAGraphStat  # noqa: F401, E402
-
-
 @dataclasses.dataclass
 class GraphEntry:
     batch_descriptor: BatchDescriptor
@@ -341,20 +315,16 @@ class GraphWrapper(CUDAGraphWrapper):
                     capture_pool(self.graph_pool, self.vllm_config)
                 )
 
-                # Sync offloader's copy stream before capture if available.
-                if get_offloader is not None:
-                    get_offloader().sync_prev_onload()
+                get_offloader().sync_prev_onload()
 
-                # FL-specific: use platform-agnostic graph capture while
-                # preserving the explicit stream used by vLLM v0.28.0.
+                # Use the platform device and its explicit capture stream.
                 with current_platform.torch_device_fn.graph(
                     graph,
                     pool=graph_pool,
                     stream=_graph_capture_stream(),
                 ):
                     output = self.runnable(*args, **kwargs)
-                    if get_offloader is not None:
-                        get_offloader().join_after_forward()
+                    get_offloader().join_after_forward()
                     if self.cudagraph_options.weak_ref_output:
                         output = weak_ref_tensors(output)
 
@@ -379,9 +349,7 @@ class GraphWrapper(CUDAGraphWrapper):
                 f"got {new_input_addresses}"
             )
 
-        # Sync offloader before replay if available
-        if get_offloader is not None:
-            get_offloader().sync_prev_onload()
+        get_offloader().sync_prev_onload()
 
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()

@@ -847,15 +847,7 @@ class WorkerFL(WorkerBase):
                 ),
             )
         else:
-            try:
-                kernel_warmup(self)
-            except ImportError as e:
-                # vllm 0.24.0's kernel_warmup unconditionally imports
-                # minimax_m3_msa_warmup, whose chain reaches torchvision.
-                # torchvision is not installed on OOT runtimes (installing it
-                # would overwrite the vendor-matched torch matrix); the warmup
-                # is a no-op for any model other than MiniMaxM3, so skip it.
-                logger.warning("kernel_warmup skipped: %s", e)
+            kernel_warmup(self)
 
         cuda_graph_memory_bytes = 0
         if not self.model_config.enforce_eager:
@@ -1533,9 +1525,9 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm_fl.utils import get_batch_invariant_module
+    from vllm.model_executor.determinism.batch_invariant import init_batch_invariance
 
-    get_batch_invariant_module().init_batch_invariance()
+    init_batch_invariance()
     override_envs_for_eplb(
         parallel_config,
         moe_backend=getattr(vllm_config.kernel_config, "moe_backend", None),

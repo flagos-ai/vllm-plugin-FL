@@ -6,19 +6,6 @@ import os
 _OP_CONFIG: dict[str, str] | None = None
 
 
-def get_batch_invariant_module():
-    """Resolve vLLM's batch-invariance module before and after its 0.32 move."""
-    from importlib import import_module
-    from importlib.util import find_spec
-
-    parent = (
-        "determinism"
-        if find_spec("vllm.model_executor.determinism") is not None
-        else "layers"
-    )
-    return import_module(f"vllm.model_executor.{parent}.batch_invariant")
-
-
 # Mapping used by dispatch registration to resolve the current runtime platform
 # into a backend directory under dispatch/backends/vendor.
 #

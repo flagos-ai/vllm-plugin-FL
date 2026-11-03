@@ -7,19 +7,31 @@ from typing import ClassVar
 
 import torch
 
-from vllm.v1.attention.backend import AttentionLayer, AttentionType, MultipleOf
+from vllm.config import VllmConfig
+from vllm.config.cache import CacheDType
+from vllm.logger import init_logger
+from vllm.model_executor.determinism.batch_invariant import (
+    _batch_invariant_MODE as _bi_mode,
+)
+from vllm.platforms.interface import DeviceCapability
+from vllm.v1.attention.backend import (
+    AttentionCGSupport,
+    AttentionLayer,
+    AttentionType,
+    MultipleOf,
+)
+from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
+from vllm.v1.attention.backends.utils import (
+    reshape_attn_output_for_spec_decode,
+    reshape_query_for_spec_decode,
+)
+from vllm.v1.kv_cache_interface import AttentionSpec
+
 from ..ops.flashmla import (
     flash_mla_with_kvcache,
     get_mla_metadata,
     is_flashmla_dense_supported,
 )
-from vllm.config import VllmConfig
-from vllm.config.cache import CacheDType
-from vllm.logger import init_logger
-from vllm.model_executor.layers.batch_invariant import (
-    _batch_invariant_MODE as _bi_mode,
-)
-from vllm.platforms.interface import DeviceCapability
 from .common import (
     MLACommonBackend,
     MLACommonDecodeMetadata,
@@ -28,13 +40,6 @@ from .common import (
     MLACommonMetadataBuilder,
     QueryLenSupport,
 )
-from vllm.v1.attention.backend import AttentionCGSupport
-from vllm.v1.attention.backends.utils import (
-    reshape_attn_output_for_spec_decode,
-    reshape_query_for_spec_decode,
-)
-from vllm.v1.kv_cache_interface import AttentionSpec
-from vllm.v1.attention.backends.registry import AttentionBackendEnum, register_backend
 
 logger = init_logger(__name__)
 
