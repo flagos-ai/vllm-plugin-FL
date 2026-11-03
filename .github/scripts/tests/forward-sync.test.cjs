@@ -22,15 +22,20 @@ const forwardSync = require("../forward-sync.cjs");
 const { SOURCE, TARGET, SYNC_PREFIX, MARKER } = forwardSync.constants;
 const SHA = (letter) => letter.repeat(40);
 const S = SHA("a"), T = SHA("b"), H = SHA("c"), OLD = SHA("d"), MERGED = SHA("e");
-const RETRY = SHA("f");
+const RETRY = SHA("f"), COMMON = SHA("0"), WIP = SHA("1");
 const SYNC = SYNC_PREFIX + S, OLD_BRANCH = SYNC_PREFIX + OLD;
 const repository = "flagos-ai/vllm-plugin-FL";
 const sourceMarker = (sha) => "<!-- forward-sync-source: " + sha + " -->";
 const pendingMarker = (sha) => "<!-- forward-sync-pending: " + sha + " -->";
+const conflictFiles = ["vllm_fl/model_executor/layers/example.py", ".github/workflows/ci.yml"];
+const conflictBlock = [
+  "<!-- forward-sync-conflicts:start -->", "Generated conflict details.",
+  "<!-- forward-sync-conflicts:end -->",
+].join("\n");
 
 function pr(overrides = {}) {
   return {
-    number: 12, state: "open", merged_at: null,
+    number: 12, node_id: "PR_fixture_12", draft: false, state: "open", merged_at: null,
     html_url: "https://github.com/" + repository + "/pull/12",
     body: MARKER + "\n" + sourceMarker(OLD) + "\nMaintainer notes: preserve this.",
     head: { sha: H, ref: SYNC, repo: { full_name: repository } }, ...overrides,
@@ -63,6 +68,9 @@ function fixture(options = {}) {
     [H + "..." + OLD]: "diverged", [RETRY + "..." + OLD]: "diverged",
     [MERGED + "..." + OLD]: "diverged", [MERGED + "..." + S]: "diverged",
     [RETRY + "..." + T]: "behind",
+    [WIP + "..." + T]: "behind", [WIP + "..." + H]: "behind",
+    [WIP + "..." + OLD]: "diverged", [S + "..." + COMMON]: "behind",
+    [T + "..." + COMMON]: "behind",
     ...(options.comparisons || {}),
   };
   const errors = { ...(options.errors || {}) };
@@ -110,7 +118,8 @@ function fixture(options = {}) {
         }),
         create: method("createPR", (args) => {
           const created = pr({
-            number: 20, html_url: "https://github.com/" + repository + "/pull/20",
+            number: 20, node_id: "PR_fixture_20", draft: args.draft,
+            html_url: "https://github.com/" + repository + "/pull/20",
             body: args.body, head: { sha: refs["heads/" + args.head], ref: args.head,
               repo: { full_name: repository } },
           });
@@ -125,6 +134,18 @@ function fixture(options = {}) {
       },
     },
     paginate: async (fn, args) => (await fn(args)).data,
+    graphql: async (query, args) => {
+      calls.push({ name: "convertToDraft", args: { query, ...args } });
+      if (errors.convertToDraft) throw fail(errors.convertToDraft);
+      assert.match(query, /convertPullRequestToDraft/);
+      assert.doesNotMatch(query, /markPullRequestReadyForReview/);
+      const found = prs.find((item) => item.node_id === args.pullRequestId);
+      assert.ok(found, "Draft conversion must use the managed PR's node ID");
+      found.draft = true;
+      return { convertPullRequestToDraft: {
+        pullRequest: { id: found.node_id, isDraft: true },
+      } };
+    },
   };
   const core = {
     info() {},
@@ -139,9 +160,19 @@ function fixture(options = {}) {
     assert.equal(args.core, core);
     if (errors.replay) throw fail(errors.replay, "Replay failed");
     if (state.conflict) {
+      assert.equal(typeof args.onConflict, "function");
+      // Draft conversion must succeed before the helper publishes conflict markers.
+      await args.onConflict();
+      const changed = args.baseSha !== WIP;
+      if (changed) {
+        refs["heads/" + args.syncBranch] = WIP;
+        calls.push({ name: "replayPush", args: { branch: args.syncBranch, sha: WIP } });
+      }
       return {
-        sha: args.baseSha, checkpointSha: args.checkpointSha,
-        pending: args.sourceSha, conflicted: true, changed: false,
+        sha: changed ? WIP : args.baseSha,
+        checkpointSha: options.conflictCheckpointSha || args.checkpointSha || COMMON,
+        pendingSha: args.sourceSha, conflictFiles,
+        conflicted: true, changed,
       };
     }
     const changed = state.replayChanged ?? args.baseSha !== MERGED;
@@ -160,7 +191,9 @@ function fixture(options = {}) {
     run: () => forwardSync({ github, context, core, replay }),
     calls, refs, prs, warnings, failures, outputs, errors, comparisons, state,
     replays: () => calls.filter(({ name }) => name === "replay"),
-    mutations: () => calls.filter(({ name }) => ["replayPush", "createPR", "updatePR"].includes(name)),
+    mutations: () => calls.filter(({ name }) => [
+      "replayPush", "createPR", "updatePR", "convertToDraft",
+    ].includes(name)),
   };
 }
 
@@ -187,6 +220,7 @@ test("the first sync replays onto target instead of creating a source snapshot",
   const created = f.calls.find(({ name }) => name === "createPR").args;
   assert.equal(created.base, TARGET);
   assert.equal(created.head, SYNC);
+  assert.equal(created.draft, false);
   assert.match(created.body, /Automatic merging is disabled/);
   assert.ok(created.body.includes(sourceMarker(S)));
   assert.equal(f.refs["heads/" + SYNC], MERGED);
@@ -252,33 +286,83 @@ test("human conflict-resolution commits are preserved as the replay base", async
   assertNoSourceAncestryWrites(f);
 });
 
-test("an open replay conflict preserves its branch, checkpoint and maintainer notes", async () => {
+test("an open replay conflict converts to draft before publishing its WIP commit", async () => {
   const f = fixture({ sync: H, prs: [pr()], conflict: true });
   const result = await f.run();
   assert.equal(result.status, "conflict-needs-resolution");
   assert.equal(result.pullRequest, 12);
-  assert.equal(f.refs["heads/" + SYNC], H);
+  assert.equal(result.pullRequestUrl, f.prs[0].html_url);
+  assert.equal(f.outputs.status, "conflict-needs-resolution");
+  assert.equal(f.outputs.pull_request_number, 12);
+  assert.equal(f.refs["heads/" + SYNC], WIP);
   assert.equal(f.prs.length, 1);
-  assert.equal(f.failures.length, 1);
-  assert.ok(f.failures[0].includes(f.prs[0].html_url));
-  assert.deepEqual(mutationNames(f), ["updatePR"]);
+  assert.equal(f.prs[0].draft, true);
+  assert.deepEqual(f.failures, []);
+  assert.ok(f.warnings.some((message) => message.includes(f.prs[0].html_url)));
+  assert.deepEqual(mutationNames(f), ["convertToDraft", "replayPush", "updatePR"]);
+  assert.equal(f.calls.find(({ name }) => name === "convertToDraft").args.pullRequestId,
+    "PR_fixture_12");
   assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
   assert.ok(!f.prs[0].body.includes(sourceMarker(S)));
   assert.ok(f.prs[0].body.includes(pendingMarker(S)));
+  for (const file of conflictFiles) assert.ok(f.prs[0].body.includes(file));
   assert.match(f.prs[0].body, /Maintainer notes: preserve this/);
+  assert.match(f.prs[0].body, /forward-sync-pending\.json/);
+  assert.match(f.prs[0].body, /resolved/);
+  assertNoSourceAncestryWrites(f);
+});
+
+test("an already draft PR publishes a conflict without redundant draft conversion", async () => {
+  const f = fixture({ sync: H, prs: [pr({ draft: true })], conflict: true });
+  assert.equal((await f.run()).status, "conflict-needs-resolution");
+  assert.equal(f.prs[0].draft, true);
+  assert.equal(f.refs["heads/" + SYNC], WIP);
+  assert.deepEqual(mutationNames(f), ["replayPush", "updatePR"]);
+  assert.deepEqual(f.failures, []);
+});
+
+test("a failed draft conversion prevents the conflict branch push", async () => {
+  const f = fixture({
+    sync: H, prs: [pr()], conflict: true, errors: { convertToDraft: 403 },
+  });
+  const originalBody = f.prs[0].body;
+  await assert.rejects(f.run(), { status: 403 });
+  assert.equal(f.refs["heads/" + SYNC], H);
+  assert.equal(f.prs[0].draft, false);
+  assert.equal(f.prs[0].body, originalBody);
+  assert.deepEqual(mutationNames(f), ["convertToDraft"]);
+  assert.equal(f.outputs.status, undefined);
+  assertNoSourceAncestryWrites(f);
+});
+
+test("the conflict source marker records only the successfully replayed prefix", async () => {
+  const processed = SHA("9");
+  const f = fixture({
+    sync: H, prs: [pr()], conflict: true, conflictCheckpointSha: processed,
+  });
+  assert.equal((await f.run()).status, "conflict-needs-resolution");
+  assert.ok(f.prs[0].body.includes(sourceMarker(processed)));
+  assert.ok(!f.prs[0].body.includes(sourceMarker(OLD)));
+  assert.ok(!f.prs[0].body.includes(sourceMarker(S)));
+  assert.ok(f.prs[0].body.includes(pendingMarker(S)));
 });
 
 test("an open PR advances its marker even when every new patch is equivalent", async () => {
   const f = fixture({
     sync: H, replayChanged: false,
-    prs: [pr({ body: pr().body + "\n" + pendingMarker(S) })],
+    prs: [pr({ draft: true, body: pr().body + "\n" + pendingMarker(S) +
+      "\n" + conflictBlock + "\nMaintainer resolution: keep this too." })],
   });
   assert.equal((await f.run()).status, "pr-updated");
   assert.equal(f.refs["heads/" + SYNC], H);
   assert.deepEqual(mutationNames(f), ["updatePR"]);
   assert.ok(f.prs[0].body.includes(sourceMarker(S)));
   assert.ok(!f.prs[0].body.includes(pendingMarker(S)));
+  assert.ok(!f.prs[0].body.includes("forward-sync-conflicts:"));
+  assert.ok(!f.prs[0].body.includes("Generated conflict details."));
   assert.match(f.prs[0].body, /Maintainer notes: preserve this/);
+  assert.match(f.prs[0].body, /Maintainer resolution: keep this too/);
+  assert.equal(f.prs[0].draft, true);
 });
 
 test("a closed, unmerged PR is not silently reopened or overwritten", async () => {
@@ -466,41 +550,91 @@ test("a reviewed checkpoint never becomes a commit parent even if absent from ta
   assertNoSourceAncestryWrites(f);
 });
 
-test("a conflicting new increment creates neither a snapshot branch nor an empty PR", async () => {
+test("a conflicting new increment creates a draft PR on the target-derived WIP branch", async () => {
   const f = fixture({ prs: [mergedPr()], conflict: true });
   const result = await f.run();
   assert.equal(result.status, "conflict-needs-resolution");
-  assert.equal(result.pullRequest, null);
-  assert.equal(result.pullRequestUrl, null);
+  assert.equal(result.pullRequest, 20);
+  assert.equal(result.pullRequestUrl, f.prs[0].html_url);
   assert.equal(firstReplay(f).baseSha, T);
   assert.equal(firstReplay(f).checkpointSha, OLD);
-  assert.equal(f.refs["heads/" + SYNC], undefined);
-  assert.equal(f.prs.length, 1);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.outputs.pull_request_number, undefined);
-  assert.match(f.failures[0], /No PR was created before resolution/);
+  assert.equal(f.refs["heads/" + SYNC], WIP);
+  assert.equal(f.refs["heads/" + TARGET], T);
+  assert.equal(f.prs.length, 2);
+  assert.equal(f.prs[0].draft, true);
+  assert.deepEqual(mutationNames(f), ["replayPush", "createPR"]);
+  assert.equal(f.calls.find(({ name }) => name === "createPR").args.draft, true);
+  assert.equal(f.outputs.pull_request_number, 20);
+  assert.equal(f.outputs.status, "conflict-needs-resolution");
+  assert.deepEqual(f.failures, []);
+  assert.equal(f.warnings.length, 1);
   assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
+  assert.ok(!f.prs[0].body.includes(sourceMarker(S)));
+  assert.ok(f.prs[0].body.includes(pendingMarker(S)));
+  assert.ok(!f.prs[1].body.includes(pendingMarker(S)));
+  for (const file of conflictFiles) assert.ok(f.prs[0].body.includes(file));
+  assert.match(f.prs[0].body, /forward-sync-pending\.json/);
+  assert.match(f.prs[0].body, /resolved/);
   assertNoSourceAncestryWrites(f);
 });
 
-test("a first-cycle conflict also avoids publishing original source history", async () => {
+test("a first-cycle conflict records its common checkpoint in a new draft PR", async () => {
   const f = fixture({ conflict: true });
   assert.equal((await f.run()).status, "conflict-needs-resolution");
   assert.equal(firstReplay(f).checkpointSha, null);
-  assert.equal(f.refs["heads/" + SYNC], undefined);
-  assert.deepEqual(f.mutations(), []);
+  assert.equal(f.refs["heads/" + SYNC], WIP);
+  assert.equal(f.prs.length, 1);
+  assert.equal(f.prs[0].draft, true);
+  assert.ok(f.prs[0].body.includes(sourceMarker(COMMON)));
+  assert.ok(!f.prs[0].body.includes(sourceMarker(S)));
+  assert.ok(f.prs[0].body.includes(pendingMarker(S)));
+  assert.deepEqual(mutationNames(f), ["replayPush", "createPR"]);
+  assert.deepEqual(f.failures, []);
   assertNoSourceAncestryWrites(f);
 });
 
-test("a new increment retries a conflict from target without duplicate branch writes", async () => {
+test("a pending conflict retry reuses its draft PR and WIP branch without duplicate writes", async () => {
   const f = fixture({ prs: [mergedPr()], conflict: true });
   assert.equal((await f.run()).status, "conflict-needs-resolution");
-  f.state.conflict = false;
-  assert.equal((await f.run()).status, "pr-created");
+  const firstBody = f.prs[0].body;
+  assert.equal((await f.run()).status, "conflict-needs-resolution");
   assert.equal(f.replays().length, 2);
-  assert.ok(f.replays().every(({ args }) => args.baseSha === T && !args.existingBranch));
+  assert.equal(f.replays()[1].args.baseSha, WIP);
+  assert.equal(f.replays()[1].args.checkpointSha, OLD);
+  assert.equal(f.replays()[1].args.existingBranch, true);
   assert.equal(f.calls.filter(({ name }) => name === "replayPush").length, 1);
+  assert.equal(f.calls.filter(({ name }) => name === "createPR").length, 1);
+  assert.equal(f.calls.filter(({ name }) => name === "convertToDraft").length, 0);
+  assert.equal(f.prs[0].body, firstBody);
+  assert.equal(f.prs.length, 2);
+  assert.equal(f.refs["heads/" + SYNC], WIP);
+  assert.deepEqual(f.failures, []);
+  assertNoSourceAncestryWrites(f);
+});
+
+test("resolved conflicts clear generated instructions while preserving notes and draft state", async () => {
+  const f = fixture({ prs: [mergedPr()], conflict: true });
+  assert.equal((await f.run()).status, "conflict-needs-resolution");
+  f.prs[0].body += "\nMaintainer resolution: preserve backend switches.";
+  f.prs[0].head.sha = RETRY;
+  f.refs["heads/" + SYNC] = RETRY;
+  f.state.conflict = false;
+  assert.equal((await f.run()).status, "pr-updated");
+  assert.equal(f.replays()[1].args.baseSha, RETRY);
+  assert.equal(f.replays()[1].args.checkpointSha, OLD);
+  assert.equal(f.prs.length, 2);
+  assert.equal(f.prs[0].number, 20);
+  assert.equal(f.prs[0].draft, true);
+  assert.ok(f.prs[0].body.includes(sourceMarker(S)));
+  assert.ok(!f.prs[0].body.includes(pendingMarker(S)));
+  assert.ok(!f.prs[0].body.includes("forward-sync-conflicts:"));
+  assert.ok(!f.prs[0].body.includes("Conflicts awaiting maintainer resolution"));
+  assert.match(f.prs[0].body, /Maintainer resolution: preserve backend switches/);
+  assert.equal(f.calls.filter(({ name }) => name === "createPR").length, 1);
+  assert.equal(f.calls.filter(({ name }) => name === "convertToDraft").length, 0);
   assert.equal(f.refs["heads/" + SYNC], MERGED);
+  assert.deepEqual(f.failures, []);
+  assertNoSourceAncestryWrites(f);
 });
 
 test("an open sync still validates the previous merged head in target", async () => {
