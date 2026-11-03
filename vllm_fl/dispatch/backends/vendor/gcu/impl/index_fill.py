@@ -10,6 +10,8 @@ from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
 from math import prod
 
+from packaging.version import InvalidVersion, Version
+
 # The private launcher/kernel contract is supported for this release only.
 # CI verifies exact release bytes separately in docker/enflame/verify_index_fill.py;
 # comments, formatting and source paths are not runtime API requirements.
@@ -177,7 +179,11 @@ def _install_index_fill_gcu_patch(module) -> bool:
         raise RuntimeError(
             "FlagGems version is unavailable for Enflame adapter"
         ) from exc
-    if installed_version != _SUPPORTED_VERSION:
+    try:
+        supported_version = Version(installed_version).public == _SUPPORTED_VERSION
+    except InvalidVersion:
+        supported_version = False
+    if not supported_version:
         raise RuntimeError(
             f"Unsupported FlagGems version {installed_version} for Enflame adapter; "
             f"expected {_SUPPORTED_VERSION}"

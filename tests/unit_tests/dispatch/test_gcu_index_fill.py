@@ -329,6 +329,27 @@ def source_provider(tmp_path, monkeypatch):
     return module
 
 
+@pytest.mark.parametrize("installed_version", ["5.4.0", "5.4.0+g6fe7709e7717"])
+def test_patch_accepts_supported_public_version(
+    tmp_path, monkeypatch, installed_version
+):
+    module = source_provider(tmp_path, monkeypatch)
+    monkeypatch.setattr(index_fill, "version", lambda name: installed_version)
+    assert index_fill._install_index_fill_gcu_patch(module) is True
+
+
+@pytest.mark.parametrize(
+    "installed_version", ["5.5.0", "5.4.0rc1", "5.4.0.dev1", "5.4.0.post1", "invalid"]
+)
+def test_patch_rejects_other_public_versions(tmp_path, monkeypatch, installed_version):
+    module = source_provider(tmp_path, monkeypatch)
+    original = module._index_fill_contiguous_launch
+    monkeypatch.setattr(index_fill, "version", lambda name: installed_version)
+    with pytest.raises(RuntimeError, match="Unsupported FlagGems version"):
+        index_fill._install_index_fill_gcu_patch(module)
+    assert module._index_fill_contiguous_launch is original
+
+
 def test_patch_reapplication_is_idempotent_and_rejects_method_replacement(
     tmp_path, monkeypatch
 ):
