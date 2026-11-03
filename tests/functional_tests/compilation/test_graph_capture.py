@@ -229,8 +229,8 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
                 captured = wrapper(static_input)
             torch.gcu.current_stream().wait_stream(stream)
             torch.gcu.synchronize()
-            entry = wrapper.concrete_graph_entries[descriptor]
-            assert isinstance(entry.graph, torch.gcu.GCUGraph)
+            entry = wrapper.concrete_cudagraph_entries[descriptor]
+            assert isinstance(entry.cudagraph, torch.gcu.GCUGraph)
             assert wrapper in CUDAGraphWrapper._all_instances
             for revision in (1, 2):
                 values = torch.full((2, 4), revision, dtype=torch.float32)
@@ -240,8 +240,26 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
                 torch.gcu.synchronize()
                 torch.testing.assert_close(result.cpu(), values * 2 + 1)
                 assert len(calls) == 1
-                assert wrapper.concrete_graph_entries[descriptor].graph is entry.graph
+                assert (
+                    wrapper.concrete_cudagraph_entries[descriptor].cudagraph
+                    is entry.cudagraph
+                )
+            # Elastic EP resets this upstream field before the next capture.
+            wrapper.concrete_cudagraph_entries = {}
+            with torch.gcu.stream(stream):
+                wrapper(static_input)
+            torch.gcu.current_stream().wait_stream(stream)
+            static_input.fill_(3)
+            result = wrapper(static_input)
+            torch.gcu.synchronize()
+            torch.testing.assert_close(result.cpu(), torch.full((2, 4), 7.0))
+            assert len(calls) == 2
+            assert (
+                wrapper.concrete_cudagraph_entries[descriptor].cudagraph
+                is not entry.cudagraph
+            )
             record_property("enflame_native_wrapper_graph_replays", 2)
+            record_property("enflame_graph_recapture_after_reset", True)
     finally:
         set_cudagraph_capturing_enabled(False)
         wrapper.clear_graphs()

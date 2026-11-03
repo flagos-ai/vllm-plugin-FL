@@ -5,10 +5,9 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
-import weakref
 from collections.abc import Callable
 from contextlib import ExitStack, contextmanager
-from typing import Any, ClassVar
+from typing import Any
 from unittest.mock import patch
 
 import torch
@@ -208,20 +207,12 @@ from vllm.compilation.cuda_graph import CUDAGraphStat  # noqa: F401, E402
 @dataclasses.dataclass
 class GraphEntry:
     batch_descriptor: BatchDescriptor
-    graph: Any | None = None
+    cudagraph: Any | None = None
     output: Any | None = None
 
     # for graph debugging, track the input addresses
     # during capture, and check if they are the same during replay
     input_addresses: list[int] | None = None
-
-    @property
-    def cudagraph(self):
-        return self.graph
-
-    @cudagraph.setter
-    def cudagraph(self, value):
-        self.graph = value
 
 
 @dataclasses.dataclass
@@ -234,14 +225,6 @@ class GraphOptions:
 class GraphWrapper(CUDAGraphWrapper):
     """FL-specific graph wrapper that supports multiple device types (CUDA, NPU).
     Adapted from upstream CUDAGraphWrapper with platform-agnostic graph capture."""
-
-    _all_instances: ClassVar[weakref.WeakSet["GraphWrapper"]] = weakref.WeakSet()
-
-    @classmethod
-    def clear_all_graphs(cls) -> None:
-        """Clear captured graphs from all GraphWrapper instances."""
-        for instance in list(cls._all_instances):
-            instance.clear_graphs()
 
     def __init__(
         self,
@@ -272,19 +255,9 @@ class GraphWrapper(CUDAGraphWrapper):
         self.cudagraph_options = cudagraph_options
         # the entries for different batch descriptors that we need to capture
         # cudagraphs for.
-        self.concrete_graph_entries: dict[BatchDescriptor, GraphEntry] = {}
+        self.concrete_cudagraph_entries: dict[BatchDescriptor, GraphEntry] = {}
 
-        GraphWrapper._all_instances.add(self)
-        # Native runners discover FL captures during memory profiling/cleanup.
         CUDAGraphWrapper._all_instances.add(self)
-
-    @property
-    def concrete_cudagraph_entries(self):
-        return self.concrete_graph_entries
-
-    @concrete_cudagraph_entries.setter
-    def concrete_cudagraph_entries(self, value):
-        self.concrete_graph_entries = value
 
     def __getattr__(self, key: str) -> Any:
         # allow accessing the attributes of the runnable.
@@ -305,9 +278,6 @@ class GraphWrapper(CUDAGraphWrapper):
     def cudagraph_wrapper(self) -> "GraphWrapper":
         return self
 
-    def clear_graphs(self) -> None:
-        self.concrete_graph_entries.clear()
-
     def __call__(self, *args, **kwargs):
         if not is_forward_context_available():
             # No forward context means we are outside the normal
@@ -325,15 +295,15 @@ class GraphWrapper(CUDAGraphWrapper):
             return self.runnable(*args, **kwargs)
 
         assert batch_descriptor is not None
-        if batch_descriptor not in self.concrete_graph_entries:
+        if batch_descriptor not in self.concrete_cudagraph_entries:
             # create a new entry for this batch descriptor
-            self.concrete_graph_entries[batch_descriptor] = GraphEntry(
+            self.concrete_cudagraph_entries[batch_descriptor] = GraphEntry(
                 batch_descriptor=batch_descriptor
             )
 
-        entry = self.concrete_graph_entries[batch_descriptor]
+        entry = self.concrete_cudagraph_entries[batch_descriptor]
 
-        if entry.graph is None:
+        if entry.cudagraph is None:
             if self.cudagraph_options.debug_log_enable:
                 logger.debug(
                     "Capturing a cudagraph on (%s,%s)",
@@ -389,7 +359,7 @@ class GraphWrapper(CUDAGraphWrapper):
                         output = weak_ref_tensors(output)
 
             entry.output = weak_ref_tensors(output)
-            entry.graph = graph
+            entry.cudagraph = graph
 
             compilation_counter.num_cudagraph_captured += 1
 
@@ -415,5 +385,5 @@ class GraphWrapper(CUDAGraphWrapper):
 
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
-        entry.graph.replay()
+        entry.cudagraph.replay()
         return entry.output

@@ -215,8 +215,8 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     torch.npu.current_stream().wait_stream(capture_stream)
     torch.npu.synchronize()
 
-    entry = wrapper.concrete_graph_entries[descriptor]
-    assert isinstance(entry.graph, torch.npu.NPUGraph)
+    entry = wrapper.concrete_cudagraph_entries[descriptor]
+    assert isinstance(entry.cudagraph, torch.npu.NPUGraph)
     assert len(calls) == 1
 
     # NPU capture need not materialize its output until the first replay.
@@ -240,7 +240,9 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
         expected = eager_reference(values)
         torch.testing.assert_close(replayed_output, expected)
         assert not torch.all(replayed_output == -999).item()
-        assert wrapper.concrete_graph_entries[descriptor].graph is entry.graph
+        assert (
+            wrapper.concrete_cudagraph_entries[descriptor].cudagraph is entry.cudagraph
+        )
         assert len(calls) == 1
 
 
@@ -281,7 +283,7 @@ class TestGraphEntry:
         entry = GraphEntry(batch_descriptor=mock_batch_desc)
 
         assert entry.batch_descriptor is mock_batch_desc
-        assert entry.graph is None
+        assert entry.cudagraph is None
         assert entry.output is None
         assert entry.input_addresses is None
 
@@ -421,10 +423,9 @@ def test_native_graph_registry_can_clear_fl_captures(monkeypatch):
     )
     assert isinstance(wrapper, CUDAGraphWrapper)
     assert wrapper in CUDAGraphWrapper._all_instances
-    assert wrapper in graph_module.GraphWrapper._all_instances
-    wrapper.concrete_graph_entries["capture"] = object()
+    wrapper.concrete_cudagraph_entries["capture"] = object()
     CUDAGraphWrapper.clear_all_graphs()
-    assert wrapper.concrete_graph_entries == {}
+    assert wrapper.concrete_cudagraph_entries == {}
 
 
 @pytest.mark.parametrize("device_type", ["cuda", "npu", "gcu"])
@@ -510,5 +511,3 @@ def test_capture_uses_native_pool_context_and_preserves_offloader_errors(
     else:
         assert wrapper() is output
         assert events == ["pool-enter", "capture", "pool-exit"]
-        entry = wrapper.concrete_graph_entries[descriptor]
-        assert entry.cudagraph is entry.graph
