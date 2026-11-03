@@ -11,6 +11,11 @@ is claimed or yielded, so a plain ``pip install`` is enough. Each module
 applies its patch as an import side effect and self-gates on
 :func:`_fl_metax_gate.metax_active`.
 
+This package sits under the MetaX vendor tree instead of
+``vllm_fl/patches/`` because every shim here is MetaX-only. It is safe to
+import this early because ``vendor/metax/__init__.py`` defers ``MacaBackend``
+and ``patches`` until the backend actually loads.
+
 Kill switches (``FL_METAX_*_PATCH=0``) are documented in the individual
 modules. ``FL_BOOT_SHIMS_PATCH=0`` disables the whole set.
 """

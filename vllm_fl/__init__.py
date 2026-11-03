@@ -171,6 +171,8 @@ def _patch_custom_ops():
 
 def _init_vendor_device():
     """Apply compatibility hooks that must run before vLLM model imports."""
+    _install_metax_compat()
+
     from vllm_fl.utils import DeviceInfo
 
     if DeviceInfo().vendor_name == "kunlunxin":
@@ -191,7 +193,7 @@ def _install_metax_compat():
     a plain ``pip install`` is sufficient.
     """
     try:
-        from vllm_fl.patches.metax_028_compat import install, metax_active
+        from vllm_fl.dispatch.backends.vendor.metax.shims import install, metax_active
 
         if metax_active():
             install()
@@ -201,8 +203,6 @@ def _install_metax_compat():
 
 def register():
     """Register the FL platform."""
-    _install_metax_compat()
-
     _init_vendor_device()
 
     # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
@@ -227,7 +227,7 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
-    if vendor_name in ("ascend", "enflame", "gcu"):
+    if vendor_name in ("ascend", "enflame", "gcu", "tsingmicro"):
         # v0.28 defaults some models to the upstream V2 runner. These backends
         # use ModelRunnerFL; choose it before VllmConfig reads model defaults.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
