@@ -6,6 +6,23 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 git config --global --add safe.directory "$(pwd)"
 
+# DSW job containers can retain a 64 MiB /dev/shm despite Docker IPC options.
+# Model executors need at least 160 MiB for one shared-memory RPC queue. Match
+# the validated H20 setup by mounting a larger tmpfs inside the CI container.
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    shm_kb=$(df -k --output=avail /dev/shm | tail -1 | tr -d ' ')
+    if (( ${shm_kb:-0} < 1048576 )); then
+        mount -t tmpfs -o size=32g,mode=1777 tmpfs /dev/shm
+        echo "[cuda setup] mounted /dev/shm at 32g"
+        shm_kb=$(df -k --output=avail /dev/shm | tail -1 | tr -d ' ')
+        if (( ${shm_kb:-0} < 1048576 )); then
+            echo "[cuda setup] /dev/shm still has less than 1 GiB free" >&2
+            exit 1
+        fi
+    fi
+    df -h /dev/shm
+fi
+
 # Refresh uv before use: published images may predate GHSA-hq85-5cpj-mr62.
 # Install only this tool so the pinned vLLM/FlagGems/FlagTree stack is preserved.
 UV_REQUIREMENT=$(grep '^uv==' "$HERE/../../../docker/cuda/requirements-ci.txt")
