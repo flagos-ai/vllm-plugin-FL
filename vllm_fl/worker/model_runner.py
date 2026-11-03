@@ -5108,6 +5108,10 @@ class ModelRunnerFL(
                 if draft_probs is not None:
                     self._draft_probs = draft_probs
                     self._draft_prob_req_ids = self.input_batch.req_ids.copy()
+        else:
+            raise ValueError(
+                f"Unsupported speculative decoding method: {spec_config.method}"
+            )
 
         return draft_token_ids
 

@@ -70,6 +70,41 @@ def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context
     device_api.stream.assert_called_once_with(capture_stream)
 
 
+@pytest.mark.parametrize("method", ["unknown", "future_draft_method"])
+def test_propose_draft_token_ids_rejects_unsupported_method(method):
+    from types import SimpleNamespace
+
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+    config = SimpleNamespace(
+        method=method,
+        use_ngram_gpu=lambda: False,
+        uses_extract_hidden_states=lambda: False,
+        use_eagle=lambda: False,
+        use_dflash=lambda: False,
+        uses_draft_model=lambda: False,
+    )
+    runner = SimpleNamespace(speculative_config=config)
+    scheduler_output = SimpleNamespace(
+        total_num_scheduled_tokens=0, num_spec_tokens_to_schedule=0
+    )
+    with pytest.raises(
+        ValueError, match=f"Unsupported speculative decoding method: {method}"
+    ):
+        ModelRunnerFL.propose_draft_token_ids(
+            runner,
+            scheduler_output=scheduler_output,
+            sampled_token_ids=[],
+            sampling_metadata=None,
+            hidden_states=None,
+            sample_hidden_states=None,
+            aux_hidden_states=None,
+            spec_decode_metadata=None,
+            common_attn_metadata=None,
+            slot_mappings=None,
+        )
+
+
 # =============================================================================
 # Layer 1: ExecuteModelState Data Structure Tests
 # =============================================================================

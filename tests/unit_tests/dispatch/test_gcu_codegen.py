@@ -2,9 +2,13 @@
 """Regression: generated i64 pointer ABIs must not become i32 pointers."""
 
 import inspect
+import os
 from types import SimpleNamespace
 
 import pytest
+
+if os.environ.get("FL_TEST_PLATFORM", "enflame") != "enflame":
+    pytest.skip("GCU-specific unit tests only run on Enflame", allow_module_level=True)
 
 from vllm_fl.dispatch.backends.vendor.gcu.impl import inductor
 
