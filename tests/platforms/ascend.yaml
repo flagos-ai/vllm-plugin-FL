@@ -77,9 +77,10 @@ device_overrides:
 unsupported_features: []
 
 # Default environment variables for this platform (applied by run.py before tests start)
-# Validate native Ascend kernels; FlagGems-enabled model accuracy is separate.
+# Exercise FlagGems registration with an audited ATen whitelist.
 env_defaults:
-  USE_FLAGGEMS: "0"
+  USE_FLAGGEMS: "1"
+  VLLM_FL_FLAGOS_WHITELIST: "zeros"
 
 # ---- Device-specific test configurations ------------------------------------
 910c:

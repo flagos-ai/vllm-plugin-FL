@@ -60,16 +60,29 @@ routing for ordinary, bias-free experts. GDN uses the same reference math in eag
 vLLM 0.28's global Qwen Triton warmup is skipped because these kernels are
 replaced by the Ascend GDN implementation; other warmup and capture still run.
 
-The validated serving configuration uses `USE_FLAGGEMS=0`. FlagTree, FlagGems
-and FlagCX are installed. `USE_FLAGGEMS=1` is outside this passing configuration;
+The original serving validation uses `USE_FLAGGEMS=0`. FlagTree, FlagGems
+and FlagCX are installed. Broad ATen replacement with `USE_FLAGGEMS=1` is outside
+that passing configuration;
 previous 0.28 adaptation experiments encountered incorrect text/image outputs
 with ATen replacement enabled. The complete model gate must pass separately
 before enabling it. Graph validation here covers BF16, TP2, DP1 without expert
 parallelism, speculative decoding, ubatching, prefix caching or chunked prefill.
 
-The Ascend CI configuration defaults to `USE_FLAGGEMS=0` for the same native
-execution path, including inference and serving checks. An explicit environment
-override can enable FlagGems for separate accuracy investigations.
+Ascend CI enables FlagGems with a narrow ATen whitelist:
+
+```bash
+export USE_FLAGGEMS=1
+export VLLM_FL_FLAGOS_WHITELIST=zeros
+unset VLLM_FL_FLAGOS_BLACKLIST
+```
+
+The CI image pins FlagGems 5.0.2 and FlagTree 0.6.2a1+ascend3.5. This profile
+exercises FlagGems registration and the `zeros` kernel while keeping the
+model's other ATen operators on their native paths. `ones` remains excluded because
+the pinned Ascend implementation does not handle empty tensors. These CI defaults
+do not change the production platform blacklist or establish accuracy for broader
+FlagGems replacement. Set `VLLM_FL_FLAGOS_WHITELIST=` explicitly to override the
+CI whitelist for separate investigations.
 
 ## Model gate
 
@@ -122,9 +135,14 @@ Both graph runs recorded real FULL replay batches at padded batch sizes
 1, 2, 4 and 8, without fallback to NONE. The eager
 runs are separate controls; graph decode does not fall back to eager.
 
+The pinned CI image also passes the same 104 requests and real FULL replay
+with `USE_FLAGGEMS=1` and `VLLM_FL_FLAGOS_WHITELIST=zeros`. Standalone checks
+verify the registered FlagGems `zeros` implementation on 42 shape/dtype
+combinations, including empty tensors, and three native NPU graph replays.
+
 Additional checks cover CPU graph/runtime contracts, shared hybrid cache views,
 factory and activation interfaces, twelve native attention/GDN/MoE/vision NPU
 checks, Qwen3-0.6B one-token prompts, and Qwen3.5-4B PP2 requests with layer
 partition `31,1`. MoE capture tests change the live expert routes between replays
-and compare against a CPU reference. `USE_FLAGGEMS=1` is outside this passing
-configuration.
+and compare against a CPU reference. These original results do not establish
+accuracy for broader FlagGems replacement beyond the CI whitelist above.
