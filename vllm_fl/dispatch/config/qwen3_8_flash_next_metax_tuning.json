@@ -2961,7 +2961,7 @@
       },
       {
         "path": "runtime/backend/_metax/ops/qsa_packed.py",
-        "sha256": "1b3ba59d4373d30ccac4d0ef8e127a741ea3bb45e3b831156f75c3cec13a5f06"
+        "sha256": "de298c46e1e5235721392e31abfa8b5fdf2c7d7c3b25bc8fd071cb59b6c3e812"
       },
       {
         "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
@@ -2978,6 +2978,10 @@
       {
         "path": "runtime/backend/_metax/ops/radix_topk.py",
         "sha256": "f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/rotary_bf16.py",
+        "sha256": "181aaa4d227ea30d2387b5bae3a43775429e38012d9abd0b89fa556757362898"
       }
     ],
     "vllm": [

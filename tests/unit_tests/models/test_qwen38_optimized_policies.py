@@ -294,6 +294,7 @@ def test_capacity_qsa_selection_respects_length_and_row_boundaries(
     assert len(calls) == 1
     assert calls[0][1:6] == ("fold4_skip", splits, 16, 2, expected_stages)
     assert options[0].get("prefill_optimization", False) is optimized
+    assert options[0]["collect_metadata"] is False
 
 
 @pytest.mark.parametrize(

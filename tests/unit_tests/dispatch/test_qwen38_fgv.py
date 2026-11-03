@@ -239,6 +239,8 @@ def test_registration_preserves_default_and_scopes_vendor_difference():
         ("qwen38_hc_gate_reduce", "vendor.metax.qwen38"),
         ("qwen38_hc_inject_combine", "vendor.metax.qwen38"),
         ("qwen38_hc_down_activation", "vendor.metax.qwen38"),
+        ("qwen38_qsa_rope", "vendor.metax.qwen38"),
+        ("qwen38_qsa_compress_norm_rope", "vendor.metax.qwen38"),
     ]
     for entry in entries[4:]:
         assert entry.vendor == "metax"

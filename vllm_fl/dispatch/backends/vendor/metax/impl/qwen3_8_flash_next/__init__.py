@@ -340,10 +340,91 @@ def qwen38_hc_inject_combine(logits, block_output, residual, groups):
 
 # This provider writes every active row or initializes its fallback output.
 # functools.wraps in registration carries the capability to the resolved call.
+qsa_sparse_paged_attention._qwen38_full_output = True
 
 
+def qwen38_qsa_rope(rotary_emb, positions, tensor, cache):
+    if (
+        tensor.device.type != "cuda"
+        or tensor.dtype != torch.bfloat16
+        or tensor.ndim != 3
+        or tensor.shape[-1] != 128
+        or int(rotary_emb.rotary_dim) != 64
+        or cache.dtype != tensor.dtype
+        or positions.ndim not in (1, 2)
+    ):
+        return None
+    from flaggems_vllm.runtime.backend._metax.ops.rotary_bf16 import (
+        rotary_embedding_bf16,
+    )
+
+    return rotary_embedding_bf16(
+        tensor,
+        positions,
+        cache,
+        int(rotary_emb.rotary_dim),
+        neox=bool(rotary_emb.is_neox_style),
+        sections=getattr(rotary_emb, "mrope_section", None),
+        interleaved=bool(getattr(rotary_emb, "mrope_interleaved", False)),
+        fp32_compute=bool(rotary_emb.apply_rotary_emb.enable_fp32_compute),
+    )
 
 
+def qwen38_qsa_compress_norm_rope(
+    raw_cache,
+    raw_table,
+    mapping,
+    logical_positions,
+    slots,
+    compressed_cache,
+    norm_weight,
+    norm_eps,
+    ratio,
+    rotary_emb,
+    rope_cache,
+    *,
+    norm_is_fgv=False,
+):
+    if (
+        not norm_is_fgv
+        or torch.is_grad_enabled()
+        or not norm_weight.is_contiguous()
+        or raw_cache.device.type != "cuda"
+        or raw_cache.dtype != torch.bfloat16
+        or raw_cache.shape[-2:] != (1, 128)
+        or int(rotary_emb.rotary_dim) != 64
+        or not bool(rotary_emb.is_neox_style)
+        or ratio != 4
+    ):
+        return False
+    from flaggems_vllm.ops.qwen4.qsa import qsa_compress_groups_with_ratio
+    from flaggems_vllm.ops.gemma_rms_norm import gemma_rms_norm
+    from flaggems_vllm.runtime.backend._metax.ops.rotary_bf16 import (
+        rotary_embedding_bf16_store,
+    )
+
+    # Retain the selected Gemma kernel's reduction and rounding exactly.
+    pooled, first_positions = qsa_compress_groups_with_ratio(
+        raw_cache, raw_table, mapping, logical_positions, slots, ratio, rope_cache
+    )
+    normalized = gemma_rms_norm(pooled.reshape(-1, 128), norm_weight, norm_eps).reshape(
+        -1, 1, 128
+    )
+    sections = getattr(rotary_emb, "mrope_section", None)
+    positions = first_positions.transpose(0, 1) if sections else first_positions[:, 0]
+    rotary_embedding_bf16_store(
+        normalized,
+        positions,
+        rotary_emb._match_cos_sin_cache_dtype(normalized),
+        64,
+        slots,
+        compressed_cache,
+        neox=True,
+        sections=sections,
+        interleaved=bool(getattr(rotary_emb, "mrope_interleaved", False)),
+        fp32_compute=bool(rotary_emb.apply_rotary_emb.enable_fp32_compute),
+    )
+    return True
 
 
 def qwen38_hc_down_activation(x, groups):
@@ -365,6 +446,8 @@ def register_qwen38_operators(registry, *, is_platform_available):
             "qwen38_hc_gate_reduce",
             "qwen38_hc_inject_combine",
             "qwen38_hc_down_activation",
+            "qwen38_qsa_rope",
+            "qwen38_qsa_compress_norm_rope",
         }:
             return True
         if name == "qwen38_gdn_mixed_qkv":
@@ -414,6 +497,8 @@ def register_qwen38_operators(registry, *, is_platform_available):
                 "qwen38_hc_gate_reduce",
                 "qwen38_hc_inject_combine",
                 "qwen38_hc_down_activation",
+                "qwen38_qsa_rope",
+                "qwen38_qsa_compress_norm_rope",
             )
         ]
     )

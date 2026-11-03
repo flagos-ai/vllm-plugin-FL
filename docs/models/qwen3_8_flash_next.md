@@ -345,4 +345,6 @@ The default MTP-off GDN host-metadata path reuses framework chunk boundaries and
 
 The reviewed MetaX BF16 TP8 expert geometry can reuse activation and final output buffers. Final-output reuse requires the separately source-locked native vLLM `supports_output_buffer_alias` capability; it is default-off in the framework and is not part of an unmodified ee0da84 installation. Other layouts, LoRA and quantized paths retain their existing behavior.
 
+The source-locked MetaX QSA interface supports BF16 rotary/cache-store fusion and single-split output normalization/gating. Original BF16 rounding, padding and initialized fallback output are retained. QSA operator publication remains deferred while optimization continues.
+
 These performance paths require the exact dependency composition in `metax_tuning/operator_dependencies.json`; not all numeric operator components are public revisions yet.

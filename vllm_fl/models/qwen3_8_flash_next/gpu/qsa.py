@@ -453,7 +453,14 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                     value[:num_tokens],
                 )
 
-        output.zero_()
+        full_output = self._metax and getattr(
+            self._qsa_sparse_paged_attention, "_qwen38_full_output", False
+        )
+        if not full_output:
+            output.zero_()
+        elif num_tokens < output.shape[0]:
+            # Packed attention overwrites active rows, including empty rows.
+            output[num_tokens:].zero_()
         if num_tokens and self._metax:
             _, split_workspace = qsa_prepare_split_workspace(
                 query[:num_tokens],

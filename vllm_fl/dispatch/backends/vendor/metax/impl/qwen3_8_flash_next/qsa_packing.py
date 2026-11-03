@@ -81,7 +81,7 @@ def packed_attention(
             from flaggems_vllm.runtime.backend._metax.ops.qsa_packed import Candidate
 
             candidate = Candidate(
-                q, mode, splits, 16, warps, stages
+                q, mode, splits, 16, warps, stages, collect_metadata=False
             )
             workspace_cache[key] = candidate
     elif rowmap is not None:
@@ -101,6 +101,7 @@ def packed_attention(
             warps,
             stages,
             rows=rowmap,
+            collect_metadata=False,
         )
     elif score_columns is not None and 512 < score_columns <= 17600:
         # Long-context queries can select different KV columns. Fold each
@@ -119,6 +120,7 @@ def packed_attention(
             preset["block_n"],
             preset["warps"],
             preset["stages"],
+            collect_metadata=False,
         )
     else:
         return False

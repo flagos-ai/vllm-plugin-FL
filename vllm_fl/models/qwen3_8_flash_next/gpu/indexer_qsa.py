@@ -36,6 +36,14 @@ def apply_qsa_rope(
 
     rotary_dim = rotary_emb.rotary_dim
     cache = rotary_emb._match_cos_sin_cache_dtype(tensor)  # noqa: SLF001
+    if is_metax():
+        provider = getattr(rotary_emb, "_qwen38_rope_provider", None)
+        if provider is None:
+            provider = resolve_op("qwen38_qsa_rope")
+            rotary_emb._qwen38_rope_provider = provider
+        result = provider(rotary_emb, positions, tensor, cache)
+        if result is not None:
+            return result
     cos_sin = cache[positions]
     cos, sin = cos_sin.chunk(2, dim=-1)
     fast_result = fast_qsa_rope(rotary_emb, positions, tensor, cos, sin)
@@ -92,6 +100,9 @@ class QSAIndexer(nn.Module):
     ) -> None:
         super().__init__()
         self._metax = is_metax()
+        self._qsa_compress_norm_rope = (
+            resolve_op("qwen38_qsa_compress_norm_rope") if self._metax else None
+        )
         self._long_context_selection = bool(
             self._metax
             and vllm_config.additional_config.get("qwen38_qsa_long_context", False)
@@ -452,6 +463,21 @@ class QSAIndexer(nn.Module):
                 raw_metadata.slot_mapping,
                 position_rows,
             )
+        if self._qsa_compress_norm_rope(
+            raw_key_cache,
+            raw_metadata.block_table,
+            raw_metadata.token_to_req,
+            raw_metadata.logical_positions,
+            compressed_metadata.slot_mapping,
+            self.compressed_key_cache.kv_cache,
+            self.k_layernorm.weight,
+            self.k_layernorm.variance_epsilon,
+            self.compress_ratio,
+            self.rotary_emb,
+            rope_position_cache,
+            norm_is_fgv=bool(self.k_layernorm.fused_gemma_enabled),
+        ):
+            return
         pooled, first_positions = self._qsa_compress_groups_with_ratio(
             raw_key_cache,
             raw_metadata.block_table,

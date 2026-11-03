@@ -73,8 +73,8 @@
     {
       "package": "flaggems_vllm",
       "path": "runtime/backend/_metax/ops/qsa_packed.py",
-      "sha256": "1b3ba59d4373d30ccac4d0ef8e127a741ea3bb45e3b831156f75c3cec13a5f06",
-      "purpose": "Head/query packing with the reviewed BF16 contract",
+      "sha256": "de298c46e1e5235721392e31abfa8b5fdf2c7d7c3b25bc8fd071cb59b6c3e812",
+      "purpose": "Head/query packing with the reviewed BF16 contract; single-split direct output",
       "introduced": "01-hotpaths",
       "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
@@ -124,6 +124,14 @@
       "sha256": "f1338b987757ac9dfb903f41fe6ffc6ff88fc0104a185f8c062d0cb5b9f1a7e6",
       "purpose": "Reuse caller chunk indices and optional host-derived skew; preserve existing kernels and fallback",
       "introduced": "p4k-gdn-host-metadata-20261102",
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/rotary_bf16.py",
+      "sha256": "181aaa4d227ea30d2387b5bae3a43775429e38012d9abd0b89fa556757362898",
+      "purpose": "BF16 partial/1D/MRoPE with eager rounding and optional paged cache store",
+      "introduced": "p4k-mbt8192-buffer-fusions-20261102",
       "status": "Source-locked model integration validated; standalone operator publication pending review"
     }
   ],
@@ -205,7 +213,7 @@
       },
       {
         "path": "runtime/backend/_metax/ops/qsa_packed.py",
-        "sha256": "1b3ba59d4373d30ccac4d0ef8e127a741ea3bb45e3b831156f75c3cec13a5f06"
+        "sha256": "de298c46e1e5235721392e31abfa8b5fdf2c7d7c3b25bc8fd071cb59b6c3e812"
       },
       {
         "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
