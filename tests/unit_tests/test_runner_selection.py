@@ -407,7 +407,7 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
 
 
 def test_ascend_allows_layer_only_vllm_config(monkeypatch):
-    from vllm.config import CompilationMode, CUDAGraphMode, VllmConfig
+    from vllm.config import CompilationMode, CUDAGraphMode, DeviceConfig, VllmConfig
     from vllm.platforms import current_platform
 
     from vllm_fl.platform import PlatformFL
@@ -416,7 +416,7 @@ def test_ascend_allows_layer_only_vllm_config(monkeypatch):
     monkeypatch.setattr(
         current_platform, "check_and_update_config", PlatformFL.check_and_update_config
     )
-    config = VllmConfig()
+    config = VllmConfig(device_config=DeviceConfig(device="cpu"))
     assert config.model_config is None
     assert config.compilation_config.mode is CompilationMode.NONE
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.NONE

@@ -67,6 +67,10 @@ with ATen replacement enabled. The complete model gate must pass separately
 before enabling it. Graph validation here covers BF16, TP2, DP1 without expert
 parallelism, speculative decoding, ubatching, prefix caching or chunked prefill.
 
+The Ascend CI configuration defaults to `USE_FLAGGEMS=0` for the same native
+execution path, including inference and serving checks. An explicit environment
+override can enable FlagGems for separate accuracy investigations.
+
 ## Model gate
 
 For each model in `tools/adaptation-gate-cases/README.md`, start a service with

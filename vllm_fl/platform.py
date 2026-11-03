@@ -529,7 +529,8 @@ class PlatformFL(Platform):
             logger.info("Forcing kv cache block size to 64 for FlagOSMLA backend.")
 
         # lazy import to avoid circular import
-        from vllm.config import CompilationMode, CUDAGraphMode
+        from vllm.config import CUDAGraphMode
+        from vllm.config.compilation import CompilationMode
 
         compilation_config = vllm_config.compilation_config
         if (
