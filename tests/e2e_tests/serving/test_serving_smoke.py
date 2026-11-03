@@ -16,6 +16,8 @@ controlled by the ``serve.stream`` flag in the model YAML.
 """
 
 import base64
+import hashlib
+import json
 import os
 from io import BytesIO
 
@@ -193,7 +195,22 @@ def _generated_image_messages(prompt: str) -> list[dict]:
 
     buffer = BytesIO()
     image.save(buffer, format="JPEG")
-    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    image_bytes = buffer.getvalue()
+    encoded = base64.b64encode(image_bytes).decode("utf-8")
+    print(
+        "[image-input] "
+        + json.dumps(
+            {
+                "sha256": hashlib.sha256(image_bytes).hexdigest(),
+                "bytes": len(image_bytes),
+                "width": image.width,
+                "height": image.height,
+                "format": "JPEG",
+                "mode": image.mode,
+            },
+            sort_keys=True,
+        )
+    )
     return [
         {
             "role": "user",
@@ -206,6 +223,28 @@ def _generated_image_messages(prompt: str) -> list[dict]:
             ],
         }
     ]
+
+
+def _log_chat_metadata(finish_reason, usage) -> None:
+    """Log only completion status and fixed token counts, never request data."""
+    known_reasons = {"stop", "length", "tool_calls", "content_filter", "function_call"}
+    reason = finish_reason if isinstance(finish_reason, str) else None
+    if reason is not None and reason not in known_reasons:
+        reason = "unrecognized"
+    counts = {}
+    for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = (
+            usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        )
+        if type(value) is int and value >= 0:
+            counts[name] = value
+    print(
+        "[chat-result] "
+        + json.dumps(
+            {"finish_reason": reason, "usage": counts or None},
+            sort_keys=True,
+        )
+    )
 
 
 def _run_chat_non_streaming(
@@ -240,6 +279,7 @@ def _run_chat_non_streaming(
 
     content = data["choices"][0]["message"]["content"]
     assert len(content.strip()) > 0, "Assistant message is empty"
+    _log_chat_metadata(data["choices"][0].get("finish_reason"), data.get("usage"))
     print(f"\nResponse: {content}")
     return content
 
@@ -278,11 +318,20 @@ def _run_chat_streaming(
     response = client.chat.completions.create(**create_kwargs)
 
     text = ""
+    finish_reason = None
+    usage = None
     for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content:
-            text += chunk.choices[0].delta.content
+        if chunk.choices:
+            choice = chunk.choices[0]
+            if choice.delta.content:
+                text += choice.delta.content
+            if getattr(choice, "finish_reason", None) is not None:
+                finish_reason = choice.finish_reason
+        if getattr(chunk, "usage", None) is not None:
+            usage = chunk.usage
 
     assert len(text.strip()) > 0, "Streaming response is empty"
+    _log_chat_metadata(finish_reason, usage)
     print(f"\nStreaming response: {text}")
     return text
 

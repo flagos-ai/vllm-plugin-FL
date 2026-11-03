@@ -15,6 +15,53 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2] / "vllm_fl"
 
 
+@pytest.mark.parametrize("with_runtime", [False, True])
+def test_full_graph_wrapper_keeps_platform_selection_and_runtime(with_runtime):
+    tree = ast.parse((ROOT / "worker/model_runner.py").read_text())
+    branch = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and "cudagraph_mode.has_full_cudagraphs()" in ast.unparse(node.test)
+        and any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "resolve_obj_by_qualname"
+            for statement in node.body
+            for call in ast.walk(statement)
+        )
+    )
+    model, config, runtime = object(), object(), object() if with_runtime else None
+    calls = []
+    wrapped_model = object()
+
+    def wrapper(runnable, vllm_config, *, runtime_mode, **kwargs):
+        calls.append((runnable, vllm_config, runtime_mode, kwargs))
+        return wrapped_model
+
+    def resolve(name):
+        assert name == "platform.GraphWrapper"
+        return wrapper
+
+    runner = NS(model=model, vllm_config=config, graph_runtime=runtime)
+    namespace = {
+        "self": runner,
+        "cudagraph_mode": NS(has_full_cudagraphs=lambda: True),
+        "CUDAGraphMode": NS(FULL="full"),
+        "resolve_obj_by_qualname": resolve,
+        "current_platform": NS(
+            get_static_graph_wrapper_cls=lambda: "platform.GraphWrapper"
+        ),
+    }
+    exec(
+        compile(ast.Module(body=branch.body, type_ignores=[]), "full-wrapper", "exec"),
+        namespace,
+    )
+    expected_kwargs = {"graph_runtime": runtime} if with_runtime else {}
+    assert calls == [(model, config, "full", expected_kwargs)]
+    assert runner.model is wrapped_model
+
+
 def _ascend_phase_helpers():
     tree = ast.parse(
         (ROOT / "dispatch/backends/vendor/ascend/impl/attention.py").read_text()
