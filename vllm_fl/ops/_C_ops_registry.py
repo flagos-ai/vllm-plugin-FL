@@ -1,24 +1,54 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
 #
-# Register torch.ops._C op schemas so that vllm compilation passes can
+# Register namespaced vLLM op schemas so that vllm compilation passes can
 # reference them for pattern matching even when the native vllm._C extension
 # is not compiled for this platform.
 
 import logging
+from contextlib import suppress
 
 import torch
 
 logger = logging.getLogger(__name__)
 
+# These optional kernels use schema presence as an upstream capability probe.
+# They are not needed by compilation pattern imports. Defining only a schema
+# would suppress the real Triton/Torch fallback despite having no CUDA kernel.
+_OPTIONAL_NATIVE_ONLY_OPS = frozenset(
+    {
+        "dsv3_fused_a_gemm",
+        "fused_gdn_decode_post_conv_mtp",
+        "fused_kda_decode",
+        "fused_kda_chunk",
+        "hadacore_transform",
+        "kimi_k3_attn_res",
+    }
+)
 
-# Fallback implementations for query ops
+
+def _unavailable_cuda_view(tensor):
+    raise RuntimeError(
+        "vLLM empty builds do not provide a mapped CUDA view of CPU memory; "
+        "this backend must provide an implementation or avoid mapped CPU buffers"
+    )
+
+
+def _unavailable_weak_ref(tensor):
+    raise RuntimeError(
+        "CUDA graph weak references require the vllm_fl._C extension; "
+        "install the plugin with VLLM_VENDOR=cuda"
+    )
+
+
+# A capable GPU does not supply the absent CUTLASS kernels. Keep upstream
+# selection on implementations that an EMPTY wheel actually provides.
 _QUERY_OP_IMPLS = [
-    ("cutlass_scaled_mm_supports_fp8", lambda cap: cap >= 89),
-    ("cutlass_scaled_mm_supports_block_fp8", lambda cap: cap >= 100),
-    ("cutlass_group_gemm_supported", lambda cap: cap >= 90),
-    ("cutlass_scaled_mm_supports_fp4", lambda cap: cap >= 100),
-    ("weak_ref_tensor", lambda t: t),
-    ("get_cuda_view_from_cpu_tensor", lambda t: t),
+    ("cutlass_scaled_mm_supports_fp8", lambda cap: False),
+    ("cutlass_scaled_mm_supports_block_fp8", lambda cap: False),
+    ("cutlass_group_gemm_supported", lambda cap: False),
+    ("cutlass_scaled_mm_supports_fp4", lambda cap: False),
+    ("weak_ref_tensor", _unavailable_weak_ref),
+    ("get_cuda_view_from_cpu_tensor", _unavailable_cuda_view),
 ]
 
 
@@ -44,12 +74,13 @@ _CUDA_FALLBACK_IMPLS = [
 
 
 def register_op_schemas():
-    """Register _C op schemas if not already present."""
-    if getattr(register_op_schemas, "_lib", None) is not None:
+    """Register missing vLLM schemas in their upstream namespaces."""
+    if getattr(register_op_schemas, "_libs", None) is not None:
         return
 
     try:
         import vllm._C  # noqa: F401
+
         return
     except (ImportError, OSError):
         pass
@@ -58,6 +89,7 @@ def register_op_schemas():
     # before our FRAGMENT definitions.  The hasattr check below will then
     # skip any ops already registered by mcoplib, avoiding c10::Error.
     import importlib.util
+
     if importlib.util.find_spec("mcoplib") is not None:
         try:
             import mcoplib._C  # noqa: F401
@@ -70,31 +102,36 @@ def register_op_schemas():
         logger.warning("No op schemas found; torch.compile may not work.")
         return
 
-    lib = torch.library.Library("_C", "FRAGMENT")
+    libs = {}
 
-    for schema in schemas:
+    for namespace, schema in schemas:
         full_name = schema.split("(")[0]
         op_name = full_name.split(".")[0]
+        if namespace == "_C" and op_name in _OPTIONAL_NATIVE_ONLY_OPS:
+            continue
+        if namespace not in libs:
+            libs[namespace] = torch.library.Library(namespace, "FRAGMENT")
+        lib = libs[namespace]
+        ops = getattr(torch.ops, namespace)
         overload = full_name.split(".")[1] if "." in full_name else "default"
-        if hasattr(torch.ops._C, op_name) and hasattr(
-            getattr(torch.ops._C, op_name), overload
-        ):
+        if hasattr(ops, op_name) and hasattr(getattr(ops, op_name), overload):
             continue
         try:
             lib.define(schema)
         except Exception as e:
-            logger.debug("Failed to register _C op schema '%s': %s", full_name, e)
+            raise RuntimeError(
+                f"Failed to register the vLLM 0.32 schema {namespace}::{full_name}"
+            ) from e
 
-    for name, fn in _QUERY_OP_IMPLS:
-        try:
-            lib.impl(name, fn, "CompositeImplicitAutograd")
-        except Exception:
-            pass
+    c_lib = libs.get("_C")
+    if c_lib is not None:
+        for name, fn in _QUERY_OP_IMPLS:
+            with suppress(RuntimeError):
+                c_lib.impl(name, fn, "CompositeImplicitAutograd")
 
-    for name, fn in _CUDA_FALLBACK_IMPLS:
-        try:
-            lib.impl(name, fn, "CUDA")
-        except Exception:
-            pass
+        for name, fn in _CUDA_FALLBACK_IMPLS:
+            with suppress(RuntimeError):
+                c_lib.impl(name, fn, "CUDA")
 
-    register_op_schemas._lib = lib
+    # Library registrations are removed when the Library is garbage-collected.
+    register_op_schemas._libs = libs

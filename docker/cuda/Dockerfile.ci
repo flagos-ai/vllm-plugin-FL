@@ -1,0 +1,97 @@
+# Copyright 2026 FlagOS Contributors
+# Build with the repository root as context (docker/build.sh selects it).
+# Preserve the complete upstream CUDA wheel and all its native extensions.
+ARG CUDA_CI_BASE_IMAGE=vllm/vllm-openai:v0.32.0-cu129@sha256:bc0445dac61accbf1c3b17fbb524a71eee0b1b32f55ba45952095e3be8991c3f
+# An offline rebuild can reuse prepared local stages with these build args.
+# The wheels image must provide FlagTree, FlagGems and TorchCodec in /opt/fl-wheels.
+ARG CUDA_CI_RUNTIME_IMAGE=tools
+ARG CUDA_CI_WHEELS_IMAGE=wheels
+FROM ${CUDA_CI_BASE_IMAGE} AS tools
+# Repository CI entry points use python; the official image provides python3.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/python3 /usr/local/bin/python
+
+ARG INDEX_URL
+ARG EXTRA_INDEX_URL
+COPY docker/cuda/requirements-ci.txt /opt/fl-ci/requirements.txt
+RUN python -m pip install --no-cache-dir \
+        ${INDEX_URL:+--index-url ${INDEX_URL}} \
+        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
+        -r /opt/fl-ci/requirements.txt
+
+FROM tools AS tree-wheels
+ARG INDEX_URL
+ARG FLAGTREE_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagTree/tar.gz/317a0249ec25c6756e0aee3a87e8e3c92f154335
+ARG FLAGCX_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagCX/tar.gz/c93438decaba8d935e7aa6ae8377e56fd3910b32
+ARG FLAGTREE_LLVM_URL=https://oaitriton.blob.core.windows.net/public/llvm-builds/llvm-f6ded0be-ubuntu-x64.tar.gz
+ARG GOOGLETEST_SOURCE_URL=https://codeload.github.com/google/googletest/tar.gz/refs/tags/v1.17.0
+ARG FLAGTREE_MAX_JOBS=12
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        zlib1g-dev libxml2-dev nlohmann-json3-dev clang llvm lld ccache \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-deps --no-cache-dir \
+        ${INDEX_URL:+--index-url ${INDEX_URL}} \
+        lit==18.1.8 pybind11-stubgen==2.5.5
+COPY docker/cuda/build-flagtree.sh /opt/fl-build/build-flagtree.sh
+RUN bash /opt/fl-build/build-flagtree.sh
+
+FROM tools AS wheels
+ARG INDEX_URL
+ARG EXTRA_INDEX_URL
+ARG FLAGGEMS_SOURCE_URL=https://codeload.github.com/flagos-ai/FlagGems/tar.gz/6fe7709e7717e49cf12bb00346719a0885f505fa
+
+WORKDIR /opt/fl-build
+# Source URL overrides may point to a cache; fixed checksums still enforce
+# the exact official archives. Keep sources unmodified and install ordinary wheels.
+RUN curl -fsSL --retry 5 "${FLAGGEMS_SOURCE_URL}" -o flaggems.tar.gz \
+    && echo "1925bcf08657f011cc0aa1193ecf96742a7c18fa66121fb1ab36c8142d8107b7  flaggems.tar.gz" | sha256sum -c - \
+    && mkdir flaggems \
+    && tar -xzf flaggems.tar.gz --strip-components=1 -C flaggems \
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_FLAG_GEMS=5.4.0+g6fe7709e7717 python -m pip wheel \
+        ${INDEX_URL:+--index-url ${INDEX_URL}} \
+        ${EXTRA_INDEX_URL:+--extra-index-url ${EXTRA_INDEX_URL}} \
+        --no-deps --wheel-dir /opt/fl-wheels ./flaggems
+
+COPY --from=tree-wheels /opt/fl-wheels/ /opt/fl-wheels/
+
+# The official cu129 base includes a default CUDA13 TorchCodec wheel. Use
+# the matching CUDA12.9 release (supported with torch>=2.11) so media/LLM
+# imports do not require CUDA13 libraries.
+RUN python -m pip download --no-deps --only-binary=:all: \
+        --index-url https://download.pytorch.org/whl/cu129 \
+        --dest /opt/fl-wheels 'torchcodec==0.16.0+cu129'
+
+FROM ${CUDA_CI_WHEELS_IMAGE} AS ci-wheels
+
+FROM ${CUDA_CI_RUNTIME_IMAGE} AS ci
+COPY .github/scripts/cuda/stack.py /opt/fl-ci/stack.py
+COPY docker/cuda/record-provenance.py /opt/fl-ci/record-provenance.py
+COPY --from=ci-wheels /opt/fl-wheels /opt/fl-wheels
+# CI dependencies are resolved before installing FlagTree, which deliberately
+# replaces PyTorch's standalone Triton provider. Never resolve the FL wheels
+# against torch's triton requirement after this point.
+RUN python -m pip uninstall -y triton \
+    && python -m pip install --no-index --no-cache-dir --no-deps \
+        /opt/fl-wheels/flagtree-*.whl /opt/fl-wheels/flag_gems-*.whl \
+        /opt/fl-wheels/torchcodec-*.whl \
+    && python /opt/fl-ci/record-provenance.py /opt/fl-ci/stack.py \
+        /opt/fl-wheels /opt/fl-ci/provenance.json \
+    && rm -rf /opt/fl-wheels
+
+# Retain pip's exact Git provenance and protect the pinned native CUDA/FL stack.
+# CI setup runs the same installer idempotently without fetching another copy.
+COPY .github/scripts/install_flaggems_vllm.py /opt/fl-ci/install_flaggems_vllm.py
+RUN python /opt/fl-ci/install_flaggems_vllm.py \
+    && python -I -B /opt/fl-ci/stack.py --runtime-only
+
+ENV VLLM_PLUGINS=fl \
+    VLLM_USE_V2_MODEL_RUNNER=1 \
+    USE_FLAGGEMS=1 \
+    GEMS_VENDOR=nvidia \
+    USE_FLAGTUNE=0
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["/bin/bash"]

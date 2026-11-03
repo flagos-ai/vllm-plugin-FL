@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import timedelta
-from types import MethodType, NoneType
+from types import NoneType
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -81,7 +81,6 @@ from vllm.v1.outputs import (
 )
 from vllm.v1.utils import compute_iteration_details, report_usage_stats
 from vllm.v1.worker.gpu.warmup import warmup_kernels
-from vllm.v1.worker.gpu_worker import Worker as NativeGPUWorker
 from vllm.v1.worker.sentinel.gpu_worker_sentinel import WorkerSentinel
 from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
@@ -91,10 +90,8 @@ from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
-import vllm_fl.envs as fl_envs
-from vllm_fl.attention.utils import patch_mm_encoder_attention
 from vllm_fl.dispatch.io_common import managed_inference_mode
-from vllm_fl.utils import get_flag_gems_whitelist_blacklist
+from vllm_fl.worker.runtime import _initialize_fl_runtime
 
 logger = init_logger(__name__)
 
@@ -123,139 +120,6 @@ if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-
-
-def _initialize_fl_runtime(rank: int) -> None:
-    """Install FL dispatch hooks before model/operator construction."""
-    from vllm_fl.ops.custom_ops import register_oot_ops
-
-    # CustomOp caches its selected forward method in __init__, so the
-    # multimodal attention patch must run before model construction.
-    patch_mm_encoder_attention()
-    register_oot_ops()
-
-    if not fl_envs.USE_FLAGGEMS:
-        return
-
-    import flag_gems
-
-    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
-    should_record = rank == 0
-    common = {
-        "record": should_record,
-        "once": True,
-        "path": fl_envs.FLAGGEMS_ENABLE_OPLIST_PATH,
-    }
-    if whitelist:
-        logger.info("[FlagGems] Enable only the following ops: %s", whitelist)
-        flag_gems.only_enable(include=whitelist, **common)
-    elif blacklist:
-        logger.info("[FlagGems] Disable the following ops: %s", blacklist)
-        flag_gems.enable(unused=blacklist, **common)
-    else:
-        logger.info("[FlagGems] Enable all ops")
-        flag_gems.enable(**common)
-
-
-_NATIVE_RUNNER_IO_METHODS = ("execute_model", "sample_tokens", "pool")
-
-
-def _install_native_runner_io_methods(model_runner: Any) -> None:
-    """Replace native runner inference-mode wrappers on one runner instance.
-
-    vLLM's NVIDIA V1 and V2 runners decorate their execution entry points
-    with ``torch.inference_mode``. IO dumping needs ``torch.no_grad`` while its
-    TorchDispatchMode is active. Unwrapping only that outer decorator keeps the
-    native runner implementation and any inner vLLM decorators unchanged.
-    """
-    for method_name in _NATIVE_RUNNER_IO_METHODS:
-        bound_method = getattr(model_runner, method_name, None)
-        if bound_method is None or getattr(bound_method, "_vllm_fl_managed_io", False):
-            continue
-
-        method = getattr(bound_method, "__func__", bound_method)
-        native_impl = getattr(method, "__wrapped__", None)
-        if native_impl is None:
-            raise RuntimeError(
-                f"Native model runner method {method_name!r} no longer exposes "
-                "the vLLM inference-mode wrapper"
-            )
-
-        managed_impl = managed_inference_mode()(native_impl)
-        managed_impl._vllm_fl_managed_io = True
-        setattr(model_runner, method_name, MethodType(managed_impl, model_runner))
-
-
-def _call_native_worker_with_managed_inference(
-    method: Callable, worker: "NvidiaWorkerFL", *args, **kwargs
-) -> Any:
-    """Call a native worker method without its fixed inference-mode wrapper."""
-    native_impl = getattr(method, "__wrapped__", None)
-    if native_impl is None:
-        raise RuntimeError(
-            f"Native worker method {method.__name__!r} no longer exposes "
-            "the vLLM inference-mode wrapper"
-        )
-    return managed_inference_mode()(native_impl)(worker, *args, **kwargs)
-
-
-class NvidiaWorkerFL(NativeGPUWorker):
-    """Thin FL wrapper around vLLM's target-version NVIDIA worker.
-
-    NVIDIA uses the upstream v0.28 GPU worker and V2 model runner unchanged;
-    the plugin only installs its dispatch hooks before model construction.
-    Keeping this as a delegating wrapper prevents the copied multi-vendor
-    worker below from drifting from CUDA behavior in future vLLM releases.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._fl_io_dump_initialized = False
-        _initialize_fl_runtime(self.rank)
-
-    def _ensure_io_dump_initialized(self) -> None:
-        """Enable IO dumping on the first execution after model loading."""
-        if self._fl_io_dump_initialized:
-            return
-
-        from vllm_fl.dispatch.io_dumper import (
-            init_io_dump_from_env,
-            is_dump_enabled,
-            register_io_module_hooks,
-        )
-
-        init_io_dump_from_env(getattr(self.model_config, "enforce_eager", False))
-        if is_dump_enabled():
-            _install_native_runner_io_methods(self.model_runner)
-            register_io_module_hooks(self.model_runner.get_model())
-            logger.info("Enabled FL IO dumping for the native NVIDIA model runner")
-        self._fl_io_dump_initialized = True
-
-    def sample_tokens(
-        self, grammar_output: "GrammarOutput | None"
-    ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
-        self._ensure_io_dump_initialized()
-        output = _call_native_worker_with_managed_inference(
-            NativeGPUWorker.sample_tokens, self, grammar_output
-        )
-        if output is not None:
-            from vllm_fl.dispatch.io_dumper import advance_io_step
-
-            advance_io_step()
-        return output
-
-    def execute_model(
-        self, scheduler_output: "SchedulerOutput"
-    ) -> ModelRunnerOutput | AsyncModelRunnerOutput | None:
-        self._ensure_io_dump_initialized()
-        output = _call_native_worker_with_managed_inference(
-            NativeGPUWorker.execute_model, self, scheduler_output
-        )
-        if output is not None:
-            from vllm_fl.dispatch.io_dumper import advance_io_step
-
-            advance_io_step()
-        return output
 
 
 def _apply_worker_vendor_patches() -> None:
