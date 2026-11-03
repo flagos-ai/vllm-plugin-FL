@@ -276,6 +276,7 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
     ]
     namespace = {
         "os": os,
+        "_install_metax_compat": Mock(),
         "_arm_cpu_platform": lambda: None,
         "_patch_custom_ops": Mock(),
         "_patch_flash_attn_import": Mock(),
