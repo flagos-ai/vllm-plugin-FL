@@ -40,6 +40,11 @@ Patched names:
     capability probe, so it correctly reports False for 0.32 models and the
     XDRoPE branch is simply never taken.
 
+``vllm.v1.worker.gpu.attn_utils._reshape_attention_kv_cache``
+    Private helper the model runner uses to build KV-cache views. Its
+    ``page_aligned_blocks`` branch is what handles KV-first
+    ``(2, num_blocks, ...)`` layouts such as ROCm's.
+
 ``vllm.v1.outputs.RoutedExpertsLists``
 ``vllm.v1.outputs.RoutedExpertsTensors``
     Carriers for the opt-in routed-experts output, redesigned upstream around
@@ -49,7 +54,8 @@ Patched names:
 
 from __future__ import annotations
 
-from functools import cache
+from functools import lru_cache
+from math import prod
 from typing import NamedTuple, Protocol, runtime_checkable
 
 import numpy as np
@@ -94,7 +100,7 @@ class _SupportsXDRoPE(Protocol):
     """Structural interface for models providing XDRoPE input positions."""
 
     def get_xdrope_input_positions(self, *args, **kwargs):
-        pass
+        """Return the model's XDRoPE input positions."""
 
 
 def _supports_xdrope(model: object) -> bool:
@@ -123,6 +129,89 @@ class _XDRotaryEmbedding:
             dtype=out.dtype,
         )
         out[:, out_offset : out_offset + num_new_tokens] = values
+
+
+# ---------------------------------------------------------------------------
+# KV cache views
+# ---------------------------------------------------------------------------
+def _dtype_size(dtype: torch.dtype) -> int:
+    return torch.tensor([], dtype=dtype).element_size()
+
+
+def _reshape_attention_kv_cache(
+    kv_raw_tensor: torch.Tensor,
+    kv_cache_spec,
+    kv_cache_shape: tuple[int, ...],
+    kv_cache_stride_order: tuple[int, ...],
+    num_blocks: int,
+    packing: tuple[int, int] | None,
+    page_aligned_blocks: bool = False,
+) -> torch.Tensor:
+    """Build the typed KV-cache view over a raw byte tensor (vLLM v0.28 port)."""
+    permuted_kv_cache_shape = tuple(kv_cache_shape[i] for i in kv_cache_stride_order)
+    inv_order = [
+        kv_cache_stride_order.index(i) for i in range(len(kv_cache_stride_order))
+    ]
+    dtype = kv_cache_spec.dtype
+
+    if packing is not None:
+        offset, block_stride = packing
+        assert inv_order[0] == 0
+        page_bytes = prod(kv_cache_shape[1:]) * _dtype_size(dtype)
+        kv_cache = (
+            kv_raw_tensor.view(-1, block_stride)[:, offset : offset + page_bytes]
+            .view(dtype)
+            .view(permuted_kv_cache_shape)
+        )
+    elif kv_cache_spec.page_size_padded is not None:
+        # Use a strided view to skip the padding between physical pages.
+        #
+        # Only num-blocks-first layouts are supported (the block dimension is
+        # dim 0 of the unpermuted shape). kv-first layouts such as ROCm's
+        # ``(2, num_blocks, ...)`` are intentionally not supported here. For a
+        # num-blocks-first layout the only stride that must change is the block
+        # stride: every other (contiguous) stride already steps within the
+        # unpadded region of a page, so no further adjustment is needed.
+        assert kv_cache_shape[0] == num_blocks, (
+            "Padded KV pages require a num-blocks-first KV cache layout (got "
+            f"shape {kv_cache_shape} with num_blocks={num_blocks}); "
+            "kv-first layouts are not supported."
+        )
+        dtype_size = _dtype_size(kv_cache_spec.dtype)
+        page_stride = kv_cache_spec.page_size_bytes // dtype_size
+
+        num_blocks_dim = inv_order[0]
+        strides = list(torch.empty(permuted_kv_cache_shape, device="meta").stride())
+        strides[num_blocks_dim] = page_stride
+
+        kv_cache = torch.as_strided(
+            kv_raw_tensor.view(dtype),
+            size=permuted_kv_cache_shape,
+            stride=tuple(strides),
+        )
+    elif page_aligned_blocks:
+        # A KV-first layout such as ROCm's ``(2, num_blocks, ...)`` puts block
+        # ``b``'s K and V in two far-apart halves of the allocation, so block
+        # ``b`` does not cover page ``b``. Mamba layers sharing the allocation
+        # do address their state by page, so the two would resolve the same
+        # bytes. Build the view page-first instead, then swap the dims back.
+        assert kv_cache_shape[1] == num_blocks and kv_cache_stride_order == tuple(
+            range(len(kv_cache_shape))
+        ), (
+            "Page-aligned KV blocks expect a default-strided (kv, num_blocks, "
+            f"...) layout, got shape {kv_cache_shape} with stride order "
+            f"{kv_cache_stride_order} and num_blocks={num_blocks}."
+        )
+        kv_cache = (
+            kv_raw_tensor.view(dtype)
+            .view(num_blocks, kv_cache_shape[0], *kv_cache_shape[2:])
+            .transpose(0, 1)
+        )
+    else:
+        # No padding — safe to use a contiguous view.
+        kv_cache = kv_raw_tensor.view(dtype).view(permuted_kv_cache_shape)
+
+    return kv_cache.permute(*inv_order)
 
 
 # ---------------------------------------------------------------------------
@@ -168,13 +257,18 @@ def _set_missing(module, name: str, value) -> None:
         setattr(module, name, value)
 
 
-@cache
+@lru_cache(maxsize=1)
 def apply_worker_symbols_032() -> bool:
-    """Re-publish v0.28 worker helpers that vLLM 0.32 removed. Idempotent."""
+    """Re-publish v0.28 worker helpers that vLLM 0.32 removed.
+
+    Cached, so repeat calls are free; the installs themselves are also
+    individually idempotent via ``_set_missing``.
+    """
     from vllm.model_executor.layers import rotary_embedding
     from vllm.model_executor.models import interfaces
     from vllm.v1 import outputs
     from vllm.v1.worker import utils as worker_utils
+    from vllm.v1.worker.gpu import attn_utils
 
     _set_missing(
         worker_utils, "is_residual_scattered_for_sp", _is_residual_scattered_for_sp
@@ -182,6 +276,7 @@ def apply_worker_symbols_032() -> bool:
     _set_missing(rotary_embedding, "XDRotaryEmbedding", _XDRotaryEmbedding)
     _set_missing(interfaces, "SupportsXDRoPE", _SupportsXDRoPE)
     _set_missing(interfaces, "supports_xdrope", _supports_xdrope)
+    _set_missing(attn_utils, "_reshape_attention_kv_cache", _reshape_attention_kv_cache)
     _set_missing(outputs, "RoutedExpertsLists", _RoutedExpertsLists)
     _set_missing(outputs, "RoutedExpertsTensors", _RoutedExpertsTensors)
 
