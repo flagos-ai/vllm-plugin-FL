@@ -172,6 +172,7 @@ def fixture(
     config.cudagraph_mode = GraphMode.PIECEWISE if graph_mode is None else graph_mode
     config.compile_sizes = None
     config.inductor_compile_config = {}
+    config.decoder_replay_cudagraph_capture_sizes = []
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
     config.pass_config = SimpleNamespace(
@@ -456,17 +457,30 @@ def test_explicit_list_keeps_identity_and_existing_order():
     [
         ({}, GraphMode.NONE),
         ({"fuse_attn_quant": True}, GraphMode.FULL),
-        ({"enable_sp": True}, GraphMode.FULL),
-        ({"fuse_gemm_comms": True}, GraphMode.FULL),
+        ({"enable_sp": True}, GraphMode.PIECEWISE),
+        ({"fuse_gemm_comms": True}, GraphMode.PIECEWISE),
     ],
 )
 def test_initializer_graph_mode_changes_are_preserved(passes, expected):
     platform, vconfig, _ = fixture(split=[] if not passes else None, **passes)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.cudagraph_mode is expected
-    assert vconfig.compilation_config.splitting_ops == []
+    # vLLM 0.32 no longer promotes the legacy SP/GEMM flags to FULL. Those
+    # cases retain piecewise attention/KV boundaries and the MUSA TP split.
+    expected_splits = (
+        list(ConfigContract._attention_ops)
+        + [
+            "vllm::unified_kv_cache_update",
+            "vllm::unified_mla_kv_cache_update",
+            "vllm::all_reduce",
+        ]
+        if expected is GraphMode.PIECEWISE
+        else []
+    )
+    assert vconfig.compilation_config.splitting_ops == expected_splits
     vconfig.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
     assert vconfig.compilation_config.cudagraph_mode is expected
+    assert vconfig.compilation_config.splitting_ops == expected_splits
 
 
 @pytest.mark.parametrize(
