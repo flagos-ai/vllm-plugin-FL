@@ -11,9 +11,9 @@ on:
     paths:
       - .github/workflows/forward-sync.yml
       - .github/scripts/forward-sync.cjs
-      - .github/scripts/forward-sync-git.cjs
+      - .github/scripts/forward-sync-projection.cjs
       - .github/scripts/tests/forward-sync.test.cjs
-      - .github/scripts/tests/forward-sync-git.test.cjs
+      - .github/scripts/tests/forward-sync-projection.test.cjs
   # GitHub enables manual dispatch only after this file also exists on main.
   workflow_dispatch:
 
@@ -30,7 +30,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Test reconciliation without GitHub writes
-        run: node --test .github/scripts/tests/forward-sync.test.cjs .github/scripts/tests/forward-sync-git.test.cjs
+        run: node --test .github/scripts/tests/forward-sync.test.cjs .github/scripts/tests/forward-sync-projection.test.cjs
 
   sync:
     name: Create or update forward-sync PR
@@ -54,8 +54,6 @@ jobs:
           persist-credentials: false
       - name: Reconcile source branch into one reviewable PR
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-        env:
-          FORWARD_SYNC_TOKEN: ${{ github.token }}
         with:
           # Intentionally GITHUB_TOKEN only: no PAT, auto-merge, or PR merge call.
           script: |
