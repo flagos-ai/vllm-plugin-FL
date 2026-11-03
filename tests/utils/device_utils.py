@@ -42,6 +42,15 @@ def get_visible_device_env_var() -> str:
     return "CUDA_VISIBLE_DEVICES"
 
 
+def _txda_runtime():
+    """Return the optional TXDA runtime, including its PrivateUse1 registration."""
+    try:
+        import torch_txda  # noqa: F401
+    except ImportError:
+        return None
+    return getattr(torch, "txda", None)
+
+
 def _gcu_runtime():
     """Load an installed GCU SDK without hiding driver/import failures."""
     if find_spec("torch_gcu") is None:
@@ -62,7 +71,11 @@ def get_backend() -> str:
         runtime = _gcu_runtime()
         return "enflame" if runtime is not None and runtime.is_available() else "cpu"
     if _BACKEND:
-        return _BACKEND
+        return "tsingmicro" if _BACKEND == "txda" else _BACKEND
+    # Check TXDA before CUDA: transfer_to_txda may expose CUDA-style aliases.
+    txda = _txda_runtime()
+    if txda is not None and txda.is_available():
+        return "tsingmicro"
     # TorchGCU exposes CUDA-compatible aliases. Identify its native runtime
     # first so NVIDIA-only tests cannot run on GCU through those aliases.
     runtime = _gcu_runtime()
@@ -90,6 +103,9 @@ def is_accelerator_available() -> bool:
     backend = get_backend()
     if backend == "hygon":
         return torch.cuda.is_available()
+    if backend == "tsingmicro":
+        txda = _txda_runtime()
+        return txda is not None and txda.is_available()
     return backend not in ("cpu", "")
 
 
@@ -100,6 +116,9 @@ def get_device(index: int = 0) -> torch.device:
         return torch.device(f"cuda:{index}")
     elif backend == "ascend":
         return torch.device(f"npu:{index}")
+    elif backend == "tsingmicro":
+        _txda_runtime()
+        return torch.device(f"txda:{index}")
     elif backend == "enflame":
         return torch.device(f"gcu:{index}")
     return torch.device("cpu")
@@ -120,6 +139,9 @@ def get_device_count() -> int:
     backend = get_backend()
     if backend in ("nvidia", "hygon", "tianshu"):
         return torch.cuda.device_count()
+    elif backend == "tsingmicro":
+        txda = _txda_runtime()
+        return txda.device_count() if txda is not None else 0
     elif backend == "ascend":
         try:
             import torch_npu  # noqa: F401

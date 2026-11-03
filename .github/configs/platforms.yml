@@ -85,6 +85,8 @@ platforms:
       - vllm_fl/dispatch/config/nvidia_hopper.yaml
       - vllm_fl/dispatch/backends/vendor/cuda/
   ascend:
+    # Enablement follows the 0.4.0-dev line's own registry (the per-line
+    # compatibility matrix is the line's state, not main's).
     enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/ascend.yaml
@@ -99,8 +101,6 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/hygon.yaml
   metax:
-    # This line's image is still based on vLLM 0.24; keep the platform gated
-    # until a vLLM 0.28-compatible image is published.
     enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/metax.yaml
@@ -110,8 +110,6 @@ platforms:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
   musa:
-    # The available CI image still carries vLLM 0.20.x while this branch
-    # targets vLLM 0.28. Re-enable after publishing a matching MUSA image.
     enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/musa.yaml
@@ -130,8 +128,6 @@ platforms:
       - vllm_fl/dispatch/config/enflame.yaml
       - vllm_fl/dispatch/backends/vendor/gcu/
   kunlunxin:
-    # This line's image is still based on vLLM 0.20.x; keep the platform gated
-    # until a vLLM 0.28-compatible image is published.
     enabled: false
     trigger_paths:
       - vllm_fl/dispatch/config/kunlunxin.yaml

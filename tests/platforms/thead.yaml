@@ -77,6 +77,11 @@ zw810e:
             - 35b_a3b_tp4_graph
     timeouts:
       e2e:
+        # Inference serializes (every case is TP4 over the only 4 visible
+        # cards). Measured: eager 7+5 min, then the graph case was at 30/51
+        # captures (48.9s/it, ~17 min ETA) when the 90-min wall hit — total
+        # need ~105-110 min. 120 covers it with headroom.
+        inference: 120
         serving: 180
         concurrent: 180
     functional:
