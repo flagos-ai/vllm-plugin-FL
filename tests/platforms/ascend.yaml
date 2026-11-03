@@ -77,7 +77,10 @@ device_overrides:
 unsupported_features: []
 
 # Default environment variables for this platform (applied by run.py before tests start)
-env_defaults: {}
+# Exercise FlagGems registration with an audited ATen whitelist.
+env_defaults:
+  USE_FLAGGEMS: "1"
+  VLLM_FL_FLAGOS_WHITELIST: "zeros"
 
 # ---- Device-specific test configurations ------------------------------------
 910c:
