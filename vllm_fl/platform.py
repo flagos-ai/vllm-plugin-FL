@@ -55,6 +55,7 @@ dist_backend_dict = {
     "cuda": "nccl",
     "musa": "mccl",
     "gcu": "eccl",
+    "txda": "tccl",
 }
 
 
@@ -221,6 +222,59 @@ class PlatformFL(Platform):
         import vllm.kernels  # noqa: F401
 
     @classmethod
+    def apply_config_platform_defaults(cls, vllm_config: "VllmConfig") -> None:
+        """Install MetaX graph defaults before vLLM finalizes graph settings.
+
+        vLLM calls this right after CLI parsing, before the cudagraph capture
+        sizes / max graph size are derived from the graph mode. Setting the
+        defaults here keeps a bare serve (no ``--compilation-config``)
+        capturing graphs without fighting the final configuration checks.
+
+        Explicit user configuration wins: ``--enforce-eager`` /
+        ``-O0`` (``mode == NONE``) and an explicit ``cudagraph_mode`` are left
+        untouched. Rewriting a finalized ``NONE`` to ``PIECEWISE`` afterwards
+        would also trip vLLM's "piecewise requires VLLM_COMPILE" assertion.
+        """
+        if cls.vendor_name != "metax":
+            return
+
+        # import_kernels() applies the patches while vLLM may still be
+        # initialising, so one of them can hit a circular import. Retry the
+        # leftovers here, before any model layer is built.
+        from vllm_fl.dispatch.backends.vendor.metax.patches import ensure_patches
+
+        failed_patches = ensure_patches()
+        if failed_patches:
+            logger.warning("metax patches not applied: %s", sorted(failed_patches))
+
+        compilation_config = getattr(vllm_config, "compilation_config", None)
+        if compilation_config is None:
+            return
+
+        from vllm.config import CUDAGraphMode
+        from vllm.config.compilation import CompilationMode
+
+        if compilation_config.mode == CompilationMode.NONE:
+            # Explicit eager / no-graph run.
+            return
+        if compilation_config.cudagraph_mode is not None:
+            # Explicit -cc.cudagraph_mode=... ; do not override.
+            return
+
+        # PIECEWISE only: use_inductor_graph_partition is rejected by
+        # torch 2.8.0+metax, so graph partitioning stays off.
+        compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
+        if not getattr(compilation_config, "cudagraph_capture_sizes", None):
+            compilation_config.cudagraph_capture_sizes = [
+                1, 2, 4, 8, 16, 32, 64, 128, 256
+            ]
+        if hasattr(compilation_config, "cudagraph_mm_encoder"):
+            compilation_config.cudagraph_mm_encoder = False
+        pass_config = getattr(compilation_config, "pass_config", None)
+        if pass_config is not None:
+            pass_config.fuse_rope_kvcache_cat_mla = False
+
+    @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
         if cls.vendor_name == "iluvatar" and vllm_config.use_v2_model_runner:
             raise ValueError(
@@ -279,13 +333,49 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        if cls.device_type == "npu" and vllm_config.use_v2_model_runner:
+        if cls.device_type in {"npu", "txda"} and vllm_config.use_v2_model_runner:
+            platform_name = "Ascend" if cls.device_type == "npu" else "Tsingmicro TXDA"
             raise ValueError(
-                "Ascend requires ModelRunnerFL; the upstream V2 runner uses "
+                f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
         parallel_config = vllm_config.parallel_config
+        if cls.device_type == "txda":
+            if getattr(vllm_config, "speculative_config", None) is not None:
+                raise ValueError(
+                    "Tsingmicro TXDA does not support speculative decoding; "
+                    "the fused speculative Mamba state-copy path is unsupported. "
+                    "Remove --speculative-config to use the FL/V1 runner."
+                )
+            parallel_config.disable_custom_all_reduce = True
+            if any(
+                getattr(parallel_config, field, 1) > 1
+                for field in (
+                    "prefill_context_parallel_size",
+                    "decode_context_parallel_size",
+                )
+            ):
+                raise ValueError(
+                    "Tsingmicro TXDA SDPA does not support context parallelism; "
+                    "prefill_context_parallel_size and decode_context_parallel_size "
+                    "must both be 1."
+                )
+            world_size = getattr(parallel_config, "world_size_across_dp", None)
+            if world_size is None:
+                world_size = 1
+                for field in (
+                    "tensor_parallel_size",
+                    "pipeline_parallel_size",
+                    "data_parallel_size",
+                ):
+                    world_size *= getattr(parallel_config, field, 1)
+            if world_size > 1 and cls.dist_backend != "flagcx":
+                raise ValueError(
+                    "Tsingmicro TXDA multi-device execution requires FlagCX. "
+                    "Set FLAGCX_PATH to a valid TXDA FlagCX repository containing "
+                    "plugin/interservice/flagcx_wrapper.py and build/lib/libflagcx.so."
+                )
         if cls.device_type == "npu" and model_config is not None:
             from vllm_fl.patches.ascend_glm_dsa import (
                 prepare_glm_dsa_dense_fallback,
@@ -371,6 +461,17 @@ class PlatformFL(Platform):
         if compilation_config.compile_sizes is None:
             compilation_config.compile_sizes = []
 
+        if cls.device_type == "txda":
+            if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+                raise ValueError(
+                    "Tsingmicro TXDA graph mode is not supported. Use --enforce-eager."
+                )
+            if compilation_config.mode != CompilationMode.NONE:
+                raise ValueError(
+                    "Tsingmicro TXDA supports eager execution only; compilation "
+                    "must be disabled. Use --enforce-eager."
+                )
+
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
             compilation_config.use_inductor_graph_partition = True
@@ -454,6 +555,10 @@ class PlatformFL(Platform):
                 attention_config.use_trtllm_ragged_deepseek_prefill = False
                 attention_config.use_trtllm_attention = False
                 attention_config.disable_flashinfer_prefill = True
+
+            # Graph defaults (PIECEWISE, capture sizes, no mm-encoder graph)
+            # are installed in apply_config_platform_defaults so that explicit
+            # --enforce-eager / cudagraph_mode=NONE keep winning.
 
         # GCU relies on ECCL for collectives; custom all-reduce kernels are
         # not available.
@@ -702,7 +807,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead", "iluvatar")
+        # Retain the registered collective route used by TXDA eager execution.
+        return cls.device_type == "txda" or cls.vendor_name in (
+            "nvidia",
+            "thead",
+            "iluvatar",
+        )
 
     @classmethod
     def num_compute_units(cls, device_id: int = 0) -> int:

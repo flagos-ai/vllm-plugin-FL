@@ -1,7 +1,9 @@
 """CI wiring and fail-closed checks, not hardware acceptance evidence."""
 
+import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -57,15 +59,19 @@ def test_ci_graph_config_default_and_override():
 
     source = (ROOT / ".github/scripts/iluvatar/run_gates.sh").read_text()
     start = source.index("if [[ -z ${GRAPH_COMPILATION_CONFIG:-} ]]")
-    end = source.index("export GRAPH_COMPILATION_CONFIG", start)
-    block = source[start:end] + 'printf "%s" "$GRAPH_COMPILATION_CONFIG"'
+    end = source.index("\nfi", start) + len("\nfi")
+    block = source[start:end] + '\nprintf "%s" "$GRAPH_COMPILATION_CONFIG"'
     for override in (None, '{"mode":3,"cudagraph_mode":"FULL"}'):
         env = dict(os.environ)
         env.pop("GRAPH_COMPILATION_CONFIG", None)
         if override is not None:
             env["GRAPH_COMPILATION_CONFIG"] = override
         result = subprocess.run(
-            ["bash", "-c", block], env=env, capture_output=True, text=True, check=True
+            ["bash", "-c", f"set -e\n{block}"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         actual = json.loads(result.stdout)
         if override is not None:
@@ -77,3 +83,45 @@ def test_ci_graph_config_default_and_override():
                 "custom_ops": ["all"],
                 "ir_enable_torch_wrap": False,
             }
+
+
+def test_iluvatar_is_discovered_and_uses_vendor_runners(monkeypatch):
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / ".github/scripts/detect_platforms.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = next(
+        line.removeprefix("platforms=")
+        for line in result.stdout.splitlines()
+        if line.startswith("platforms=")
+    )
+    platforms = json.loads(output)
+    assert "iluvatar" in platforms
+    assert "cuda" in platforms
+    config = yaml.safe_load((ROOT / ".github/configs/iluvatar.yml").read_text())
+    assert config["runner_labels"] == ["iluvatar-cicd-vllm-plugin"]
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    job = ci["jobs"]["test-iluvatar"]
+    assert "'iluvatar'" in job["if"]
+    assert job["with"]["platform"] == "iluvatar"
+    assert job["uses"] == "./.github/workflows/_platform_test.yml"
+    platform = yaml.safe_load(
+        (ROOT / ".github/workflows/_platform_test.yml").read_text()
+    )
+    unit_job = platform["jobs"]["unit"]
+    assert (
+        "needs.setup.outputs.config).runner_labels" in unit_job["with"]["runner_labels"]
+    )
+    unit = yaml.safe_load((ROOT / ".github/workflows/_unit_test.yml").read_text())
+    assert (
+        unit["jobs"]["unit-tests"]["runs-on"] == "${{ fromJson(inputs.runner_labels) }}"
+    )
+    gate = yaml.safe_load((ROOT / ".github/workflows/_iluvatar_gate.yml").read_text())
+    assert (
+        gate["jobs"]["gates"]["runs-on"]
+        == "${{ fromJson(inputs.config).runner_labels }}"
+    )
