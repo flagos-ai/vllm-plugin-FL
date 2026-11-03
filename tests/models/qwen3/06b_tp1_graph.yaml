@@ -12,31 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Qwen2.5-7B model configuration (TP=2)
+# Qwen3-0.6B single-GPU (TP=1) graph smoke configuration.
+
 llm:
-  model: "/data/models/Qwen/Qwen2.5-7B"
-  tensor_parallel_size: 2
-  max_model_len: 2048
-  gpu_memory_utilization: 0.85
+  model: "/data/models/Qwen/Qwen3-0.6B"
+  max_model_len: 8192
+  gpu_memory_utilization: 0.7
+  enforce_eager: false
   trust_remote_code: true
-  enforce_eager: true
 
 generate:
   prompts:
     - "Hello, my name is"
     - "The capital of France is"
   sampling:
-    max_tokens: 32
+    max_tokens: 5
     temperature: 0.0
+  parametrize:
+    dtype: ["bfloat16"]
 
 serve:
   served_model_name: "qwen"
   endpoints: ["chat"]
   stream: true
-  max_tokens: 128
+  max_tokens: 256
   chat_messages:
     - role: "user"
       content: "Give me a short introduction to large language models."
   sampling:
-    temperature: 0.0
-    top_p: 1.0
+    temperature: 0.7
+    top_p: 0.8
+    presence_penalty: 1.5
+  extra_body:
+    top_k: 20
+    chat_template_kwargs:
+      enable_thinking: false

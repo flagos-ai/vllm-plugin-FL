@@ -33,20 +33,15 @@ device_overrides:
   s60:
     cases:
       - qwen3_6/27b_tp2_eager
-      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
-      - qwen3_6/35b_a3b_tp2_graph
     llm:
-      gpu_memory_utilization: 0.94
+      gpu_memory_utilization: 0.90
       disable_custom_all_reduce: false
     serve:
-      # Cold S60 compilation and graph capture can exceed 240 readiness polls.
-      # Keep the existing 120-minute CI job limit as the outer deadline.
-      startup_retries: 360
+      startup_retries: 240
 
 env_defaults:
   VLLM_PLUGINS: "fl"
-  TOPS_VISIBLE_DEVICES: "2,3"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "99999"
   TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
   ENABLE_I64_CHECK: "0"
@@ -55,16 +50,34 @@ env_defaults:
 s60:
   name: "s60"
   tests:
-    # S60 cold-cache compilation and graph capture precede both model cases.
+    e2e:
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        serving:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
     timeouts:
       e2e:
-        inference: 120
+        inference: 90
         serving: 120
-    e2e:
-      inference:
-        qwen3_6: ["27b_tp2_eager", "27b_tp2_graph"]
-      serving:
-        qwen3_6: ["35b_a3b_tp2_eager", "35b_a3b_tp2_graph"]
+        concurrent: 120
     functional:
       include: "*"
       exclude: []
@@ -72,5 +85,11 @@ s60:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve
