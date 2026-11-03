@@ -4,6 +4,7 @@
 
 import torch
 
+from ._kernel_utils import has_cuda_or_composite_kernel
 
 def merge_attn_states(
     output: torch.Tensor,
@@ -34,7 +35,11 @@ def merge_attn_states(
             return headdim % 4 == 0
         return headdim % 8 == 0
 
-    if _supported_dtypes(prefix_output) and _supported_headdim(prefix_output):
+    if (
+        _supported_dtypes(prefix_output)
+        and _supported_headdim(prefix_output)
+        and has_cuda_or_composite_kernel("_C::merge_attn_states")
+    ):
         from vllm._custom_ops import merge_attn_states as _cuda_merge
 
         return _cuda_merge(

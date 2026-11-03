@@ -12,6 +12,7 @@ convenient for use when we just need to call a few functions.
 """
 
 import ctypes
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -106,6 +107,14 @@ class CudaRTLibrary:
             cudaError_t,
             [ctypes.POINTER(ctypes.c_void_p), cudaIpcMemHandle_t, ctypes.c_uint],
         ),
+        Function("cudaIpcCloseMemHandle", cudaError_t, [ctypes.c_void_p]),
+        Function(
+            "cudaHostRegister",
+            cudaError_t,
+            [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint],
+        ),
+        Function("cudaHostUnregister", cudaError_t, [ctypes.c_void_p]),
+        Function("cudaGetLastError", cudaError_t, []),
     ]
 
     # https://rocm.docs.amd.com/projects/HIPIFY/en/latest/tables/CUDA_Runtime_API_functions_supported_by_HIP.html # noqa
@@ -120,6 +129,10 @@ class CudaRTLibrary:
         "cudaMemcpy": "mcMemcpy",
         "cudaIpcGetMemHandle": "mcIpcGetMemHandle",
         "cudaIpcOpenMemHandle": "mcIpcOpenMemHandle",
+        "cudaIpcCloseMemHandle": "mcIpcCloseMemHandle",
+        "cudaHostRegister": "mcHostRegister",
+        "cudaHostUnregister": "mcHostUnregister",
+        "cudaGetLastError": "mcGetLastError",
     }
 
     # class attribute to store the mapping from the path to the library
@@ -192,10 +205,8 @@ class CudaRTLibrary:
         self.CUDART_CHECK(self.funcs["cudaMemset"](devPtr, value, count))
 
     def cudaMemcpy(
-        self, dst: ctypes.c_void_p, src: ctypes.c_void_p, count: int
+        self, dst: ctypes.c_void_p, src: ctypes.c_void_p, count: int, kind: int = 4
     ) -> None:
-        cudaMemcpyDefault = 4
-        kind = cudaMemcpyDefault
         self.CUDART_CHECK(self.funcs["cudaMemcpy"](dst, src, count, kind))
 
     def cudaIpcGetMemHandle(self, devPtr: ctypes.c_void_p) -> cudaIpcMemHandle_t:
@@ -206,16 +217,41 @@ class CudaRTLibrary:
         return handle
 
     def cudaIpcOpenMemHandle(self, handle: cudaIpcMemHandle_t) -> ctypes.c_void_p:
-        cudaIpcMemLazyEnablePeerAccess = 1
+        # MACA's lazy peer-access flag is 0 (CUDA's value is 1).
+        mcIpcMemLazyEnablePeerAccess = 0
         devPtr = ctypes.c_void_p()
         self.CUDART_CHECK(
             self.funcs["cudaIpcOpenMemHandle"](
-                ctypes.byref(devPtr), handle, cudaIpcMemLazyEnablePeerAccess
+                ctypes.byref(devPtr), handle, mcIpcMemLazyEnablePeerAccess
             )
         )
         return devPtr
 
+    def cudaIpcCloseMemHandle(self, devPtr: ctypes.c_void_p) -> None:
+        self.CUDART_CHECK(self.funcs["cudaIpcCloseMemHandle"](devPtr))
 
-import vllm.distributed.device_communicators.cuda_wrapper
+    def cudaHostRegister(self, ptr: int, size: int, flags: int = 0) -> int:
+        # vLLM 0.32 handles registration failures by falling back to pageable
+        # memory; preserve the raw status rather than raising here.
+        return self.funcs["cudaHostRegister"](ctypes.c_void_p(ptr), size, flags)
 
-vllm.distributed.device_communicators.cuda_wrapper.CudaRTLibrary = CudaRTLibrary
+    def cudaHostUnregister(self, ptr: int) -> int:
+        return self.funcs["cudaHostUnregister"](ctypes.c_void_p(ptr))
+
+    def cudaGetLastError(self) -> int:
+        return self.funcs["cudaGetLastError"]()
+
+
+import vllm.distributed.device_communicators.cuda_wrapper as _cuda_wrapper
+
+# Match vLLM-metax 440ec38e9508: consumers can bind these symbols before
+# import_kernels runs, including all_reduce_utils and the host-memory helper.
+for _name, _replacement in (
+    ("CudaRTLibrary", CudaRTLibrary),
+    ("cudaIpcMemHandle_t", cudaIpcMemHandle_t),
+):
+    _original = getattr(_cuda_wrapper, _name)
+    for _module_name, _module in list(sys.modules.items()):
+        if _module_name.startswith("vllm.") and _module is not None:
+            if vars(_module).get(_name) is _original:
+                setattr(_module, _name, _replacement)

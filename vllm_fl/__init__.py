@@ -145,10 +145,12 @@ def _is_metax_backend() -> bool:
 
 def _patch_custom_ops():
     """Register fallback schemas when neither vLLM extension ABI is present."""
-    # On MetaX the maca mcoplib._C already registered every _C operator.
-    # Importing vLLM's own vllm._C .so on top of it raises a
-    # duplicate-registration c10::Error, so skip the probe entirely.
+    # Load MetaX's native ops before filling gaps in the 0.32 empty wheel.
+    # Probing vllm._C on top of mcoplib can duplicate native registrations.
     if _is_metax_backend():
+        from vllm_fl.ops._C_ops_registry import register_op_schemas
+
+        register_op_schemas()
         logger.debug(
             "[vllm_fl] MetaX backend owns torch.ops._C; skipping vllm._C import"
         )
@@ -241,7 +243,7 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
+    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro", "metax"):
         # These backends use ModelRunnerFL; choose it before VllmConfig reads
         # model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")

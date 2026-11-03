@@ -129,6 +129,12 @@ def _get_priority_backends(moe_config: FusedMoEConfig) -> list[UnquantizedMoeBac
             UnquantizedMoeBackend.TRITON,
             UnquantizedMoeBackend.BATCHED_TRITON,
         ]
+    elif getattr(current_platform, "vendor_name", "") == "metax":
+        raise NotImplementedError(
+            "MetaX requires the FlagGems unquantized MoE backend: enable "
+            "USE_FLAGGEMS=1 with the FL FlagOS preference and allow fused_moe "
+            "in the OOT policy. No native MoE fallback is validated."
+        )
     return _AVAILABLE_BACKENDS
 
 

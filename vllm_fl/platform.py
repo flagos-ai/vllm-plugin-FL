@@ -276,6 +276,11 @@ class PlatformFL(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: "VllmConfig") -> None:
+        if cls.vendor_name == "metax" and vllm_config.use_v2_model_runner:
+            raise ValueError(
+                "MetaX requires ModelRunnerFL; the upstream V2 runner requires "
+                "native CUDA/UVA support. Set VLLM_USE_V2_MODEL_RUNNER=0."
+            )
         if cls.device_type == "gcu":
             if vllm_config.use_v2_model_runner:
                 raise ValueError(
@@ -556,10 +561,13 @@ class PlatformFL(Platform):
             if model_config is not None:
                 model_config.disable_cascade_attn = True
             if attention_config := vllm_config.attention_config:
-                attention_config.use_cudnn_prefill = False
-                attention_config.use_trtllm_ragged_deepseek_prefill = False
                 attention_config.use_trtllm_attention = False
-                attention_config.disable_flashinfer_prefill = True
+                if attention_config.mla_prefill_backend is None:
+                    from vllm.v1.attention.backends.mla.prefill.registry import (
+                        MLAPrefillBackendEnum,
+                    )
+
+                    attention_config.mla_prefill_backend = MLAPrefillBackendEnum.FLASH_ATTN
 
             # Graph defaults (PIECEWISE, capture sizes, no mm-encoder graph)
             # are installed in apply_config_platform_defaults so that explicit
@@ -837,10 +845,13 @@ class PlatformFL(Platform):
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
         # Retain the registered collective routes for TXDA and native MCCL.
+        # FlagCX's ctypes calls must stay behind vLLM's opaque collective op
+        # when Dynamo traces a MetaX model. Keep the normal MCCL route intact.
         return (
             cls.device_type == "txda"
             or cls.vendor_name in ("nvidia", "thead", "iluvatar")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
+            or (cls.vendor_name == "metax" and cls.dist_backend == "flagcx")
         )
 
     @classmethod
@@ -897,6 +908,23 @@ class PlatformFL(Platform):
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["vllm_c", "native"]
+        if cls.vendor_name == "metax":
+            from dataclasses import fields
+
+            from vllm.ir import ops as ir_ops  # noqa: F401 - populate IR registry
+            from vllm.ir.op import IrOp
+
+            # An empty wheel's _C schemas do not register IR implementations.
+            # Filter each op separately, including defaults such as sparse GELU.
+            return IrOpPriorityConfig(
+                **{
+                    field.name: [
+                        provider for provider in default
+                        if provider in IrOp.registry[field.name].impls
+                    ]
+                    for field in fields(IrOpPriorityConfig)
+                }
+            )
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

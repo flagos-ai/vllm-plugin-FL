@@ -1,4 +1,4 @@
-"""MetaX patches applied into vLLM 0.28 at import time.
+"""MetaX patches applied into vLLM 0.32 at import time.
 
 ``PlatformFL.import_kernels()`` imports this package while vLLM is still
 initialising, so a single failing module used to skip every patch below it.
@@ -11,6 +11,8 @@ import logging
 
 import vllm.utils.import_utils as iu
 
+from .._compat import legacy_torch_runtime
+
 logger = logging.getLogger(__name__)
 
 # Order matters: pynccl_wrapper depends on utils_patch, and gdn_linear_attn
@@ -19,30 +21,35 @@ _PATCH_MODULES = (
     "accelerator_compat",
     "functorch_config_patch",
     "fix_standalone_compile",
+    "utils_patch",
     "pynccl_wrapper",
     "cuda_wrapper",
-    "utils_patch",
     "chunk_delta_h",
     "moe_topk_compat",
     "gdn_linear_attn",
 )
 
-# MetaX C550 does not support third-party Triton kernels (Triton upgrade
-# required). Disable them so FLA decode ops (fused_recurrent_gated_delta_rule
-# etc.) fall back to the non-Triton path handled by mcoplib, producing correct
-# output.
+# Keep the optional third-party triton_kernels package disabled, matching
+# vLLM-metax 0.32. vLLM's bundled FLA/Triton kernels remain available in the
+# pure FlagOS runtime; this does not require mcoplib to be installed.
 #
 # Assigned before any patch below is imported: vLLM modules bind this predicate
 # with ``from vllm.utils.import_utils import has_triton_kernels`` when they
 # load, so replacing it as early as possible keeps more of them on the fallback
 # path.
-# TODO: remove when MetaX Triton support is available.
+# Remove when the optional package is validated on MetaX.
+# vLLM-metax 0.32 still disables this third-party package on Triton 3.6.
+# This restriction is independent of the old Triton 3.0 compiler workarounds.
 iu.has_triton_kernels = lambda: False
 
 
 def _import_patches() -> dict[str, Exception]:
     errors: dict[str, Exception] = {}
     for name in _PATCH_MODULES:
+        if name in ("fix_standalone_compile", "functorch_config_patch") and not legacy_torch_runtime():
+            # These replace private torch 2.8 APIs and the matmul class's
+            # __setattr__; importing them on torch 2.10 would undo native fixes.
+            continue
         try:
             importlib.import_module(f"{__name__}.{name}")
         except Exception as exc:  # keep the remaining patches alive
@@ -73,4 +80,17 @@ def ensure_patches() -> dict[str, Exception]:
             PATCH_ERRORS[name] = exc
             continue
         del PATCH_ERRORS[name]
+    # _custom_ops invokes import_kernels() before defining its top-k helpers.
+    # A successful early import can therefore be overwritten without raising
+    # an exception. Restore this patch after the native module finishes loading.
+    try:
+        topk_compat = importlib.import_module(f"{__name__}.moe_topk_compat")
+        if topk_compat.apply():
+            PATCH_ERRORS.pop("moe_topk_compat", None)
+        else:
+            PATCH_ERRORS["moe_topk_compat"] = RuntimeError(
+                "MetaX routed top-k compatibility could not be applied"
+            )
+    except Exception as exc:
+        PATCH_ERRORS["moe_topk_compat"] = exc
     return dict(PATCH_ERRORS)

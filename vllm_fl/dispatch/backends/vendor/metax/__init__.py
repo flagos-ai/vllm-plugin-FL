@@ -6,7 +6,7 @@ Everything MetaX-specific lives under this package:
 
 - ``impl/``    operator implementations for the dispatch layer
 - ``patches/`` vLLM-level replacements applied when the backend loads
-- ``shims/``   import-time compatibility shims for the vLLM 0.28 empty wheel
+- ``shims/``   version-gated import compatibility for the MACA runtime
 
 The imports below stay lazy on purpose. ``vllm_fl.register()`` loads ``shims``
 while vLLM is still initialising; importing ``MacaBackend`` (which pulls

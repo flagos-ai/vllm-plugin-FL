@@ -23,7 +23,7 @@ from vllm.distributed.device_communicators.pynccl_wrapper import (
     ncclUniqueId,
 )
 
-from .utils_patch import find_mccl_library
+from .utils_patch import find_mccl_library, replace_loaded_vllm_aliases
 
 
 class MCCLLibrary:
@@ -172,6 +172,11 @@ class MCCLLibrary:
         # it is better not to call it at all.
         # ncclResult_t  ncclCommDestroy(ncclComm_t comm);
         Function("mcclCommDestroy", ncclResult_t, [ncclComm_t]),
+        # Required by vLLM 0.32's non-collective communicator shutdown.
+        Function("mcclCommAbort", ncclResult_t, [ncclComm_t]),
+        # Optional on older MCCL; vLLM probes these through has_symbol().
+        Function("mcclCommSuspend", ncclResult_t, [ncclComm_t, ctypes.c_int]),
+        Function("mcclCommResume", ncclResult_t, [ncclComm_t]),
         # ncclResult_t ncclGroupStart();
         Function("mcclGroupStart", ncclResult_t, []),
         # ncclResult_t ncclGroupEnd();
@@ -210,7 +215,7 @@ class MCCLLibrary:
         so_file = so_file or find_mccl_library()
         # \------------------------- Metax Modification -------------------------/
         try:
-            if so_file not in MCCLLibrary.path_to_dict_mapping:
+            if so_file not in MCCLLibrary.path_to_library_cache:
                 lib = ctypes.CDLL(so_file)
                 MCCLLibrary.path_to_library_cache[so_file] = lib
             self.lib = MCCLLibrary.path_to_library_cache[so_file]
@@ -237,22 +242,14 @@ class MCCLLibrary:
                     f.argtypes = func.argtypes
                     _funcs[func.name] = f
                 except AttributeError:
-                    if func.name in [
-                        "ncclCommWindowRegister",
-                        "ncclCommWindowDeregister",
-                    ]:
-                        if envs.VLLM_USE_NCCL_SYMM_MEM:
-                            logger.warning_once(
-                                "The symbol %s is not found in the NCCL "
-                                "library %s. To enable VLLM_USE_NCCL_SYMM_MEM "
-                                " please update your NCCL version to >= "
-                                "2.27.03.",
-                                func.name,
-                                so_file,
-                            )
+                    if func.name in ("mcclCommSuspend", "mcclCommResume"):
+                        continue
                     raise
             MCCLLibrary.path_to_dict_mapping[so_file] = _funcs
         self._funcs = MCCLLibrary.path_to_dict_mapping[so_file]
+
+    def has_symbol(self, name: str) -> bool:
+        return name.replace("nccl", "mccl", 1) in self._funcs
 
     def ncclGetErrorString(self, result: ncclResult_t) -> str:
         return self._funcs["mcclGetErrorString"](result).decode("utf-8")
@@ -429,6 +426,17 @@ class MCCLLibrary:
     def ncclCommDestroy(self, comm: ncclComm_t) -> None:
         self.NCCL_CHECK(self._funcs["mcclCommDestroy"](comm))
 
+    def ncclCommAbort(self, comm: ncclComm_t) -> None:
+        # Destroy is collective and can deadlock after peer ranks exit. Match
+        # the upstream MetaX wrapper: mcclCommAbort is a required symbol.
+        self.NCCL_CHECK(self._funcs["mcclCommAbort"](comm))
+
+    def ncclCommSuspend(self, comm: ncclComm_t, flags: int) -> None:
+        self.NCCL_CHECK(self._funcs["mcclCommSuspend"](comm, flags))
+
+    def ncclCommResume(self, comm: ncclComm_t) -> None:
+        self.NCCL_CHECK(self._funcs["mcclCommResume"](comm))
+
     def ncclGroupStart(self) -> None:
         self.NCCL_CHECK(self._funcs["mcclGroupStart"]())
 
@@ -438,20 +446,15 @@ class MCCLLibrary:
     def ncclCommWindowRegister(
         self, comm: ncclComm_t, buff: buffer_type, size: int, win_flags: int
     ) -> ncclWindow_t:
-        window = ncclWindow_t()
-        # self.NCCL_CHECK(self._funcs["mcclCommWindowRegister"](
-        #     comm, buff, size, ctypes.byref(window), win_flags))
-        return window
+        raise NotImplementedError("MCCL symmetric-memory windows are not supported")
 
     def ncclCommWindowDeregister(self, comm: ncclComm_t, window: ncclWindow_t) -> None:
-        # self.NCCL_CHECK(self._funcs["mcclCommWindowDeregister"](comm, window))
-        return
+        raise NotImplementedError("MCCL symmetric-memory windows are not supported")
 
 
-from vllm.distributed.device_communicators import pynccl, pynccl_wrapper
-
-pynccl.NCCLLibrary = MCCLLibrary
-pynccl_wrapper.NCCLLibrary = MCCLLibrary
+replace_loaded_vllm_aliases(
+    "vllm.distributed.device_communicators.pynccl_wrapper", "NCCLLibrary", MCCLLibrary
+)
 
 
 # Patch: pynccl uses ctypes to pass tensor pointers to MCCL; TorchDynamo
@@ -462,9 +465,10 @@ from vllm.distributed.device_communicators.cuda_communicator import CudaCommunic
 
 
 def _compile_friendly_all_reduce(self, input_):
-    """Use torch.distributed all_reduce which Dynamo can trace."""
-    dist.all_reduce(input_, op=dist.ReduceOp.SUM, group=self.device_group)
-    return input_
+    """Traceable all-reduce with CudaCommunicator's out-of-place contract."""
+    output = input_.clone()
+    dist.all_reduce(output, op=dist.ReduceOp.SUM, group=self.device_group)
+    return output
 
 
 CudaCommunicator.all_reduce = _compile_friendly_all_reduce

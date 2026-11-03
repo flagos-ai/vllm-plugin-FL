@@ -11,6 +11,8 @@
 import torch
 import copy
 
+from .._compat import legacy_torch_runtime
+
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._functorch._aot_autograd.autograd_cache import (
     check_cacheable,
@@ -171,11 +173,13 @@ def standalone_compile(
 
 import torch._inductor
 
-torch._inductor.standalone_compile = standalone_compile
+if legacy_torch_runtime():
+    torch._inductor.standalone_compile = standalone_compile
 
 import torch._functorch._aot_autograd.autograd_cache
 
-torch._functorch._aot_autograd.autograd_cache.autograd_cache_key = autograd_cache_key
+if legacy_torch_runtime():
+    torch._functorch._aot_autograd.autograd_cache.autograd_cache_key = autograd_cache_key
 
 
 # -------------------------------------------------------------------
@@ -216,4 +220,5 @@ def __setattr__(self, name, value):
 
 from torch.backends.cuda import matmul
 
-matmul.__class__.__setattr__ = __setattr__
+if legacy_torch_runtime():
+    matmul.__class__.__setattr__ = __setattr__

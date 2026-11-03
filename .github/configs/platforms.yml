@@ -18,8 +18,8 @@
 # (e.g., "cuda" -> cuda.yml, "ascend" -> ascend.yml).
 #
 # Set `enabled: false` to skip a platform without removing its config file.
-# Enable NVIDIA first for the vLLM 0.32 rollout. Re-enable other backends
-# after their runtime and CI adaptations are ready.
+# NVIDIA and MetaX are enabled for the vLLM 0.32 rollout. Re-enable other
+# backends after their runtime and CI adaptations are ready.
 
 platforms:
   cuda:
@@ -29,7 +29,7 @@ platforms:
   hygon:
     enabled: false
   metax:
-    enabled: false
+    enabled: true
   musa:
     enabled: false
   enflame:
