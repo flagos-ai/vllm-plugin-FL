@@ -136,8 +136,23 @@ def _patch_flash_attn_import():
         sys.modules["vllm.vllm_flash_attn"] = stub
 
 
+def _is_metax_backend() -> bool:
+    """True when this process runs on the MetaX (maca) backend."""
+    from vllm_fl.ops._C_ops_registry import _is_metax_backend as _impl
+
+    return _impl()
+
+
 def _patch_custom_ops():
     """Register fallback schemas when neither vLLM extension ABI is present."""
+    # On MetaX the maca mcoplib._C already registered every _C operator.
+    # Importing vLLM's own vllm._C .so on top of it raises a
+    # duplicate-registration c10::Error, so skip the probe entirely.
+    if _is_metax_backend():
+        logger.debug(
+            "[vllm_fl] MetaX backend owns torch.ops._C; skipping vllm._C import"
+        )
+        return
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
             importlib.import_module(module_name)
@@ -157,6 +172,8 @@ def _patch_custom_ops():
 
 def _init_vendor_device():
     """Apply compatibility hooks that must run before vLLM model imports."""
+    _install_metax_compat()
+
     from vllm_fl.utils import DeviceInfo
 
     if DeviceInfo().vendor_name == "kunlunxin":
@@ -165,6 +182,24 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
+
+
+def _install_metax_compat():
+    """Apply the MetaX vLLM 0.28 compatibility shims before any kernel runs.
+
+    These shims used to be installed as ``.pth`` hooks in ``site-packages`` so
+    that they ran at interpreter start-up. Every one of them either arms a
+    ``sys.meta_path`` hook for a lazily imported module or rebinds a module
+    that is already imported, so the plugin entry point runs early enough and
+    a plain ``pip install`` is sufficient.
+    """
+    try:
+        from vllm_fl.dispatch.backends.vendor.metax.shims import install, metax_active
+
+        if metax_active():
+            install()
+    except Exception as exc:  # pragma: no cover - never block registration
+        logger.warning("[vllm_fl] MetaX compatibility shims not installed: %s", exc)
 
 
 def register():
@@ -196,7 +231,7 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    if vendor_name in ("ascend", "enflame", "gcu"):
+    if vendor_name in ("ascend", "enflame", "gcu", "tsingmicro"):
         # These backends use ModelRunnerFL; choose it before VllmConfig reads
         # model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")

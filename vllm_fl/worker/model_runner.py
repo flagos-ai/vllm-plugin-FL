@@ -41,6 +41,13 @@ from vllm.config import (
 from vllm.config.cache import CacheConfig
 from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
 from vllm.config.model import PROCESSED_LOGPROBS_MODES
+
+try:  # FL: vLLM >= 0.28 slot mapping mode enum
+    from vllm.v1.worker.block_table import SlotMappingMode
+except ImportError:  # pragma: no cover - older vLLM
+    class SlotMappingMode:  # type: ignore[no-redef]
+        TOKEN_TO_KV_SLOT = 0
+        NONE = 1
 from vllm.distributed.ec_transfer import get_ec_transfer, has_ec_transfer
 from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.kv_transfer import get_kv_transfer_group, has_kv_transfer_group
@@ -59,6 +66,15 @@ from vllm.forward_context import (
     set_forward_context,
 )
 from vllm.logger import init_logger
+
+# FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
+try:  # pragma: no cover - vLLM version compat
+    from vllm.distributed.parallel_state import (
+        prepare_communication_buffer_for_model as _prepare_comm_buffer,
+    )
+except ImportError:  # vLLM >= 0.28 dropped the symbol
+    def _prepare_comm_buffer(*args, **kwargs):
+        return None
 from vllm.lora.layers import LoRAMapping, LoRAMappingType
 from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -197,7 +213,6 @@ from vllm.v1.spec_decode.utils import update_num_computed_tokens_for_batch_chang
 from vllm.v1.structured_output.utils import apply_grammar_bitmask
 from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
 from vllm.v1.worker import mamba_utils
-from vllm.v1.worker.block_table import SlotMappingMode
 from vllm.v1.worker.cp_utils import (
     check_attention_cp_compatibility,
     get_dcp_dummy_context_len,
@@ -561,6 +576,11 @@ class ModelRunnerFL(
         self.max_model_len = model_config.max_model_len
 
         # Always set to false after the first forward pass
+        # FL: vLLM >= 0.28 removed CacheConfig.calculate_kv_scales
+        # (runtime kv-scale calibration dropped upstream); tolerate absence.
+        self.calculate_kv_scales = getattr(
+            self.cache_config, "calculate_kv_scales", False
+        )
         self.dcp_world_size = self.parallel_config.decode_context_parallel_size
         self.dcp_rank = 0 if self.dcp_world_size <= 1 else get_dcp_group().rank_in_group
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
@@ -1328,7 +1348,10 @@ class ModelRunnerFL(
                 sampling_params
                 and sampling_params.sampling_type == SamplingType.RANDOM_SEED
             ):
-                generator = torch.Generator(device=self.device)
+                # TXDA random kernels use the runtime's CPU fallback.
+                generator = torch.Generator(
+                    device="cpu" if self.device.type == "txda" else self.device
+                )
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
@@ -3523,6 +3546,14 @@ class ModelRunnerFL(
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
+        # CPU generators (used by TXDA) do not expose Philox offsets. Save
+        # their full state before sampling so a discarded chunked-prefill
+        # sample does not advance the request's seeded random stream.
+        self._cpu_generator_states = {
+            index: generator.get_state()
+            for index, generator in sampling_metadata.generators.items()
+            if generator.device.type == "cpu"
+        }
         # Update output token ids with tokens sampled in last step
         # if async scheduling and required by current sampling params.
         self.input_batch.update_async_output_token_ids()
@@ -3581,7 +3612,10 @@ class ModelRunnerFL(
         for i in discard_sampled_tokens_req_indices:
             gen = self.input_batch.generators.get(int(i))
             if gen is not None:
-                gen.set_offset(gen.get_offset() - 4)
+                if gen.device.type == "cpu":
+                    gen.set_state(self._cpu_generator_states[int(i)])
+                else:
+                    gen.set_offset(gen.get_offset() - 4)
 
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
@@ -5244,7 +5278,13 @@ class ModelRunnerFL(
             time_after_load - time_before_load,
         )
         if not load_dummy_weights:
+            _prepare_comm_buffer(self.model)
+            # FL: register IO dumper module hooks
             register_io_module_hooks(self.model)
+            if (drafter := getattr(self, "drafter", None)) and (
+                drafter_model := getattr(drafter, "model", None)
+            ):
+                _prepare_comm_buffer(drafter_model)
         mm_config = self.model_config.multimodal_config
         self.is_multimodal_pruning_enabled = (
             supports_multimodal_pruning(self.get_model())
@@ -6095,7 +6135,11 @@ class ModelRunnerFL(
                     sampling_metadata=replace(
                         dummy_metadata,
                         generators={
-                            0: torch.Generator(device=self.device).manual_seed(0)
+                            0: torch.Generator(
+                                device="cpu"
+                                if self.device.type == "txda"
+                                else self.device
+                            ).manual_seed(0)
                         },
                     ),
                 )
