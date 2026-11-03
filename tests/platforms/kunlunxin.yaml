@@ -78,18 +78,41 @@ p800:
   name: "p800"
   tests:
     e2e:
-      inference:
-        qwen3_6:
-          - "27b_tp4_eager"
-          - "35b_a3b_tp4_graph"
-      serving:
-        qwen3_6:
-          - "27b_tp4_graph"
-          - "35b_a3b_tp4_eager"
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 27b_tp4_graph
+            - 35b_a3b_tp4_eager
+            - 35b_a3b_tp4_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_graph
     timeouts:
       e2e:
         inference: 180
         serving: 180
+        concurrent: 180
     functional:
       include: "*"
       exclude:
@@ -114,5 +137,11 @@ p800:
       # harness only fails after its 600s startup budget. The hang happens
       # before any request is served, so it is unrelated to the code paths
       # changed here; track it as a separate P800/FlagGems follow-up.
-      enabled: false
-      smoke: ["serve"]
+      pr:
+        enabled: false
+        types:
+          - serve
+      nightly:
+        enabled: false
+        types:
+          - serve

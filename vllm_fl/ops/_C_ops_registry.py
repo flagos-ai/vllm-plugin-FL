@@ -5,6 +5,7 @@
 # is not compiled for this platform.
 
 import logging
+import os
 
 import torch
 
@@ -43,9 +44,60 @@ _CUDA_FALLBACK_IMPLS = [
 ]
 
 
+def _is_metax_backend() -> bool:
+    """True when vLLM resolved the MetaX (maca) platform.
+
+    On that backend ``mcoplib._C`` already owns ``torch.ops._C``.  Importing
+    vLLM's own ``vllm._C`` .so would dlopen a second copy of the same operator
+    names and raise a duplicate-registration ``c10::Error``, so every
+    ``import vllm._C`` below is gated on this check.
+    """
+    # Non-reentrant by construction: this function is reached from the
+    # ``vllm.platform_plugins`` entry point (vllm_fl:register) while
+    # vllm.platforms is still resolving ``current_platform``.  A plain
+    # ``from vllm.platforms import current_platform`` here would re-enter that
+    # resolution, recursing until RecursionError and leaving vLLM with
+    # UnspecifiedPlatform.  Consult only an *already resolved* platform and
+    # otherwise fall back to a hardware/environment probe.
+    import importlib.util
+    import sys
+
+    resolved = getattr(sys.modules.get("vllm.platforms"), "_current_platform", None)
+    if resolved is not None:
+        is_metax = getattr(resolved, "is_metax", None)
+        if callable(is_metax):
+            try:
+                return bool(is_metax())
+            except Exception:
+                pass
+    if os.environ.get("GEMS_VENDOR", "").strip().lower() == "metax":
+        return True
+    try:
+        return importlib.util.find_spec("mcoplib") is not None
+    except Exception:
+        return False
+
+
+def _C_ops_present() -> bool:
+    """True when torch.ops._C already carries ops this module would define."""
+    ops = getattr(torch.ops, "_C", None)
+    if ops is None:
+        return False
+    names = [name for name, _ in _QUERY_OP_IMPLS]
+    names += [name for name, _ in _CUDA_FALLBACK_IMPLS]
+    return any(hasattr(ops, name) for name in names)
+
+
 def register_op_schemas():
     """Register _C op schemas if not already present."""
     if getattr(register_op_schemas, "_lib", None) is not None:
+        return
+
+    # Bail out before touching vllm._C when the active backend already owns _C.
+    if _is_metax_backend() or _C_ops_present():
+        logger.debug(
+            "Skipping vllm._C import: _C ops are already provided by the active backend"
+        )
         return
 
     try:

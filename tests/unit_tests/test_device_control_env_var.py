@@ -35,7 +35,9 @@ def test_unvalidated_vendors_preserve_vllm_base_noop(monkeypatch, vendor):
     assert get_device_control_env_var(vendor) == _PLACEHOLDER
 
 
-@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "not_a_vendor"])
+@pytest.mark.parametrize(
+    "vendor", ["ascend", "enflame", "gcu", "tsingmicro", "not_a_vendor"]
+)
 def test_env_override_wins(monkeypatch, vendor):
     monkeypatch.setenv(_OVERRIDE, "CUSTOM_VISIBLE_DEVICES")
     assert get_device_control_env_var(vendor) == "CUSTOM_VISIBLE_DEVICES"
@@ -47,6 +49,7 @@ def test_env_override_wins(monkeypatch, vendor):
         ("ascend", _PLACEHOLDER),
         ("enflame", "TOPS_VISIBLE_DEVICES"),
         ("gcu", "TOPS_VISIBLE_DEVICES"),
+        ("tsingmicro", "TXDA_VISIBLE_DEVICES"),
     ],
 )
 def test_blank_env_override_is_ignored(monkeypatch, vendor, expected):
@@ -59,3 +62,8 @@ def test_platform_picks_up_the_dispatched_value():
 
     expected = get_device_control_env_var(PlatformFL.vendor_name)
     assert PlatformFL.device_control_env_var == expected
+
+
+def test_tsingmicro_uses_txda_visible_devices(monkeypatch):
+    monkeypatch.delenv(_OVERRIDE, raising=False)
+    assert get_device_control_env_var("tsingmicro") == "TXDA_VISIBLE_DEVICES"
