@@ -5265,12 +5265,9 @@ class IluvatarModelRunner(
             self.eplb_state.start_async_loop()
 
         if (
-            (
-                current_platform.device_type == "npu"
-                or getattr(current_platform, "vendor_name", None) == "iluvatar"
-            )
-            and self.compilation_config.mode != CompilationMode.NONE
-        ):
+            current_platform.device_type == "npu"
+            or getattr(current_platform, "vendor_name", None) == "iluvatar"
+        ) and self.compilation_config.mode != CompilationMode.NONE:
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
             # because fullgraph compilation cannot enter that context manager.
