@@ -20,6 +20,7 @@ def apply_moe_activation(
     clamp_limit: float | None = None,
     alpha: float = 1.0,
     beta: float = 0.0,
+    silu_out=None,
 ) -> torch.Tensor:
     """Apply MoE activation function."""
     assert input.dim() == 2, "Input must be 2D"
@@ -44,7 +45,10 @@ def apply_moe_activation(
                 input,
                 clamp_limit=clamp_limit,
             )
-        output.copy_(_silu_and_mul(None, input))
+        if silu_out is None:
+            output.copy_(_silu_and_mul(None, input))
+        else:
+            silu_out(input, output)
     elif activation == MoEActivation.GELU:
         output.copy_(_gelu_and_mul(None, input))
     elif activation == MoEActivation.SWIGLUOAI:

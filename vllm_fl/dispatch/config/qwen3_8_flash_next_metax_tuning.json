@@ -2984,6 +2984,10 @@
       {
         "path": "model_executor/layers/fla/ops/fused_sigmoid_gating.py",
         "sha256": "000ab8996af9788fdb8843a6a3b91833e7a14c8acc0e1ea073a536330f64cb6f"
+      },
+      {
+        "path": "model_executor/layers/fused_moe/modular_kernel.py",
+        "sha256": "b50933dd1f2c525eedb485f68cd032e6bfaaaba03a9c672b49c984b4d8155b58"
       }
     ]
   },

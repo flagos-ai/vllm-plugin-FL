@@ -70,3 +70,36 @@ def moe_eligible(
         and global_experts == 512
         and not apply_router_weight_on_input
     )
+
+
+def direct_outputs_supported(config, quant_config, device_name):
+    """Opt in only the reviewed unquantized Qwen TP8 expert geometry."""
+    parallel = config.moe_parallel_config
+    return (
+        "C550" in device_name
+        and config.in_dtype == torch.bfloat16
+        and config.hidden_dim == 2560
+        and config.intermediate_size_per_partition == 80
+        and config.num_experts == config.num_local_experts == 512
+        and config.experts_per_token == 10
+        and config.activation.value == "silu"
+        and parallel.tp_size == 8
+        and parallel.pcp_size
+        == parallel.dp_size
+        == parallel.ep_size
+        == parallel.sp_size
+        == 1
+        and not parallel.use_all2all_kernels
+        and not config.has_bias
+        and not config.is_lora_enabled
+        and quant_config.quant_dtype is None
+        and quant_config.gemm1_clamp_limit is None
+    )
+
+
+def silu_activation_out(input, output):
+    """Reuse the library's identical pointwise kernel with the supplied buffer."""
+    from flaggems_vllm.ops.silu_and_mul import silu_and_mul_out
+
+    width = input.shape[-1] // 2
+    return silu_and_mul_out(input[..., :width], input[..., width:], output)

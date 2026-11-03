@@ -388,6 +388,30 @@ def _prepare_expert_assignment(
 
 
 class TritonExpertsFL(TritonExperts):
+    def __init__(self, moe_config, quant_config):
+        super().__init__(moe_config, quant_config)
+        self._qwen38_silu_out = None
+        platform = _get_current_platform()
+        if getattr(platform, "vendor_name", None) == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.mctlass_moe import (
+                direct_outputs_supported,
+                silu_activation_out,
+            )
+
+            device = torch.device(moe_config.device)
+            if device.type == "cuda" and direct_outputs_supported(
+                moe_config, quant_config, _metax_moe_device_name(device.index)
+            ):
+                self._qwen38_silu_out = silu_activation_out
+
+    @property
+    def supports_output_buffer_alias(self):
+        return (
+            getattr(self, "_qwen38_silu_out", None) is not None
+            and self._lora_context is None
+            and self.gemm1_clamp_limit is None
+        )
+
     def apply(
         self,
         output: torch.Tensor,
@@ -742,6 +766,9 @@ class TritonExpertsFL(TritonExperts):
             clamp_limit=self.gemm1_clamp_limit,
             alpha=self.gemm1_alpha,
             beta=self.gemm1_beta,
+            silu_out=(
+                self._qwen38_silu_out if self.supports_output_buffer_alias else None
+            ),
         )
 
         a2q_scale: torch.Tensor | None = None

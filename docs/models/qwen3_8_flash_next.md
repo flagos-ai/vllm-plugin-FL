@@ -343,4 +343,6 @@ MTP-off serving accepts `--max-num-batched-tokens 4096` or `8192`; the compatibi
 
 The default MTP-off GDN host-metadata path reuses framework chunk boundaries and supplies a host-derived skew hint to the source-locked FGV interface. `--no-gdn-host-metadata` retains its fallback. Metadata groups keep separate state addresses; numerical GDN kernels and FP32 state dtype are unchanged.
 
+The reviewed MetaX BF16 TP8 expert geometry can reuse activation and final output buffers. Final-output reuse requires the separately source-locked native vLLM `supports_output_buffer_alias` capability; it is default-off in the framework and is not part of an unmodified ee0da84 installation. Other layouts, LoRA and quantized paths retain their existing behavior.
+
 These performance paths require the exact dependency composition in `metax_tuning/operator_dependencies.json`; not all numeric operator components are public revisions yet.

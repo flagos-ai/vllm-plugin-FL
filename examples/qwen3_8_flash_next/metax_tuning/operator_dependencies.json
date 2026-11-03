@@ -232,5 +232,12 @@
     ]
   },
   "accuracy": "No new quantization, RNG distribution or model accuracy claim",
-  "portability": "Source hashes identify reproduction files, not public installable revisions; operator publication is separate."
+  "portability": "Source hashes identify reproduction files, not public installable revisions; operator publication is separate.",
+  "vllm_local_capability": {
+    "base": "ee0da84ab9e04ac7610e28580af62c365e898389",
+    "path": "model_executor/layers/fused_moe/modular_kernel.py",
+    "sha256": "b50933dd1f2c525eedb485f68cd032e6bfaaaba03a9c672b49c984b4d8155b58",
+    "purpose": "Default-off modular expert output-buffer alias capability",
+    "status": "Source-locked native capability; model integration validated; standalone publication deferred"
+  }
 }
