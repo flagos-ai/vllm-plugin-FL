@@ -16,7 +16,7 @@ active simultaneously.
 | Triton | `3.6.0`, **supplied by FlagTree** from `/opt/flagtree` |
 | FlagTree distribution | `0.7.0+amd3.6` |
 | FlagGems | `main`, post-5.4.0 — needs commit [a8fdfa0](https://github.com/flagos-ai/FlagGems/commit/a8fdfa082487e7ef73e65adcdaa79c134e6d790f) |
-| FlagGems-vllm | `0.1.0`, commit `b5c2c2249319277ccda4d41aa0f65164bd9b2a19` |
+| FlagGems-vllm | Commit [`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19) (`v0.2.0`; package metadata reports `0.1.0`) — the project-wide pin |
 | FlagCX | `0.15.0.dev52+g591cfbf`, built with `USE_AMD=1` (RCCL backend) |
 | Attention backend | `TRITON_ATTN` (dense), `TRITON_MLA` (MLA); ViT uses Torch SDPA |
 | Communication | FlagCX over RCCL; custom all-reduce disabled |
@@ -29,6 +29,30 @@ Two properties of this hardware drive several choices below:
 - **64 KB LDS.** Some kernel autotuning configurations ask for 120 KB and are
   rejected; Triton recovers by selecting a smaller configuration, which costs
   first-run time rather than correctness.
+
+## Build the image
+
+The quickest path is the AMD Dockerfile, which performs every step in section 4
+(FlagTree, the empty vLLM, FlagGems, FlagGems-vllm, FlagCX and the plugin) and
+fails the build if the resulting stack is not the validated one:
+
+```bash
+./docker/build.sh --platform amd --target release
+```
+
+It needs two source images, because neither is sufficient alone: the ROCm base
+image has a Torch built for gfx1100 but ships upstream Triton 3.8 and no
+FlagGems, while the FlagOS runtime image carries FlagTree but its Torch cannot
+see the GPUs. Override either with `AMD_BASE_IMAGE` /
+`AMD_FLAGOS_RUNTIME_IMAGE`; `./docker/build.sh --help` lists the rest.
+
+Note that the base image's entrypoint is `vllm serve`, so use
+`--entrypoint python3` (or `bash`) when inspecting the image rather than
+serving from it.
+
+Sections 1–7 below are the same stack assembled by hand, which is how the
+results in [Validation scope](#validation-scope) were produced. Follow them to
+work incrementally, or to adapt the stack to another ROCm image.
 
 ## 1. Check the host and the GPUs
 
@@ -80,7 +104,31 @@ docker run -d --name vllm-fl-amd --entrypoint bash \
 
 ## 4. Install the stack
 
-### 4.1 FlagTree supplies Triton
+### 4.1 Install FlagTree
+
+FlagTree `0.7.0+amd3.6` is **not on PyPI** — `pip install flagtree` fails with
+`No matching distribution found`. The AMD build is distributed inside the
+FlagOS runtime image, so take `/opt/flagtree` from there. It is self-contained
+(1.1 GB, ships its own `triton`), which is why its Torch being unusable on
+gfx1100 does not matter here: only this directory is used.
+
+Run on the **host**, into the directory mounted at `/work`:
+
+```bash
+docker create --name flagtree-src \
+  harbor.baai.ac.cn/flagos-runtime/flagos-runtime-amd-rocm7.2.4:2.3.0
+docker cp flagtree-src:/opt/flagtree /data/fl-amd/flagtree
+docker rm flagtree-src
+```
+
+Then, inside the container, put it at `/opt/flagtree`:
+
+```bash
+cp -r /work/flagtree /opt/flagtree
+ls /opt/flagtree        # bin  flagtree  flagtree-0.7.0+amd3.6.dist-info  triton
+```
+
+### 4.2 Make FlagTree own the `triton` module
 
 FlagGems requires Triton ≤ 3.6; the base image ships 3.8. Move the image's
 Triton aside (reversibly) and put FlagTree first on the path:
@@ -97,9 +145,11 @@ print(triton.__version__, triton.__file__);
 print('flagtree', md.version('flagtree'))"
 ```
 
-`triton.__file__` must resolve under `/opt/flagtree`.
+`triton.__file__` must resolve under `/opt/flagtree`, and the reported
+`flagtree` version must be `0.7.0+amd3.6`. Upstream Triton 3.8 is not a
+supported substitute.
 
-### 4.2 Rebuild vLLM as an empty distribution
+### 4.3 Rebuild vLLM as an empty distribution
 
 Non-NVIDIA backends use empty builds uniformly.
 
@@ -113,7 +163,7 @@ pip install --no-cache-dir /work/wheels/vllm-0.32.0+empty-*.whl
 python3 -c "import vllm; print(vllm.__version__)"   # 0.32.0+empty
 ```
 
-### 4.3 FlagGems, FlagGems-vllm and FlagCX
+### 4.4 FlagGems, FlagGems-vllm and FlagCX
 
 FlagGems must come from `main`: the AMD fix that sets
 `triton_extra_name="hip"` for the `_amd` backend is not in the 5.4.0 release,
@@ -127,7 +177,9 @@ SP=$(python3 -c "import site; print(site.getsitepackages()[0])")
 cp -r /work/FlagGems/src/flag_gems "$SP/flag_gems"
 pip install -q sqlalchemy
 
-# FlagGems-vllm (pinned)
+# FlagGems-vllm: the project-wide pin (v0.2.0), the same commit
+# .github/scripts/install_flaggems_vllm.py installs for every other backend.
+# Its package metadata still reports 0.1.0; the commit identifies the release.
 git clone https://github.com/flagos-ai/FlagGems-vllm /work/FlagGems-vllm
 git -C /work/FlagGems-vllm checkout b5c2c2249319277ccda4d41aa0f65164bd9b2a19
 pip install --no-deps --no-build-isolation /work/FlagGems-vllm
@@ -145,7 +197,7 @@ FLAGCX_ADAPTOR=amd USE_AMD=1 FLAGCX_HOME=/work/FlagCX \
 > `git config --global http.version HTTP/1.1` and retry; `ls-remote` succeeding
 > does not guarantee that `clone` will.
 
-### 4.4 Install the plugin
+### 4.5 Install the plugin
 
 ```bash
 cd /work/vllm-plugin-FL
@@ -179,6 +231,40 @@ from vllm_fl.platform import PlatformFL as P
 print('vendor', P.vendor_name, '| device_type', P.device_type,
       '| is_rocm', P().is_rocm())"
 ```
+
+Confirm FlagCX is genuinely carrying collectives rather than falling back to
+RCCL. A `backend=flagcx` log line alone only shows which backend was
+requested, so check that `libflagcx.so` is mapped into the process and that a
+real collective is correct:
+
+```bash
+cat > /tmp/check_flagcx.py <<'PY'
+import os, torch, torch.distributed as dist
+dist.init_process_group(backend="flagcx")
+rank, ws = dist.get_rank(), dist.get_world_size()
+torch.cuda.set_device(rank)
+with open("/proc/self/maps") as f:
+    libs = sorted({l.split()[-1] for l in f if "flagcx" in l.lower()})
+t = torch.full((4,), float(rank + 1), device=f"cuda:{rank}")
+dist.all_reduce(t)
+expected = float(sum(range(1, ws + 1)))
+ok = bool((t == expected).all().item())
+print(f"rank {rank}: reduce {t[0].item()} expected {expected} -> "
+      f"{'OK' if ok else 'FAIL'}; flagcx libs {libs or 'NONE'}", flush=True)
+# Every rank must reach this barrier before any of them exits, otherwise a
+# fast rank tears its communicator down mid-collective and the job hangs.
+dist.barrier()
+# FlagCX's destroy_process_group segfaults on ROCm, so exit without it.
+os._exit(0)
+PY
+
+FLAGCX_PATH=/work/FlagCX LD_LIBRARY_PATH=/work/FlagCX/build/lib \
+  torchrun --nproc-per-node=2 /tmp/check_flagcx.py
+```
+
+`/work/FlagCX/build/lib/libflagcx.so` must appear and the reduction must match.
+`librccl.so` also being mapped is expected: FlagCX's AMD adaptor uses RCCL
+underneath.
 
 ## 6. Start the service
 
@@ -234,6 +320,12 @@ FlagGems, FlagTree and FlagCX active simultaneously:
 
 covering single and 8-way-concurrent text, image, and mixed text-image
 requests, on a dense model and an MoE model.
+
+FlagCX was confirmed to be in the data path rather than merely requested:
+those runs log `backend=flagcx` on all 8 ranks with no `backend=nccl`, the
+platform resolves the communicator to `CommunicatorFL`, and the check in
+section 5 shows `libflagcx.so` mapped into the process with a correct
+`all_reduce`.
 
 **Not supported in this release — graph mode.** Graph capture fails for two
 reasons: FlagGems GDN kernels are traced into by Dynamo and need an opaque
