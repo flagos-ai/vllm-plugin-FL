@@ -120,7 +120,8 @@ def test_codegen_version_invalidates_cache_preserving_user_config(monkeypatch, v
     simulate_platform(monkeypatch, vendor)
     PlatformFL.check_and_update_config(config)
     assert config.additional_config == {
-        "customer_option": [1, 3], "fl_gcu_codegen": "preserve_dtype_v1"
+        "customer_option": [1, 3],
+        "fl_gcu_codegen": "preserve_dtype_v1",
     }
     assert user == {"customer_option": [1, 3]}
     PlatformFL.check_and_update_config(config)

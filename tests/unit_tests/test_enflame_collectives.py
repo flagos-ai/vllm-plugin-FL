@@ -5,13 +5,20 @@ import pytest
 import torch
 
 from vllm.distributed import parallel_state
+
 from vllm_fl.platform import PlatformFL
 
 
 @pytest.mark.parametrize(
     "vendor, expected",
-    [("enflame", True), ("gcu", True), ("nvidia", True),
-     ("thead", True), ("iluvatar", True), ("ascend", False)],
+    [
+        ("enflame", True),
+        ("gcu", True),
+        ("nvidia", True),
+        ("thead", True),
+        ("iluvatar", True),
+        ("ascend", False),
+    ],
 )
 def test_collective_custom_op_policy(monkeypatch, vendor, expected):
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)

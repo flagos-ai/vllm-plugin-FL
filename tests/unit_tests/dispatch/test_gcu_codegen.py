@@ -1,5 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 """Regression: generated i64 pointer ABIs must not become i32 pointers."""
+
 import inspect
 from types import SimpleNamespace
 

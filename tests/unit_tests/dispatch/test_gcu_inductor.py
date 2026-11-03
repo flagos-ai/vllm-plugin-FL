@@ -187,9 +187,7 @@ def test_gcu_i64_option_reaches_compiler_without_narrowing_metadata(dtype, style
     assert heuristics.CachingAutotuner._create_compile_options is wrapped
 
 
-@pytest.mark.parametrize(
-    "device,dtype", [("cuda", "i64"), ("cpu", "i64")]
-)
+@pytest.mark.parametrize("device,dtype", [("cuda", "i64"), ("cpu", "i64")])
 def test_i64_option_does_not_change_other_kernels(device, dtype):
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_i64_compile_options(heuristics)
@@ -488,10 +486,10 @@ def test_gcu_internal_i64_enabled_with_i32_argument_signature():
     # Embedding kernels widen indices internally despite an i32-only ABI.
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_i64_compile_options(heuristics)
-    autotuner = heuristics.CachingAutotuner('gcu')
-    meta = {'signature': {'in_ptr0': '*i32', 'xnumel': 'i32'}}
-    assert autotuner._create_compile_options(object(), meta)['enable_i64'] is True
-    assert 'enable_i64' not in meta
+    autotuner = heuristics.CachingAutotuner("gcu")
+    meta = {"signature": {"in_ptr0": "*i32", "xnumel": "i32"}}
+    assert autotuner._create_compile_options(object(), meta)["enable_i64"] is True
+    assert "enable_i64" not in meta
 
 
 @pytest.mark.parametrize("part", ["LO", "HI"])

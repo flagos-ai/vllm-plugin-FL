@@ -158,7 +158,7 @@ def test_enflame_s60_compilation_config_reaches_engine_and_cli(case):
 def test_serve_args_serializes_nested_json(tmp_path):
     _write(
         tmp_path / "nested.yaml",
-        '''
+        """
         llm:
           model: test-model
           compilation_config:
@@ -167,12 +167,13 @@ def test_serve_args_serializes_nested_json(tmp_path):
               enabled: true
               optional: null
               label: 'a "quoted" value'
-        ''',
+        """,
     )
     cfg = ModelConfig.load("nested", models_dir=tmp_path)
     args = cfg.serve_args()
-    assert json.loads(args[args.index("--compilation-config") + 1]) == (
-        cfg.engine_kwargs()["compilation_config"]
+    assert (
+        json.loads(args[args.index("--compilation-config") + 1])
+        == (cfg.engine_kwargs()["compilation_config"])
     )
 
 

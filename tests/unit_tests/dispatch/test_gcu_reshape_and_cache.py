@@ -173,24 +173,25 @@ def test_cache_address_overflow_is_rejected_without_allocating_device_memory(
         impl.reshape_and_cache_flash(**args)
 
 
-@pytest.mark.parametrize('head_major', [True, False])
+@pytest.mark.parametrize("head_major", [True, False])
 def test_standardized_cache_device_readback(head_major):
-    if not hasattr(torch, 'gcu') or not torch.gcu.is_available():
-        pytest.skip('Requires real GCU for strided cache kernel')
-    args, _ = _inputs(device='gcu')
+    if not hasattr(torch, "gcu") or not torch.gcu.is_available():
+        pytest.skip("Requires real GCU for strided cache kernel")
+    args, _ = _inputs(device="gcu")
     if head_major:
-        cache = torch.full((16, 2, 4, 8), -91., device='gcu')
+        cache = torch.full((16, 2, 4, 8), -91.0, device="gcu")
     else:
-        cache = torch.full((16, 4, 2, 8), -91., device='gcu').transpose(1, 2)
+        cache = torch.full((16, 4, 2, 8), -91.0, device="gcu").transpose(1, 2)
     k, v = cache.transpose(1, 2).split(4, dim=-1)
     args.update(key_cache=k, value_cache=v)
-    args['slot_mapping'] = torch.tensor([0, 1, 18, -1, -(2**32), 63, 30],
-                                        dtype=torch.int64, device='gcu')
+    args["slot_mapping"] = torch.tensor(
+        [0, 1, 18, -1, -(2**32), 63, 30], dtype=torch.int64, device="gcu"
+    )
     expected = cache.cpu().clone()
     for token, slot in enumerate([0, 1, 18, -1, -1, 63, 30]):
         if slot >= 0:
             block, offset = divmod(slot, 4)
-            expected[block, :, offset, :4] = args['key'][token].cpu()
-            expected[block, :, offset, 4:] = args['value'][token].cpu()
+            expected[block, :, offset, :4] = args["key"][token].cpu()
+            expected[block, :, offset, 4:] = args["value"][token].cpu()
     impl.reshape_and_cache_flash(**args)
     torch.testing.assert_close(cache.cpu(), expected, rtol=0, atol=0)

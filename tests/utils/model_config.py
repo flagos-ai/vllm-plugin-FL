@@ -379,7 +379,9 @@ class ModelConfig:
                 if value:
                     args.append(flag)
             else:
-                serialized = json.dumps(value) if isinstance(value, dict) else str(value)
+                serialized = (
+                    json.dumps(value) if isinstance(value, dict) else str(value)
+                )
                 args.extend([flag, serialized])
 
         return args
