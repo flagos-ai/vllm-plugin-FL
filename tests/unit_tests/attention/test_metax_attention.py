@@ -61,6 +61,9 @@ def test_flash_attention_selector_accepts_032_keywords_and_rejects_prefixlm():
         torch=torch,
     )
     backend = module.MacaFlashAttentionBackend
+    assert backend.supports_head_size(512)
+    assert not backend.supports_head_size(520)
+    assert not backend.supports_head_size(127)
     assert backend.get_supported_kernel_block_sizes(kv_cache_spec=object()) == [
         16,
         32,
@@ -192,7 +195,8 @@ def test_mla_prefill_uses_maca_fa2_arguments_and_lse():
         max_seq_len=7,
     )
     backend.run_prefill_context_chunk(chunk, q, k, v)
-    assert calls.pop()["causal"] is False
+    context_args = calls.pop()
+    assert context_args["causal"] is False
 
 
 def test_mla_prefill_refuses_fused_quantized_output():

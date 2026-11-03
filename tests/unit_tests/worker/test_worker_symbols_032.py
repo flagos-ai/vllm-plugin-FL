@@ -6,6 +6,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -55,6 +56,20 @@ def test_worker_helpers_are_missing_only_and_do_not_import_v2_attention(
     shim = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, shim)
     spec.loader.exec_module(shim)
+    # An upstream dependency can still be importing during plugin discovery.
+    # A failed attempt must remain retryable and must not publish partial shims.
+    worker = modules["vllm.v1.worker"]
+    del worker.utils
+    monkeypatch.setitem(sys.modules, "vllm.v1.worker.utils", None)
+    with pytest.raises(ImportError):
+        shim.apply_worker_symbols_032()
+    for module_name, name in targets:
+        if native_helpers:
+            assert getattr(modules[module_name], name) is sentinels[module_name, name]
+        else:
+            assert not hasattr(modules[module_name], name)
+    worker.utils = modules["vllm.v1.worker.utils"]
+    monkeypatch.setitem(sys.modules, "vllm.v1.worker.utils", worker.utils)
     # No vllm.v1.worker.gpu package is installed in this isolated runtime.
     # Importing its attn_utils for the removed allocator shim would fail here.
     assert shim.apply_worker_symbols_032()
@@ -66,7 +81,13 @@ def test_worker_helpers_are_missing_only_and_do_not_import_v2_attention(
             assert value is sentinels[module_name, name]
         else:
             assert callable(value)
+    monkeypatch.setattr(
+        shim,
+        "_set_missing",
+        Mock(side_effect=AssertionError("successful installation must run only once")),
+    )
     assert shim.apply_worker_symbols_032()
+    shim._set_missing.assert_not_called()
     for (module_name, name), value in installed.items():
         assert getattr(modules[module_name], name) is value
 

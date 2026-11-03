@@ -91,13 +91,12 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
         boh = i_n * NT
 
     # [BV, BK]
+    # Initialize every tile before the constexpr branches. Triton eliminates
+    # unused tiles for smaller K before allocating device registers.
     b_h1 = tl.zeros([BV, 64], dtype=tl.float32)
-    if K > 64:
-        b_h2 = tl.zeros([BV, 64], dtype=tl.float32)
-    if K > 128:
-        b_h3 = tl.zeros([BV, 64], dtype=tl.float32)
-    if K > 192:
-        b_h4 = tl.zeros([BV, 64], dtype=tl.float32)
+    b_h2 = tl.zeros([BV, 64], dtype=tl.float32)
+    b_h3 = tl.zeros([BV, 64], dtype=tl.float32)
+    b_h4 = tl.zeros([BV, 64], dtype=tl.float32)
 
     # calculate offset
     h += ((boh * H + i_h) * V * K).to(tl.int64)

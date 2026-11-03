@@ -30,7 +30,6 @@ from vllm_fl.dispatch.backends.vendor.metax.impl.attention.utils.fa_utils import
     flash_attn_supports_kv_cache_dtype,
     flash_attn_supports_quant_query_input,
     get_flash_attn_version,
-    is_fa_version_supported,
     is_flash_attn_varlen_func_available,
     uses_fa4_hd256_kernel,
 )
@@ -171,13 +170,8 @@ class MacaFlashAttentionBackend(AttentionBackend):
 
     @classmethod
     def supports_head_size(cls, head_size: int) -> bool:
-        if head_size % 8 != 0:
-            return False
-        if head_size <= 512:  # Maca support 512 in fa2
-            return True
-        if is_fa_version_supported(4):
-            return head_size <= 512
-        return False
+        # MACA FA2 supports head sizes through 512 without an FA4 extension.
+        return head_size % 8 == 0 and head_size <= 512
 
     @classmethod
     def supports_kv_cache_dtype(cls, kv_cache_dtype: CacheDType | None) -> bool:
@@ -1388,8 +1382,6 @@ class FlashAttentionImpl(AttentionImpl):
             )
 
             mm_prefix_query_ranges = attn_metadata.mm_prefix_query_range_tensor
-            mm_mask_mod = None  # noqa: F841
-            mm_aux = None  # noqa: F841
             if (
                 mm_prefix_query_ranges is not None
                 and not is_dynamic_causal
@@ -1404,8 +1396,6 @@ class FlashAttentionImpl(AttentionImpl):
             # mask without block-size approximation.  The mask_mod encodes
             # "causal AND (kv < prefix_len OR q - kv < rswa_window)", which
             # supersedes any FA-layer sliding_window_size parameter.
-            rswa_mask_mod_fn = None  # noqa: F841
-            rswa_aux = None  # noqa: F841
             if (
                 attn_metadata.rswa_prefix_lens is not None
                 and self.vllm_flash_attn_version == 4
@@ -1730,11 +1720,6 @@ class FlashAttentionImpl(AttentionImpl):
         cu_seqlens_k = attn_metadata.query_start_loc
         max_seqlen_q = attn_metadata.max_query_len
         max_seqlen_k = attn_metadata.max_query_len
-
-        descale_shape = (  # noqa: F841
-            cu_seqlens_q.shape[0] - 1,  # type: ignore[union-attr]
-            self.num_kv_heads,
-        )
 
         # Call flash attention directly on Q, K, V tensors
         sliding_window_size = (

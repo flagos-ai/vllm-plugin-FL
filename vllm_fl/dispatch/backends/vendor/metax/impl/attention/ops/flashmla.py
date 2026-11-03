@@ -11,6 +11,18 @@ from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
+__all__ = [
+    "FlashMLASchedMeta",
+    "flash_mla_sparse_fwd",
+    "flash_mla_with_kvcache",
+    "flash_mla_with_kvcache_fp8",
+    "get_mla_metadata",
+    "get_mla_metadata_dense_fp8",
+    "is_flashmla_dense_supported",
+    "is_flashmla_sparse_supported",
+    "torch_flash_mla_sparse_prefill",
+]
+
 
 def _is_flashmla_available() -> tuple[bool, str | None]:
     """Check the MACA scheduler-object ABI required by the 0.32 backend."""

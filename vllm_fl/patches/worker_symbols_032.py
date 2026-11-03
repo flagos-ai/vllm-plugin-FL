@@ -49,13 +49,11 @@ Patched names:
 
 from __future__ import annotations
 
+from functools import cache
 from typing import NamedTuple, Protocol, runtime_checkable
 
 import numpy as np
 import torch
-
-_installed = False
-
 
 # ---------------------------------------------------------------------------
 # Sequence parallelism
@@ -94,7 +92,8 @@ def _is_residual_scattered_for_sp(vllm_config, num_input_tokens: int) -> bool:
 class _SupportsXDRoPE(Protocol):
     """Structural interface for models providing XDRoPE input positions."""
 
-    def get_xdrope_input_positions(self, *args, **kwargs): ...
+    def get_xdrope_input_positions(self, *args, **kwargs):
+        pass
 
 
 def _supports_xdrope(model: object) -> bool:
@@ -168,12 +167,9 @@ def _set_missing(module, name: str, value) -> None:
         setattr(module, name, value)
 
 
+@cache
 def apply_worker_symbols_032() -> bool:
     """Re-publish v0.28 worker helpers that vLLM 0.32 removed. Idempotent."""
-    global _installed
-    if _installed:
-        return True
-
     from vllm.model_executor.layers import rotary_embedding
     from vllm.model_executor.models import interfaces
     from vllm.v1 import outputs
@@ -188,5 +184,4 @@ def apply_worker_symbols_032() -> bool:
     _set_missing(outputs, "RoutedExpertsLists", _RoutedExpertsLists)
     _set_missing(outputs, "RoutedExpertsTensors", _RoutedExpertsTensors)
 
-    _installed = True
     return True

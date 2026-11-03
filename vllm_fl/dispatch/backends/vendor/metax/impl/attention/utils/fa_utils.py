@@ -15,29 +15,28 @@ from vllm.platforms import current_platform
 
 from ..ops._kernel_utils import has_cuda_or_composite_kernel
 
-_flaggems_cache_eligible: bool | None = None
-_flaggems_cache_writer = None
+_flaggems_cache_state = {"eligible": None, "writer": None}
 
 
 def _get_flaggems_cache_writer():
     """Resolve the block-stride-aware bridge, retrying partial imports."""
-    global _flaggems_cache_eligible, _flaggems_cache_writer
-    if _flaggems_cache_writer is not None:
-        return _flaggems_cache_writer
-    if _flaggems_cache_eligible is None:
+    state = _flaggems_cache_state
+    if state["writer"] is not None:
+        return state["writer"]
+    if state["eligible"] is None:
         try:
-            _flaggems_cache_eligible = Version(version("flaggems-vllm")) >= Version(
+            state["eligible"] = Version(version("flaggems-vllm")) >= Version(
                 "0.3.0.dev1"
             )
         except (PackageNotFoundError, InvalidVersion):
-            _flaggems_cache_eligible = False
-    if not _flaggems_cache_eligible:
+            state["eligible"] = False
+    if not state["eligible"]:
         return None
     try:
         module = importlib.import_module("flaggems_vllm")
     except (ImportError, OSError) as exc:
         if "partially initialized" not in str(exc):
-            _flaggems_cache_eligible = False
+            state["eligible"] = False
         return None
     if getattr(getattr(module, "__spec__", None), "_initializing", False):
         # vLLM plugin discovery can encounter the bridge's import cycle. The
@@ -45,10 +44,10 @@ def _get_flaggems_cache_writer():
         return None
     writer = getattr(module, "reshape_and_cache_flash", None)
     if callable(writer):
-        _flaggems_cache_writer = writer
+        state["writer"] = writer
     else:
-        _flaggems_cache_eligible = False
-    return _flaggems_cache_writer
+        state["eligible"] = False
+    return state["writer"]
 
 
 def _flaggems_cache_layout_supported(key_cache, value_cache) -> bool:

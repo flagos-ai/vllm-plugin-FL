@@ -188,8 +188,7 @@ def _bridge_resolver(package_version, module=None, error=None):
     resolve = _function(
         "utils/fa_utils.py",
         "_get_flaggems_cache_writer",
-        _flaggems_cache_eligible=None,
-        _flaggems_cache_writer=None,
+        _flaggems_cache_state={"eligible": None, "writer": None},
         version=lookup,
         PackageNotFoundError=importlib.metadata.PackageNotFoundError,
         InvalidVersion=InvalidVersion,
@@ -261,6 +260,17 @@ def test_partial_import_error_is_retried_instead_of_caching_unavailable():
     assert resolve() is None
     assert resolve() is bridge.reshape_and_cache_flash
     lookup.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "error", [ImportError("bridge unavailable"), OSError("bad ABI")]
+)
+def test_permanent_bridge_import_error_is_cached(error):
+    resolve, lookup, loader, _ = _bridge_resolver("0.3.0.dev1")
+    loader.side_effect = error
+    assert resolve() is None and resolve() is None
+    lookup.assert_called_once()
+    loader.assert_called_once()
 
 
 @pytest.mark.parametrize("native_available", [False, True])

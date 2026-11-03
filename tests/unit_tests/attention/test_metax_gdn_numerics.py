@@ -70,7 +70,6 @@ def test_gdn_chunk_prefill_matches_token_recurrence(
 
     boundaries = (0, 5, 73)
     values = _inputs(73, key_dim, value_dim, 2, key_heads, value_heads)
-    q, k, v, g, beta, initial = values
     expected = _reference(*values, boundaries, round_normalized=True)
     q, k, v, g, beta, initial = (x.cuda().contiguous() for x in values)
     output_buffer = torch.full_like(v, float("nan"))
