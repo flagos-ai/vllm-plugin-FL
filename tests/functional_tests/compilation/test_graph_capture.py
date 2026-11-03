@@ -179,3 +179,140 @@ class TestGraphCacheManagement:
         cache[desc] = entry
 
         assert cache[desc].batch_descriptor.num_tokens == 16
+
+
+@pytest.mark.parametrize("weak_ref_output", [False, True])
+def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
+    device, weak_ref_output, record_property
+):
+    from importlib.metadata import version
+
+    from packaging.version import Version
+
+    if device.type != "gcu" or Version(version("vllm")) < Version("0.32.0"):
+        pytest.skip("Enflame native V1 integration requires vLLM 0.32")
+    from vllm.compilation.cuda_graph import CUDAGraphOptions, CUDAGraphWrapper
+    from vllm.compilation.monitor import set_cudagraph_capturing_enabled
+    from vllm.config import CUDAGraphMode, VllmConfig
+    from vllm.forward_context import BatchDescriptor, set_forward_context
+
+    from vllm_fl.compilation.graph import GraphWrapper
+
+    config = VllmConfig()
+    descriptor = BatchDescriptor(num_tokens=2, num_reqs=2, uniform=True)
+    calls = []
+
+    def runnable(x):
+        calls.append(None)
+        return x * 2 + 1
+
+    static_input = torch.arange(8, dtype=torch.float32, device=device).reshape(2, 4)
+    runnable(static_input)
+    calls.clear()
+    wrapper = GraphWrapper(
+        runnable,
+        config,
+        CUDAGraphMode.FULL,
+        CUDAGraphOptions(weak_ref_output=weak_ref_output),
+    )
+    stream = torch.gcu.Stream()
+    stream.wait_stream(torch.gcu.current_stream())
+    set_cudagraph_capturing_enabled(True)
+    try:
+        with set_forward_context(
+            None,
+            config,
+            cudagraph_runtime_mode=CUDAGraphMode.FULL,
+            batch_descriptor=descriptor,
+        ):
+            with torch.gcu.stream(stream):
+                captured = wrapper(static_input)
+            torch.gcu.current_stream().wait_stream(stream)
+            torch.gcu.synchronize()
+            entry = wrapper.concrete_cudagraph_entries[descriptor]
+            assert isinstance(entry.cudagraph, torch.gcu.GCUGraph)
+            assert wrapper in CUDAGraphWrapper._all_instances
+            for revision in (1, 2):
+                values = torch.full((2, 4), revision, dtype=torch.float32)
+                static_input.copy_(values)
+                captured.fill_(-999)
+                result = wrapper(static_input)
+                torch.gcu.synchronize()
+                torch.testing.assert_close(result.cpu(), values * 2 + 1)
+                assert len(calls) == 1
+                assert (
+                    wrapper.concrete_cudagraph_entries[descriptor].cudagraph
+                    is entry.cudagraph
+                )
+            # Elastic EP resets this upstream field before the next capture.
+            wrapper.concrete_cudagraph_entries = {}
+            with torch.gcu.stream(stream):
+                wrapper(static_input)
+            torch.gcu.current_stream().wait_stream(stream)
+            static_input.fill_(3)
+            result = wrapper(static_input)
+            torch.gcu.synchronize()
+            torch.testing.assert_close(result.cpu(), torch.full((2, 4), 7.0))
+            assert len(calls) == 2
+            assert (
+                wrapper.concrete_cudagraph_entries[descriptor].cudagraph
+                is not entry.cudagraph
+            )
+            record_property("enflame_native_wrapper_graph_replays", 2)
+            record_property("enflame_graph_recapture_after_reset", True)
+    finally:
+        set_cudagraph_capturing_enabled(False)
+        wrapper.clear_graphs()
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_gcu_shared_experts_capture_and_replay(device, dtype, monkeypatch):
+    """The native MoE shared-expert path must allocate on the capture stream."""
+    if current_platform.device_type != "gcu":
+        pytest.skip("Requires TorchGCU graph capture")
+
+    from types import SimpleNamespace
+
+    import flag_gems
+
+    from vllm.model_executor.layers.fused_moe.runner.shared_experts import (
+        SharedExperts,
+        SharedExpertsOrder,
+    )
+
+    from vllm_fl.dispatch.backends.vendor.gcu.patch import (
+        apply_shared_experts_gcu_patch,
+    )
+
+    monkeypatch.delenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", raising=False)
+    apply_shared_experts_gcu_patch()
+    config = SimpleNamespace(
+        moe_parallel_config=SimpleNamespace(
+            enable_eplb=False,
+            use_fi_nvl_two_sided_kernels=False,
+        )
+    )
+    layer = torch.nn.Linear(64, 128, bias=False, device=device, dtype=dtype)
+    shared = SharedExperts(layer, config, False, lambda: False)
+    static_input = torch.ones(32, 64, device=device, dtype=dtype)
+    assert shared._stream is None
+    with flag_gems.use_gems():
+        for _ in range(3):
+            assert not shared.maybe_forward_async(static_input)
+            shared(static_input, SharedExpertsOrder.NO_OVERLAP)
+            _ = shared.output
+        torch.gcu.synchronize()
+        graph = _new_graph()
+        with _graph_capture(graph):
+            shared(static_input, SharedExpertsOrder.NO_OVERLAP)
+            output = shared.output
+        for value in (2, 3):
+            static_input.fill_(value)
+            graph.replay()
+            torch.gcu.synchronize()
+            expected = torch.nn.functional.linear(
+                static_input.cpu().float(), layer.weight.cpu().float()
+            )
+            torch.testing.assert_close(
+                output.cpu().float(), expected, atol=0.03, rtol=0.03
+            )

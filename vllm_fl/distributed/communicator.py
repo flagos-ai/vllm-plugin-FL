@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from typing import Optional, Union
 
 import torch
 from torch.distributed import ProcessGroup
@@ -12,6 +11,7 @@ from torch.distributed import ProcessGroup
 from vllm.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase,
 )
+from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
 from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
 
@@ -20,7 +20,7 @@ from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 logger = init_logger(__name__)
 
 
-class CommunicatorFL(DeviceCommunicatorBase):
+class CommunicatorFL(CudaCommunicator):
     def __init__(
         self,
         cpu_group: ProcessGroup,
@@ -32,9 +32,8 @@ class CommunicatorFL(DeviceCommunicatorBase):
         tcp_store_group: StatelessProcessGroup | None = None,
         use_all2all: bool = False,
     ):
-        # Call the common base directly. NVIDIA adds a CudaCommunicator-compatible
-        # bridge for vLLM graph capture, but must not initialize PyNCCL as well as
-        # FlagCX through cooperative multiple inheritance.
+        # Satisfy the native GPU graph interface while initializing only
+        # FlagCX, without a second PyNCCL/custom-all-reduce stack.
         DeviceCommunicatorBase.__init__(
             self,
             cpu_group,
@@ -45,7 +44,21 @@ class CommunicatorFL(DeviceCommunicatorBase):
             global_world_size,
             use_all2all=use_all2all,
         )
-        self.pyflagcx_comm: Optional[PyFlagcxCommunicator] = None
+        self.use_custom_allreduce = False
+        self.use_torch_symm_mem = False
+        self.use_flashinfer_allreduce = False
+        self.use_flashinfer_pcie_ipc_allreduce = False
+        self.use_aiter_allreduce = False
+        self.use_aiter_ag_rs = False
+        self.pynccl_comm = None
+        self.ca_comm = None
+        self.qr_comm = None
+        self.symm_mem_comm = None
+        self.fi_ar_comm = None
+        self.fi_pcie_ipc_ar_comm = None
+        self.aiter_ar_comm = None
+
+        self.pyflagcx_comm: PyFlagcxCommunicator | None = None
         if self.world_size > 1:
             self.pyflagcx_comm = PyFlagcxCommunicator(
                 group=self.cpu_group,
@@ -194,21 +207,20 @@ class CommunicatorFL(DeviceCommunicatorBase):
 
         assert input_tensor.shape[0] % world_size == 0
         chunk_size = input_tensor.shape[0] // world_size
-        output_shape = (chunk_size, ) + input_tensor.shape[1:]
+        output_shape = (chunk_size,) + input_tensor.shape[1:]
 
-        output = torch.empty(output_shape,
-                             dtype=input_tensor.dtype,
-                             device=input_tensor.device)
+        output = torch.empty(
+            output_shape, dtype=input_tensor.dtype, device=input_tensor.device
+        )
 
         pyflagcx_comm.reduce_scatter(output, input_tensor)
 
         # Reshape before returning
         return output.movedim(0, dim).contiguous()
 
-    def reduce_scatterv(self,
-                        input_: torch.Tensor,
-                        dim: int = -1,
-                        sizes: Optional[list[int]] = None):
+    def reduce_scatterv(
+        self, input_: torch.Tensor, dim: int = -1, sizes: list[int] | None = None
+    ):
         world_size = self.world_size
         pyflagcx_comm = self.pyflagcx_comm
         assert pyflagcx_comm is not None
@@ -227,11 +239,11 @@ class CommunicatorFL(DeviceCommunicatorBase):
         else:
             assert input_tensor.shape[0] % world_size == 0
             chunk_size = input_tensor.shape[0] // world_size
-        output_shape = (chunk_size, ) + input_tensor.shape[1:]
+        output_shape = (chunk_size,) + input_tensor.shape[1:]
 
-        output = torch.empty(output_shape,
-                             dtype=input_tensor.dtype,
-                             device=input_tensor.device)
+        output = torch.empty(
+            output_shape, dtype=input_tensor.dtype, device=input_tensor.device
+        )
 
         if sizes is not None:
             pyflagcx_comm.reduce_scatterv(output, input_tensor, sizes=sizes)
@@ -241,7 +253,7 @@ class CommunicatorFL(DeviceCommunicatorBase):
         # Reshape before returning
         return output.movedim(0, dim).contiguous()
 
-    def send(self, tensor: torch.Tensor, dst: Optional[int] = None) -> None:
+    def send(self, tensor: torch.Tensor, dst: int | None = None) -> None:
         """Sends a tensor to the destination rank in a blocking way"""
         """NOTE: `dst` is the local rank of the destination rank."""
         if dst is None:
@@ -253,10 +265,9 @@ class CommunicatorFL(DeviceCommunicatorBase):
         else:
             torch.distributed.send(tensor, self.ranks[dst], self.device_group)
 
-    def recv(self,
-             size: torch.Size,
-             dtype: torch.dtype,
-             src: Optional[int] = None) -> torch.Tensor:
+    def recv(
+        self, size: torch.Size, dtype: torch.dtype, src: int | None = None
+    ) -> torch.Tensor:
         """Receives a tensor from the source rank."""
         """NOTE: `src` is the local rank of the source rank."""
         if src is None:
@@ -295,10 +306,12 @@ class CommunicatorFL(DeviceCommunicatorBase):
         if self.all2all_manager is not None:
             self.all2all_manager.checkpoint_restore()
 
-    def all_gatherv(self,
-                    input_: Union[torch.Tensor, list[torch.Tensor]],
-                    dim: int = 0,
-                    sizes: Optional[list[int]] = None):
+    def all_gatherv(
+        self,
+        input_: torch.Tensor | list[torch.Tensor],
+        dim: int = 0,
+        sizes: list[int] | None = None,
+    ):
         if dim != 0:
             raise NotImplementedError("only dim 0 all-gatherv is supported")
         world_size = self.world_size
@@ -310,20 +323,20 @@ class CommunicatorFL(DeviceCommunicatorBase):
         if sizes is not None and all(s == sizes[0] for s in sizes):
             sizes = None
 
-        def _all_gather_single(input_: torch.Tensor,
-                               sizes: Optional[list[int]] = None):
+        def _all_gather_single(input_: torch.Tensor, sizes: list[int] | None = None):
             input_size = input_.size()
             if sizes is not None:
                 assert len(sizes) == world_size
                 assert input_.shape[dim] == sizes[self.rank_in_group], (
-                    f"{input_.shape[dim]} != {sizes[self.rank_in_group]}")
-                output_size = (sum(sizes), ) + input_size[1:]
+                    f"{input_.shape[dim]} != {sizes[self.rank_in_group]}"
+                )
+                output_size = (sum(sizes),) + input_size[1:]
             else:
-                output_size = (input_size[0] * world_size, ) + input_size[1:]
+                output_size = (input_size[0] * world_size,) + input_size[1:]
             # Allocate output tensor.
-            output_tensor = torch.empty(output_size,
-                                        dtype=input_.dtype,
-                                        device=input_.device)
+            output_tensor = torch.empty(
+                output_size, dtype=input_.dtype, device=input_.device
+            )
             if sizes is not None:
                 pyflagcx_comm.all_gatherv(output_tensor, input_, sizes=sizes)
             else:

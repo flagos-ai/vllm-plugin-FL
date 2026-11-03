@@ -12,6 +12,8 @@ from the root tests/conftest.py. Only functional-specific fixtures belong here.
 
 import pytest
 
+from tests.utils.device_utils import get_backend
+
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
@@ -28,6 +30,11 @@ def pytest_sessionfinish(session, exitstatus):
     It also drains any residual inductor SubprocPool whose _read_thread could
     segfault when the subprocess pipe breaks during NPU teardown.
     """
+    # Other backends must finish pytest normally so report hook wrappers and
+    # terminal summaries can complete before the interpreter shuts down.
+    if get_backend() != "ascend":
+        return
+
     import contextlib
     import os
     import threading

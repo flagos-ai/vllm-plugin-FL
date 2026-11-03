@@ -259,7 +259,7 @@ def check_stack(*, runtime_only=False):
         fused_origin = fused_dist.locate_file("flaggems_vllm/__init__.py")
         if Path(flaggems_vllm.__file__).resolve() != Path(fused_origin).resolve():
             raise RuntimeError("FlagGems-vllm must come from the pinned installation")
-        worker = importlib.import_module("vllm_fl.worker.nvidia_worker").NvidiaWorkerFL
+        worker = importlib.import_module("vllm_fl.worker.worker").WorkerFL
         if getattr(current_platform, "vendor_name", None) != "nvidia":
             raise RuntimeError("Normal FL registration did not activate NVIDIA")
         if not torch.cuda.is_available():

@@ -1,0 +1,14 @@
+# Enflame S60 / CPython 3.12 overlay for vLLM 0.32.0 empty builds.
+# Vendor Torch, FlagTree, Triton GCU and FlagGems remain in the pinned base image.
+# FlagTree supplies the triton namespace: do not install upstream triton.
+# Install with --no-deps --require-hashes to preserve the vendor SDK.
+aiohttp==3.14.5 --hash=sha256:20f085697d7e911f1f73c43ed03fafbed1e7121797e2eb5428efa80398060584
+mcp==2.0.0 --hash=sha256:1cb4c75d2d2c7b8c1d756355e5d82a39f2822cc7f13e22a2051d7ca3592349d6
+oss-harmony==0.0.11 --hash=sha256:d877c6b526cdbdf55068bae8f05c60398e929c9e296c7f69a1d533339708be80
+pillow==13.0.0 --hash=sha256:42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca
+requests==2.33.0 --hash=sha256:3324635456fa185245e24865e810cecec7b4caf933d7eb133dcde67d48cee69b
+tokenizers==0.23.2 --hash=sha256:41c2f84d172449b4dadb9cdc508e3e364076613c35b16e76ecfe47a60d1e3305
+transformers==5.16.1 --hash=sha256:2f2d5b98a5ad3718713653734298fa620754ed683702a635ebb587df3ed29c7e
+certifi==2026.10.23 --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+mcp-types==2.0.0 --hash=sha256:6b2de797ca2797f568b79529e1b25948e34de511bcc0bd82fef1039a6d1b8eb0
+safetensors==0.8.0 --hash=sha256:fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774

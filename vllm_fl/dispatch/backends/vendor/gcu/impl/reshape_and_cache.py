@@ -9,8 +9,45 @@ from flag_gems.fused.reshape_and_cache_flash import (
     reshape_and_cache_flash as _gems_reshape_and_cache_flash,
 )
 
+from vllm.triton_utils import tl, triton
+
 _INT32_MAX = 2**31 - 1
 _MAX_GRID_X = 65535
+
+
+@triton.jit
+def _cache_concatenated_kv(
+    key,
+    value,
+    key_cache,
+    value_cache,
+    slots,
+    key_stride,
+    value_stride,
+    cache_stride,
+    token_stride,
+    head_stride,
+    BLOCK_SIZE: tl.constexpr,
+    HEAD_SIZE: tl.constexpr,
+    WIDTH: tl.constexpr,
+    TILE: tl.constexpr,
+):
+    token = tl.program_id(0)
+    slot = tl.load(slots + token)
+    if slot < 0:
+        return
+    cols = tl.arange(0, TILE)
+    mask = cols < WIDTH
+    dst = (
+        (slot // BLOCK_SIZE) * cache_stride
+        + (slot % BLOCK_SIZE) * token_stride
+        + (cols // HEAD_SIZE) * head_stride
+        + cols % HEAD_SIZE
+    )
+    k = tl.load(key + token * key_stride + cols, mask=mask)
+    v = tl.load(value + token * value_stride + cols, mask=mask)
+    tl.store(key_cache + dst, k, mask=mask)
+    tl.store(value_cache + dst, v, mask=mask)
 
 
 def _slots_as_int32(slot_mapping: torch.Tensor) -> torch.Tensor:
@@ -35,11 +72,12 @@ def reshape_and_cache_flash(
     k_scale: torch.Tensor,
     v_scale: torch.Tensor,
 ) -> None:
-    """Write paged K/V using FlagGems' Enflame-compatible cache kernel.
+    """Write paged K/V using Enflame-compatible bounded cache kernels.
 
     Native GCU advanced assignment rejects the interleaved K/V block layout
     used by vLLM. FlagGems accepts its padded block stride and skips negative
-    slots. Its Enflame path uses int32 indexing, so validate layout and index
+    slots. Concatenated vLLM 0.32 caches need explicit token/head strides.
+    Both paths use int32 indexing, so validate layout and index
     arithmetic from metadata before launching. Nonnegative slots must already
     be valid cache indices, as required by the upstream cache-write contract.
     """
@@ -69,6 +107,8 @@ def reshape_and_cache_flash(
         raise ValueError("GCU cache dimensions must be positive")
     width = heads * head_size
     block_elements = block_size * width
+    concatenated = key_cache.stride()[1:] == (2 * width, 2 * head_size, 1)
+    physical_block_elements = block_elements * (2 if concatenated else 1)
     for t in (key, value):
         if (
             t.shape[0] < num_tokens
@@ -79,8 +119,10 @@ def reshape_and_cache_flash(
             raise ValueError("GCU cache inputs require contiguous heads within tokens")
     for t in (key_cache, value_cache):
         if (
-            t.stride()[1:] != (width, head_size, 1)
-            or t.stride(0) < block_elements
+            t.stride()[1:] != key_cache.stride()[1:]
+            or t.stride()[1:]
+            not in ((width, head_size, 1), (2 * width, 2 * head_size, 1))
+            or t.stride(0) < physical_block_elements
             or t.stride(0) != key_cache.stride(0)
         ):
             raise ValueError(
@@ -89,7 +131,7 @@ def reshape_and_cache_flash(
     if (
         blocks * block_size - 1 > _INT32_MAX
         or key_cache.stride(0) > _INT32_MAX
-        or (blocks - 1) * key_cache.stride(0) + block_elements - 1 > _INT32_MAX
+        or (blocks - 1) * key_cache.stride(0) + physical_block_elements - 1 > _INT32_MAX
         or any(
             t.stride(0) > _INT32_MAX
             or (min(num_tokens, _MAX_GRID_X) - 1) * t.stride(0) + width - 1 > _INT32_MAX
@@ -107,6 +149,24 @@ def reshape_and_cache_flash(
     # all calls compatible with graph capture, including long prefills.
     for start in range(0, num_tokens, _MAX_GRID_X):
         count = min(num_tokens - start, _MAX_GRID_X)
+        if concatenated:
+            _cache_concatenated_kv[(count,)](
+                key.narrow(0, start, count),
+                value.narrow(0, start, count),
+                key_cache,
+                value_cache,
+                slots.narrow(0, start, count),
+                key.stride(0),
+                value.stride(0),
+                key_cache.stride(0),
+                key_cache.stride(1),
+                key_cache.stride(2),
+                BLOCK_SIZE=block_size,
+                HEAD_SIZE=head_size,
+                WIDTH=width,
+                TILE=triton.next_power_of_2(width),
+            )
+            continue
         _gems_reshape_and_cache_flash(
             key.narrow(0, start, count),
             value.narrow(0, start, count),

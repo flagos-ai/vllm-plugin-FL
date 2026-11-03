@@ -200,9 +200,6 @@ def register():
         # These backends use ModelRunnerFL; choose it before VllmConfig reads
         # model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
-    if vendor_name == "nvidia":
-        return "vllm_fl.nvidia_platform.NvidiaPlatformFL"
-
     return "vllm_fl.platform.PlatformFL"
 
 

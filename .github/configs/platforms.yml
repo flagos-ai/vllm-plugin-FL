@@ -33,7 +33,7 @@ platforms:
   musa:
     enabled: false
   enflame:
-    enabled: false
+    enabled: true
   kunlunxin:
     enabled: false
   iluvatar:

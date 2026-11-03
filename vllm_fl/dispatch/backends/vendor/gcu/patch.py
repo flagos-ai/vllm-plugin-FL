@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 _patches_applied = False
 
 
+def apply_shared_experts_gcu_patch() -> None:
+    from importlib.util import find_spec
+
+    # Reuse upstream shared experts' NO_OVERLAP path: TorchGCU cannot
+    # allocate on the auxiliary stream during capture.
+    if find_spec("vllm.model_executor.layers.fused_moe.runner") is not None:
+        from vllm.model_executor.layers.fused_moe.runner import shared_experts
+
+        shared_experts.aux_stream = lambda: None
+
+
 def apply_gcu_patches() -> None:
     """Apply all GCU-specific kernel / model monkey-patches."""
     global _patches_applied
@@ -37,6 +48,7 @@ def apply_gcu_patches() -> None:
     apply_fused_recurrent_packed_decode_gcu_patch()
     apply_kv_zeroer_gcu_patch()
     apply_mamba_copy_gcu_patch()
+    apply_shared_experts_gcu_patch()
     apply_index_fill_gcu_patch()
     apply_inductor_gcu_patch()
     _patches_applied = True

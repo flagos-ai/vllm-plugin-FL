@@ -20,7 +20,12 @@ import torch
 import torch.nn as nn
 
 import vllm.envs as envs
-from vllm.config import CUDAGraphMode, VllmConfig, set_current_vllm_config
+from vllm.config import (
+    CUDAGraphMode,
+    VllmConfig,
+    set_current_vllm_config,
+    update_config,
+)
 from vllm.config.compilation import CompilationMode
 from vllm.device_allocator import get_mem_allocator_instance
 from vllm.distributed import (
@@ -86,12 +91,17 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
 from vllm_fl.dispatch.io_common import managed_inference_mode
-from vllm_fl.worker.runtime import _initialize_fl_runtime
+from vllm_fl.worker.model_runner import ModelRunnerFL
+from vllm_fl.worker.runtime import (
+    _initialize_fl_runtime,
+    is_residual_scattered_for_sp,
+    prepare_native_model_runner,
+)
 
 logger = init_logger(__name__)
 
@@ -119,7 +129,6 @@ def _normalize_process_group_backend(backend: str) -> str:
 if TYPE_CHECKING:
     from vllm.device_allocator.sleep_mode_backend import SleepModeBackend
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
-    from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 
 def _apply_worker_vendor_patches() -> None:
@@ -307,9 +316,6 @@ class WorkerFL(WorkerBase):
                         buffer.data.copy_(self._sleep_saved_draft_buffers[name].data)
             self._sleep_saved_draft_buffers = {}
 
-        if tags is None or "kv_cache" in tags:
-            self.model_runner.post_kv_cache_wake_up()
-
     def checkpoint_prepare(self) -> None:
         checkpoint_prepare_distributed_state()
 
@@ -496,19 +502,19 @@ class WorkerFL(WorkerBase):
             _num_workspace_lanes(self.vllm_config, self.use_v2_model_runner),
         )
 
+        from vllm_fl.patches.qsa_cache_hint import patch_qsa_cache_hint
+
+        if patch_qsa_cache_hint(self.model_config, self.device):
+            logger.info("Applied the FlagTree QSA K-cache hint workaround")
+
         # Construct the model runner
         if self.use_v2_model_runner:
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
 
-            # HACK(woosuk): This is a temporary fix to avoid type errors.
-            self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
-                self.vllm_config, self.device
-            )
+            self.model_runner = GPUModelRunnerV2(self.vllm_config, self.device)
         else:
-            from vllm_fl.worker.model_runner import ModelRunnerFL
-
             self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
 
         if self.rank == 0:
@@ -529,6 +535,12 @@ class WorkerFL(WorkerBase):
             self._scoped_allocator_max_split(max_split_size_mb=20),
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
+            if self.use_v2_model_runner:
+                prepare_native_model_runner(
+                    self.model_runner,
+                    self.model_config.enforce_eager,
+                    load_dummy_weights,
+                )
 
         if self.vllm_config.weight_transfer_config is not None:
             self.weight_transfer_engine = WeightTransferEngineFactory.create_engine(
@@ -539,7 +551,21 @@ class WorkerFL(WorkerBase):
             )
 
     def update_config(self, overrides: dict[str, Any]) -> None:
-        self.model_runner.update_config(overrides)
+        """Apply config overrides to the worker, its model runner and the
+        shared VllmConfig."""
+        allowed_config_names = {"load_config", "model_config"}
+        for config_name, config_overrides in overrides.items():
+            if config_name not in allowed_config_names:
+                allowed = ", ".join(sorted(allowed_config_names))
+                raise ValueError(
+                    f"Config override '{config_name}' is not supported. "
+                    f"Supported configs: {allowed}"
+                )
+            config = getattr(self.vllm_config, config_name)
+            new_config = update_config(config, config_overrides)
+            setattr(self.vllm_config, config_name, new_config)
+            setattr(self.model_runner, config_name, new_config)
+            setattr(self, config_name, new_config)
 
     def reload_weights(self, *args, **kwargs) -> None:
         with set_current_vllm_config(self.vllm_config):
@@ -764,9 +790,6 @@ class WorkerFL(WorkerBase):
 
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
-
-        if self.model_config.enable_return_routed_experts:
-            self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
@@ -1510,9 +1533,9 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    from vllm_fl.utils import get_batch_invariant_module
 
-    init_batch_invariance()
+    get_batch_invariant_module().init_batch_invariance()
     override_envs_for_eplb(
         parallel_config,
         moe_backend=getattr(vllm_config.kernel_config, "moe_backend", None),

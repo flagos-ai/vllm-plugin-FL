@@ -14,3 +14,7 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
+
+# Local adaptation progress, connection profiles, and runtime evidence
+.flflow-progress.json
+.flflow-evidence/

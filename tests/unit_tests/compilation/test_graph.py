@@ -181,6 +181,9 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     forward_context = SimpleNamespace(
         batch_descriptor=descriptor, cudagraph_runtime_mode=mode
     )
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
     monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
     monkeypatch.setattr(graph_module, "get_forward_context", lambda: forward_context)
     monkeypatch.setattr(
@@ -198,7 +201,9 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
 
     wrapper = graph_module.GraphWrapper(
         runnable,
-        SimpleNamespace(compilation_config=SimpleNamespace()),
+        SimpleNamespace(
+            compilation_config=SimpleNamespace(), use_cumem_cudagraph_pool=False
+        ),
         mode,
         graph_module.GraphOptions(weak_ref_output=weak_ref_output),
     )
@@ -210,8 +215,8 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     torch.npu.current_stream().wait_stream(capture_stream)
     torch.npu.synchronize()
 
-    entry = wrapper.concrete_graph_entries[descriptor]
-    assert isinstance(entry.graph, torch.npu.NPUGraph)
+    entry = wrapper.concrete_cudagraph_entries[descriptor]
+    assert isinstance(entry.cudagraph, torch.npu.NPUGraph)
     assert len(calls) == 1
 
     # NPU capture need not materialize its output until the first replay.
@@ -235,7 +240,9 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
         expected = eager_reference(values)
         torch.testing.assert_close(replayed_output, expected)
         assert not torch.all(replayed_output == -999).item()
-        assert wrapper.concrete_graph_entries[descriptor].graph is entry.graph
+        assert (
+            wrapper.concrete_cudagraph_entries[descriptor].cudagraph is entry.cudagraph
+        )
         assert len(calls) == 1
 
 
@@ -276,7 +283,7 @@ class TestGraphEntry:
         entry = GraphEntry(batch_descriptor=mock_batch_desc)
 
         assert entry.batch_descriptor is mock_batch_desc
-        assert entry.graph is None
+        assert entry.cudagraph is None
         assert entry.output is None
         assert entry.input_addresses is None
 
@@ -397,3 +404,110 @@ def test_gcu_weak_ref_preserves_views_without_owning_storage(dtype_name):
     # Borrowed aliases stay alive but their original allocation must be released.
     # Never dereference either alias after its owning tensor/graph is released.
     assert torch.gcu.memory_allocated() <= baseline
+
+
+def test_native_graph_registry_can_clear_fl_captures(monkeypatch):
+    from vllm.compilation.cuda_graph import CUDAGraphWrapper
+    from vllm.config import CUDAGraphMode
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    monkeypatch.setattr(
+        graph_module.current_platform, "get_global_graph_pool", lambda: None
+    )
+    wrapper = graph_module.GraphWrapper(
+        lambda: None,
+        SimpleNamespace(
+            compilation_config=SimpleNamespace(), use_cumem_cudagraph_pool=False
+        ),
+        CUDAGraphMode.FULL,
+    )
+    assert isinstance(wrapper, CUDAGraphWrapper)
+    assert wrapper in CUDAGraphWrapper._all_instances
+    wrapper.concrete_cudagraph_entries["capture"] = object()
+    CUDAGraphWrapper.clear_all_graphs()
+    assert wrapper.concrete_cudagraph_entries == {}
+
+
+@pytest.mark.parametrize("device_type", ["cuda", "npu", "gcu"])
+def test_all_platforms_share_the_graph_wrapper(monkeypatch, device_type):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", device_type)
+    assert PlatformFL.get_static_graph_wrapper_cls() == (
+        "vllm_fl.compilation.graph.GraphWrapper"
+    )
+
+
+@pytest.mark.parametrize("offloader_fails", [False, True])
+def test_capture_uses_native_pool_context_and_preserves_offloader_errors(
+    monkeypatch, offloader_fails
+):
+    from contextlib import contextmanager
+
+    from vllm.config import CUDAGraphMode
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    events = []
+    original_pool, capture_pool = (1, 2), (3, 4)
+
+    @contextmanager
+    def native_pool(pool, config):
+        assert pool == original_pool
+        events.append("pool-enter")
+        try:
+            yield capture_pool
+        finally:
+            events.append("pool-exit")
+
+    @contextmanager
+    def graph_context(graph, *, pool, stream):
+        assert pool == capture_pool
+        events.append("capture")
+        yield
+
+    def sync():
+        if offloader_fails:
+            raise RuntimeError("offloader failed")
+
+    platform = SimpleNamespace(
+        device_type="gcu",
+        get_global_graph_pool=lambda: original_pool,
+        torch_device_fn=SimpleNamespace(
+            current_stream=lambda: None, graph=graph_context
+        ),
+    )
+    descriptor = object()
+    context = SimpleNamespace(
+        batch_descriptor=descriptor, cudagraph_runtime_mode=CUDAGraphMode.FULL
+    )
+    monkeypatch.setattr(graph_module, "current_platform", platform)
+    monkeypatch.setattr(graph_module, "capture_pool", native_pool)
+    monkeypatch.setattr(graph_module.Graph, "graph", lambda: object())
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
+    monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
+    monkeypatch.setattr(graph_module, "get_forward_context", lambda: context)
+    monkeypatch.setattr(graph_module, "weak_ref_tensors", lambda value: value)
+    monkeypatch.setattr(
+        graph_module,
+        "get_offloader",
+        lambda: SimpleNamespace(sync_prev_onload=sync, join_after_forward=lambda: None),
+    )
+    monkeypatch.setattr(graph_module.compilation_counter, "num_cudagraph_captured", 0)
+    output = object()
+    wrapper = graph_module.GraphWrapper(
+        lambda: output,
+        SimpleNamespace(
+            compilation_config=SimpleNamespace(), use_cumem_cudagraph_pool=False
+        ),
+        CUDAGraphMode.FULL,
+        graph_module.GraphOptions(debug_log_enable=False),
+    )
+    if offloader_fails:
+        with pytest.raises(RuntimeError, match="offloader failed"):
+            wrapper()
+        assert events == ["pool-enter", "pool-exit"]
+    else:
+        assert wrapper() is output
+        assert events == ["pool-enter", "capture", "pool-exit"]

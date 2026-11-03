@@ -1,20 +1,20 @@
 # Copyright (c) 2025 BAAI. All rights reserved.
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.28.0/vllm/compilation/cuda_graph.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/compilation/cuda_graph.py
 # Below is the original copyright:
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
-import weakref
 from collections.abc import Callable
-from contextlib import ExitStack, suppress
-from typing import Any, ClassVar
+from contextlib import ExitStack, contextmanager
+from typing import Any
 from unittest.mock import patch
 
 import torch
 
 import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
+from vllm.compilation.cuda_graph import CUDAGraphWrapper
 from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.distributed.device_communicators.pynccl_allocator import set_graph_pool_id
@@ -27,7 +27,29 @@ from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import current_stream
 
+try:
+    from vllm.model_executor.offloader.base import get_offloader
+except ModuleNotFoundError as exc:
+    if exc.name not in (
+        "vllm.model_executor.offloader",
+        "vllm.model_executor.offloader.base",
+    ):
+        raise
+    get_offloader = None
+
 logger = init_logger(__name__)
+
+try:
+    from vllm.compilation.cudagraph_pool import capture_pool
+except ModuleNotFoundError as exc:
+    if exc.name != "vllm.compilation.cudagraph_pool":
+        raise
+
+    @contextmanager
+    def capture_pool(pool, vllm_config):
+        # Older runtimes do not provide the shared CuMem pool context.
+        set_graph_pool_id(pool or current_platform.graph_pool_handle())
+        yield pool
 
 
 # FL-specific: platform-agnostic weak_ref_tensors
@@ -152,9 +174,9 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type == "npu":
+    if current_platform.device_type in ("npu", "gcu"):
         # vLLM's current_stream helper maintains CUDA-specific thread-local
-        # state and can remain on the default stream while torch.npu.stream()
+        # state and can remain on the default stream while a vendor stream
         # has selected the side stream used for graph capture.
         return current_platform.torch_device_fn.current_stream()
     return current_stream()
@@ -185,7 +207,7 @@ from vllm.compilation.cuda_graph import CUDAGraphStat  # noqa: F401, E402
 @dataclasses.dataclass
 class GraphEntry:
     batch_descriptor: BatchDescriptor
-    graph: Any | None = None
+    cudagraph: Any | None = None
     output: Any | None = None
 
     # for graph debugging, track the input addresses
@@ -200,17 +222,9 @@ class GraphOptions:
     weak_ref_output: bool = True
 
 
-class GraphWrapper:
+class GraphWrapper(CUDAGraphWrapper):
     """FL-specific graph wrapper that supports multiple device types (CUDA, NPU).
     Adapted from upstream CUDAGraphWrapper with platform-agnostic graph capture."""
-
-    _all_instances: ClassVar[weakref.WeakSet["GraphWrapper"]] = weakref.WeakSet()
-
-    @classmethod
-    def clear_all_graphs(cls) -> None:
-        """Clear captured graphs from all GraphWrapper instances."""
-        for instance in list(cls._all_instances):
-            instance.clear_graphs()
 
     def __init__(
         self,
@@ -241,9 +255,9 @@ class GraphWrapper:
         self.cudagraph_options = cudagraph_options
         # the entries for different batch descriptors that we need to capture
         # cudagraphs for.
-        self.concrete_graph_entries: dict[BatchDescriptor, GraphEntry] = {}
+        self.concrete_cudagraph_entries: dict[BatchDescriptor, GraphEntry] = {}
 
-        GraphWrapper._all_instances.add(self)
+        CUDAGraphWrapper._all_instances.add(self)
 
     def __getattr__(self, key: str) -> Any:
         # allow accessing the attributes of the runnable.
@@ -264,9 +278,6 @@ class GraphWrapper:
     def cudagraph_wrapper(self) -> "GraphWrapper":
         return self
 
-    def clear_graphs(self) -> None:
-        self.concrete_graph_entries.clear()
-
     def __call__(self, *args, **kwargs):
         if not is_forward_context_available():
             # No forward context means we are outside the normal
@@ -284,15 +295,15 @@ class GraphWrapper:
             return self.runnable(*args, **kwargs)
 
         assert batch_descriptor is not None
-        if batch_descriptor not in self.concrete_graph_entries:
+        if batch_descriptor not in self.concrete_cudagraph_entries:
             # create a new entry for this batch descriptor
-            self.concrete_graph_entries[batch_descriptor] = GraphEntry(
+            self.concrete_cudagraph_entries[batch_descriptor] = GraphEntry(
                 batch_descriptor=batch_descriptor
             )
 
-        entry = self.concrete_graph_entries[batch_descriptor]
+        entry = self.concrete_cudagraph_entries[batch_descriptor]
 
-        if entry.graph is None:
+        if entry.cudagraph is None:
             if self.cudagraph_options.debug_log_enable:
                 logger.debug(
                     "Capturing a cudagraph on (%s,%s)",
@@ -326,32 +337,29 @@ class GraphWrapper:
                         )
                     )
 
-                if self.graph_pool is not None:
-                    set_graph_pool_id(self.graph_pool)
-                else:
-                    set_graph_pool_id(current_platform.graph_pool_handle())
+                graph_pool = stack.enter_context(
+                    capture_pool(self.graph_pool, self.vllm_config)
+                )
 
                 # Sync offloader's copy stream before capture if available.
-                with suppress(ImportError, RuntimeError):
-                    from vllm.model_executor.offloader.base import get_offloader
-
+                if get_offloader is not None:
                     get_offloader().sync_prev_onload()
 
                 # FL-specific: use platform-agnostic graph capture while
                 # preserving the explicit stream used by vLLM v0.28.0.
                 with current_platform.torch_device_fn.graph(
                     graph,
-                    pool=self.graph_pool,
+                    pool=graph_pool,
                     stream=_graph_capture_stream(),
                 ):
                     output = self.runnable(*args, **kwargs)
-                    with suppress(ImportError, RuntimeError, UnboundLocalError):
+                    if get_offloader is not None:
                         get_offloader().join_after_forward()
                     if self.cudagraph_options.weak_ref_output:
                         output = weak_ref_tensors(output)
 
             entry.output = weak_ref_tensors(output)
-            entry.graph = graph
+            entry.cudagraph = graph
 
             compilation_counter.num_cudagraph_captured += 1
 
@@ -372,12 +380,10 @@ class GraphWrapper:
             )
 
         # Sync offloader before replay if available
-        with suppress(ImportError, RuntimeError):
-            from vllm.model_executor.offloader.base import get_offloader
-
+        if get_offloader is not None:
             get_offloader().sync_prev_onload()
 
         if current_platform.device_type == "npu":
             current_platform.torch_device_fn.synchronize()
-        entry.graph.replay()
+        entry.cudagraph.replay()
         return entry.output

@@ -2,6 +2,7 @@
 
 """Behavioral contract tests for the vLLM 0.28 FlagCX communicator adapter."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,9 +17,107 @@ from vllm.distributed.device_communicators.cuda_communicator import (  # noqa: E
 )
 
 from vllm_fl.distributed.communicator import CommunicatorFL  # noqa: E402
-from vllm_fl.distributed.nvidia_communicator import (  # noqa: E402
-    NvidiaCommunicatorFL,
+from vllm_fl.distributed.device_communicators import flagcx  # noqa: E402
+
+
+@pytest.mark.parametrize("device_type", ["npu", "gcu"])
+def test_flagcx_initialization_uses_native_device_context(monkeypatch, device_type):
+    class Device:
+        type = device_type
+
+    class Group:
+        rank = 0
+        world_size = 2
+
+        def broadcast_obj(self, value, src):
+            assert src == 0
+            return value
+
+    device = Device()
+    stream = MagicMock()
+    backend = SimpleNamespace(
+        device=MagicMock(), current_stream=MagicMock(return_value=stream)
+    )
+    cuda_device = MagicMock(side_effect=AssertionError("native CUDA context used"))
+    fake_torch = SimpleNamespace(
+        device=Device,
+        cuda=SimpleNamespace(device=cuda_device),
+        zeros=MagicMock(),
+        **{device_type: backend},
+    )
+    library = MagicMock()
+    monkeypatch.setattr(flagcx, "torch", fake_torch)
+    monkeypatch.setattr(flagcx, "StatelessProcessGroup", Group)
+    monkeypatch.setattr(flagcx, "FLAGCXLibrary", MagicMock(return_value=library))
+    warmup = MagicMock()
+    monkeypatch.setattr(flagcx.PyFlagcxCommunicator, "all_reduce", warmup)
+
+    communicator = flagcx.PyFlagcxCommunicator(Group(), device, "/test/libflagcx.so")
+
+    assert communicator.available and not communicator.disabled
+    backend.device.assert_called_once_with(device)
+    backend.device.return_value.__enter__.assert_called_once()
+    backend.current_stream.assert_called_once_with(device)
+    stream.synchronize.assert_called_once()
+    warmup.assert_called_once()
+    cuda_device.assert_not_called()
+
+
+@pytest.mark.parametrize("device_type", ["npu", "gcu"])
+def test_flagcx_uses_current_native_stream_handle(monkeypatch, device_type):
+    streams = [
+        SimpleNamespace(**{f"{device_type}_stream": handle}) for handle in (11, 29)
+    ]
+    backend = SimpleNamespace(current_stream=MagicMock(side_effect=streams))
+    monkeypatch.setattr(flagcx, "torch", SimpleNamespace(**{device_type: backend}))
+    monkeypatch.setattr(
+        flagcx,
+        "current_stream",
+        MagicMock(side_effect=AssertionError("CUDA stream used")),
+    )
+    communicator = flagcx.PyFlagcxCommunicator.__new__(flagcx.PyFlagcxCommunicator)
+    communicator.device = SimpleNamespace(type=device_type)
+    handles = []
+    communicator.flagcx = SimpleNamespace(
+        adaptor_stream_copy=lambda stream: handles.append(stream.cuda_stream)
+    )
+
+    for _ in streams:
+        communicator._copy_flagcx_stream(communicator._current_stream())
+
+    assert handles == [11, 29]
+    assert backend.current_stream.call_count == 2
+
+
+@pytest.mark.parametrize("vendor", ["enflame", "ascend"])
+def test_flagcx_collectives_opt_into_native_opaque_ops(monkeypatch, vendor):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "dist_backend", "flagcx")
+
+    assert PlatformFL.use_custom_op_collectives() is True
+
+
+@pytest.mark.parametrize(
+    ("vendor", "backend", "expected"),
+    [
+        ("nvidia", "nccl", True),
+        ("thead", "tccl", True),
+        ("iluvatar", "nccl", True),
+        ("enflame", "eccl", False),
+        ("ascend", "hccl", False),
+    ],
 )
+def test_non_flagcx_collectives_preserve_platform_policy(
+    monkeypatch, vendor, backend, expected
+):
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
+    monkeypatch.setattr(PlatformFL, "dist_backend", backend)
+
+    assert PlatformFL.use_custom_op_collectives() is expected
 
 
 @pytest.fixture
@@ -147,19 +246,21 @@ def test_all2all_calls_use_vllm_028_signatures(method_name, arguments):
     assert result is expected
 
 
-def test_nvidia_bridge_satisfies_cuda_graph_contract(mocked_base_init):
-    communicator = NvidiaCommunicatorFL(cpu_group=object())
+def test_common_flagcx_satisfies_native_graph_contract(monkeypatch, mocked_base_init):
+    native_init = MagicMock(
+        side_effect=AssertionError("second native communication stack")
+    )
+    monkeypatch.setattr(CudaCommunicator, "__init__", native_init)
+    communicator = CommunicatorFL(cpu_group=object())
 
     assert isinstance(communicator, CudaCommunicator)
     assert communicator.ca_comm is None
     assert communicator.pynccl_comm is None
     assert communicator.pyflagcx_comm is None
-    assert NvidiaCommunicatorFL.all_reduce is CommunicatorFL.all_reduce
-    assert NvidiaCommunicatorFL.all_gather is CommunicatorFL.all_gather
-    assert NvidiaCommunicatorFL.broadcast is CommunicatorFL.broadcast
+    native_init.assert_not_called()
 
 
-def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init):
+def test_common_flagcx_enters_native_graph_capture(monkeypatch, mocked_base_init):
     from contextlib import nullcontext
     from types import SimpleNamespace
 
@@ -167,7 +268,7 @@ def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init
 
     from vllm.distributed.parallel_state import GroupCoordinator
 
-    communicator = NvidiaCommunicatorFL(cpu_group=object())
+    communicator = CommunicatorFL(cpu_group=object())
     coordinator = SimpleNamespace(device_communicator=communicator)
     stream = object()
     capture_context = SimpleNamespace(stream=stream)

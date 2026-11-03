@@ -1,6 +1,7 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
 import ctypes
+import inspect
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -270,6 +271,9 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         worker_utils.KVBlockZeroer.__init__,
     )
     kv = torch.empty((2, 8, 16, 2, 16), dtype=torch.int32)
+    standardized = "num_blocks" in inspect.signature(original_init).parameters
+    if standardized:
+        kv = kv.transpose(0, 1)
     backend_calls = []
 
     def block_dim(*args, **kwargs):
@@ -283,6 +287,7 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         kv_cache_group_id=0,
         backend=SimpleNamespace(get_kv_cache_block_dim=block_dim),
         layer_names=["real", "alias", "runner", "non_tensor"],
+        kernel_block_stride=0,
     )
     context = {
         "real": SimpleNamespace(kv_cache=kv),
@@ -311,12 +316,13 @@ def test_original_builder_preserves_virtual_segments_and_aliases(
         torch.device("cpu"),
         (g for g in [group]),
         [16],
-        "auto",
-        context,
+        *([context, 4] if standardized else ["auto", context]),
         {"runner"},
     )
     addresses = [kv.data_ptr() + offset for offset in (0, 2048, 16384, 18432)]
-    assert backend_calls == [((16, 2, 16), {"cache_dtype_str": "auto"})]
+    assert backend_calls == (
+        [] if standardized else [((16, 2, 16), {"cache_dtype_str": "auto"})]
+    )
     assert len(snapshots) == 1
     assert snapshots[0][0].tolist() == addresses
     assert queried == addresses
