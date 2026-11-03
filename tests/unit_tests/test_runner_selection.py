@@ -42,6 +42,7 @@ def _make_ascend_vllm_config(
             backend=backend,
             mode=compilation_mode,
             compile_sizes=None,
+            inductor_compile_config={},
             cudagraph_mode=cudagraph_mode,
             pass_config=SimpleNamespace(
                 fuse_norm_quant=True,
@@ -54,7 +55,7 @@ def _make_ascend_vllm_config(
 
 
 @pytest.mark.parametrize(
-    "vendor", ["ascend", "enflame", "gcu", "iluvatar", "tsingmicro"]
+    "vendor", ["ascend", "mthreads", "enflame", "gcu", "iluvatar", "tsingmicro"]
 )
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
@@ -69,6 +70,7 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
     monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
@@ -81,17 +83,18 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
 
 
 @pytest.mark.parametrize(
-    "device_type,vendor",
+    "device_type,vendor,error_pattern",
     [
-        ("npu", "ascend"),
-        ("gcu", "enflame"),
-        ("gcu", "gcu"),
-        ("cuda", "iluvatar"),
-        ("txda", "tsingmicro"),
+        ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("cuda", "iluvatar", "VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
     ],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
-    monkeypatch, device_type, vendor
+    monkeypatch, device_type, vendor, error_pattern
 ):
     from types import SimpleNamespace
 
@@ -99,8 +102,31 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
 
     monkeypatch.setattr(PlatformFL, "device_type", device_type)
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
-    with pytest.raises(ValueError, match="VLLM_USE_V2_MODEL_RUNNER=0"):
+    with pytest.raises(ValueError, match=error_pattern):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
+
+
+@pytest.mark.parametrize("tp", [1, 4])
+def test_musa_accepts_fl_runner_for_single_and_multiple_devices(monkeypatch, tp):
+    from vllm.config import CUDAGraphMode
+    from vllm.config.compilation import CompilationMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "musa")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "mthreads")
+    monkeypatch.setattr(PlatformFL, "dist_backend", "mccl")
+    config = _make_ascend_vllm_config(
+        compilation_mode=CompilationMode.NONE,
+        cudagraph_mode=CUDAGraphMode.NONE,
+        enforce_eager=True,
+    )
+    config.parallel_config.tensor_parallel_size = tp
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.use_v2_model_runner is False
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
 @pytest.mark.parametrize("vendor", ["enflame", "gcu"])

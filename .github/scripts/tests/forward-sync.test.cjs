@@ -1,17 +1,6 @@
 /*
  * Copyright 2026 FlagOS Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 "use strict";
@@ -19,107 +8,167 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const forwardSync = require("../forward-sync.cjs");
-const { SOURCE, TARGET, SYNC_PREFIX, MARKER } = forwardSync.constants;
-const SHA = (letter) => letter.repeat(40);
-const S = SHA("a"), T = SHA("b"), H = SHA("c"), OLD = SHA("d"), MERGED = SHA("e");
-const RETRY = SHA("f");
-const SYNC = SYNC_PREFIX + S, OLD_BRANCH = SYNC_PREFIX + OLD;
+const { SOURCE, TARGET, SYNC_PREFIX, BASE_PREFIX, MARKER, BASE_MARKER, STATE_PATH } = forwardSync.constants;
+const SHA = letter => letter.repeat(40);
+const S = SHA("a"), T = SHA("b"), P = SHA("c"), OLD = SHA("d"), R = SHA("e");
+const BASE = SHA("f"), H = SHA("1"), WIP = SHA("2"), STAFF = SHA("3");
+const TARGET_TREE = SHA("4"), SOURCE_TREE = SHA("5"), BASE_TREE = SHA("6"), INITIAL = SHA("7");
 const repository = "flagos-ai/vllm-plugin-FL";
-const sourceMarker = (sha) => "<!-- forward-sync-source: " + sha + " -->";
-const pendingMarker = (sha) => "<!-- forward-sync-pending: " + sha + " -->";
+const syncBranch = SYNC_PREFIX + S;
+const oldBranch = SYNC_PREFIX + OLD;
+const baselineBranch = BASE_PREFIX + T;
+const sourceMarker = sha => "<!-- forward-sync-source: " + sha + " -->";
+const projectionMarker = sha => "<!-- forward-sync-projection: " + sha + " -->";
+const queuedMarker = sha => "<!-- forward-sync-queued: " + sha + " -->";
+const baseline = overrides => ({ version: 1, source: SOURCE, target: TARGET,
+  sourceCheckpoint: OLD, projectionCheckpoint: P, ...overrides });
 
 function pr(overrides = {}) {
   return {
-    number: 12, state: "open", merged_at: null,
+    number: 12, draft: true, state: "open", merged_at: null,
     html_url: "https://github.com/" + repository + "/pull/12",
-    body: MARKER + "\n" + sourceMarker(OLD) + "\nMaintainer notes: preserve this.",
-    head: { sha: H, ref: SYNC, repo: { full_name: repository } }, ...overrides,
+    body: [MARKER, sourceMarker(OLD), projectionMarker(P), "Maintainer notes: keep this."].join("\n"),
+    head: { sha: P, ref: oldBranch, repo: { full_name: repository } },
+    ...overrides,
   };
 }
 
 function mergedPr(overrides = {}) {
-  return pr({
-    state: "closed", merged_at: "2026-10-19T00:00:00Z",
-    head: { sha: H, ref: OLD_BRANCH, repo: { full_name: repository } },
-    ...overrides,
-  });
+  return pr({ number: 11, draft: false, state: "closed", merged_at: "2026-11-03T04:00:00Z",
+    body: MARKER + "\n" + sourceMarker(OLD),
+    head: { sha: H, ref: oldBranch, repo: { full_name: repository } }, ...overrides });
+}
+
+function legacyPr(overrides = {}) {
+  return pr({ body: MARKER + "\n" + sourceMarker(OLD) + "\n<!-- forward-sync-pending: " + S + " -->",
+    head: { sha: WIP, ref: syncBranch, repo: { full_name: repository } }, ...overrides });
+}
+
+function baselinePr(overrides = {}) {
+  return pr({ number: 13, draft: false, body: BASE_MARKER,
+    head: { sha: BASE, ref: baselineBranch, repo: { full_name: repository } }, ...overrides });
 }
 
 function fixture(options = {}) {
-  const refs = {
-    ["heads/" + SOURCE]: options.source || S, ["heads/" + TARGET]: T,
-    ...(options.sync ? { ["heads/" + SYNC]: options.sync } : {}),
-    ...(options.oldTip ? { ["heads/" + OLD_BRANCH]: options.oldTip } : {}),
-    ...(options.refs || {}),
-  };
-  const prs = structuredClone(options.prs || []);
-  // These compare statuses validate source history and reviewed target ancestry.
-  // A replayed source SHA is intentionally not an ancestor of its cherry-pick.
+  const refs = { ["heads/" + SOURCE]: options.source || S, ["heads/" + TARGET]: T,
+    ...(options.refs || {}) };
+  const prs = structuredClone(options.prs || [mergedPr()]);
+  for (const item of prs) {
+    if (item.state === "open" && item.head.repo?.full_name === repository) {
+      refs["heads/" + item.head.ref] ??= item.head.sha;
+    }
+  }
   const comparisons = {
-    [T + "..." + S]: "diverged", [T + "..." + OLD]: "diverged",
     [S + "..." + OLD]: "behind", [T + "..." + H]: "behind",
-    [MERGED + "..." + H]: "behind", [MERGED + "..." + T]: "behind",
-    [H + "..." + T]: "behind", [RETRY + "..." + H]: "behind",
-    [H + "..." + OLD]: "diverged", [RETRY + "..." + OLD]: "diverged",
-    [MERGED + "..." + OLD]: "diverged", [MERGED + "..." + S]: "diverged",
-    [RETRY + "..." + T]: "behind",
+    [T + "..." + P]: "behind", [R + "..." + P]: "behind",
+    [STAFF + "..." + P]: "behind", [BASE + "..." + T]: "behind",
+    [T + "..." + INITIAL]: "behind",
     ...(options.comparisons || {}),
   };
-  const errors = { ...(options.errors || {}) };
-  const state = { conflict: Boolean(options.conflict), replayChanged: options.replayChanged };
-  const calls = [], warnings = [], failures = [], outputs = {};
-  const fail = (status, message = "GitHub API failure") => Object.assign(new Error(message), { status });
-  const method = (name, fn) => async (args) => {
-    calls.push({ name, args });
-    if (errors[name]) throw fail(errors[name]);
-    return { data: fn(args) };
+  const contents = {};
+  const initialState = Object.hasOwn(options, "state") ? options.state : baseline();
+  if (initialState !== null) contents[T + ":" + STATE_PATH] = initialState;
+  const pending = { version: 1, status: "needs-resolution", checkpointSha: OLD,
+    pendingSha: S, ...(options.pending || {}) };
+  contents[WIP + ":.github/forward-sync-pending.json"] = pending;
+  if (options.baselineRef) {
+    refs["heads/" + baselineBranch] = BASE;
+    contents[BASE + ":" + STATE_PATH] = baseline();
+  }
+  const commits = {
+    [T]: { sha: T, tree: { sha: TARGET_TREE }, message: "Target adaptation", parents: [] },
+    [OLD]: { sha: OLD, tree: { sha: SOURCE_TREE }, message: "Reviewed source checkpoint", parents: [] },
+    [WIP]: { sha: WIP, tree: { sha: SOURCE_TREE },
+      message: "WIP: resolve MUSA forward-sync conflicts", parents: [{ sha: T }] },
+    ...(options.commits || {}),
   };
-  const forbidden = (name) => method(name, () => {
-    assert.fail(name + " must not publish original source ancestry or create snapshot refs");
-  });
+  const calls = [], warnings = [], outputs = {}, errors = { ...(options.errors || {}) };
+  const fail = status => Object.assign(new Error("GitHub API failure"), { status });
+  const method = (name, fn) => async args => {
+    calls.push({ name, args: structuredClone(args) });
+    if (errors[name]) throw fail(errors[name]);
+    return { data: structuredClone(fn(args)) };
+  };
+  let stateInTree;
   const github = {
     rest: {
       git: {
-        getCommit: forbidden("getCommit"),
-        createCommit: forbidden("createCommit"),
-        createRef: forbidden("createRef"),
-        updateRef: forbidden("updateRef"),
         getRef: method("getRef", ({ ref }) => {
           if (!refs[ref]) throw fail(404);
           return { object: { sha: refs[ref] } };
         }),
+        getCommit: method("getCommit", ({ commit_sha }) => {
+          assert.ok(commits[commit_sha], "Missing commit fixture: " + commit_sha);
+          return commits[commit_sha];
+        }),
+        createCommit: method("createCommit", args => {
+          const sha = args.tree === SOURCE_TREE ? P : BASE;
+          commits[sha] = { sha, tree: { sha: args.tree }, message: args.message,
+            parents: args.parents.map(parent => ({ sha: parent })) };
+          if (args.tree === BASE_TREE) contents[sha + ":" + STATE_PATH] = stateInTree;
+          return commits[sha];
+        }),
+        createTree: method("createTree", args => {
+          assert.equal(args.tree.length, 1, "Bootstrap must change only its state file");
+          assert.equal(args.tree[0].path, STATE_PATH);
+          stateInTree = JSON.parse(args.tree[0].content);
+          return { sha: BASE_TREE };
+        }),
+        createRef: method("createRef", ({ ref, sha }) => {
+          assert.notEqual(ref, "refs/heads/" + TARGET, "The target is updated only through review");
+          assert.equal(ref.startsWith("refs/heads/"), true);
+          const shortRef = ref.slice("refs/".length);
+          assert.equal(refs[shortRef], undefined, "Existing branches must never be recreated");
+          refs[shortRef] = sha;
+          return { ref, object: { sha } };
+        }),
+        updateRef: method("updateRef", ({ ref, sha, force }) => {
+          assert.notEqual(ref, "heads/" + TARGET);
+          assert.equal(force, false, "Source updates must never force-push over reviewer work");
+          refs[ref] = sha;
+          return { ref, object: { sha } };
+        }),
       },
       repos: {
         compareCommitsWithBasehead: method("compare", ({ basehead }) => {
-          assert.ok(basehead in comparisons, "Missing comparison fixture: " + basehead);
+          assert.ok(basehead in comparisons, "Missing ancestry fixture: " + basehead);
           return { status: comparisons[basehead] };
         }),
-        merge: forbidden("merge"),
+        getContent: method("getContent", ({ path, ref }) => {
+          const key = ref + ":" + path;
+          if (!(key in contents)) throw fail(404);
+          return { encoding: "base64", content: Buffer.from(JSON.stringify(contents[key])).toString("base64") };
+        }),
+        merge: method("merge", () => assert.fail("GitHub must calculate conflicts without an automatic merge")),
       },
       pulls: {
-        get: method("getPR", ({ pull_number }) => {
-          const found = prs.find((item) => item.number === pull_number);
-          if (options.closeOnRead) found.state = "closed";
-          return found;
-        }),
-        list: method("listPRs", ({ base, head, state: requestedState }) => {
-          assert.equal(base, TARGET);
-          assert.equal(head, undefined);
-          assert.equal(requestedState, "all");
+        list: method("listPRs", args => {
+          assert.equal(args.base, TARGET);
+          assert.equal(args.state, "all");
           return prs;
         }),
-        create: method("createPR", (args) => {
-          const created = pr({
-            number: 20, html_url: "https://github.com/" + repository + "/pull/20",
-            body: args.body, head: { sha: refs["heads/" + args.head], ref: args.head,
-              repo: { full_name: repository } },
-          });
+        create: method("createPR", args => {
+          const created = pr({ number: 20, draft: args.draft, body: args.body,
+            html_url: "https://github.com/" + repository + "/pull/20",
+            head: { sha: refs["heads/" + args.head], ref: args.head, repo: { full_name: repository } } });
           prs.unshift(created);
           return created;
         }),
-        update: method("updatePR", ({ pull_number, body }) => {
-          const found = prs.find((item) => item.number === pull_number);
-          found.body = body;
+        get: method("getPR", ({ pull_number }) => {
+          const found = prs.find(item => item.number === pull_number);
+          assert.ok(found);
+          if (options.legacyMovedOnRead && found.number === 12) {
+            found.head.sha = STAFF;
+            refs["heads/" + found.head.ref] = STAFF;
+          }
+          return found;
+        }),
+        update: method("updatePR", ({ pull_number, ...changes }) => {
+          const found = prs.find(item => item.number === pull_number);
+          assert.ok(found);
+          for (const key of ["body", "state", "draft"]) {
+            if (Object.hasOwn(changes, key)) found[key] = changes[key];
+          }
           return found;
         }),
       },
@@ -127,497 +176,258 @@ function fixture(options = {}) {
     paginate: async (fn, args) => (await fn(args)).data,
   };
   const core = {
-    info() {},
-    warning(message) { warnings.push(message); },
-    setFailed(message) { failures.push(message); },
+    info() {}, warning(message) { warnings.push(message); },
     setOutput(name, value) { outputs[name] = value; },
   };
+  const project = async args => {
+    calls.push({ name: "project", args });
+    if (errors.project) throw fail(errors.project);
+    return { projectionSha: options.projectionSha || R, commits: args.sourceSha === args.sourceCheckpoint ? [] : [{
+      sourceSha: args.sourceSha, projectionSha: options.projectionSha || R,
+      author: { name: "Physics", email: "physics@example.com", date: "2026-11-03T07:44:02Z" },
+      message: "upgrade(musa): adapt MUSA to vLLM 0.28.0 (#575)\n\nOriginal source message.",
+    }] };
+  };
   const context = { repo: { owner: "flagos-ai", repo: "vllm-plugin-FL" }, payload: options.payload || {} };
-  const replay = async (args) => {
-    calls.push({ name: "replay", args });
-    assert.equal(args.repository, repository);
-    assert.equal(args.core, core);
-    if (errors.replay) throw fail(errors.replay, "Replay failed");
-    if (state.conflict) {
-      return {
-        sha: args.baseSha, checkpointSha: args.checkpointSha,
-        pending: args.sourceSha, conflicted: true, changed: false,
-      };
-    }
-    const changed = state.replayChanged ?? args.baseSha !== MERGED;
-    if (changed) {
-      // The helper owns Git writes. The GitHub orchestration layer never
-      // creates a commit with the original source/checkpoint SHA as a parent.
-      refs["heads/" + args.syncBranch] = MERGED;
-      calls.push({ name: "replayPush", args: { branch: args.syncBranch, sha: MERGED } });
-    }
-    return {
-      sha: changed ? MERGED : args.baseSha, checkpointSha: args.sourceSha,
-      conflicted: false, changed,
-    };
-  };
   return {
-    run: () => forwardSync({ github, context, core, replay }),
-    calls, refs, prs, warnings, failures, outputs, errors, comparisons, state,
-    replays: () => calls.filter(({ name }) => name === "replay"),
-    mutations: () => calls.filter(({ name }) => ["replayPush", "createPR", "updatePR"].includes(name)),
+    run: () => forwardSync({ github, context, core, project }),
+    calls, refs, prs, errors, outputs, warnings, github, comparisons, contents,
+    projects: () => calls.filter(call => call.name === "project"),
+    writes: () => calls.filter(call => ["createCommit", "createTree", "createRef", "updateRef", "createPR", "updatePR"].includes(call.name)),
   };
 }
 
-const firstReplay = (f) => f.replays()[0].args;
-const mutationNames = (f) => f.mutations().map(({ name }) => name);
+const firstProject = f => f.projects()[0].args;
+const writeNames = f => f.writes().map(call => call.name);
 
-function assertNoSourceAncestryWrites(f) {
-  assert.deepEqual(f.calls.filter(({ name }) => [
-    "getCommit", "createCommit", "createRef", "updateRef", "merge",
-  ].includes(name)), []);
-}
+test("initialization reviews only comparison ancestry before publishing incoming source changes", async () => {
+  const f = fixture({ state: null });
+  assert.equal((await f.run()).status, "baseline-pr-required");
+  assert.deepEqual(f.projects(), []);
+  const created = f.calls.filter(call => call.name === "createCommit");
+  assert.deepEqual(created[0].args.parents, [T]);
+  assert.equal(created[0].args.tree, SOURCE_TREE);
+  assert.deepEqual(created[1].args.parents, [T, P]);
+  assert.equal(created[1].args.tree, BASE_TREE);
+  const tree = f.calls.find(call => call.name === "createTree").args;
+  assert.equal(tree.base_tree, TARGET_TREE);
+  assert.deepEqual(JSON.parse(tree.tree[0].content), baseline());
+  assert.equal(f.calls.some(call => call.name === "getCommit" && call.args.commit_sha === S), false);
+  const createdPr = f.calls.find(call => call.name === "createPR").args;
+  assert.equal(createdPr.base, TARGET);
+  assert.equal(createdPr.head, baselineBranch);
+  assert.ok(createdPr.body.includes(BASE_MARKER));
+  assert.match(createdPr.body, /historical snapshot contains the source-side context/);
+  assert.match(createdPr.body, /Squash\/rebase would lose/);
+  assert.equal(f.refs["heads/" + TARGET], T);
+  assert.equal(f.refs["heads/" + syncBranch], undefined);
+});
 
-test("the first sync replays onto target instead of creating a source snapshot", async () => {
+test("a waiting bootstrap PR is reused without creating a normal sync PR", async () => {
+  const f = fixture({ state: null, prs: [baselinePr(), mergedPr()] });
+  const result = await f.run();
+  assert.equal(result.status, "baseline-pr-required");
+  assert.equal(result.pullRequest, 13);
+  assert.deepEqual(f.writes(), []);
+  assert.deepEqual(f.projects(), []);
+});
+
+test("bootstrap PR creation retries reuse the published ancestry and state", async () => {
+  const f = fixture({ state: null, errors: { createPR: 403 } });
+  await assert.rejects(f.run(), { status: 403 });
+  assert.equal(f.refs["heads/" + baselineBranch], BASE);
+  delete f.errors.createPR;
+  assert.equal((await f.run()).status, "baseline-pr-required");
+  assert.equal(f.calls.filter(call => call.name === "createCommit").length, 2);
+  assert.equal(f.calls.filter(call => call.name === "createRef").length, 1);
+  assert.deepEqual(f.projects(), []);
+});
+
+test("invalid baseline state and squash-lost comparison ancestry stop before writes", async () => {
+  const invalid = fixture({ state: baseline({ target: "main" }) });
+  await assert.rejects(invalid.run(), /Invalid source comparison baseline/);
+  assert.deepEqual(invalid.writes(), []);
+  const lost = fixture({ comparisons: { [T + "..." + P]: "diverged" } });
+  await assert.rejects(lost.run(), /not an ancestor of target/);
+  assert.deepEqual(lost.writes(), []);
+  assert.deepEqual(lost.projects(), []);
+});
+
+test("an unchanged reviewed source checkpoint needs no new projection or PR", async () => {
+  const f = fixture({ source: OLD });
+  assert.equal((await f.run()).status, "already-processed");
+  assert.deepEqual(f.projects(), []);
+  assert.deepEqual(f.writes(), []);
+});
+
+test("a new PR projects only the increment and names the original source author", async () => {
   const f = fixture();
   const result = await f.run();
   assert.equal(result.status, "pr-created");
-  assert.equal(result.pullRequestUrl, f.prs[0].html_url);
-  assert.deepEqual(mutationNames(f), ["replayPush", "createPR"]);
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.equal(firstReplay(f).sourceSha, S);
-  assert.equal(firstReplay(f).checkpointSha, null);
-  assert.equal(firstReplay(f).syncBranch, SYNC);
-  assert.equal(firstReplay(f).existingBranch, false);
-  const created = f.calls.find(({ name }) => name === "createPR").args;
+  const args = firstProject(f);
+  assert.equal(args.github, f.github);
+  assert.deepEqual(args.scope, { owner: "flagos-ai", repo: "vllm-plugin-FL" });
+  assert.equal(args.sourceSha, S);
+  assert.equal(args.sourceCheckpoint, OLD);
+  assert.equal(args.projectionCheckpoint, P);
+  assert.deepEqual(writeNames(f), ["createRef", "createPR"]);
+  const created = f.calls.find(call => call.name === "createPR").args;
   assert.equal(created.base, TARGET);
-  assert.equal(created.head, SYNC);
-  assert.match(created.body, /Automatic merging is disabled/);
+  assert.equal(created.draft, true);
   assert.ok(created.body.includes(sourceMarker(S)));
-  assert.equal(f.refs["heads/" + SYNC], MERGED);
-  assert.notEqual(f.refs["heads/" + SYNC], S);
+  assert.ok(created.body.includes(projectionMarker(R)));
+  assert.ok(created.body.includes("/commit/" + S));
+  assert.match(created.body, /upgrade\(musa\).* — Physics/);
+  assert.match(created.body, /native conflicts/);
+  assert.doesNotMatch(created.body, /resolve the committed conflict markers/i);
+  assert.equal(f.refs["heads/" + syncBranch], R);
   assert.equal(f.refs["heads/" + TARGET], T);
-  assertNoSourceAncestryWrites(f);
 });
 
-test("the replay helper receives its token without GitHub commit-parent writes", async () => {
-  const oldToken = process.env.FORWARD_SYNC_TOKEN;
-  process.env.FORWARD_SYNC_TOKEN = "fixture-token";
-  try {
-    const f = fixture();
-    await f.run();
-    assert.equal(firstReplay(f).token, "fixture-token");
-    assert.equal(firstReplay(f).sourceSha, S);
-    assertNoSourceAncestryWrites(f);
-  } finally {
-    if (oldToken === undefined) delete process.env.FORWARD_SYNC_TOKEN;
-    else process.env.FORWARD_SYNC_TOKEN = oldToken;
+test("an untouched open projection extends with a non-force update and preserves notes", async () => {
+  const f = fixture({ prs: [pr(), mergedPr()] });
+  assert.equal((await f.run()).status, "pr-updated");
+  assert.equal(firstProject(f).sourceCheckpoint, OLD);
+  assert.equal(firstProject(f).projectionCheckpoint, P);
+  assert.deepEqual(writeNames(f), ["updateRef", "updatePR"]);
+  assert.deepEqual(f.calls.find(call => call.name === "updateRef").args,
+    { owner: "flagos-ai", repo: "vllm-plugin-FL", ref: "heads/" + oldBranch, sha: R, force: false });
+  assert.ok(f.prs[0].body.includes(sourceMarker(S)));
+  assert.ok(f.prs[0].body.includes(projectionMarker(R)));
+  assert.match(f.prs[0].body, /Maintainer notes: keep this/);
+  assert.equal(f.prs[0].draft, true);
+});
+
+test("maintainer resolutions freeze the branch and queue source changes without advancing checkpoints", async () => {
+  const active = pr({ head: { sha: STAFF, ref: oldBranch, repo: { full_name: repository } } });
+  const f = fixture({ prs: [active, mergedPr()] });
+  assert.equal((await f.run()).status, "pr-awaiting-review");
+  assert.deepEqual(f.projects(), []);
+  assert.deepEqual(writeNames(f), ["updatePR"]);
+  assert.equal(f.refs["heads/" + oldBranch], STAFF);
+  assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
+  assert.ok(f.prs[0].body.includes(projectionMarker(P)));
+  assert.ok(f.prs[0].body.includes(queuedMarker(S)));
+  assert.match(f.prs[0].body, /Maintainer notes: keep this/);
+});
+
+test("the next cycle extends the source projection rather than a merged resolution head", async () => {
+  const completed = mergedPr({ body: [MARKER, sourceMarker(OLD), projectionMarker(P)].join("\n") });
+  const f = fixture({ state: baseline({ projectionCheckpoint: INITIAL }), prs: [completed] });
+  assert.equal((await f.run()).status, "pr-created");
+  assert.equal(firstProject(f).sourceCheckpoint, OLD);
+  assert.equal(firstProject(f).projectionCheckpoint, P);
+  assert.notEqual(firstProject(f).projectionCheckpoint, H);
+  assert.ok(f.calls.some(call => call.name === "compare" && call.args.basehead === T + "..." + H));
+});
+
+test("an unchanged native PR retry leaves its ref, body, and draft state intact", async () => {
+  const active = pr({ body: [MARKER, sourceMarker(S), projectionMarker(R), "Maintainer notes: keep this."].join("\n"),
+    head: { sha: R, ref: syncBranch, repo: { full_name: repository } } });
+  const f = fixture({ prs: [active, mergedPr()] });
+  assert.equal((await f.run()).status, "pr-updated");
+  assert.equal(firstProject(f).sourceCheckpoint, S);
+  assert.equal(firstProject(f).projectionCheckpoint, R);
+  assert.deepEqual(f.writes(), []);
+  assert.equal(f.prs[0].draft, true);
+});
+
+test("legacy WIP replacement creates a separate native branch before closing the old draft", async () => {
+  const f = fixture({ prs: [legacyPr(), mergedPr()] });
+  assert.equal((await f.run()).status, "pr-created");
+  const create = f.calls.find(call => call.name === "createPR");
+  assert.notEqual(create.args.head, syncBranch);
+  assert.equal(f.refs["heads/" + syncBranch], WIP);
+  assert.equal(f.refs["heads/" + create.args.head], R);
+  assert.deepEqual(writeNames(f), ["createRef", "createPR", "updatePR"]);
+  const close = f.calls.find(call => call.name === "updatePR");
+  assert.equal(close.args.pull_number, 12);
+  assert.equal(close.args.state, "closed");
+  assert.ok(f.calls.indexOf(create) < f.calls.indexOf(close));
+  assert.equal(f.prs.find(item => item.number === 12).state, "closed");
+  assert.match(create.args.body, /Replaces legacy WIP draft #12/);
+});
+
+test("a failed native PR creation leaves the legacy draft and its branch untouched", async () => {
+  const f = fixture({ prs: [legacyPr(), mergedPr()], errors: { createPR: 403 } });
+  await assert.rejects(f.run(), { status: 403 });
+  assert.equal(f.refs["heads/" + syncBranch], WIP);
+  assert.equal(f.prs.find(item => item.number === 12).state, "open");
+  assert.equal(f.calls.some(call => call.name === "updatePR"), false);
+  assert.equal(f.calls.some(call => call.name === "updateRef"), false);
+});
+
+test("a legacy draft changed during replacement is preserved instead of closed", async () => {
+  const f = fixture({ prs: [legacyPr(), mergedPr()], legacyMovedOnRead: true });
+  assert.equal((await f.run()).status, "pr-created");
+  assert.equal(f.prs.find(item => item.number === 12).state, "open");
+  assert.equal(f.refs["heads/" + syncBranch], STAFF);
+  assert.equal(f.calls.some(call => call.name === "updatePR"), false);
+  assert.equal(f.warnings.length, 1);
+});
+
+test("legacy replacement requires the original draft, pending manifest, and WIP commit", async () => {
+  for (const options of [
+    { prs: [legacyPr({ draft: false }), mergedPr()] },
+    { prs: [legacyPr(), mergedPr()], pending: { checkpointSha: S } },
+    { prs: [legacyPr(), mergedPr()], commits: { [WIP]: {
+      sha: WIP, tree: { sha: SOURCE_TREE }, message: "Maintainer resolution", parents: [{ sha: T }],
+    } } },
+  ]) {
+    const f = fixture(options);
+    await assert.rejects(f.run(), /legacy draft contains maintainer work/);
+    assert.deepEqual(f.projects(), []);
+    assert.deepEqual(f.writes(), []);
   }
 });
 
-test("equivalent patches require no new branch or empty PR", async () => {
-  const f = fixture({ replayChanged: false });
-  assert.equal((await f.run()).status, "already-applied");
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.refs["heads/" + SYNC], undefined);
-  assert.equal(f.prs.length, 0);
+test("force-push and source deletion events stop before repository access", async () => {
+  const forced = fixture({ payload: { ref: "refs/heads/" + SOURCE, forced: true } });
+  await assert.rejects(forced.run(), /rewrote history/);
+  assert.deepEqual(forced.calls, []);
+  const deleted = fixture({ payload: { ref: "refs/heads/" + SOURCE, deleted: true } });
+  assert.equal((await deleted.run()).status, "source-deleted");
+  assert.deepEqual(deleted.calls, []);
 });
 
-test("an unchanged open retry reuses the PR without writes", async () => {
-  const f = fixture({
-    sync: MERGED, replayChanged: false,
-    prs: [pr({ body: MARKER + "\n" + sourceMarker(S) })],
-  });
-  assert.equal((await f.run()).status, "pr-updated");
-  assert.equal(firstReplay(f).baseSha, MERGED);
-  assert.equal(firstReplay(f).checkpointSha, S);
-  assert.equal(firstReplay(f).existingBranch, true);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.calls.filter(({ name }) => name === "getPR").length, 1);
+test("a source rewrite after the reviewed checkpoint cannot publish a new projection", async () => {
+  const f = fixture({ comparisons: { [S + "..." + OLD]: "diverged" } });
+  await assert.rejects(f.run(), /Source history was rewritten/);
+  assert.deepEqual(f.projects(), []);
+  assert.deepEqual(f.writes(), []);
 });
 
-test("source already included in target requires no replay, branch or PR writes", async () => {
-  const f = fixture({ comparisons: { [T + "..." + S]: "behind" } });
-  assert.equal((await f.run()).status, "already-included");
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-  assert.equal(f.calls.some(({ name }) => name === "listPRs"), false);
+test("an open PR with a rewritten checkpoint or moved ref is protected", async () => {
+  const rewritten = fixture({ prs: [pr({
+    body: [MARKER, sourceMarker(INITIAL), projectionMarker(P)].join("\n"),
+  }), mergedPr()], comparisons: { [S + "..." + INITIAL]: "diverged" } });
+  await assert.rejects(rewritten.run(), /rewrote the open PR checkpoint/);
+  assert.deepEqual(rewritten.writes(), []);
+  const moved = fixture({ prs: [pr(), mergedPr()], refs: { ["heads/" + oldBranch]: STAFF } });
+  await assert.rejects(moved.run(), /branch moved while reading/);
+  assert.deepEqual(moved.writes(), []);
 });
 
-test("human conflict-resolution commits are preserved as the replay base", async () => {
-  const f = fixture({ sync: H, prs: [pr()] });
-  assert.equal((await f.run()).status, "pr-updated");
-  assert.equal(firstReplay(f).baseSha, H);
-  assert.equal(firstReplay(f).checkpointSha, OLD);
-  assert.equal(firstReplay(f).existingBranch, true);
-  assert.equal(f.refs["heads/" + SYNC], MERGED);
-  assert.match(f.prs[0].body, /Maintainer notes: preserve this/);
-  assert.ok(f.prs[0].body.includes(sourceMarker(S)));
-  assertNoSourceAncestryWrites(f);
+test("a missing merged PR head in target cannot be hidden by comparison state", async () => {
+  const f = fixture({ comparisons: { [T + "..." + H]: "diverged" } });
+  await assert.rejects(f.run(), /merged sync head is missing from target/);
+  assert.deepEqual(f.projects(), []);
+  assert.deepEqual(f.writes(), []);
 });
 
-test("an open replay conflict preserves its branch, checkpoint and maintainer notes", async () => {
-  const f = fixture({ sync: H, prs: [pr()], conflict: true });
-  const result = await f.run();
-  assert.equal(result.status, "conflict-needs-resolution");
-  assert.equal(result.pullRequest, 12);
-  assert.equal(f.refs["heads/" + SYNC], H);
-  assert.equal(f.prs.length, 1);
-  assert.equal(f.failures.length, 1);
-  assert.ok(f.failures[0].includes(f.prs[0].html_url));
-  assert.deepEqual(mutationNames(f), ["updatePR"]);
-  assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
-  assert.ok(!f.prs[0].body.includes(sourceMarker(S)));
-  assert.ok(f.prs[0].body.includes(pendingMarker(S)));
-  assert.match(f.prs[0].body, /Maintainer notes: preserve this/);
+test("independent work on an existing destination branch is never force-pushed", async () => {
+  const f = fixture({ refs: { ["heads/" + syncBranch]: STAFF },
+    comparisons: { [R + "..." + STAFF]: "diverged" } });
+  await assert.rejects(f.run(), /independent work; no force push/);
+  assert.equal(f.refs["heads/" + syncBranch], STAFF);
+  assert.deepEqual(f.writes(), []);
 });
 
-test("an open PR advances its marker even when every new patch is equivalent", async () => {
-  const f = fixture({
-    sync: H, replayChanged: false,
-    prs: [pr({ body: pr().body + "\n" + pendingMarker(S) })],
-  });
-  assert.equal((await f.run()).status, "pr-updated");
-  assert.equal(f.refs["heads/" + SYNC], H);
-  assert.deepEqual(mutationNames(f), ["updatePR"]);
-  assert.ok(f.prs[0].body.includes(sourceMarker(S)));
-  assert.ok(!f.prs[0].body.includes(pendingMarker(S)));
-  assert.match(f.prs[0].body, /Maintainer notes: preserve this/);
-});
-
-test("a closed, unmerged PR is not silently reopened or overwritten", async () => {
-  const f = fixture({ sync: H, prs: [pr({ state: "closed" })] });
-  await assert.rejects(f.run(), /closed without merging/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("an unrelated existing branch is protected", async () => {
-  const f = fixture({ sync: H, comparisons: { [H + "..." + T]: "diverged" } });
-  await assert.rejects(f.run(), /reviewed target/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("an unmarked PR is protected", async () => {
-  const f = fixture({ sync: H, prs: [pr({ body: "Someone else's PR" })] });
-  await assert.rejects(f.run(), /unrecognized PR/);
-  assert.deepEqual(f.mutations(), []);
-});
-
-test("a merged PR with lost ancestry stops before replaying squash-merged history", async () => {
-  const f = fixture({
-    oldTip: H, prs: [mergedPr()], comparisons: { [T + "..." + H]: "diverged" },
-  });
-  await assert.rejects(f.run(), /squash\/rebase merge/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("a new cycle replays only the increment from the reviewed source checkpoint", async () => {
-  const f = fixture({ oldTip: H, prs: [mergedPr()] });
-  assert.equal((await f.run()).status, "pr-created");
-  assert.deepEqual(mutationNames(f), ["replayPush", "createPR"]);
-  assert.equal(firstReplay(f).sourceSha, S);
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.equal(firstReplay(f).checkpointSha, OLD);
-  assert.equal(firstReplay(f).existingBranch, false);
-  assert.equal(f.refs["heads/" + SYNC], MERGED);
-  assert.equal(f.refs["heads/" + OLD_BRANCH], H);
-  assert.equal(f.refs["heads/" + TARGET], T);
-  assert.equal(f.outputs.reviewed_source_sha, OLD);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("a deleted merged branch starts a new increment after historical-head validation", async () => {
-  const f = fixture({ prs: [mergedPr()] });
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(firstReplay(f).checkpointSha, OLD);
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.equal(f.refs["heads/" + OLD_BRANCH], undefined);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("source history rewrite detected from the prior checkpoint stops all mutations", async () => {
-  const f = fixture({
-    sync: H, prs: [pr()], comparisons: { [S + "..." + OLD]: "diverged" },
-  });
-  await assert.rejects(f.run(), /rewound or rewritten/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("a force-push event fails before accessing any repository refs", async () => {
-  const f = fixture({ payload: { ref: "refs/heads/" + SOURCE, forced: true } });
-  await assert.rejects(f.run(), /rewrote history/);
-  assert.deepEqual(f.calls, []);
-});
-
-test("source deletion is a no-op", async () => {
-  const f = fixture({ payload: { ref: "refs/heads/" + SOURCE, deleted: true } });
-  assert.equal((await f.run()).status, "source-deleted");
-  assert.deepEqual(f.calls, []);
-});
-
-test("permission errors are propagated instead of mistaken for a missing ref", async () => {
-  const f = fixture({ errors: { getRef: 403 } });
-  await assert.rejects(f.run(), { status: 403 });
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("PR creation permission failure retries the pushed branch without duplicating patches", async () => {
-  const f = fixture({ errors: { createPR: 403 } });
-  await assert.rejects(f.run(), { status: 403 });
-  assert.equal(f.refs["heads/" + SYNC], MERGED);
-  delete f.errors.createPR;
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(f.replays().length, 2);
-  assert.equal(f.replays()[1].args.baseSha, MERGED);
-  assert.equal(f.replays()[1].args.existingBranch, true);
-  assert.equal(f.calls.filter(({ name }) => name === "replayPush").length, 1);
-  assert.equal(f.prs.length, 1);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("missing checkpoint and duplicate open PRs fail without writes", async () => {
-  const missing = fixture({ sync: H, prs: [pr({ body: MARKER })] });
-  await assert.rejects(missing.run(), /no unique source SHA marker/);
-  assert.deepEqual(missing.mutations(), []);
-  const duplicate = fixture({ sync: H, prs: [pr(), pr({ number: 13 })] });
-  await assert.rejects(duplicate.run(), /Multiple open/);
-  assert.deepEqual(duplicate.mutations(), []);
-});
-
-test("unexpected replay failures propagate without a replacement PR", async () => {
-  const f = fixture({ sync: H, prs: [pr()], errors: { replay: 403 } });
-  await assert.rejects(f.run(), { status: 403 });
-  assert.equal(f.refs["heads/" + SYNC], H);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.calls.some(({ name }) => name === "createPR"), false);
-});
-
-test("a new-cycle PR creation failure reuses the reviewed branch without duplicate replay", async () => {
-  const f = fixture({ oldTip: H, prs: [mergedPr()], errors: { createPR: 403 } });
-  await assert.rejects(f.run(), { status: 403 });
-  assert.equal(f.refs["heads/" + SYNC], MERGED);
-  delete f.errors.createPR;
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(f.refs["heads/" + OLD_BRANCH], H);
-  assert.equal(f.replays()[1].args.baseSha, MERGED);
-  assert.equal(f.replays()[1].args.checkpointSha, OLD);
-  assert.equal(f.calls.filter(({ name }) => name === "replayPush").length, 1);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("manual commits added after a merged PR are not silently abandoned", async () => {
-  const f = fixture({
-    oldTip: MERGED, prs: [mergedPr()], comparisons: { [T + "..." + MERGED]: "diverged" },
-  });
-  await assert.rejects(f.run(), /reconcile those manual commits/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("resetting an old branch cannot hide a squash merge's missing PR ancestry", async () => {
-  const f = fixture({
-    oldTip: T, prs: [mergedPr()], comparisons: { [T + "..." + H]: "diverged" },
-  });
-  await assert.rejects(f.run(), /squash\/rebase merge/);
-  assert.deepEqual(f.mutations(), []);
-});
-
-test("a fork PR with a matching branch prefix cannot impersonate the managed PR", async () => {
-  const f = fixture({ prs: [pr({
-    body: "Untrusted fork PR",
-    head: { sha: H, ref: SYNC, repo: { full_name: "someone/vllm-plugin-FL" } },
-  })] });
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(firstReplay(f).baseSha, T);
-});
-
-test("an open PR with a missing branch stops for manual recovery", async () => {
-  const f = fixture({ prs: [pr()] });
-  await assert.rejects(f.run(), /branch is missing/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("a PR closed during replay fails visibly instead of reporting success", async () => {
-  const f = fixture({ sync: H, prs: [pr()], closeOnRead: true });
-  await assert.rejects(f.run(), (error) =>
-    /closed while its branch was being updated/.test(error.message) &&
-    error.message.includes(f.prs[0].html_url));
-  assert.equal(f.refs["heads/" + SYNC], MERGED);
-  assert.equal(f.outputs.status, undefined);
-  assert.equal(f.calls.some(({ name }) => name === "createPR"), false);
-});
-
-test("an unchanged reviewed checkpoint needs no PR despite excluded source ancestry", async () => {
-  const f = fixture({ source: OLD, oldTip: H, prs: [mergedPr()] });
-  assert.equal((await f.run()).status, "already-processed");
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("a reviewed checkpoint never becomes a commit parent even if absent from target ancestry", async () => {
-  const f = fixture({ prs: [mergedPr()] });
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(firstReplay(f).checkpointSha, OLD);
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.equal(f.calls.some(({ name, args }) => name === "compare" && args.basehead === T + "..." + OLD), false);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("a conflicting new increment creates neither a snapshot branch nor an empty PR", async () => {
-  const f = fixture({ prs: [mergedPr()], conflict: true });
-  const result = await f.run();
-  assert.equal(result.status, "conflict-needs-resolution");
-  assert.equal(result.pullRequest, null);
-  assert.equal(result.pullRequestUrl, null);
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.equal(firstReplay(f).checkpointSha, OLD);
-  assert.equal(f.refs["heads/" + SYNC], undefined);
-  assert.equal(f.prs.length, 1);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.outputs.pull_request_number, undefined);
-  assert.match(f.failures[0], /No PR was created before resolution/);
-  assert.ok(f.prs[0].body.includes(sourceMarker(OLD)));
-  assertNoSourceAncestryWrites(f);
-});
-
-test("a first-cycle conflict also avoids publishing original source history", async () => {
-  const f = fixture({ conflict: true });
-  assert.equal((await f.run()).status, "conflict-needs-resolution");
-  assert.equal(firstReplay(f).checkpointSha, null);
-  assert.equal(f.refs["heads/" + SYNC], undefined);
-  assert.deepEqual(f.mutations(), []);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("a new increment retries a conflict from target without duplicate branch writes", async () => {
-  const f = fixture({ prs: [mergedPr()], conflict: true });
-  assert.equal((await f.run()).status, "conflict-needs-resolution");
-  f.state.conflict = false;
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(f.replays().length, 2);
-  assert.ok(f.replays().every(({ args }) => args.baseSha === T && !args.existingBranch));
-  assert.equal(f.calls.filter(({ name }) => name === "replayPush").length, 1);
-  assert.equal(f.refs["heads/" + SYNC], MERGED);
-});
-
-test("an open sync still validates the previous merged head in target", async () => {
-  const f = fixture({ sync: H, prs: [pr(), mergedPr({ number: 11 })] });
-  assert.equal((await f.run()).status, "pr-updated");
-  assert.equal(f.outputs.reviewed_source_sha, OLD);
-  assert.ok(f.calls.some(({ name, args }) => name === "compare" && args.basehead === T + "..." + H));
-  assertNoSourceAncestryWrites(f);
-});
-
-test("an open PR cannot hide lost ancestry from the last merged sync", async () => {
-  const f = fixture({
-    sync: H, prs: [pr(), mergedPr({ number: 11 })],
-    comparisons: { [T + "..." + H]: "diverged" },
-  });
-  await assert.rejects(f.run(), /squash\/rebase merge/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("an open PR cannot replace a missing merged checkpoint with an observed SHA", async () => {
-  const f = fixture({ sync: H, prs: [pr(), mergedPr({ number: 11, body: MARKER })] });
-  await assert.rejects(f.run(), /no unique source SHA marker/);
-  assert.deepEqual(f.mutations(), []);
-});
-
-test("the most recently merged checkpoint wins over PR creation order", async () => {
-  const reviewed = SHA("2"), reviewedHead = SHA("3");
-  const f = fixture({
-    prs: [mergedPr(), mergedPr({
-      number: 11, merged_at: "2026-10-20T00:00:00Z",
-      body: MARKER + "\n" + sourceMarker(reviewed),
-      head: { sha: reviewedHead, ref: SYNC_PREFIX + reviewed, repo: { full_name: repository } },
-    })],
-    comparisons: { [S + "..." + reviewed]: "behind", [T + "..." + reviewedHead]: "behind" },
-  });
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(firstReplay(f).checkpointSha, reviewed);
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.equal(f.outputs.reviewed_source_sha, reviewed);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("a pending source marker is never the reviewed checkpoint", async () => {
-  const f = fixture({ prs: [mergedPr({
-    body: MARKER + "\n" + sourceMarker(OLD) + "\n" + pendingMarker(S),
-  })] });
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(firstReplay(f).checkpointSha, OLD);
-});
-
-test("a replay retry does not require original source SHA ancestry", async () => {
-  const f = fixture({
-    sync: RETRY, prs: [mergedPr()], comparisons: { [RETRY + "..." + OLD]: "diverged" },
-  });
-  assert.equal((await f.run()).status, "pr-created");
-  assert.equal(firstReplay(f).baseSha, RETRY);
-  assert.equal(firstReplay(f).checkpointSha, OLD);
-  assertNoSourceAncestryWrites(f);
-});
-
-test("a retry branch missing the merged PR head is rejected", async () => {
-  const f = fixture({
-    sync: RETRY, prs: [mergedPr()], comparisons: { [RETRY + "..." + H]: "diverged" },
-  });
-  await assert.rejects(f.run(), /reviewed target|legacy source snapshot/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
-});
-
-test("a source-only branch cannot bypass the reviewed target", async () => {
-  const f = fixture({
-    sync: S, prs: [mergedPr()], comparisons: { [S + "..." + H]: "diverged" },
-  });
-  await assert.rejects(f.run(), /reviewed target|legacy source snapshot/);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.refs["heads/" + SYNC], S);
-});
-
-test("an open source snapshot lacking the last merged head requires migration", async () => {
-  const f = fixture({
-    sync: S, prs: [pr({ body: MARKER + "\n" + sourceMarker(S) }), mergedPr({ number: 11 })],
-    comparisons: { [S + "..." + H]: "diverged" },
-  });
-  await assert.rejects(f.run(), /reviewed target|legacy source snapshot/);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.refs["heads/" + SYNC], S);
-});
-
-test("an open replay branch need not contain its original source checkpoint SHA", async () => {
-  for (const hasCompleted of [false, true]) {
-    const f = fixture({
-      sync: H, prs: [pr(), ...(hasCompleted ? [mergedPr({ number: 11 })] : [])],
-      comparisons: { [H + "..." + OLD]: "diverged" },
-    });
-    assert.equal((await f.run()).status, "pr-updated");
-    assert.equal(firstReplay(f).checkpointSha, OLD);
-    assert.equal(firstReplay(f).baseSha, H);
-    assertNoSourceAncestryWrites(f);
-  }
-});
-
-test("a retry branch based on target with no remaining patches creates no empty PR", async () => {
-  const f = fixture({ sync: T, replayChanged: false });
-  assert.equal((await f.run()).status, "already-applied");
-  assert.equal(firstReplay(f).baseSha, T);
-  assert.equal(firstReplay(f).existingBranch, true);
-  assert.deepEqual(f.mutations(), []);
-  assert.equal(f.prs.length, 0);
-});
-
-test("legacy ACK ancestry is refused when the source checkpoint was excluded from target", async () => {
-  const f = fixture({
-    sync: H, prs: [pr(), mergedPr({ number: 11 })],
-    comparisons: { [H + "..." + OLD]: "behind" },
-  });
-  await assert.rejects(f.run(), /excluded source ancestry/);
-  assert.deepEqual(f.mutations(), []);
-  assert.deepEqual(f.replays(), []);
+test("multiple managed open PRs or missing reviewed checkpoints fail without writes", async () => {
+  const duplicate = fixture({ prs: [pr(), pr({ number: 13 }), mergedPr()] });
+  await assert.rejects(duplicate.run(), /Multiple open forward-sync/);
+  assert.deepEqual(duplicate.writes(), []);
+  const missing = fixture({ prs: [mergedPr({ body: MARKER })] });
+  await assert.rejects(missing.run(), /no unique checkpoint marker/);
+  assert.deepEqual(missing.writes(), []);
 });

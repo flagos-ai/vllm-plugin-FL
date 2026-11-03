@@ -7,7 +7,11 @@ FlagGems activation operator implementations.
 from __future__ import annotations
 
 import torch
+
 from vllm.platforms import current_platform
+
+if current_platform.device_type == "musa":
+    from .musa_ops import silu_and_mul as musa_silu_and_mul
 
 
 @torch.library.custom_op("vllm_fl::iluvatar_gems_silu_and_mul", mutates_args=())
@@ -37,6 +41,13 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
     """
     if getattr(current_platform, "vendor_name", None) == "iluvatar":
         return _iluvatar_gems_silu_and_mul(x)
+    if (
+        current_platform.device_type == "musa"
+        and x.device.type == "musa"
+        and torch.compiler.is_compiling()
+        and not torch.is_grad_enabled()
+    ):
+        return musa_silu_and_mul(x)
 
     from flaggems_vllm import silu_and_mul as gems_silu_and_mul
 
