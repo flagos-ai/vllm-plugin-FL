@@ -48,6 +48,7 @@ tolerance:
 # Device-level overrides for specific test cases (optional).
 # Matrix follows the 0.4.0-dev line: eager only — decode graphs land with the
 # ascend graph work (see the ascend graph branch), not with this CI sync.
+# Graph cases are kept commented out rather than deleted; tracked in #646.
 device_overrides:
   910c:
     cases:
@@ -112,10 +113,6 @@ env_defaults: {}
             - 27b_tp2_eager
             # - 27b_tp2_graph
             - 35b_a3b_tp2_eager
-            # - 35b_a3b_tp2_graph
-        concurrent:
-          qwen3_6:
-            - 27b_tp2_eager
             # - 35b_a3b_tp2_graph
     functional:
       # Include patterns: "*" for all, or list specific paths

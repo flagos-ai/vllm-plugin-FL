@@ -96,19 +96,13 @@ jobs:
       - name: Install project
         run: bash .github/scripts/${{ inputs.platform }}/setup.sh
 
-      - name: Run unit tests
+      # Unit and functional tests run in a single invocation so both scopes land
+      # in one merged report; two runs would overwrite test-results-<platform>.*.
+      - name: Run unit and functional tests
         run: |
           python tests/run.py \
             --platform ${{ inputs.platform }} \
-            --scope unit \
-            --output-dir test-results/unit
-
-      - name: Run functional tests
-        run: |
-          python tests/run.py \
-            --platform ${{ inputs.platform }} \
-            --scope functional \
-            --output-dir test-results/functional
+            --scope unit,functional
 
       - name: Upload test results
         if: always()
@@ -117,10 +111,10 @@ jobs:
         with:
           name: functional-${{ inputs.platform }}
           path: |
-            test-results/**
             test-results-${{ inputs.platform }}.xml
             test-results-${{ inputs.platform }}.json
             coverage-${{ inputs.platform }}.json
+            test-results/logs/**
 
       - name: Check FlagCICD authentication
         id: flagcicd

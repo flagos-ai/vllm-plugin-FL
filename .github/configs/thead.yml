@@ -2,8 +2,7 @@
 # Based on main's flagcicd-810e runner and PPU device grants.
 # The administrator must reserve the four visible PPU cards exclusively for CI.
 # This config grants device access; it does not prove fresh idle telemetry.
-# The generic workflow uses these checked-in defaults directly.
-# The shared platform workflow consumes this configuration directly.
+# The shared platform workflow consumes these checked-in defaults directly.
 platform: thead
 ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-thead-ci
 runner_labels: [flagcicd-810e]
