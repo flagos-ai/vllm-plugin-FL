@@ -111,7 +111,7 @@ out of scripts and shell history.
 ```bash
 docker login harbor.baai.ac.cn
 
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:d80f4616b04fda507ce6d9dc54d36983d4ef134730bb9305b45409931260d688
+export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 ```

@@ -263,6 +263,9 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
+    fi
     BUILD_ARGS+=(
         --build-arg "ASCEND_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${ASCEND_VLLM_VERSION}"
@@ -270,7 +273,7 @@ elif [[ "${PLATFORM}" == "ascend" ]]; then
         --build-arg "FLAGTREE_VERSION=${ASCEND_FLAGTREE_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="ascend-vllm${VLLM_VERSION}-a3-${TARGET}"
+        IMAGE_TAG="v${VLLM_VERSION}-ascend-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     PYTHON_VERSION="${HYGON_PYTHON_VERSION}"
@@ -290,7 +293,7 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
         esac
     done
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
-        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+        IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
     BUILD_ARGS+=(
         --build-arg "HYGON_BASE_IMAGE=${HYGON_BASE_IMAGE}"
