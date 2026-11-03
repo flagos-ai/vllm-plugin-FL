@@ -113,6 +113,14 @@ def packed_attention(
         preset = next(
             p for p in _long_context_settings()["prefill"] if b <= p["max_rows"]
         )
+        optimized = _long_context_settings().get("prefill_optimized")
+        use_optimized = bool(
+            optimized
+            and b >= optimized["min_rows"]
+            and score_columns <= optimized["max_score_columns"]
+        )
+        if use_optimized:
+            preset = optimized
         candidate = Candidate(
             q,
             "fold4_skip",
@@ -121,6 +129,7 @@ def packed_attention(
             preset["warps"],
             preset["stages"],
             collect_metadata=False,
+            prefill_optimization=use_optimized,
         )
     else:
         return False

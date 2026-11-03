@@ -1,49 +1,30 @@
-# Qwen3.8-Flash-Next MetaX launch profile
+# Qwen3.8 Flash Next MetaX tuning configuration
 
-This profile builds on [plugin-FL #455](https://github.com/flagos-ai/vllm-plugin-FL/pull/455).
-It retains the validated BF16/TP8 C550 parameters, shared CPU N-gram lookup,
-optional MTP graphs and context-width QSA buckets. The executable
-[serving entry point](../serve_metax.py) defaults to MTP off and enables K1/K2/K3
-only when explicitly selected; it keeps checkpoint sampling defaults.
+Use [serve_metax.py](../serve_metax.py) to select the model configuration.
+It defaults to MTP off, synchronous scheduling, shared CPU lookup and MBT2048;
+MTP-off deployments may explicitly select async scheduling, UVA auto and
+MBT4096/8192. The [model guide](../../../docs/models/qwen3_8_flash_next.md)
+describes build requirements, interfaces and supported boundaries.
 
-See the model guide's
-[runtime and operator dependencies](../../../docs/models/qwen3_8_flash_next.md#runtime-and-operator-dependencies)
-for the current required composition and unpublished dependency status.
-This directory's `manifest.json` records the historical tuning base only; it
-does not provide a complete current deployment lock.
-
-Use the [serving entry point](../serve_metax.py) to select this profile. It owns
-the serving configuration, enables the shared N-gram and QSA tuning settings,
-and pairs each explicit MTP choice with its matching graph geometry. There is
-no separate manual `additional_config` recipe in this profile.
-
-The launcher selects this directory's `moe-configs` through
-VLLM_TUNED_CONFIG_FOLDER. FG and FGV use distinct native caches
-(`$HOME/.flaggems` and `$HOME/.flagdnn`); the deployment supplies separate
-container filesystems or homes when isolation between services is needed.
-Triton and the operator-hit log use the launcher's mode-specific cache paths.
-
-The model installs the profile before constructing layers and capturing graphs.
-Reviewed linear/MV choices use native LibTuner/ConfigCache entries. Remaining
-presets select launch metadata on existing FG/FGV/vLLM kernels. GDN output
-dispatch keeps a native cache per context bucket. The profile does not rewrite
-third-party source files or ship diff files; kernel computations remain in their
-original libraries. Geometry misses keep the native path.
-
-Parameters are packaged in
+Parameters live in
 vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json.
-QSA retains K512 and the reviewed shape routing: width N<=512 skips score/TopK;
-otherwise supported M<=128 query-row shapes use corrected FGV non-TLE per-row selection,
-larger M uses radix, and out-of-scope shapes retain FG fallback. Score widths
-are 512/2048/8192/cache-capacity. Target and MTP graph keys include the selected width.
-The current reviewed configuration includes scoped MCTlass BF16 projections
-and expert GEMMs, Top20/race sampling and QSA folding/packing with native
-fallbacks. See the model guide and
-[operator composition](operator_dependencies.json) for shapes, dependencies
-and historical measured results. Experiment counters and benchmark RPCs are
-not part of the serving path.
-Host preparation additionally batches PLE hashing and reuses GDN/QSA metadata; no CPU-affinity or GC-policy change is selected.
-The best MTP-off invocation adds `--async-scheduling`; synchronous mode remains the default/fallback, and MTP options require sync.
+The launcher supplies this directory's moe-configs through
+VLLM_TUNED_CONFIG_FOLDER. Reviewed FG LibTuner entries and FGV launch parameters
+are selected before computation; shape misses retain the existing path.
 
+QSA retains the fixed selection budget and independent decode/prefill policy.
+HC, projection and expert shape limits extend through 8192 prefill rows.
+The model owns metadata, graph workspace lifetime and state; numerical kernels
+remain in FG/FGV or the native vendor libraries. No source replacement scripts
+are shipped and no prefill graph mode is enabled.
 
-The added serving capabilities and source-locked dependency boundaries are documented in `../../../docs/models/qwen3_8_flash_next.md`.
+[operator_dependencies.json](operator_dependencies.json) describes the actual
+development assembly, including unpublished library/native API requirements.
+Source hashes are reproduction guards, not public installable versions.
+manifest.json records the historical tuning base, not the complete current
+deployment lock.
+
+Use independent writable caches for concurrent service experiments. Triton and
+optional operator-hit outputs use launcher-selected mode directories; FG/FGV
+also use their native caches. One-off benchmarks, observers, trace processing
+and startup recovery tools remain outside the model repository.

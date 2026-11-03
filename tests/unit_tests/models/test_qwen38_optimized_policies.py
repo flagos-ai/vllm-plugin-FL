@@ -289,7 +289,7 @@ def test_capacity_qsa_selection_respects_length_and_row_boundaries(
         {},
         score_columns=columns,
     )
-    optimized = False
+    optimized = m >= 4096 and columns <= 17600
     expected_stages = 3 if optimized else 1
     assert len(calls) == 1
     assert calls[0][1:6] == ("fold4_skip", splits, 16, 2, expected_stages)

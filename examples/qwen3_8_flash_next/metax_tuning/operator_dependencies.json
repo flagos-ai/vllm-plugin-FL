@@ -73,8 +73,8 @@
     {
       "package": "flaggems_vllm",
       "path": "runtime/backend/_metax/ops/qsa_packed.py",
-      "sha256": "de298c46e1e5235721392e31abfa8b5fdf2c7d7c3b25bc8fd071cb59b6c3e812",
-      "purpose": "Head/query packing with the reviewed BF16 contract; single-split direct output",
+      "sha256": "3edb369a293d0d7281d9c0c0cafbb5ffe0ffd4f34c22cacab4202df70f37cf9f",
+      "purpose": "Head/query packing with the reviewed BF16 contract; single-split direct output; opt-in sparse-prefill loop/page-map optimization",
       "introduced": "01-hotpaths",
       "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
@@ -213,7 +213,7 @@
       },
       {
         "path": "runtime/backend/_metax/ops/qsa_packed.py",
-        "sha256": "de298c46e1e5235721392e31abfa8b5fdf2c7d7c3b25bc8fd071cb59b6c3e812"
+        "sha256": "3edb369a293d0d7281d9c0c0cafbb5ffe0ffd4f34c22cacab4202df70f37cf9f"
       },
       {
         "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
