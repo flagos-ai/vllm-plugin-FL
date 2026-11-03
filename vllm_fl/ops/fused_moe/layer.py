@@ -3,8 +3,24 @@
 
 import vllm.model_executor.layers.fused_moe as _fused_moe_pkg
 
-# Save the target-version factory before custom_ops installs the FL wrapper.
-_OrigFusedMoEFactory = _fused_moe_pkg.FusedMoEFactory
+# Save the original FusedMoE factory BEFORE any monkey-patching occurs.
+# custom_ops.py patches _fused_moe_pkg.FusedMoE = FusedMoEFL at runtime,
+# so calling _fused_moe_pkg.FusedMoE() inside FusedMoEFL would recurse
+# infinitely.  Capturing it here breaks the cycle.
+# vLLM 0.28 API compatibility (shared version shim, not MetaX-specific):
+# 0.28 introduced `FusedMoEFactory` and kept `FusedMoE` as a legacy alias;
+# upstream's 0.4.0-dev branch calls the factory through `_OrigFusedMoEFactory`.
+# Resolve the new name first when present so both call sites work.
+# NOTE: `_fused_moe_pkg.FusedMoE` must NOT be dereferenced unconditionally —
+# vLLM 0.28 no longer exports that name (AttributeError at import time), so the
+# lookup goes through getattr and the legacy name only serves as a fallback for
+# vllm <= 0.24.  (Regression introduced by the 0.4.0-dev merge conflict
+# resolution, which restored the unconditional dereference.)
+_OrigFusedMoEFactory = (
+    getattr(_fused_moe_pkg, "FusedMoEFactory", None) or _fused_moe_pkg.FusedMoE
+)
+# Backwards-compatible alias for the pre-merge name.
+_OrigFusedMoE = _OrigFusedMoEFactory
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.config import FusedMoEConfig
 from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner

@@ -54,6 +54,15 @@ from vllm.distributed.weight_transfer import (
     WeightTransferEngineFactory,
 )
 from vllm.logger import init_logger
+
+# FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
+try:  # pragma: no cover - vLLM version compat
+    from vllm.distributed.parallel_state import (
+        prepare_communication_buffer_for_model as _prepare_comm_buffer,
+    )
+except ImportError:  # vLLM >= 0.28 dropped the symbol
+    def _prepare_comm_buffer(*args, **kwargs):
+        return None
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
