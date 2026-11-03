@@ -266,6 +266,7 @@ def device_utils(monkeypatch):
             "torch_txda",
             ModuleType("torch_txda") if txda_installed else None,
         )
+        monkeypatch.delenv("FL_TEST_PLATFORM", raising=False)
         monkeypatch.setenv("FL_BACKEND", explicit)
         monkeypatch.setenv("GEMS_VENDOR", vendor)
         path = Path(__file__).parents[1] / "utils" / "device_utils.py"
