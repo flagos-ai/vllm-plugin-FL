@@ -40,7 +40,9 @@ def _pinned(*args, **kwargs):
     try:
         return torch.empty(*args, **kwargs).pin_memory()
     except RuntimeError as exc:  # pragma: no cover - no pinned-memory support
-        pytest.skip(f"pinned host memory unavailable: {exc}")
+        # pytest.skip raises, but say so explicitly: a bare call here reads as
+        # a function that can also fall through and return None.
+        raise pytest.skip.Exception(f"pinned host memory unavailable: {exc}") from exc
 
 
 @pytest.mark.gpu
