@@ -1,75 +1,44 @@
-# One-time recovery of the manually-created sync draft; do not merge this branch.
-name: Recover forward-sync bot PR
-
+# One-time baseline initialization using the reviewed candidate; do not merge this recovery branch.
+name: Initialize native-sync comparison baseline
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-  pull-requests: write
-
 jobs:
-  recover:
+  baseline:
     if: github.repository == 'flagos-ai/vllm-plugin-FL' && github.ref == 'refs/heads/codex/recover-forward-sync-bot-pr'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
       group: forward-sync-0.4-to-0.5
       cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - name: Recreate the closed manual draft using the Action identity
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 2aa3a8069d8004bf7ad465fab5a208a485867983
+          persist-credentials: false
+      - name: Create the state-only baseline review PR
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const scope = {owner: 'flagos-ai', repo: 'vllm-plugin-FL'};
             const api = github.rest;
-            const expectedHead = '05e24cc0dcfcc3431fbd8aea46b4103ae8957200';
-            const branch = 'codex/sync-0.4-to-0.5-8edc3078545db2fd9ecb4bf9380ef48c35a01dd1';
-            const original = (await api.pulls.get({...scope, pull_number: 683})).data;
-            if (original.state !== 'closed' || original.merged_at || !original.draft ||
-                original.user.login !== 'physics31415926' || original.head.sha !== expectedHead ||
-                original.head.ref !== branch || original.head.repo?.full_name !== 'flagos-ai/vllm-plugin-FL' ||
-                original.base.ref !== '0.5.0-dev') {
-              throw new Error('The manual draft changed; refusing to replace unrelated or edited work.');
-            }
-            const open = (await github.paginate(api.pulls.list, {
-              ...scope, state: 'open', base: '0.5.0-dev', per_page: 100,
-            })).filter(pr => pr.head.repo?.full_name === 'flagos-ai/vllm-plugin-FL' &&
-              pr.head.ref.startsWith('codex/sync-0.4-to-0.5-'));
-            if (open.length) {
-              if (open.length !== 1 || open[0].user.type !== 'Bot') {
-                throw new Error('Another managed sync PR exists; no duplicate was created.');
-              }
-              core.setOutput('pull_request_url', open[0].html_url);
-              await core.summary.addLink('Existing Action-owned sync PR', open[0].html_url).write();
+            const target = (await api.git.getRef({...scope, ref: 'heads/0.5.0-dev'})).data.object.sha;
+            try {
+              await api.repos.getContent({...scope, path: '.github/forward-sync-baseline.json', ref: target});
+              core.info('The comparison baseline is already present; no runtime PR was created by this one-time action.');
               return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
             }
-            const tip = (await api.git.getRef({...scope, ref: 'heads/' + branch})).data.object.sha;
-            if (tip !== expectedHead) throw new Error('The pending branch moved; no manual work was overwritten.');
-            const comparison = (await api.repos.compareCommitsWithBasehead({
-              ...scope, basehead: expectedHead + '...f6c1f92e59679ccf027b5336d15a3914214cb714',
+            const excluded = (await api.repos.compareCommitsWithBasehead({
+              ...scope, basehead: target + '...f6c1f92e59679ccf027b5336d15a3914214cb714',
             })).data;
-            if (['behind', 'identical'].includes(comparison.status)) {
-              throw new Error('Excluded source ancestry is present; refusing to recreate the draft.');
-            }
-            const checkpoint = [...original.body.matchAll(/<!-- forward-sync-source: ([0-9a-f]{40}) -->/g)];
-            if (checkpoint.length !== 1 || !original.body.includes('<!-- vllm-fl-forward-sync: 0.4.0-dev -> 0.5.0-dev -->')) {
-              throw new Error('The draft has no unique processed source checkpoint.');
-            }
-            const content = (await api.repos.getContent({
-              ...scope, path: '.github/forward-sync-pending.json', ref: expectedHead,
-            })).data;
-            if (Array.isArray(content) || content.encoding !== 'base64') throw new Error('Missing pending conflict manifest.');
-            const pending = JSON.parse(Buffer.from(content.content, 'base64').toString('utf8'));
-            if (pending.version !== 1 || pending.status !== 'needs-resolution' ||
-                pending.checkpointSha !== checkpoint[0][1] || !pending.conflictFiles?.length) {
-              throw new Error('Pending conflict state does not match the reviewed draft.');
-            }
-            const pr = (await api.pulls.create({
-              ...scope, base: '0.5.0-dev', head: branch, draft: true,
-              title: 'chore: forward-sync 0.4.0-dev into 0.5.0-dev (conflicts awaiting resolution)',
-              body: original.body + '\n\nThis Action-created draft replaces the closed manual handoff #683. The pending branch and conflict snapshot are unchanged.',
-            })).data;
-            if (pr.user.type !== 'Bot') throw new Error('Unexpected PR creator identity.');
-            core.setOutput('pull_request_url', pr.html_url);
-            await core.summary.addHeading('Action-owned conflict handoff').addLink('Draft PR', pr.html_url).write();
+            if (['behind', 'identical'].includes(excluded.status)) throw new Error('Target already contains excluded source ancestry; reconcile manually.');
+            const sync = require('./.github/scripts/forward-sync.cjs');
+            const result = await sync({github, context, core});
+            if (result.status !== 'baseline-pr-required') throw new Error('Unexpected baseline initialization result.');
+            await core.summary.addHeading('Native sync comparison baseline').addCodeBlock(JSON.stringify(result, null, 2), 'json').write();
