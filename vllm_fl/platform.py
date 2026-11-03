@@ -10,10 +10,9 @@
 import importlib
 import os
 from contextlib import suppress
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 import torch
-from typing_extensions import ParamSpec
 
 for _extension in (
     "vllm._C",
@@ -44,9 +43,6 @@ from vllm_fl.utils import (
 )
 
 logger = init_logger(__name__)
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 
 dist_backend_dict = {
     "npu": "hccl",

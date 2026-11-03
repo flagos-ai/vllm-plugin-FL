@@ -165,7 +165,7 @@ def test_shared_attention_honors_explicit_selection_before_dispatch(
         return "dispatched.Attention"
 
     monkeypatch.setattr(dispatch, "call_op", select)
-    selected = AttentionBackendEnum.TORCH_SDPA if explicit else None
+    selected = AttentionBackendEnum.FLASH_ATTN if explicit else None
     result = PlatformFL.get_attn_backend_cls(
         selected, SimpleNamespace(use_mla=False, use_sparse=False), 32
     )
