@@ -474,8 +474,8 @@ selects the `zw810e` unit/functional scope and the TP4 Qwen3.6 PR cases; its
 benchmark entries are disabled.
 
 The functional job runs the platform `check.sh` and `setup.sh`, then executes
-`python tests/run.py --platform thead --scope unit` and
-`python tests/run.py --platform thead --scope functional`. Each E2E job runs
+`python tests/run.py --platform thead --scope unit,functional` in a single
+invocation so both scopes share one report. Each E2E job runs
 the same platform setup, validates the selected model paths, and executes
 `tests/run.py --scope e2e` for the generated matrix. No `_thead_test.yml`,
 `run_tests.py`, `run_gate.py`, or `test_ci.py` workflow is required for this
