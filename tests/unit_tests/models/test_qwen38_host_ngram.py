@@ -279,3 +279,65 @@ def test_empty_packed_hash_has_exact_shape(requests):
     assert actual.shape == (0, 2)
     assert actual.dtype == torch.int64
     assert actual.device.type == "cpu"
+
+
+def test_uva_weight_fragments_wait_for_outer_completion(monkeypatch):
+    model = make_model(monkeypatch, 0)
+    calls = []
+    model._uva_lookup = SimpleNamespace(finish_loading=lambda *args: calls.append(args))
+    model._ple_embedding_load_state = {"shards": set(), "full": False, "buffers": set()}
+    rows = model.ngram_embedding.org_vocab_size
+    shard_size = (rows + 3) // 4
+    full = torch.zeros((rows, 4), dtype=torch.bfloat16)
+    for i in range(4):
+        model.load_weights(
+            [
+                (
+                    f"ngram_embedding.shard_{i}.weight",
+                    full[i * shard_size : (i + 1) * shard_size],
+                )
+            ]
+        )
+        assert not calls
+    with pytest.raises(ValueError, match="hash buffer"):
+        model._finish_host_lookup_loading()
+    model.load_weights(
+        [
+            (name, getattr(model, name).clone())
+            for name in (
+                "layer_multipliers",
+                "ngram_heads_vocab_sizes",
+                "ngram_heads_offsets",
+            )
+        ]
+    )
+    assert not calls
+    model._finish_host_lookup_loading()
+    assert len(calls) == 1
+
+
+def test_uva_direct_weight_transaction_registers_once(monkeypatch):
+    model = make_model(monkeypatch, 0)
+    calls = []
+    model._uva_lookup = SimpleNamespace(finish_loading=lambda *args: calls.append(args))
+    rows = model.ngram_embedding.org_vocab_size
+    shard_size = (rows + 3) // 4
+    full = torch.zeros((rows, 4), dtype=torch.bfloat16)
+    weights = [
+        (name, getattr(model, name).clone())
+        for name in (
+            "layer_multipliers",
+            "ngram_heads_vocab_sizes",
+            "ngram_heads_offsets",
+        )
+    ]
+    weights += [
+        (
+            f"ngram_embedding.shard_{i}.weight",
+            full[i * shard_size : (i + 1) * shard_size],
+        )
+        for i in range(4)
+    ]
+    model.load_weights(weights)
+    assert len(calls) == 1
+    assert not hasattr(model, "_ple_embedding_load_state")

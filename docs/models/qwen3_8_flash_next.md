@@ -337,4 +337,6 @@ Full-model accuracy and multimodal acceptance are not claimed.
 
 HC small fusions are selected only for the reviewed MetaX BF16 shapes. Grouped normalization, gate/reduce, residual injection and divide/SiLU retain the original intermediate rounding. Other shapes keep their existing paths.
 
+Build the optional native mapping extension with `VLLM_VENDOR=metax python setup.py build_ext --inplace` in the matching MetaX Torch/MACA environment. With MTP off, `--ngram-mode uva_auto` selects broadcast or head-sharded mapped-host lookup; `shared_buffer` remains the default. Registration/table owners live for the service lifetime. GPU hashing preserves the model history semantics.
+
 These performance paths require the exact dependency composition in `metax_tuning/operator_dependencies.json`; not all numeric operator components are public revisions yet.

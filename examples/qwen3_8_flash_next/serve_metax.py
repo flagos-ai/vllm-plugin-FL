@@ -57,11 +57,16 @@ def build_config(
     *,
     record_flaggems_ops: bool = False,
     async_scheduling: bool = False,
+    ngram_mode: str = "shared_buffer",
 ) -> dict:
     """Build one complete native configuration; no prior variant is mutated."""
     if mtp not in MTP_COUNTS:
         raise ValueError("MTP must be off, k1, k2 or k3")
     k = MTP_COUNTS[mtp]
+    if ngram_mode not in {"shared_buffer", "uva_broadcast", "uva_sharded", "uva_auto"}:
+        raise ValueError("Invalid N-gram lookup mode")
+    if k and ngram_mode != "shared_buffer":
+        raise ValueError("UVA lookup is supported only with MTP off")
     if async_scheduling and k:
         raise ValueError("Async scheduling is supported only with MTP off")
     buckets = [(k + 1) * count for count in REQUEST_BUCKETS]
@@ -92,7 +97,7 @@ def build_config(
         "additional_config": {
             # Opt in for dispatch diagnosis; DEBUG records cost CPU even once.
             "flaggems_record_ops": record_flaggems_ops,
-            "qwen38_ngram_mode": "shared_buffer",
+            "qwen38_ngram_mode": ngram_mode,
             "qwen38_mtp_graph": bool(k),
             "qwen38_qsa_length_buckets": True,
             "qwen38_qsa_packing": not bool(k),
@@ -190,6 +195,12 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--mtp", choices=tuple(MTP_COUNTS), default="off")
     p.add_argument(
+        "--ngram-mode",
+        choices=("shared_buffer", "uva_broadcast", "uva_sharded", "uva_auto"),
+        default="shared_buffer",
+        help="PLE host-table lookup strategy (UVA requires MetaX extension)",
+    )
+    p.add_argument(
         "--async-scheduling",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -232,6 +243,7 @@ def main() -> None:
         args.mtp,
         record_flaggems_ops=args.record_flaggems_ops,
         async_scheduling=args.async_scheduling,
+        ngram_mode=args.ngram_mode,
     )
     command = native_command(
         config,

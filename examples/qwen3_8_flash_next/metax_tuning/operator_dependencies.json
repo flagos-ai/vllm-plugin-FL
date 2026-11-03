@@ -101,6 +101,14 @@
       "purpose": "Grouped norm, gate reduction and residual injection preserving eager BF16 intermediate rounding",
       "introduced": "hc-prefill-longctx-20261101",
       "status": "Source-locked model integration validated; standalone operator publication pending review"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/host_embedding.py",
+      "sha256": "f8356d0788a11b9d398edf0385befaed7450ab6b7f986d89ae7597f60d89fd05",
+      "purpose": "Generic BF16/int32/FP32 mapped-host row gather with optional head-column selection and int64 large-table addressing",
+      "introduced": "UVA lookup integration",
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     }
   ],
   "active_launch_source_guards": {

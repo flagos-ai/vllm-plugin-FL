@@ -366,3 +366,19 @@ def test_async_scheduling_is_explicit_and_mtp_stays_synchronous(launcher):
     for mode in ("k1", "k2", "k3"):
         with pytest.raises(ValueError, match="MTP off"):
             launcher.build_config("/checkpoint", mode, async_scheduling=True)
+
+
+@pytest.mark.parametrize("mode", ("uva_broadcast", "uva_sharded", "uva_auto"))
+def test_uva_explicit_option_and_mtp_guard(launcher, mode):
+    config = launcher.build_config(
+        "/checkpoint", "off", async_scheduling=True, ngram_mode=mode
+    )
+    assert config["additional_config"]["qwen38_ngram_mode"] == mode
+    assert config["generation_config"] == "auto"
+    with pytest.raises(ValueError, match="MTP off"):
+        launcher.build_config("/checkpoint", "k1", ngram_mode=mode)
+
+
+def test_unvalidated_full_replication_not_exposed(launcher):
+    with pytest.raises(ValueError, match="Invalid N-gram"):
+        launcher.build_config("/checkpoint", ngram_mode="uva_direct")

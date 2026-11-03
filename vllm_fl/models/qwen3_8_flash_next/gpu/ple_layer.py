@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Cross-vendor Qwen3.8-Flash-Next position-learning enhancement layers."""
 
+import math
 from collections.abc import Iterable, Sequence
 from functools import wraps
 
@@ -26,7 +27,13 @@ from vllm.v1.attention.backends.registry import MambaAttentionBackendEnum
 from vllm.v1.attention.backends.utils import NULL_BLOCK_ID
 
 from ..common.hyperconnection import GroupedGemmaRMSNorm
-from ..common.ple import copy_ple_embedding_shard_
+from ..common.ple import (
+    _PLE_LAYER_PRIME,
+    _SPLITMIX_GAMMA,
+    _nth_prime_after,
+    _splitmix64,
+    copy_ple_embedding_shard_,
+)
 from ..common.short_conv_attn import (
     PleShortConvAttentionBackend,
     PleShortConvAttentionMetadata,
@@ -37,14 +44,8 @@ from .ops.ple_fusion import (
     ple_gate_norm,
     ple_prefill_short_conv_,
 )
-
-from ..common.ple import (
-    _MASK64, _SPLITMIX_GAMMA, _PLE_LAYER_PRIME, _splitmix64, _nth_prime_after,
-)
 from .runtime import is_metax
 from vllm_fl.dispatch import resolve_op
-import math
-
 
 
 class Qwen3_8FlashNextPLEGroupedNorm(GroupedGemmaRMSNorm):
@@ -67,14 +68,24 @@ def validate_ple_embedding_weights(load_weights):
         owners = [
             module
             for module in model.modules()
-            if isinstance(module, Qwen3_8FlashNextNGramEmbedding)
+            if (
+                isinstance(module, Qwen3_8FlashNextNGramEmbedding)
+                or getattr(module, "_uva_lookup", None) is not None
+            )
             and getattr(module, "_ple_embedding_load_state", None) is None
         ]
         for module in owners:
-            module._ple_embedding_load_state = {"shards": set(), "full": False}
+            module._ple_embedding_load_state = {
+                "shards": set(),
+                "full": False,
+                "buffers": set(),
+            }
         try:
             loaded = load_weights(model, weights, *args, **kwargs)
             for module in owners:
+                if getattr(module, "_uva_lookup", None) is not None:
+                    module._finish_host_lookup_loading()
+                    continue
                 seen = module._ple_embedding_load_state["shards"]
                 missing = sorted(module._required_embedding_shards() - seen)
                 if seen and missing:
@@ -391,8 +402,15 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             ngram_cls = HostNGramEmbedding
             ngram_kwargs = dict(
                 params_dtype=model_config.dtype,
-                host_lookup_mode=vllm_config.additional_config.get("qwen38_ngram_mode", "sharded"),
+                host_lookup_mode=vllm_config.additional_config.get(
+                    "qwen38_ngram_mode", "sharded"
+                ),
             )
+        lookup_mode = ngram_kwargs.get("host_lookup_mode", "sharded")
+        if lookup_mode in {"uva_broadcast", "uva_sharded", "uva_auto"} and (
+            not self._metax or vllm_config.speculative_config is not None
+        ):
+            raise NotImplementedError("PLE UVA currently requires MetaX with MTP off")
         self.ple_embedding: nn.Module = ngram_cls(
             config,
             int(config.ple_embed_dim),
@@ -422,9 +440,15 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             self.hidden_size,
             model_config.dtype,
         )
-        self.norm_key = Qwen3_8FlashNextPLEGroupedNorm(*norm_args, use_fused_ops=not self._metax)
-        self.norm_query = Qwen3_8FlashNextPLEGroupedNorm(*norm_args, use_fused_ops=not self._metax)
-        self.norm_conv = Qwen3_8FlashNextPLEGroupedNorm(*norm_args, use_fused_ops=not self._metax)
+        self.norm_key = Qwen3_8FlashNextPLEGroupedNorm(
+            *norm_args, use_fused_ops=not self._metax
+        )
+        self.norm_query = Qwen3_8FlashNextPLEGroupedNorm(
+            *norm_args, use_fused_ops=not self._metax
+        )
+        self.norm_conv = Qwen3_8FlashNextPLEGroupedNorm(
+            *norm_args, use_fused_ops=not self._metax
+        )
         self.conv1d = nn.Conv1d(
             self.hc_hidden_size,
             self.hc_hidden_size,
@@ -766,7 +790,10 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             conv_state = conv_state[..., -state_capacity:]
         if self._metax:
             return self._short_conv_dispatch_metax(
-                inputs, layer_attn_metadata, conv_state, conv_weights.to(dtype=inputs.dtype),
+                inputs,
+                layer_attn_metadata,
+                conv_state,
+                conv_weights.to(dtype=inputs.dtype),
             )
         return self._short_conv_dilated_dispatch(
             inputs,
@@ -836,16 +863,24 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         return norm(flat).reshape(shape)
 
     def prepare_host_lookup(
-        self, input_ids, query_start_loc, ngram_context, *, dummy: bool = False
+        self,
+        input_ids,
+        query_start_loc,
+        ngram_context,
+        *,
+        dummy: bool = False,
+        num_reqs: int | None = None,
+        num_tokens: int | None = None,
     ) -> None:
         """Graph-external producer called by the Qwen worker hook."""
         self.ple_embedding.prepare_host_lookup(
-            input_ids, query_start_loc, ngram_context, dummy=dummy
+            input_ids,
+            query_start_loc,
+            ngram_context,
+            dummy=dummy,
+            num_reqs=num_reqs,
+            num_tokens=num_tokens,
         )
-
-
-
-
 
     def _short_conv_dispatch_metax(
         self,
@@ -943,6 +978,7 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
             if has_spec:
                 output.index_copy_(0, metadata.non_spec_token_indx.long(), non_out)
         return output
+
 
 def qwen3_8_flash_next_ple_short_conv(
     inputs: torch.Tensor,

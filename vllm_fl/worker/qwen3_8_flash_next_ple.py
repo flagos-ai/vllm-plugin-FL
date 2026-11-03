@@ -165,23 +165,45 @@ class _HostInputBuffers:
             raise RuntimeError("configured PLE layer not found in the loaded target")
 
     def prepare(
-        self, input_ids, query_start_loc, context, dummy=False, use_cpu_metadata=False
+        self,
+        input_ids,
+        query_start_loc,
+        context,
+        dummy=False,
+        use_cpu_metadata=False,
+        gpu_query_start_loc=None,
     ):
         nreq = query_start_loc.numel() - 1
         if nreq > self.context.shape[0]:
             raise ValueError("PLE requests exceed fixed buffers")
-        self.query_start_loc[: nreq + 1].copy_(query_start_loc)
+        source = (
+            query_start_loc
+            if gpu_query_start_loc is None
+            else gpu_query_start_loc[: nreq + 1]
+        )
+        self.query_start_loc[: nreq + 1].copy_(source)
         self.query_start_loc[nreq + 1 :].fill_(query_start_loc[-1])
         if context is not self.context:
             self.context.fill_(int(self.config.eos_token_id))
             self.context[:nreq].copy_(context)
         for layer in self.layers:
-            layer.prepare_host_lookup(
-                input_ids,
-                query_start_loc if use_cpu_metadata else self.query_start_loc,
-                context if use_cpu_metadata else self.context,
-                dummy=dummy,
-            )
+            uva = getattr(getattr(layer, "ple_embedding", None), "_uva_lookup", None)
+            if uva is not None:
+                layer.prepare_host_lookup(
+                    input_ids,
+                    self.query_start_loc,
+                    self.context,
+                    dummy=dummy,
+                    num_reqs=nreq,
+                    num_tokens=int(query_start_loc[-1]),
+                )
+            else:
+                layer.prepare_host_lookup(
+                    input_ids,
+                    query_start_loc if use_cpu_metadata else self.query_start_loc,
+                    context if use_cpu_metadata else self.context,
+                    dummy=dummy,
+                )
         return dict(query_start_loc=self.query_start_loc, ngram_context=self.context)
 
 
@@ -240,6 +262,8 @@ def _mrv1_prepare(runner):
     lookup_ids = runner.input_ids.gpu
     if (
         use_cpu_metadata
+        and runner.vllm_config.additional_config.get("qwen38_ngram_mode", "sharded")
+        not in {"uva_broadcast", "uva_sharded", "uva_auto"}
         and runner.speculative_config is None
         and nreq > 0
         and not getattr(runner, "enable_prompt_embeds", False)
@@ -250,9 +274,18 @@ def _mrv1_prepare(runner):
         # Pure prefill IDs are gathered into this pinned CPU mirror by MRV1.
         # Decode/draft IDs can be updated only on GPU, so retain that source.
         lookup_ids = runner.input_ids.cpu
+    prepare_options = {"use_cpu_metadata": use_cpu_metadata}
+    if runner.vllm_config.additional_config.get("qwen38_ngram_mode", "sharded") in {
+        "uva_broadcast",
+        "uva_sharded",
+        "uva_auto",
+    }:
+        # MRV1 already queued this GPU mirror before updating the GPU history.
+        # A D2D copy preserves our fixed forward buffer without a blocking H2D.
+        prepare_options["gpu_query_start_loc"] = runner.query_start_loc.gpu
     return buffers.prepare(
         lookup_ids,
         runner.query_start_loc.cpu[: nreq + 1],
         context,
-        use_cpu_metadata=use_cpu_metadata,
+        **prepare_options,
     )

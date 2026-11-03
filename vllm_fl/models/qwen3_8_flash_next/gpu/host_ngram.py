@@ -42,6 +42,7 @@ class HostVocabEmbedding(nn.Module):
         tp_size: int,
         dtype: torch.dtype,
         allocate: bool = True,
+        shared_weight: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         if not 0 <= tp_rank < tp_size or vocab_size % tp_size:
@@ -53,12 +54,13 @@ class HostVocabEmbedding(nn.Module):
             org_vocab_start_index=tp_rank * rows,
             org_vocab_end_index=(tp_rank + 1) * rows,
         )
-        self.weight = nn.Parameter(
-            torch.empty(
+        if shared_weight is None:
+            shared_weight = torch.empty(
                 rows if allocate else 0, embedding_dim, dtype=dtype, device="cpu"
-            ),
-            requires_grad=False,
-        )
+            )
+        elif tuple(shared_weight.shape) != (rows, embedding_dim):
+            raise ValueError("Shared host table shape mismatch")
+        self.weight = nn.Parameter(shared_weight, requires_grad=False)
 
     def _apply(self, fn, recurse=True):
         # A later model.to(device) must never turn host offload into full GPU
@@ -179,12 +181,21 @@ class HostNGramEmbedding(nn.Module):
         self.max_num_reqs = max_num_reqs
         self.tp_size = get_tensor_model_parallel_world_size()
         tp_rank = get_tensor_model_parallel_rank()
-        if host_lookup_mode not in {"sharded", "shared_buffer"}:
-            raise ValueError("N-gram lookup mode must be sharded or shared_buffer")
+        if host_lookup_mode not in {
+            "sharded",
+            "shared_buffer",
+            "uva_broadcast",
+            "uva_sharded",
+            "uva_auto",
+        }:
+            raise ValueError("Invalid N-gram host lookup mode")
         self.host_lookup_mode = host_lookup_mode
         self.tp_rank = tp_rank
         self._shared_lookup = None
-        if host_lookup_mode == "shared_buffer":
+        self._uva_lookup = None
+        uva_mode = host_lookup_mode in {"uva_broadcast", "uva_sharded", "uva_auto"}
+        group = None
+        if host_lookup_mode == "shared_buffer" or uva_mode:
             from vllm.distributed import get_tp_group
             from vllm.distributed.parallel_state import in_the_same_node_as
 
@@ -195,12 +206,10 @@ class HostNGramEmbedding(nn.Module):
                 raise NotImplementedError(
                     "Shared N-gram results require one TP host/IPC namespace"
                 )
-            self._shared_lookup = SharedNgramBuffer(
-                group,
-                max_total_tokens,
-                embedding_dim,
-                params_dtype,
-            )
+            if not uva_mode:
+                self._shared_lookup = SharedNgramBuffer(
+                    group, max_total_tokens, embedding_dim, params_dtype
+                )
         bound = max(1, (((1 << 63) - 1) // self.unigram_vocab_size) // 2)
         seed = (
             int(getattr(config, "seed", 1234)) + _PLE_LAYER_PRIME * ple_dense_layer_id
@@ -229,16 +238,34 @@ class HostNGramEmbedding(nn.Module):
             )
         divisor = int(config.make_ngram_vocab_size_divisible_by)
         padded_vocab_size = ((total + divisor - 1) // divisor) * divisor
+        device = torch.empty(0).device
+        if uva_mode:
+            from .uva_ngram import UvaNgramLookup
+
+            self._uva_lookup = UvaNgramLookup(
+                group,
+                padded_vocab_size,
+                self.head_dim,
+                params_dtype,
+                device,
+                max_total_tokens,
+                self.heads_per_ngram,
+                self.ngram_heads,
+                self.eos_token_id,
+                host_lookup_mode,
+            )
+        full_table = self._shared_lookup is not None or uva_mode
         self.ngram_embedding = HostVocabEmbedding(
             padded_vocab_size,
             self.head_dim,
-            tp_rank=0 if self._shared_lookup is not None else tp_rank,
-            tp_size=1 if self._shared_lookup is not None else self.tp_size,
+            tp_rank=0 if full_table else tp_rank,
+            tp_size=1 if full_table else self.tp_size,
             dtype=params_dtype,
             allocate=self._shared_lookup is None or tp_rank == 0,
+            shared_weight=self._uva_lookup.weight if uva_mode else None,
         )
-        # Follow the model construction device, but never pin the huge table.
-        device = torch.empty(0).device
+        # The CPU fallback pins only its gathered staging buffer. UVA explicitly
+        # registers the shared full table after checkpoint loading.
         self.register_buffer(
             "prepared_embeddings",
             torch.empty(
@@ -246,13 +273,17 @@ class HostNGramEmbedding(nn.Module):
             ),
             persistent=False,
         )
-        self._host_stage = torch.empty(
-            max_total_tokens,
-            self.ngram_heads,
-            self.head_dim,
-            dtype=params_dtype,
-            device="cpu",
-            pin_memory=device.type != "cpu",
+        self._host_stage = (
+            None
+            if uva_mode
+            else torch.empty(
+                max_total_tokens,
+                self.ngram_heads,
+                self.head_dim,
+                dtype=params_dtype,
+                device="cpu",
+                pin_memory=device.type != "cpu",
+            )
         )
         self._copy_event = None
         self._prepared = False
@@ -273,6 +304,8 @@ class HostNGramEmbedding(nn.Module):
         ngram_context: torch.Tensor,
         *,
         dummy: bool = False,
+        num_reqs: int | None = None,
+        num_tokens: int | None = None,
     ) -> None:
         if input_ids is None or query_start_loc is None or ngram_context is None:
             raise ValueError(
@@ -281,6 +314,22 @@ class HostNGramEmbedding(nn.Module):
         capacity = input_ids.numel()
         if capacity > self.max_total_tokens:
             raise ValueError("PLE token capacity exceeds its fixed buffer")
+        uva = getattr(self, "_uva_lookup", None)
+        if uva is not None:
+            if num_reqs is None or num_tokens is None:
+                raise ValueError("UVA lookup requires CPU-known request/token counts")
+            uva.prepare(
+                input_ids,
+                query_start_loc,
+                ngram_context,
+                self.prepared_embeddings,
+                num_reqs=num_reqs,
+                num_tokens=num_tokens,
+                dummy=dummy,
+            )
+            self._prepared = True
+            self._prepared_capacity = capacity
+            return
         if self._copy_event is not None:
             # The CPU staging allocation cannot be overwritten while its
             # previous asynchronous H2D copy is still reading it.
@@ -395,7 +444,53 @@ class HostNGramEmbedding(nn.Module):
         return self.prepared_embeddings[:count]
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        """Load hash buffers and checkpoint-split embedding rows."""
+        """Participate in the outer checkpoint-loading transaction.
+
+        Native loaders may revisit this embedding for separate file groups.
+        Direct calls own a complete transaction; model calls retain coverage
+        until the existing outermost PLE validation boundary.
+        """
+        uva = getattr(self, "_uva_lookup", None)
+        own = (
+            uva is not None and getattr(self, "_ple_embedding_load_state", None) is None
+        )
+        if own:
+            self._ple_embedding_load_state = {
+                "shards": set(),
+                "full": False,
+                "buffers": set(),
+            }
+        try:
+            loaded = self._load_weight_fragments(weights)
+            if own:
+                self._finish_host_lookup_loading()
+            return loaded
+        finally:
+            if own:
+                del self._ple_embedding_load_state
+
+    def _finish_host_lookup_loading(self):
+        state = self._ple_embedding_load_state
+        expected = {
+            "layer_multipliers",
+            "ngram_heads_vocab_sizes",
+            "ngram_heads_offsets",
+        }
+        if (
+            state["shards"] != set(range(self.split_ngram_parts))
+            or not expected <= state["buffers"]
+        ):
+            raise ValueError("UVA requires every PLE checkpoint shard and hash buffer")
+        self._uva_lookup.finish_loading(
+            self.layer_multipliers,
+            self.ngram_heads_vocab_sizes,
+            self.ngram_heads_offsets,
+        )
+
+    def _load_weight_fragments(
+        self, weights: Iterable[tuple[str, torch.Tensor]]
+    ) -> set[str]:
+        """Load one streamed group, retaining only coverage metadata."""
 
         persistent_buffers = {
             "layer_multipliers": self.layer_multipliers,
@@ -403,6 +498,8 @@ class HostNGramEmbedding(nn.Module):
             "ngram_heads_vocab_sizes": self.ngram_heads_vocab_sizes,
         }
         loaded: set[str] = set()
+        state = getattr(self, "_ple_embedding_load_state", None)
+        seen_shards = state["shards"] if state is not None else set()
         regular_weights: list[tuple[str, torch.Tensor]] = []
         shard_prefix = "ngram_embedding.shard_"
 
@@ -419,6 +516,8 @@ class HostNGramEmbedding(nn.Module):
                     )
                 buffer.copy_(loaded_weight.to(device=buffer.device, dtype=buffer.dtype))
                 loaded.add(name)
+                if state is not None:
+                    state["buffers"].add(name)
                 continue
             if name.startswith(shard_prefix) and name.endswith(".weight"):
                 shard_text = name[len(shard_prefix) : -len(".weight")]
@@ -431,6 +530,9 @@ class HostNGramEmbedding(nn.Module):
                         f"PLE embedding shard index {shard_index} exceeds "
                         f"split_ngram_parts={self.split_ngram_parts}"
                     )
+                if shard_index in seen_shards:
+                    raise ValueError(f"Duplicate PLE checkpoint shard {shard_index}")
+                seen_shards.add(shard_index)
                 embedding = self.ngram_embedding
                 shard_size = (
                     embedding.org_vocab_size + self.split_ngram_parts - 1
@@ -447,7 +549,10 @@ class HostNGramEmbedding(nn.Module):
                         f"expected {expected_shape}, got "
                         f"{tuple(loaded_weight.shape)}"
                     )
-                if self._shared_lookup is not None and self.tp_rank != 0:
+                if (
+                    self._shared_lookup is not None
+                    or getattr(self, "_uva_lookup", None) is not None
+                ) and self.tp_rank != 0:
                     # Consumers validate checkpoint shape/name completeness but
                     # keep no duplicate full table and touch no table payload.
                     loaded.add("ngram_embedding.weight")

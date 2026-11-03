@@ -3039,5 +3039,11 @@
       "block": 256,
       "num_warps": 4
     }
+  },
+  "ngram_uva": {
+    "broadcast_max_tokens": 512,
+    "broadcast_block_rows": 16,
+    "sharded_block_rows": 8,
+    "num_warps": 4
   }
 }
