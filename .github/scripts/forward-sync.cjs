@@ -22,6 +22,7 @@ const SYNC_PREFIX = "codex/sync-0.4-to-0.5-";
 const MARKER = "<!-- vllm-fl-forward-sync: 0.4.0-dev -> 0.5.0-dev -->";
 const SOURCE_MARKER = /<!-- forward-sync-source: ([0-9a-f]{40}) -->/g;
 const PENDING_MARKER = /\n?<!-- forward-sync-pending: [0-9a-f]{40} -->/g;
+const CONFLICT_BLOCK = /\n?<!-- forward-sync-conflicts:start -->[\s\S]*?<!-- forward-sync-conflicts:end -->/g;
 
 module.exports = async function forwardSync({ github, context, core, replay }) {
   const payload = context.payload || {};
@@ -70,9 +71,8 @@ module.exports = async function forwardSync({ github, context, core, replay }) {
     core.setOutput("status", status);
     if (syncBranch) core.setOutput("sync_branch", syncBranch);
     if (status === "conflict-needs-resolution") {
-      core.setFailed("Source commits conflict with the target. Replay the pending commits onto " +
-        syncBranch + " and resolve them before retrying; do not merge the source branch." +
-        (pr ? " PR: " + pr.html_url : " No PR was created before resolution."));
+      core.warning("Source conflicts were published for maintainer resolution on " +
+        syncBranch + (pr ? ". Draft PR: " + pr.html_url : "."));
     }
     if (pr) {
       core.setOutput("pull_request_number", pr.number);
@@ -147,23 +147,51 @@ module.exports = async function forwardSync({ github, context, core, replay }) {
     throw new Error("The sync branch contains excluded source ancestry from the old ACK mechanism. " +
       "Rebuild it using replay before retrying; no commits were overwritten.");
   }
+  let pr = open[0];
+  async function ensureDraft() {
+    if (!pr || pr.draft) return;
+    if (!pr.node_id) throw new Error("The open PR has no node ID for safe draft conversion.");
+    await github.graphql(`mutation($pullRequestId: ID!) {
+      convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) {
+        pullRequest { id isDraft }
+      }
+    }`, { pullRequestId: pr.node_id });
+    pr = { ...pr, draft: true };
+  }
   const replaySource = replay || require("./forward-sync-git.cjs");
   const outcome = await replaySource({
     sourceSha, baseSha: syncSha || targetSha, checkpointSha: processedSha,
     syncBranch, repository: owner + "/" + repo,
     token: process.env.FORWARD_SYNC_TOKEN, core, existingBranch: Boolean(syncSha),
+    onConflict: ensureDraft,
   });
-  if (outcome.conflicted && !open.length) return result("conflict-needs-resolution");
-  if (!open.length && !outcome.changed && (!syncSha || syncSha === targetSha)) {
+  if (outcome.conflicted) await ensureDraft();
+  if (!outcome.conflicted && !open.length && !outcome.changed && (!syncSha || syncSha === targetSha)) {
     return result("already-applied");
   }
 
-  let pr = open[0];
-  const sourceMarker = "<!-- forward-sync-source: " +
-    (outcome.conflicted ? processedSha : sourceSha) + " -->";
+  const processedCheckpoint = outcome.conflicted ? outcome.checkpointSha : sourceSha;
+  if (!/^[0-9a-f]{40}$/.test(processedCheckpoint || "")) {
+    throw new Error("Replay did not retain a valid processed source checkpoint.");
+  }
+  const sourceMarker = "<!-- forward-sync-source: " + processedCheckpoint + " -->";
+  const pendingSha = outcome.pendingSha || sourceSha;
+  const conflictDetails = outcome.conflicted ? [
+    "<!-- forward-sync-conflicts:start -->",
+    "### Conflicts awaiting maintainer resolution",
+    "Pending source: [`" + pendingSha + "`](https://github.com/" + owner + "/" + repo + "/commit/" + pendingSha + ").",
+    "",
+    ...(outcome.conflictFiles || []).map((file) => "- `" + file.replace(/`/g, "\\`") + "`"),
+    "",
+    "1. Resolve the committed conflict markers and keep the target's 0.32 behavior and backend CI switches.",
+    "2. Set `status` to `resolved` in `.github/forward-sync-pending.json`, commit, and push your resolution.",
+    "3. Start a new manual run on `0.4.0-dev` (`gh workflow run forward-sync.yml --ref 0.4.0-dev`) to validate the resolution and resume pending increments.",
+    "4. Mark this PR ready for review after resolution and CI validation. Do not merge source ancestry.",
+    "<!-- forward-sync-conflicts:end -->",
+  ].join("\n") : "";
   if (pr) {
-    let body = pr.body.replace(PENDING_MARKER, "").replace(SOURCE_MARKER, sourceMarker);
-    if (outcome.conflicted) body += "\n<!-- forward-sync-pending: " + sourceSha + " -->";
+    let body = pr.body.replace(PENDING_MARKER, "").replace(CONFLICT_BLOCK, "").replace(SOURCE_MARKER, sourceMarker);
+    if (outcome.conflicted) body += "\n<!-- forward-sync-pending: " + pendingSha + " -->\n" + conflictDetails;
     if (body !== pr.body) {
       pr = (await api.pulls.update({ ...scope, pull_number: pr.number, body })).data;
     }
@@ -187,19 +215,20 @@ module.exports = async function forwardSync({ github, context, core, replay }) {
     "Automatic merging is disabled.",
     "",
     "### Review and conflict resolution",
-    "- Replay pending commits on " + syncBranch + ", resolve conflicts, and push the result.",
+    "- Resolve pending conflicts on " + syncBranch + ", commit the resolution, and rerun this workflow.",
     "- Keep the 0.32 adaptation and backend CI enablement on " + TARGET + ".",
     "- Do not merge the source branch or record source checkpoints as merge parents.",
     "- Use a merge commit when merging this PR into the target to retain its reviewed head.",
     "- Verify NVIDIA CI before manually merging.",
     "",
     "GitHub may require a maintainer to approve PR workflow runs created by GITHUB_TOKEN.",
+    ...(outcome.conflicted ? ["", "<!-- forward-sync-pending: " + pendingSha + " -->", conflictDetails] : []),
   ].join("\n");
   pr = (await api.pulls.create({
     ...scope, title: "chore: forward-sync " + SOURCE + " into " + TARGET,
-    head: syncBranch, base: TARGET, body,
+    head: syncBranch, base: TARGET, body, draft: Boolean(outcome.conflicted),
   })).data;
-  return result("pr-created", pr);
+  return result(outcome.conflicted ? "conflict-needs-resolution" : "pr-created", pr);
 };
 
 module.exports.constants = { SOURCE, TARGET, SYNC_PREFIX, MARKER };
