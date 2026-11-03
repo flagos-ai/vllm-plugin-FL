@@ -18,9 +18,8 @@ export MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
 export GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.70}
 # Keep FULL graph replay; Inductor lowering currently fails generation gates.
 if [[ -z ${GRAPH_COMPILATION_CONFIG:-} ]]; then
-    GRAPH_COMPILATION_CONFIG='{"mode":0,"cudagraph_mode":"FULL","custom_ops":["all"],"ir_enable_torch_wrap":false}'
+    export GRAPH_COMPILATION_CONFIG='{"mode":0,"cudagraph_mode":"FULL","custom_ops":["all"],"ir_enable_torch_wrap":false}'
 fi
-export GRAPH_COMPILATION_CONFIG
 export PORT=${PORT:-8132}
 out=${ILUVATAR_GATE_RESULTS:-ci-results/iluvatar-gates}
 mkdir -p "$out"
