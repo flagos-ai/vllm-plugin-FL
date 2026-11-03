@@ -13,41 +13,40 @@ from typing import ClassVar
 import numpy as np
 import torch
 
-from vllm.v1.attention.backend import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionType,
-    MultipleOf,
+# GCU: use Enflame-native flash_attn_varlen_func for best performance,
+# plus PyTorch native reshape_and_cache_flash (upstream triton kernel has
+# GCU compatibility issues — see reshape_and_cache.py for details).
+from flash_attn.vllm_flash_attn import (  # type: ignore[import]
+    flash_attn_varlen_func,  # Enflame native kernel
 )
-from vllm.utils.torch_utils import is_quantized_kv_cache
-from vllm.model_executor.layers.attention.attention import Attention
-from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
-from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 
-
-from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
+from vllm.config import VllmConfig, get_layers_from_vllm_config
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
-from vllm.model_executor.determinism.batch_invariant import _batch_invariant_MODE as _bi_mode
+from vllm.model_executor.determinism.batch_invariant import (
+    _batch_invariant_MODE as _bi_mode,
+)
+from vllm.model_executor.layers.attention.attention import Attention
+from vllm.platforms.interface import DeviceCapability
 from vllm.utils.math_utils import cdiv
+from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.v1.attention.backend import (
+    AttentionBackend,
     AttentionCGSupport,
+    AttentionImpl,
     AttentionMetadataBuilder,
+    AttentionType,
+    MultipleOf,
 )
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata,
     get_dcp_local_seq_lens,
 )
+from vllm.v1.attention.ops.dcp import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.kv_cache_interface import AttentionSpec
-from vllm.platforms.interface import DeviceCapability
 
-# GCU: use Enflame-native flash_attn_varlen_func for best performance,
-# plus PyTorch native reshape_and_cache_flash (upstream triton kernel has
-# GCU compatibility issues — see reshape_and_cache.py for details).
-from flash_attn.vllm_flash_attn import (  # type: ignore[import]
-    flash_attn_varlen_func,            # Enflame native kernel
-)
 # AOT scheduler metadata generation (FA3 feature).
 # Enflame .so exposes scheduler_metadata parameter; upstream fa_utils
 # provides the Python helper to pre-compute it.
@@ -101,6 +100,7 @@ class AttentionGCUBackend(AttentionBackend):
             AttentionType.ENCODER_ONLY,
             AttentionType.ENCODER_DECODER,
         )
+
     @staticmethod
     def get_impl_cls() -> type["AttentionGCUImpl"]:
         return AttentionGCUImpl
@@ -121,6 +121,7 @@ class AttentionGCUBackend(AttentionBackend):
         if kv_cache_dtype.startswith("fp8"):
             return True
         return kv_cache_dtype in ["auto"]
+
     @classmethod
     def supports_head_size(cls, head_size: int) -> bool:
         return head_size % 8 == 0 and head_size <= 256
@@ -139,6 +140,7 @@ class AttentionGCUBackend(AttentionBackend):
     ) -> str | None:
         # Enflame FA kernel supports sinks via s_aux parameter.
         return None
+
 
 @dataclass
 class AttentionGCUMetadata:
@@ -228,7 +230,7 @@ class AttentionGCUMetadataBuilder(AttentionMetadataBuilder[AttentionGCUMetadata]
                 vllm_config.scheduler_config.max_num_seqs,
                 self.max_cudagraph_size or 0,
             )
-            sched_meta_size = (1024 + (max_batch_size + 1) * 16)
+            sched_meta_size = 1024 + (max_batch_size + 1) * 16
             self.scheduler_metadata = torch.zeros(
                 sched_meta_size,
                 dtype=torch.int32,

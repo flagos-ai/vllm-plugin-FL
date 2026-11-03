@@ -43,7 +43,8 @@ expected = {
 }
 for package, wanted in expected.items():
     actual = version(package)
-    if actual != wanted:
+    matches = Version(actual).public == wanted if package == "flag-gems" else actual == wanted
+    if not matches:
         raise RuntimeError(f"Expected {package} {wanted}, found {actual}")
 print("Enflame CI package versions match the vLLM 0.32 recipe")
 PY

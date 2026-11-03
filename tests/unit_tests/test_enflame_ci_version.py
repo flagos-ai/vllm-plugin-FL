@@ -31,6 +31,16 @@ def test_current_empty_release_passes():
     run_gate("0.32.0+empty")
 
 
+def test_flaggems_local_build_passes():
+    run_gate("0.32.0+empty", **{"flag-gems": "5.4.0+g6fe7709e7717"})
+
+
+@pytest.mark.parametrize("version", ["5.5.0", "5.4.0rc1", "5.4.0.dev1", "5.4.0.post1"])
+def test_flaggems_public_version_drift_rejected(version):
+    with pytest.raises(RuntimeError, match="Expected flag-gems "):
+        run_gate("0.32.0+empty", **{"flag-gems": version})
+
+
 @pytest.mark.parametrize("version", ["0.28.0+empty", "0.32.0", "0.32.1+empty"])
 def test_incompatible_release_rejected(version):
     with pytest.raises(RuntimeError, match="Expected vLLM 0.32.0 empty build"):

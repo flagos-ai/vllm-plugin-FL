@@ -243,12 +243,11 @@ def apply_inductor_gcu_patch() -> None:
 
     if getattr(current_platform, "vendor_name", None) != "enflame":
         return
-    from torch._inductor.runtime import triton_heuristics
-    from torch_gcu.gcu.inductor import backend_register
-
     # A changed code generator must not reuse artifacts with corrupted ABIs.
     # Preserve a caller's cache tag while adding a versioned backend salt.
     import torch.compiler.config as compiler_config
+    from torch._inductor.runtime import triton_heuristics
+    from torch_gcu.gcu.inductor import backend_register
 
     salt = "fl_gcu_preserve_dtype_v1"
     tag = compiler_config.cache_key_tag

@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 
 def rms_norm_gcu(
     obj,
     x: torch.Tensor,
-    residual: Optional[torch.Tensor] = None,
-) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+    residual: torch.Tensor | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Match CUDA RMSNorm's accumulation and low-precision rounding points."""
     dtype = x.dtype
     value = x.float()

@@ -13,10 +13,22 @@ from vllm.triton_utils import tl, triton
 
 
 @triton.jit
-def _strided_cache_kernel(K, V, KC, VC, S, KS: tl.constexpr, VS: tl.constexpr,
-                          BS: tl.constexpr, TS: tl.constexpr, HS: tl.constexpr,
-                          N: tl.constexpr, H: tl.constexpr, D: tl.constexpr,
-                          WIDTH: tl.constexpr):
+def _strided_cache_kernel(
+    K,
+    V,
+    KC,
+    VC,
+    S,
+    KS: tl.constexpr,
+    VS: tl.constexpr,
+    BS: tl.constexpr,
+    TS: tl.constexpr,
+    HS: tl.constexpr,
+    N: tl.constexpr,
+    H: tl.constexpr,
+    D: tl.constexpr,
+    WIDTH: tl.constexpr,
+):
     token = tl.program_id(0).to(tl.int32)
     slot = tl.load(S + token).to(tl.int32)
     if slot >= 0:
@@ -86,7 +98,6 @@ def reshape_and_cache_flash(
     if min(blocks, block_size, heads, head_size) <= 0:
         raise ValueError("GCU cache dimensions must be positive")
     width = heads * head_size
-    block_elements = block_size * width
     for t in (key, value):
         if (
             t.shape[0] < num_tokens
@@ -101,8 +112,9 @@ def reshape_and_cache_flash(
         (2 * head_size, 2 * block_size * head_size, 1),
         (2 * width, 2 * head_size, 1),
     )
-    cache_span = 1 + sum((n - 1) * s for n, s in
-                         zip(key_cache.shape[1:], cache_strides[1:]))
+    cache_span = 1 + sum(
+        (n - 1) * s for n, s in zip(key_cache.shape[1:], cache_strides[1:])
+    )
     for t in (key_cache, value_cache):
         if (
             not (packed or standardized)
@@ -135,10 +147,18 @@ def reshape_and_cache_flash(
         count = min(num_tokens - start, _MAX_GRID_X)
         if not packed:
             _strided_cache_kernel[(count,)](
-                key.narrow(0, start, count), value.narrow(0, start, count),
-                key_cache, value_cache, slots.narrow(0, start, count),
-                key.stride(0), value.stride(0), *cache_strides[:3],
-                block_size, heads, head_size, triton.next_power_of_2(width),
+                key.narrow(0, start, count),
+                value.narrow(0, start, count),
+                key_cache,
+                value_cache,
+                slots.narrow(0, start, count),
+                key.stride(0),
+                value.stride(0),
+                *cache_strides[:3],
+                block_size,
+                heads,
+                head_size,
+                triton.next_power_of_2(width),
             )
             continue
         _gems_reshape_and_cache_flash(
