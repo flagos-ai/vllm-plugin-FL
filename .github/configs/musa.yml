@@ -17,19 +17,25 @@
 
 platform: musa
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-musa-ci
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
 
 runner_labels:
   - mt-cicd-vllm-plugin
 
 container_volumes:
-  - /data:/data
+  - /data:/data:ro
 
+# The vLLM 0.28 image uses the native MUSA runtime without privileged mode.
+# GEMS_VENDOR selects the Mthreads kernels; VLLM_PLUGINS enables the FL plugin.
+# This runner allocates host cards 4..7; the SDK sees their logical IDs 0..3.
+# Keep both masks to preserve that allocation; see docs/usage/musa.md.
+# Retain 64 GiB of shared memory with private IPC.
 container_options: >-
   --hostname vllm-plugin-fl
-  --privileged
-  --ipc=host
+  --runtime=mthreads
+  --ipc=private
   --shm-size=64g
   --env GEMS_VENDOR=mthreads
   --env VLLM_PLUGINS=fl
-  --env MTHREADS_VISIBLE_DEVICES=all
+  --env MTHREADS_VISIBLE_DEVICES=4,5,6,7
+  --env MUSA_VISIBLE_DEVICES=0,1,2,3

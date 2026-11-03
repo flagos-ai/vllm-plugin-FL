@@ -28,11 +28,13 @@ device_overrides:
     llm:
       gpu_memory_utilization: 0.80
       trust_remote_code: true
+    serve:
+      chat_template_kwargs:
+        enable_thinking: false
 
 env_defaults:
   GEMS_VENDOR: "mthreads"
   VLLM_PLUGINS: "fl"
-  MTHREADS_VISIBLE_DEVICES: "all"
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 
 # MCCL 2.11.4 cannot host two concurrently initializing TP groups on one
@@ -46,12 +48,14 @@ s5000:
     e2e:
       pr:
         inference:
+          qwen3: ["06b_tp1_eager", "06b_tp1_graph"]
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
             - 35b_a3b_tp4_eager
             - 35b_a3b_tp4_graph
         serving:
+          qwen3: ["06b_tp1_graph"]
           qwen3_6:
             - 27b_tp4_eager
             - 27b_tp4_graph
