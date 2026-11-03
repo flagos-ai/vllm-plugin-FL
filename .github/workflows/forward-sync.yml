@@ -1,11 +1,11 @@
-# One-time baseline initialization using the reviewed candidate; do not merge this recovery branch.
-name: Initialize native-sync comparison baseline
+# One-time publication of PR #689's resolved merge tree; do not merge this branch.
+name: Publish resolved forward-sync PR 689
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  baseline:
+  publish:
     if: github.repository == 'flagos-ai/vllm-plugin-FL' && github.ref == 'refs/heads/codex/recover-forward-sync-bot-pr'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -14,31 +14,57 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
-      pull-requests: write
+      pull-requests: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: 2aa3a8069d8004bf7ad465fab5a208a485867983
-          persist-credentials: false
-      - name: Create the state-only baseline review PR
+      - name: Publish the reviewed resolution as an Actions merge commit
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const scope = {owner: 'flagos-ai', repo: 'vllm-plugin-FL'};
             const api = github.rest;
+            const expected = {
+              head: '90d4d410d8eeba36037401c2a51bdeea90f7f541',
+              base: '63808fd633fb502292064f11973df50edbacf730',
+              artifact: 'fae95abd844607e7e922cc4305223acd2c5a7d35',
+              tree: '35096c9823955edd5987bb317a43613777b28029',
+              branch: 'codex/sync-0.4-to-0.5-native-131969d53c5f75291ceda45a48616eeff68bb5ff',
+            };
+            const pr = (await api.pulls.get({...scope, pull_number: 689})).data;
+            if (pr.state !== 'open' || !pr.draft || pr.user.login !== 'github-actions[bot]' ||
+                pr.head.sha !== expected.head || pr.head.ref !== expected.branch ||
+                pr.base.ref !== '0.5.0-dev' || pr.base.sha !== expected.base) {
+              throw new Error('PR #689 changed since resolution; review again before publishing.');
+            }
             const target = (await api.git.getRef({...scope, ref: 'heads/0.5.0-dev'})).data.object.sha;
-            try {
-              await api.repos.getContent({...scope, path: '.github/forward-sync-baseline.json', ref: target});
-              core.info('The comparison baseline is already present; no runtime PR was created by this one-time action.');
-              return;
-            } catch (error) {
-              if (error.status !== 404) throw error;
+            if (target !== expected.base) throw new Error('Target moved; refresh the resolution.');
+            const artifactRef = (await api.git.getRef({...scope, ref: 'heads/codex/pr689-resolution-tree'})).data.object.sha;
+            if (artifactRef !== expected.artifact) throw new Error('Resolution artifact changed.');
+            const artifact = (await api.git.getCommit({...scope, commit_sha: expected.artifact})).data;
+            if (artifact.tree.sha !== expected.tree ||
+                artifact.parents.map(parent => parent.sha).join(',') !== [expected.head, expected.base].join(',')) {
+              throw new Error('Resolution tree or merge parents do not match the reviewed artifact.');
             }
             const excluded = (await api.repos.compareCommitsWithBasehead({
-              ...scope, basehead: target + '...f6c1f92e59679ccf027b5336d15a3914214cb714',
+              ...scope, basehead: expected.artifact + '...f6c1f92e59679ccf027b5336d15a3914214cb714',
             })).data;
-            if (['behind', 'identical'].includes(excluded.status)) throw new Error('Target already contains excluded source ancestry; reconcile manually.');
-            const sync = require('./.github/scripts/forward-sync.cjs');
-            const result = await sync({github, context, core});
-            if (result.status !== 'baseline-pr-required') throw new Error('Unexpected baseline initialization result.');
-            await core.summary.addHeading('Native sync comparison baseline').addCodeBlock(JSON.stringify(result, null, 2), 'json').write();
+            if (['behind', 'identical'].includes(excluded.status)) {
+              throw new Error('Resolution contains the excluded source ancestry.');
+            }
+            const merge = (await api.git.createCommit({
+              ...scope,
+              message: 'Merge 0.5.0-dev and resolve MUSA forward-sync conflicts',
+              tree: expected.tree,
+              parents: [expected.head, expected.base],
+            })).data;
+            if (merge.author.email !== '41898282+github-actions[bot]@users.noreply.github.com' ||
+                merge.committer.email !== '41898282+github-actions[bot]@users.noreply.github.com') {
+              throw new Error('Resolution commit must be authored and committed by GitHub Actions.');
+            }
+            await api.git.updateRef({...scope, ref: 'heads/' + expected.branch, sha: merge.sha, force: false});
+            const live = (await api.pulls.get({...scope, pull_number: 689})).data;
+            if (live.head.sha !== merge.sha) throw new Error('PR head moved after publication.');
+            core.info('Published PR #689 resolution: ' + merge.sha);
+            await core.summary.addHeading('PR #689 conflict resolution published')
+              .addLink('Review PR #689', live.html_url)
+              .addCodeBlock(JSON.stringify({commit: merge.sha, tree: merge.tree.sha, parents: merge.parents.map(p => p.sha)}, null, 2), 'json')
+              .write();
