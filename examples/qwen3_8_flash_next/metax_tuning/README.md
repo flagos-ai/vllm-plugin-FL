@@ -44,3 +44,6 @@ and historical measured results. Experiment counters and benchmark RPCs are
 not part of the serving path.
 Host preparation additionally batches PLE hashing and reuses GDN/QSA metadata; no CPU-affinity or GC-policy change is selected.
 The best MTP-off invocation adds `--async-scheduling`; synchronous mode remains the default/fallback, and MTP options require sync.
+
+
+The added serving capabilities and source-locked dependency boundaries are documented in `../../../docs/models/qwen3_8_flash_next.md`.

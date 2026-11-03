@@ -11,6 +11,18 @@ import torch
 logger = logging.getLogger(__name__)
 
 
+def _get_host_device_view(tensor):
+    from vllm_fl.utils import DeviceInfo
+
+    if DeviceInfo().vendor_name == "metax":
+        from vllm_fl.dispatch.backends.vendor.metax.host_memory import (
+            get_cuda_view_from_cpu_tensor,
+        )
+
+        return get_cuda_view_from_cpu_tensor(tensor)
+    return tensor
+
+
 # Fallback implementations for query ops
 _QUERY_OP_IMPLS = [
     ("cutlass_scaled_mm_supports_fp8", lambda cap: cap >= 89),
@@ -18,7 +30,7 @@ _QUERY_OP_IMPLS = [
     ("cutlass_group_gemm_supported", lambda cap: cap >= 90),
     ("cutlass_scaled_mm_supports_fp4", lambda cap: cap >= 100),
     ("weak_ref_tensor", lambda t: t),
-    ("get_cuda_view_from_cpu_tensor", lambda t: t),
+    ("get_cuda_view_from_cpu_tensor", _get_host_device_view),
 ]
 
 
@@ -50,6 +62,7 @@ def register_op_schemas():
 
     try:
         import vllm._C  # noqa: F401
+
         return
     except (ImportError, OSError):
         pass
@@ -58,6 +71,7 @@ def register_op_schemas():
     # before our FRAGMENT definitions.  The hasattr check below will then
     # skip any ops already registered by mcoplib, avoiding c10::Error.
     import importlib.util
+
     if importlib.util.find_spec("mcoplib") is not None:
         try:
             import mcoplib._C  # noqa: F401

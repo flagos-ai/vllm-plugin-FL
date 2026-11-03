@@ -306,6 +306,38 @@ def qwen38_grup_projection(x, weight):
     return torch.nn.functional.linear(x, weight) if result is None else result
 
 
+def qwen38_hc_grouped_norm(x, weight, groups, eps):
+    from .hc_policy import grouped_norm
+
+    return grouped_norm(x, weight, groups, eps)
+
+
+def qwen38_hc_gate_reduce(logits, normed, groups):
+    from .hc_policy import gate_reduce
+
+    return gate_reduce(logits, normed, groups)
+
+
+def qwen38_hc_inject_combine(logits, block_output, residual, groups):
+    from .hc_policy import inject_combine
+
+    return inject_combine(logits, block_output, residual, groups)
+
+
+# This provider writes every active row or initializes its fallback output.
+# functools.wraps in registration carries the capability to the resolved call.
+
+
+
+
+
+
+def qwen38_hc_down_activation(x, groups):
+    from .hc_policy import down_activation
+
+    return down_activation(x, groups)
+
+
 def register_qwen38_operators(registry, *, is_platform_available):
     from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
@@ -313,6 +345,13 @@ def register_qwen38_operators(registry, *, is_platform_available):
         if not is_platform_available():
             return False
         if name in {"qwen38_grdown_projection", "qwen38_grup_projection"}:
+            return True
+        if name in {
+            "qwen38_hc_grouped_norm",
+            "qwen38_hc_gate_reduce",
+            "qwen38_hc_inject_combine",
+            "qwen38_hc_down_activation",
+        }:
             return True
         if name == "qwen38_gdn_mixed_qkv":
             return True
@@ -357,6 +396,10 @@ def register_qwen38_operators(registry, *, is_platform_available):
                 "qwen38_grup_projection",
                 "qwen38_ple_gate",
                 "qwen38_gdn_mixed_qkv",
+                "qwen38_hc_grouped_norm",
+                "qwen38_hc_gate_reduce",
+                "qwen38_hc_inject_combine",
+                "qwen38_hc_down_activation",
             )
         ]
     )

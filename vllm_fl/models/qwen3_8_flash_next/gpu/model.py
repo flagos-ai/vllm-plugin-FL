@@ -454,6 +454,17 @@ class Qwen3_8FlashNextSparseMoeBlock(Qwen3NextSparseMoeBlock):
         self.requires_tp_all_reduce = False
 
 
+def _hc_small_ops(vllm_config):
+    if not is_metax() or not vllm_config.additional_config.get(
+        "qwen38_hc_small_fusions", False
+    ):
+        return {}
+    return {
+        name: resolve_op("qwen38_hc_" + name)
+        for name in ("grouped_norm", "gate_reduce", "inject_combine", "down_activation")
+    }
+
+
 class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
     def __init__(
         self,
@@ -579,6 +590,7 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
             mix_up_projection=resolve_op("qwen38_grup_projection")
             if self._metax
             else None,
+            **_hc_small_ops(vllm_config),
         )
         self.mlp_hyper_connection = GatedResidualSimple(
             hc_config,
@@ -593,6 +605,7 @@ class Qwen3_8FlashNextDecoderLayer(Qwen3NextDecoderLayer):
             mix_up_projection=resolve_op("qwen38_grup_projection")
             if self._metax
             else None,
+            **_hc_small_ops(vllm_config),
         )
 
         if self._metax:
@@ -775,7 +788,7 @@ class Qwen3_8FlashNextModel(nn.Module):
                 use_fused_ops=not is_metax(),
             )
             self.hyper_connection_mixer = GatedResidualSimple(
-                hc_config, use_combine=False, role="final"
+                hc_config, use_combine=False, role="final", **_hc_small_ops(vllm_config)
             )
         else:
             self.hyper_connection_mixer = None

@@ -331,3 +331,10 @@ wall time. Full historical evidence remains in the linked version.
 Uncovered dynamic linear/MV shapes can still invoke runtime autotuning and
 extra clears. That optimization and communication work remain separate.
 Full-model accuracy and multimodal acceptance are not claimed.
+
+
+## Additional MetaX serving capabilities
+
+HC small fusions are selected only for the reviewed MetaX BF16 shapes. Grouped normalization, gate/reduce, residual injection and divide/SiLU retain the original intermediate rounding. Other shapes keep their existing paths.
+
+These performance paths require the exact dependency composition in `metax_tuning/operator_dependencies.json`; not all numeric operator components are public revisions yet.

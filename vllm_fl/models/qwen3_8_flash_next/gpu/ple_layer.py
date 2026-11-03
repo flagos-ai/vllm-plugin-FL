@@ -356,6 +356,13 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
         self._metax = is_metax()
+        self._hc_grouped_norm = (
+            resolve_op("qwen38_hc_grouped_norm")
+            if self._metax
+            and vllm_config.additional_config.get("qwen38_hc_small_fusions", False)
+            and vllm_config.speculative_config is None
+            else None
+        )
         if self._metax:
             self._ple_short_conv = resolve_op("ple_short_conv_")
             self._ple_gate = resolve_op("qwen38_ple_gate")
@@ -816,12 +823,17 @@ class Qwen3_8FlashNextPLELayer(nn.Module, MambaBase):
         )
         return gated_value.flatten(-2) + conv_output
 
-
     def _apply_norm(
         self, norm: Qwen3_8FlashNextPLEGroupedNorm, hidden_states: torch.Tensor
     ) -> torch.Tensor:
         shape = hidden_states.shape
-        return norm(hidden_states.flatten(-2)).reshape(shape)
+        flat = hidden_states.flatten(-2)
+        grouped_norm = getattr(self, "_hc_grouped_norm", None)
+        if grouped_norm is not None:
+            result = grouped_norm(flat, norm.weight, self.hc_count, norm.eps)
+            if result is not None:
+                return result.reshape(shape)
+        return norm(flat).reshape(shape)
 
     def prepare_host_lookup(
         self, input_ids, query_start_loc, ngram_context, *, dummy: bool = False

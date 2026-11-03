@@ -235,9 +235,14 @@ def test_registration_preserves_default_and_scopes_vendor_difference():
         ("qwen38_grup_projection", "vendor.metax.qwen38"),
         ("qwen38_ple_gate", "vendor.metax.qwen38"),
         ("qwen38_gdn_mixed_qkv", "vendor.metax.qwen38"),
+        ("qwen38_hc_grouped_norm", "vendor.metax.qwen38"),
+        ("qwen38_hc_gate_reduce", "vendor.metax.qwen38"),
+        ("qwen38_hc_inject_combine", "vendor.metax.qwen38"),
+        ("qwen38_hc_down_activation", "vendor.metax.qwen38"),
     ]
-    assert entries[-1].vendor == "metax"
-    assert not entries[-1].is_available()
+    for entry in entries[4:]:
+        assert entry.vendor == "metax"
+        assert not entry.is_available()
 
 
 def test_packed_gdn_passes_fp32_beta_input_without_changing_values(monkeypatch):

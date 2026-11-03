@@ -43,6 +43,15 @@ op_backends:
   - impl:vendor.metax.qwen38
   qwen38_gdn_mixed_qkv:
   - impl:vendor.metax.qwen38
+  # HC-only BF16 intermediate-rounding contract; keep generic FG ops available.
+  qwen38_hc_grouped_norm:
+  - impl:vendor.metax.qwen38
+  qwen38_hc_gate_reduce:
+  - impl:vendor.metax.qwen38
+  qwen38_hc_inject_combine:
+  - impl:vendor.metax.qwen38
+  qwen38_hc_down_activation:
+  - impl:vendor.metax.qwen38
 flagos_blacklist:
 - masked_fill
 - masked_fill_

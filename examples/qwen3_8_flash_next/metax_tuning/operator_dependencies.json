@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Tested package composition; model submission does not vendor or rewrite these implementations",
+  "scope": "Reviewed development composition; not a public installation lock; no model-side source rewriting",
   "vllm": {
     "version": "0.24.0",
     "commit": "ee0da84ab9e04ac7610e28580af62c365e898389"
@@ -20,7 +20,7 @@
       "sha256": "a403e7a46f5596d0fb251fd6c806a3f36be81a7acfd04a74fe066d44c03e7147",
       "purpose": "Remove ineffective generator assertion and host tensor iteration",
       "introduced": "01-hotpaths",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flaggems_vllm",
@@ -28,7 +28,7 @@
       "sha256": "f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e",
       "purpose": "Existing large-row QSA TopK dependency",
       "introduced": "published-parent",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flaggems_vllm",
@@ -36,7 +36,7 @@
       "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4",
       "purpose": "Existing generic sampling fallback",
       "introduced": "published-parent",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flaggems_vllm",
@@ -44,7 +44,7 @@
       "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84",
       "purpose": "Existing exported sampling fallback",
       "introduced": "published-parent",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flag_gems",
@@ -52,7 +52,7 @@
       "sha256": "87921767027917f1781f90450d70061d8e0605217df8663c991694d62dd05b31",
       "purpose": "Existing fallback dependency",
       "introduced": "published-parent",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flaggems_vllm",
@@ -60,7 +60,7 @@
       "sha256": "c1cea3fd6db8dd25306f80b36aab2b9fe9f387b7980b854f92d00dd99f819186",
       "purpose": "Block Top20 and top-p filtering",
       "introduced": "01-hotpaths",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flaggems_vllm",
@@ -68,15 +68,15 @@
       "sha256": "ade13cc1ef45c6d66cdc58f20cf2e2e644119bc388b29f975ad2341e6ee82156",
       "purpose": "Race reduction with native RNG",
       "introduced": "01-hotpaths",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flaggems_vllm",
       "path": "runtime/backend/_metax/ops/qsa_packed.py",
       "sha256": "1b3ba59d4373d30ccac4d0ef8e127a741ea3bb45e3b831156f75c3cec13a5f06",
-      "purpose": "Packed QSA kernels",
+      "purpose": "Head/query packing with the reviewed BF16 contract",
       "introduced": "01-hotpaths",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flaggems_vllm",
@@ -84,15 +84,23 @@
       "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0",
       "purpose": "BF16 plans, AvBv scales and GEMM execution",
       "introduced": "01-hotpaths",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
     {
       "package": "flag_gems",
       "path": "runtime/backend/_metax/ops/index_put.py",
       "sha256": "11cec2ff61c7ff59aac54f93c4280226e46177c757e01fa8cd054d67e78e7db2",
-      "purpose": "GPU boolean scalar assignment without host readback",
+      "purpose": "Avoid host synchronization in leading bool-mask scalar assignment",
       "introduced": "02-host-preparation",
-      "status": "Private fixed-source composition; this review asserts no public revision for this delta"
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
+    },
+    {
+      "package": "flaggems_vllm",
+      "path": "runtime/backend/_metax/ops/hyperconnection_bf16.py",
+      "sha256": "cefed0e793627d5e1726279c7b53ac578b081b6984565b062a803a6b602c0480",
+      "purpose": "Grouped norm, gate reduction and residual injection preserving eager BF16 intermediate rounding",
+      "introduced": "hc-prefill-longctx-20261101",
+      "status": "Source-locked model integration validated; standalone operator publication pending review"
     }
   ],
   "active_launch_source_guards": {
@@ -178,6 +186,18 @@
       {
         "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
         "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/hyperconnection_bf16.py",
+        "sha256": "cefed0e793627d5e1726279c7b53ac578b081b6984565b062a803a6b602c0480"
+      },
+      {
+        "path": "ops/qwen4/qsa.py",
+        "sha256": "460a001aec9806a65450e9e018af8e92df00505533b8c9e2cc3bdab415b20d59"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/radix_topk.py",
+        "sha256": "f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e"
       }
     ],
     "vllm": [

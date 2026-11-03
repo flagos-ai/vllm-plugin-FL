@@ -63,6 +63,7 @@ def test_mtp_configuration_contract(launcher, mode, k):
         "flaggems_record_ops": False,
         "qwen38_fused_qsa_metadata": not bool(k),
         "qwen38_fused_gemma_norm": not bool(k),
+        "qwen38_hc_small_fusions": not bool(k),
         "qwen38_reuse_gdn_metadata": not bool(k),
         "qwen38_ple_cpu_metadata": not bool(k),
         "qwen38_ngram_mode": "shared_buffer",

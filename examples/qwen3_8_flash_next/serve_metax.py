@@ -98,6 +98,7 @@ def build_config(
             "qwen38_qsa_packing": not bool(k),
             "qwen38_fused_qsa_metadata": not bool(k),
             "qwen38_fused_gemma_norm": not bool(k),
+            "qwen38_hc_small_fusions": not bool(k),
             "qwen38_reuse_gdn_metadata": not bool(k),
             "qwen38_ple_cpu_metadata": not bool(k),
             "qwen38_tuning_profile": True,

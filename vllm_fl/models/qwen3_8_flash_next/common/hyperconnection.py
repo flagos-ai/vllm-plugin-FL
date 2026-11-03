@@ -187,8 +187,16 @@ class GatedResidualSimple(HyperConnectionBase):
         small_projection=None,
         mix_projection=None,
         mix_up_projection=None,
+        grouped_norm=None,
+        gate_reduce=None,
+        inject_combine=None,
+        down_activation=None,
     ) -> None:
         super().__init__(config, layer_idx, role)
+        self._grouped_norm = grouped_norm
+        self._gate_reduce = gate_reduce
+        self._inject_combine = inject_combine
+        self._down_activation = down_activation
         self._small_projection = (
             F.linear if small_projection is None else small_projection
         )
@@ -324,6 +332,15 @@ class GatedResidualSimple(HyperConnectionBase):
         return True
 
     def _normalize(self, hyper_input: torch.Tensor) -> torch.Tensor:
+        if self._grouped_norm is not None and not self.config.use_fused_ops:
+            result = self._grouped_norm(
+                hyper_input,
+                self.hc_norm.weight,
+                self.hc_count,
+                self.config.rms_norm_eps,
+            )
+            if result is not None:
+                return result
         if self.config.hc_per_branch_norm:
             return self.hc_norm(hyper_input)
         return self.hc_norm(
@@ -347,8 +364,16 @@ class GatedResidualSimple(HyperConnectionBase):
             down = self._mix_projection(
                 hyper_input_normed, self.input_mix_weight_down.weight
             )
-        gate = F.silu(down / self.hc_count)
+        gate = None
+        if self._down_activation is not None and not self.config.use_fused_ops:
+            gate = self._down_activation(down, self.hc_count)
+        if gate is None:
+            gate = F.silu(down / self.hc_count)
         gate_logits = self._mix_up_projection(gate, self.input_mix_weight_up.weight)
+        if self._gate_reduce is not None and not self.config.use_fused_ops:
+            result = self._gate_reduce(gate_logits, hyper_input_normed, self.hc_count)
+            if result is not None:
+                return result, injection_logits
         if not self.config.use_fused_ops:
             gate = torch.sigmoid(gate_logits).unflatten(
                 -1, (self.hc_count, self.hidden_size)
@@ -405,6 +430,12 @@ class GatedResidualSimple(HyperConnectionBase):
         assert hidden_states.shape[-1] == self.hc_count * self.hidden_size
         assert block_output.shape[-1] == self.hidden_size
         assert injection_logits.shape[-1] == self.hc_count
+        if self._inject_combine is not None and not self.config.use_fused_ops:
+            result = self._inject_combine(
+                injection_logits, block_output, hidden_states, self.hc_count
+            )
+            if result is not None:
+                return result
         if not self.config.use_fused_ops:
             injection_weight = 2.0 * torch.sigmoid(injection_logits / self.hc_count)
             residual = hidden_states.unflatten(-1, (self.hc_count, self.hidden_size))
