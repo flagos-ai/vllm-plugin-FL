@@ -50,11 +50,14 @@ jobs:
             if (['behind', 'identical'].includes(excluded.status)) {
               throw new Error('Resolution contains the excluded source ancestry.');
             }
+            const bot = {name: 'github-actions[bot]', email: '41898282+github-actions[bot]@users.noreply.github.com', date: new Date().toISOString()};
             const merge = (await api.git.createCommit({
               ...scope,
               message: 'Merge 0.5.0-dev and resolve MUSA forward-sync conflicts',
               tree: expected.tree,
               parents: [expected.head, expected.base],
+              author: bot,
+              committer: bot,
             })).data;
             if (merge.author.email !== '41898282+github-actions[bot]@users.noreply.github.com' ||
                 merge.committer.email !== '41898282+github-actions[bot]@users.noreply.github.com') {
