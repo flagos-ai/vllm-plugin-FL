@@ -11,7 +11,21 @@ import torch
 from _qwen38_cpu import ROOT, declarations, sampling_metadata
 
 VENDOR = ROOT / "vllm_fl/dispatch/backends/vendor/metax/impl/qwen3_8_flash_next"
-moe = declarations(VENDOR / "mctlass_moe.py", "qwen_review_moe")
+
+
+def load_vendor_policy(path, name):
+    package = "qwen38_test_vendor_policies"
+    if package not in sys.modules:
+        module_package = ModuleType(package)
+        module_package.__path__ = [str(VENDOR)]
+        sys.modules[package] = module_package
+    spec = importlib.util.spec_from_file_location(package + "." + name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+moe = load_vendor_policy(VENDOR / "mctlass_moe.py", "qwen_review_moe")
 rows = declarations(
     ROOT / "vllm_fl/models/qwen3_8_flash_next/common/qsa_packing.py",
     "qwen_review_packing",
@@ -33,6 +47,9 @@ def tensor(shape, dtype=torch.bfloat16):
     "m,expected",
     [
         (1, False),
+        (15, False),
+        (16, True),
+        (17, False),
         (30, False),
         (31, True),
         (64, True),
@@ -40,7 +57,11 @@ def tensor(shape, dtype=torch.bfloat16):
         (1023, True),
         (1024, True),
         (2048, True),
-        (2049, False),
+        (2049, True),
+        (4096, True),
+        (4097, True),
+        (8192, True),
+        (8193, False),
     ],
 )
 def test_closed_moe_bounds_and_quantized_fallback(m, expected):
@@ -57,7 +78,9 @@ def test_closed_moe_bounds_and_quantized_fallback(m, expected):
     assert not moe.moe_eligible(*args, False, True, False, None, 512, False)
 
 
-@pytest.mark.parametrize("m,stages", [(64, 1), (1024, 2)])
+@pytest.mark.parametrize(
+    "m,stages", [(16, 2), (32, 1), (64, 1), (1024, 2), (4096, 2), (8192, 2)]
+)
 def test_closed_moe_preserves_small_m_g2_fallback(monkeypatch, m, stages):
     calls = []
     provider = ModuleType("flaggems_vllm.runtime.backend._metax.ops.mctlass_bf16")
@@ -183,11 +206,13 @@ def test_packing_metadata_cache_is_scoped_and_cleared_on_error(monkeypatch):
     monkeypatch.setattr(module, "torch", NS(tensor=make, int32=torch.int32))
     starts = torch.tensor([0, 3])
     lengths = torch.tensor([5])
-    with pytest.raises(RuntimeError, match="scope"):
-        with module.qsa_metadata_build_scope():
-            a = module._cached_pack_rows(starts, lengths, 3, "cpu")
-            assert module._cached_pack_rows(starts, lengths, 3, "cpu") is a
-            raise RuntimeError("scope")
+    with (
+        pytest.raises(RuntimeError, match="scope"),
+        module.qsa_metadata_build_scope(),
+    ):
+        a = module._cached_pack_rows(starts, lengths, 3, "cpu")
+        assert module._cached_pack_rows(starts, lengths, 3, "cpu") is a
+        raise RuntimeError("scope")
     assert module._QSA_PACK_ROWS_CACHE.get() is None
     with module.qsa_metadata_build_scope():
         assert module._cached_pack_rows(starts, lengths, 3, "cpu") is not a
@@ -206,3 +231,89 @@ def test_runner_import_resolves_real_ple_state_without_gpu_initialization():
         "qwen3_8_flash_next_sampling"
     )
     assert not torch.cuda.is_initialized()
+
+
+@pytest.mark.parametrize(
+    "m,columns,splits",
+    [
+        (16, 8192, 32),
+        (16, 8193, 16),
+        (16, 17600, 16),
+        (16, 17601, 32),
+        (8, 17600, 32),
+        (32, 17600, 16),
+        (1, 17600, 64),
+        (2049, 2048, 1),
+        (4095, 2048, 1),
+        (4095, 17600, 1),
+        (4096, 2048, 1),
+        (4096, 8192, 1),
+        (4096, 17600, 1),
+        (8192, 8192, 1),
+        (8192, 17600, 1),
+    ],
+)
+def test_capacity_qsa_selection_respects_length_and_row_boundaries(
+    monkeypatch, m, columns, splits
+):
+    module = load_vendor_policy(VENDOR / "qsa_packing.py", "qwen_capacity_pack")
+    calls = []
+    options = []
+    provider = ModuleType("flaggems_vllm.runtime.backend._metax.ops.qsa_packed")
+
+    class Candidate:
+        def __init__(self, *args, **kwargs):
+            calls.append(args)
+            options.append(kwargs)
+
+        def __call__(self, *args, **kwargs):
+            pass
+
+    provider.Candidate = Candidate
+    monkeypatch.setitem(sys.modules, provider.__name__, provider)
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", lambda: False)
+    q = tensor((m, 3, 256))
+    q.stride = lambda dim: 1 if dim == 2 else 1536
+    k = tensor((1, 400, 1, 256))
+    gate = tensor(q.shape)
+    assert module.packed_attention(
+        q,
+        k,
+        k,
+        tensor((m, 2051)),
+        None,
+        None,
+        0.0625,
+        object(),
+        gate,
+        {},
+        score_columns=columns,
+    )
+    optimized = False
+    expected_stages = 3 if optimized else 1
+    assert len(calls) == 1
+    assert calls[0][1:6] == ("fold4_skip", splits, 16, 2, expected_stages)
+    assert options[0].get("prefill_optimization", False) is optimized
+
+
+@pytest.mark.parametrize(
+    "m,columns", [(8193, 2048), (4096, 17601), (8192, 17601), (4096, None)]
+)
+def test_extended_qsa_retains_unvalidated_length_and_row_fallback(m, columns):
+    module = load_vendor_policy(VENDOR / "qsa_packing.py", "qwen_mbt_qsa_fallback")
+    q = tensor((m, 3, 256))
+    q.stride = lambda dim: 1 if dim == 2 else 1536
+    k = tensor((1, 400, 1, 256))
+    assert not module.packed_attention(
+        q,
+        k,
+        k,
+        tensor((m, 2051)),
+        None,
+        None,
+        0.0625,
+        object(),
+        tensor(q.shape),
+        {},
+        score_columns=columns,
+    )

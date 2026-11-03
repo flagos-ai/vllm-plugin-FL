@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU policy/fallback contracts; numerical GPU evidence is recorded separately."""
 
+import importlib.util
 from types import SimpleNamespace as NS
 
 import pytest
@@ -9,7 +10,16 @@ from _qwen38_cpu import ROOT, declarations
 
 VENDOR = ROOT / "vllm_fl/dispatch/backends/vendor/metax/impl/qwen3_8_flash_next"
 moe = declarations(VENDOR / "moe_launch.py", "qwen38_hotspot_moe")
-linear = declarations(VENDOR / "linear_policy.py", "qwen38_hotspot_linear")
+limits_spec = importlib.util.spec_from_file_location(
+    "qwen38_hotspot_limits", VENDOR / "shape_limits.py"
+)
+limits = importlib.util.module_from_spec(limits_spec)
+limits_spec.loader.exec_module(limits)
+linear = declarations(
+    VENDOR / "linear_policy.py",
+    "qwen38_hotspot_linear",
+    {"max_prefill_rows": limits.max_prefill_rows},
+)
 qsa = declarations(
     VENDOR / "__init__.py",
     "qwen38_hotspot_split",
@@ -108,7 +118,11 @@ def _tensor(shape, *, device="cuda:0", dtype=torch.bfloat16, contiguous=True):
         (1023, False),
         (1024, True),
         (2048, True),
-        (2049, False),
+        (2049, True),
+        (4096, True),
+        (4097, True),
+        (8192, True),
+        (8193, False),
     ],
 )
 def test_gr_row_boundaries(rows, eligible):

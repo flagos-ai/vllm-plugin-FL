@@ -16,6 +16,8 @@ from pathlib import Path
 import torch
 import triton
 
+from .shape_limits import max_prefill_rows
+
 _enabled = False
 
 
@@ -116,6 +118,30 @@ def _qsa_attention(meta):
             num_warps=4 if meta["num_rows"] <= 64 else 2,
             num_stages=1,
         )
+    return None
+
+
+def _qsa_score(meta, presets):
+    if (
+        meta["q_ptr"].dtype == meta["k_cache_ptr"].dtype == torch.bfloat16
+        and meta["NUM_HEADS"] == 4
+        and meta["HEAD_DIM"] == 128
+        and 8 <= meta["num_rows"] <= max_prefill_rows()
+        and 512 < meta["num_columns"] <= 17600
+    ):
+        row = next(p for p in presets if meta["num_columns"] <= p["max_columns"])
+        return {k: v for k, v in row.items() if k != "max_columns"}
+    return None
+
+
+def _qsa_radix(meta, preset):
+    if (
+        meta["logits"].dtype == torch.float32
+        and 128 < meta["logits"].shape[0] <= max_prefill_rows()
+        and meta["width"] == 2048
+        and meta["k"] == 512
+    ):
+        return preset
     return None
 
 
@@ -323,6 +349,24 @@ def install_qwen38_launch_profile(vllm_config=None):
     qsa._qsa_sparse_paged_gqa_split_kernel = _Launch(
         qsa._qsa_sparse_paged_gqa_split_kernel, _qsa_attention
     )
+    if vllm_config is None or (
+        vllm_config.speculative_config is None
+        and vllm_config.additional_config.get("qwen38_qsa_long_context", False)
+    ):
+        indexer = import_module("flaggems_vllm.ops.qwen4.qsa")
+        indexer._qsa_mqa_paged_dot_kernel = _Launch(
+            indexer._qsa_mqa_paged_dot_kernel,
+            lambda meta: _qsa_score(meta, profile["qsa_indexer_launch"]),
+            lambda meta, grid: (
+                meta["num_rows"],
+                triton.cdiv(meta["num_columns"], meta["BLOCK_N"]),
+            ),
+        )
+        radix = import_module("flaggems_vllm.runtime.backend._metax.ops.radix_topk")
+        radix._radix_topk_indices = _Launch(
+            radix._radix_topk_indices,
+            lambda meta: _qsa_radix(meta, profile["qsa_radix_short"]),
+        )
     wy = import_module("flaggems_vllm.ops.FLA.wy_fast")
     wy.recompute_w_u_fwd_kernel = _Launch(wy.recompute_w_u_fwd_kernel, _wy)
     original_wy = wy.recompute_w_u_fwd

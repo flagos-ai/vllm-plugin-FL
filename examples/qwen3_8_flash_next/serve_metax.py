@@ -58,11 +58,16 @@ def build_config(
     record_flaggems_ops: bool = False,
     async_scheduling: bool = False,
     ngram_mode: str = "shared_buffer",
+    max_num_batched_tokens: int = 2048,
 ) -> dict:
     """Build one complete native configuration; no prior variant is mutated."""
     if mtp not in MTP_COUNTS:
         raise ValueError("MTP must be off, k1, k2 or k3")
     k = MTP_COUNTS[mtp]
+    if max_num_batched_tokens not in (2048, 4096, 8192):
+        raise ValueError("MBT must be 2048, 4096 or 8192")
+    if k and max_num_batched_tokens != 2048:
+        raise ValueError("Large MBT is supported only with MTP off")
     if ngram_mode not in {"shared_buffer", "uva_broadcast", "uva_sharded", "uva_auto"}:
         raise ValueError("Invalid N-gram lookup mode")
     if k and ngram_mode != "shared_buffer":
@@ -77,7 +82,7 @@ def build_config(
         "dtype": "bfloat16",
         "max_model_len": 69632,
         "max_num_seqs": 64,
-        "max_num_batched_tokens": 2048,
+        "max_num_batched_tokens": max_num_batched_tokens,
         "gpu_memory_utilization": 0.92,
         "language_model_only": True,
         "enable_prefix_caching": False,
@@ -104,6 +109,7 @@ def build_config(
             "qwen38_fused_qsa_metadata": not bool(k),
             "qwen38_fused_gemma_norm": not bool(k),
             "qwen38_hc_small_fusions": not bool(k),
+            "qwen38_qsa_long_context": not bool(k),
             "qwen38_reuse_gdn_metadata": not bool(k),
             "qwen38_ple_cpu_metadata": not bool(k),
             "qwen38_tuning_profile": True,
@@ -195,6 +201,9 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--mtp", choices=tuple(MTP_COUNTS), default="off")
     p.add_argument(
+        "--max-num-batched-tokens", type=int, choices=(2048, 4096, 8192), default=2048
+    )
+    p.add_argument(
         "--ngram-mode",
         choices=("shared_buffer", "uva_broadcast", "uva_sharded", "uva_auto"),
         default="shared_buffer",
@@ -244,6 +253,7 @@ def main() -> None:
         record_flaggems_ops=args.record_flaggems_ops,
         async_scheduling=args.async_scheduling,
         ngram_mode=args.ngram_mode,
+        max_num_batched_tokens=args.max_num_batched_tokens,
     )
     command = native_command(
         config,

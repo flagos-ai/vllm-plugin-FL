@@ -92,6 +92,11 @@ class QSAIndexer(nn.Module):
     ) -> None:
         super().__init__()
         self._metax = is_metax()
+        self._long_context_selection = bool(
+            self._metax
+            and vllm_config.additional_config.get("qwen38_qsa_long_context", False)
+            and vllm_config.speculative_config is None
+        )
         if self._metax:
             self._qsa_compress_groups_with_ratio = resolve_op(
                 "qsa_compress_groups_with_ratio"
@@ -480,6 +485,7 @@ class QSAIndexer(nn.Module):
             self.compress_ratio,
             out,
             num_columns=metadata.score_columns,
+            long_context=self._long_context_selection,
         )
 
     def forward_metax(

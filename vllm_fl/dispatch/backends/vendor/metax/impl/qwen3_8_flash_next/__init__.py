@@ -8,6 +8,7 @@ from importlib import import_module
 
 import torch
 
+from .shape_limits import max_prefill_rows
 from vllm_fl.dispatch.backends.flaggems.impl import qwen3_8_flash_next as portable
 
 
@@ -73,11 +74,14 @@ def qsa_select_paged_tokens(
     compress_ratio,
     out=None,
     num_columns=None,
+    *,
+    long_context=False,
 ):
     """Select with the measured non-TLE FGV paths; skip fully visible buckets.
 
     Small batches use the corrected native per-row selector. Large batches
-    retain radix selection because native per-row regresses at M2048/N2048.
+    retain radix for short score buckets; long buckets prefer the per-row
+    provider after measuring the actual score-width dependence.
     This local VENDOR policy leaves other FG/FGV consumers unchanged.
     """
     block_topk, width = portable._check_selection_geometry(compress_ratio, token_topk)
@@ -106,7 +110,11 @@ def qsa_select_paged_tokens(
             num_columns=columns,
         )
         if block_topk == 512 and columns <= 32768:
-            if count <= 128:
+            if count <= 128 or (
+                long_context
+                and count <= max_prefill_rows()
+                and 8192 <= columns <= 17600
+            ):
                 native = import_module("flaggems_vllm.ops.top_k_per_row_decode")
                 if native.HAS_TLE:
                     raise RuntimeError(
@@ -211,7 +219,7 @@ def qwen38_small_projection(x, weight):
     if (
         flat.device.type == "cuda"
         and flat.shape[1] == 10240
-        and flat.shape[0] <= 2048
+        and flat.shape[0] <= max_prefill_rows()
         and flat.is_contiguous()
         and weight.is_contiguous()
     ):
@@ -266,6 +274,7 @@ def qsa_sparse_paged_attention(
     gate=None,
     packed_workspace_cache=None,
     pack_rows=None,
+    score_columns=None,
 ):
     from .qsa_packing import packed_attention
 
@@ -281,8 +290,11 @@ def qsa_sparse_paged_attention(
         gate,
         packed_workspace_cache,
         pack_rows,
+        score_columns=score_columns,
     ):
         return out
+    # Preserve the fallback's initialized-output contract.
+    out.zero_()
     portable.qsa_sparse_paged_attention(
         q,
         k,

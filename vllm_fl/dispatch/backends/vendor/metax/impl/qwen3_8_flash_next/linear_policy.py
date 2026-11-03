@@ -8,9 +8,11 @@ measured graph-dominated workload. Use the same path in warmup and capture.
 
 import torch
 
+from .shape_limits import max_prefill_rows
+
 
 def selected_rows(rows):
-    return 1 <= rows <= 64 or 1024 <= rows <= 2048
+    return 1 <= rows <= 64 or 1024 <= rows <= max_prefill_rows()
 
 
 def supports_native_grdown(x, weight):

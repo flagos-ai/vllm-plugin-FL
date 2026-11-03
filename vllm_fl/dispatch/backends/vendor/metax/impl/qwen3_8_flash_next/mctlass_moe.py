@@ -1,19 +1,41 @@
 # SPDX-License-Identifier: Apache-2.0
 """Qwen expert GEMM selection; assignment and activation remain framework-owned."""
 
+import json
+from functools import lru_cache
+from pathlib import Path
+
 import torch
+
+from .shape_limits import max_prefill_rows
+
+
+@lru_cache(maxsize=1)
+def _capacity_settings():
+    path = (
+        Path(__file__).resolve().parents[5]
+        / "config/qwen3_8_flash_next_metax_tuning.json"
+    )
+    return json.loads(path.read_text())["moe_capacity"]
+
+
+def _closed_rows(rows):
+    return (
+        31 <= rows <= max_prefill_rows()
+        or rows in _capacity_settings()["additional_closed_rows"]
+    )
 
 
 def prepare_moe_stages(x, w1, w2, c1, activated, c2, *, eligible):
-    if not eligible or not 31 <= x.shape[0] <= 2048:
+    if not eligible or not _closed_rows(x.shape[0]):
         return None, None
     from flaggems_vllm.runtime.backend._metax.ops.mctlass_bf16 import get_plan
 
     p1 = get_plan(x, w1, c1, topk=10)
-    # Keep the tuned small-M G2: the closed kernel regressed on few-hot routes.
+    # Keep tuned small-M G2 except the separately validated M16 graph bucket.
     p2 = (
         get_plan(activated, w2, c2, topk=1, weighted=True)
-        if x.shape[0] >= 1024
+        if x.shape[0] >= 1024 or x.shape[0] in _capacity_settings()["closed_down_rows"]
         else None
     )
     return p1, p2
@@ -34,7 +56,7 @@ def moe_eligible(
     apply_router_weight_on_input,
 ):
     return (
-        31 <= x.shape[0] <= 2048
+        _closed_rows(x.shape[0])
         and "C550" in device_name
         and x.dtype == w1.dtype == w2.dtype == torch.bfloat16
         and tuple(w1.shape) == (512, 160, 2560)

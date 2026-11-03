@@ -339,4 +339,6 @@ HC small fusions are selected only for the reviewed MetaX BF16 shapes. Grouped n
 
 Build the optional native mapping extension with `VLLM_VENDOR=metax python setup.py build_ext --inplace` in the matching MetaX Torch/MACA environment. With MTP off, `--ngram-mode uva_auto` selects broadcast or head-sharded mapped-host lookup; `shared_buffer` remains the default. Registration/table owners live for the service lifetime. GPU hashing preserves the model history semantics.
 
+MTP-off serving accepts `--max-num-batched-tokens 4096` or `8192`; the compatibility default is 2048. Large prefill rows and long score buckets select the validated HC/projection/expert/attention paths. Larger MBT consumes more workspace and may worsen tail latency. Prefill stays eager.
+
 These performance paths require the exact dependency composition in `metax_tuning/operator_dependencies.json`; not all numeric operator components are public revisions yet.

@@ -5,6 +5,8 @@ import torch
 
 from vllm.model_executor.layers.linear import UnquantizedLinearMethod
 
+from .shape_limits import max_prefill_rows
+
 _LINEAR = {
     (10240, 320): False,  # GR up: Universal
     (2560, 768): False,  # GDN output
@@ -17,7 +19,7 @@ _LINEAR = {
 def supports_linear(x, weight):
     return (
         x.ndim == weight.ndim == 2
-        and 1024 <= x.shape[0] <= 2048
+        and 1024 <= x.shape[0] <= max_prefill_rows()
         and x.device.type == "cuda"
         and x.device == weight.device
         and x.shape[1] == weight.shape[1]

@@ -328,6 +328,10 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         # these views here prevents a later rows/TopK bucket from resizing the
         # allocation referenced by an already-captured graph.
         self._qsa_packed_workspaces = {}
+        self._qsa_long_context = bool(
+            vllm_config.additional_config.get("qwen38_qsa_long_context", False)
+            and vllm_config.speculative_config is None
+        )
         self._qsa_split_workspaces: dict[
             tuple[int, int, int, int, int, int],
             tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -472,6 +476,15 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                 split_workspace=split_workspace,
                 gate=gate[:num_tokens],
                 packed_workspace_cache=self._qsa_packed_workspaces,
+                score_columns=(
+                    getattr(
+                        metadata[self.indexer.compressed_key_cache.prefix],
+                        "score_columns",
+                        None,
+                    )
+                    if self._qsa_long_context
+                    else None
+                ),
                 pack_rows=(
                     getattr(main_metadata, "pack_rows", None)
                     if getattr(

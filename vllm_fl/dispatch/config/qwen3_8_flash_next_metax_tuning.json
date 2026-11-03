@@ -2907,7 +2907,7 @@
       },
       {
         "path": "runtime/backend/_metax/ops/index_put.py",
-        "sha256": "11cec2ff61c7ff59aac54f93c4280226e46177c757e01fa8cd054d67e78e7db2"
+        "sha256": "56ec63b69230f5d436e63bd97b4912835f420c31134175e545bfc60f2e0a45d4"
       }
     ],
     "flaggems_vllm": [
@@ -3040,10 +3040,79 @@
       "num_warps": 4
     }
   },
+  "qsa_long_context": {
+    "prefill": [
+      {
+        "max_rows": 512,
+        "splits": 4,
+        "block_n": 16,
+        "warps": 2,
+        "stages": 1
+      },
+      {
+        "max_rows": 1024,
+        "splits": 2,
+        "block_n": 16,
+        "warps": 2,
+        "stages": 1
+      },
+      {
+        "max_rows": 2048,
+        "splits": 1,
+        "block_n": 16,
+        "warps": 2,
+        "stages": 1
+      },
+      {
+        "max_rows": 8192,
+        "splits": 1,
+        "block_n": 16,
+        "warps": 2,
+        "stages": 1
+      }
+    ],
+    "decode_single_splits": 64,
+    "decode_shape_overrides": [
+      {
+        "rows": 16,
+        "min_score_columns": 8193,
+        "max_score_columns": 17600,
+        "splits": 16
+      }
+    ]
+  },
+  "qsa_indexer_launch": [
+    {
+      "max_columns": 8192,
+      "BLOCK_N": 32,
+      "num_warps": 2,
+      "num_stages": 1
+    },
+    {
+      "max_columns": 17600,
+      "BLOCK_N": 64,
+      "num_warps": 2,
+      "num_stages": 1
+    }
+  ],
+  "qsa_radix_short": {
+    "block": 512,
+    "num_warps": 4,
+    "num_stages": 1
+  },
   "ngram_uva": {
     "broadcast_max_tokens": 512,
     "broadcast_block_rows": 16,
     "sharded_block_rows": 8,
     "num_warps": 4
-  }
+  },
+  "moe_capacity": {
+    "additional_closed_rows": [
+      16
+    ],
+    "closed_down_rows": [
+      16
+    ]
+  },
+  "prefill_max_rows": 8192
 }

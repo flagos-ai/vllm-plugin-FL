@@ -89,8 +89,8 @@
     {
       "package": "flag_gems",
       "path": "runtime/backend/_metax/ops/index_put.py",
-      "sha256": "11cec2ff61c7ff59aac54f93c4280226e46177c757e01fa8cd054d67e78e7db2",
-      "purpose": "Avoid host synchronization in leading bool-mask scalar assignment",
+      "sha256": "56ec63b69230f5d436e63bd97b4912835f420c31134175e545bfc60f2e0a45d4",
+      "purpose": "GPU boolean scalar assignment without host readback; int64 address multiplication for int32-indexed paged state writes",
       "introduced": "02-host-preparation",
       "status": "Source-locked model integration validated; standalone operator publication pending review"
     },
@@ -135,7 +135,7 @@
       },
       {
         "path": "runtime/backend/_metax/ops/index_put.py",
-        "sha256": "11cec2ff61c7ff59aac54f93c4280226e46177c757e01fa8cd054d67e78e7db2"
+        "sha256": "56ec63b69230f5d436e63bd97b4912835f420c31134175e545bfc60f2e0a45d4"
       }
     ],
     "flaggems_vllm": [
