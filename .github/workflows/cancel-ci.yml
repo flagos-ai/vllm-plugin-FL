@@ -1,0 +1,98 @@
+# Cancel in-progress CI jobs when a PR author comments /cancel-ci.
+# Long-running e2e jobs on vendor runners can hang and burn 60-minute
+# timeouts on scarce hardware; a comment stops the burn without needing
+# repository write access.
+#
+# Safety model (same as rerun-failed-ci.yml):
+# - Never checks out or executes PR code; it only orchestrates existing
+#   workflow runs via the Actions API.
+# - Only the PR author and collaborators with write/maintain/admin are
+#   honored; comments from anyone else are rejected on the PR.
+# - The comment must be exactly "/cancel-ci" (no extra text).
+name: Cancel CI
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: cancel-ci-${{ github.event.comment.id }}
+  cancel-in-progress: false
+
+jobs:
+  cancel-ci:
+    if: |
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/cancel-ci'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check commenter authorization
+        id: auth
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          PR_URL: ${{ github.event.issue.pull_request.url }}
+        run: |
+          set -euo pipefail
+          # Allow PR authors and anyone with write access to the repo.
+          pr_author=$(gh api "$PR_URL" --jq '.user.login')
+          if [ "$COMMENTER" = "$pr_author" ]; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if gh api "repos/${{ github.repository }}/collaborators/$COMMENTER/permission" --jq '.permission' | grep -qE 'admin|write|maintain'; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::$COMMENTER is neither the PR author nor a collaborator with write access."
+          exit 1
+
+      - name: React to comment (ack)
+        if: always() && steps.auth.outputs.authorized == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions -f content='eyes'
+
+      - name: Cancel running workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.issue.pull_request.url }}
+        run: |
+          set -euo pipefail
+          head_sha=$(gh api "$PR_URL" --jq '.head.sha')
+          # Cancel every in-progress / queued run for the PR head commit
+          # (main CI, CodeQL, ...). Runs awaiting admin approval are left
+          # alone on purpose.
+          run_ids=$(gh run list --repo "${{ github.repository }}" \
+            --commit "$head_sha" --limit 30 --json databaseId,status \
+            --jq '.[] | select(.status == "in_progress" or .status == "queued" or .status == "requested") | .databaseId')
+          if [ -z "$run_ids" ]; then
+            echo "::error::No in-progress workflow run found for head SHA $head_sha."
+            exit 1
+          fi
+          for id in $run_ids; do
+            echo "Cancelling run $id"
+            gh run cancel "$id" --repo "${{ github.repository }}"
+          done
+
+      - name: Report result on PR
+        if: always() && steps.auth.outcome != 'cancelled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          if [ "${{ steps.auth.outcome }}" = "failure" ]; then
+            body="⛔ @$COMMENTER is not authorized to use this command (only the PR author or collaborators with write access)."
+          elif [ "${{ job.status }}" = "success" ]; then
+            body="🛑 CI runs for this PR have been cancelled (requested by @$COMMENTER)."
+          else
+            body="❌ Failed to cancel CI for this PR (requested by @$COMMENTER). See [workflow log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          fi
+          gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" --body "$body"

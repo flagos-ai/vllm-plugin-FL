@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Install the same pinned FlagGems-vllm source in every CI interpreter."""
+"""Install the same FlagGems-vllm release in every platform's CI interpreter."""
 
 import json
 import os
@@ -7,11 +7,10 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, distribution, version
 
-# Public HY4 MLA APIs, optional MetaX TLE fixes, and portable math shims.
-# Pinned to the upstream merge of flagos-ai/FlagGems-vllm#955.
-COMMIT = "f775b37f3066e2935742d26c7592a5dd55499159"
+RELEASE = "v0.2.0"
+COMMIT = "b5c2c2249319277ccda4d41aa0f65164bd9b2a19"
 REPOSITORY = "https://github.com/flagos-ai/FlagGems-vllm.git"
-RUNTIME_PACKAGES = ("torch", "triton", "flag-gems", "vllm", "numpy")
+RUNTIME_PACKAGES = ("torch", "flagtree", "triton", "flag-gems", "vllm", "numpy")
 PACKAGE_DEPENDENCIES = ("packaging", "pybind11", "PyYAML", "sqlalchemy")
 
 
@@ -22,7 +21,7 @@ def package_version(name):
         return None
 
 
-def source_is_installed():
+def release_is_installed():
     try:
         text = distribution("flaggems-vllm").read_text("direct_url.json")
         source = json.loads(text or "{}")
@@ -44,8 +43,8 @@ def main():
     missing = [name for name in PACKAGE_DEPENDENCIES if package_version(name) is None]
     if missing:
         pip_install(*missing)
-    if not source_is_installed():
-        # Replace another source even if its package version is identical.
+    if not release_is_installed():
+        # Metadata still says 0.1.0; force replacement of another 0.1.0 source.
         # Reuse the build tools already used by this platform's plugin setup.
         pip_install(
             "--no-deps",
@@ -53,13 +52,13 @@ def main():
             "--force-reinstall",
             f"flaggems-vllm @ git+{REPOSITORY}@{COMMIT}",
         )
-    if not source_is_installed():
-        raise RuntimeError(f"FlagGems-vllm must come from upstream commit {COMMIT}")
+    if not release_is_installed():
+        raise RuntimeError(f"FlagGems-vllm must come from {RELEASE} commit {COMMIT}")
     after = {name: package_version(name) for name in RUNTIME_PACKAGES}
     if after != before:
         raise RuntimeError(f"CI runtime dependencies changed: {before} -> {after}")
     print(
-        f"FlagGems-vllm: upstream commit {COMMIT}, "
+        f"FlagGems-vllm: {RELEASE}, commit {COMMIT}, "
         f"package metadata {package_version('flaggems-vllm')}"
     )
 
