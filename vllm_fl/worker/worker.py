@@ -770,8 +770,14 @@ class WorkerFL(WorkerBase):
         # XPU stays excluded (see #39977).
         cudagraph_memory_estimate = 0
         if (
+            # TXDA is not cuda-alike, but it does capture graphs after the KV
+            # cache is allocated, so its pool has to be accounted for here too;
+            # otherwise high-concurrency batches leave no room for runtime
+            # activations and fail with OOM.
             current_platform.is_cuda_alike()
-            and self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+            or current_platform.device_type == "txda"
+        ) and (
+            self.vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
             cudagraph_memory_estimate = self.model_runner.profile_cudagraph_memory()
 
