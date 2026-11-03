@@ -26,6 +26,7 @@ fi
 # vLLM / FlagGems / torch come from the CI image.
 # Install only the checked-out plugin source for this workflow run.
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install "pytest-xdist>=3.0.0"
 
 python .github/scripts/install_flaggems_vllm.py
 

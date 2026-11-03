@@ -202,7 +202,7 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
-    if vendor_name in {"ascend", "mthreads", "enflame", "gcu"}:
+    if vendor_name in {"ascend", "mthreads", "enflame", "gcu", "tsingmicro"}:
         # v0.28 defaults some models to the upstream V2 runner. These backends
         # use ModelRunnerFL; choose it before VllmConfig reads model defaults.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")

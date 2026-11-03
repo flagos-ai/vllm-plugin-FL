@@ -141,8 +141,8 @@ env -u VLLM_VENDOR "$PYTHON" -I -B -m pip wheel \
 ```
 
 The last command is **required**: it installs the shared FlagGems-vllm provider
-from the repository's fixed `v0.2.0` commit
-`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`, unless that exact source is already
+from the repository's pinned upstream commit
+`f775b37f3066e2935742d26c7592a5dd55499159`, unless that exact source is already
 installed. It checks that the existing runtime package versions remain unchanged.
 This provider is separate from the corrected FlagGems wheel already in the image.
 Do not install generic PyPI Torch/CUDA packages or replace the image's dependencies.
@@ -244,10 +244,13 @@ bucket-switching latency and broad ABI compatibility remain unmeasured.
 ## CI coverage
 
 MUSA uses the repository's
-[shared platform workflow](../../.github/workflows/_platform_test.yml) for unit
-tests, functional tests, E2E inference and serving, and benchmark smoke. The
+[shared platform workflow](../../.github/workflows/_platform_test.yml) for a
+combined unit/functional job, E2E inference and serving, and benchmark smoke. The
 [platform test configuration](../../tests/platforms/musa.yaml) currently lists
-four inference and three serving configurations.
+six inference and five serving configurations for PR validation, retaining the
+0.6B smoke cases alongside all four 27B/35B modes. Nightly also includes
+concurrent cases; MUSA E2E cases run serially to avoid overlapping
+MCCL group initialization.
 
 Use the repository's `ci.yml` platform selection. Runner labels and device
 environment settings come from the

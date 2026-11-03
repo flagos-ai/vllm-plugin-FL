@@ -55,6 +55,7 @@ dist_backend_dict = {
     "cuda": "nccl",
     "musa": "mccl",
     "gcu": "eccl",
+    "txda": "tccl",
 }
 
 
@@ -272,14 +273,56 @@ class PlatformFL(Platform):
             # method during construction; backend selection happens later.
             patch_mm_encoder_attention()
 
-        if cls.device_type in {"npu", "musa"} and vllm_config.use_v2_model_runner:
-            backend = "Ascend" if cls.device_type == "npu" else "MUSA"
+        if (
+            cls.device_type in {"npu", "musa", "txda"}
+            and vllm_config.use_v2_model_runner
+        ):
+            platform_name = {
+                "npu": "Ascend",
+                "musa": "MUSA",
+                "txda": "Tsingmicro TXDA",
+            }[cls.device_type]
             raise ValueError(
-                f"{backend} requires ModelRunnerFL; the upstream V2 runner uses "
+                f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
                 "unsupported CUDA/UVA APIs. Set VLLM_USE_V2_MODEL_RUNNER=0."
             )
         model_config = vllm_config.model_config
         parallel_config = vllm_config.parallel_config
+        if cls.device_type == "txda":
+            if getattr(vllm_config, "speculative_config", None) is not None:
+                raise ValueError(
+                    "Tsingmicro TXDA does not support speculative decoding; "
+                    "the fused speculative Mamba state-copy path is unsupported. "
+                    "Remove --speculative-config to use the FL/V1 runner."
+                )
+            parallel_config.disable_custom_all_reduce = True
+            if any(
+                getattr(parallel_config, field, 1) > 1
+                for field in (
+                    "prefill_context_parallel_size",
+                    "decode_context_parallel_size",
+                )
+            ):
+                raise ValueError(
+                    "Tsingmicro TXDA SDPA does not support context parallelism; "
+                    "prefill_context_parallel_size and decode_context_parallel_size "
+                    "must both be 1."
+                )
+            world_size = getattr(parallel_config, "world_size_across_dp", None)
+            if world_size is None:
+                world_size = 1
+                for field in (
+                    "tensor_parallel_size",
+                    "pipeline_parallel_size",
+                    "data_parallel_size",
+                ):
+                    world_size *= getattr(parallel_config, field, 1)
+            if world_size > 1 and cls.dist_backend != "flagcx":
+                raise ValueError(
+                    "Tsingmicro TXDA multi-device execution requires FlagCX. "
+                    "Set FLAGCX_PATH to a valid TXDA FlagCX repository containing "
+                    "plugin/interservice/flagcx_wrapper.py and build/lib/libflagcx.so."
+                )
         if cls.device_type == "npu" and model_config is not None:
             from vllm_fl.patches.ascend_glm_dsa import (
                 prepare_glm_dsa_dense_fallback,
@@ -372,6 +415,17 @@ class PlatformFL(Platform):
             # capture, but compile these nodes separately on MUSA.
             compilation_config.inductor_compile_config["combo_kernels"] = False
             compilation_config.inductor_compile_config["benchmark_combo_kernel"] = False
+
+        if cls.device_type == "txda":
+            if compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
+                raise ValueError(
+                    "Tsingmicro TXDA graph mode is not supported. Use --enforce-eager."
+                )
+            if compilation_config.mode != CompilationMode.NONE:
+                raise ValueError(
+                    "Tsingmicro TXDA supports eager execution only; compilation "
+                    "must be disabled. Use --enforce-eager."
+                )
 
         if getattr(cls, "vendor_name", None) == "iluvatar":
             compilation_config.cudagraph_mm_encoder = False
@@ -723,8 +777,11 @@ class PlatformFL(Platform):
 
     @classmethod
     def use_custom_op_collectives(cls) -> bool:
-        return cls.vendor_name in ("nvidia", "thead", "iluvatar") or (
-            cls.device_type == "musa" and cls.dist_backend == "mccl"
+        # Retain the registered collective routes for TXDA and native MCCL.
+        return (
+            cls.device_type == "txda"
+            or cls.vendor_name in ("nvidia", "thead", "iluvatar")
+            or (cls.device_type == "musa" and cls.dist_backend == "mccl")
         )
 
     @classmethod

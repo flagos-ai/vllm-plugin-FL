@@ -12,13 +12,25 @@ git config --global --add safe.directory "$(pwd)"
 # Install a wheel so serving workers cannot prefer the image's old package.
 env -u VLLM_VENDOR python -m pip install --no-build-isolation --no-deps .
 
-# tests/run.py requires reporting and timeout plugins declared in the test extra.
-# Use the PyPI mirror reachable from the MUSA runners for these test packages.
-python -m pip install \
-    --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
-    "pytest-cov==7.1.0" \
-    "pytest-json-report==1.5.0" \
-    "pytest-timeout==2.4.0"
+# Install the shared runner's reporting, timeout and parallel-test plugins.
+# Keep failure fatal after trying independent package indexes in order.
+install_test_dependencies() {
+    local index_url
+    for index_url in \
+        https://pypi.tuna.tsinghua.edu.cn/simple \
+        https://pypi.org/simple \
+        https://mirrors.aliyun.com/pypi/simple; do
+        if python -m pip install --index-url "$index_url" \
+            "pytest-cov==7.1.0" \
+            "pytest-json-report==1.5.0" \
+            "pytest-timeout==2.4.0" \
+            "pytest-xdist>=3.0.0"; then
+            return 0
+        fi
+    done
+    return 1
+}
+install_test_dependencies
 
 python .github/scripts/install_flaggems_vllm.py
 
