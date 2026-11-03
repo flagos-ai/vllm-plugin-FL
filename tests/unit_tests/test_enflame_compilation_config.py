@@ -70,7 +70,7 @@ def test_enflame_inductor_disables_combo_without_disabling_graphs(monkeypatch, v
     assert compilation.compile_sizes == [1, 8]
 
 
-@pytest.mark.parametrize("vendor", ["iluvatar", "kunlunxin"])
+@pytest.mark.parametrize("vendor", ["nvidia", "iluvatar", "kunlunxin"])
 def test_other_vendors_preserve_inductor_options(monkeypatch, vendor):
     config = config_for_platform()
     original_options = dict(config.compilation_config.inductor_compile_config)
@@ -110,3 +110,67 @@ def test_partial_compilation_metadata_preserves_platform_config_contract(monkeyp
         "compile_sizes": [1, 8],
         "cudagraph_mode": CUDAGraphMode.FULL_AND_PIECEWISE,
     }
+
+
+@pytest.mark.parametrize("vendor", ["nvidia", "enflame"])
+@pytest.mark.parametrize("flagcx", [False, True])
+def test_shared_platform_preserves_compile_passes_and_selects_collectives(
+    monkeypatch, vendor, flagcx
+):
+    config = config_for_platform()
+    simulate_platform(monkeypatch, vendor)
+    monkeypatch.setattr(PlatformFL, "dist_backend", PlatformFL.dist_backend)
+    if flagcx:
+        monkeypatch.setenv("FLAGCX_PATH", "/test/flagcx")
+    else:
+        monkeypatch.delenv("FLAGCX_PATH", raising=False)
+    passes = config.compilation_config.pass_config
+    passes.fuse_norm_quant = True
+    passes.fuse_act_quant = True
+    passes.fuse_allreduce_rms = True
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    assert passes.fuse_norm_quant and passes.fuse_act_quant
+    assert passes.fuse_allreduce_rms is not flagcx
+    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_AND_PIECEWISE
+    assert PlatformFL.use_custom_allreduce() is not flagcx
+    assert config.parallel_config.disable_custom_all_reduce is (
+        flagcx or vendor == "enflame"
+    )
+    expected = (
+        "vllm_fl.distributed.communicator.CommunicatorFL"
+        if flagcx
+        else "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator"
+    )
+    assert PlatformFL.get_device_communicator_cls() == expected
+
+
+@pytest.mark.parametrize("vendor", ["nvidia", "enflame"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_shared_attention_honors_explicit_selection_before_dispatch(
+    monkeypatch, vendor, explicit
+):
+    from vllm.v1.attention.backends.registry import AttentionBackendEnum
+
+    import vllm_fl.dispatch as dispatch
+
+    simulate_platform(monkeypatch, vendor)
+    calls = []
+
+    def select(name, **kwargs):
+        calls.append((name, kwargs))
+        return "dispatched.Attention"
+
+    monkeypatch.setattr(dispatch, "call_op", select)
+    selected = AttentionBackendEnum.TORCH_SDPA if explicit else None
+    result = PlatformFL.get_attn_backend_cls(
+        selected, SimpleNamespace(use_mla=False, use_sparse=False), 32
+    )
+    assert result == (selected.get_path() if explicit else "dispatched.Attention")
+    assert calls == (
+        []
+        if explicit
+        else [("attention_backend", {"use_mla": False, "use_sparse": False})]
+    )
