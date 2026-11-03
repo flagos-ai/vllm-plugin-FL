@@ -26,6 +26,7 @@ def test_native_gdn_skips_only_qwen_triton_warmup(monkeypatch):
 
 
 def test_native_gdn_registration_is_idempotent(monkeypatch):
+    pytest.importorskip("torch_npu")
     from vllm.model_executor.custom_op import op_registry_oot
 
     from vllm_fl.dispatch.backends.vendor.ascend.impl.gdn import (
