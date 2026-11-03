@@ -14,7 +14,12 @@ _PATH = Path(__file__).parents[3] / "vllm_fl/dispatch/backends/flaggems/impl/rot
 _SPEC = importlib.util.spec_from_file_location("_gcu_rotary_contract", _PATH)
 assert _SPEC is not None and _SPEC.loader is not None
 _ROTARY = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_ROTARY)
+# This CPU adapter contract must not select a native branch from the host.
+with pytest.MonkeyPatch.context() as _loader_patch:
+    _platforms = ModuleType("vllm.platforms")
+    _platforms.current_platform = SimpleNamespace(device_type="gcu")
+    _loader_patch.setitem(sys.modules, "vllm.platforms", _platforms)
+    _SPEC.loader.exec_module(_ROTARY)
 
 
 class _TensorOn:

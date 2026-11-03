@@ -31,7 +31,18 @@ platforms:
   metax:
     enabled: false
   musa:
+<<<<<<< HEAD
     enabled: false
+=======
+    enabled: true
+    trigger_paths:
+      - vllm_fl/dispatch/config/musa.yaml
+      - vllm_fl/dispatch/backends/vendor/musa/
+      - tests/platforms/musa.yaml
+    exempt_from_global:
+      - vllm_fl/dispatch/config/musa.yaml
+      - vllm_fl/dispatch/backends/vendor/musa/
+>>>>>>> 8edc307 (upgrade(musa): adapt MUSA to vLLM 0.28.0 (#575))
   enflame:
     enabled: false
   kunlunxin:

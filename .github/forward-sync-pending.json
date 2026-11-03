@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "status": "needs-resolution",
+  "sourceSha": "8edc3078545db2fd9ecb4bf9380ef48c35a01dd1",
+  "checkpointSha": "237213a09dede840dd0ac42615cba205d7abb43a",
+  "conflictFiles": [
+    ".github/configs/platforms.yml",
+    ".github/scripts/musa/setup.sh",
+    "docker/build.sh",
+    "tests/models/qwen2_5/7b_tp1.yaml",
+    "tests/models/qwen2_5/7b_tp2.yaml",
+    "tests/platforms/musa.yaml",
+    "vllm_fl/__init__.py"
+  ]
+}

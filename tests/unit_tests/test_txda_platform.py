@@ -363,6 +363,7 @@ def test_txda_uses_tccl_without_affecting_cuda():
 
 @pytest.fixture
 def txda_test_device_utils(monkeypatch):
+    monkeypatch.delenv("FL_TEST_PLATFORM", raising=False)
     fake_torch = ModuleType("torch")
     fake_torch.cuda = SimpleNamespace(
         is_available=lambda: False, device_count=lambda: 0
@@ -374,6 +375,7 @@ def txda_test_device_utils(monkeypatch):
     # An installed GCU SDK must not be reused with this fixture's fake torch.
     monkeypatch.setitem(sys.modules, "torch_gcu", None)
     monkeypatch.setitem(sys.modules, "torch_npu", None)
+    monkeypatch.setitem(sys.modules, "torch_musa", None)
 
     def load(backend=""):
         monkeypatch.setenv("FL_BACKEND", backend)
@@ -491,5 +493,7 @@ def test_txda_collectives_use_opaque_ops_without_changing_other_platforms(
         {},
         class_name="PlatformFL",
     )
-    platform = SimpleNamespace(device_type=device_type, vendor_name=vendor_name)
+    platform = SimpleNamespace(
+        device_type=device_type, vendor_name=vendor_name, dist_backend=""
+    )
     assert use_custom_ops(platform) is expected

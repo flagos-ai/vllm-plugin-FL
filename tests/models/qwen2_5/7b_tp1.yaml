@@ -14,10 +14,16 @@
 
 # Qwen2.5-7B model configuration (TP=1)
 llm:
+<<<<<<< HEAD:tests/models/qwen2_5/7b_tp1.yaml
   model: "/data/models/Qwen/Qwen2.5-7B"
   tensor_parallel_size: 1
   max_model_len: 2048
   gpu_memory_utilization: 0.85
+=======
+  model: "/data/models/Qwen/Qwen3-0.6B"
+  max_model_len: 8192
+  enforce_eager: true
+>>>>>>> 8edc307 (upgrade(musa): adapt MUSA to vLLM 0.28.0 (#575)):tests/models/qwen3/06b_tp1_eager.yaml
   trust_remote_code: true
   enforce_eager: true
 
