@@ -1396,7 +1396,10 @@ class ModelRunnerFL(
                 sampling_params
                 and sampling_params.sampling_type == SamplingType.RANDOM_SEED
             ):
-                generator = torch.Generator(device=self.device)
+                # TXDA random kernels use the runtime's CPU fallback.
+                generator = torch.Generator(
+                    device="cpu" if self.device.type == "txda" else self.device
+                )
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
@@ -3845,6 +3848,14 @@ class ModelRunnerFL(
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
+        # CPU generators (used by TXDA) do not expose Philox offsets. Save
+        # their full state before sampling so a discarded chunked-prefill
+        # sample does not advance the request's seeded random stream.
+        self._cpu_generator_states = {
+            index: generator.get_state()
+            for index, generator in sampling_metadata.generators.items()
+            if generator.device.type == "cpu"
+        }
         # Update output token ids with tokens sampled in last step
         # if async scheduling and required by current sampling params.
         self.input_batch.update_async_output_token_ids()
@@ -3903,7 +3914,10 @@ class ModelRunnerFL(
         for i in discard_sampled_tokens_req_indices:
             gen = self.input_batch.generators.get(int(i))
             if gen is not None:
-                gen.set_offset(gen.get_offset() - 4)
+                if gen.device.type == "cpu":
+                    gen.set_state(self._cpu_generator_states[int(i)])
+                else:
+                    gen.set_offset(gen.get_offset() - 4)
 
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
@@ -6515,7 +6529,11 @@ class ModelRunnerFL(
                     sampling_metadata=replace(
                         dummy_metadata,
                         generators={
-                            0: torch.Generator(device=self.device).manual_seed(0)
+                            0: torch.Generator(
+                                device="cpu"
+                                if self.device.type == "txda"
+                                else self.device
+                            ).manual_seed(0)
                         },
                     ),
                 )
