@@ -20,6 +20,22 @@ def moe_align_block_size_flaggems(
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if topk_ids.device.type == "cuda":
+        from vllm.platforms import current_platform
+
+        if getattr(current_platform, "vendor_name", None) == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.impl.moe_align_block_size import (
+                moe_align_block_size,
+            )
+
+            return moe_align_block_size(
+                topk_ids,
+                block_size,
+                num_experts,
+                expert_map,
+                pad_sorted_ids,
+                ignore_invalid_experts,
+            )
     if topk_ids.device.type == "gcu":
         # FlagGems-vllm's generic four-stage kernel uses atomic RMW operations
         # unsupported by the pinned GCU compiler. Keep the official FlagGems

@@ -18,6 +18,7 @@ from vllm.model_executor.layers.fused_moe.fused_moe import (
     try_get_optimal_moe_config,
 )
 from vllm.model_executor.layers.fused_moe.utils import moe_kernel_quantize_input
+from vllm.platforms import current_platform
 from vllm.triton_utils import tl
 from vllm_fl.dispatch import CachedOp
 
@@ -251,6 +252,14 @@ def fused_experts_impl(
             B_bias=w2_bias,
         )
 
+        if getattr(current_platform, "vendor_name", None) == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.impl.moe_align_block_size import (
+                zero_invalid_expert_outputs,
+            )
+
+            zero_invalid_expert_outputs(
+                intermediate_cache3, curr_topk_ids, global_num_experts, expert_map
+            )
         _moe_sum(
             intermediate_cache3.view(*intermediate_cache3.size()),
             out_hidden_states[begin_chunk_idx:end_chunk_idx],

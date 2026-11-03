@@ -22,7 +22,6 @@ from vllm.model_executor.layers.fused_moe.utils import (
     _resize_cache,
     moe_kernel_quantize_input,
 )
-import os
 try:
     from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
         FlashinferMoeBackend,
@@ -51,7 +50,7 @@ except ImportError:
         def __str__(self):
             return self.value
 from vllm.platforms import current_platform
-from vllm.triton_utils import tl, triton
+from vllm.triton_utils import tl
 
 from vllm_fl.dispatch import CachedOp, call_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation
@@ -289,9 +288,16 @@ def _prepare_expert_assignment(
     )
 
     if naive_block_assignment:
+        expert_ids = topk_ids.view(-1)
+        if getattr(current_platform, "vendor_name", None) == "metax":
+            # The GEMM's naive path recognizes -1 as a skipped route. Normalize
+            # every out-of-range ID without changing the router's own tensor.
+            expert_ids = torch.where(
+                (expert_ids >= 0) & (expert_ids < global_num_experts), expert_ids, -1
+            )
         return (
             None,
-            topk_ids.view(-1),
+            expert_ids,
             torch.full(
                 (1,),
                 topk_ids.numel() * config["BLOCK_SIZE_M"],
@@ -614,6 +620,14 @@ class TritonExpertsFL(TritonExperts):
             )
 
         # separate function is required for MoE + LoRA
+        if getattr(current_platform, "vendor_name", None) == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.impl.moe_align_block_size import (
+                zero_invalid_expert_outputs,
+            )
+
+            zero_invalid_expert_outputs(
+                intermediate_cache3, topk_ids, global_num_experts, expert_map
+            )
         self.moe_sum(intermediate_cache3, output)
 
     def moe_sum(self, input: torch.Tensor, output: torch.Tensor) -> None:

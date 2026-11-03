@@ -80,6 +80,14 @@ vLLM 0.32's packed K/V layout. An upstream FlagGems-vllm writer needs equivalent
 page/head-stride support before replacing this fallback. No new FlagGems or
 FlagTree upstream commit is required for the tested configuration.
 
+The pinned MoE alignment kernel also assumes every routed expert ID is valid.
+vLLM 0.32 uses `-1` for padded routes during warmup and graph capture. MetaX
+therefore uses the plugin's bounds-checked alignment kernels, preserving the
+router's IDs and weights while excluding invalid routes from counting and
+scatter. This covers the default 256-slot warmup as well as smaller batches.
+An upstream FlagGems replacement must handle invalid expert IDs in both the
+count and scatter stages before this compatibility path can be removed.
+
 FlagTree supplies the `triton` namespace through `/opt/flagtree` in this image's
 `PYTHONPATH`. Preserve that entry when adding paths for optional components:
 
