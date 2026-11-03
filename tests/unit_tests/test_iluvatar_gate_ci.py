@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +52,45 @@ def test_gate_missing_model_fails_before_server_launch(tmp_path):
     )
     assert result.returncode == 2
     assert "Missing model:" in result.stderr
+    assert not (tmp_path / "results").exists()
+
+
+@pytest.mark.parametrize("missing", ["configuration", "library", "wrapper"])
+def test_gate_missing_flagcx_fails_before_server_launch(tmp_path, missing):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "config.json").write_text("{}")
+    flagcx = tmp_path / "flagcx"
+    library = flagcx / "build/lib/libflagcx.so"
+    if missing == "wrapper":
+        library.parent.mkdir(parents=True)
+        library.touch()
+    env = dict(
+        os.environ,
+        ILUVATAR_MODEL_27B=str(model),
+        ILUVATAR_MODEL_35B=str(model),
+        ILUVATAR_GATE_RESULTS=str(tmp_path / "results"),
+    )
+    env.pop("FLAGCX_PATH", None)
+    if missing != "configuration":
+        env["FLAGCX_PATH"] = str(flagcx)
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/scripts/iluvatar/run_gates.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    if missing == "configuration":
+        assert "ILUVATAR_FLAGCX_PATH" in result.stderr
+        assert "inside the container" in result.stderr
+    else:
+        expected = (
+            library
+            if missing == "library"
+            else flagcx / "plugin/interservice/flagcx_wrapper.py"
+        )
+        assert f"Missing FlagCX file: {expected}" in result.stderr
     assert not (tmp_path / "results").exists()
 
 

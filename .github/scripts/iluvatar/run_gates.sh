@@ -3,11 +3,13 @@
 set -euo pipefail
 : "${ILUVATAR_MODEL_27B:?Set the mounted Qwen3.6-27B directory}"
 : "${ILUVATAR_MODEL_35B:?Set the mounted Qwen3.6-35B-A3B directory}"
-: "${FLAGCX_PATH:?Set the validated FlagCX build root}"
+: "${FLAGCX_PATH:?Set the validated FlagCX build root; in CI, configure ILUVATAR_FLAGCX_PATH to a path visible inside the container}"
 for path in "$ILUVATAR_MODEL_27B" "$ILUVATAR_MODEL_35B"; do
     test -f "$path/config.json" || { echo "Missing model: $path" >&2; exit 2; }
 done
-test -f "$FLAGCX_PATH/build/lib/libflagcx.so"
+for file in build/lib/libflagcx.so plugin/interservice/flagcx_wrapper.py; do
+    test -f "$FLAGCX_PATH/$file" || { echo "Missing FlagCX file: $FLAGCX_PATH/$file" >&2; exit 2; }
+done
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$root"
 export PYTHONPATH="$root"

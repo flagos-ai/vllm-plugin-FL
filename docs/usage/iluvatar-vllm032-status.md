@@ -45,6 +45,40 @@
 - CI 新增 `_iluvatar_gate.yml` 与 `run_gates.sh`，串行执行两模型 × eager/graph，上传失败时的原始日志；聚合通知在 Iluvatar gate 被跳过时不得成功。平台 registry 继续保持原 opt-in 策略。CI 需将 `ILUVATAR_FLAGCX_PATH` 仓库变量指向容器已有挂载内的实际 FlagCX 构建根目录，缺失即失败，不用空库代替。
 - 新增 graph 参数传递与 CI wiring / 缺失模型拒绝回归，8 passed；`bash -n` 和 `git diff --check` 通过。这些检查不等价于远端硬件 CI 已运行。
 
+## CI FlagCX 前置条件
+
+Iluvatar 模型门禁读取上游仓库 Actions 变量 `ILUVATAR_FLAGCX_PATH`，并将其作为
+`FLAGCX_PATH` 传入测试容器。它必须指向 **CI 容器内可见**、已为 CoreX 构建的
+FlagCX 根目录，而不是开发容器中的历史路径。该目录必须同时包含
+`build/lib/libflagcx.so` 和 `plugin/interservice/flagcx_wrapper.py`。
+
+维护者需要先检查 runner 的实际安装位置：如果构建目录位于现有 `/data` 挂载中，
+可直接使用对应容器路径；否则先在 `.github/configs/iluvatar.yml` 的
+`container_volumes` 中显式挂载真实构建目录，再设置容器路径。仅设置变量不能让
+未挂载的宿主机文件出现在容器中。
+
+维护者可在仓库 Settings → Secrets and variables → Actions → Variables 设置该变量，
+也可使用有上游仓库管理权限的 GitHub CLI：
+
+```bash
+gh variable set ILUVATAR_FLAGCX_PATH \
+  --repo flagos-ai/vllm-plugin-FL \
+  --body /actual/container/path/FlagCX
+```
+
+配置前，在相同 CI 容器中验证真实目录及动态库依赖：
+
+```bash
+export FLAGCX_PATH=/actual/container/path/FlagCX
+test -f "$FLAGCX_PATH/plugin/interservice/flagcx_wrapper.py"
+python -c 'import ctypes, os; ctypes.CDLL(os.path.join(os.environ["FLAGCX_PATH"], "build/lib/libflagcx.so"))'
+```
+
+路径是必须由维护者替换的占位符。确认配置后重新运行失败的模型门禁任务。
+变量为空或所需文件缺失时，门禁在启动模型前失败；不能通过空库、跳过门禁或
+将未执行的模型测试记为通过来解决。`a34eded` 的 CI 已确认因变量为空而退出，
+尚未执行模型请求；这与同一轮 MUSA 单测 fixture 字段类型错误是两个独立问题。
+
 ## 编译路径进一步对照
 
 - 当前代码的 27B eager 复测已完成，5/5 场景、26/26 请求通过，结果位于 `/workspace/adapt-logs/gate-27b-eager-final/`。
