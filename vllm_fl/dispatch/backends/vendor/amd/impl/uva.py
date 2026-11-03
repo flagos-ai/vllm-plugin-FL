@@ -44,10 +44,15 @@ def _load_hip_runtime() -> ctypes.CDLL | None:
     return None
 
 
-def _mapped_device_pointer(cpu_tensor: torch.Tensor) -> int:
-    """Return the device-visible address of a pinned CPU tensor's storage."""
+def _mapped_device_pointer(host_ptr: int) -> int:
+    """Return the device-visible address for a pinned host address.
+
+    Takes a raw address rather than a tensor: the caller maps the *storage
+    base*, not ``tensor.data_ptr()``. ``data_ptr()`` already includes the
+    tensor's storage offset, and the offset is applied again when the view is
+    built, so mapping it here would shift the view twice.
+    """
     hip = _load_hip_runtime()
-    host_ptr = cpu_tensor.data_ptr()
     if hip is None:
         # Under UVA the host address is already device-addressable; use it
         # directly rather than failing outright.
@@ -64,6 +69,21 @@ def _mapped_device_pointer(cpu_tensor: torch.Tensor) -> int:
             "device view on this AMD device."
         )
     return device_ptr.value or host_ptr
+
+
+# Storage built by ``_construct_storage_from_data_pointer`` wraps a raw pointer
+# with no deleter, so it does not retain the host allocation the way upstream's
+# ``from_blob`` deleter does. Callers such as vLLM's ``UVAOffloader`` assign the
+# view to ``p.data`` and then drop their own handle on the pinned tensor; the
+# allocation would be recycled while the parameter still points into it, which
+# silently corrupts the data. Ownership cannot be attached to the returned
+# storage from Python — assigning to ``p.data`` keeps the StorageImpl, not the
+# Python tensor or any attribute on it — so the source storage is retained here,
+# keyed by its host address. Keys repeat because the pinned-memory caching
+# allocator reuses addresses, so this is bounded by the distinct pinned
+# allocations actually mapped, and retaining them is the intended lifetime: the
+# view *is* that memory.
+_mapped_sources: dict[int, torch.UntypedStorage] = {}
 
 
 def get_cuda_view_from_cpu_tensor_amd(cpu_tensor: torch.Tensor) -> torch.Tensor:
@@ -97,11 +117,17 @@ def get_cuda_view_from_cpu_tensor_amd(cpu_tensor: torch.Tensor) -> torch.Tensor:
             "a zero-copy host view cannot be constructed on this torch build."
         )
 
-    device_ptr = _mapped_device_pointer(cpu_tensor)
-    nbytes = cpu_tensor.untyped_storage().nbytes()
+    # Map the storage base, so that ``storage_offset`` below is applied exactly
+    # once; mapping ``data_ptr()`` would apply it twice and shift the view.
+    source = cpu_tensor.untyped_storage()
+    base_ptr = source.data_ptr()
+    device_ptr = _mapped_device_pointer(base_ptr)
     device = torch.device("cuda", torch.cuda.current_device())
 
-    storage = construct_storage(device_ptr, device, nbytes)
+    # Keep the pinned allocation alive for as long as any view of it can exist.
+    _mapped_sources.setdefault(base_ptr, source)
+
+    storage = construct_storage(device_ptr, device, source.nbytes())
     view = torch.empty(0, dtype=cpu_tensor.dtype, device=device)
     view.set_(
         storage,
