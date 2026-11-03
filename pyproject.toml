@@ -53,9 +53,7 @@ test = [
     "requests",
     "openai",
     "decorator",
-    # NVIDIA uses the official CUDA distribution; other backends may preinstall
-    # their 0.32.0 local-version wheel before installing test dependencies.
-    "vllm[audio]==0.32.0",
+    "vllm[audio]==0.28.0",
 ]
 
 [tool.setuptools_scm]
@@ -107,6 +105,7 @@ python_functions = ["test_*"]
 markers = [
     "gpu: marks tests as requiring single GPU (deselect with '-m \"not gpu\"')",
     "multi_gpu: marks tests as requiring multiple GPUs",
+    "serial: marks tests that must not run under pytest-xdist",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "e2e: marks tests as end-to-end tests",

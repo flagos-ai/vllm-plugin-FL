@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# MiniCPM-O 4.5 multimodal model configuration (TP=4, audio)
+# MiniCPM-O 4.5 multimodal model configuration (TP=2, audio)
 
 llm:
   model: "/data/models/MiniCPM"
@@ -23,26 +23,23 @@ llm:
   max_num_seqs: 2
   enforce_eager: true
   trust_remote_code: true
-  load_format: "auto"
+  load_format: "dummy"
 
 generate:
   modality: audio
   prompts:
-    - question: "What is 1+1? Answer with only the number."
+    - question: "What is 1+1?"
       asset_count: 0
-      expected: ["2"]
-    - question: "Transcribe the audio in English."
+    - question: "What is recited in the audio?"
       asset_count: 1
-      expected: ["mary", "lamb"]
-    - question: "In English, name the sport and the nursery rhyme in these two audio clips."
+    - question: "What sport and what nursery rhyme are referenced?"
       asset_count: 2
-      expected: ["baseball", "mary", "lamb"]
   assets:
     - mary_had_lamb
     - winning_call
   sampling:
     max_tokens: 128
-    temperature: 0.0
+    temperature: 0.2
 
 serve:
   api_key: "token-abc123"

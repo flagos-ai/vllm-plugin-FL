@@ -22,15 +22,7 @@ from vllm_fl.dispatch.backends.flaggems.impl.attention import (
     AttentionFLBackend,
     AttentionFLImpl,
     AttentionFLMetadataBuilder,
-    _split_kv_cache,
 )
-
-
-def _split_txda_kv_cache(kv_cache, head_size):
-    # Retain legacy vendor cache views while accepting vLLM 0.32 packed K/V.
-    if kv_cache.ndim == 5:
-        return kv_cache.unbind(0)
-    return _split_kv_cache(kv_cache, head_size)
 
 
 class TxdaSDPAAttentionBackend(AttentionFLBackend):
@@ -81,9 +73,9 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
 
     do_kv_cache_update and forward are overridden to avoid the flag_gems
     kernels (reshape_and_cache_flash / flash_attn_varlen_func) that compute
-    silently wrong values on TX8110. Cache views preserve both the legacy
-    separate K/V layout and vLLM 0.32 packed K/V storage. The metadata builder
-    disables cascade and graph capture.
+    silently wrong values on TX8110. The KV cache layout
+    (2, num_blocks, block_size, num_kv_heads, head_size) and metadata are
+    unchanged; the metadata builder disables cascade and graph capture.
     """
 
     can_return_lse_for_decode: bool = False
@@ -115,7 +107,7 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
         if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             return
 
-        key_cache, value_cache = _split_txda_kv_cache(kv_cache, self.head_size)
+        key_cache, value_cache = kv_cache.unbind(0)
         block_size = key_cache.shape[1]
         # Dynamic boolean indexing is expensive on TXDA, and the native
         # index_put_ fallback transfers the cache through the CPU. Copy only
@@ -175,7 +167,7 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
         if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
             return self._forward_encoder(query, key, value, output, attn_metadata)
 
-        key_cache, value_cache = _split_txda_kv_cache(kv_cache, self.head_size)
+        key_cache, value_cache = kv_cache.unbind(0)
         cu_seqlens_q = attn_metadata.query_start_loc
         seq_lens = attn_metadata.seq_lens
         block_table = attn_metadata.block_table
