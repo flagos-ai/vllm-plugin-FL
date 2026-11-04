@@ -187,7 +187,7 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
 ):
     if device.type != "gcu":
         pytest.skip("Requires Enflame")
-    from vllm.compilation.cuda_graph import CUDAGraphOptions, CUDAGraphWrapper
+    from vllm.compilation.cuda_graph import CUDAGraphOptions
     from vllm.compilation.monitor import set_cudagraph_capturing_enabled
     from vllm.config import CUDAGraphMode, VllmConfig
     from vllm.forward_context import BatchDescriptor, set_forward_context
@@ -227,7 +227,7 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
             torch.gcu.synchronize()
             entry = wrapper.concrete_cudagraph_entries[descriptor]
             assert isinstance(entry.cudagraph, torch.gcu.GCUGraph)
-            assert wrapper in CUDAGraphWrapper._all_instances
+            assert wrapper in GraphWrapper._all_instances
             for revision in (1, 2):
                 values = torch.full((2, 4), revision, dtype=torch.float32)
                 static_input.copy_(values)
@@ -240,8 +240,8 @@ def test_enflame_native_v1_wrapper_captures_and_replays_on_side_stream(
                     wrapper.concrete_cudagraph_entries[descriptor].cudagraph
                     is entry.cudagraph
                 )
-            # Elastic EP resets this upstream field before the next capture.
-            wrapper.concrete_cudagraph_entries = {}
+            # Shared lifecycle cleanup must release captures before recapture.
+            GraphWrapper.clear_all_graphs()
             with torch.gcu.stream(stream):
                 wrapper(static_input)
             torch.gcu.current_stream().wait_stream(stream)

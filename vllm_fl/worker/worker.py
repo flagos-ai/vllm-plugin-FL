@@ -37,6 +37,7 @@ from vllm.distributed.ec_transfer import (
     ensure_ec_transfer_initialized,
     ensure_ec_transfer_shutdown,
 )
+from vllm.distributed.elastic_ep.elastic_execute import ElasticEPScalingExecutor
 from vllm.distributed.eplb.eplb_utils import override_envs_for_eplb
 from vllm.distributed.kv_transfer import (
     ensure_kv_transfer_initialized,
@@ -95,6 +96,7 @@ from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
+from vllm_fl.compilation.graph import GraphWrapper
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.worker.model_runner import ModelRunnerFL
 from vllm_fl.worker.runtime import (
@@ -145,6 +147,14 @@ def _apply_worker_vendor_patches() -> None:
         patch_sampler_compile_for_iluvatar()
     except Exception as exc:
         logger.warning("Iluvatar worker patch failed: %s", exc)
+
+
+class ElasticEPScalingExecutorFL(ElasticEPScalingExecutor):
+    def _release_cuda_graphs(self) -> None:
+        model = getattr(self.worker.model_runner, "model", None)
+        if isinstance(model, GraphWrapper):
+            model.clear_graphs()
+        super()._release_cuda_graphs()
 
 
 class AsyncIntermediateTensors(IntermediateTensors):
@@ -221,9 +231,7 @@ class WorkerFL(WorkerBase):
         precision = envs.VLLM_FLOAT32_MATMUL_PRECISION
         torch.set_float32_matmul_precision(precision)
 
-        from vllm.distributed.elastic_ep.elastic_execute import ElasticEPScalingExecutor
-
-        self.elastic_ep_executor = ElasticEPScalingExecutor(self)
+        self.elastic_ep_executor = ElasticEPScalingExecutorFL(self)
         self.worker_sentinel: WorkerSentinel | None = None
         if self.parallel_config.enable_fault_tolerance:
             self.worker_sentinel = WorkerSentinel(worker=self)

@@ -370,3 +370,91 @@ def test_worker_config_update_keeps_runner_and_shared_config_in_sync():
     assert worker.load_config is worker.model_runner.load_config
     with pytest.raises(ValueError, match="cache_config"):
         worker.update_config({"cache_config": {}})
+
+
+@pytest.mark.parametrize("wrapper_kind", ["fl", "native"])
+def test_common_runner_unwraps_graph_models(monkeypatch, wrapper_kind):
+    import torch
+
+    from vllm.compilation.cuda_graph import CUDAGraphWrapper
+    from vllm.config import CUDAGraphMode
+
+    from vllm_fl.compilation.graph import GraphWrapper
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+    monkeypatch.setattr(
+        "vllm.platforms.current_platform.get_global_graph_pool", lambda: None
+    )
+    model = torch.nn.Linear(2, 2)
+    wrapper_cls = GraphWrapper if wrapper_kind == "fl" else CUDAGraphWrapper
+    wrapper = wrapper_cls(
+        model, SimpleNamespace(compilation_config=SimpleNamespace()), CUDAGraphMode.FULL
+    )
+    runner = ModelRunnerFL.__new__(ModelRunnerFL)
+    runner.model = wrapper
+    runner.drafter = SimpleNamespace(model=wrapper)
+    assert runner.get_model() is model
+    assert runner.get_draft_model() is model
+
+
+@pytest.mark.parametrize("wrapper_kind", ["fl", "native", "plain", "manager"])
+def test_elastic_ep_releases_graphs_before_native_cleanup(monkeypatch, wrapper_kind):
+    from contextlib import nullcontext
+
+    import torch
+
+    from vllm.compilation.cuda_graph import CUDAGraphWrapper
+    from vllm.config import CUDAGraphMode
+    from vllm.distributed.elastic_ep import elastic_execute
+
+    from vllm_fl.compilation.graph import GraphWrapper
+    from vllm_fl.worker.worker import ElasticEPScalingExecutorFL
+
+    monkeypatch.setattr(
+        "vllm.platforms.current_platform.get_global_graph_pool", lambda: None
+    )
+    model = torch.nn.Linear(2, 2)
+    runner = SimpleNamespace(get_model=lambda: model)
+    if wrapper_kind in {"fl", "native"}:
+        wrapper_cls = GraphWrapper if wrapper_kind == "fl" else CUDAGraphWrapper
+        runner.model = wrapper_cls(
+            model,
+            SimpleNamespace(compilation_config=SimpleNamespace()),
+            CUDAGraphMode.FULL,
+        )
+        runner.model.concrete_cudagraph_entries["capture"] = object()
+    elif wrapper_kind == "plain":
+        runner.model = model
+    events = []
+    if wrapper_kind == "manager":
+        runner.cudagraph_manager = SimpleNamespace(
+            release_graphs=lambda: events.append("manager")
+        )
+
+    def check_captures_released():
+        if wrapper_kind in {"fl", "native"}:
+            assert runner.model.concrete_cudagraph_entries == {}
+        events.append("reset")
+
+    monkeypatch.setattr(torch.compiler, "reset", check_captures_released)
+    monkeypatch.setattr(
+        elastic_execute, "set_current_vllm_config", lambda _: nullcontext()
+    )
+    monkeypatch.setattr(
+        elastic_execute, "reset_compile_wrapper", lambda raw: events.append(raw)
+    )
+    monkeypatch.setattr(elastic_execute.gc, "collect", lambda: None)
+    monkeypatch.setattr(torch.accelerator, "synchronize", lambda: events.append("sync"))
+    monkeypatch.setattr(
+        torch.accelerator, "empty_cache", lambda: events.append("empty")
+    )
+    executor = ElasticEPScalingExecutorFL.__new__(ElasticEPScalingExecutorFL)
+    executor.worker = SimpleNamespace(model_runner=runner, vllm_config=object())
+    executor._release_cuda_graphs()
+    expected = (["manager"] if wrapper_kind == "manager" else []) + [
+        "reset",
+        model,
+        "sync",
+        "empty",
+    ]
+    assert events == expected

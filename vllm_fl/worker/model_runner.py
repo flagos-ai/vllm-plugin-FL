@@ -3183,7 +3183,8 @@ class ModelRunnerFL(
         if not hasattr(self, "model"):
             raise ValueError("Cannot get model before model has been initialized")
         if isinstance(
-            self.model, (CUDAGraphWrapper, UBatchWrapper, BreakableCUDAGraphWrapper)
+            self.model,
+            (GraphWrapper, CUDAGraphWrapper, UBatchWrapper, BreakableCUDAGraphWrapper),
         ):
             # get raw model out of the cudagraph wrapper.
             return self.model.unwrap()
@@ -3195,7 +3196,8 @@ class ModelRunnerFL(
             return None
         model = getattr(drafter, "model", None)
         if isinstance(
-            model, (CUDAGraphWrapper, UBatchWrapper, BreakableCUDAGraphWrapper)
+            model,
+            (GraphWrapper, CUDAGraphWrapper, UBatchWrapper, BreakableCUDAGraphWrapper),
         ):
             return cast(nn.Module, model.unwrap())
         return cast(nn.Module | None, model)
@@ -6343,6 +6345,7 @@ class ModelRunnerFL(
         if current_platform.is_rocm():
             # Drop captured graphs before distributed teardown. On ROCm, delayed
             # graph destruction can surface HSA faults in the next engine startup.
+            GraphWrapper.clear_all_graphs()
             CUDAGraphWrapper.clear_all_graphs()
             BreakableCUDAGraphWrapper.clear_all_graphs()
             self.encoder_cudagraph_manager = None
@@ -6397,7 +6400,7 @@ class ModelRunnerFL(
         ):
             return None
 
-        # Use get_model() to unwrap CUDAGraphWrapper/UBatchWrapper, because
+        # Use get_model() to unwrap graph/ubatch wrappers, because
         # @runtime_checkable Protocol isinstance() checks do not work through
         # __getattr__ forwarding.
         from vllm.model_executor.models.interfaces import (
@@ -6469,8 +6472,10 @@ class ModelRunnerFL(
         profiling_pool = current_platform.graph_pool_handle()
         encoder_profiling_pool = current_platform.graph_pool_handle()
         original_pools: dict[int, Any] = {}
-        all_wrappers = list(CUDAGraphWrapper._all_instances) + list(
-            BreakableCUDAGraphWrapper._all_instances
+        all_wrappers = (
+            list(GraphWrapper._all_instances)
+            + list(CUDAGraphWrapper._all_instances)
+            + list(BreakableCUDAGraphWrapper._all_instances)
         )
         for instance in all_wrappers:
             original_pools[id(instance)] = instance.graph_pool
@@ -6542,12 +6547,15 @@ class ModelRunnerFL(
                     )
         finally:
             set_cudagraph_capturing_enabled(False)
+            GraphWrapper.clear_all_graphs()
             CUDAGraphWrapper.clear_all_graphs()
             BreakableCUDAGraphWrapper.clear_all_graphs()
             if encoder_cudagraph_manager is not None:
                 encoder_cudagraph_manager.clear()
-            all_wrappers = list(CUDAGraphWrapper._all_instances) + list(
-                BreakableCUDAGraphWrapper._all_instances
+            all_wrappers = (
+                list(GraphWrapper._all_instances)
+                + list(CUDAGraphWrapper._all_instances)
+                + list(BreakableCUDAGraphWrapper._all_instances)
             )
             for instance in all_wrappers:
                 if id(instance) in original_pools:

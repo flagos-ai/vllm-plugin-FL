@@ -406,7 +406,7 @@ def test_gcu_weak_ref_preserves_views_without_owning_storage(dtype_name):
     assert torch.gcu.memory_allocated() <= baseline
 
 
-def test_native_graph_registry_can_clear_fl_captures(monkeypatch):
+def test_fl_graph_registry_can_clear_fl_captures(monkeypatch):
     from vllm.compilation.cuda_graph import CUDAGraphWrapper
     from vllm.config import CUDAGraphMode
 
@@ -421,10 +421,11 @@ def test_native_graph_registry_can_clear_fl_captures(monkeypatch):
         ),
         CUDAGraphMode.FULL,
     )
-    assert isinstance(wrapper, CUDAGraphWrapper)
-    assert wrapper in CUDAGraphWrapper._all_instances
+    assert not isinstance(wrapper, CUDAGraphWrapper)
+    assert wrapper not in CUDAGraphWrapper._all_instances
+    assert wrapper in graph_module.GraphWrapper._all_instances
     wrapper.concrete_cudagraph_entries["capture"] = object()
-    CUDAGraphWrapper.clear_all_graphs()
+    graph_module.GraphWrapper.clear_all_graphs()
     assert wrapper.concrete_cudagraph_entries == {}
 
 
