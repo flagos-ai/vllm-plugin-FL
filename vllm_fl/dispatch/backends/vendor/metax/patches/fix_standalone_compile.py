@@ -10,6 +10,7 @@
 
 import torch
 import copy
+import inspect
 
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._functorch._aot_autograd.autograd_cache import (
@@ -46,6 +47,20 @@ def autograd_cache_key(
     return key, debug_lines
 
 
+def _get_compiled_artifact_type() -> type[CompiledArtifact]:
+    """Resolve the native cache artifact before compilation has side effects."""
+    if not inspect.isabstract(CompiledArtifact):
+        return CompiledArtifact
+
+    from torch._inductor.standalone_compile import CacheCompiledArtifact
+
+    if inspect.isabstract(CacheCompiledArtifact):
+        raise TypeError(
+            "MetaX standalone compilation requires a concrete CacheCompiledArtifact"
+        )
+    return CacheCompiledArtifact
+
+
 def standalone_compile_impl(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[InputType],
@@ -53,6 +68,8 @@ def standalone_compile_impl(
     dynamic_shapes: Any,
     options: Any,
 ) -> CompiledArtifact:
+    artifact_type = _get_compiled_artifact_type()
+
     from torch.compiler._cache import CacheArtifactManager
 
     from torch._inductor.compile_fx import compile_fx
@@ -124,7 +141,7 @@ def standalone_compile_impl(
                 "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
-    return CompiledArtifact(compiled_fn, artifacts)
+    return artifact_type(compiled_fn, artifacts)
 
 
 def standalone_compile(
