@@ -9,8 +9,8 @@ FlagGems stay on the tested versions.
 
 | Component | Validated version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci` |
-| Image digest | `sha256:eb904d40a92e9769f358f4d81c8043acfbc30b1b077f0a31210be6316ec0cf18` |
+| Prebuilt image | `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-lluvatar-ci` |
+| Image digest | `sha256:dc7e26da9b4d7ea28bb972b1619aa61acfc8e784f5edb9da2568dd5e61502ca8` |
 | Base image | `harbor.baai.ac.cn/plugin/iluvatar-corex4.5.0-flagtree0.6.0-triton3.6.0-cxnone-vllm_fl0.24.0:20260909` |
 | Chip | Iluvatar CoreX BI-V150 |
 | vLLM | `0.28.0+empty` (`VLLM_TARGET_DEVICE=empty`, no `vllm._C`) |
@@ -110,7 +110,7 @@ in scripts or shell history.
 ```bash
 docker login harbor.baai.ac.cn
 
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci
+export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-lluvatar-ci
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 ```

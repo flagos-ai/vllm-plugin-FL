@@ -8,7 +8,8 @@ editable installation is required. The recipe uses two Hygon BW1000 64 GiB DCUs.
 
 | Component | Version or configuration |
 |---|---|
-| Image (Linux AMD64) | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d` |
+| Image (Linux AMD64) | `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-hygon-ci` |
+| Image manifest | `sha256:5e3241d99ac74ab00c969320d4d9f7b146873d8fd13e184f0ef5cd05e0c584ba` |
 | Vendor base | DTK 26.04 / Ubuntu 22.04 / Python 3.10.12 |
 | vLLM | Distribution `0.28.0+empty`; runtime `0.28.0` |
 | PyTorch | Distribution `2.10.0+das.opt1.dtk2604.20260325.g6b060a`; runtime `2.10.0` |
@@ -60,7 +61,7 @@ must contain the original model configuration, tokenizer, and all checkpoint
 shards. Set `MODEL_ROOT` to the parent directory containing these models.
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d
+export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-hygon-ci
 export MODEL_ROOT=/public-flash/models
 export MODEL_NAME=Qwen3.6-27B
 export SERVED_MODEL=hygon-qwen36
@@ -198,7 +199,7 @@ existing 40-character commit SHA.
 docker buildx version
 git diff --exit-code HEAD -- vllm_fl pyproject.toml setup.py README.md LICENSE
 bash docker/build.sh --platform hygon --target ci \
-  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl \
+  --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl \
   --image-tag v0.28.0-hygon-ci
 ```
 
@@ -206,7 +207,7 @@ The Hygon Dockerfile retains the vendor DTK/PyTorch base and its noneditable
 FlagGems/FlagTree installation, then builds and installs ordinary wheels for
 the empty vLLM and this plugin.
 Current source builds and CI also install **FlagGems-vllm v0.2.0**, commit
-[`b5c2c2249319277ccda4d41aa0f65164bd9b2a19`](https://github.com/flagos-ai/FlagGems-vllm/commit/b5c2c2249319277ccda4d41aa0f65164bd9b2a19),
+[`f775b37f3066e2935742d26c7592a5dd55499159`](https://github.com/flagos-ai/FlagGems-vllm/commit/f775b37f3066e2935742d26c7592a5dd55499159),
 through the shared installer, alongside the vendor FlagGems package. Its
 package metadata still reports `0.1.0`; the commit identifies the release.
 The pinned image and the [historical validation in PR #576](https://github.com/flagos-ai/vllm-plugin-FL/pull/576)

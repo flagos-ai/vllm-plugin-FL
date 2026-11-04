@@ -9,8 +9,8 @@ tested versions.
 
 | Component | Validated version or configuration |
 |---|---|
-| Prebuilt image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci` |
-| Image manifest | `sha256:ad7a8dfc9f760d9878b6634a4009aefe98afd58e179f01c62333e935ee130e6f` |
+| Prebuilt image | `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-cuda-ci` |
+| Image manifest | `sha256:d27953eda9f39a3884fc9c7433e761da4737b8de341eac5a0f7b0209e400bf7a` |
 | Base image | `vllm/vllm-openai:v0.28.0-cu129` |
 | vLLM | `0.28.0` |
 | Python | `3.12.3` |
@@ -78,7 +78,7 @@ in scripts or shell history.
 ```bash
 docker login harbor.baai.ac.cn
 
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
+export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-cuda-ci
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 ```

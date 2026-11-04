@@ -18,7 +18,7 @@
 platform: nvidia
 
 # Docker image for this hardware
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-cuda-ci@sha256:96f89fec934a02a59b12cc1cb88c8372249d8b615039794bcefdb40fb04d5a3a
 
 # Runner labels for this hardware (self-hosted)
 runner_labels:

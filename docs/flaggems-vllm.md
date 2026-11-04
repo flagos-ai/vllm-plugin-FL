@@ -12,7 +12,7 @@ baseline NVIDIA blacklist, without the migration's temporary `mm` exclusion.
 Start with the image and runtime checks in the [NVIDIA guide](usage/nvidia.md):
 
 ```text
-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-cuda-ci
+harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-cuda-ci
 ```
 
 In a container with this checkout mounted at `/workspace/vllm-plugin-FL`:

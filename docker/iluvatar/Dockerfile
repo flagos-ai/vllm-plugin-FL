@@ -19,7 +19,7 @@
 # Example:
 #   mkdir -p docker/iluvatar/wheels
 #   cp /path/to/vllm-0.28.0+empty-*.whl docker/iluvatar/wheels/
-#   docker build --target ci -t harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-iluvatar-ci -f docker/iluvatar/Dockerfile docker/iluvatar
+#   docker build --target ci -t harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-lluvatar-ci -f docker/iluvatar/Dockerfile docker/iluvatar
 ARG ILUVATAR_BASE_IMAGE=harbor.baai.ac.cn/plugin/iluvatar-corex4.5.0-flagtree0.6.0-triton3.6.0-cxnone-vllm_fl0.24.0:20260909
 
 # ---------- base stage ----------

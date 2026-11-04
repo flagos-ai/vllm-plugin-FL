@@ -85,6 +85,33 @@ class TestCase:
 # ---------------------------------------------------------------------------
 
 
+SCOPES = ("unit", "functional", "e2e", "benchmark")
+
+
+def parse_scopes(scope: str) -> set[str]:
+    """Expand a ``--scope`` value into the concrete scopes to run.
+
+    Accepts a single scope, ``all``, or a comma-separated list such as
+    ``unit,functional`` so that one invocation produces one merged report
+    instead of two runs overwriting each other's report files.
+    """
+    requested = [item.strip() for item in scope.split(",") if item.strip()]
+    if not requested:
+        raise ValueError("--scope must name at least one scope")
+
+    resolved: set[str] = set()
+    for item in requested:
+        if item == "all":
+            resolved.update(SCOPES)
+        elif item in SCOPES:
+            resolved.add(item)
+        else:
+            raise ValueError(
+                f"unknown scope {item!r}; choose from {', '.join(('all', *SCOPES))}"
+            )
+    return resolved
+
+
 class TestRunner:
     """Platform-aware test runner that delegates to pytest.
 
@@ -112,6 +139,7 @@ class TestRunner:
     ):
         self.config = PlatformConfig.load(platform, device)
         self.scope = scope
+        self.scopes = parse_scopes(scope)
         self.stage = stage
         self.task = task
         self.model = model
@@ -333,19 +361,22 @@ class TestRunner:
         - ``e2e``: end-to-end model tests (inference, serving)
         - ``benchmark``: benchmark tests selected by platform YAML
         - ``all``: all of the above
+
+        Several scopes may be combined as a comma-separated list, e.g.
+        ``unit,functional``.
         """
         cases: list[TestCase] = []
 
-        if self.scope in ("all", "unit"):
+        if "unit" in self.scopes:
             cases.extend(self._discover_unit_tests())
 
-        if self.scope in ("all", "functional"):
+        if "functional" in self.scopes:
             cases.extend(self._discover_functional_tests())
 
-        if self.scope in ("all", "e2e"):
+        if "e2e" in self.scopes:
             cases.extend(self._discover_e2e_tests())
 
-        if self.scope in ("all", "benchmark"):
+        if "benchmark" in self.scopes:
             cases.extend(self._discover_benchmark_tests())
 
         return cases
@@ -861,6 +892,15 @@ class TestRunner:
 # ---------------------------------------------------------------------------
 
 
+def _scope_arg(value: str) -> str:
+    """Validate ``--scope`` early so a typo fails with a usage message."""
+    try:
+        parse_scopes(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Unified test runner with platform-aware configuration.",
@@ -879,10 +919,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--scope",
-        choices=["all", "unit", "functional", "e2e", "benchmark"],
+        type=_scope_arg,
         default="all",
         help="Which test scope to run: unit, functional (ops/compilation/"
-        "distributed), e2e (inference/serving), benchmark, or all (default: all)",
+        "distributed), e2e (inference/serving), benchmark, or all (default: all). "
+        "Accepts a comma-separated list, e.g. unit,functional, which produces a "
+        "single merged report",
     )
     parser.add_argument(
         "--stage",

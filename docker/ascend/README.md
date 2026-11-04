@@ -45,14 +45,15 @@ optional dependency conflicts.
 Build the image from the repository root:
 
 ```bash
-docker/build.sh \
-  --platform ascend \
-  --target ci \
-  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
+docker/build.sh --platform ascend --target ci
 ```
 
+This produces `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci`,
+matching `ci_image` in `.github/configs/ascend.yml`. Pass `--image-name` or
+`--image-tag` only when publishing somewhere else.
+
 The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` image. Build and publish a
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci` image. Build and publish a
 replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
 changing the configuration does not publish it.
 `.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an
