@@ -8,7 +8,7 @@ import torch
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 
-logger = init_logger(__name__)
+logger = init_logger("vllm.metax_v2")
 
 
 def _has_native_mapped_cpu_view() -> bool:

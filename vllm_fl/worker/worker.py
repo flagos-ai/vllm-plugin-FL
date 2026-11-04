@@ -527,7 +527,7 @@ class WorkerFL(WorkerBase):
                 self.vllm_config, self.device
             )
             if getattr(current_platform, "vendor_name", None) == "metax":
-                logger.info_once(
+                init_logger("vllm.metax_v2").info_once(
                     "MetaX V2 model runner: %s.%s",
                     type(self.model_runner).__module__,
                     type(self.model_runner).__qualname__,

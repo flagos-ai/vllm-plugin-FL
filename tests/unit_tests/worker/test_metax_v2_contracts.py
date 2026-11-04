@@ -303,6 +303,7 @@ def test_worker_prepares_compatibility_before_official_v2_constructor(runtime):
     )
     calls = []
     logged_types = []
+    logger_names = []
 
     def official(config, device):
         assert not runtime.buffers.is_uva_available()
@@ -324,8 +325,11 @@ def test_worker_prepares_compatibility_before_official_v2_constructor(runtime):
     scope = {
         "self": runner,
         "current_platform": runtime.platform,
-        "logger": SimpleNamespace(
-            info_once=lambda message, *args: logged_types.append(args)
+        "init_logger": lambda name: (
+            logger_names.append(name)
+            or SimpleNamespace(
+                info_once=lambda message, *args: logged_types.append(args)
+            )
         ),
         "__builtins__": {**vars(builtins), "__import__": selected_import},
     }
@@ -342,6 +346,7 @@ def test_worker_prepares_compatibility_before_official_v2_constructor(runtime):
     # The constructor fixture returns an ordinary object. The diagnostic must
     # report its real type, rather than hard-coding the expected runner name.
     assert logged_types == [("builtins", "object")]
+    assert logger_names == ["vllm.metax_v2"]
 
 
 @pytest.mark.parametrize(
