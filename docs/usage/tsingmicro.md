@@ -292,7 +292,9 @@ All 18 audited BF16 cases passed on TXDA: decode and prefill MLP shapes,
 vision projection, LM head and narrow GDN projections. The independent CPU
 float32 reference is rounded to BF16; the normalized L2 limit is 0.01 and
 maximum absolute error limit is 0.002. The largest observed absolute error
-was 0.0009765625. The separate FP32 router case failed its normalized L2
+was 0.0009765625. A further 30 black-box product GEMM cases passed across feature-strided,
+transposed, expanded-row and noncontiguous-weight inputs, without modifying
+input or weight storage. The separate FP32 router case failed its normalized L2
 limit, so FP32 is excluded from this adapter.
 
 Explicit CPU thread settings preserve 32 threads when vLLM creates each
@@ -322,6 +324,23 @@ including the unrotated head tail. Selecting three rows from a 262144-by-64
 cache took about 1.2 ms in the isolated probe; this is not a model throughput
 measurement.
 
+## Empty-build MoE routing
+
+V2 supplies a padding mask to MoE routing even when a batch contains no padded
+rows. The upstream masked path invokes `_moe_C.topk_softmax`, which an empty
+build does not contain. TXDA routes these small logits through CPU FP32
+softmax/sigmoid and stable expert selection. It retains lower-ID tie ordering,
+renormalization, nonfinite-score handling, padding IDs of -1 and source-row
+indices. Expert GEMMs remain on device and other backends retain their paths.
+
+```bash
+source /work/task/env.sh
+python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_router.py \
+  --output /work/task/outputs/router-probe.json
+```
+
+All 48 device comparisons passed against an independent scalar CPU oracle.
+
 ## Model acceptance
 
 Use the unchanged cases in `tools/adaptation-gate-cases` for both
@@ -331,7 +350,9 @@ concurrent text requests, eight concurrent image requests and eight mixed
 requests. Keep the original 512/128-token budgets, image fixtures and quality
 assertions. Graph acceptance is outside this eager delivery.
 
-Run one hardware job at a time in the isolated container. In a host tmux job:
+Give each model an exclusive allocated device group. Concurrent runs use
+distinct physical masks and server ports; each worker owns one device. In a
+host tmux job:
 
 ```bash
 source /work/task/env.sh
@@ -358,7 +379,8 @@ MODEL_PATH=/models/Qwen/Qwen3.6-27B PORT=18320 \
   RESULTS_DIR=/work/task/outputs/adaptation-gate bash ./run_test.sh
 ```
 
-Then shut down the first server and repeat for the MoE model. Send SIGTERM to
+Repeat for the MoE model on an independent device group and unused port, or
+shut down the first server before reusing its devices. Send SIGTERM to
 the API server and allow at least 90 seconds for cleanup before forcing owned
 workers to exit. The TXDA communicator bounds native Abort to five seconds;
 Abort does not guarantee complete SDK resource release or safe in-process
@@ -366,7 +388,7 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **661 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **729 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper
@@ -376,7 +398,9 @@ context-free SDPA page capabilities, and BF16 GEMM math, dispatch guards and
 provider error propagation. KV zeroing regressions cover seven physical
 layouts, virtual blocks, mixed-dtype overlays, storage lifetime, manager mapping
 and complete ID validation before any write. MRoPE regressions check independent
-lookup/rotation oracles, partial tails, dispatch isolation and error propagation. The Mamba cases include
+lookup/rotation oracles, partial tails, dispatch isolation and error propagation.
+MoE routing cases cover both scores, padding, nonfinite inputs, stable ties,
+normalization and backend isolation. The Mamba cases include
 overlapping copies, padded storage, multiple types, uniform cache groups,
 noncopyable tail states and failed-plan rollback.
 
@@ -397,8 +421,11 @@ validated the current setup on physical devices 4 and 5 with SHM enabled and
 preflights passed all 30 checks. No worker stream patch was needed. Explicitly
 disabling SHM and forcing Socket failed in both FlagCX and native TCCL probes
 in this image; that configuration is not the acceptance setup. The 27B gate
-is running with the current KV/MRoPE/GEMM combination; 35B is queued after it.
-Neither model gate has passed yet.
+has passed its long text and eight concurrent text requests (9/26) and is
+running image cases. The 35B run exposed the missing masked top-k operator;
+a native routing fix passed 68 CPU cases and 48 hardware comparisons before
+restarting its full gate. The models now run in parallel on physical groups
+4,5 and 2,3. Neither complete model gate has passed yet.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful

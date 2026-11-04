@@ -33,6 +33,63 @@ def _is_ascend_npu_tensor(value: torch.Tensor) -> bool:
     return value.device.type == "npu"
 
 
+def _is_txda_tensor(value: torch.Tensor) -> bool:
+    return value.device.type == "txda"
+
+
+def _txda_native_fused_topk(
+    hidden_states: torch.Tensor,
+    gating_output: torch.Tensor,
+    topk: int,
+    renormalize: bool,
+    indices_type: torch.dtype | None,
+    scoring_func: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Reference TXDA routing, including vLLM 0.32's padded-token contract.
+
+    Empty builds have no _moe_C kernels for upstream's masked path. Keep this
+    small FP32 routing calculation on the CPU rather than using the vendor
+    FP32 kernels that failed precision checks. Expert GEMMs stay on device.
+    """
+    logits = gating_output.to(device="cpu", dtype=torch.float32)
+    if scoring_func == "softmax":
+        scores = torch.softmax(logits, dim=-1)
+    elif scoring_func == "sigmoid":
+        scores = torch.sigmoid(logits)
+    else:
+        raise ValueError(f"Unsupported scoring function: {scoring_func}")
+    # The upstream C++ kernels clear nonfinite scores before selecting experts.
+    scores = torch.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+    if not 0 <= topk <= scores.shape[-1]:
+        raise ValueError("topk must be between zero and the number of experts")
+    # C++ selects descending scores and gives the lower expert ID priority on
+    # ties. torch.topk does not promise that tie order; stable sorting does.
+    ids = torch.argsort(scores, dim=-1, descending=True, stable=True)[:, :topk]
+    weights = scores.gather(1, ids)
+    if renormalize:
+        denominator = weights.sum(dim=-1, keepdim=True)
+        weights = weights / torch.where(
+            denominator > 0, denominator, torch.ones_like(denominator)
+        )
+
+    num_tokens = hidden_states.shape[0]
+    is_padding = _get_padding_mask(num_tokens)
+    if is_padding is not None:
+        # Padding suppresses expert work through -1 IDs; the upstream kernel
+        # still returns the selected weights and the ordinary source-row map.
+        ids = ids.masked_fill(is_padding.to(device="cpu").unsqueeze(1), -1)
+    source_rows = torch.arange(num_tokens, dtype=torch.int32).unsqueeze(1)
+    source_rows = source_rows + torch.arange(topk, dtype=torch.int32) * num_tokens
+    return (
+        weights.to(device=hidden_states.device),
+        ids.to(
+            device=hidden_states.device,
+            dtype=torch.int32 if indices_type is None else indices_type,
+        ),
+        source_rows.to(device=hidden_states.device),
+    )
+
+
 def _sqrtsoftplus_topk(
     gating_output: torch.Tensor,
     e_score_correction_bias: torch.Tensor | None,
@@ -78,6 +135,11 @@ def fused_topk(
     scoring_func: str = "softmax",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
+
+    if _is_txda_tensor(gating_output):
+        return _txda_native_fused_topk(
+            hidden_states, gating_output, topk, renormalize, indices_type, scoring_func
+        )
 
     # The FL kernel currently implements the unpadded softmax path. Preserve
     # v0.28.0 padding and sigmoid semantics by delegating those cases upstream.
