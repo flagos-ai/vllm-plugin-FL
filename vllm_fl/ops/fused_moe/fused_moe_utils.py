@@ -22,7 +22,7 @@ from vllm.model_executor.layers.fused_moe.utils import (
     _resize_cache,
     moe_kernel_quantize_input,
 )
-import os
+
 try:
     from vllm.model_executor.layers.quantization.utils.flashinfer_utils import (
         FlashinferMoeBackend,
@@ -50,8 +50,10 @@ except ImportError:
 
         def __str__(self):
             return self.value
+
+
 from vllm.platforms import current_platform
-from vllm.triton_utils import tl, triton
+from vllm.triton_utils import tl
 
 from vllm_fl.dispatch import CachedOp, call_op
 from vllm_fl.ops.fused_moe.activation import apply_moe_activation

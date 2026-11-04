@@ -126,3 +126,8 @@ A standalone probe verifies the actual FlagGems `zeros` provider on 42
 shape/dtype combinations and three native NPU graph replays. CPU `zeros`
 retains its native provider. The CI image also exercises xdist's success and
 failure reporting before the NPU interpreter shutdown workaround takes effect.
+
+The clean CI candidate also passes both models' configured offline inference
+and serving jobs (four configurations, six pytest checks), plus the serving
+benchmark smoke. These checks use the CI's eager controls; graph model
+validation is the separate 104-request matrix above.
