@@ -435,32 +435,33 @@ preprocessing/sampling preflight have passed with the opt-in bootstrap.
 The pinned source-built FlagCX passed the TP2 preflight: 15 checks on each rank,
 including float32/bfloat16 reductions, int32/int64 aggregation, variable-size
 collectives, broadcast and nested groups. All tensor communication used FlagCX.
-Qwen3.6-27B has reached API readiness with both ranks reporting the actual
-upstream V2 runner class and pinned FlagCX library. The two-model hardware
-acceptance gate has **not passed**. The earlier inference run was stopped
-to address CPU GEMM fallback performance. After the native KV zeroer passed all
-eight hardware cases, profiling identified the MRoPE cache lookup bottleneck.
-Its native lookup then passed 28 hardware comparisons. Subsequent diagnosis
-validated the current setup on physical devices 4 and 5 with SHM enabled and
+The native KV zeroer passed eight hardware cases, MRoPE lookup passed 28
+comparisons, and scoped GDN state copying passed eight product hardware cases.
+The reproducible communication setup uses SHM enabled and
 `NCCL_SOCKET_IFNAME=ens29f0`: both default-stream and nondefault-stream FlagCX
 preflights passed all 30 checks. No worker stream patch was needed. Explicitly
 disabling SHM and forcing Socket failed in both FlagCX and native TCCL probes
-in this image; that configuration is not the acceptance setup. The pre-state-indexing
-27B run passed long text, eight concurrent text requests and single-image OCR
-(10/26); the 35B run with native routing passed both text scenarios (9/26).
-After the scoped GDN state-copy adapter passed its eight product hardware
-cases and all CPU regressions, complete acceptance is being rerun on the final
-runtime code `9ae5f50`. The earlier 27B r16 and 35B r7 runs have drained and
-exited; their partial results do not count toward this final acceptance.
-The current 27B r17 run uses physical devices 6,7 and port 18322: the original
-long-text scenario passed (1/26 requests), and concurrent text is running.
-The current 35B r8 run uses physical devices 2,3 and port 18321: single text
-and eight concurrent text requests passed (9/26 requests), and OCR is running.
-Both ranks of each model have confirmed the real upstream V2 runner, FlagCX
-and scoped GDN state copying. These results are partial: neither model's
-complete final-code gate has passed. All original budgets and assertions
-remain unchanged.
-The historical 0.28 TP8 passes do not establish 0.32 correctness.
+in this image; that configuration is not the acceptance setup.
+
+Final runtime code `9ae5f50` has the following model acceptance results:
+
+| Model | Run / physical devices / port | Final-code result |
+| --- | --- | --- |
+| Qwen3.6-35B-A3B | r8 / 2,3 / 18321 | **5/5 scenarios and 26/26 requests PASS** |
+| Qwen3.6-27B | r17 / 6,7 / 18322 | Long text passed (1/26); concurrent short answers under investigation |
+
+For 35B, all 26 saved responses were independently rechecked against the
+original inputs, image fixtures, required terms and ten quality checks.
+Both ranks recorded the actual upstream V2 runner, pinned FlagCX library,
+native BF16 GEMM, KV zeroer and scoped GDN adapter. The supervisor reported
+passed; test, host and server exit codes were all zero, with no forced cleanup.
+
+The 27B concurrent short-answer scenario has generated over 400 tokens versus
+21 in the earlier baseline, with five requests still running at this snapshot.
+The cause is unconfirmed; the GDN adapter has not been established as the cause.
+The complete 27B gate, and therefore the two-model acceptance, **has not passed**.
+All original budgets and assertions remain unchanged. Earlier partial runs and
+historical 0.28 TP8 results do not count toward this final acceptance.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful
 imports are not model acceptance passes.
