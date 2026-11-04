@@ -10,7 +10,7 @@ env_defaults:
   GEMS_VENDOR: sunrise
   VLLM_PLUGINS: fl
   USE_FLAGGEMS: "1"
-  VLLM_USE_V2_MODEL_RUNNER: "0"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
   TA_CLOSE_GRAPH_MEMORY: "1"
   PCCL_PROTO: Simple
 device_overrides:
@@ -42,6 +42,12 @@ persistence_m:
         - tests/unit_tests/test_sunrise_device_utils.py
         - tests/unit_tests/test_sunrise_python310.py
         - tests/unit_tests/test_sunrise_ir.py
+        - tests/unit_tests/test_sunrise_compiler.py
+      exclude: []
+    functional:
+      include:
+        - tests/functional_tests/ops/test_sunrise_kv_cache.py
+        - tests/functional_tests/ops/test_sunrise_activation_compat.py
       exclude: []
     e2e:
       serving:
