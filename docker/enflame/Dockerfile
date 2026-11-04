@@ -237,6 +237,10 @@ print(f"vLLM {vllm} / torch {torch} / torch_gcu {torch_gcu} / "
       "— package metadata OK; device/Gate validation remains separate")
 PY
 
+# Bash sources the runtime's profiles through its inherited BASH_ENV. Apply
+# the inference graph setting after the vendor profile in every image stage.
+COPY runtime_env.sh /etc/profile.d/zz-vllm-fl-enflame.sh
+
 WORKDIR /workspace
 
 # ---------- dev stage ----------
