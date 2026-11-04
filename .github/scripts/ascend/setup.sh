@@ -22,7 +22,7 @@ for package, expected_version in {
     "vllm": "0.28.0+empty",
     "torch": "2.10.0+cpu",
     "torch-npu": "2.10.0",
-    "flagtree": "0.6.2a1+ascend3.5",
+    "flagtree": "0.7.0+ascend3.5",
     "cann-shmem": "1.6.0",
     "pytest": "8.3.2",
     "coverage": "7.16.1",

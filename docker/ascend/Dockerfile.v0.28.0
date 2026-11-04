@@ -16,13 +16,15 @@
 ARG ASCEND_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.0.0-910c@sha256:6a4692bfa392be9cc97bcf5302362b9393d9867a2b59d23c873fcde4c08cca04
 FROM ${ASCEND_BASE_IMAGE} AS release
 ARG VLLM_VERSION=0.28.0
-ARG FLAGTREE_VERSION=0.6.2a1+ascend3.5
-ARG FLAGGEMS_VERSION=3b406c36212744b98b9720bf6d0a5387c09fe96b
+ARG FLAGTREE_VERSION=0.7.0+ascend3.5
+ARG FLAGGEMS_VERSION=5.4.0
 RUN test "${VLLM_VERSION}" = 0.28.0 \
- && test "${FLAGTREE_VERSION}" = 0.6.2a1+ascend3.5 \
- && test "${FLAGGEMS_VERSION}" = 3b406c36212744b98b9720bf6d0a5387c09fe96b
+ && test "${FLAGTREE_VERSION}" = 0.7.0+ascend3.5 \
+ && test "${FLAGGEMS_VERSION}" = 5.4.0
 ENV VLLM_PLUGINS=fl VLLM_FL_PLATFORM=ascend USE_C_EXTENSION=0 VLLM_USE_V2_MODEL_RUNNER=0
 ENV PIP_PROGRESS_BAR=off
+# Expose the base compiler to non-login build steps as well as Bash sessions.
+ENV PYTHONPATH=/opt/flagtree
 ENV OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 RUN mkdir -p /opt/release \
  && printf '%s\n' \
@@ -31,12 +33,13 @@ RUN mkdir -p /opt/release \
       torchvision==0.25.0+cpu \
       torchaudio==2.10.0+cpu \
       numpy==1.26.4 \
-      flagtree==0.6.2a1+ascend3.5 \
-      flag-gems==5.0.2 \
+      flagtree==0.7.0+ascend3.5 \
+      flag-gems==5.4.0 \
+      flagcx==0.14.0+cann9.0.0.910c \
       cann-shmem==1.6.0 \
-      packaging==26.0 \
-      PyYAML==6.0.3 \
-      sqlalchemy==2.0.48 \
+      packaging==26.3 \
+      PyYAML==6.0.1 \
+      sqlalchemy==2.0.55 \
       'opencv-python-headless>=4.11.0,<4.12' \
       > /opt/release/constraints.txt \
  && printf '%s\n' \
@@ -82,15 +85,15 @@ RUN mkdir -p /opt/release \
       fastapi-cli==0.0.24 \
       fastapi-cloud-cli==0.17.1 \
       fastar==0.11.0 \
-      filelock==3.29.0 \
-      flag-gems==5.0.2 \
-      flagtree==0.6.2a1+ascend3.5 \
+      filelock==4.2.4 \
+      flag-gems==5.4.0 \
+      flagtree==0.7.0+ascend3.5 \
       flask==3.1.3 \
       frozenlist==1.8.0 \
-      fsspec==2026.4.0 \
+      fsspec==2026.9.0 \
       gguf==0.19.0 \
       googleapis-common-protos==1.75.0 \
-      greenlet==3.5.5 \
+      greenlet==3.5.6 \
       grpcio==1.80.0 \
       h11==0.16.0 \
       h2==4.3.0 \
@@ -120,7 +123,7 @@ RUN mkdir -p /opt/release \
       lm-format-enforcer==0.11.3 \
       loguru==0.7.3 \
       markdown-it-py==4.2.0 \
-      markupsafe==3.0.3 \
+      markupsafe==3.0.4 \
       mcp==1.27.1 \
       mdurl==0.1.2 \
       memcache-hybrid==1.1.1 \
@@ -148,14 +151,14 @@ RUN mkdir -p /opt/release \
       opentelemetry-semantic-conventions==0.62b1 \
       opentelemetry-semantic-conventions-ai==0.5.1 \
       outlines-core==0.2.14 \
-      packaging==26.0 \
+      packaging==26.3 \
       pandas==3.0.3 \
       pandas-stubs==3.0.3.260530 \
       partial-json-parser==0.2.1.1.post7 \
       pathlib2==2.3.7.post1 \
       pathspec==1.1.1 \
-      pillow==12.2.0 \
-      pip==26.1.1 \
+      pillow==13.0.0 \
+      pip==26.2.2 \
       pluggy==1.6.0 \
       priority==2.0.0 \
       prometheus-client==0.25.0 \
@@ -165,7 +168,7 @@ RUN mkdir -p /opt/release \
       psutil==6.0.0 \
       py-cpuinfo==9.0.0 \
       pybase64==1.4.3 \
-      pybind11==3.0.4 \
+      pybind11==3.0.3 \
       pycountry==26.2.16 \
       pycparser==3.0 \
       pydantic==2.13.4 \
@@ -184,7 +187,7 @@ RUN mkdir -p /opt/release \
       python-dotenv==1.2.2 \
       python-json-logger==4.1.0 \
       python-multipart==0.0.28 \
-      pyyaml==6.0.3 \
+      pyyaml==6.0.1 \
       pyzmq==27.1.0 \
       quart==0.20.0 \
       ray==2.48.0 \
@@ -207,7 +210,7 @@ RUN mkdir -p /opt/release \
       sniffio==1.3.1 \
       soundfile==0.13.1 \
       soxr==1.1.0 \
-      sqlalchemy==2.0.48 \
+      sqlalchemy==2.0.55 \
       sse-starlette==3.4.4 \
       starlette==1.6.0 \
       supervisor==4.3.0 \
@@ -221,7 +224,7 @@ RUN mkdir -p /opt/release \
       tqdm==4.67.3 \
       transformers==5.5.3 \
       typer==0.25.1 \
-      typing-extensions==4.15.0 \
+      typing-extensions==4.16.0 \
       typing-inspection==0.4.2 \
       urllib3==2.7.0 \
       uvicorn==0.46.0 \
@@ -231,39 +234,39 @@ RUN mkdir -p /opt/release \
       watchfiles==1.1.1 \
       websockets==16.0 \
       werkzeug==3.1.8 \
-      wheel==0.47.0 \
+      wheel==0.48.0 \
       wsproto==1.3.2 \
       xgrammar==0.2.6 \
       yarl==1.23.0 \
       zipp==3.23.1 \
       > /opt/release/reference-constraints.txt
-# Keep source revisions paired with the validated runtime and dispatch policy.
-RUN git clone --depth 1 --branch v0.28.0 https://github.com/vllm-project/vllm.git /opt/src/vllm \
- && test "$(git -C /opt/src/vllm rev-parse HEAD)" = 2cf0a6915ce544dc493a0990f2ea38d81601128a \
- && git clone --no-checkout https://github.com/flagos-ai/vllm-plugin-FL.git /opt/src/plugin \
- && git -C /opt/src/plugin fetch origin refs/pull/487/head \
- && git -C /opt/src/plugin checkout --detach 9a7eaf1191999422682bf5c6d1cf7b3f88d253b5 \
- && git clone https://github.com/flagos-ai/FlagGems.git /opt/src/FlagGems \
- && git -C /opt/src/FlagGems checkout --detach 3b406c36212744b98b9720bf6d0a5387c09fe96b
-RUN python -m pip uninstall -y flagcx flagtree flag-gems triton triton-ascend \
- && python -m pip install --no-cache-dir --no-deps 'flagtree===0.6.2a1+ascend3.5' \
-      --index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+# Download immutable source archives: older Docker seccomp profiles block
+# the helper threads used by git fetch, even for this Python-only build.
+RUN mkdir -p /opt/src/vllm /opt/src/plugin \
+ && curl -fL --retry 3 --connect-timeout 20 --max-time 900 \
+      https://codeload.github.com/vllm-project/vllm/tar.gz/2cf0a6915ce544dc493a0990f2ea38d81601128a \
+      -o /opt/src/vllm.tar.gz \
+ && tar -xzf /opt/src/vllm.tar.gz --strip-components=1 -C /opt/src/vllm \
+ && curl -fL --retry 3 --connect-timeout 20 --max-time 900 \
+      https://codeload.github.com/flagos-ai/vllm-plugin-FL/tar.gz/9a7eaf1191999422682bf5c6d1cf7b3f88d253b5 \
+      -o /opt/src/plugin.tar.gz \
+ && tar -xzf /opt/src/plugin.tar.gz --strip-components=1 -C /opt/src/plugin
+# Keep FlagCX, FlagTree and FlagGems exactly as supplied by the base image.
+RUN python -c "from importlib.metadata import version; expected={'flagcx':'0.14.0+cann9.0.0.910c','flagtree':'0.7.0+ascend3.5','flag-gems':'5.4.0'}; assert all(version(k)==v for k,v in expected.items()), expected"
 # Text inference only: match OpenCV to the NumPy 1.x runtime required by FlagGems.
 RUN python -m pip install --no-cache-dir setuptools==79.0.1 scikit-build-core==0.12.2 setuptools-rust==1.13.0 cmake==3.31.6
 # Driver libraries are supplied by the host at runtime, not during image builds.
 RUN export TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
  && sed -i 's/opencv-python-headless >= 4.13.0/opencv-python-headless >= 4.11.0, < 4.12/' /opt/src/vllm/requirements/common.txt \
  && VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE=0.28.0+empty python -m pip install --no-build-isolation --no-deps /opt/src/vllm \
- && python -m pip install --no-cache-dir -c /opt/release/constraints.txt -c /opt/release/reference-constraints.txt -r /opt/src/vllm/requirements/common.txt \
- && python -m pip install --no-cache-dir -c /opt/release/constraints.txt packaging==26.0 PyYAML==6.0.3 sqlalchemy==2.0.48
+ && python -m pip install --no-cache-dir -c /opt/release/constraints.txt -c /opt/release/reference-constraints.txt -r /opt/src/vllm/requirements/common.txt
 RUN export TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
- && python -m pip install --no-build-isolation --no-deps --config-settings=wheel.cmake=false /opt/src/FlagGems \
- && python -m pip wheel --no-build-isolation --no-deps -w /opt/release/wheels /opt/src/plugin \
+ && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_VLLM_PLUGIN_FL=0.3.0rc2.post1+g9a7eaf119 \
+      python -m pip wheel --no-build-isolation --no-deps -w /opt/release/wheels /opt/src/plugin \
  && python -m pip install --no-deps /opt/release/wheels/vllm_plugin_fl-*.whl \
  && python -m pip freeze > /opt/release/requirements.lock.txt \
- && git -C /opt/src/vllm rev-parse HEAD > /opt/release/vllm.commit \
- && git -C /opt/src/plugin rev-parse HEAD > /opt/release/plugin.commit \
- && git -C /opt/src/FlagGems rev-parse HEAD > /opt/release/flaggems.commit \
+ && printf '%s\n' 2cf0a6915ce544dc493a0990f2ea38d81601128a > /opt/release/vllm.commit \
+ && printf '%s\n' 9a7eaf1191999422682bf5c6d1cf7b3f88d253b5 > /opt/release/plugin.commit \
  && sha256sum /opt/src/plugin/vllm_fl/dispatch/config/ascend.yaml > /opt/release/ascend-policy.sha256
 RUN printf '%s\n' \
       '#!/bin/bash' \
@@ -272,32 +275,15 @@ RUN printf '%s\n' \
       'source /etc/profile.d/zz-flagos.sh' \
       'exec vllm serve "$@"' \
       > /opt/release/entrypoint.sh
-RUN printf '%s\n' \
-      '#!/bin/bash' \
-      '# Fixed release stack: use the installed compiler in /flagos, not the base'"'"'s' \
-      '# selectable compiler trees. Do not download or upgrade packages at startup.' \
-      'case ":$PATH:" in' \
-      '  *:/flagos/bin:*) ;;' \
-      '  *) export PATH="/flagos/bin:$PATH" ;;' \
-      esac \
-      '_vllm_pythonpath=""' \
-      'IFS=: read -ra _vllm_paths <<< "${PYTHONPATH:-}"' \
-      'for _vllm_path in "${_vllm_paths[@]}"; do' \
-      '  case "$_vllm_path" in' \
-      '    /opt/flagtree|/opt/triton|"") continue ;;' \
-      '  esac' \
-      '  _vllm_pythonpath="${_vllm_pythonpath:+$_vllm_pythonpath:}$_vllm_path"' \
-      done \
-      'export PYTHONPATH="$_vllm_pythonpath"' \
-      'unset _vllm_pythonpath _vllm_paths _vllm_path' \
-      > /etc/profile.d/zz-flagos.sh
-RUN python -c "from importlib.metadata import version; expected={'vllm':'0.28.0+empty','torch':'2.10.0+cpu','torch-npu':'2.10.0','flagtree':'0.6.2a1+ascend3.5','flag-gems':'5.0.2','cann-shmem':'1.6.0','numpy':'1.26.4'}; assert all(version(k)==v for k,v in expected.items()), expected"
+RUN python -c "from importlib.metadata import version; expected={'vllm':'0.28.0+empty','torch':'2.10.0+cpu','torch-npu':'2.10.0','flagtree':'0.7.0+ascend3.5','flag-gems':'5.4.0','flagcx':'0.14.0+cann9.0.0.910c','cann-shmem':'1.6.0','numpy':'1.26.4'}; assert all(version(k)==v for k,v in expected.items()), expected"
+# Match the audited Ascend CI registration policy for FlagGems 5.4.0.
+ENV USE_FLAGGEMS=1 VLLM_FL_FLAGOS_WHITELIST=zeros
 WORKDIR /app
 ENTRYPOINT ["/bin/bash", "/opt/release/entrypoint.sh"]
 CMD ["--help"]
 
-# CI tools are installed after building FlagGems with scikit-build-core 0.12.2.
-# The plugin's own pyproject requires scikit-build-core 0.11.0 for wheel checks.
+# The plugin's pyproject requires scikit-build-core 0.11.0 for wheel checks.
+# These tools do not replace the inherited FlagOS runtime components.
 FROM release AS ci
 RUN mkdir -p /opt/release/ci \
  && printf '%s\n' \
