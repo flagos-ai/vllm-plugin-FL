@@ -65,7 +65,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ENABLE_I64_CHECK=0 \
     TORCHGCU_INDUCTOR_ENABLE=1
 
-RUN apt-get update \
+# Optional mirror for builders with slow access to Ubuntu's public servers.
+ARG UBUNTU_MIRROR
+RUN if [ -n "${UBUNTU_MIRROR}" ]; then \
+        for sources in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do \
+            if [ -f "${sources}" ]; then \
+                sed -i -E "s@https?://(archive|security).ubuntu.com/ubuntu/?@${UBUNTU_MIRROR%/}/@g" "${sources}"; \
+            fi; \
+        done; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
