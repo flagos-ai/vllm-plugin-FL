@@ -198,6 +198,9 @@ def register_oot_ops(whitelist: list[str] | None = None) -> None:
         _patch_unquantized_moe_oracle(prefer_flaggems_experts=True)
         _patch_fused_moe_factory()
 
+    if str(getattr(current_platform, "vendor_name", "")).lower() == "hygon":
+        from vllm_fl.dispatch.backends.vendor.hygon.patch import apply_hygon_patches
+        apply_hygon_patches()
 
 def _patch_fused_moe_factory() -> None:
     """Replace the FusedMoE factory function with FusedMoEFL in all relevant

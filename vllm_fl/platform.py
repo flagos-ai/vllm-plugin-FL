@@ -231,7 +231,7 @@ class PlatformFL(Platform):
         if self.device_type == "musa":
             return True
         if self.vendor_name == "hygon":
-            return False
+            return True
         if self.vendor_name in ("gcu", "enflame"):
             return True
         return self.device_type == "cuda"
@@ -249,6 +249,11 @@ class PlatformFL(Platform):
     def is_cuda(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         return self.device_type == "cuda" and self.vendor_name == "nvidia"
+        
+    def is_rocm(self) -> bool:
+        if self.vendor_name == "hygon":
+            return True
+        return False
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:
@@ -309,6 +314,21 @@ class PlatformFL(Platform):
     def import_kernels(cls) -> None:
         """Import device-specific kernels."""
         logger.info(f"current vendor_name is: {cls.vendor_name}")
+
+        # v2 编译模型注册: import_kernels 在 vllm 完全初始化后、模型加载前
+        # 被调用(与 plugin register() 的循环导入问题不同, 此处所有 vllm
+        # 模块已就绪)。注册字符串路径, vllm 在 resolve_model_cls 时 lazy
+        # import 模型类。
+        if cls.vendor_name == "hygon":
+            try:
+                from vllm import ModelRegistry
+                ModelRegistry.register_model(
+                    "DeepseekV4ForCausalLM",
+                    "vllm_fl.models.hygon.deepseek_v4:DeepseekV4ForCausalLM",
+                )
+                logger.info("Registered Hygon compile-friendly DeepseekV4ForCausalLM (from import_kernels)")
+            except Exception as e:
+                logger.warning("Hygon DV4 model registration failed: %s", e)
 
         if cls.vendor_name == "metax":
             try:
@@ -503,6 +523,13 @@ class PlatformFL(Platform):
         use_mla = attn_selector_config.use_mla
         use_sparse = attn_selector_config.use_sparse
 
+        # BW1100 deployment: keep the explicitly requested packed FP8 MLA ABI.
+        if (cls.vendor_name == "hygon" and use_mla and use_sparse
+                and attn_selector_config.kv_cache_dtype == "fp8_ds_mla"
+                and selected_backend == AttentionBackendEnum.FLASHMLA_SPARSE
+                and torch.cuda.get_device_properties(torch.cuda.current_device()).gcnArchName.startswith("gfx938")):
+            return selected_backend.get_path()
+
         # A model activation plan may override the attention backend (for
         # example GLM5's portable MLA path).  Only a plan activated for the
         # model being loaded is consulted, so a process-level GLM provider
@@ -595,6 +622,10 @@ class PlatformFL(Platform):
         elif cls.vendor_name == "ascend":
             return "vllm_fl.distributed.device_communicators.npu_communicator.NPUCommunicator"
         else:
+            if (cls.vendor_name == "hygon"
+                    and os.environ.get("VLLM_FL_HYGON_SPLIT_GRAPH_COMM", "0") == "1"):
+                logger.info("Using opt-in Hygon split Graph communicator.")
+                return "vllm_fl.distributed.hygon_split_graph_comm.HygonSplitGraphCommunicator"
             logger.info("Using CudaCommunicator for communication.")
             return "vllm.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
 
@@ -674,8 +705,20 @@ class PlatformFL(Platform):
     @classmethod
     def use_custom_allreduce(cls) -> bool:
         if cls.vendor_name == "hygon":
+            # vLLM's IPC custom allreduce, source-built by the plugin
+            # (impl/comm/custom_all_reduce.py); NCCL stays the fallback for
+            # large messages.  ~3x lower latency at decode sizes on BW1000.
+            try:
+                from vllm_fl.dispatch.backends.vendor.hygon.impl.comm.custom_all_reduce import (
+                    ensure_custom_allreduce_ops,
+                )
+
+                return ensure_custom_allreduce_ops()
+            except Exception:  # noqa: BLE001 - fall back to NCCL
+                return False
+        if cls.dist_backend == "flagcx":
             return False
-        return cls.dist_backend != "flagcx"
+        return True
 
     @classmethod
     def pre_register_and_update(cls, parser=None) -> None:
@@ -694,6 +737,10 @@ class PlatformFL(Platform):
     @classmethod
     def supports_fp8(cls) -> bool:
         """Report native FP8 support for the current device architecture."""
+        if cls.vendor_name == "hygon":
+            # BW1100 deployment: Triton FP8 dot validated on gfx938.
+            arch = torch.cuda.get_device_properties(torch.cuda.current_device()).gcnArchName
+            return str(arch).startswith("gfx938")
         if cls.vendor_name == "amd":
             from vllm.platforms.rocm import RocmPlatform
 
@@ -827,6 +874,12 @@ class PlatformFL(Platform):
 
     @classmethod
     def is_fully_connected(cls, physical_device_ids: list[int]) -> bool:
+        if cls.vendor_name == "hygon":
+            # 单节点 XGMI 互联: 对端 GPU 天然具备 p2p/IPC 能力 (vLLM 注释亦说明
+            # XGMI 相连的 AMD GPU p2p 总是可用), 插件已在 BW1000 上验证 4 卡 IPC
+            # 握手; 默认的 NVLink/pynvml 探测看不到 XGMI, 必须在这里放行,
+            # 否则 vllm CustomAllreduce 在 world_size>2 时自禁用.
+            return True
         if cls.vendor_name != "nvidia" or cls.device_type != "cuda":
             return False
         try:

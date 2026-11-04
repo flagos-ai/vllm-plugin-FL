@@ -17,6 +17,11 @@ fl_vllm_environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_FL_USE_FLAGGEMS_VLLM": lambda: (
         os.environ.get("VLLM_FL_USE_FLAGGEMS_VLLM", "0").lower() in ("1", "true")
     ),
+    # DeepSeek-V4 main sparse attention implementation on Hygon:
+    # "flash_mla" (default, Hygon FlashMLA wheel) or "triton" (vLLM ragged).
+    "VLLM_FL_SPARSE_ATTN_IMPL": lambda: os.environ.get(
+        "VLLM_FL_SPARSE_ATTN_IMPL", "flash_mla"
+    ).lower(),
 }
 
 
