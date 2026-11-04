@@ -131,6 +131,9 @@ jobs:
   # job on that device's runner (device_runner_labels override).
   unit:
     needs: setup
+    # Evaluate before matrix expansion: platforms without extra devices still
+    # run their full unit coverage in functional, with no empty matrix job.
+    if: ${{ toJson(fromJson(needs.setup.outputs.config).unit_devices || fromJson('[]')) != '[]' }}
     strategy:
       fail-fast: false
       matrix:
