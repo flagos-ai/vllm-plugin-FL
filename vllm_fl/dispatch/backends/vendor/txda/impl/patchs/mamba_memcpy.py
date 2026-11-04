@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Native tensor copies for TXDA's vLLM 0.28 Mamba state boundaries."""
+"""Native tensor copies for TXDA's vLLM 0.32 Mamba state boundaries."""
 
 from functools import wraps
 
@@ -75,9 +75,15 @@ def patch_mamba_state_copy() -> None:
         entries = []
         try:
             for group_id in mamba_group_ids:
-                for layer_name in kv_cache_config.kv_cache_groups[group_id].layer_names:
+                group = kv_cache_config.kv_cache_groups[group_id]
+                for layer_name in group.layer_names:
+                    # vLLM 0.32 keys callbacks by Mamba type. A uniform cache
+                    # group can still contain layers with different state
+                    # specs, so resolve each layer just as upstream does.
+                    spec = mamba_utils._get_mamba_spec_for_layer(group, layer_name)
+                    state_copy_funcs = mamba_state_copy_funcs[spec.mamba_type]
                     for state, _ in zip(
-                        forward_context[layer_name].kv_cache, mamba_state_copy_funcs
+                        forward_context[layer_name].kv_cache, state_copy_funcs
                     ):
                         index = offset + len(entries)
                         size = int(copy_bufs.sizes.np[index])

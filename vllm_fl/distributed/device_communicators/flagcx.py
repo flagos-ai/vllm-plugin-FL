@@ -36,14 +36,47 @@ try:
         flagcxRedOpTypeEnum,
     )
     _flagcx_available = True
-except (ImportError, ModuleNotFoundError):
-    _flagcx_available = False
-    FLAGCXLibrary = None
-    buffer_type = None
-    flagcxComm_t = None
-    flagcxDataTypeEnum = None
-    flagcxUniqueId = None
-    flagcxRedOpTypeEnum = None
+except ImportError:
+    try:
+        # Current FlagOS application images ship FlagCX as a wheel instead
+        # of a source checkout. Keep the legacy wrapper first for existing
+        # deployments; both expose the same communicator-facing API.
+        from flagcx.api import (
+            FLAGCXLibrary,
+            buffer_type,
+            flagcxComm_t,
+            flagcxDataTypeEnum,
+            flagcxUniqueId,
+            flagcxRedOpTypeEnum,
+        )
+        _flagcx_available = True
+    except ImportError:
+        _flagcx_available = False
+        FLAGCXLibrary = None
+        buffer_type = None
+        flagcxComm_t = None
+        flagcxDataTypeEnum = None
+        flagcxUniqueId = None
+        flagcxRedOpTypeEnum = None
+
+
+def _resolve_flagcx_library_path() -> str:
+    """Resolve only an explicitly configured source checkout or wheel root."""
+    root = os.getenv("FLAGCX_PATH")
+    if not root:
+        raise RuntimeError("FLAGCX_PATH must be set to use FlagCX")
+    candidates = (
+        os.path.join(root, "build", "lib", "libflagcx.so"),
+        os.path.join(root, "lib", "libflagcx.so"),
+    )
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    raise FileNotFoundError(
+        f"FlagCX library not found under FLAGCX_PATH={root!r}; "
+        "expected build/lib/libflagcx.so or lib/libflagcx.so"
+    )
+
 
 class PyFlagcxCommunicator:
     def __init__(
@@ -88,13 +121,11 @@ class PyFlagcxCommunicator:
             self.disabled = True
             return
         try:
-            ### TODO(lms): simplify it
+            if FLAGCXLibrary is None:
+                raise RuntimeError("FlagCX Python bindings are not available")
             if library_path is None:
-                flagcx_path = os.getenv('FLAGCX_PATH')
-                library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
-                self.flagcx = FLAGCXLibrary(library_path)
-            else:
-                self.flagcx = FLAGCXLibrary(library_path)
+                library_path = _resolve_flagcx_library_path()
+            self.flagcx = FLAGCXLibrary(library_path)
         except Exception as exc:
             # disable because of missing NCCL library
             # e.g. in a non-GPU environment

@@ -192,6 +192,12 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
+    elif vendor_name == "tsingmicro":
+        # Keep this helper independent of vendor.txda package imports: those
+        # also patch Mamba and must wait until vLLM platform discovery ends.
+        from vllm_fl.txda_compat import patch_accelerator_memory_info
+
+        patch_accelerator_memory_info()
 
 
 def _install_metax_compat():
