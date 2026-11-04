@@ -4,10 +4,9 @@
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
 
-# Strict Mode:
-#   true  = Raise an error immediately on failure; do not attempt other backends.
-#   false = Attempt the next available backend in sequence upon failure (Default).
-strict: false
+# Propagate execution errors: retrying after a state update or graph launch can
+# corrupt cache contents. Capability-based selection still happens before use.
+strict: true
 
 # Vendor Whitelist (Optional, allows all if not set)
 # allow_vendors:

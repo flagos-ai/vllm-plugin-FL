@@ -17,6 +17,8 @@ from vllm.model_executor.layers.mamba.ops.cpu.causal_conv1d import (
     causal_conv1d_update_torch,
 )
 
+from vllm_fl.kv_cache.ascend.state import state_row_indices
+
 
 def _prepare_qkv(x, num_key_heads, num_value_heads, head_k_dim, head_v_dim):
     q, k, v = torch.split(
@@ -45,20 +47,31 @@ def _gating(a, b, A_log, dt_bias, *, packed_beta):
 
 
 def _gather_rows(state, indices):
-    if state.device.type == "npu" and not state.is_contiguous():
-        from .gdn_state import gather_state_rows
+    if state.is_contiguous():
+        return state.index_select(0, indices)
+    # Index contiguous storage directly: indexing a strided NPU tensor can
+    # materialize the entire logical cache, even for a single active row.
+    storage = _storage_view(state)
+    return storage.index_select(0, state_row_indices(state, indices)).view(
+        indices.numel(), *state.shape[1:]
+    )
 
-        return gather_state_rows(state, indices)
-    return state.index_select(0, indices)
+
+def _storage_view(state):
+    return state.as_strided(
+        (state.untyped_storage().nbytes() // state.element_size(),),
+        (1,),
+        storage_offset=0,
+    )
 
 
 def _scatter_rows(state, indices, rows):
-    if state.device.type == "npu" and not state.is_contiguous():
-        from .gdn_state import scatter_state_rows
-
-        scatter_state_rows(state, indices, rows)
-    else:
+    if state.is_contiguous():
         state.index_copy_(0, indices, rows)
+    else:
+        _storage_view(state).index_copy_(
+            0, state_row_indices(state, indices), rows.contiguous().flatten()
+        )
 
 
 def gdn_decode(

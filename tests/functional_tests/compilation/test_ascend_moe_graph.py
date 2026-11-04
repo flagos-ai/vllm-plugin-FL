@@ -74,6 +74,7 @@ def test_grouped_moe_capture_reads_live_expert_routes(tokens):
                     * weights_cpu[token, route]
                 )
 
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output.cpu().float(), expected, rtol=0.03, atol=0.03)
@@ -132,6 +133,7 @@ def test_padded_router_and_grouped_moe_capture_reads_live_mask(monkeypatch):
                 expected[token] += (
                     F.linear(activated, w2[expert].cpu().float()) * scores[token, route]
                 )
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output.cpu().float(), expected, atol=0.03, rtol=0.03)
