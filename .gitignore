@@ -14,6 +14,3 @@ coverage.xml
 # Reports
 report*.json
 test-results-*
-
-# Pinned Ascend Docker source checkouts.
-/docker/ascend/sources/

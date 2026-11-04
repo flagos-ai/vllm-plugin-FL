@@ -43,7 +43,7 @@ MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
-ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.0.0-910c@sha256:6a4692bfa392be9cc97bcf5302362b9393d9867a2b59d23c873fcde4c08cca04}"
+ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
 ASCEND_FLAGTREE_VERSION="${ASCEND_FLAGTREE_VERSION:-0.6.2a1+ascend3.5}"
 ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853}"
@@ -235,9 +235,6 @@ fi
 
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
-if [[ "${PLATFORM}" == "ascend" ]]; then
-    DOCKERFILE="${BUILD_CONTEXT}/Dockerfile.v0.28.0"
-fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
 fi
@@ -266,7 +263,6 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
-    bash "${BUILD_CONTEXT}/scripts/prepare-v0.28.0.sh"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
     fi
