@@ -53,6 +53,9 @@ Arguments include `SUNRISE_BASE_IMAGE`, `SUNRISE_PYTHON`, `VLLM_VERSION`,
 archive. A different archive requires its independently verified checksum.
 The `dev` stage adds development tools, `ci` adds test dependencies, and
 `release` retains the inference runtime.
+For git-only network configuration, set `SUNRISE_GIT_CONFIG` to a local git
+config file when invoking `docker/build.sh`; it is mounted as an optional
+BuildKit secret for the provider clone and is not copied into image layers.
 
 During image construction, `TORCH_DEVICE_BACKEND_AUTOLOAD=0` is scoped to
 build processes so torch package metadata can be read without host devices.

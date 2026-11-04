@@ -118,6 +118,7 @@ VERSIONS (override via environment variables):
   Sunrise:
     SUNRISE_BASE_IMAGE   Sunrise vendor stack (default: ${SUNRISE_BASE_IMAGE})
     SUNRISE_VLLM_VERSION vLLM empty version (default: ${SUNRISE_VLLM_VERSION})
+    SUNRISE_GIT_CONFIG   Optional git-only config file passed as a BuildKit secret
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
@@ -341,6 +342,10 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
 elif [[ "${PLATFORM}" == "sunrise" ]]; then
     VLLM_VERSION="${SUNRISE_VLLM_VERSION}"
     BUILD_CONTEXT="${SCRIPT_DIR}/.."
+    if [[ -n "${SUNRISE_GIT_CONFIG:-}" ]]; then
+        [[ -f "${SUNRISE_GIT_CONFIG}" ]] || err "SUNRISE_GIT_CONFIG file does not exist."
+        BUILD_SECRET_ARGS+=(--secret "id=git_config,src=${SUNRISE_GIT_CONFIG}")
+    fi
     BUILD_ARGS+=(
         --build-arg "SUNRISE_BASE_IMAGE=${SUNRISE_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${SUNRISE_VLLM_VERSION}"

@@ -78,9 +78,16 @@ RUN source /opt/sunrise-build/environment.sh \
 # The provider is independent of plugin edits. Keep its immutable source install
 # in a cached layer and avoid HTTP/2 partial-clone failures through the gateway.
 COPY .github/scripts/install_flaggems_vllm.py /opt/sunrise-build/install_flaggems_vllm.py
-RUN source /opt/sunrise-build/environment.sh \
+RUN --mount=type=secret,id=git_config,required=false \
+    source /opt/sunrise-build/environment.sh \
     && export TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
-    && export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
+    && if [ -f /run/secrets/git_config ]; then \
+        export GIT_CONFIG_GLOBAL=/run/secrets/git_config; \
+    fi \
+    && export GIT_CONFIG_COUNT=3 \
+        GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
+        GIT_CONFIG_KEY_1=http.lowSpeedLimit GIT_CONFIG_VALUE_1=1 \
+        GIT_CONFIG_KEY_2=http.lowSpeedTime GIT_CONFIG_VALUE_2=60 \
     && python /opt/sunrise-build/install_flaggems_vllm.py \
     && python /opt/sunrise-build/runtime_constraints.py verify \
         /opt/sunrise-stack --vllm-version "${VLLM_VERSION}"
