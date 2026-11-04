@@ -6,7 +6,14 @@ import hashlib
 import json
 from pathlib import Path
 
-from run_gate import CHECKS, replay_evidence, validate_results
+from run_gate import (
+    CHECKS,
+    _native_runner_v2,
+    effective_from_startup_log,
+    replay_evidence,
+    validate_effective_configuration,
+    validate_results,
+)
 
 EXPECTED_MODELS = {"Qwen3.6-27B", "Qwen3.6-35B-A3B"}
 REQUIRED_CONFIGURATION = {
@@ -15,6 +22,32 @@ REQUIRED_CONFIGURATION = {
     "max_num_seqs": 8,
     "kv_cache_memory_bytes": 4294967296,
 }
+
+
+def validate_effective_receipt(receipt, directory):
+    if receipt.get("effective_config_evidence") != "effective-configuration.json":
+        raise ValueError("Missing actual server configuration evidence")
+    proof = json.loads((Path(directory) / "effective-configuration.json").read_text())
+    if proof.get("source") not in {"server_info", "startup_log"}:
+        raise ValueError("Unknown actual server configuration source")
+    for key in ("model", "served_model_name", "port"):
+        if proof.get(key) != receipt.get(key):
+            raise ValueError("Actual configuration evidence belongs to another server")
+    actual = validate_effective_configuration(
+        proof.get("configuration", {}), REQUIRED_CONFIGURATION, receipt["mode"]
+    )
+    if receipt.get("effective_configuration") != actual:
+        raise ValueError("Recorded effective configuration differs from evidence")
+    log_text = Path(receipt["server_log"]).read_text(errors="replace")
+    if not _native_runner_v2(log_text):
+        raise ValueError("Actual worker did not confirm Sunrise Runner V2")
+    if proof["source"] == "startup_log":
+        from_log = effective_from_startup_log(
+            log_text, receipt["model"], receipt["served_model_name"], receipt["port"]
+        )
+        if from_log != actual:
+            raise ValueError("Effective configuration differs from actual startup log")
+    return actual
 
 
 def validate_matrix(directories):
@@ -37,8 +70,7 @@ def validate_matrix(directories):
             for name in ("passed", "runner_v2", "only_owned_cleanup_complete")
         ):
             raise ValueError("Gate receipt did not pass V2/quality/owned cleanup")
-        if receipt.get("requested_configuration") != REQUIRED_CONFIGURATION:
-            raise ValueError("Gate must use TP2, context8192, sequences8, and KV4GiB")
+        effective = validate_effective_receipt(receipt, directory)
         gate = validate_results(
             directory / "requests",
             receipt["model"],
@@ -95,6 +127,7 @@ def validate_matrix(directories):
                 "mode": key[1],
                 "directory": str(directory.resolve()),
                 "shared_requests": gate["requests"],
+                "effective_configuration": effective,
                 "measured_long_prefill_tokens": measured,
                 "graph_replay_evidence": graph,
             }

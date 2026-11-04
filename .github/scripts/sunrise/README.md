@@ -38,6 +38,14 @@ To borrow a server that this task already started, add all three options:
 The endpoint must be local and explicitly specify its port. Readiness checks
 match both the served name and `/v1/models` model root. The log must identify the
 actual Sunrise V2 runner and sufficient allocated KV token capacity. The runner
+also reads `/server_info?config_format=json` when available and retains only the
+necessary model/TP/scheduler/KV/compilation fields, never its environment data.
+The endpoint is development-only in vLLM 0.32 and is normally absent; HTTP 404/405
+uses the dedicated native server startup log instead, requiring explicit actual
+APIServer fields and matching EngineCore configuration. Missing or conflicting
+fields fail verification. `effective-configuration.json` records the observed
+configuration; requested CLI values are never substituted for missing evidence.
+The runner
 never opens a borrowed log for writing or terminates a borrowed server. The
 borrowed server must have been started with the same standard configuration and,
 for graph mode, native graph metrics. An owned server and the shared test client
@@ -77,7 +85,11 @@ python .github/scripts/sunrise/verify_gate_matrix.py \
 Keep the server logs at their receipt paths until matrix verification completes;
 the matrix validator re-reads post-ready native graph evidence. It also checks
 that all four scenarios used the same shared dataset, revalidates every raw
-shared report, and rejects incomplete or duplicate model/mode coverage.
+shared report, and rejects incomplete or duplicate model/mode coverage. Each
+receipt must include verified effective TP2/context8192/sequences8/KV4GiB and the
+actual eager/V2/graph configuration, with its configuration evidence file. For
+startup-log evidence, the validator re-parses the original log and compares the
+values. Requested settings alone never satisfy matrix validation.
 
 CPU-only acceptance contracts:
 

@@ -8,6 +8,7 @@ metrics after owned-server readiness, not a V1-only replay log marker.
 """
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -20,7 +21,7 @@ import time
 import uuid
 from contextlib import ExitStack, suppress
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import ProxyHandler, Request, build_opener
 
@@ -104,6 +105,248 @@ def validate_results(root, model, served_model, port):
             "Missing Gate scenarios: " + repr(sorted(set(SCENARIOS) - set(found)))
         )
     return {"scenarios": len(found), "requests": sum(found.values()), "passed": True}
+
+
+def _native_runner_v2(text):
+    return (
+        re.search(
+            r"\[[^\]]*sunrise_worker\.py:\d+\]\s+Using Sunrise Model Runner V2(?:\s|$)",
+            text,
+        )
+        is not None
+    )
+
+
+def _normalize_effective(values):
+    integers = (
+        "tensor_parallel_size",
+        "max_model_len",
+        "max_num_seqs",
+        "kv_cache_memory_bytes",
+    )
+    result = {}
+    for name in integers:
+        value = values.get(name)
+        if type(value) is not int or value <= 0:
+            raise ValueError("Missing or invalid actual server field: " + name)
+        result[name] = value
+    for name in ("enforce_eager", "use_v2_model_runner"):
+        value = values.get(name)
+        if type(value) is not bool:
+            raise ValueError("Missing or invalid actual server field: " + name)
+        result[name] = value
+    mode = values.get("compilation_mode")
+    if not (
+        type(mode) is int
+        and mode == 0
+        or isinstance(mode, str)
+        and mode in ("NONE", "CompilationMode.NONE")
+    ):
+        raise ValueError("Actual server must use compilation mode NONE")
+    result["compilation_mode"] = 0
+    backend = values.get("compilation_backend")
+    if not isinstance(backend, str) or not backend:
+        raise ValueError("Missing actual server compilation backend")
+    result["compilation_backend"] = backend
+    graph = values.get("cudagraph_mode")
+    if graph == 0 and type(graph) is int or graph in ("NONE", "CUDAGraphMode.NONE"):
+        graph = "NONE"
+    elif graph in ("FULL_DECODE_ONLY", "CUDAGraphMode.FULL_DECODE_ONLY") or (
+        isinstance(graph, (tuple, list))
+        and len(graph) == 2
+        and all(type(item) is int for item in graph)
+        and list(graph) == [2, 0]
+    ):
+        graph = "FULL_DECODE_ONLY"
+    else:
+        raise ValueError("Missing or unsupported actual server cudagraph mode")
+    result["cudagraph_mode"] = graph
+    sizes = values.get("cudagraph_capture_sizes")
+    if not isinstance(sizes, list) or any(
+        type(size) is not int or size <= 0 for size in sizes
+    ):
+        raise ValueError("Missing or invalid actual graph capture sizes")
+    result["cudagraph_capture_sizes"] = sizes
+    return result
+
+
+def validate_effective_configuration(effective, requested, mode):
+    actual = _normalize_effective(effective)
+    for name, expected in requested.items():
+        if type(expected) is not int or actual.get(name) != expected:
+            raise ValueError("Actual server configuration differs: " + name)
+    expected_graph = "NONE" if mode == "eager" else "FULL_DECODE_ONLY"
+    if (
+        actual["enforce_eager"] is not (mode == "eager")
+        or actual["use_v2_model_runner"] is not True
+        or actual["compilation_backend"] != "eager"
+        or actual["cudagraph_mode"] != expected_graph
+        or actual["cudagraph_capture_sizes"]
+        != ([] if mode == "eager" else [1, 2, 4, 8])
+    ):
+        raise ValueError("Actual server eager/V2/graph configuration differs")
+    return actual
+
+
+def effective_from_server_info(document, model, served_model, log_text):
+    # The dev endpoint also returns environment data. Only these config fields
+    # are read or retained; never print or persist the complete response.
+    config = document.get("vllm_config")
+    if not isinstance(config, dict):
+        raise ValueError("Server info has no JSON VllmConfig")
+    model_config = config.get("model_config", {})
+    names = model_config.get("served_model_name")
+    if isinstance(names, str):
+        names = [names]
+    if (
+        model_config.get("model") != model
+        or not isinstance(names, list)
+        or served_model not in names
+    ):
+        raise ValueError("Server info belongs to another model/server")
+    # The 0.32 property is normally absent from JSON; its environment selector
+    # may be present. An explicit disabled value must not be hidden by a stale
+    # worker announcement in a supplied log. Read only this necessary env field.
+    for choice in (
+        config.get("use_v2_model_runner"),
+        document.get("vllm_env", {}).get("VLLM_USE_V2_MODEL_RUNNER"),
+    ):
+        if choice is not None and (type(choice) is not bool or choice is not True):
+            raise ValueError("Server info does not confirm Runner V2")
+    compile_config = config.get("compilation_config", {})
+    return _normalize_effective(
+        {
+            "tensor_parallel_size": config.get("parallel_config", {}).get(
+                "tensor_parallel_size"
+            ),
+            "max_model_len": model_config.get("max_model_len"),
+            "max_num_seqs": config.get("scheduler_config", {}).get("max_num_seqs"),
+            "kv_cache_memory_bytes": config.get("cache_config", {}).get(
+                "kv_cache_memory_bytes"
+            ),
+            "enforce_eager": model_config.get("enforce_eager"),
+            # use_v2_model_runner is a non-serialized VllmConfig property in 0.32.
+            # The actual worker announcement establishes which runner was built.
+            "use_v2_model_runner": _native_runner_v2(log_text),
+            "compilation_mode": compile_config.get("mode"),
+            "compilation_backend": compile_config.get("backend"),
+            "cudagraph_mode": compile_config.get("cudagraph_mode"),
+            "cudagraph_capture_sizes": compile_config.get("cudagraph_capture_sizes"),
+        }
+    )
+
+
+def _literal_mapping(text, marker):
+    start = text.index(marker) + len(marker)
+    # Native compilation repr includes Enum reprs, not executable expressions.
+    # Convert only that syntax to quoted enum names before literal evaluation.
+    text = re.sub(
+        r"<([A-Za-z_][\w]*)\.([A-Z_]+): [^<>]+>",
+        lambda match: repr(match[2]),
+        text[start:],
+    )
+    depth = 0
+    quote = None
+    escaped = False
+    for index, char in enumerate(text):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                value = ast.literal_eval(text[: index + 1])
+                if not isinstance(value, dict):
+                    break
+                return value
+    raise ValueError("Missing or invalid native startup mapping")
+
+
+def effective_from_startup_log(text, model, served_model, port):
+    args_lines = [line for line in text.splitlines() if "non-default args: " in line]
+    engine_lines = [
+        line
+        for line in text.splitlines()
+        if re.search(r"Initializing a V[12] LLM engine .* with config: ", line)
+    ]
+    if len(args_lines) != 1 or len(engine_lines) != 1:
+        raise ValueError("Startup log must identify one actual server/configuration")
+    args = _literal_mapping(args_lines[0], "non-default args: ")
+    names = args.get("served_model_name")
+    if isinstance(names, str):
+        names = [names]
+    if (
+        args.get("model") != model
+        or not isinstance(names, list)
+        or served_model not in names
+        or args.get("port") != port
+    ):
+        raise ValueError("Startup log belongs to another model/server")
+    engine = engine_lines[0].split(" with config: ", 1)[1]
+    # These are actual EngineCore VllmConfig values, not caller CLI defaults.
+    observed = {}
+    for name in ("model", "max_seq_len", "tensor_parallel_size", "enforce_eager"):
+        pattern = r"(?:^|, )" + name + r"=(('[^']*')|([^,]+))"
+        match = re.search(pattern, engine)
+        if match is None:
+            raise ValueError("Missing actual EngineCore field: " + name)
+        observed[name] = ast.literal_eval(match[1])
+    if observed["model"] != model:
+        raise ValueError("EngineCore model differs from actual server arguments")
+    for cli, native in (
+        ("max_model_len", "max_seq_len"),
+        ("tensor_parallel_size", "tensor_parallel_size"),
+        ("enforce_eager", "enforce_eager"),
+    ):
+        if cli in args and args[cli] != observed[native]:
+            raise ValueError("Actual startup/EngineCore configuration differs: " + cli)
+    compile_config = _literal_mapping(engine, "compilation_config=")
+    return _normalize_effective(
+        {
+            "tensor_parallel_size": observed["tensor_parallel_size"],
+            "max_model_len": observed["max_seq_len"],
+            # The native EngineCore compact repr omits SchedulerConfig/CacheConfig.
+            # Require their explicit actual APIServer startup fields, never defaults.
+            "max_num_seqs": args.get("max_num_seqs"),
+            "kv_cache_memory_bytes": args.get("kv_cache_memory_bytes"),
+            "enforce_eager": observed["enforce_eager"],
+            "use_v2_model_runner": _native_runner_v2(text),
+            "compilation_mode": compile_config.get("mode"),
+            "compilation_backend": compile_config.get("backend"),
+            "cudagraph_mode": compile_config.get("cudagraph_mode"),
+            "cudagraph_capture_sizes": compile_config.get("cudagraph_capture_sizes"),
+        }
+    )
+
+
+def observe_effective_configuration(base_url, model, served_model, port, log_text):
+    endpoint = base_url.removesuffix("/v1") + "/server_info?config_format=json"
+    try:
+        with build_opener(ProxyHandler({})).open(endpoint, timeout=10) as response:
+            document = json.load(response)
+    except HTTPError as error:
+        if error.code not in (404, 405):
+            raise
+        source = "startup_log"
+        actual = effective_from_startup_log(log_text, model, served_model, port)
+    else:
+        source = "server_info"
+        actual = effective_from_server_info(document, model, served_model, log_text)
+    return {
+        "source": source,
+        "model": model,
+        "served_model_name": served_model,
+        "port": port,
+        "configuration": actual,
+    }
 
 
 def kv_cache_capacity(text, max_model_len):
@@ -488,11 +731,21 @@ def main():
             )
             facts["server_ready_unix_seconds"] = time.time()
             ready_text = server_log.read_text(errors="replace")
-            if "Using Sunrise Model Runner V2" not in ready_text:
+            if not _native_runner_v2(ready_text):
                 raise ValueError(
                     "Owned server did not confirm actual Sunrise Model Runner V2"
                 )
             facts["runner_v2"] = True
+            effective = observe_effective_configuration(
+                base_url, model, served_model, port, ready_text
+            )
+            facts["effective_configuration"] = validate_effective_configuration(
+                effective["configuration"], facts["requested_configuration"], args.mode
+            )
+            facts["effective_config_evidence"] = "effective-configuration.json"
+            (output / facts["effective_config_evidence"]).write_text(
+                json.dumps(effective, indent=2) + "\n"
+            )
             facts["kv_cache_capacity"] = kv_cache_capacity(
                 server_log.read_text(errors="replace"), args.max_model_len
             )

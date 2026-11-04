@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import pytest
 
@@ -246,7 +247,18 @@ def create_matrix(gate, root):
             model_path = "/models/" + model
             write_shared_reports(gate, directory / "requests", model=model_path)
             log = directory / "server.log"
-            log.write_text("startup\n| 1 | 1 | 0 | FULL | 4 |\n")
+            log.write_text(
+                "startup\n" + native_worker_log() + "| 1 | 1 | 0 | FULL | 4 |\n"
+            )
+            effective = expected_effective(mode)
+            proof = {
+                "source": "server_info",
+                "model": model_path,
+                "served_model_name": "owned",
+                "port": 18360,
+                "configuration": effective,
+            }
+            (directory / "effective-configuration.json").write_text(json.dumps(proof))
             receipt = {
                 "model": model_path,
                 "mode": mode,
@@ -261,6 +273,8 @@ def create_matrix(gate, root):
                     "max_num_seqs": 8,
                     "kv_cache_memory_bytes": 4294967296,
                 },
+                "effective_configuration": effective,
+                "effective_config_evidence": "effective-configuration.json",
                 "gate": {"scenarios": 5, "requests": 26, "passed": True},
                 "gate_returncode": 0,
                 "gate_source_sha256": {"case_utils.py": "a" * 64},
@@ -297,6 +311,288 @@ def test_matrix_rejects_duplicate_scenario_and_absent_post_ready_replay(gate, tm
     directories = create_matrix(gate, tmp_path)
     with pytest.raises(ValueError, match="Duplicate"):
         matrix.validate_matrix([directories[0], directories[0], *directories[2:]])
-    (directories[1] / "server.log").write_text("startup\nGraph capturing finished")
+    (directories[1] / "server.log").write_text(
+        "startup\n" + native_worker_log() + "Graph capturing finished"
+    )
     with pytest.raises(ValueError, match="request-time FULL"):
         matrix.validate_matrix(directories)
+
+
+def native_worker_log():
+    return "(Worker pid=10) INFO [vllm_fl/worker/sunrise_worker.py:139] Using Sunrise Model Runner V2\n"
+
+
+def expected_effective(mode="eager"):
+    return {
+        "tensor_parallel_size": 2,
+        "max_model_len": 8192,
+        "max_num_seqs": 8,
+        "kv_cache_memory_bytes": 4294967296,
+        "enforce_eager": mode == "eager",
+        "use_v2_model_runner": True,
+        "compilation_mode": 0,
+        "compilation_backend": "eager",
+        "cudagraph_mode": "NONE" if mode == "eager" else "FULL_DECODE_ONLY",
+        "cudagraph_capture_sizes": [] if mode == "eager" else [1, 2, 4, 8],
+    }
+
+
+def actual_server_info(mode="eager"):
+    graph = 0 if mode == "eager" else [2, 0]
+    return {
+        "vllm_config": {
+            "model_config": {
+                "model": "/models/m",
+                "served_model_name": ["owned"],
+                "max_model_len": 8192,
+                "enforce_eager": mode == "eager",
+            },
+            "parallel_config": {"tensor_parallel_size": 2},
+            "scheduler_config": {"max_num_seqs": 8},
+            "cache_config": {"kv_cache_memory_bytes": 4294967296},
+            "compilation_config": {
+                "mode": 0,
+                "backend": "eager",
+                "cudagraph_mode": graph,
+                "cudagraph_capture_sizes": [] if mode == "eager" else [1, 2, 4, 8],
+            },
+        },
+        "vllm_env": {"POTENTIAL_SECRET": "MUST_NOT_BE_RECORDED"},
+        "system_env": {"environment": "MUST_NOT_BE_RECORDED"},
+    }
+
+
+def actual_startup_log(mode="eager"):
+    args = {
+        "model": "/models/m",
+        "served_model_name": ["owned"],
+        "port": 18360,
+        "max_model_len": 8192,
+        "tensor_parallel_size": 2,
+        "max_num_seqs": 8,
+        "kv_cache_memory_bytes": 4294967296,
+    }
+    eager = mode == "eager"
+    enum = (
+        "<CUDAGraphMode.NONE: 0>"
+        if eager
+        else "<CUDAGraphMode.FULL_DECODE_ONLY: (2, 0)>"
+    )
+    compilation = (
+        "{'mode': <CompilationMode.NONE: 0>, 'backend': 'eager', 'cudagraph_mode': "
+        + enum
+        + ", 'cudagraph_capture_sizes': "
+        + repr([] if eager else [1, 2, 4, 8])
+        + ", 'extra': {'nested': True}}"
+    )
+    return (
+        "(APIServer pid=1) INFO [api_utils.py:286] non-default args: "
+        + repr(args)
+        + "\n"
+        "(EngineCore pid=2) INFO [core.py:133] Initializing a V1 LLM engine (v0.32.0) with config: model='/models/m', max_seq_len=8192, tensor_parallel_size=2, enforce_eager="
+        + repr(eager)
+        + ", compilation_config="
+        + compilation
+        + ", kernel_config=KernelConfig()\n"
+        + native_worker_log()
+    )
+
+
+@pytest.mark.parametrize("mode", ["eager", "graph"])
+def test_server_info_uses_real_numeric_vllm_config(gate, mode):
+    result = gate.effective_from_server_info(
+        actual_server_info(mode), "/models/m", "owned", native_worker_log()
+    )
+    assert result == expected_effective(mode)
+    assert (
+        gate.validate_effective_configuration(
+            result,
+            {
+                key: result[key]
+                for key in (
+                    "tensor_parallel_size",
+                    "max_model_len",
+                    "max_num_seqs",
+                    "kv_cache_memory_bytes",
+                )
+            },
+            mode,
+        )
+        == result
+    )
+
+
+@pytest.mark.parametrize(
+    "section,field",
+    [
+        ("parallel_config", "tensor_parallel_size"),
+        ("scheduler_config", "max_num_seqs"),
+        ("cache_config", "kv_cache_memory_bytes"),
+        ("model_config", "max_model_len"),
+        ("model_config", "enforce_eager"),
+        ("compilation_config", "mode"),
+        ("compilation_config", "backend"),
+        ("compilation_config", "cudagraph_mode"),
+        ("compilation_config", "cudagraph_capture_sizes"),
+    ],
+)
+def test_missing_actual_config_fields_never_use_requested_defaults(
+    gate, section, field
+):
+    document = actual_server_info()
+    del document["vllm_config"][section][field]
+    with pytest.raises(ValueError):
+        gate.effective_from_server_info(
+            document, "/models/m", "owned", native_worker_log()
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("tensor_parallel_size", 1),
+        ("max_model_len", 4096),
+        ("max_num_seqs", 4),
+        ("kv_cache_memory_bytes", 2147483648),
+        ("enforce_eager", False),
+        ("use_v2_model_runner", False),
+        ("cudagraph_mode", "FULL_DECODE_ONLY"),
+        ("cudagraph_capture_sizes", [1, 2]),
+    ],
+)
+def test_actual_wrong_configuration_is_rejected(gate, field, value):
+    actual = expected_effective()
+    actual[field] = value
+    requested = {
+        key: expected_effective()[key]
+        for key in (
+            "tensor_parallel_size",
+            "max_model_len",
+            "max_num_seqs",
+            "kv_cache_memory_bytes",
+        )
+    }
+    with pytest.raises(ValueError, match="Actual server"):
+        gate.validate_effective_configuration(actual, requested, "eager")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("tensor_parallel_size", "2"),
+        ("tensor_parallel_size", True),
+        ("max_num_seqs", 8.0),
+        ("compilation_mode", False),
+        ("compilation_mode", 0.0),
+        ("enforce_eager", "True"),
+        ("cudagraph_capture_sizes", None),
+    ],
+)
+def test_actual_config_types_are_strict(gate, field, value):
+    actual = expected_effective()
+    actual[field] = value
+    with pytest.raises(ValueError):
+        gate._normalize_effective(actual)
+
+
+@pytest.mark.parametrize("mode", ["eager", "graph"])
+def test_startup_log_extracts_typed_engine_and_actual_server_values(gate, mode):
+    assert gate.effective_from_startup_log(
+        actual_startup_log(mode), "/models/m", "owned", 18360
+    ) == expected_effective(mode)
+
+
+def test_startup_log_requires_missing_actual_fields(gate):
+    text = actual_startup_log().replace("'max_num_seqs': 8, ", "")
+    with pytest.raises(ValueError, match="max_num_seqs"):
+        gate.effective_from_startup_log(text, "/models/m", "owned", 18360)
+    with pytest.raises(ValueError, match="another model/server"):
+        gate.effective_from_startup_log(
+            actual_startup_log(), "/models/m", "owned", 18361
+        )
+
+
+def test_observation_keeps_only_selected_config_and_not_environment(gate, monkeypatch):
+    document = actual_server_info()
+    monkeypatch.setattr(
+        gate,
+        "build_opener",
+        lambda *args: SimpleNamespace(
+            open=lambda *args, **kwargs: io.BytesIO(json.dumps(document).encode())
+        ),
+    )
+    proof = gate.observe_effective_configuration(
+        "http://127.0.0.1:18360/v1", "/models/m", "owned", 18360, native_worker_log()
+    )
+    assert proof["source"] == "server_info"
+    assert proof["configuration"] == expected_effective()
+    assert "MUST_NOT_BE_RECORDED" not in json.dumps(proof)
+    assert "vllm_env" not in proof and "system_env" not in proof
+
+
+@pytest.mark.parametrize("status", [404, 405])
+def test_only_unsupported_info_endpoint_falls_back_to_real_log(
+    gate, monkeypatch, status
+):
+    def missing(*args, **kwargs):
+        raise HTTPError(
+            "http://127.0.0.1:18360/server_info", status, "unsupported", {}, None
+        )
+
+    monkeypatch.setattr(
+        gate, "build_opener", lambda *args: SimpleNamespace(open=missing)
+    )
+    proof = gate.observe_effective_configuration(
+        "http://127.0.0.1:18360/v1", "/models/m", "owned", 18360, actual_startup_log()
+    )
+    assert proof["source"] == "startup_log"
+    assert proof["configuration"] == expected_effective()
+
+
+def test_server_info_internal_error_does_not_get_hidden_by_fallback(gate, monkeypatch):
+    def failure(*args, **kwargs):
+        raise HTTPError("http://127.0.0.1:18360/server_info", 500, "failure", {}, None)
+
+    monkeypatch.setattr(
+        gate, "build_opener", lambda *args: SimpleNamespace(open=failure)
+    )
+    with pytest.raises(HTTPError):
+        gate.observe_effective_configuration(
+            "http://127.0.0.1:18360/v1",
+            "/models/m",
+            "owned",
+            18360,
+            actual_startup_log(),
+        )
+
+
+def test_matrix_checks_effective_not_claimed_requested_configuration(gate, tmp_path):
+    matrix = load_module("verify_gate_matrix", HERE / "verify_gate_matrix.py")
+    directories = create_matrix(gate, tmp_path)
+    path = directories[0] / "effective-configuration.json"
+    proof = json.loads(path.read_text())
+    proof["configuration"]["tensor_parallel_size"] = 1
+    path.write_text(json.dumps(proof))
+    with pytest.raises(ValueError, match="tensor_parallel_size"):
+        matrix.validate_matrix(directories)
+
+
+def test_matrix_requires_effective_proof(gate, tmp_path):
+    matrix = load_module("verify_gate_matrix", HERE / "verify_gate_matrix.py")
+    directories = create_matrix(gate, tmp_path)
+    path = directories[0] / "summary.json"
+    receipt = json.loads(path.read_text())
+    del receipt["effective_config_evidence"]
+    path.write_text(json.dumps(receipt))
+    with pytest.raises(ValueError, match="actual server configuration evidence"):
+        matrix.validate_matrix(directories)
+
+
+@pytest.mark.parametrize("selector", [False, "True"])
+def test_api_v2_selector_cannot_be_hidden_by_old_worker_log(gate, selector):
+    document = actual_server_info()
+    document["vllm_env"]["VLLM_USE_V2_MODEL_RUNNER"] = selector
+    with pytest.raises(ValueError, match="Runner V2"):
+        gate.effective_from_server_info(
+            document, "/models/m", "owned", native_worker_log()
+        )
