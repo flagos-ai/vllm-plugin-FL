@@ -135,6 +135,8 @@ TORCH_DEVICE_BACKEND_AUTOLOAD=0 VLLM_TARGET_DEVICE=empty python -m pip install \
 cd /work/vllm-plugin-FL
 env -u VLLM_VENDOR python -m pip install --no-build-isolation --no-deps -e .
 python .github/scripts/install_flaggems_vllm.py
+python -m pip install --no-deps \
+  transformers==5.19.0 xgrammar==0.2.8 oss-harmony==0.0.11 modelscope==1.35.3
 python -m pip show vllm vllm-plugin-fl torch torch-txda flagtree flag-gems flaggems-vllm
 ```
 
@@ -176,6 +178,21 @@ transport and is not forced by the plugin.
 An explicit `--kv-cache-memory-bytes` overrides `VLLM_TXDA_KV_CACHE_SIZE`.
 If neither is set, the plugin uses its 20 GiB fallback and skips unsafe
 peak-memory profiling. Use explicit bounded settings for validation.
+
+## V2 preflight
+
+After loading `env.sh`, run the real preprocessing and greedy-sampling probe
+before loading a model:
+
+```bash
+python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_v2.py \
+  --device 0 --output /work/task/outputs/v2-kernel-probe.json
+```
+
+It checks fused writes across two cache groups, gathered block tables with
+padded rows, slot mappings across block boundaries and greedy sampling across
+two Triton blocks in both float32 and bfloat16. Passing this probe does not
+replace the model acceptance cases.
 
 ## Model acceptance
 
@@ -221,11 +238,12 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **351 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **380 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper
-packaging, stream use and communicator cleanup. The Mamba cases include
+packaging, stream use and communicator cleanup, plus opt-in bootstrap and V2
+stream namespace isolation. The Mamba cases include
 overlapping copies, padded storage, multiple types, uniform cache groups,
 noncopyable tail states and failed-plan rollback.
 
