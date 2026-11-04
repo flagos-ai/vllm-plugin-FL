@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-HELPER = ".github/scripts/cuda/runner_devices.sh"
+HELPER = ".github/scripts/nvidia/runner_devices.sh"
 _CONTROLLED = (
     "GITHUB_ACTIONS",
     "RUNNER_NAME",

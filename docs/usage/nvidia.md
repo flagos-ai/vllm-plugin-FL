@@ -17,7 +17,7 @@ The `VLLM_TARGET_DEVICE=empty` installation is for other hardware backends.
 | FlagTree | Development commit `317a0249ec25c6756e0aee3a87e8e3c92f154335`; supplies Triton `3.6.0` |
 | Runtime defaults | FlagGems enabled, FlagTune disabled, upstream runner defaults |
 
-Use the image reference selected in [the CUDA CI configuration](../../.github/configs/cuda.yml).
+Use the image reference selected in [the CUDA CI configuration](../../.github/configs/nvidia.yml).
 Record the resolved image digest and plugin commit for each deployment. The
 image records source and wheel provenance in `/opt/fl-ci/provenance.json`.
 These development revisions are fixed rather than floating branch installs.
@@ -70,10 +70,10 @@ export USE_FLAGGEMS=1 GEMS_VENDOR=nvidia USE_FLAGTUNE=0
 export FL_STACK_PROVENANCE=/opt/fl-ci/provenance.json
 
 python .github/scripts/install_flaggems_vllm.py
-python -I -B .github/scripts/cuda/stack.py --runtime-only
+python -I -B .github/scripts/nvidia/stack.py --runtime-only
 env -u VLLM_VENDOR python -m pip install \
   --break-system-packages --no-build-isolation --no-deps -e .
-python -I -B .github/scripts/cuda/stack.py
+python -I -B .github/scripts/nvidia/stack.py
 ```
 
 The plugin uses the official vLLM CUDA extensions and installs its Python
@@ -164,7 +164,7 @@ installation and installs the fixed FlagGems, FlagTree and FlagGems-vllm sources
 The build records provenance and checks the runtime. Install the plugin checkout
 and run the full stack check after starting the resulting image.
 
-CI [setup.sh](../../.github/scripts/cuda/setup.sh) verifies the provider and
+CI [setup.sh](../../.github/scripts/nvidia/setup.sh) verifies the provider and
 runtime pins, installs the plugin with `--no-deps`, then checks the stack and audio
 dependencies. Audio checks require access to the official vLLM audio fixtures
 or a populated `VLLM_ASSETS_CACHE`.

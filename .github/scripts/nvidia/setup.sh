@@ -4,7 +4,7 @@
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=.github/scripts/cuda/runner_devices.sh
+# shellcheck source=.github/scripts/nvidia/runner_devices.sh
 source "$HERE/runner_devices.sh"
 configure_cuda_runner_devices
 
@@ -44,6 +44,12 @@ env -u VLLM_VENDOR python -m uv pip install \
     --no-build-isolation \
     --no-deps \
     -e .
+
+# The 0.32 base image predates the harness's xdist unit pass (-n N); the
+# other pytest plugins (cov/json-report/timeout) are already present.
+# pip, not uv: the image's pip index is a reachable mirror while uv ignores
+# pip.conf and dies connecting to files.pythonhosted.org on some runners.
+python -m pip install --break-system-packages "pytest-xdist>=3.0.0"
 
 python -I -B "$HERE/stack.py"
 report_cuda_runner_devices
