@@ -1,7 +1,7 @@
 # Ascend 910C: vLLM 0.28.0 CI image
 
 `Dockerfile.v0.28.0` builds the validated Ascend runtime on FlagOS runtime 2.3.0.
-`Dockerfile` contains the same recipe for the default Ascend build path.
+The Ascend build helper uses this versioned file directly.
 
 Published tag: `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci`.
 Runner label: `flagcicd-ascend-910c-k8s-vllm028`.

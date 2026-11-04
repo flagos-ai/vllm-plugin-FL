@@ -235,6 +235,9 @@ fi
 
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
+if [[ "${PLATFORM}" == "ascend" ]]; then
+    DOCKERFILE="${BUILD_CONTEXT}/Dockerfile.v0.28.0"
+fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
 fi
@@ -263,7 +266,6 @@ if [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
-    DOCKERFILE="${BUILD_CONTEXT}/Dockerfile.v0.28.0"
     bash "${BUILD_CONTEXT}/scripts/prepare-v0.28.0.sh"
     if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
         IMAGE_NAME="harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl"
