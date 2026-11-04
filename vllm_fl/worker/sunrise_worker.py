@@ -136,6 +136,7 @@ class SunriseWorker(upstream.Worker):
         if self.use_v2_model_runner:
             from vllm_fl.worker.sunrise_v2_model_runner import SunriseV2ModelRunner
 
+            upstream.logger.info("Using Sunrise Model Runner V2")
             return SunriseV2ModelRunner(self.vllm_config, self.device)
         from vllm_fl.worker.sunrise_model_runner import SunriseModelRunner
 

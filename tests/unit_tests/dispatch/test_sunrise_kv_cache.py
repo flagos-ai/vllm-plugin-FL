@@ -54,3 +54,41 @@ def test_native_v032_packed_views_keep_layers_and_kv_disjoint(layout_name):
     assert not views[0][:2].any()
     assert not views[1].any()
     assert key.untyped_storage().data_ptr() == raw.untyped_storage().data_ptr()
+
+
+def test_native_v2_discovers_and_customizes_specs_without_global_config(monkeypatch):
+    kv = pytest.importorskip("vllm.v1.kv_cache_interface")
+    from types import SimpleNamespace
+
+    from vllm.config import get_current_vllm_config_or_none, vllm as config_module
+    from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
+    from vllm.v1.worker.gpu.attn_utils import get_kv_cache_spec
+    from vllm.v1.worker.utils import customize_attention_spec
+
+    from vllm_fl.dispatch.backends.vendor.sunrise.impl.attention import (
+        AttentionFLBackend,
+    )
+
+    monkeypatch.setattr(config_module, "_current_vllm_config", None)
+    assert get_current_vllm_config_or_none() is None
+    spec = kv.FullAttentionSpec(
+        block_size=128, num_kv_heads=2, head_size=8, dtype=torch.bfloat16
+    )
+
+    class Layer(AttentionLayerBase):
+        def get_attn_backend(self):
+            return AttentionFLBackend
+
+        def get_kv_cache_spec(self, config):
+            return spec
+
+    config = SimpleNamespace(
+        compilation_config=SimpleNamespace(static_forward_context={"layer": Layer()}),
+        attention_config=SimpleNamespace(hisparse_config=None),
+    )
+    customized = customize_attention_spec(AttentionFLBackend, spec)
+    assert customized.block_size == 128
+    assert customized.block_stride_alignment.base == 64
+    discovered = get_kv_cache_spec(config)
+    assert discovered == {"layer": customized}
+    assert get_current_vllm_config_or_none() is None

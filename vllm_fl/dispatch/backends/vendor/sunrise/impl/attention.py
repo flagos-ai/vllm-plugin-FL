@@ -12,7 +12,11 @@ import torch
 from flaggems_vllm import flash_attn_varlen_func, reshape_and_cache_flash
 
 import vllm.envs as envs
-from vllm.config import VllmConfig, get_current_vllm_config, get_layers_from_vllm_config
+from vllm.config import (
+    VllmConfig,
+    get_current_vllm_config_or_none,
+    get_layers_from_vllm_config,
+)
 from vllm.config.cache import CacheDType
 from vllm.distributed.parallel_state import get_dcp_group
 from vllm.logger import init_logger
@@ -51,23 +55,10 @@ class AttentionFLBackend(AttentionBackend):
     def get_supported_kernel_block_sizes(
         kv_cache_spec: KVCacheSpec | None = None,
     ) -> list[int | MultipleOf]:
-        vllm_config = get_current_vllm_config()
-        model_config = vllm_config.model_config
-        cache_config = vllm_config.cache_config
-        if (
-            model_config
-            and model_config.is_hybrid
-            and (
-                cache_config.mamba_ssm_cache_dtype == "float32"
-                or cache_config.mamba_cache_dtype == "float32"
-            )
-        ):
-            # NOTE(tdoublep): while in principle, FA supports
-            # MultipleOf(16), these are the block sizes that do not
-            # suffer from the NaN propagation problem described here:
-            # https://github.com/Dao-AILab/flash-attention/issues/1974
-            return [16, 32, 64]
-        return [MultipleOf(16)]
+        # V2 queries this capability with a spec outside any global config
+        # context. Keep the validated hybrid-safe kernel set for every spec;
+        # larger manager blocks can be split into these kernel blocks.
+        return [16, 32, 64]
 
     @staticmethod
     def get_name() -> str:
@@ -129,7 +120,12 @@ class AttentionFLBackend(AttentionBackend):
         # `stride_order` indicates the permutation that gets
         # us from `get_kv_cache_shape` to the actual memory layout we want.
         # vLLM 0.32 resolves the layout once in CacheConfig for all workers.
-        layout = get_current_vllm_config().cache_config.get_resolved_kv_cache_layout()
+        config = get_current_vllm_config_or_none()
+        layout = (
+            config.cache_config.get_resolved_kv_cache_layout()
+            if config is not None
+            else KVCacheLayout.LBNHC
+        )
         cache_layout = {
             KVCacheLayout.LBNHC: "NHD",
             KVCacheLayout.LBHNC: "HND",
