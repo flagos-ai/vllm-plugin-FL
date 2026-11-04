@@ -40,7 +40,8 @@ def sunrise_provider():
     torch.ptpu.set_device(0)
     provider = importlib.import_module("flaggems_vllm")
     swiglu = importlib.import_module("flaggems_vllm.ops.swiglu")
-    return SimpleNamespace(provider=provider, swiglu=swiglu, device="ptpu:0")
+    tanh = importlib.import_module("flaggems_vllm.ops.tanh")
+    return SimpleNamespace(provider=provider, swiglu=swiglu, tanh=tanh, device="ptpu:0")
 
 
 def _inputs(dtype):
@@ -138,8 +139,8 @@ def test_provider_swiglu_and_serving_silu(sunrise_provider, dtype):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
 def test_provider_tanh_forward_and_backward(sunrise_provider, dtype):
     x, upstream = _inputs(dtype)
-    actual = sunrise_provider.provider.tanh(x.to(sunrise_provider.device))
-    actual_grad = sunrise_provider.provider.tanh_backward(
+    actual = sunrise_provider.tanh.tanh(x.to(sunrise_provider.device))
+    actual_grad = sunrise_provider.tanh.tanh_backward(
         upstream.to(sunrise_provider.device), actual
     )
     expected = torch.tanh(x.float())
