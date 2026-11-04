@@ -13,6 +13,7 @@ from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
     AscendAttentionBackendImpl,
     AscendAttentionMetadataBuilder,
     AscendAttentionState,
+    AscendCommonAttentionMetadata,
     AscendMetadata,
 )
 
@@ -42,7 +43,8 @@ def test_upstream_creates_ascend_metadata_builder():
     )
     config = SimpleNamespace(
         model_config=SimpleNamespace(max_model_len=2048),
-        scheduler_config=SimpleNamespace(enable_chunked_prefill=False),
+        scheduler_config=SimpleNamespace(enable_chunked_prefill=False, max_num_seqs=4),
+        parallel_config=SimpleNamespace(decode_context_parallel_size=1),
         speculative_config=None,
     )
     group = AttentionGroup(AscendAttentionBackend, ["attention"], spec, 0)
@@ -52,6 +54,40 @@ def test_upstream_creates_ascend_metadata_builder():
     assert builder.kv_cache_spec.block_size == 128
     assert builder.layer_names == ["attention"]
     assert not builder.supports_update_block_table
+    assert group.kernel_block_table.shape == (1, 4, 16)
+    assert group.kernel_block_offsets.tolist() == [0, 1]
+
+
+def test_ascend_phase_survives_upstream_kernel_metadata_mapping():
+    from dataclasses import replace
+
+    import torch
+
+    metadata = AscendCommonAttentionMetadata(
+        query_start_loc=torch.tensor([0, 1, 3]),
+        query_start_loc_cpu=torch.tensor([0, 1, 3]),
+        seq_lens=torch.tensor([5, 8]),
+        num_reqs=2,
+        num_actual_tokens=3,
+        max_query_len=2,
+        max_seq_len=8,
+        block_table_tensor=torch.tensor([[1], [2]], dtype=torch.int32),
+        slot_mapping=torch.tensor([128, 256, 257]),
+        attn_state=AscendAttentionState.ChunkedPrefill,
+        _seq_lens_cpu=torch.tensor([5, 8]),
+        _num_computed_tokens_cpu=torch.tensor([4, 6]),
+    )
+    # vLLM 0.32 AttentionGroup replaces the common metadata when virtual
+    # kernel blocks need a mapped block table. Dynamic attributes are lost.
+    mapped = replace(metadata, block_table_tensor=metadata.block_table_tensor * 2)
+    assert mapped.attn_state is AscendAttentionState.ChunkedPrefill
+    assert mapped._seq_lens_cpu is metadata._seq_lens_cpu
+    unpadded = mapped.unpadded(num_actual_tokens=1, num_actual_reqs=1)
+    assert unpadded.attn_state is AscendAttentionState.ChunkedPrefill
+    assert unpadded.num_reqs == unpadded.num_actual_tokens == 1
+    assert unpadded._seq_lens_cpu.tolist() == [5]
+    assert unpadded._num_computed_tokens_cpu.tolist() == [4]
+    assert unpadded.block_table_tensor.tolist() == [[2]]
 
 
 @pytest.mark.parametrize("block_size", [16, 32, 64])
@@ -62,8 +98,22 @@ def test_rejects_blocks_smaller_than_ascend_kernel(block_size):
 
 @pytest.mark.parametrize("manager_block_size", [128, 256, 384])
 def test_hybrid_blocks_use_128_token_kernel_blocks(manager_block_size):
+    import torch
+
+    from vllm.v1.kv_cache_interface import FullAttentionSpec
+
+    spec = FullAttentionSpec(
+        block_size=manager_block_size,
+        num_kv_heads=8,
+        head_size=128,
+        dtype=torch.bfloat16,
+    )
     assert AscendAttentionBackend.supports_block_size(manager_block_size)
-    assert select_common_block_size(manager_block_size, [AscendAttentionBackend]) == 128
+    assert AscendAttentionBackend.get_supported_kernel_block_sizes(spec) == [128]
+    assert (
+        select_common_block_size(manager_block_size, [AscendAttentionBackend], [spec])
+        == 128
+    )
 
 
 @pytest.mark.parametrize("state", list(AscendAttentionState))

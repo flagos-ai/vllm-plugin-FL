@@ -240,9 +240,8 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
-        # this flag to select the matching block-table and KV-cache kernels.
-        self.use_v2_model_runner = False
+        # Keep runtime setup and runner construction on the same V1/V2 path.
+        self.use_v2_model_runner = vllm_config.use_v2_model_runner
 
         # Hybrid models (mamba/linear attention + full attention) keep the
         # attention KV cache in the fused [2, blocks, ...] layout on Kunlunxin.
@@ -549,9 +548,19 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            from vllm.v1.worker.gpu.model_runner import (
-                GPUModelRunner as GPUModelRunnerV2,
-            )
+            if current_platform.device_type == "npu":
+                from vllm_fl.patches.ascend_v2_device import (
+                    install_ascend_v2_device_shims,
+                )
+
+                install_ascend_v2_device_shims()
+                from vllm_fl.worker.model_runner_v2 import (
+                    GPUModelRunnerFLV2 as GPUModelRunnerV2,
+                )
+            else:
+                from vllm.v1.worker.gpu.model_runner import (
+                    GPUModelRunner as GPUModelRunnerV2,
+                )
 
             # HACK(woosuk): This is a temporary fix to avoid type errors.
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
@@ -588,6 +597,10 @@ class WorkerFL(WorkerBase):
                 self.device,
                 self.model_runner.get_model(),
             )
+
+        # vLLM 0.32 keeps profiling, compilation and serving under the same
+        # Dynamo thread guard; do not change it after model warmup.
+        set_torch_threads_for_runtime()
 
     def update_config(self, overrides: dict[str, Any]) -> None:
         self.model_runner.update_config(overrides)
@@ -845,6 +858,12 @@ class WorkerFL(WorkerBase):
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
 
+    def get_supported_kv_cache_layouts(self) -> list[str]:
+        # This RPC is outside WorkerWrapperBase's init/load contexts. Ascend
+        # selects planar or dense hybrid layouts from the current model config.
+        with set_current_vllm_config(self.vllm_config):
+            return super().get_supported_kv_cache_layouts()
+
     def update_max_model_len(self, max_model_len: int) -> None:
         """Update max_model_len after auto-fit to GPU memory.
         This is called when max_model_len=-1 is used and the engine
@@ -875,7 +894,8 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        # vLLM 0.32 moved routed-experts output to the aux-output connector.
+        if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -1065,10 +1085,13 @@ class WorkerFL(WorkerBase):
         # compilations that would cause latency spikes during inference.
         from vllm.utils.jit_monitor import activate as activate_jit_monitor
 
-        activate_jit_monitor(
-            mode=self.observability_config.jit_monitor_mode,
-            verbose=self.observability_config.jit_monitor_verbose,
-        )
+        # Eager execution permits runtime JIT compilation. Match the 0.32
+        # worker and monitor only when kernel warmup was enabled.
+        if self.vllm_config.kernel_config.enable_jit_warmup:
+            activate_jit_monitor(
+                mode=self.observability_config.jit_monitor_mode,
+                verbose=self.observability_config.jit_monitor_verbose,
+            )
 
         # Freeze the worker heap so the GC won't scan static objects
         # (model weights, KV caches, CUDA graphs) during inference.
@@ -1078,10 +1101,6 @@ class WorkerFL(WorkerBase):
         # Warmup / first-compile is done — activate the `VLLM_GPU_SYNC_CHECK`
         # gate so subsequent `execute_model` / `sample_tokens` calls enforce it.
         enable_gpu_sync_check()
-
-        # Startup is done; steady-state serving gets no benefit from torch
-        # intra-op parallelism.
-        set_torch_threads_for_runtime()
 
         return CompilationTimes(
             language_model=self.compilation_config.compilation_time,
@@ -1285,7 +1304,7 @@ class WorkerFL(WorkerBase):
 
         if (
             parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
+            and getattr(compilation_config.pass_config, "enable_sp", False)
             and forward_pass
         ):
             # currently only supported by V1 GPUModelRunner
@@ -1620,7 +1639,14 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:
+        from vllm.model_executor.determinism.batch_invariant import (
+            init_batch_invariance,
+        )
+    except ImportError:  # vLLM 0.28 keeps the helper under layers/.
+        from vllm.model_executor.layers.batch_invariant import (
+            init_batch_invariance,
+        )
 
     init_batch_invariance()
     override_envs_for_eplb(

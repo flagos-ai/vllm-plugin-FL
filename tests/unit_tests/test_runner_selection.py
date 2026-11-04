@@ -80,13 +80,14 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     )
 
     assert vllm_fl.register() == "vllm_fl.platform.PlatformFL"
+    if vendor == "ascend" and requested is None:
+        expected = "1"
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == expected
 
 
 @pytest.mark.parametrize(
     "device_type,vendor,error_pattern",
     [
-        ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
         ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
@@ -226,7 +227,8 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
     assert config.cache_config.mamba_cache_mode == mamba_cache_mode
 
 
-def test_ascend_preserves_full_decode_graphs(monkeypatch):
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_ascend_preserves_full_decode_graphs(monkeypatch, use_v2):
     from vllm.config import CUDAGraphMode
 
     from vllm_fl.platform import PlatformFL
@@ -234,6 +236,7 @@ def test_ascend_preserves_full_decode_graphs(monkeypatch):
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
     monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY)
+    config.use_v2_model_runner = use_v2
 
     PlatformFL.check_and_update_config(config)
 
