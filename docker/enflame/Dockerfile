@@ -36,6 +36,7 @@ ARG FLAGTREE_VERSION=0.7.0+enflame3.6
 ARG TRITON_GCU_VERSION=3.6.0+1.0.20260722
 ARG OPENAI_VERSION=3.28.0
 ARG PANDAS_VERSION=3.0.6
+ARG NUMPY_VERSION=2.3.5
 ARG FLAGGEMS_SHA256=09cb175e29f4fdfc78b87df46c4500d5a9b451e12cd64dda9a7d669f522bf5e5
 ARG FLAGTREE_SHA256=94b3aaf9f9aefa02f535ee5339f16c5304c52a1de5e7e749f742f7b4bf01332d
 ARG TRITON_GCU_SHA256=59d7a450a48f8de2a965ea6e456ea7c13bf53cb83abd5df929e4e8558da5f8f9
@@ -136,7 +137,11 @@ RUN (python -m pip uninstall -y vllm || true) \
         'torch-gcu==2.11.0+3.8.20260713' \
         'torchaudio==2.11.0+cpu' \
         'torchvision==0.26.0+cpu' \
-        'numpy==1.26.4' \
+        "numpy==${NUMPY_VERSION}" \
+        'transformers==5.6.0' \
+        'huggingface-hub==1.33.0' \
+        'xgrammar==0.2.8' \
+        'opencv-python-headless==4.13.0.92' \
         'triton==3.6.0' \
         "triton-gcu==${TRITON_GCU_VERSION}" \
         "flagtree==${FLAGTREE_VERSION}" \
@@ -178,6 +183,7 @@ RUN VLLM_EXPECTED_VERSION="${VLLM_VERSION}" \
     FLAGTREE_EXPECTED_VERSION="${FLAGTREE_VERSION}" \
     OPENAI_EXPECTED_VERSION="${OPENAI_VERSION}" \
     PANDAS_EXPECTED_VERSION="${PANDAS_VERSION}" \
+    NUMPY_EXPECTED_VERSION="${NUMPY_VERSION}" \
     TRITON_GCU_EXPECTED_VERSION="${TRITON_GCU_VERSION}" python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
 import os
@@ -200,6 +206,7 @@ flagtree = dist("flagtree")
 triton_gcu = dist("triton-gcu", "triton_gcu")
 openai = dist("openai")
 pandas = dist("pandas")
+numpy = dist("numpy")
 
 assert Version(vllm).base_version == os.environ["VLLM_EXPECTED_VERSION"], (
     f"installed vLLM {vllm}, expected {os.environ['VLLM_EXPECTED_VERSION']}"
@@ -214,9 +221,10 @@ assert flagtree == os.environ["FLAGTREE_EXPECTED_VERSION"], flagtree
 assert triton_gcu == os.environ["TRITON_GCU_EXPECTED_VERSION"], triton_gcu
 assert openai == os.environ["OPENAI_EXPECTED_VERSION"], openai
 assert pandas == os.environ["PANDAS_EXPECTED_VERSION"], pandas
+assert numpy == os.environ["NUMPY_EXPECTED_VERSION"], numpy
 print(f"vLLM {vllm} / torch {torch} / torch_gcu {torch_gcu} / "
       f"FlagGems {flag_gems} / FlagTree {flagtree} / triton_gcu {triton_gcu} "
-      f"/ OpenAI SDK {openai} / pandas {pandas} "
+      f"/ OpenAI SDK {openai} / pandas {pandas} / NumPy {numpy} "
       "— package metadata OK; device/Gate validation remains separate")
 PY
 
@@ -226,6 +234,7 @@ WORKDIR /workspace
 FROM base AS dev
 
 RUN python -m pip install --no-cache-dir \
+        build \
         pytest==8.4.1 \
         pytest-cov \
         pytest-json-report \
