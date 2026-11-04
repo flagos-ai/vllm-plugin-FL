@@ -143,6 +143,10 @@ def sunrise_modules(monkeypatch):
                 key_cache[block, offset].copy_(key[token])
                 value_cache[block, offset].copy_(value[token])
 
+    install(
+        "vllm_fl.dispatch.backends.vendor.sunrise.impl.cache_update",
+        write_kv_cache=Mock(side_effect=write_cache),
+    )
     cache_kernel = Mock(side_effect=write_cache)
     flash_kernel = Mock(side_effect=lambda **kwargs: kwargs["out"].copy_(kwargs["q"]))
     install(
@@ -161,6 +165,10 @@ def sunrise_modules(monkeypatch):
         spec.loader.exec_module(module)
         return module
 
+    load(
+        "vllm_fl.dispatch.backends.vendor.sunrise.impl.kv_cache",
+        vendor / "impl/kv_cache.py",
+    )
     return SimpleNamespace(
         attention=load("_sunrise_attention_test", vendor / "impl/attention.py"),
         backend=load("_sunrise_backend_test", vendor / "sunrise.py"),
