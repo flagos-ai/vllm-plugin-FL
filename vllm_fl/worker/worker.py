@@ -851,7 +851,11 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        # V2 owns auxiliary output initialization in vLLM 0.32. The optional
+        # legacy capturer belongs only to ModelRunnerFL and its legacy config.
+        if not self.use_v2_model_runner and getattr(
+            self.model_config, "enable_return_routed_experts", False
+        ):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -999,8 +1003,10 @@ class WorkerFL(WorkerBase):
             maybe_save_startup_plan(self, kv_cache_memory_bytes_to_requested_limit)
 
         if self.use_v2_model_runner:
-            # V2: Run full execute_model + sample_tokens to JIT compile triton kernels.
-            warmup_kernels(self.model_runner, self.execute_model, self.sample_tokens)
+            # vLLM 0.32 disables JIT warmup with enforce-eager. Actual requests
+            # still execute and compile the required V2 kernels normally.
+            if self.vllm_config.kernel_config.enable_jit_warmup:
+                warmup_kernels(self.model_runner, self.execute_model, self.sample_tokens)
         elif get_pp_group().is_last_rank:
             # V1: Warm up sampler and preallocate memory buffer for logits and other
             # sampling related tensors of max possible shape to avoid memory
