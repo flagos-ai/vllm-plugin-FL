@@ -590,16 +590,25 @@ class AttentionFLImpl(AttentionImpl):
             # and value[:num_actual_tokens] because the reshape_and_cache_flash
             # op uses the slot_mapping's shape to determine the number of
             # actual tokens.
-            reshape_and_cache_flash(
-                key,
-                value,
-                key_cache,
-                value_cache,
-                attn_metadata.slot_mapping,
-                self.kv_cache_dtype,
-                layer._k_scale,
-                layer._v_scale,
-            )
+            if kv_cache.ndim == 4:
+                from vllm_fl.dispatch.backends.vendor.sunrise.impl.cache_update import (
+                    write_kv_cache,
+                )
+
+                write_kv_cache(
+                    key, value, key_cache, value_cache, attn_metadata.slot_mapping
+                )
+            else:
+                reshape_and_cache_flash(
+                    key,
+                    value,
+                    key_cache,
+                    value_cache,
+                    attn_metadata.slot_mapping,
+                    self.kv_cache_dtype,
+                    layer._k_scale,
+                    layer._v_scale,
+                )
 
         if not attn_metadata.use_cascade:
             cu_seqlens_q = attn_metadata.query_start_loc

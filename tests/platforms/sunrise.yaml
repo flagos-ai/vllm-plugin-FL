@@ -34,9 +34,11 @@ persistence_m:
         - tests/unit_tests/dispatch/test_sunrise_graph_capture.py
         - tests/unit_tests/dispatch/test_sunrise_embedding.py
         - tests/unit_tests/dispatch/test_sunrise_kv_cache.py
+        - tests/unit_tests/dispatch/test_sunrise_cache_update.py
         - tests/unit_tests/distributed/test_sunrise_flagcx_wheel.py
         - tests/unit_tests/worker/test_sunrise_worker.py
         - tests/unit_tests/worker/test_sunrise_model_runner.py
+        - tests/unit_tests/worker/test_sunrise_v2_model_runner.py
         - tests/unit_tests/test_sunrise_device_utils.py
         - tests/unit_tests/test_sunrise_python310.py
       exclude: []
