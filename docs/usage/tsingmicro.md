@@ -196,8 +196,11 @@ export TXDA_LAUNCH_KERNEL_SYNC=0
 
 `VLLM_TXDA_SYNC_COLLECTIVES=1` explicitly enables synchronized TXDA
 collective phases. The control group coordinates ranks around native stream
-synchronization; all tensor communication still goes through FlagCX. Grouped
-collectives synchronize at the outermost group end. Other backends and the
+synchronization; all tensor communication still goes through FlagCX. Full-group
+collectives execute as separate synchronized phases, including
+inside logical groups. The shipped TCCL grouped path was observed to leave
+later outputs unwritten; native P2P batches retain their grouping. Other backends
+and the
 default mode retain their original scheduling. This prioritizes correctness
 and does not establish an overlap or throughput guarantee.
 
@@ -209,6 +212,23 @@ transport and is not forced by the plugin.
 An explicit `--kv-cache-memory-bytes` overrides `VLLM_TXDA_KV_CACHE_SIZE`.
 If neither is set, the plugin uses its 20 GiB fallback and skips unsafe
 peak-memory profiling. Use explicit bounded settings for validation.
+
+## FlagCX preflight
+
+Run the real data-path probe with at least two allocated devices before model
+acceptance. It checks the library identity, float32/bfloat16 reductions, integer
+aggregation, variable-size operations, broadcast and nested groups. Tensor data
+stays on the FlagCX path; Gloo coordinates the CPU control group only.
+
+```bash
+source /work/task/env.sh
+python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_flagcx.py \
+  --world-size 2 --output /work/task/outputs/flagcx-probe.json
+```
+
+TXDA multi-device startup raises if FlagCX initialization fails and records the
+loaded library and synchronization mode in the server log. A native TCCL-only
+comparison does not satisfy the FlagCX acceptance gate.
 
 ## V2 preflight
 
@@ -269,7 +289,7 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **433 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **488 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper
@@ -278,9 +298,10 @@ stream namespace isolation. The Mamba cases include
 overlapping copies, padded storage, multiple types, uniform cache groups,
 noncopyable tail states and failed-plan rollback.
 
-This CPU environment does not have vLLM installed. Real vLLM 0.32 imports,
-model startup and the two-model hardware gate have **not passed**. They remain
-pending resolution of the Python prerequisite and deployment of this candidate with the opt-in bootstrap.
+This CPU environment does not have vLLM installed. In the target image, the
+vLLM 0.32 empty build imports, device memory snapshot, native streams and V2
+preprocessing/sampling preflight have passed with the opt-in bootstrap.
+The two-model V2 hardware acceptance gate has **not passed** and remains pending.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful

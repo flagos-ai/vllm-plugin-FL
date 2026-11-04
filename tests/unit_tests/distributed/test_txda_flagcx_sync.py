@@ -192,8 +192,8 @@ def ready_comm(loaded, *, sync=True, stateless=False):
     comm._legacy_unique_id_api = False
     comm._sync_collectives = sync
     comm._group_depth = 0
-    comm._pending_sync_streams = []
-    comm._pending_sync_tensors = []
+    comm._suspended_group_depth = 0
+    comm._collective_phase_active = False
     return comm
 
 
@@ -232,11 +232,11 @@ def test_full_group_collectives_close_gpu_phase_before_free(loaded, operation):
         if event[0] in {"sync", "barrier", "enqueue"}
     ]
     num_enqueues = 2 if operation in {"all_gatherv", "reduce_scatterv"} else 1
-    assert phase_events == ["sync", "barrier"] + ["enqueue"] * num_enqueues + [
-        "barrier",
-        "sync",
-        "barrier",
-    ]
+    assert (
+        phase_events
+        == ["sync", "barrier", "enqueue", "barrier", "sync", "barrier"] * num_enqueues
+    )
+    assert not any(event[0] in {"group_start", "group_end"} for event in loaded.events)
 
 
 def test_allocated_all_reduce_output_lives_through_all_barriers_and_sync(loaded):
@@ -301,58 +301,64 @@ def test_stateless_control_group_uses_its_own_barrier(loaded):
     ]
 
 
-def test_nested_group_defers_sync_and_keeps_tensors_until_outer_end(loaded):
+def test_nested_group_serializes_each_full_collective_then_restores_native_groups(
+    loaded,
+):
     comm = ready_comm(loaded)
-    other_stream = Stream(loaded.events, "other")
     comm.group_start()
     comm.group_start()
     input_tensor = Tensor(comm.device)
-    input_ref = weakref.ref(input_tensor)
-    output_tensor = comm.all_reduce(input_tensor)
-    output_ref = weakref.ref(output_tensor)
-    comm.all_gather(Tensor(comm.device, 8), Tensor(comm.device), stream=other_stream)
-    # Repeated native stream objects need only one synchronization.
-    comm.all_reduce(input_tensor)
-    comm.group_end()
-    del input_tensor, output_tensor
-    gc.collect()
-    assert input_ref() is not None and output_ref() is not None
-    assert not any(event[0] in {"barrier", "sync"} for event in loaded.events)
+    first = comm.all_reduce(input_tensor)
+    assert comm._group_depth == 2 and comm._suspended_group_depth == 0
+    second = comm.all_reduce(input_tensor)
+    assert first is not second
+    assert comm._group_depth == 2 and comm._suspended_group_depth == 0
 
     comm.group_end()
+    comm.group_end()
 
-    assert loaded.events[-8:] == [
-        ("sync", "current"),
-        ("sync", "other"),
-        ("barrier", "process_group"),
+    one_phase = [
         ("group_end",),
+        ("group_end",),
+        ("sync", "current"),
+        ("barrier", "process_group"),
+        ("copy", "current"),
+        ("enqueue", "flagcxAllReduce"),
         ("barrier", "process_group"),
         ("sync", "current"),
-        ("sync", "other"),
         ("barrier", "process_group"),
+        ("free", "current"),
+        ("group_start",),
+        ("group_start",),
     ]
-    gc.collect()
-    assert input_ref() is None and output_ref() is None
-    assert comm._pending_sync_streams == [] and comm._pending_sync_tensors == []
+    assert loaded.events == [
+        ("group_start",),
+        ("group_start",),
+    ] + one_phase * 2 + [("group_end",), ("group_end",)]
+    assert comm._group_depth == 0
 
 
 @pytest.mark.parametrize("operation", ["all_gatherv", "reduce_scatterv"])
-def test_internally_grouped_collective_defers_to_existing_outer_group(
+def test_variable_collective_runs_each_root_outside_existing_outer_group(
     loaded, operation
 ):
     comm = ready_comm(loaded)
     comm.group_start()
     getattr(comm, operation)(Tensor(comm.device, 8), Tensor(comm.device), [4, 4])
-    assert not any(event[0] in {"barrier", "sync"} for event in loaded.events)
+    assert comm._group_depth == 1 and comm._suspended_group_depth == 0
+    assert sum(event[0] == "barrier" for event in loaded.events) == 6
+    # Every per-root operation temporarily closes and restores the native group.
+    native_depth = 0
+    for event in loaded.events:
+        if event[0] == "group_start":
+            native_depth += 1
+        elif event[0] == "group_end":
+            native_depth -= 1
+        elif event[0] == "enqueue":
+            assert native_depth == 0
     comm.group_end()
-    assert loaded.events[-6:] == [
-        ("sync", "current"),
-        ("barrier", "process_group"),
-        ("group_end",),
-        ("barrier", "process_group"),
-        ("sync", "current"),
-        ("barrier", "process_group"),
-    ]
+    assert loaded.events[-2:] == [("group_start",), ("group_end",)]
+    assert comm._group_depth == 0
 
 
 @pytest.mark.parametrize("grouped", [False, True])
@@ -365,6 +371,106 @@ def test_point_to_point_never_adds_a_full_group_barrier(loaded, grouped):
     if grouped:
         comm.group_end()
     assert not any(event[0] in {"barrier", "sync"} for event in loaded.events)
+    assert sum(event[0] == "group_start" for event in loaded.events) == int(grouped)
+    assert sum(event[0] == "group_end" for event in loaded.events) == int(grouped)
+
+
+@pytest.mark.parametrize("operation", ["all_gatherv", "reduce_scatterv"])
+def test_default_variable_collectives_keep_the_native_group(loaded, operation):
+    comm = ready_comm(loaded, sync=False)
+    getattr(comm, operation)(Tensor(comm.device, 8), Tensor(comm.device), [4, 4])
+    assert [event[0] for event in loaded.events] == [
+        "copy",
+        "group_start",
+        "enqueue",
+        "enqueue",
+        "group_end",
+        "free",
+    ]
+
+
+def test_mixed_group_submits_p2p_before_full_collective_then_reopens_for_p2p(loaded):
+    comm = ready_comm(loaded)
+    tensor = Tensor(comm.device)
+    comm.group_start()
+    comm.send(tensor, dst=1)
+    comm.recv(tensor, src=1)
+    comm.all_reduce(tensor)
+    comm.send(tensor, dst=1)
+    comm.recv(tensor, src=1)
+    comm.group_end()
+
+    assert loaded.events == [
+        ("group_start",),
+        ("copy", "current"),
+        ("enqueue", "flagcxSend"),
+        ("free", "current"),
+        ("copy", "current"),
+        ("enqueue", "flagcxRecv"),
+        ("free", "current"),
+        ("group_end",),
+        ("sync", "current"),
+        ("barrier", "process_group"),
+        ("copy", "current"),
+        ("enqueue", "flagcxAllReduce"),
+        ("barrier", "process_group"),
+        ("sync", "current"),
+        ("barrier", "process_group"),
+        ("free", "current"),
+        ("group_start",),
+        ("copy", "current"),
+        ("enqueue", "flagcxSend"),
+        ("free", "current"),
+        ("copy", "current"),
+        ("enqueue", "flagcxRecv"),
+        ("free", "current"),
+        ("group_end",),
+    ]
+
+
+@pytest.mark.parametrize("failure_phase", ["pre_sync", "enqueue", "post_sync"])
+@pytest.mark.parametrize("group_depth", [0, 2])
+def test_failed_grouped_collective_does_not_reopen_native_groups(
+    loaded, failure_phase, group_depth
+):
+    comm = ready_comm(loaded)
+    for _ in range(group_depth):
+        comm.group_start()
+    sync_count = 0
+
+    def synchronize():
+        nonlocal sync_count
+        sync_count += 1
+        if sync_count == (1 if failure_phase == "pre_sync" else 2):
+            raise RuntimeError("phase failed")
+
+    if failure_phase == "enqueue":
+
+        def enqueue(*args):
+            raise RuntimeError("phase failed")
+
+        loaded.library.flagcxAllReduce = enqueue
+    else:
+        loaded.stream.on_sync = synchronize
+
+    with pytest.raises(RuntimeError, match="phase failed"):
+        comm.all_reduce(Tensor(comm.device))
+
+    assert comm._group_depth == 0 and comm._suspended_group_depth == group_depth
+    assert comm._collective_phase_active
+    assert sum(event[0] == "group_start" for event in loaded.events) == group_depth
+    assert sum(event[0] == "group_end" for event in loaded.events) == group_depth
+    event_count = len(loaded.events)
+    for action in (
+        comm.group_start,
+        comm.group_end,
+        lambda: comm.all_reduce(Tensor(comm.device)),
+        lambda: comm.send(Tensor(comm.device), dst=1),
+        lambda: comm.recv(Tensor(comm.device), src=1),
+    ):
+        with pytest.raises(RuntimeError, match="abort the communicator"):
+            action()
+    assert len(loaded.events) == event_count
 
 
 def test_consecutive_collectives_reenter_the_producer_sync_phase(loaded):

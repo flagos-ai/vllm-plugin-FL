@@ -212,8 +212,8 @@ class PyFlagcxCommunicator:
             and os.getenv("VLLM_TXDA_SYNC_COLLECTIVES", "0") == "1"
         )
         self._group_depth = 0
-        self._pending_sync_streams = []
-        self._pending_sync_tensors = []
+        self._suspended_group_depth = 0
+        self._collective_phase_active = False
         # nccl communicator and stream will use this device
         # `torch.cuda.device` / `torch.musa.device` are context managers that
         # change the current device to the specified one
@@ -343,10 +343,19 @@ class PyFlagcxCommunicator:
             dist.barrier(group=self.group)
 
     def _prepare_collective(self, stream):
-        """Finish local producers before every rank starts the next phase."""
-        if getattr(self, "_sync_collectives", False) and not self._group_depth:
-            stream.synchronize()
-            self._cpu_group_barrier()
+        """Run TXDA full-group collectives outside native TCCL groups."""
+        if not getattr(self, "_sync_collectives", False):
+            return
+        if self._collective_phase_active:
+            raise RuntimeError("TXDA FlagCX collective phase failed; abort the communicator")
+        self._collective_phase_active = True
+        self._suspended_group_depth = self._group_depth
+        while self._group_depth:
+            # Submit preceding P2P work before synchronizing its input stream.
+            self._native_group_end()
+            self._group_depth -= 1
+        stream.synchronize()
+        self._cpu_group_barrier()
 
     def _synchronize_collective_streams(self, streams):
         """Close each TXDA collective phase using the CPU control group."""
@@ -359,16 +368,19 @@ class PyFlagcxCommunicator:
         """Retain tensors until opt-in TXDA synchronization has completed."""
         try:
             if getattr(self, "_sync_collectives", False):
-                if self._group_depth:
-                    if not any(s is stream for s in self._pending_sync_streams):
-                        self._pending_sync_streams.append(stream)
-                    self._pending_sync_tensors.extend(tensors)
-                else:
-                    self._synchronize_collective_streams([stream])
+                self._synchronize_collective_streams([stream])
         finally:
             # Free only FlagCX's borrowed-stream wrapper, never the native
-            # TXDA stream. Grouped tensors remain held until outer GroupEnd.
+            # TXDA stream. The arguments retain tensor storage through sync.
             self.flagcx.adaptor_stream_free(flagcx_stream)
+        if getattr(self, "_sync_collectives", False):
+            # Reopen only after the entire collective phase succeeds. A failed
+            # phase leaves the groups suspended and requires communicator abort.
+            for _ in range(self._suspended_group_depth):
+                self._native_group_start()
+                self._group_depth += 1
+            self._suspended_group_depth = 0
+            self._collective_phase_active = False
 
     def all_reduce(self,
                    in_tensor: torch.Tensor,
@@ -444,11 +456,15 @@ class PyFlagcxCommunicator:
         if self.device.type == "npu":
             assert input_tensor.shape[0] == sizes[self.rank]
         split_offset = 0
-        self._prepare_collective(stream)
-        flagcx_stream = self._copy_flagcx_stream(stream)
-        self.group_start()
+        sync_collectives = getattr(self, "_sync_collectives", False)
+        if not sync_collectives:
+            flagcx_stream = self._copy_flagcx_stream(stream)
+            self.group_start()
         for root, split_size in enumerate(sizes):
             dst_slice = output_tensor[split_offset:split_offset + split_size]
+            if sync_collectives:
+                self._prepare_collective(stream)
+                flagcx_stream = self._copy_flagcx_stream(stream)
             self.flagcx.flagcxBroadcast(
                 buffer_type(input_tensor.data_ptr()),
                 buffer_type(dst_slice.data_ptr()),
@@ -458,8 +474,12 @@ class PyFlagcxCommunicator:
                 self.comm,
                 flagcx_stream,
             )
+            if sync_collectives:
+                self._finish_collective(
+                    flagcx_stream, stream, input_tensor, output_tensor)
             split_offset += split_size
-        self.group_end()
+        if not sync_collectives:
+            self.group_end()
         if self.device.type == "npu":
             # FlagCX v0.13's Ascend broadcast copies only `count` bytes to the
             # root's distinct receive buffer, so fill its own slice here.
@@ -467,7 +487,8 @@ class PyFlagcxCommunicator:
             with torch.npu.stream(stream):
                 output_tensor[own_offset:own_offset + sizes[self.rank]].copy_(
                     input_tensor)
-        self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
+        if not sync_collectives:
+            self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
 
     def reduce_scatter(self,
                        output_tensor: torch.Tensor,
@@ -514,24 +535,35 @@ class PyFlagcxCommunicator:
             stream = self._current_stream()
 
         split_offset = 0
-        self._prepare_collective(stream)
-        flagcx_stream = self._copy_flagcx_stream(stream)
-        self.group_start()
+        sync_collectives = getattr(self, "_sync_collectives", False)
+        if not sync_collectives:
+            flagcx_stream = self._copy_flagcx_stream(stream)
+            self.group_start()
         for root, split_size in enumerate(sizes):
             chunk = input_tensor[split_offset:split_offset + split_size, ...]
+            if sync_collectives:
+                self._prepare_collective(stream)
+                flagcx_stream = self._copy_flagcx_stream(stream)
             self.flagcx.flagcxReduce(
                 buffer_type(chunk.data_ptr()),
                 buffer_type(output_tensor.data_ptr()), chunk.numel(),
                 flagcxDataTypeEnum.from_torch(input_tensor.dtype),
                 flagcxRedOpTypeEnum.from_torch(op), root, self.comm,
                 flagcx_stream)
+            if sync_collectives:
+                self._finish_collective(
+                    flagcx_stream, stream, input_tensor, output_tensor)
             split_offset += split_size
-        self.group_end()
-        self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
+        if not sync_collectives:
+            self.group_end()
+            self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
 
     def send(self, tensor: torch.Tensor, dst: int, stream=None):
         if self.disabled:
             return
+        if (getattr(self, "_sync_collectives", False)
+                and self._collective_phase_active):
+            raise RuntimeError("TXDA FlagCX collective phase failed; abort the communicator")
         assert tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {tensor.device}")
@@ -546,6 +578,9 @@ class PyFlagcxCommunicator:
     def recv(self, tensor: torch.Tensor, src: int, stream=None):
         if self.disabled:
             return
+        if (getattr(self, "_sync_collectives", False)
+                and self._collective_phase_active):
+            raise RuntimeError("TXDA FlagCX collective phase failed; abort the communicator")
         assert tensor.device == self.device, (
             f"this nccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {tensor.device}")
@@ -579,15 +614,27 @@ class PyFlagcxCommunicator:
                                 self.comm, flagcx_stream)
         self._finish_collective(flagcx_stream, stream, tensor)
 
-    def group_start(self):
-        if self.disabled:
-            return
+    def _native_group_start(self):
         # The packaged flagcx.api wrapper requires a communicator on every
         # backend. The legacy source wrapper only takes one for Ascend.
         if not self._legacy_unique_id_api or self.device.type == "npu":
             self.flagcx.flagcxGroupStart(self.comm)
         else:
             self.flagcx.flagcxGroupStart()
+
+    def _native_group_end(self):
+        if not self._legacy_unique_id_api or self.device.type == "npu":
+            self.flagcx.flagcxGroupEnd(self.comm)
+        else:
+            self.flagcx.flagcxGroupEnd()
+
+    def group_start(self):
+        if self.disabled:
+            return
+        if (getattr(self, "_sync_collectives", False)
+                and self._collective_phase_active):
+            raise RuntimeError("TXDA FlagCX collective phase failed; abort the communicator")
+        self._native_group_start()
         if getattr(self, "_sync_collectives", False):
             self._group_depth += 1
 
@@ -595,25 +642,10 @@ class PyFlagcxCommunicator:
         if self.disabled:
             return
         sync_collectives = getattr(self, "_sync_collectives", False)
+        if sync_collectives and self._collective_phase_active:
+            raise RuntimeError("TXDA FlagCX collective phase failed; abort the communicator")
         if sync_collectives and not self._group_depth:
             raise RuntimeError("TXDA FlagCX group_end called without group_start")
-        if (
-            sync_collectives
-            and self._group_depth == 1
-            and self._pending_sync_streams
-        ):
-            # Native groups defer their collective launches to outer GroupEnd.
-            # Finish the input producers before allowing that launch phase.
-            for stream in self._pending_sync_streams:
-                stream.synchronize()
-            self._cpu_group_barrier()
-        if not self._legacy_unique_id_api or self.device.type == "npu":
-            self.flagcx.flagcxGroupEnd(self.comm)
-        else:
-            self.flagcx.flagcxGroupEnd()
+        self._native_group_end()
         if sync_collectives:
             self._group_depth -= 1
-            if not self._group_depth and self._pending_sync_streams:
-                self._synchronize_collective_streams(self._pending_sync_streams)
-                self._pending_sync_streams.clear()
-                self._pending_sync_tensors.clear()
