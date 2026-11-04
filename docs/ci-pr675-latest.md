@@ -1,5 +1,24 @@
 # PR #675 CI repair evidence
 
+## Follow-up: remaining Stream signature annotations
+
+The reported CUDA job `126332517747` in run `41755861468` still failed
+`test_model_runner_imports_against_target_vllm` and
+`test_compiled_gcu_dispatch_warmup` at the pooling output constructor's eager
+Stream annotation. A whole-file audit found two remaining import-time lookups:
+the pooling output parameter and the async copy stream helper's return type.
+Both now use the same deferred string expression as the previously fixed
+constructor. Runtime stream creation and function-local annotations are unchanged.
+
+A new AST-based regression evaluates every matching function signature with
+`torch_device_fn=None`, then resolves its deferred expression against a Stream
+class to check type semantics. It failed before the fix with `NoneType.Stream`.
+After the fix, the four related test files pass: **73 passed**, two warnings,
+13.70 seconds, on the available S60 environment. A separate invocation of the
+two reported CUDA failures plus the new regression also passes. Ruff check,
+Ruff format check and `git diff --check` pass. These local observations are not
+a claim that the new remote CUDA CI job has passed.
+
 ## Source failures
 
 Inspected the complete logs for run `41616100214`, head

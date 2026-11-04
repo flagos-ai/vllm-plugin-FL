@@ -4,6 +4,7 @@ import ast
 import importlib.util
 import inspect
 import sys
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
 
@@ -44,6 +45,37 @@ def test_model_runner_imports_against_target_vllm():
 
     assert callable(ModelRunnerFL.execute_model)
     assert callable(ModelRunnerFL.initialize_kv_cache)
+
+
+def test_stream_signatures_defer_platform_lookup():
+    from types import SimpleNamespace
+
+    path = Path(__file__).resolve().parents[3] / "vllm_fl/worker/model_runner.py"
+    tree = ast.parse(path.read_text())
+    platform = SimpleNamespace(torch_device_fn=None)
+    namespace = {"current_platform": platform}
+    stream_type = type("Stream", (), {})
+    signatures = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+        arguments += [arg for arg in (node.args.vararg, node.args.kwarg) if arg]
+        annotations = [arg.annotation for arg in arguments] + [node.returns]
+        for annotation in annotations:
+            if annotation is None:
+                continue
+            if "current_platform.torch_device_fn.Stream" not in ast.unparse(annotation):
+                continue
+            platform.torch_device_fn = None
+            deferred = eval(
+                compile(ast.Expression(annotation), str(path), "eval"), namespace
+            )
+            assert isinstance(deferred, str), (node.name, annotation.lineno)
+            platform.torch_device_fn = SimpleNamespace(Stream=stream_type)
+            assert eval(deferred, namespace) is stream_type
+            signatures.append(node.name)
+    assert len(signatures) >= 3
 
 
 def test_gcu_attention_imports_against_target_vllm(gcu_attention_module):

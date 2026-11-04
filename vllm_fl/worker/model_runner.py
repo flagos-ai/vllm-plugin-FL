@@ -485,7 +485,7 @@ class AsyncGPUPoolingModelRunnerOutput(AsyncModelRunnerOutput):
         model_runner_output: ModelRunnerOutput,
         raw_pooler_output: PoolerOutput,
         finished_mask: list[bool],
-        async_output_copy_stream: current_platform.torch_device_fn.Stream,
+        async_output_copy_stream: "current_platform.torch_device_fn.Stream",
     ):
         self._model_runner_output = model_runner_output
 
@@ -1243,7 +1243,7 @@ class ModelRunnerFL(
 
     def _get_or_create_async_output_copy_stream(
         self,
-    ) -> current_platform.torch_device_fn.Stream:
+    ) -> "current_platform.torch_device_fn.Stream":
         stream = self.async_output_copy_stream
         if stream is None:
             stream = current_platform.torch_device_fn.Stream()
