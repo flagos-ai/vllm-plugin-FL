@@ -101,3 +101,19 @@ def test_ambiguous_native_distributions_fail(native):
     native.append(distribution("torch-ptpu", "0.2.4+torch2.11"))
     with pytest.raises(RuntimeError, match="Multiple active versions"):
         constraints.native_versions()
+
+
+def test_pinned_provider_addition_does_not_hide_flaggems_replacement(tmp_path, native):
+    constraints.capture(tmp_path)
+    native.append(distribution("flaggems_vllm", "0.1.0"))
+    constraints.verify(tmp_path)
+    assert "flaggems-vllm" not in constraints.native_versions()
+    # The provider is independently pinned; FlagGems itself remains protected.
+    native[:] = [
+        distribution("flag_gems", "5.6.0")
+        if package.metadata["Name"] == "flag_gems"
+        else package
+        for package in native
+    ]
+    with pytest.raises(RuntimeError, match="flag-gems"):
+        constraints.verify(tmp_path)
