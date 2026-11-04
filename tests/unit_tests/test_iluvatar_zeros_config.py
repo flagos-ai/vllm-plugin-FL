@@ -5,11 +5,12 @@ from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
 def test_iluvatar_native_zero_dependency_is_excluded(monkeypatch):
     # Exercise the actual worker config loader, not a duplicate YAML parser.
-    from pathlib import Path
+    from types import SimpleNamespace
 
-    root = Path(__file__).parents[2]
-    monkeypatch.setenv(
-        "VLLM_FL_DISPATCH_CONFIG", str(root / "vllm_fl/dispatch/config/iluvatar.yaml")
+    import vllm.platforms
+
+    monkeypatch.setattr(
+        vllm.platforms, "current_platform", SimpleNamespace(vendor_name="iluvatar")
     )
     for key in (
         "VLLM_FL_FLAGOS_WHITELIST",

@@ -50,7 +50,12 @@ def test_v1_runner_vendor_isolation(monkeypatch, vendor):
     assert calls == [(expected, worker.vllm_config, worker.device)]
 
 
-def test_target_runner_import():
+def test_target_runner_import(monkeypatch):
+    import torch
+
+    from vllm.platforms import current_platform
+
+    monkeypatch.setattr(current_platform, "torch_device_fn", torch.cuda)
     from vllm_fl.worker.iluvatar_model_runner import IluvatarModelRunner
 
     assert callable(IluvatarModelRunner.execute_model)
