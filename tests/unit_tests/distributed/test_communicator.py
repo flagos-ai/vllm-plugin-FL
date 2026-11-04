@@ -16,6 +16,9 @@ from vllm.distributed.device_communicators.cuda_communicator import (  # noqa: E
 )
 
 from vllm_fl.distributed.communicator import CommunicatorFL  # noqa: E402
+from vllm_fl.distributed.metax_communicator import (  # noqa: E402
+    MetaxCommunicatorFL,
+)
 from vllm_fl.distributed.nvidia_communicator import (  # noqa: E402
     NvidiaCommunicatorFL,
 )
@@ -147,19 +150,23 @@ def test_all2all_calls_use_vllm_028_signatures(method_name, arguments):
     assert result is expected
 
 
-def test_nvidia_bridge_satisfies_cuda_graph_contract(mocked_base_init):
-    communicator = NvidiaCommunicatorFL(cpu_group=object())
+@pytest.mark.parametrize("bridge_class", [NvidiaCommunicatorFL, MetaxCommunicatorFL])
+def test_cuda_bridge_satisfies_graph_contract(mocked_base_init, bridge_class):
+    communicator = bridge_class(cpu_group=object())
 
     assert isinstance(communicator, CudaCommunicator)
     assert communicator.ca_comm is None
     assert communicator.pynccl_comm is None
     assert communicator.pyflagcx_comm is None
-    assert NvidiaCommunicatorFL.all_reduce is CommunicatorFL.all_reduce
-    assert NvidiaCommunicatorFL.all_gather is CommunicatorFL.all_gather
-    assert NvidiaCommunicatorFL.broadcast is CommunicatorFL.broadcast
+    assert bridge_class.all_reduce is CommunicatorFL.all_reduce
+    assert bridge_class.all_gather is CommunicatorFL.all_gather
+    assert bridge_class.broadcast is CommunicatorFL.broadcast
 
 
-def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init):
+@pytest.mark.parametrize("bridge_class", [NvidiaCommunicatorFL, MetaxCommunicatorFL])
+def test_cuda_bridge_enters_native_graph_capture(
+    monkeypatch, mocked_base_init, bridge_class
+):
     from contextlib import nullcontext
     from types import SimpleNamespace
 
@@ -167,7 +174,7 @@ def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init
 
     from vllm.distributed.parallel_state import GroupCoordinator
 
-    communicator = NvidiaCommunicatorFL(cpu_group=object())
+    communicator = bridge_class(cpu_group=object())
     coordinator = SimpleNamespace(device_communicator=communicator)
     stream = object()
     capture_context = SimpleNamespace(stream=stream)
@@ -179,3 +186,35 @@ def test_nvidia_bridge_enters_native_graph_capture(monkeypatch, mocked_base_init
     with GroupCoordinator.graph_capture(coordinator, capture_context) as context:
         assert context is capture_context
     assert communicator.pyflagcx_comm is None
+
+
+@pytest.mark.parametrize("bridge_class", [NvidiaCommunicatorFL, MetaxCommunicatorFL])
+def test_cuda_bridge_keeps_flagcx_as_only_device_communicator(
+    monkeypatch, mocked_base_init, bridge_class
+):
+    from types import SimpleNamespace
+
+    import vllm_fl.distributed.communicator as module
+
+    base_init = DeviceCommunicatorBase.__init__
+
+    def two_rank_base(self, *args, **kwargs):
+        base_init(self, *args, **kwargs)
+        self.world_size = 2
+
+    native = MagicMock(disabled=False)
+    native.all_reduce.return_value = expected = object()
+    monkeypatch.setattr(DeviceCommunicatorBase, "__init__", two_rank_base)
+    monkeypatch.setattr(module, "PyFlagcxCommunicator", lambda **kwargs: native)
+    monkeypatch.setattr(
+        CudaCommunicator,
+        "__init__",
+        lambda *args, **kwargs: pytest.fail("second CUDA communicator initialized"),
+    )
+    communicator = bridge_class(cpu_group=object(), device=SimpleNamespace(type="cuda"))
+    value = object()
+    assert communicator.all_reduce(value) is expected
+    native.all_reduce.assert_called_once_with(value)
+    assert communicator.pyflagcx_comm is native
+    assert communicator.pynccl_comm is None
+    assert communicator.ca_comm is None

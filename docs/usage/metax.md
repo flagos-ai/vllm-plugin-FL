@@ -345,7 +345,11 @@ The core-only configuration uses Gloo for Torch control/bootstrap groups and
 `CommunicatorFL` / `PyFlagcxCommunicator` for device collectives. The plugin
 requires successful MetaX FlagCX initialization instead of silently falling
 back. It uses vLLM's opaque collective operators in this configuration so
-Dynamo does not trace ctypes; default MCCL execution is unchanged. Group APIs
+Dynamo does not trace ctypes. With explicit MetaX runner V2, `MetaxCommunicatorFL`
+reuses the existing FlagCX-only CUDA API bridge to satisfy the native graph
+coordinator's `CudaCommunicator` type and capture-attribute contract. It does
+not initialize a second PyNCCL or custom-all-reduce communicator. Default MCCL
+execution is unchanged. Group APIs
 pass the communicator for the new FlagCX ABI and retain legacy signatures.
 
 Run the real device tests on free cards, using two or four processes:
@@ -392,7 +396,16 @@ Pipeline/expert parallelism and FlagCX KV transfer are outside this test scope.
 
 ### Validate FlagCX across two physical hosts
 
-The following is a cross-machine validation procedure, not a recorded pass.
+The procedure below separates each mode's acceptance. Exact private revision
+`661807408568` passed the original two-host native V2 eager client: 14 records
+(1 GET and 13 POST), all 188 original checks, with enabled FlagCX world size 2,
+distinct host boot/GPU identities and native communication during inference.
+The image response used its original 128-token cap; this is smoke coverage.
+That revision failed native V2 graph startup at the coordinator's communicator
+type assertion, before any HTTP request. A CUDA API bridge addresses the
+interface mismatch; its graph model acceptance must be recorded separately.
+
+
 Reserve one idle MetaX GPU on each of two physical hosts. Use the same image,
 plugin revision, pinned FlagCX core/wrapper and complete Qwen3.5-4B checkpoint
 on both hosts. Mount the checkpoint at the same absolute path. Weights are

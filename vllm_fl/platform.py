@@ -797,6 +797,11 @@ class PlatformFL(Platform):
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         if cls.dist_backend == "flagcx":
+            if (
+                cls.vendor_name == "metax"
+                and os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == "1"
+            ):
+                return "vllm_fl.distributed.metax_communicator.MetaxCommunicatorFL"
             logger.info("Using CommunicatorFL for communication.")
             return "vllm_fl.distributed.communicator.CommunicatorFL"  # noqa
         else:
