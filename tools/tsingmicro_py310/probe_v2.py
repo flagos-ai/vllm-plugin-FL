@@ -20,8 +20,11 @@ from vllm.platforms import current_platform
 from vllm.v1.worker.gpu.block_table import BlockTables
 from vllm.v1.worker.gpu.sample.gumbel import gumbel_sample
 
+from vllm_fl.worker.txda_v2_preprocess import patch_txda_v2_preprocess
+
 if current_platform.device_type != "txda":
     raise RuntimeError("This probe requires the TXDA platform")
+patch_txda_v2_preprocess()
 torch.txda.set_device(args.device)
 device = torch.device(f"txda:{args.device}")
 result = {"platform": current_platform.device_type, "probes": {}}

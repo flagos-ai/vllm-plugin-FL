@@ -30,6 +30,9 @@ def adapter(monkeypatch):
     platforms = ModuleType("vllm.platforms")
     platforms.current_platform = platform
     monkeypatch.setitem(sys.modules, platforms.__name__, platforms)
+    preprocess = ModuleType("vllm_fl.worker.txda_v2_preprocess")
+    preprocess.patch_txda_v2_preprocess = Mock(return_value=True)
+    monkeypatch.setitem(sys.modules, preprocess.__name__, preprocess)
     modules = []
     runner_class = type("GPUModelRunner", (), {})
     for name in helper._DEVICE_MODULES:
@@ -39,7 +42,12 @@ def adapter(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
         modules.append(module)
     return SimpleNamespace(
-        helper=helper, torch=torch, platform=platform, modules=modules, cls=runner_class
+        helper=helper,
+        torch=torch,
+        platform=platform,
+        modules=modules,
+        cls=runner_class,
+        preprocess=preprocess.patch_txda_v2_preprocess,
     )
 
 
@@ -56,6 +64,7 @@ def test_v2_modules_route_only_stream_calls_to_native_txda(adapter, api):
         function.assert_called_with("device-or-stream", blocking=True)
         assert module.torch.Tensor is adapter.torch.Tensor
     assert adapter.torch.cuda is original_cuda
+    adapter.preprocess.assert_called_once_with()
 
 
 def test_repeated_install_preserves_module_views_and_upstream_class(adapter):

@@ -33,7 +33,10 @@ The existing packed K/V attention path is retained. The V2 runner has separate
 state-management and sampling paths; the legacy copy regressions alone do not
 validate V2 execution. Its eager Stream/Event calls use a module-local TXDA
 device view, preserving the real upstream V2 runner class and global
-`torch.cuda` namespace.
+`torch.cuda` namespace. TXDA V2 staged writes, block-table gathering and slot
+mapping use native Tensor copies and host integer metadata instead of the
+vendor compiler's incorrect pointer-table kernels. This synchronizes metadata
+and prioritizes correctness over throughput.
 
 The image's accelerator memory query reports allocator pool sizes rather than
 whole-device memory. A TXDA-only compatibility hook routes
