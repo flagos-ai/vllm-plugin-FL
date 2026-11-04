@@ -247,5 +247,26 @@
     "sha256": "b50933dd1f2c525eedb485f68cd032e6bfaaaba03a9c672b49c984b4d8155b58",
     "purpose": "Default-off modular expert output-buffer alias capability",
     "status": "Source-locked native capability; model integration validated; standalone publication deferred"
+  },
+  "qsa_native_candidate": {
+    "status": "Unpublished packed-indexer API composition; validated with fixed development dependencies",
+    "apis": [
+      "qsa_indexer_fast"
+    ],
+    "files": [
+      {
+        "path": "runtime/backend/_metax/ops/qsa_indexer_fast.py",
+        "sha256": "ad0313eadd9c24b9d60fc7e8d6cb6e1ef6066e77e6e99c350840b47447e1c141"
+      }
+    ],
+    "public_api_paths": [
+      "ops/qwen4/qsa_indexer_fast.py"
+    ],
+    "public_api_sources": [
+      {
+        "path": "ops/qwen4/qsa_indexer_fast.py",
+        "sha256": "7d41c0351f21390641e2353ddbca5774d6fd2c0cef7e7c46a5f0e0057bc8fad4"
+      }
+    ]
   }
 }

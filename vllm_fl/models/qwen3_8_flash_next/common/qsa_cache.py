@@ -38,7 +38,7 @@ from vllm.v1.kv_cache_interface import (
     MLAAttentionSpec,
 )
 
-from .qsa_packing import _cached_pack_rows
+from .qsa_packing import _cached_indexer_pack_rows, _cached_pack_rows
 
 
 def _spec_supports_block_stride_flag() -> bool:
@@ -448,6 +448,7 @@ class PreparedQSAForwardMetadata(AttentionMetadata):
     compress_ratio: int
     score_columns: int | None = None
     pack_rows: torch.Tensor | None = None
+    indexer_pack_rows: torch.Tensor | None = None
 
 
 class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMetadata]):
@@ -613,6 +614,20 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
                 self.token_to_req_buffer.device,
             )
 
+        indexer_pack_rows = None
+        if (
+            self.pack_rows_enabled
+            and self.compress_ratio == 4
+            and num_tokens > 64
+            and columns is not None
+            and columns > 512
+        ):
+            indexer_pack_rows = _cached_indexer_pack_rows(
+                common_attn_metadata.query_start_loc_cpu,
+                num_tokens,
+                self.token_to_req_buffer.device,
+            )
+
         return PreparedQSAForwardMetadata(
             block_table=common_attn_metadata.block_table_tensor,
             slot_mapping=slot_mapping,
@@ -625,6 +640,7 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
             compress_ratio=self.compress_ratio,
             score_columns=columns,
             pack_rows=pack_rows,
+            indexer_pack_rows=indexer_pack_rows,
         )
 
 

@@ -10,6 +10,7 @@ import torch
 
 from vllm_fl.dispatch.backends.flaggems.impl import qwen3_8_flash_next as ops
 from vllm_fl.dispatch.backends.vendor.metax.impl import qwen3_8_flash_next as metax
+from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next import qsa_policy
 
 
 def expansion_oracle(blocks, positions, lengths, requests, ratio, budget):
@@ -495,7 +496,7 @@ def test_metax_selection_uses_native_only_for_small_batches(monkeypatch, rows):
         assert name == "flaggems_vllm.runtime.backend._metax.ops.radix_topk"
         return SimpleNamespace(radix_topk=radix)
 
-    monkeypatch.setattr(metax, "import_module", module)
+    monkeypatch.setattr(qsa_policy, "import_module", module)
     out = metax.qsa_select_paged_tokens(
         torch.empty(rows, 4, 128),
         torch.empty(2, 1600, 1, 128),

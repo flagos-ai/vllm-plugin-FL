@@ -135,3 +135,12 @@ Unit tests retain dispatch, fallback/error, mutable-state and ownership
 contracts. Numerical and changed-input graph evidence, hardware measurements,
 failed experiments and per-change results belong in PR/CI artifacts, not this
 user guide. The dependency manifest records any remaining delivery limitations.
+
+
+### Packed BF16 QSA indexer
+
+Same-request groups of sixteen queries share K reads and skip invisible tiles.
+The metadata builder prepares groups once per step. Decode keeps shape-selected
+parameters; the all-visible short bucket retains its score/TopK bypass.
+The numerical API belongs to FGV and remains a source-locked development
+dependency until a public, fixed installation composition is available.

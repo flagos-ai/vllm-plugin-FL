@@ -512,6 +512,7 @@ class QSAIndexer(nn.Module):
             out,
             num_columns=metadata.score_columns,
             long_context=self._long_context_selection,
+            pack_rows=getattr(metadata, "indexer_pack_rows", None),
         )
 
     def forward_metax(

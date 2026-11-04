@@ -8,6 +8,11 @@ from importlib import import_module
 
 import torch
 
+from .qsa_policy import (
+    qsa_select_paged_tokens as qsa_select_paged_tokens,
+    qsa_sparse_paged_attention as qsa_sparse_paged_attention,
+    qsa_sparse_split_count as qsa_sparse_split_count,
+)
 from .shape_limits import max_prefill_rows
 from vllm_fl.dispatch.backends.flaggems.impl import qwen3_8_flash_next as portable
 
@@ -63,113 +68,6 @@ def gdn_prefill(
     if core_attn_out is not None:
         core_attn_out.reshape(-1)[: output.numel()].copy_(output.reshape(-1))
     return output, final_state
-
-
-def qsa_select_paged_tokens(
-    q,
-    k_cache,
-    page_table,
-    token_to_req,
-    query_positions,
-    sequence_lengths,
-    token_topk,
-    compress_ratio,
-    out=None,
-    num_columns=None,
-    *,
-    long_context=False,
-):
-    """Select with the measured non-TLE FGV paths; skip fully visible buckets.
-
-    Small batches use the corrected native per-row selector. Large batches
-    retain radix for short score buckets; long buckets prefer the per-row
-    provider after measuring the actual score-width dependence.
-    This local VENDOR policy leaves other FG/FGV consumers unchanged.
-    """
-    block_topk, width = portable._check_selection_geometry(compress_ratio, token_topk)
-    count = q.shape[0]
-    out = portable._selection_output(count, width, q.device, out)
-    if count == 0:
-        return out
-    capacity = page_table.shape[1] * k_cache.shape[1]
-    columns = capacity if num_columns is None else num_columns
-    if not isinstance(columns, int) or not 0 <= columns <= capacity:
-        raise ValueError("QSA score width must fit the allocated cache capacity")
-    if columns <= block_topk:
-        # This graph bucket fits entirely in the selection budget. Expansion
-        # applies device-side visibility, request validity and incomplete tails.
-        indices = torch.arange(block_topk, dtype=torch.int32, device=q.device)
-        indices = indices.unsqueeze(0).expand(count, -1)
-    else:
-        scores, visible = portable.qsa_mqa_paged(
-            q,
-            k_cache,
-            page_table,
-            token_to_req,
-            query_positions,
-            sequence_lengths,
-            compress_ratio,
-            num_columns=columns,
-        )
-        if block_topk == 512 and columns <= 32768:
-            if count <= 128 or (
-                long_context
-                and count <= max_prefill_rows()
-                and 8192 <= columns <= 17600
-            ):
-                native = import_module("flaggems_vllm.ops.top_k_per_row_decode")
-                if native.HAS_TLE:
-                    raise RuntimeError(
-                        "Qwen QSA requires the validated FGV non-TLE selector; "
-                        "disable per-row TLE before worker startup"
-                    )
-                indices = torch.empty(
-                    (count, block_topk), device=scores.device, dtype=torch.int32
-                )
-                native.top_k_per_row_decode(
-                    scores,
-                    1,
-                    visible,
-                    indices,
-                    count,
-                    scores.stride(0),
-                    scores.stride(1),
-                    block_topk,
-                )
-            else:
-                select = import_module(
-                    "flaggems_vllm.runtime.backend._metax.ops.radix_topk"
-                ).radix_topk
-                indices = select(scores, visible, block_topk)
-        else:
-            # Preserve the original provider outside the measured QSA geometry.
-            import flag_gems
-
-            _, selected = flag_gems.topk(
-                scores, block_topk, dim=-1, largest=True, sorted=False
-            )
-            ascending = torch.arange(block_topk, dtype=torch.int32, device=q.device)
-            indices = torch.where(
-                visible[:, None] <= block_topk, ascending, selected.to(torch.int32)
-            )
-    # QSA block/tail semantics are model-owned. Fuse only this composition;
-    # keep individual FG operators available to all other consumers.
-    expand = portable.expand_qsa_block_indices
-    if indices.is_cuda and sequence_lengths.numel():
-        from vllm_fl.models.qwen3_8_flash_next.gpu.ops.qsa import (
-            expand_qsa_block_indices,
-        )
-
-        expand = expand_qsa_block_indices
-    return expand(
-        indices,
-        query_positions,
-        sequence_lengths,
-        token_to_req,
-        compress_ratio,
-        token_topk,
-        out,
-    )
 
 
 def qwen38_gdn_mixed_qkv(mixed_qkv):
@@ -233,21 +131,6 @@ def qwen38_small_projection(x, weight):
     return torch.stack(columns, dim=-1).reshape(*x.shape[:-1], 4)
 
 
-def qsa_sparse_split_count(q, k_cache, topk):
-    """Use graph-static split-KV only for the measured MetaX QSA bucket."""
-    if (
-        q.device.type == "cuda"
-        and q.dtype == k_cache.dtype == torch.bfloat16
-        and 0 < q.shape[0] <= 64
-        and q.shape[1:] == (3, 256)
-        and k_cache.ndim == 4
-        and k_cache.shape[2:] == (1, 256)
-        and topk == 2051
-    ):
-        return 16 if q.shape[0] <= 32 else 8
-    return 1
-
-
 def qwen38_grdown_projection(x, weight):
     """Fixed native path for graph-dominated GR down shapes, with FG fallback.
 
@@ -260,57 +143,6 @@ def qwen38_grdown_projection(x, weight):
     if supports_native_grdown(x, weight):
         return native_grdown(x, weight)
     return torch.nn.functional.linear(x, weight)
-
-
-def qsa_sparse_paged_attention(
-    q,
-    k,
-    v,
-    indices,
-    table,
-    mapping,
-    scale,
-    out,
-    *,
-    split_workspace=None,
-    gate=None,
-    packed_workspace_cache=None,
-    pack_rows=None,
-    score_columns=None,
-):
-    from .qsa_packing import packed_attention
-
-    if packed_workspace_cache is not None and packed_attention(
-        q,
-        k,
-        v,
-        indices,
-        table,
-        mapping,
-        scale,
-        out,
-        gate,
-        packed_workspace_cache,
-        pack_rows,
-        score_columns=score_columns,
-    ):
-        return out
-    # Preserve the fallback's initialized-output contract.
-    out.zero_()
-    portable.qsa_sparse_paged_attention(
-        q,
-        k,
-        v,
-        indices,
-        table,
-        mapping,
-        scale,
-        out,
-        split_workspace=split_workspace,
-    )
-    if gate is not None:
-        out.mul_(torch.sigmoid(gate))
-    return out
 
 
 def qwen38_grup_projection(x, weight):
@@ -397,8 +229,8 @@ def qwen38_qsa_compress_norm_rope(
         or ratio != 4
     ):
         return False
-    from flaggems_vllm.ops.qwen4.qsa import qsa_compress_groups_with_ratio
     from flaggems_vllm.ops.gemma_rms_norm import gemma_rms_norm
+    from flaggems_vllm.ops.qwen4.qsa import qsa_compress_groups_with_ratio
     from flaggems_vllm.runtime.backend._metax.ops.rotary_bf16 import (
         rotary_embedding_bf16_store,
     )

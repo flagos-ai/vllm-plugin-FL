@@ -2982,6 +2982,14 @@
       {
         "path": "runtime/backend/_metax/ops/rotary_bf16.py",
         "sha256": "181aaa4d227ea30d2387b5bae3a43775429e38012d9abd0b89fa556757362898"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/qsa_indexer_fast.py",
+        "sha256": "ad0313eadd9c24b9d60fc7e8d6cb6e1ef6066e77e6e99c350840b47447e1c141"
+      },
+      {
+        "path": "ops/qwen4/qsa_indexer_fast.py",
+        "sha256": "7d41c0351f21390641e2353ddbca5774d6fd2c0cef7e7c46a5f0e0057bc8fad4"
       }
     ],
     "vllm": [
@@ -3095,6 +3103,58 @@
       "block_n": 16,
       "warps": 2,
       "stages": 3
+    },
+    "indexer_fast": {
+      "prefill": [
+        {
+          "max_columns": 2048,
+          "block_n": 128,
+          "warps": 8,
+          "stages": 1
+        },
+        {
+          "max_columns": 17600,
+          "block_n": 64,
+          "warps": 8,
+          "stages": 1
+        }
+      ],
+      "decode": [
+        {
+          "max_columns": 2048,
+          "block_n": 32,
+          "warps": 2,
+          "stages": 1
+        },
+        {
+          "max_columns": 8192,
+          "max_rows": 31,
+          "block_n": 32,
+          "warps": 2,
+          "stages": 1
+        },
+        {
+          "max_columns": 8192,
+          "min_rows": 32,
+          "block_n": 64,
+          "warps": 2,
+          "stages": 1
+        },
+        {
+          "max_columns": 17600,
+          "max_rows": 15,
+          "block_n": 32,
+          "warps": 2,
+          "stages": 1
+        },
+        {
+          "max_columns": 17600,
+          "min_rows": 16,
+          "block_n": 64,
+          "warps": 2,
+          "stages": 1
+        }
+      ]
     }
   },
   "qsa_indexer_launch": [

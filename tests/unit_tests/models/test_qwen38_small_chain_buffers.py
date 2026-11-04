@@ -133,7 +133,7 @@ def test_vendor_fallback_initializes_output_before_call(monkeypatch, packed):
 
     method = fn(
         ROOT
-        / "vllm_fl/dispatch/backends/vendor/metax/impl/qwen3_8_flash_next/__init__.py",
+        / "vllm_fl/dispatch/backends/vendor/metax/impl/qwen3_8_flash_next/qsa_policy.py",
         "qsa_sparse_paged_attention",
         {
             "torch": torch,

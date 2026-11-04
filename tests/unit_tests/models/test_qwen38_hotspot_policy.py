@@ -21,7 +21,7 @@ linear = declarations(
     {"max_prefill_rows": limits.max_prefill_rows},
 )
 qsa = declarations(
-    VENDOR / "__init__.py",
+    VENDOR / "qsa_policy.py",
     "qwen38_hotspot_split",
     names={"qsa_sparse_split_count"},
 )

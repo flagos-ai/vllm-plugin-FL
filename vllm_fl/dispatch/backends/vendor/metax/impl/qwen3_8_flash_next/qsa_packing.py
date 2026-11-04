@@ -135,3 +135,20 @@ def packed_attention(
         return False
     candidate(q, k, v, indices, table, mapping, out, gate)
     return True
+
+
+def indexer_launch(rows, columns, packed):
+    presets = _long_context_settings()["indexer_fast"][
+        "prefill" if packed else "decode"
+    ]
+    preset = next(
+        p
+        for p in presets
+        if p.get("min_rows", 0) <= rows <= p.get("max_rows", 8192)
+        and columns <= p["max_columns"]
+    )
+    return dict(
+        block_n=preset["block_n"],
+        num_warps=preset["warps"],
+        num_stages=preset["stages"],
+    )
