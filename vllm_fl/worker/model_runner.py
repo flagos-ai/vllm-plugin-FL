@@ -6805,17 +6805,19 @@ class ModelRunnerFL(
         )
         encoder_profiling_pool = current_platform.graph_pool_handle()
         original_pools: dict[int, Any] = {}
-        all_wrappers = list(GraphWrapper._all_instances) + list(
-            BreakableCUDAGraphWrapper._all_instances
+        all_wrappers = (
+            list(CUDAGraphWrapper._all_instances)
+            + list(GraphWrapper._all_instances)
+            + list(BreakableCUDAGraphWrapper._all_instances)
         )
+        # Kunlunxin: Breakable PIECEWISE wrappers with graph_pool=None own
+        # independent pools; profiling must preserve that runtime policy.
         private_breakable_graphs = any(
             instance.graph_pool is None
             for instance in BreakableCUDAGraphWrapper._all_instances
         )
         for instance in all_wrappers:
             original_pools[id(instance)] = instance.graph_pool
-            # None requests independent pools, including every breakable segment.
-            # Profiling must preserve the runtime allocation policy.
             if instance.graph_pool is not None:
                 instance.graph_pool = profiling_pool
 
@@ -6828,14 +6830,34 @@ class ModelRunnerFL(
         if kl_guard_supported:
             self._kl_budget_reset()
         encoder_memory_estimate = 0
+        # On ROCm, capture these throwaway profiling graphs on vLLM's dedicated
+        # compute stream instead of the fresh side stream graph_capture()
+        # allocates by default. torch's allocator pools free blocks per stream,
+        # so a side-stream forward strands a persistent aiter scratch buffer in
+        # a separate pool, shifting the physical placement of the real KV cache
+        # allocated afterward and slowing bandwidth-bound decode ~20%. The
+        # graphs are discarded, so a side stream is unnecessary here.
+        # Use current_stream(), not torch.cuda.current_stream(): before vLLM
+        # initializes its dedicated stream, torch returns the per-thread default
+        # stream (cuda_stream=0), which cannot be used for cudagraph capture.
+        # cap_ctx=None keeps the side-stream path on CUDA.
+        cap_ctx = (
+            GraphCaptureContext(current_stream())
+            if current_platform.is_rocm()
+            else None
+        )
+
         # Cleanup-only guard: CUDA graph capture errors should still propagate
         # because encoder graph capture is opt-in.
         try:
             if current_platform.device_type == "musa":
                 cap_ctx = self._get_musa_graph_capture_context()
             set_cudagraph_capturing_enabled(True)
-            with self._freeze_gc(), graph_capture(device=self.device):
-                _accelerator_synchronize()
+            with (
+                self._freeze_gc(),
+                graph_capture(device=self.device, graph_capture_context=cap_ctx),
+            ):
+                torch.accelerator.synchronize()
                 torch.accelerator.empty_cache()
 
                 for mode, descs in capture_descs:
@@ -6890,13 +6912,13 @@ class ModelRunnerFL(
                                 else None
                             ),
                         )
-                        _accelerator_synchronize()
-                        free_after = current_platform.torch_device_fn.mem_get_info()[0]
+                        torch.accelerator.synchronize()
+                        free_after = torch.accelerator.get_memory_info()[0]
                         mem_samples.append(mem_before - free_after)
                         if kl_guard:
                             self._kl_note(mode, desc.num_tokens, mem_samples[-1])
                             BreakableCUDAGraphWrapper.clear_all_graphs()
-                            _accelerator_synchronize()
+                            torch.accelerator.synchronize()
                             torch.accelerator.empty_cache()
                             if self._kl_over_budget():
                                 break
@@ -6963,10 +6985,10 @@ class ModelRunnerFL(
                         )
 
                 if encoder_cudagraph_manager is not None:
-                    mem_before = current_platform.torch_device_fn.mem_get_info()[0]
+                    mem_before = torch.accelerator.get_memory_info()[0]
                     encoder_cudagraph_manager.capture(graph_pool=encoder_profiling_pool)
-                    _accelerator_synchronize()
-                    free_after = current_platform.torch_device_fn.mem_get_info()[0]
+                    torch.accelerator.synchronize()
+                    free_after = torch.accelerator.get_memory_info()[0]
                     encoder_memory_estimate = max(mem_before - free_after, 0)
 
                     logger.debug(
@@ -7021,7 +7043,10 @@ class ModelRunnerFL(
             )
             return 0
 
-        self._limit_musa_piecewise_capture_sizes()
+        # Optional MUSA-only hook inherited from the pre-sync runner: lightweight
+        # runner objects (graph-memory profiling stubs) do not implement it.
+        if callable(getattr(self, "_limit_musa_piecewise_capture_sizes", None)):
+            self._limit_musa_piecewise_capture_sizes()
 
         # Initialize encoder CUDA graph manager if enabled.
         self._maybe_init_encoder_cudagraph_manager()
@@ -7084,7 +7109,7 @@ class ModelRunnerFL(
         ):
             torch.accelerator.synchronize()
             torch.accelerator.empty_cache()
-            start_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
+            start_free_gpu_memory = torch.accelerator.get_memory_info()[0]
 
             for (
                 runtime_mode,
@@ -7094,15 +7119,15 @@ class ModelRunnerFL(
                     batch_descriptors=batch_descs,
                     cudagraph_runtime_mode=runtime_mode,
                 )
-                _accelerator_synchronize()
+                torch.accelerator.synchronize()
 
             # Capture encoder CUDA graphs if enabled
             if self.encoder_cudagraph_manager is not None:
                 encoder_graph_pool = current_platform.graph_pool_handle()
                 self.encoder_cudagraph_manager.capture(graph_pool=encoder_graph_pool)
 
-            _accelerator_synchronize()
-            end_free_gpu_memory = current_platform.torch_device_fn.mem_get_info()[0]
+            torch.accelerator.synchronize()
+            end_free_gpu_memory = torch.accelerator.get_memory_info()[0]
 
         # Disable cudagraph capturing globally, so any unexpected cudagraph
         # capturing will be detected and raise an error after here.
@@ -7111,7 +7136,7 @@ class ModelRunnerFL(
         # after here.
         set_cudagraph_capturing_enabled(False)
 
-        _accelerator_synchronize()
+        torch.accelerator.synchronize()
         torch.accelerator.empty_cache()
 
         # Lock workspace to prevent resizing during execution.
