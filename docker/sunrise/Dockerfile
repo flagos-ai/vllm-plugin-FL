@@ -22,7 +22,9 @@ RUN apt-get update \
 
 # Repository-root build context. Compiler selection is inherited from the
 # published image and must expose its matched FlagTree/Triton and FlagGems.
-COPY docker/sunrise/ /opt/sunrise-build/
+COPY docker/sunrise/environment.sh docker/sunrise/entrypoint.sh \
+    docker/sunrise/runtime_constraints.py docker/sunrise/python310_compat.py \
+    docker/sunrise/verify_runtime.py /opt/sunrise-build/
 RUN source /opt/sunrise-build/environment.sh \
     && export TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
     && "${SUNRISE_PYTHON}" -c 'import sys; assert (3, 10) <= sys.version_info[:2] < (3, 14), sys.version' \
@@ -73,6 +75,16 @@ RUN source /opt/sunrise-build/environment.sh \
     && python /opt/sunrise-build/runtime_constraints.py verify \
         /opt/sunrise-stack --vllm-version "${VLLM_VERSION}"
 
+# The provider is independent of plugin edits. Keep its immutable source install
+# in a cached layer and avoid HTTP/2 partial-clone failures through the gateway.
+COPY .github/scripts/install_flaggems_vllm.py /opt/sunrise-build/install_flaggems_vllm.py
+RUN source /opt/sunrise-build/environment.sh \
+    && export TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
+    && export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
+    && python /opt/sunrise-build/install_flaggems_vllm.py \
+    && python /opt/sunrise-build/runtime_constraints.py verify \
+        /opt/sunrise-stack --vllm-version "${VLLM_VERSION}"
+
 # Install the requested checkout without resolving a replacement vendor stack.
 # A stable build version also works when Docker excludes worktree .git files.
 COPY . /opt/vllm-plugin-fl/
@@ -80,7 +92,6 @@ RUN source /opt/sunrise-build/environment.sh \
     && export TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
     && SETUPTOOLS_SCM_PRETEND_VERSION="${PLUGIN_VERSION}" \
         python -m pip install --no-build-isolation --no-deps /opt/vllm-plugin-fl \
-    && python /opt/vllm-plugin-fl/.github/scripts/install_flaggems_vllm.py \
     && python /opt/sunrise-build/runtime_constraints.py verify \
         /opt/sunrise-stack --vllm-version "${VLLM_VERSION}"
 

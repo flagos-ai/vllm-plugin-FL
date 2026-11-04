@@ -195,8 +195,9 @@ class PlatformFL(Platform):
         if (device_type == "cuda" and vendor_name not in ("iluvatar", "hygon"))
         else device_type
     )
-    # Keep small torch.compile helpers on the native NPU execution path.
-    simple_compile_backend = "eager" if device_type == "npu" else "inductor"
+    # Keep standalone helpers on native device execution. The published
+    # torch_ptpu/torch 2.11 CPU stack registers no PTPU Inductor code generator.
+    simple_compile_backend = "eager" if device_type in ("npu", "ptpu") else "inductor"
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
