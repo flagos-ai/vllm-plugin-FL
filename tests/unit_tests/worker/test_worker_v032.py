@@ -1,7 +1,36 @@
 """Regression coverage for the vLLM 0.32 worker interface."""
 
 import ast
+import importlib.util
 import inspect
+import sys
+from types import ModuleType
+from unittest.mock import Mock
+
+import pytest
+
+
+@pytest.fixture
+def gcu_attention_module(monkeypatch):
+    name = "flash_attn.vllm_flash_attn"
+    try:
+        available = importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        available = False
+    if not available:
+        native = ModuleType(name)
+        native.flash_attn_varlen_func = Mock(
+            side_effect=RuntimeError("Enflame native kernel unavailable on this host")
+        )
+        monkeypatch.setitem(sys.modules, name, native)
+    from vllm_fl.dispatch.backends.vendor.gcu.impl import attention
+
+    yield attention
+    if not available:
+        sys.modules.pop(attention.__name__, None)
+        package = sys.modules[attention.__package__]
+        if getattr(package, "attention", None) is attention:
+            delattr(package, "attention")
 
 
 def test_worker_imports_against_target_vllm():
@@ -17,17 +46,13 @@ def test_model_runner_imports_against_target_vllm():
     assert callable(ModelRunnerFL.initialize_kv_cache)
 
 
-def test_gcu_attention_imports_against_target_vllm():
-    from vllm_fl.dispatch.backends.vendor.gcu.impl.attention import AttentionGCUBackend
-
-    assert AttentionGCUBackend.get_name() == "FLASH_ATTN"
+def test_gcu_attention_imports_against_target_vllm(gcu_attention_module):
+    assert gcu_attention_module.AttentionGCUBackend.get_name() == "FLASH_ATTN"
 
 
-def test_gcu_block_size_accepts_v032_spec():
+def test_gcu_block_size_accepts_v032_spec(gcu_attention_module):
     # customize_attention_spec calls this without a current-config context.
-    from vllm_fl.dispatch.backends.vendor.gcu.impl import attention
-
-    backend = attention.AttentionGCUBackend
+    backend = gcu_attention_module.AttentionGCUBackend
     assert (
         backend.get_supported_kernel_block_sizes(None)
         == backend.get_supported_kernel_block_sizes()
@@ -102,13 +127,13 @@ def test_gcu_does_not_query_cuda_allocator_settings(monkeypatch):
         pass
 
 
-def test_gcu_forward_uses_standardized_kv_views(monkeypatch):
+def test_gcu_forward_uses_standardized_kv_views(monkeypatch, gcu_attention_module):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
     import torch
 
-    from vllm_fl.dispatch.backends.vendor.gcu.impl import attention
+    attention = gcu_attention_module
 
     impl = attention.AttentionGCUImpl.__new__(attention.AttentionGCUImpl)
     impl.attn_type = attention.AttentionType.DECODER

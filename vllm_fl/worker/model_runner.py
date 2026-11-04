@@ -341,7 +341,7 @@ class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
         sampled_token_ids: torch.Tensor,
         logprobs_tensors: LogprobsTensors | None,
         invalid_req_indices: list[int],
-        async_output_copy_stream: current_platform.torch_device_fn.Stream,
+        async_output_copy_stream: "current_platform.torch_device_fn.Stream",
         vocab_size: int,
         check_ep_fault: bool = False,
         num_nans: torch.Tensor | None = None,
