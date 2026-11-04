@@ -532,7 +532,32 @@ results separately from the earlier single-host runs and the adaptation Gate.
 - Dense FlashMLA requires the vendor scheduler-object ABI, including
   `FlashMLASchedMeta`. Older tuple-based libraries are rejected with a dependency
   error. Sparse MLA and FP8 MLA caches are not supported by this backend.
-- Explicit upstream V2 runner selection is rejected. FULL graphs and additional
-  speculative/quantized configurations require separate hardware validation.
+- `ModelRunnerFL` remains the default. Explicit `VLLM_USE_V2_MODEL_RUNNER=1`
+  enables the [experimental upstream V2 path](#experimental-upstream-v2-runner).
+  FULL graphs and additional speculative/quantized configurations require
+  separate hardware validation.
 - All changes are installed through the FL plugin lifecycle. Do not edit
   installed vLLM sources or copy CUDA extensions from another environment.
+
+
+### Experimental upstream V2 runner
+
+The default MetaX path remains `ModelRunnerFL`. Explicitly setting
+`VLLM_USE_V2_MODEL_RUNNER=1` selects the official vLLM 0.32
+`vllm.v1.worker.gpu.model_runner.GPUModelRunner` for isolated validation.
+When the empty wheel lacks a native CPU-dispatch mapped-memory kernel,
+only V2's buffer module uses its existing `NonUvaBuffer` copy fallback;
+global pinned-memory and CUDA platform classification are unchanged.
+
+This path uses the official `CUDAGraphWrapper` and its V2 profiling/cleanup
+registry, with the existing MetaX native-first weak-reference primitive.
+It preserves the explicit active capture stream and does not apply the
+private V1 stable-input/split-boundary candidate. FL operator dispatch is
+resolved after model loading before compilation. Model/operator registration,
+KV allocation and GDN metadata remain on their upstream V2 paths.
+
+This is an experimental implementation, not GPU or model acceptance. Validate
+single-host eager correctness first, followed by actual PIECEWISE capture and
+replay with unchanged text/image budgets and assertions. Cross-node FlagCX
+requires its own native per-rank communication and complete HTTP evidence.
+The older V1 failures and CPU-only candidates do not establish V2 correctness.

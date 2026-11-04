@@ -514,6 +514,10 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                from vllm_fl.worker.metax_v2 import prepare_metax_v2_runtime
+
+                prepare_metax_v2_runtime(self.vllm_config)
             from vllm.v1.worker.gpu.model_runner import (
                 GPUModelRunner as GPUModelRunnerV2,
             )
@@ -522,6 +526,12 @@ class WorkerFL(WorkerBase):
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
                 self.vllm_config, self.device
             )
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                logger.info_once(
+                    "MetaX V2 model runner: %s.%s",
+                    type(self.model_runner).__module__,
+                    type(self.model_runner).__qualname__,
+                )
         else:
             from vllm_fl.worker.model_runner import ModelRunnerFL
 
@@ -546,6 +556,16 @@ class WorkerFL(WorkerBase):
         ):
             self.model_runner.load_model(load_dummy_weights=load_dummy_weights)
 
+        if (
+            self.use_v2_model_runner
+            and getattr(current_platform, "vendor_name", None) == "metax"
+            and self.vllm_config.compilation_config.mode != CompilationMode.NONE
+        ):
+            # ModelRunnerFL normally resolves CachedOps before Dynamo tracing.
+            # Upstream V2 does not know FL's lazy dispatch registry.
+            from vllm_fl.dispatch import warmup_cached_ops
+
+            warmup_cached_ops()
         if self.vllm_config.weight_transfer_config is not None:
             self.weight_transfer_engine = WeightTransferEngineFactory.create_engine(
                 self.vllm_config.weight_transfer_config,
