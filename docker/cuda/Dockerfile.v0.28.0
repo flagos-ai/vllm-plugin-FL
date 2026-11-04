@@ -1,0 +1,114 @@
+# syntax=docker/dockerfile:1
+# Retain the CUDA 13.3 runtime line from FlagOS runtime 2.3.0.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-nvidia-cuda13.3@sha256:b32bc68278397aa144454898523170a668ef0314a644faa2f68988723462da20
+FROM ${BASE_IMAGE}
+
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+
+ARG VLLM_VERSION=0.28.0
+ARG CI_FLAGTREE_VERSION=0.6.2a1
+ARG FLAGGEMS_COMMIT=6ed2f39071ef85db26b7e64f0652a162f434959c
+ARG VLLM_FL_COMMIT=dbc397eacf1c49e96bf93ff2a32d271357ffde85
+
+# CI uses `uv --system`; explicitly select the base image's /flagos interpreter.
+# FlagTree lives outside site-packages and must also work without a login shell.
+ENV UV_PYTHON=/flagos/bin/python \
+    PYTHONPATH=/opt/flagtree \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_HTTP_TIMEOUT=120 \
+    VLLM_NO_USAGE_STATS=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl git build-essential cmake ninja-build \
+        libgomp1 libsndfile1 ffmpeg libibverbs1 librdmacm1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY <<EOF /opt/cuda133-build/constraints.txt
+# Match the existing vLLM 0.28 CI environment where CUDA-independent.
+numpy==2.2.6
+transformers==5.15.1
+tokenizers==0.22.2
+huggingface-hub==1.28.0
+openai==3.3.1
+xgrammar==0.2.3
+torchcodec==0.16.0
+setuptools==80.10.2
+pytest==9.1.1
+pytest-xdist==3.8.0
+pytest-timeout==2.4.0
+modelscope==1.37.1
+av==18.1.0
+xgboost==3.3.0
+EOF
+
+# vLLM 0.28's default wheel uses CUDA 13.0, matching the base's cu130 lane.
+# Its matching PyTorch wheels replace 2.11 with 2.13; system CUDA stays at 13.3.
+RUN uv pip install --system --break-system-packages \
+        --torch-backend cu130 \
+        --constraint /opt/cuda133-build/constraints.txt \
+        "vllm[audio]==${VLLM_VERSION}" \
+        pytest pytest-cov pytest-timeout pytest-json-report pytest-xdist \
+        modelscope requests decorator scikit-build-core==0.11 pybind11 \
+        packaging wheel sqlalchemy xgboost==3.3.0 \
+    && uv pip uninstall --system triton
+
+# `==` also admits local versions such as +ppu3.6. Use === to select the
+# exact NVIDIA wheel and keep the compiler in the base image's side directory.
+RUN python -m pip install --no-deps --no-cache-dir \
+        --index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
+        --target /opt/flagtree-ci "flagtree===${CI_FLAGTREE_VERSION}" \
+    && rm -rf /opt/flagtree \
+    && mv /opt/flagtree-ci /opt/flagtree \
+    && python -c 'from importlib.metadata import version; assert version("flagtree") == "0.6.2a1"'
+
+# Install from Git so the original CI provenance checks pass without changes.
+RUN uv pip install --system --break-system-packages \
+        --no-build-isolation --no-deps --reinstall \
+        "flag-gems @ git+https://github.com/flagos-ai/FlagGems.git@${FLAGGEMS_COMMIT}"
+
+RUN git init /opt/vllm-plugin-FL \
+    && cd /opt/vllm-plugin-FL \
+    && git remote add origin https://github.com/flagos-ai/vllm-plugin-FL.git \
+    && git fetch --depth 1 origin "${VLLM_FL_COMMIT}" \
+    && git checkout --detach FETCH_HEAD \
+    && uv pip install --system --break-system-packages \
+        --no-build-isolation --no-deps -e . \
+    && python .github/scripts/nvidia/check_flaggems.py \
+    && python .github/scripts/install_flaggems_vllm.py
+
+# Version checks are possible at build time without exposing a GPU to Docker.
+RUN python -c 'from importlib.metadata import version; import triton; assert version("vllm").startswith("0.28.0"); assert version("torch").endswith("+cu130"); assert version("flagtree") == "0.6.2a1"; assert triton.__version__.startswith("3.6.0")' \
+    && ! python -m pip show triton >/dev/null 2>&1
+
+# NVIDIA CI uses NCCL. The base's optional FlagCX binding targets torch 2.11
+# and cannot be loaded by torch 2.13; remove that binding instead of leaving
+# an incompatible auto-loaded extension in the environment.
+RUN uv pip uninstall --system flagcx
+
+# setup.sh exercises these assets; cache and decode them during the build.
+RUN python -c 'from vllm.assets.audio import AudioAsset; assets = [AudioAsset(name).audio_and_sample_rate for name in ("mary_had_lamb", "winning_call")]; assert all(audio.size > 0 and rate > 0 for audio, rate in assets)'
+
+# The original NVIDIA setup instantiates XGBRanker, which requires sklearn.
+RUN uv pip install --system --break-system-packages scikit-learn==1.9.1 \
+    && python -c 'from xgboost import XGBRanker; XGBRanker()'
+
+# FlashInfer compiles sampling and model kernels at runtime. The supplied base
+# is a runtime image; add the matching 13.3 compiler and development libraries.
+# Keep cuBLAS headers at the exact version of the base's held runtime package.
+RUN apt-get update \
+    && cublas_version="$(dpkg-query -W -f='${Version}' libcublas-13-3)" \
+    && cuda_libraries_version="$(dpkg-query -W -f='${Version}' cuda-libraries-13-3)" \
+    && apt-get install -y --no-install-recommends \
+        cuda-compiler-13-3 "cuda-libraries-dev-13-3=${cuda_libraries_version}" \
+        "libcublas-dev-13-3=${cublas_version}" \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/cuda/bin/nvcc --version
+
+ENV VLLM_PLUGINS=fl \
+    USE_FLAGGEMS=1 \
+    GEMS_VENDOR=nvidia \
+    USE_FLAGTUNE=0
+
+WORKDIR /opt/vllm-plugin-FL
+CMD ["bash"]
