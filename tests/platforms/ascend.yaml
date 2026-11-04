@@ -64,6 +64,14 @@ device_overrides:
       enable_chunked_prefill: false
       async_scheduling: false
       enable_prefix_caching: false
+      # The shared graph cases carry only enforce_eager: false, which leaves
+      # vLLM's default cudagraph_mode in place. Ascend accepts NONE or
+      # FULL_DECODE_ONLY only (vllm_fl/platform.py), so pin the mode and the
+      # capture sizes validated in #646. Eager cases are unaffected: their
+      # enforce_eager: true short-circuits before this is read.
+      compilation_config:
+        cudagraph_mode: FULL_DECODE_ONLY
+        cudagraph_capture_sizes: [1, 2, 4, 8]
     serve:
       startup_retries: 180
       extra_args:
