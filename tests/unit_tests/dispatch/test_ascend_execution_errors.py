@@ -13,16 +13,39 @@ from vllm_fl.dispatch import (
     OpManager,
     OpRegistry,
     policy_context,
-    policy_from_config,
 )
+from vllm_fl.dispatch.policy import policy_from_env
+
+
+def _use_platform_config(monkeypatch, platform):
+    import vllm_fl.dispatch.config as config
+
+    path = Path(config.__file__).parent / f"{platform}.yaml"
+    monkeypatch.setattr(config, "get_config_path", lambda: path)
+    monkeypatch.delenv("VLLM_FL_CONFIG", raising=False)
+
+
+@pytest.mark.parametrize("override", [None, "", "0", "1"])
+@pytest.mark.parametrize("platform", ["ascend", "nvidia"])
+def test_strict_platform_default_and_environment_override(
+    monkeypatch, platform, override
+):
+    _use_platform_config(monkeypatch, platform)
+    if override is None:
+        monkeypatch.delenv("VLLM_FL_STRICT", raising=False)
+    else:
+        monkeypatch.setenv("VLLM_FL_STRICT", override)
+    expected = override == "1" if override else platform == "ascend"
+    assert policy_from_env().strict is expected
 
 
 @pytest.mark.parametrize("cached", [False, True])
 def test_ascend_execution_error_does_not_retry_after_state_write(monkeypatch, cached):
     import vllm_fl.dispatch as dispatch
 
-    config = Path(dispatch.__file__).parent / "config" / "ascend.yaml"
-    policy = policy_from_config(str(config))
+    _use_platform_config(monkeypatch, "ascend")
+    monkeypatch.delenv("VLLM_FL_STRICT", raising=False)
+    policy = policy_from_env()
     assert policy.strict
     registry = OpRegistry()
     state = torch.zeros(1)

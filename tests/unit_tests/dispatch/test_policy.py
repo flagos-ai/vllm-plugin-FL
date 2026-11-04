@@ -184,12 +184,13 @@ class TestPolicyContext:
         assert policy.prefer == PREFER_DEFAULT
 
     def test_with_strict_mode(self):
+        original = get_policy()
         with with_strict_mode():
             policy = get_policy()
             assert policy.strict is True
 
         policy = get_policy()
-        assert policy.strict is False
+        assert policy.strict is original.strict
 
     def test_nested_contexts(self):
         with with_preference("vendor"):

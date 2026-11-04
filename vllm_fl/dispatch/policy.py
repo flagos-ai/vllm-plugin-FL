@@ -398,6 +398,7 @@ class PolicyManager:
 
         # Priority 3: Load platform-specific config as base defaults
         from vllm_fl.dispatch.config import get_config_path
+
         platform_config_path = get_config_path()
         platform_policy = None
         if platform_config_path:
@@ -409,7 +410,7 @@ class PolicyManager:
         # Priority 2: Environment variables override platform config
         # Get values from environment variables
         env_prefer_str = os.environ.get("VLLM_FL_PREFER", "").strip().lower()
-        env_strict_str = os.environ.get("VLLM_FL_STRICT", "0").strip()
+        env_strict_str = os.environ.get("VLLM_FL_STRICT", "").strip()
         env_deny_str = os.environ.get("VLLM_FL_DENY_VENDORS", "").strip()
         env_allow_str = os.environ.get("VLLM_FL_ALLOW_VENDORS", "").strip()
         env_per_op_str = os.environ.get("VLLM_FL_PER_OP", "").strip()
