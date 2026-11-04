@@ -1,6 +1,6 @@
 # Copyright 2026 FlagOS Contributors
 # SPDX-License-Identifier: Apache-2.0
-"""MetaX QSA selection and attention policies."""
+"""MetaX QSA selection and attention policies over numerical library APIs."""
 
 from importlib import import_module
 
@@ -176,7 +176,19 @@ def qsa_sparse_paged_attention(
     packed_workspace_cache=None,
     pack_rows=None,
     score_columns=None,
+    prefer_native=False,
+    native_workspace=None,
 ):
+    if prefer_native:
+        from .qsa_native import native_available, native_eligible, run_native
+
+        if native_eligible(
+            q, k, v, indices, scale, out, gate, native_workspace
+        ) and native_available(q.device):
+            return run_native(
+                q, k, v, indices, table, mapping, out, gate, native_workspace
+            )
+
     from .qsa_packing import packed_attention
 
     if packed_workspace_cache is not None and packed_attention(

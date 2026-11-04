@@ -65,6 +65,7 @@ def test_mtp_configuration_contract(launcher, mode, k):
         "qwen38_fused_gemma_norm": not bool(k),
         "qwen38_hc_small_fusions": not bool(k),
         "qwen38_qsa_long_context": not bool(k),
+        "qwen38_qsa_native_attention": not bool(k),
         "qwen38_reuse_gdn_metadata": not bool(k),
         "qwen38_gdn_host_metadata": not bool(k),
         "qwen38_ple_cpu_metadata": not bool(k),

@@ -2988,8 +2988,16 @@
         "sha256": "ad0313eadd9c24b9d60fc7e8d6cb6e1ef6066e77e6e99c350840b47447e1c141"
       },
       {
+        "path": "runtime/backend/_metax/ops/qsa_paged_native.py",
+        "sha256": "97b33e9196d13e16969c9dd9ca2ecea3b6f224b1153364a54db4d0b03601c71b"
+      },
+      {
         "path": "ops/qwen4/qsa_indexer_fast.py",
         "sha256": "7d41c0351f21390641e2353ddbca5774d6fd2c0cef7e7c46a5f0e0057bc8fad4"
+      },
+      {
+        "path": "ops/qwen4/qsa_native.py",
+        "sha256": "c330739f946545f87ab26953499891e844cb506a780ca56b3b7f17a4247a3144"
       }
     ],
     "vllm": [

@@ -37,8 +37,9 @@ def fn(path, name, ns):
     "active,padded,capability",
     [(3, 3, True), (3, 5, True), (0, 5, True), (3, 5, False)],
 )
+@pytest.mark.parametrize("native", [False, True])
 def test_qsa_zero_elision_requires_provider_and_preserves_padding(
-    monkeypatch, active, padded, capability
+    monkeypatch, active, padded, capability, native
 ):
     module = ModuleType("vllm_fl.models.qwen3_8_flash_next.gpu.ops.qsa")
     module.qsa_prepare_split_workspace = lambda *a, **k: (1, None)
@@ -74,6 +75,7 @@ def test_qsa_zero_elision_requires_provider_and_preserves_padding(
     def attention(q, k, v, idx, table, mapping, scale, out, **kw):
         assert torch.isnan(out).all() if capability else torch.all(out == 0)
         out.fill_(3)
+        assert kw["prefer_native"] is native
         calls.append(active)
 
     if capability:
@@ -91,6 +93,7 @@ def test_qsa_zero_elision_requires_provider_and_preserves_padding(
         _qsa_sparse_paged_attention=attention,
         _qsa_packed_workspaces={},
         _qsa_long_context=True,
+        _qsa_native_attention=native,
         topk_indices_buffer=indices,
         scaling=0.0625,
     )

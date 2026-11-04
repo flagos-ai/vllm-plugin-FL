@@ -144,3 +144,15 @@ The metadata builder prepares groups once per step. Decode keeps shape-selected
 parameters; the all-visible short bucket retains its score/TopK bypass.
 The numerical API belongs to FGV and remains a source-locked development
 dependency until a public, fixed installation composition is available.
+
+
+### Native MetaX QSA attention
+
+The MTP-off path uses MACA paged attention with four-token virtual pages over
+the original K/V storage. Capability and layout checks run before execution;
+unsupported inputs retain the existing provider and execution errors propagate.
+Framework metadata builds the virtual-page mapping and owns scratch. The model
+retains capture buffers after per-step metadata is released, keyed by rows,
+device, stream and score bucket. Prefill/mixed stay eager; decode graphs keep
+stable addresses. Native attention uses the reviewed BF16 tolerance rather than
+bitwise equality. Its FGV APIs remain unpublished development dependencies.

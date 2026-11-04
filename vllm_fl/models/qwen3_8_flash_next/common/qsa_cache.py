@@ -449,6 +449,7 @@ class PreparedQSAForwardMetadata(AttentionMetadata):
     score_columns: int | None = None
     pack_rows: torch.Tensor | None = None
     indexer_pack_rows: torch.Tensor | None = None
+    native_workspace: dict[str, torch.Tensor] | None = None
 
 
 class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMetadata]):
@@ -481,6 +482,12 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
         self.pack_rows_enabled = (
             bool(vllm_config.additional_config.get("qwen38_qsa_packing", False))
             and vllm_config.speculative_config is None
+            and device.type == "cuda"
+        )
+        self.native_attention_enabled = bool(
+            vllm_config.additional_config.get("qwen38_qsa_native_attention", False)
+            and vllm_config.speculative_config is None
+            and getattr(current_platform, "vendor_name", None) == "metax"
             and device.type == "cuda"
         )
         max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
@@ -593,6 +600,21 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
                 columns = qsa_score_columns(
                     int(common_attn_metadata.max_seq_len), self.compress_ratio, capacity
                 )
+        native_workspace = None
+        if (
+            getattr(self, "native_attention_enabled", False)
+            and self.compress_ratio == 1
+        ):
+            from vllm_fl.dispatch.backends.vendor.metax.impl.qwen3_8_flash_next.qsa_native import (
+                native_available,
+            )
+
+            if native_available(self.token_to_req_buffer.device):
+                from .qsa_workspace import prepare_native_qsa_workspace
+
+                native_workspace = prepare_native_qsa_workspace(
+                    num_tokens, self.token_to_req_buffer.device
+                )
         pack_rows = None
         seq_cpu = getattr(common_attn_metadata, "seq_lens_cpu_upper_bound", None)
         if seq_cpu is None:
@@ -600,6 +622,7 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
         if (
             self.pack_rows_enabled
             and self.compress_ratio == 1
+            and native_workspace is None
             and num_tokens > 64
             and int(common_attn_metadata.max_seq_len) <= 2051
             and seq_cpu is not None
@@ -641,6 +664,7 @@ class PreparedQSAMetadataBuilder(AttentionMetadataBuilder[PreparedQSAForwardMeta
             score_columns=columns,
             pack_rows=pack_rows,
             indexer_pack_rows=indexer_pack_rows,
+            native_workspace=native_workspace,
         )
 
 

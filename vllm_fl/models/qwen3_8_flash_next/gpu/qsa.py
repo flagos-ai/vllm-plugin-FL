@@ -332,6 +332,12 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             vllm_config.additional_config.get("qwen38_qsa_long_context", False)
             and vllm_config.speculative_config is None
         )
+        self._qsa_native_attention = bool(
+            self._metax
+            and vllm_config.speculative_config is None
+            and vllm_config.additional_config.get("qwen38_qsa_native_attention", False)
+        )
+        self._qsa_native_graph_workspaces: dict[tuple, dict[str, torch.Tensor]] = {}
         self._qsa_split_workspaces: dict[
             tuple[int, int, int, int, int, int],
             tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -471,6 +477,20 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                     query[:num_tokens], key_cache, self.topk_indices_buffer.shape[1]
                 ),
             )
+            native_workspace = getattr(main_metadata, "native_workspace", None)
+            if native_workspace is not None:
+                from ..common.qsa_workspace import retain_native_graph_workspace
+
+                native_workspace = retain_native_graph_workspace(
+                    self._qsa_native_graph_workspaces,
+                    native_workspace,
+                    query[:num_tokens],
+                    getattr(
+                        metadata[self.indexer.compressed_key_cache.prefix],
+                        "score_columns",
+                        None,
+                    ),
+                )
             self._qsa_sparse_paged_attention(
                 query[:num_tokens],
                 key_cache,
@@ -483,6 +503,8 @@ class Qwen3_8FlashNextQSAAttention(Qwen3NextAttention, AttentionLayerBase):
                 split_workspace=split_workspace,
                 gate=gate[:num_tokens],
                 packed_workspace_cache=self._qsa_packed_workspaces,
+                prefer_native=self._qsa_native_attention,
+                native_workspace=native_workspace,
                 score_columns=(
                     getattr(
                         metadata[self.indexer.compressed_key_cache.prefix],

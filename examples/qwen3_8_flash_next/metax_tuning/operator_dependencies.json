@@ -249,23 +249,36 @@
     "status": "Source-locked native capability; model integration validated; standalone publication deferred"
   },
   "qsa_native_candidate": {
-    "status": "Unpublished packed-indexer API composition; validated with fixed development dependencies",
+    "status": "Unpublished API composition; numerical/changed-graph validation recorded separately; no public-release claim",
     "apis": [
-      "qsa_indexer_fast"
+      "qsa_indexer_fast",
+      "native_qsa_attention"
     ],
     "files": [
       {
         "path": "runtime/backend/_metax/ops/qsa_indexer_fast.py",
         "sha256": "ad0313eadd9c24b9d60fc7e8d6cb6e1ef6066e77e6e99c350840b47447e1c141"
+      },
+      {
+        "path": "runtime/backend/_metax/ops/qsa_paged_native.py",
+        "sha256": "97b33e9196d13e16969c9dd9ca2ecea3b6f224b1153364a54db4d0b03601c71b"
       }
     ],
+    "native_binary_sha256": "1b5a65a404de34072c47cf244ab516fac8831c929d84c6a329642806e032d9b9",
+    "precision": "BF16 module tolerances; full-model accuracy pending",
+    "mode": "MTP off; prefill/mixed/decode; main attention has no small-batch performance split",
     "public_api_paths": [
-      "ops/qwen4/qsa_indexer_fast.py"
+      "ops/qwen4/qsa_indexer_fast.py",
+      "ops/qwen4/qsa_native.py"
     ],
     "public_api_sources": [
       {
         "path": "ops/qwen4/qsa_indexer_fast.py",
         "sha256": "7d41c0351f21390641e2353ddbca5774d6fd2c0cef7e7c46a5f0e0057bc8fad4"
+      },
+      {
+        "path": "ops/qwen4/qsa_native.py",
+        "sha256": "c330739f946545f87ab26953499891e844cb506a780ca56b3b7f17a4247a3144"
       }
     ]
   }
