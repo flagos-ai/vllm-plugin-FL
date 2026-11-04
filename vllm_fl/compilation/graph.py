@@ -5,16 +5,16 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
-import weakref
 from collections.abc import Callable
 from contextlib import ExitStack
-from typing import Any, ClassVar
+from typing import Any
 from unittest.mock import patch
 
 import torch
 
 import vllm.envs as envs
 from vllm.compilation.counter import compilation_counter
+from vllm.compilation.cuda_graph import CUDAGraphWrapper
 from vllm.compilation.cudagraph_pool import capture_pool
 from vllm.compilation.monitor import validate_cudagraph_capturing_enabled
 from vllm.config import CUDAGraphMode, VllmConfig
@@ -200,13 +200,6 @@ class GraphWrapper:
     """FL-specific graph wrapper that supports multiple device types (CUDA, NPU).
     Adapted from upstream CUDAGraphWrapper with platform-agnostic graph capture."""
 
-    _all_instances: ClassVar[weakref.WeakSet["GraphWrapper"]] = weakref.WeakSet()
-
-    @classmethod
-    def clear_all_graphs(cls) -> None:
-        for instance in list(cls._all_instances):
-            instance.clear_graphs()
-
     def clear_graphs(self) -> None:
         self.concrete_cudagraph_entries.clear()
 
@@ -241,7 +234,8 @@ class GraphWrapper:
         # cudagraphs for.
         self.concrete_cudagraph_entries: dict[BatchDescriptor, GraphEntry] = {}
 
-        GraphWrapper._all_instances.add(self)
+        # Native V1/V2 use this registry for graph-pool profiling and cleanup.
+        CUDAGraphWrapper._all_instances.add(self)
 
     def __getattr__(self, key: str) -> Any:
         # allow accessing the attributes of the runnable.
