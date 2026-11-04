@@ -5,6 +5,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import ctypes
+import importlib.util
 import os
 import sys
 import threading
@@ -26,22 +27,47 @@ _flagcx_path = os.getenv('FLAGCX_PATH')
 if _flagcx_path and os.path.isdir(_flagcx_path):
     sys.path.append(_flagcx_path)
 
-try:
-    from plugin.interservice.flagcx_wrapper import (
-        FLAGCXLibrary,
-        buffer_type,
-        flagcxComm_t,
-        flagcxDataTypeEnum,
-        flagcxUniqueId,
-        flagcxRedOpTypeEnum,
-    )
-    _flagcx_available = True
-except ImportError:
+def _load_configured_source_api():
+    """Pair a new source-built library with its matching standalone wrapper."""
+    if not _flagcx_path:
+        return None
+    source = os.path.join(_flagcx_path, "src", "flagcx", "api.py")
+    if not os.path.isfile(source):
+        return None
+    name = "_vllm_fl_flagcx_source_api"
+    cached = sys.modules.get(name)
+    if cached is not None and getattr(cached, "__file__", None) == source:
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    module = importlib.util.module_from_spec(spec)
+    # dataclasses in the wrapper resolve their defining module through this.
+    sys.modules[name] = module
     try:
-        # Current FlagOS application images ship FlagCX as a wheel instead
-        # of a source checkout. Keep the legacy wrapper first for existing
-        # deployments; both expose the same communicator-facing API.
-        from flagcx.api import (
+        spec.loader.exec_module(module)
+        for symbol in (
+            "FLAGCXLibrary", "buffer_type", "flagcxComm_t", "flagcxDataTypeEnum",
+            "flagcxUniqueId", "flagcxRedOpTypeEnum",
+        ):
+            if not hasattr(module, symbol):
+                raise ImportError(f"Configured FlagCX wrapper is missing {symbol}: {source}")
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+_source_api = _load_configured_source_api()
+if _source_api is not None:
+    FLAGCXLibrary = _source_api.FLAGCXLibrary
+    buffer_type = _source_api.buffer_type
+    flagcxComm_t = _source_api.flagcxComm_t
+    flagcxDataTypeEnum = _source_api.flagcxDataTypeEnum
+    flagcxUniqueId = _source_api.flagcxUniqueId
+    flagcxRedOpTypeEnum = _source_api.flagcxRedOpTypeEnum
+    _flagcx_available = True
+else:
+    try:
+        from plugin.interservice.flagcx_wrapper import (
             FLAGCXLibrary,
             buffer_type,
             flagcxComm_t,
@@ -51,13 +77,25 @@ except ImportError:
         )
         _flagcx_available = True
     except ImportError:
-        _flagcx_available = False
-        FLAGCXLibrary = None
-        buffer_type = None
-        flagcxComm_t = None
-        flagcxDataTypeEnum = None
-        flagcxUniqueId = None
-        flagcxRedOpTypeEnum = None
+        try:
+            # Wheel-packaged images do not contain the legacy source wrapper.
+            from flagcx.api import (
+                FLAGCXLibrary,
+                buffer_type,
+                flagcxComm_t,
+                flagcxDataTypeEnum,
+                flagcxUniqueId,
+                flagcxRedOpTypeEnum,
+            )
+            _flagcx_available = True
+        except ImportError:
+            _flagcx_available = False
+            FLAGCXLibrary = None
+            buffer_type = None
+            flagcxComm_t = None
+            flagcxDataTypeEnum = None
+            flagcxUniqueId = None
+            flagcxRedOpTypeEnum = None
 
 
 def _resolve_flagcx_library_path() -> str:
@@ -169,6 +207,13 @@ class PyFlagcxCommunicator:
         # now `device` is a `torch.device` object
         assert isinstance(device, torch.device)
         self.device = device
+        self._sync_collectives = (
+            device.type == "txda"
+            and os.getenv("VLLM_TXDA_SYNC_COLLECTIVES", "0") == "1"
+        )
+        self._group_depth = 0
+        self._pending_sync_streams = []
+        self._pending_sync_tensors = []
         # nccl communicator and stream will use this device
         # `torch.cuda.device` / `torch.musa.device` are context managers that
         # change the current device to the specified one
@@ -200,7 +245,8 @@ class PyFlagcxCommunicator:
                 # all_reduce returns a new output allocation. Keep it alive
                 # until the asynchronous native collective has completed.
                 warmup_output = self.all_reduce(data)
-                stream.synchronize()
+                if not self._sync_collectives:
+                    stream.synchronize()
                 del data, warmup_output
             except Exception:
                 # A returned native handle still needs cleanup if warmup fails.
@@ -290,6 +336,40 @@ class PyFlagcxCommunicator:
             stream = SimpleNamespace(cuda_stream=stream.npu_stream)
         return self.flagcx.adaptor_stream_copy(stream)
 
+    def _cpu_group_barrier(self):
+        if isinstance(self.group, StatelessProcessGroup):
+            self.group.barrier()
+        else:
+            dist.barrier(group=self.group)
+
+    def _prepare_collective(self, stream):
+        """Finish local producers before every rank starts the next phase."""
+        if getattr(self, "_sync_collectives", False) and not self._group_depth:
+            stream.synchronize()
+            self._cpu_group_barrier()
+
+    def _synchronize_collective_streams(self, streams):
+        """Close each TXDA collective phase using the CPU control group."""
+        self._cpu_group_barrier()
+        for stream in streams:
+            stream.synchronize()
+        self._cpu_group_barrier()
+
+    def _finish_collective(self, flagcx_stream, stream, *tensors):
+        """Retain tensors until opt-in TXDA synchronization has completed."""
+        try:
+            if getattr(self, "_sync_collectives", False):
+                if self._group_depth:
+                    if not any(s is stream for s in self._pending_sync_streams):
+                        self._pending_sync_streams.append(stream)
+                    self._pending_sync_tensors.extend(tensors)
+                else:
+                    self._synchronize_collective_streams([stream])
+        finally:
+            # Free only FlagCX's borrowed-stream wrapper, never the native
+            # TXDA stream. Grouped tensors remain held until outer GroupEnd.
+            self.flagcx.adaptor_stream_free(flagcx_stream)
+
     def all_reduce(self,
                    in_tensor: torch.Tensor,
                    out_tensor: torch.Tensor = None,
@@ -309,6 +389,7 @@ class PyFlagcxCommunicator:
 
         if stream is None:
             stream = self._current_stream()
+        self._prepare_collective(stream)
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxAllReduce(buffer_type(in_tensor.data_ptr()),
                                 buffer_type(out_tensor.data_ptr()),
@@ -316,7 +397,7 @@ class PyFlagcxCommunicator:
                                 flagcxDataTypeEnum.from_torch(in_tensor.dtype),
                                 flagcxRedOpTypeEnum.from_torch(op), self.comm,
                                 flagcx_stream)
-        self.flagcx.adaptor_stream_free(flagcx_stream)
+        self._finish_collective(flagcx_stream, stream, in_tensor, out_tensor)
         return out_tensor
 
     def all_gather(self,
@@ -333,13 +414,14 @@ class PyFlagcxCommunicator:
             f"but the input tensor is on {input_tensor.device}")
         if stream is None:
             stream = self._current_stream()
+        self._prepare_collective(stream)
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxAllGather(
             buffer_type(input_tensor.data_ptr()),
             buffer_type(output_tensor.data_ptr()), input_tensor.numel(),
             flagcxDataTypeEnum.from_torch(input_tensor.dtype), self.comm,
             flagcx_stream)
-        self.flagcx.adaptor_stream_free(flagcx_stream)
+        self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
 
     def all_gatherv(
         self,
@@ -362,6 +444,7 @@ class PyFlagcxCommunicator:
         if self.device.type == "npu":
             assert input_tensor.shape[0] == sizes[self.rank]
         split_offset = 0
+        self._prepare_collective(stream)
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.group_start()
         for root, split_size in enumerate(sizes):
@@ -384,7 +467,7 @@ class PyFlagcxCommunicator:
             with torch.npu.stream(stream):
                 output_tensor[own_offset:own_offset + sizes[self.rank]].copy_(
                     input_tensor)
-        self.flagcx.adaptor_stream_free(flagcx_stream)
+        self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
 
     def reduce_scatter(self,
                        output_tensor: torch.Tensor,
@@ -401,6 +484,7 @@ class PyFlagcxCommunicator:
             f"but the input tensor is on {input_tensor.device}")
         if stream is None:
             stream = self._current_stream()
+        self._prepare_collective(stream)
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxReduceScatter(
             buffer_type(input_tensor.data_ptr()),
@@ -408,7 +492,7 @@ class PyFlagcxCommunicator:
             flagcxDataTypeEnum.from_torch(input_tensor.dtype),
             flagcxRedOpTypeEnum.from_torch(op), self.comm,
             flagcx_stream)
-        self.flagcx.adaptor_stream_free(flagcx_stream)
+        self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
 
     def reduce_scatterv(
         self,
@@ -430,6 +514,7 @@ class PyFlagcxCommunicator:
             stream = self._current_stream()
 
         split_offset = 0
+        self._prepare_collective(stream)
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.group_start()
         for root, split_size in enumerate(sizes):
@@ -442,7 +527,7 @@ class PyFlagcxCommunicator:
                 flagcx_stream)
             split_offset += split_size
         self.group_end()
-        self.flagcx.adaptor_stream_free(flagcx_stream)
+        self._finish_collective(flagcx_stream, stream, input_tensor, output_tensor)
 
     def send(self, tensor: torch.Tensor, dst: int, stream=None):
         if self.disabled:
@@ -487,20 +572,48 @@ class PyFlagcxCommunicator:
         else:
             sendbuff = buffer_type()
             recvbuff = buffer_type(tensor.data_ptr())
+        self._prepare_collective(stream)
         flagcx_stream = self._copy_flagcx_stream(stream)
         self.flagcx.flagcxBroadcast(sendbuff, recvbuff, tensor.numel(),
                                 flagcxDataTypeEnum.from_torch(tensor.dtype), src,
                                 self.comm, flagcx_stream)
-        self.flagcx.adaptor_stream_free(flagcx_stream)
+        self._finish_collective(flagcx_stream, stream, tensor)
 
     def group_start(self):
-        if self.device.type == "npu":
+        if self.disabled:
+            return
+        # The packaged flagcx.api wrapper requires a communicator on every
+        # backend. The legacy source wrapper only takes one for Ascend.
+        if not self._legacy_unique_id_api or self.device.type == "npu":
             self.flagcx.flagcxGroupStart(self.comm)
         else:
             self.flagcx.flagcxGroupStart()
+        if getattr(self, "_sync_collectives", False):
+            self._group_depth += 1
 
     def group_end(self):
-        if self.device.type == "npu":
+        if self.disabled:
+            return
+        sync_collectives = getattr(self, "_sync_collectives", False)
+        if sync_collectives and not self._group_depth:
+            raise RuntimeError("TXDA FlagCX group_end called without group_start")
+        if (
+            sync_collectives
+            and self._group_depth == 1
+            and self._pending_sync_streams
+        ):
+            # Native groups defer their collective launches to outer GroupEnd.
+            # Finish the input producers before allowing that launch phase.
+            for stream in self._pending_sync_streams:
+                stream.synchronize()
+            self._cpu_group_barrier()
+        if not self._legacy_unique_id_api or self.device.type == "npu":
             self.flagcx.flagcxGroupEnd(self.comm)
         else:
             self.flagcx.flagcxGroupEnd()
+        if sync_collectives:
+            self._group_depth -= 1
+            if not self._group_depth and self._pending_sync_streams:
+                self._synchronize_collective_streams(self._pending_sync_streams)
+                self._pending_sync_streams.clear()
+                self._pending_sync_tensors.clear()

@@ -149,6 +149,26 @@ The repository installer pins FlagGems-vllm to `v0.2.0` commit
 `b5c2c2249319277ccda4d41aa0f65164bd9b2a19` and verifies the existing runtime
 versions remain unchanged.
 
+## Build the pinned FlagCX candidate
+
+The current adaptation tests the official FlagCX main revision
+`4a3dca96fb5a87dd6bd016e67359d7abeb0c6933` separately from the image's
+0.14 wheel. This source revision builds against the existing TXDA SDK:
+
+```bash
+cd /work/task
+git clone https://github.com/flagos-ai/FlagCX.git FlagCX-latest
+cd FlagCX-latest
+git checkout 4a3dca96fb5a87dd6bd016e67359d7abeb0c6933
+git submodule update --init --depth 1 third-party/json
+make -j16 USE_TSM=1 USE_BOOTSTRAP=1 COMPILE_KERNEL=0 \
+  DEVICE_HOME=/usr/local/kuiper CCL_HOME=/usr/local/kuiper
+```
+
+The plugin loads the matching standalone `src/flagcx/api.py` when
+`FLAGCX_PATH` names this checkout, and loads `build/lib/libflagcx.so` by
+its explicit path. Installing a new Torch backend binding is unnecessary.
+
 ## Runtime configuration
 
 Save the following in `/work/task/env.sh`. The current image packages FlagCX
@@ -160,9 +180,10 @@ as a wheel with its ctypes wrapper in `flagcx.api` and its library under
 export GEMS_VENDOR=tsingmicro
 export FL_TXDA_PY310_COMPAT=1
 export PYTHONPATH="/work/vllm-plugin-FL/tools/tsingmicro_py310:${PYTHONPATH:-}"
-export FLAGCX_PATH=$(python -c 'from pathlib import Path; import flagcx; print(Path(flagcx.__file__).resolve().parent)')
-test -f "$FLAGCX_PATH/lib/libflagcx.so"
-export LD_LIBRARY_PATH="$FLAGCX_PATH/lib:${LD_LIBRARY_PATH:-}"
+export FLAGCX_PATH=/work/task/FlagCX-latest
+test -f "$FLAGCX_PATH/src/flagcx/api.py"
+test -f "$FLAGCX_PATH/build/lib/libflagcx.so"
+export VLLM_TXDA_SYNC_COLLECTIVES=1
 export VLLM_PLUGINS=fl
 export VLLM_USE_V2_MODEL_RUNNER=1
 export VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS=30
@@ -172,6 +193,13 @@ export FL_MODEL_BASE_PATH=/models
 export NCCL_P2P_DISABLE=1
 export TXDA_LAUNCH_KERNEL_SYNC=0
 ```
+
+`VLLM_TXDA_SYNC_COLLECTIVES=1` explicitly enables synchronized TXDA
+collective phases. The control group coordinates ranks around native stream
+synchronization; all tensor communication still goes through FlagCX. Grouped
+collectives synchronize at the outermost group end. Other backends and the
+default mode retain their original scheduling. This prioritizes correctness
+and does not establish an overlap or throughput guarantee.
 
 `TXDA_VISIBLE_DEVICES` controls logical-to-physical device mapping. Validate
 collectives on the allocated group before serving a model. Earlier TX8110 runs
@@ -241,7 +269,7 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **380 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **433 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper

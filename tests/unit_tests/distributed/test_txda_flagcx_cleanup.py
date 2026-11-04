@@ -5,6 +5,7 @@ import ast
 import ctypes
 import gc
 import logging
+import os
 import threading
 import time
 import weakref
@@ -87,6 +88,7 @@ def loaded():
     )
     namespace = {
         "ctypes": ctypes,
+        "os": os,
         "threading": threading,
         "torch": runtime,
         "dist": Mock(),

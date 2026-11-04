@@ -23,6 +23,9 @@ class Group:
 
 @pytest.fixture
 def load_module(monkeypatch):
+    monkeypatch.delenv("FLAGCX_PATH", raising=False)
+    monkeypatch.setitem(sys.modules, "_vllm_fl_flagcx_source_api", None)
+
     def package(name):
         module = ModuleType(name)
         module.__path__ = []
@@ -80,6 +83,55 @@ def test_source_wrapper_keeps_priority_over_installed_wheel(load_module):
     assert loaded.module._flagcx_available
     assert loaded.module.FLAGCXLibrary is loaded.legacy.FLAGCXLibrary
     assert loaded.module.flagcxUniqueId is loaded.legacy.flagcxUniqueId
+
+
+def test_configured_new_source_api_has_priority_and_dataclass_module(
+    load_module, monkeypatch, tmp_path
+):
+    source = tmp_path / "src/flagcx/api.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "from dataclasses import dataclass\n"
+        "@dataclass\n"
+        "class FLAGCXLibrary:\n"
+        "    origin: str = 'configured-source'\n"
+        "buffer_type = flagcxComm_t = flagcxDataTypeEnum = object()\n"
+        "flagcxUniqueId = flagcxRedOpTypeEnum = object()\n"
+    )
+    monkeypatch.setenv("FLAGCX_PATH", str(tmp_path))
+
+    loaded = load_module()
+
+    assert loaded.module._flagcx_available
+    assert loaded.module.FLAGCXLibrary().origin == "configured-source"
+    assert loaded.module.FLAGCXLibrary is not loaded.legacy.FLAGCXLibrary
+    assert loaded.module.FLAGCXLibrary is not loaded.wheel.FLAGCXLibrary
+    assert (
+        sys.modules["_vllm_fl_flagcx_source_api"].FLAGCXLibrary
+        is loaded.module.FLAGCXLibrary
+    )
+    assert load_module().module.FLAGCXLibrary is loaded.module.FLAGCXLibrary
+
+
+@pytest.mark.parametrize(
+    "contents,error,message",
+    [
+        ("FLAGCXLibrary = object()\n", ImportError, "missing buffer_type"),
+        ("raise RuntimeError('broken configured wrapper')\n", RuntimeError, "broken"),
+    ],
+)
+def test_configured_source_failure_does_not_load_an_unmatched_wheel_wrapper(
+    load_module, monkeypatch, tmp_path, contents, error, message
+):
+    source = tmp_path / "src/flagcx/api.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(contents)
+    monkeypatch.setenv("FLAGCX_PATH", str(tmp_path))
+
+    with pytest.raises(error, match=message):
+        load_module()
+
+    assert "_vllm_fl_flagcx_source_api" not in sys.modules
 
 
 @pytest.mark.parametrize("legacy", [False, True])
