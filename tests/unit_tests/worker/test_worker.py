@@ -449,7 +449,8 @@ def test_elastic_ep_releases_graphs_before_native_cleanup(monkeypatch, wrapper_k
         torch.accelerator, "empty_cache", lambda: events.append("empty")
     )
     executor = ElasticEPScalingExecutorFL.__new__(ElasticEPScalingExecutorFL)
-    executor.worker = SimpleNamespace(model_runner=runner, vllm_config=object())
+    worker = SimpleNamespace(model_runner=runner, vllm_config=object())
+    executor.worker_ref = lambda: worker
     executor._release_cuda_graphs()
     expected = (["manager"] if wrapper_kind == "manager" else []) + [
         "reset",
