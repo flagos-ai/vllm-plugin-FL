@@ -1,0 +1,101 @@
+# Build from the repository root:
+# docker build -f docker/iluvatar/Dockerfile.v0.28.0 -t vllm-fl-iluvatar:0.28.0-local docker/iluvatar
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-iluvatar-corex4.5.0@sha256:6122f544f0f000f95b5739e6a2c4cadbf1293b3ace0f8c9ebca5715510ed1831
+FROM ${BASE_IMAGE}
+
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+
+ARG FLAGTREE_VERSION=0.6.2a3+iluvatar3.6
+# Same FlagGems sources as the reference image, whose package was labeled 5.3.5.
+ARG FLAGGEMS_COMMIT=4df52d9168ac55c1c1061cefb4638c570292d896
+ARG PLUGIN_REPOSITORY=https://github.com/BrianPei/vllm-plugin-FL.git
+ARG PLUGIN_COMMIT=ad8ebc972a7a2b8666796891f14ca81d674618b0
+
+ENV UV_PYTHON=/flagos/bin/python \
+    PYTHONPATH=/opt/flagtree \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VLLM_NO_USAGE_STATS=1
+
+# Protect the vendor PyTorch packages while resolving vLLM's Python dependencies.
+RUN mkdir -p /opt/iluvatar-ci \
+    && printf '%s\n' \
+        'torch===2.10.0+corex.4.5.0.20260804' \
+        'torchvision===0.25.0+corex.4.5.0.20260804' \
+        'torchaudio===2.10.0+corex.4.5.0.20260804' \
+        'numpy==1.26.4' \
+        'opencv-python-headless==4.11.0.86' \
+        'transformers==5.15.1' \
+        'tokenizers==0.22.2' \
+        'huggingface-hub==1.28.0' \
+        'openai==3.3.1' \
+        'xgrammar==0.2.3' \
+        'setuptools==80.10.2' \
+        'modelscope==1.35.3' \
+        > /opt/iluvatar-ci/constraints.txt
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl git build-essential libsndfile1 ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --no-cache-dir \
+        --constraint /opt/iluvatar-ci/constraints.txt \
+        setuptools setuptools-scm setuptools-rust wheel packaging \
+        scikit-build-core==0.11 pybind11 ninja jinja2
+
+# Build an empty vLLM wheel from the official, checksummed source distribution.
+# Build isolation is disabled to preserve the CoreX PyTorch ABI.
+# CoreX torch uses the NumPy 1.x ABI. Keep the reference OpenCV 4.11 pin
+# instead of the generic vLLM OpenCV requirement, which forces NumPy 2.x.
+RUN curl --fail --location --silent --show-error --retry 3 \
+        https://files.pythonhosted.org/packages/22/39/096d88cfe34ee43a8b6e7c957d1ad6338fa5256474d6ff9a32008c6f8cd6/vllm-0.28.0.tar.gz \
+        -o /tmp/vllm-0.28.0.tar.gz \
+    && echo 'ac96dd0ec5be9c13f2aa4bfb50498c4727110406f6e4980b58a4097e4d18634a  /tmp/vllm-0.28.0.tar.gz' | sha256sum -c - \
+    && mkdir -p /tmp/vllm-src /tmp/vllm-wheels \
+    && tar -xzf /tmp/vllm-0.28.0.tar.gz -C /tmp/vllm-src --strip-components=1 \
+    && VLLM_TARGET_DEVICE=empty python -m pip wheel \
+        --no-build-isolation --no-deps --wheel-dir /tmp/vllm-wheels /tmp/vllm-src \
+    && python -m pip install --no-cache-dir --no-deps \
+        /tmp/vllm-wheels/vllm-0.28.0+empty-*.whl \
+    && sed '/^opencv-python-headless[[:space:]]/d' \
+        /tmp/vllm-src/requirements/common.txt > /tmp/vllm-common-corex.txt \
+    && python -m pip install --no-cache-dir \
+        --constraint /opt/iluvatar-ci/constraints.txt \
+        --requirement /tmp/vllm-common-corex.txt opencv-python-headless \
+        pytest pytest-cov pytest-timeout pytest-json-report pytest-xdist \
+        modelscope requests decorator sqlalchemy xgboost scikit-learn \
+        librosa soundfile \
+    && rm -rf /tmp/vllm-src /tmp/vllm-wheels /tmp/vllm-0.28.0.tar.gz /tmp/vllm-common-corex.txt
+
+# Generic Python dependencies can bring NVIDIA-only runtime packages along.
+# CoreX uses its own collective library and the FlagTree-provided compiler.
+RUN python -m pip uninstall -y triton nvidia-nccl-cu13 \
+    && python -c 'from xgboost import XGBRanker; XGBRanker()'
+
+# FlagTree provides the iluvatar Triton backend outside site-packages.
+RUN python -m pip install --no-deps --no-cache-dir \
+        --index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
+        --target /opt/flagtree-ci "flagtree===${FLAGTREE_VERSION}" \
+    && rm -rf /opt/flagtree \
+    && mv /opt/flagtree-ci /opt/flagtree
+
+RUN python -m pip install --no-build-isolation --no-deps --no-cache-dir --force-reinstall \
+        "flag-gems @ git+https://github.com/flagos-ai/FlagGems.git@${FLAGGEMS_COMMIT}"
+
+RUN git init /opt/vllm-plugin-FL \
+    && cd /opt/vllm-plugin-FL \
+    && git remote add origin "${PLUGIN_REPOSITORY}" \
+    && git fetch --depth 1 origin "${PLUGIN_COMMIT}" \
+    && git checkout --detach FETCH_HEAD \
+    && python -m pip install --no-build-isolation --no-deps -e . \
+    && python .github/scripts/install_flaggems_vllm.py
+
+RUN python -c 'from importlib.metadata import version; import triton, torch, numpy; assert version("numpy") == "1.26.4"; assert version("opencv-python-headless") == "4.11.0.86"; assert torch.from_numpy(numpy.ones(1)).numpy()[0] == 1; assert version("vllm") == "0.28.0+empty"; assert version("torch") == "2.10.0+corex.4.5.0.20260804"; assert version("flag-gems") == "5.3.4.post1.dev203+g4df52d916"; assert version("flagtree") == "0.6.2a3+iluvatar3.6"; assert triton.__version__ == "3.6.0"' \
+    && ! python -m pip show triton >/dev/null 2>&1
+
+ENV VLLM_PLUGINS=fl \
+    USE_FLAGGEMS=1 \
+    GEMS_VENDOR=iluvatar
+
+WORKDIR /opt/vllm-plugin-FL
+CMD ["bash"]

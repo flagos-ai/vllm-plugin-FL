@@ -13,14 +13,14 @@
 # limitations under the License.
 
 # Iluvatar CoreX (BI-V150) CI configuration.
-# ci_image published 2026-09-30 (rebuilt with vLLM 0.28.0+empty + pytest CI deps):
-#   harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-lluvatar-ci
-#   digest sha256:dc7e26da9b4d7ea28bb972b1619aa61acfc8e784f5edb9da2568dd5e61502ca8
+# Rebuilt 2026-11-04 from FlagOS runtime CoreX 4.5.0 version 2.3.0.
+# Validated: unit tests and GPU/NCCL environment smoke checks.
+# Build recipe: docker/iluvatar/Dockerfile.v0.28.0
 # Jobs need a self-hosted runner matching the label below.
 
 platform: iluvatar
 
-ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-lluvatar-ci
+ci_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-lluvatar-ci@sha256:58f1264a29737c0f5744233d895af55692013c2433258b5580b89b3b18a4cb1c
 
 runner_labels:
   - iluvatar-cicd-vllm-plugin
