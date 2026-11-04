@@ -14,9 +14,10 @@
 
 # vLLM 0.28 empty-device recipe for Enflame S60. Keep the vendor torch_gcu
 # 2.11 stack and install official Enflame compiler/operator wheels.
-# The runtime is validated on driver 1.10.6. The old vendor wrapper
+# The FlagOS runtime supplies /flagos Python and the TOPS 1.10.6 SDK.
+# The old vendor wrapper
 # remains in Dockerfile.v0.20.2.
-ARG ENFLAME_BASE_IMAGE=harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853
+ARG ENFLAME_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-enflame-tops1.10.6:2.3.0@sha256:6356cd26647a4cbd27f2ad9ece7281df888df7ec9e9c2dc3bb5aaa262f9097c6
 # Override with a mirror (e.g. https://gh-proxy.com/https://github.com/...) on
 # hosts with unreliable direct GitHub access.
 ARG VLLM_SOURCE_URL=https://github.com/vllm-project/vllm.git
@@ -69,6 +70,9 @@ RUN apt-get update \
         ca-certificates \
         curl \
         git \
+        ffmpeg \
+        libgl1 \
+        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Build tooling for vLLM 0.28 empty mode: setuptools >= 77 (PEP 639 SPDX
@@ -126,6 +130,9 @@ RUN (python -m pip uninstall -y vllm || true) \
     && printf '%s\n' \
         'torch==2.11.0+cpu' \
         'torch-gcu==2.11.0+3.8.20260713' \
+        'torchaudio==2.11.0+cpu' \
+        'torchvision==0.26.0+cpu' \
+        'numpy==1.26.4' \
         'triton==3.6.0' \
         "triton-gcu==${TRITON_GCU_VERSION}" \
         "flagtree==${FLAGTREE_VERSION}" \
@@ -227,6 +234,8 @@ WORKDIR /workspace
 FROM dev AS ci
 
 RUN python -m pip install --no-cache-dir \
+        "pytest-xdist>=3.0.0" \
+        "modelscope==1.35.3" \
         pytest-timeout \
         pytest-metadata \
         requests \
@@ -235,6 +244,9 @@ RUN python -m pip install --no-cache-dir \
         decorator \
         pyyaml \
         sqlalchemy
+
+# CI dependencies must not overlay FlagTree or replace the vendor torch stack.
+RUN python /usr/local/share/vllm-plugin-fl/enflame-verify-compiler.py
 
 WORKDIR /workspace
 
