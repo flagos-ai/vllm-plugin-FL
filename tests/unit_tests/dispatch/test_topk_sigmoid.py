@@ -105,3 +105,47 @@ def test_topk_outside_expert_count_fails():
     for invalid_k in (0, 3):
         with pytest.raises(ValueError, match="topk"):
             _run_topk(logits, topk=invalid_k)
+
+def test_cuda_backend_availability_matches_native_vllm_platform(monkeypatch):
+    """vLLM names its built-in NVIDIA platform 'cuda', not 'nvidia'."""
+    import sys
+    from types import SimpleNamespace
+
+    from vllm_fl.dispatch.backends.vendor.cuda.cuda import CudaBackend
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+
+    # Mock the lazy vllm.platforms import without initializing CUDA.
+    original_platforms = sys.modules.get("vllm.platforms")
+    native_cls = type(
+        "CudaPlatform",
+        (),
+        {"__module__": "vllm.platforms.cuda", "device_name": "cuda"},
+    )
+    foreign_cls = type(
+        "MacaPlatform",
+        (),
+        {"__module__": "vllm_maca.platforms", "device_name": "cuda"},
+    )
+    try:
+        monkeypatch.setitem(
+            sys.modules,
+            "vllm.platforms",
+            SimpleNamespace(current_platform=native_cls()),
+        )
+        monkeypatch.setattr(CudaBackend, "_available", None)
+        assert CudaBackend().is_available()
+
+        monkeypatch.setitem(
+            sys.modules,
+            "vllm.platforms",
+            SimpleNamespace(current_platform=foreign_cls()),
+        )
+        monkeypatch.setattr(CudaBackend, "_available", None)
+        assert not CudaBackend().is_available()
+    finally:
+        if original_platforms is not None:
+            monkeypatch.setitem(sys.modules, "vllm.platforms", original_platforms)
+        else:
+            monkeypatch.delitem(sys.modules, "vllm.platforms", raising=False)
