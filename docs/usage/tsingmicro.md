@@ -7,7 +7,8 @@ installing vLLM and the plugin.
 
 ## Execution scope
 
-- Use the FL/V1 model runner and `--enforce-eager`.
+- Use the upstream V2 model runner with `VLLM_USE_V2_MODEL_RUNNER=1` and
+  `--enforce-eager`. V2 is the priority acceptance path for vLLM 0.32.
 - Graph execution is unsupported by the current TXDA reference attention
   backend. Its metadata reads lengths and block IDs on the host and advertises
   `AttentionCGSupport.NEVER`. Removing the eager flag does not enable graphs.
@@ -21,11 +22,14 @@ installing vLLM and the plugin.
   selectors for MoE dispatch. This conservative configuration establishes no
   throughput guarantee.
 
-The vLLM 0.32 Mamba copy callbacks are keyed by Mamba type. The TXDA native
+The legacy FL/V1 Mamba copy callbacks are keyed by Mamba type in vLLM 0.32.
+The retained TXDA native
 tensor-copy fallback resolves the spec and callbacks for each layer, including
 uniform cache groups containing different state specs. It copies only states
 with upstream callbacks and preserves storage padding and overlapping ranges.
-The existing packed K/V attention path is retained.
+The existing packed K/V attention path is retained. The V2 runner has separate
+state-management and sampling paths; the legacy copy regressions alone do not
+validate V2 execution.
 
 The image's accelerator memory query reports allocator pool sizes rather than
 whole-device memory. A TXDA-only compatibility hook routes
@@ -150,9 +154,8 @@ export PYTHONPATH="/work/vllm-plugin-FL/tools/tsingmicro_py310:${PYTHONPATH:-}"
 export FLAGCX_PATH=$(python -c 'from pathlib import Path; import flagcx; print(Path(flagcx.__file__).resolve().parent)')
 test -f "$FLAGCX_PATH/lib/libflagcx.so"
 export LD_LIBRARY_PATH="$FLAGCX_PATH/lib:${LD_LIBRARY_PATH:-}"
-export GEMS_VENDOR=tsingmicro
 export VLLM_PLUGINS=fl
-export VLLM_USE_V2_MODEL_RUNNER=0
+export VLLM_USE_V2_MODEL_RUNNER=1
 export VLLM_WORKER_SHUTDOWN_TIMEOUT_SECONDS=30
 export TXDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export FL_BACKEND=tsingmicro
