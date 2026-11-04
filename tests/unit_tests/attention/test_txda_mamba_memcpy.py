@@ -14,6 +14,16 @@ ROOT = Path(__file__).resolve().parents[3]
 PATCH = ROOT / "vllm_fl/dispatch/backends/vendor/txda/impl/patchs/mamba_memcpy.py"
 
 
+class MambaSpec:
+    def __init__(self, mamba_type):
+        self.mamba_type = mamba_type
+
+
+class UniformTypeKVCacheSpecs:
+    def __init__(self, specs):
+        self.kv_cache_specs = specs
+
+
 @pytest.fixture
 def patched(monkeypatch):
     worker = ModuleType("vllm.v1.worker")
@@ -22,14 +32,25 @@ def patched(monkeypatch):
     monkeypatch.setitem(sys.modules, worker.__name__, worker)
     monkeypatch.setitem(sys.modules, mamba.__name__, mamba)
 
+    # Match vLLM 0.32's layer-specific spec resolution, including mixed
+    # Mamba types grouped in a UniformTypeKVCacheSpecs cache group.
+    def get_spec(group, name):
+        spec = group.kv_cache_spec
+        if isinstance(spec, UniformTypeKVCacheSpecs):
+            spec = spec.kv_cache_specs[name]
+        assert isinstance(spec, MambaSpec)
+        return spec
+
     def collect(bufs, config, funcs, groups, src, dst, bias, request, context):
         if src == dst and bias == 0:
             return
         offset = bufs.offset
         for group in groups:
             blocks = request.block_ids[group]
-            for name in config.kv_cache_groups[group].layer_names:
-                for state, copy_func in zip(context[name].kv_cache, funcs):
+            cache_group = config.kv_cache_groups[group]
+            for name in cache_group.layer_names:
+                copy_funcs = funcs[get_spec(cache_group, name).mamba_type]
+                for state, copy_func in zip(context[name].kv_cache, copy_funcs):
                     spec = copy_func(state, blocks, src, bias + 1)
                     bufs.src_ptrs.np[offset] = spec.start_addr
                     bufs.dst_ptrs.np[offset] = state[blocks[dst]].data_ptr()
@@ -37,6 +58,7 @@ def patched(monkeypatch):
                     offset += 1
         bufs.offset = offset
 
+    mamba._get_mamba_spec_for_layer = get_spec
     mamba.collect_mamba_copy_meta = collect
     mamba.do_mamba_copy_block = lambda _: pytest.fail("raw-pointer kernel was used")
     mamba.MambaCopyBuffers = SimpleNamespace(create=object())
@@ -91,14 +113,18 @@ def copy_spec(state, blocks, src, accepted):
 
 def arguments(bufs, states, *, src=0, dst=1, bias=0, function=copy_spec):
     names = [f"layer.{i}" for i in range(len(states))]
-    config = SimpleNamespace(kv_cache_groups=[SimpleNamespace(layer_names=names)])
+    config = SimpleNamespace(
+        kv_cache_groups=[
+            SimpleNamespace(layer_names=names, kv_cache_spec=MambaSpec("mamba2"))
+        ]
+    )
     context = {
         name: SimpleNamespace(kv_cache=[state]) for name, state in zip(names, states)
     }
     return (
         bufs,
         config,
-        (function,),
+        {"mamba2": (function,)},
         [0],
         src,
         dst,
@@ -106,6 +132,81 @@ def arguments(bufs, states, *, src=0, dst=1, bias=0, function=copy_spec):
         SimpleNamespace(block_ids=[[0, 1, 2]]),
         context,
     )
+
+
+def test_single_mamba_type_copies_both_conv_and_temporal_states(patched):
+    pairs = [padded_state() for _ in range(2)]
+    before = [storage.clone() for storage, _ in pairs]
+    bufs = buffers()
+    args = list(arguments(bufs, [pairs[0][1]]))
+    args[2] = {"gdn": (copy_spec, copy_spec)}
+    args[1].kv_cache_groups[0].kv_cache_spec = MambaSpec("gdn")
+    args[-1]["layer.0"].kv_cache = [state for _, state in pairs]
+
+    patched.alias(*args)
+
+    assert bufs.offset == 2
+    for (storage, _), original in zip(pairs, before):
+        expected = original.clone()
+        expected[23:31] = original[7:15]
+        torch.testing.assert_close(storage, expected, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("uniform_group", [False, True])
+def test_mixed_mamba_types_resolve_each_layers_copyable_prefix(patched, uniform_group):
+    pairs = [padded_state() for _ in range(4)]
+    before = [storage.clone() for storage, _ in pairs]
+    names = ["gdn.layer", "short_conv.layer"]
+    specs = {name: MambaSpec(kind) for name, kind in zip(names, ["gdn", "short_conv"])}
+    if uniform_group:
+        groups = [
+            SimpleNamespace(
+                layer_names=names, kv_cache_spec=UniformTypeKVCacheSpecs(specs)
+            )
+        ]
+    else:
+        groups = [
+            SimpleNamespace(layer_names=[name], kv_cache_spec=specs[name])
+            for name in names
+        ]
+    calls = []
+
+    def tracked(kind):
+        def callback(*args):
+            calls.append((kind, args[0].data_ptr()))
+            return copy_spec(*args)
+
+        return callback
+
+    bufs = buffers()
+    context = {
+        names[0]: SimpleNamespace(kv_cache=[state for _, state in pairs[:2]]),
+        # Only the prefix with a callback is copyable; the auxiliary state
+        # must stay untouched even though the dict has two Mamba types.
+        names[1]: SimpleNamespace(kv_cache=[state for _, state in pairs[2:]]),
+    }
+    patched.alias(
+        bufs,
+        SimpleNamespace(kv_cache_groups=groups),
+        {"short_conv": (tracked("short_conv"),), "gdn": (tracked("gdn"),) * 2},
+        list(range(len(groups))),
+        0,
+        1,
+        0,
+        SimpleNamespace(block_ids=[[0, 1, 2] for _ in groups]),
+        context,
+    )
+
+    assert calls == [
+        (kind, state.data_ptr())
+        for kind, (_, state) in zip(["gdn", "gdn", "short_conv"], pairs)
+    ]
+    assert bufs.offset == 3
+    for index, ((storage, _), original) in enumerate(zip(pairs, before)):
+        expected = original.clone()
+        if index < 3:
+            expected[23:31] = original[7:15]
+        torch.testing.assert_close(storage, expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize(
@@ -209,6 +310,33 @@ def test_invalid_range_rejected_before_copy_and_offset_restored(patched, kind):
         )
     assert bufs.offset == 0
     torch.testing.assert_close(backing, before, rtol=0, atol=0)
+
+
+def test_failed_collection_preserves_prior_copy_plan(patched):
+    backing, state = padded_state()
+    before = backing.clone()
+    bufs = buffers()
+    patched.mamba.collect_mamba_copy_meta(*arguments(bufs, [state]))
+    plan = getattr(bufs, patched.patch._PLAN_ATTRIBUTE)
+
+    with pytest.raises(ValueError, match="outside"):
+        patched.mamba.collect_mamba_copy_meta(
+            *arguments(
+                bufs,
+                [state],
+                dst=2,
+                function=lambda *args: SimpleNamespace(
+                    start_addr=backing.data_ptr() - state.element_size(), num_elements=1
+                ),
+            )
+        )
+
+    assert bufs.offset == 1
+    assert getattr(bufs, patched.patch._PLAN_ATTRIBUTE) is plan
+    patched.mamba.do_mamba_copy_block(bufs)
+    expected = before.clone()
+    expected[23:31] = before[7:15]
+    torch.testing.assert_close(backing, expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("size", [-4, 3])

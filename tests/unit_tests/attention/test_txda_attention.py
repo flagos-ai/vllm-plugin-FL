@@ -6,6 +6,7 @@ import ast
 import importlib.util
 import math
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -16,6 +17,25 @@ ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "vllm_fl/dispatch/backends/vendor/txda/impl/attention.py"
 SHARED_SOURCE = ROOT / "vllm_fl/dispatch/backends/flaggems/impl/attention.py"
 CACHE_LAYOUTS = ["NHD", "HND", "LBHNC", "LBNHC"]
+
+
+@dataclass(frozen=True)
+class _MultipleOf:
+    base: int
+
+
+class _BulkOnlyVector:
+    """Model the working vector copy path when TXDA scalar item() fails."""
+
+    def __init__(self, values):
+        self.values = list(values)
+        self.shape = (len(self.values),)
+
+    def tolist(self):
+        return self.values.copy()
+
+    def __getitem__(self, index):
+        raise AssertionError("TXDA scalar metadata reads must use a bulk vector copy")
 
 
 def _load(monkeypatch, name, path):
@@ -36,6 +56,7 @@ def attention(monkeypatch):
         ENCODER_DECODER="encoder_decoder",
     )
     backend.AttentionCGSupport = SimpleNamespace(NEVER="never")
+    backend.MultipleOf = _MultipleOf
     monkeypatch.setitem(sys.modules, backend.__name__, backend)
     shared = ModuleType("vllm_fl.dispatch.backends.flaggems.impl.attention")
     shared.AttentionFLBackend = type("AttentionFLBackend", (), {})
@@ -137,7 +158,10 @@ def test_sdpa_matches_explicit_attention(
 @pytest.mark.parametrize("causal", [True, False])
 @pytest.mark.parametrize("window", [-1, 2])
 @pytest.mark.parametrize("layout", CACHE_LAYOUTS)
-def test_paged_mixed_batch_ignores_invalid_padding(attention, causal, window, layout):
+@pytest.mark.parametrize("bulk_only", [False, True])
+def test_paged_mixed_batch_ignores_invalid_padding(
+    attention, causal, window, layout, bulk_only
+):
     impl = _impl(attention, window=window)
     gen = torch.Generator().manual_seed(21)
     block_size = 4
@@ -153,8 +177,8 @@ def test_paged_mixed_batch_ignores_invalid_padding(attention, causal, window, la
     )
     metadata = SimpleNamespace(
         num_actual_tokens=5,
-        query_start_loc=torch.tensor(starts),
-        seq_lens=torch.tensor(lengths),
+        query_start_loc=_BulkOnlyVector(starts) if bulk_only else torch.tensor(starts),
+        seq_lens=_BulkOnlyVector(lengths) if bulk_only else torch.tensor(lengths),
         block_table=block_table,
         use_cascade=False,
         causal=causal,
@@ -187,14 +211,19 @@ def test_cache_update_skips_negative_slots_and_padded_kv(attention, layout):
 
 @pytest.mark.parametrize("window", [-1, 2])
 @pytest.mark.parametrize("attn_type", ["encoder", "encoder_only"])
-def test_encoder_segments_are_bidirectional(attention, window, attn_type):
+@pytest.mark.parametrize("bulk_only", [False, True])
+def test_encoder_segments_are_bidirectional(attention, window, attn_type, bulk_only):
     impl = _impl(attention, window=window, attn_type=attn_type)
     gen = torch.Generator().manual_seed(87)
     q = torch.randn(6, 4, 8, generator=gen)
     k, v = (torch.randn(6, 2, 8, generator=gen) for _ in range(2))
     output = torch.empty_like(q)
     metadata = SimpleNamespace(
-        num_actual_tokens=6, query_start_loc=torch.tensor([0, 2, 6]), use_cascade=False
+        num_actual_tokens=6,
+        query_start_loc=(
+            _BulkOnlyVector([0, 2, 6]) if bulk_only else torch.tensor([0, 2, 6])
+        ),
+        use_cascade=False,
     )
     impl.forward(None, q, k, v, None, metadata, output)
     for lo, hi in [(0, 2), (2, 6)]:
@@ -311,3 +340,36 @@ def test_cache_update_without_valid_slots_does_not_touch_storage(
         None, key, key, cache, torch.tensor(slots, dtype=torch.int64)
     )
     torch.testing.assert_close(cache, before, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("spec", [None, object()])
+def test_block_size_capability_does_not_need_global_config(attention, spec):
+    sizes = attention.TxdaSDPAAttentionBackend.get_supported_kernel_block_sizes(spec)
+    assert sizes == [_MultipleOf(1)]
+
+
+@pytest.mark.parametrize("block_size", [1, 7, 784])
+@pytest.mark.parametrize("layout", CACHE_LAYOUTS)
+def test_sdpa_handles_small_odd_and_hybrid_pages(attention, block_size, layout):
+    impl = _impl(attention)
+    gen = torch.Generator().manual_seed(73)
+    reference_cache = torch.randn(2, 8, block_size, 2, 8, generator=gen)
+    cache = _cache_layout(reference_cache, layout)
+    query = torch.randn(3, 4, 8, generator=gen)
+    output = torch.empty_like(query)
+    seq_len = block_size + 3
+    pages = [3, 0, 5, 2]
+    metadata = SimpleNamespace(
+        num_actual_tokens=3,
+        query_start_loc=_BulkOnlyVector([0, 3]),
+        seq_lens=_BulkOnlyVector([seq_len]),
+        block_table=torch.tensor([pages + [999]]),
+        use_cascade=False,
+        causal=True,
+    )
+    actual = impl.forward(None, query, None, None, cache, metadata, output)
+    used = pages[: math.ceil(seq_len / block_size)]
+    key = reference_cache[0, used].flatten(0, 1)[:seq_len]
+    value = reference_cache[1, used].flatten(0, 1)[:seq_len]
+    expected = _oracle(query, key, value, impl.scale, causal=True, window=-1)
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)

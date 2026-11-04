@@ -17,7 +17,7 @@ from vllm.logger import init_logger
 
 from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 
-logger = init_logger(__name__)
+logger = init_logger("vllm.fl.communicator")
 
 
 class CommunicatorFL(DeviceCommunicatorBase):
@@ -51,10 +51,24 @@ class CommunicatorFL(DeviceCommunicatorBase):
                 group=self.cpu_group,
                 device=self.device,
             )
-            if self.device.type == "npu" and self.pyflagcx_comm.disabled:
+            if self.device.type in ("npu", "txda") and self.pyflagcx_comm.disabled:
                 raise RuntimeError(
-                    "FlagCX requested on NPU but failed to initialize"
+                    f"FlagCX requested on {self.device.type.upper()} but failed "
+                    "to initialize"
                 ) from self.pyflagcx_comm.init_error
+            if self.device.type == "txda":
+                comm = self.pyflagcx_comm
+                library = getattr(getattr(comm.flagcx, "lib", None), "_name", "unknown")
+                logger.info(
+                    "TXDA FlagCX enabled: device=%s rank=%d world_size=%d "
+                    "library=%s sync_collectives=%s wrapper=%s",
+                    self.device,
+                    comm.rank,
+                    comm.world_size,
+                    library,
+                    getattr(comm, "_sync_collectives", False),
+                    type(comm.flagcx).__module__,
+                )
 
         if self.use_all2all:
             self._init_all2all_manager(tcp_store_group)

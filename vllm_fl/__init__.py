@@ -192,6 +192,12 @@ def _init_vendor_device():
         )
 
         _patch_xpu_get_device()
+    elif vendor_name == "tsingmicro":
+        # Keep this helper independent of vendor.txda package imports: those
+        # also patch Mamba and must wait until vLLM platform discovery ends.
+        from vllm_fl.txda_compat import patch_accelerator_memory_info
+
+        patch_accelerator_memory_info()
 
 
 def _install_metax_compat():
@@ -241,7 +247,7 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
+    if vendor_name in ("ascend", "mthreads", "enflame", "gcu"):
         # These backends use ModelRunnerFL; choose it before VllmConfig reads
         # model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")

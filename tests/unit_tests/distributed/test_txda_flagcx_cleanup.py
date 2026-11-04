@@ -5,6 +5,7 @@ import ast
 import ctypes
 import gc
 import logging
+import os
 import threading
 import time
 import weakref
@@ -87,6 +88,7 @@ def loaded():
     )
     namespace = {
         "ctypes": ctypes,
+        "os": os,
         "threading": threading,
         "torch": runtime,
         "dist": Mock(),
@@ -175,6 +177,32 @@ def test_warmup_failure_aborts_created_txda_handle(loaded, monkeypatch):
     assert abort.call_count == 1
     assert comm.disabled and not comm.available and comm.comm is None
     library.flagcxCommDestroy.assert_not_called()
+
+
+@pytest.mark.parametrize("device", ["txda:0", "cuda:0", "npu:0"])
+def test_warmup_output_stays_alive_until_stream_finishes(loaded, monkeypatch, device):
+    class Output:
+        pass
+
+    references = {}
+
+    def all_reduce(self, data):
+        output = Output()
+        references["output"] = weakref.ref(output)
+        return output
+
+    def synchronize():
+        assert references["output"]() is not None
+
+    stream = SimpleNamespace(synchronize=synchronize)
+    loaded.namespace["FLAGCXLibrary"].return_value = Library(Mock(return_value=0))
+    monkeypatch.setattr(loaded.cls, "_current_stream", lambda self: stream)
+    monkeypatch.setattr(loaded.cls, "all_reduce", all_reduce)
+
+    comm = loaded.cls(Group(), device, library_path="unused")
+
+    assert comm.available and not comm.disabled
+    assert references["output"]() is None
 
 
 def test_abort_uses_exact_c_abi_and_device_once(loaded):
@@ -276,6 +304,11 @@ def test_abort_failure_is_logged_and_never_retried(loaded, caplog, failure):
     comm = ready_comm(loaded, library)
     with caplog.at_level(logging.ERROR):
         comm.destroy()
+        # The fixture deliberately bounds destroy() to 30 ms. Wait for this
+        # known nonblocking abort callback before inspecting its thread's
+        # log record; exception formatting can exceed that bound on CI.
+        comm._destroy_thread.join(timeout=5)
+        assert not comm._destroy_thread.is_alive()
         comm.destroy()
     assert "abort failed" in caplog.text
     assert "cleanup is incomplete" in caplog.text

@@ -40,7 +40,7 @@ def _load_function(path, name, namespace, *, class_name=None):
 
 
 @pytest.mark.parametrize("requested", [None, "0", "1"])
-def test_txda_registration_defaults_to_fl_runner_and_preserves_explicit_choice(
+def test_txda_registration_preserves_upstream_runner_default_and_explicit_choice(
     monkeypatch, requested
 ):
     fake_utils = ModuleType("vllm_fl.utils")
@@ -64,9 +64,7 @@ def test_txda_registration_defaults_to_fl_runner_and_preserves_explicit_choice(
     register = _load_function("vllm_fl/__init__.py", "register", namespace)
 
     assert register() == "vllm_fl.platform.PlatformFL"
-    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == (
-        "0" if requested is None else requested
-    )
+    assert os.environ.get("VLLM_USE_V2_MODEL_RUNNER") == requested
 
 
 class _CompilationMode(IntEnum):
@@ -142,10 +140,13 @@ def _config(
     )
 
 
-def test_txda_rejects_explicit_upstream_v2_runner(configure_platform):
+def test_txda_accepts_explicit_upstream_v2_runner(configure_platform):
     platform = SimpleNamespace(device_type="txda", vendor_name="tsingmicro")
-    with pytest.raises(ValueError, match="VLLM_USE_V2_MODEL_RUNNER=0"):
-        configure_platform(platform, SimpleNamespace(use_v2_model_runner=True))
+    config = _config()
+    config.use_v2_model_runner = True
+    configure_platform(platform, config)
+    assert config.use_v2_model_runner is True
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
 @pytest.mark.parametrize(

@@ -14,7 +14,6 @@ from datetime import timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import regex as re
 import torch
 import torch.nn as nn
@@ -95,14 +94,14 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.worker.runtime import _initialize_fl_runtime
 
-logger = init_logger(__name__)
+logger = init_logger("vllm.fl.worker")
 
 
 def _num_workspace_lanes(vllm_config: VllmConfig, use_v2_model_runner: bool) -> int:
@@ -510,9 +509,19 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            from vllm.v1.worker.gpu.model_runner import (
-                GPUModelRunner as GPUModelRunnerV2,
-            )
+            if current_platform.device_type == "txda":
+                from vllm_fl.worker.txda_model_runner_v2 import (
+                    get_txda_v2_model_runner,
+                )
+
+                GPUModelRunnerV2 = get_txda_v2_model_runner()
+                from vllm_fl.worker.txda_linear import patch_txda_unquantized_gemm
+
+                patch_txda_unquantized_gemm(rank=self.rank)
+            else:
+                from vllm.v1.worker.gpu.model_runner import (
+                    GPUModelRunner as GPUModelRunnerV2,
+                )
 
             # HACK(woosuk): This is a temporary fix to avoid type errors.
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
@@ -522,6 +531,15 @@ class WorkerFL(WorkerBase):
             from vllm_fl.worker.model_runner import ModelRunnerFL
 
             self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
+
+        if current_platform.device_type == "txda":
+            runner_type = type(self.model_runner)
+            logger.info(
+                "TXDA runner initialized: rank=%d class=%s use_v2=%s",
+                self.rank,
+                f"{runner_type.__module__}.{runner_type.__qualname__}",
+                self.use_v2_model_runner,
+            )
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -836,7 +854,11 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        # V2 owns auxiliary output initialization in vLLM 0.32. The optional
+        # legacy capturer belongs only to ModelRunnerFL and its legacy config.
+        if not self.use_v2_model_runner and getattr(
+            self.model_config, "enable_return_routed_experts", False
+        ):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
@@ -984,8 +1006,10 @@ class WorkerFL(WorkerBase):
             maybe_save_startup_plan(self, kv_cache_memory_bytes_to_requested_limit)
 
         if self.use_v2_model_runner:
-            # V2: Run full execute_model + sample_tokens to JIT compile triton kernels.
-            warmup_kernels(self.model_runner, self.execute_model, self.sample_tokens)
+            # vLLM 0.32 disables JIT warmup with enforce-eager. Actual requests
+            # still execute and compile the required V2 kernels normally.
+            if self.vllm_config.kernel_config.enable_jit_warmup:
+                warmup_kernels(self.model_runner, self.execute_model, self.sample_tokens)
         elif get_pp_group().is_last_rank:
             # V1: Warm up sampler and preallocate memory buffer for logits and other
             # sampling related tensors of max possible shape to avoid memory
@@ -1239,45 +1263,11 @@ class WorkerFL(WorkerBase):
 
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        all_gather_tensors = {}
-        compilation_config = self.vllm_config.compilation_config
-        parallel_config = self.vllm_config.parallel_config
-
-        if (
-            parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
-            and forward_pass
-        ):
-            # currently only supported by V1 GPUModelRunner
-            assert not self.use_v2_model_runner
-            num_scheduled_tokens_np = np.array(
-                list(scheduler_output.num_scheduled_tokens.values()),
-                dtype=np.int32,
-            )
-            # TODO(lucas): This is pretty gross; ideally we should only ever call
-            # `_determine_batch_execution_and_padding` once (will get called again
-            # in `execute_model`) but this requires a larger refactor of PP.
-            _, batch_desc, _, _, _ = (
-                self.model_runner._determine_batch_execution_and_padding(
-                    num_tokens=num_scheduled_tokens,
-                    num_reqs=len(num_scheduled_tokens_np),
-                    num_scheduled_tokens_np=num_scheduled_tokens_np,
-                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
-                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
-                )
-            )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
-                )
-            }
 
         if forward_pass and not get_pp_group().is_first_rank:
             tensor_dict, comm_handles, comm_postprocess = (
                 get_pp_group().irecv_tensor_dict(
                     all_gather_group=get_tp_group(),
-                    all_gather_tensors=all_gather_tensors,
                 )
             )
             assert tensor_dict is not None
@@ -1309,13 +1299,16 @@ class WorkerFL(WorkerBase):
             and not get_pp_group().is_last_rank
         )
 
-        # launch non-blocking send of intermediate tensors
-        self._pp_send_work = get_pp_group().isend_tensor_dict(
+        # Metadata sends are retained and reaped by GroupCoordinator. Only
+        # device handles must complete before the next forward overwrites them.
+        handles = get_pp_group().isend_tensor_dict(
             output.tensors,
             all_gather_group=get_tp_group(),
-            all_gather_tensors=all_gather_tensors,
         )
+        self._pp_send_work = handles[1:]
 
+        if self.use_v2_model_runner and self.model_runner.is_pooling_model:
+            return self.model_runner.pool()  # type: ignore
         return None
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
@@ -1581,7 +1574,7 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    from vllm.model_executor.determinism.batch_invariant import init_batch_invariance
 
     init_batch_invariance()
     override_envs_for_eplb(
