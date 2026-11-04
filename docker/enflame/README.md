@@ -81,10 +81,14 @@ The default generated tag includes the selected stage, such as
 the branch defaults from `docker/build.sh`. Pass the explicit candidate tag
 above when building 0.32. This command does not push.
 `.github/configs/enflame.yml` references the published vLLM 0.28 dependency
-image by digest. Enflame is disabled in `platforms.yml`; the existing
+image by digest. Enflame is enabled in `platforms.yml`; the existing
 configuration retains the `enflame-s60` runner label, devices `2,3` and
-`/data:/data` mount. Enable it only after selecting a built and validated
-0.32 dependency image and confirming runner availability.
+`/data:/data` mount. Its strict setup gate rejects the old dependency image;
+this is an external image-publication blocker, not a passing hardware CI run.
+Keep the gate and platform enabled. Select a replacement digest only after
+building, publishing and validating a real 0.32 dependency image. See the
+[current publication audit](../../docs/ci-pr675-latest.md#enflame-image-publication-audit)
+for the required base-image access, builder and registry permissions.
 The reference is main commit `6182281a42ce857fa52ef73ec1abafca941cdf3a`.
 Publishing the image and selecting this configuration do not establish
 that hardware CI has passed; record the actual workflow results separately.
