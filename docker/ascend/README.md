@@ -109,20 +109,31 @@ Run remote image pulls, builds, installations and tests inside a named
 
 ### Connect the shared CI
 
-[The Ascend CI configuration](../../.github/configs/ascend.yml) still selects
-`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean`. It is retained until a new
-image has been published. That old image cannot pass the updated Ascend
-setup script's 0.32 empty-stack checks.
+The validated dependency image has been published as:
+
+```text
+harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.32.0-a3-ci-20261104-v2-0b420101
+```
+
+[The Ascend CI configuration](../../.github/configs/ascend.yml) now selects
+this immutable reference for `ci_image`:
+
+```yaml
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5
+```
+
+Registry manifest inspection confirmed that its config ID matches the
+validated local image recorded below. Pulling by this digest also succeeded;
+the pulled image is `linux/arm64` and its ID matches the validated build.
 
 The platform workflow reads `ci_image` and passes it directly to the
 functional, unit, E2E and benchmark job containers. GitHub Actions starts
-that container before checkout and platform setup. Updating `setup.sh`
-cannot replace the old runtime at that point. The repository's build
+that container before checkout and platform setup. The repository's build
 workflow publishes a Python wheel artifact; `docker/build.sh` only builds a
 local Docker image. Neither publishes the dependency image automatically.
 
-After committing the verified recipe and completing the required validation,
-a publisher can promote the local CI image with the following commands:
+For future updates, build and validate a new dependency image, then publish
+it under a new tag with the following procedure:
 
 ```bash
 export LOCAL_IMAGE=codex/vllm-plugin-fl:ascend-vllm0.32.0-a3-ci
@@ -134,8 +145,8 @@ docker login harbor.baai.ac.cn
 docker push "$PUBLISH_IMAGE"
 ```
 
-This is the publication procedure, not a record of an image already pushed.
-Harbor is the repository's current convention; the workflow accepts another
+The commands above describe future updates. Harbor is the repository's
+current convention; the workflow accepts another
 registry if every selected runner can pull it. On each `flagcicd-910c`
 runner, pull the published reference using the runner account and record its
 registry digest:
@@ -148,7 +159,7 @@ docker image inspect "$PUBLISH_IMAGE" --format '{{json .RepoDigests}}'
 Set `ci_image` to that verified `repository@sha256:...` reference, then run the
 shared Ascend workflow with the checked-out plugin revision. Keep the driver
 mounts, model mounts and allocated CI device IDs aligned with the selected
-runner. No unverified 0.32 registry tag is installed by this recipe.
+runner.
 
 The [Ascend matrix](../../tests/platforms/ascend.yaml) explicitly selects
 `VLLM_USE_V2_MODEL_RUNNER=1`. Its existing `USE_FLAGGEMS=1` and
@@ -257,12 +268,11 @@ curl --fail http://127.0.0.1:7023/v1/completions \
 
 Check for non-empty generated text and server-side errors. Use an interface
 reachable by all ranks instead of `GLOO_SOCKET_IFNAME=lo` for multi-host jobs.
-The existing
-[Ascend test matrix](../../tests/platforms/ascend.yaml) includes Qwen3.6-27B
-and Qwen3.6-35B-A3B TP2 eager inference and serving cases. Those cases and the
-Ascend operator tests must pass on the new image before carrying forward the
-older recipe's support claims. Graph and multimodal coverage also require
-new results for this runtime.
+The [Ascend test matrix](../../tests/platforms/ascend.yaml) covers
+Qwen3.6-27B and Qwen3.6-35B-A3B TP2 eager inference and serving. All four
+configured cases passed, including text and generated-image assertions for
+both serving models. The validation record below identifies the tested
+settings and artifacts.
 
 ## Validation record
 
@@ -272,6 +282,8 @@ record the observed `25.5.0` environment. The host driver was retained.
 
 | Artifact | Verified identity |
 | --- | --- |
+| Published dependency image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.32.0-a3-ci-20261104-v2-0b420101` |
+| Immutable CI reference | `harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5` |
 | Local dependency image | `codex/vllm-plugin-fl:ascend-vllm0.32.0-a3-ci` |
 | Docker image ID | `sha256:0b420101520066407a2e208d3fc3fb7f406fa4afe84c38eb2cf8e86bef97c3d2` |
 | vLLM | Ordinary `0.32.0+empty` wheel |
@@ -279,9 +291,9 @@ record the observed `25.5.0` environment. The host driver was retained.
 | Plugin wheel SHA256 | `357177f02ee575b881d66fdc43fe9ebc578c544cc7300599da8279abbed2511c` |
 | Installed plugin contents | All 285 source/configuration files matched the checkout's SHA256 hashes |
 
-The image build exited successfully. The Docker image ID above identifies a
-local image; registry publication and the shared CI image digest update remain
-pending. The plugin wheel is installed separately from the dependency image.
+The image build and registry publication completed successfully. Registry
+manifest inspection confirmed the Docker config ID shown above. The plugin
+wheel is installed separately from the dependency image.
 
 | Runtime and functional validation | Result |
 | --- | --- |
@@ -316,6 +328,5 @@ V2 runner and exit 0. Its native guards for `index_fill_`, `pad` and
 supporting evidence for the equivalent operator policy from a separate
 installation; the validation results for the final wheel are listed above.
 
-Registry publication and the shared CI reference update remain pending.
-Pair the final plugin revision with the published image digest before enabling
-shared CI on the new runtime.
+Use the immutable dependency image reference together with the validated
+plugin revision when running shared CI on this runtime.
