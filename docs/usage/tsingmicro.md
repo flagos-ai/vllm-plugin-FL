@@ -296,6 +296,28 @@ worker. The 1800-second model RPC timeout permits first-use vendor kernel
 compilation; it does not relax the original gate's output assertions or
 512/128-token budgets.
 
+## MRoPE lookup preflight
+
+The V2 TXDA worker keeps upstream MRoPE rotation math but gathers its cache
+rows through basic tensor slices and device copies. Only the small position
+array moves to the CPU. Advanced indexing of the full cache was observed to
+consume about 87% of active worker samples through the SDK CPU fallback.
+Negative positions, repeated IDs and noncontiguous tensors retain Torch
+lookup semantics; all indices are checked before writing the output.
+
+```bash
+source /work/task/env.sh
+python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_mrope.py \
+  --output /work/task/outputs/mrope-probe.json
+```
+
+All 28 hardware comparisons passed: FP32/BF16 strided and large-cache lookup,
+and complete 1D/three-axis MRoPE with contiguous/interleaved sections at
+1, 8 and 65 tokens. Results matched unchanged upstream CPU math exactly,
+including the unrotated head tail. Selecting three rows from a 262144-by-64
+cache took about 1.2 ms in the isolated probe; this is not a model throughput
+measurement.
+
 ## Model acceptance
 
 Use the unchanged cases in `tools/adaptation-gate-cases` for both
@@ -340,7 +362,7 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **595 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **661 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper
@@ -349,7 +371,8 @@ stream namespace isolation, 0.32 worker/PP protocol, native IR priorities and
 context-free SDPA page capabilities, and BF16 GEMM math, dispatch guards and
 provider error propagation. KV zeroing regressions cover seven physical
 layouts, virtual blocks, mixed-dtype overlays, storage lifetime, manager mapping
-and complete ID validation before any write. The Mamba cases include
+and complete ID validation before any write. MRoPE regressions check independent
+lookup/rotation oracles, partial tails, dispatch isolation and error propagation. The Mamba cases include
 overlapping copies, padded storage, multiple types, uniform cache groups,
 noncopyable tail states and failed-plan rollback.
 
@@ -363,9 +386,17 @@ Qwen3.6-27B has reached API readiness with both ranks reporting the actual
 upstream V2 runner class and pinned FlagCX library. The two-model hardware
 acceptance gate has **not passed**. The earlier inference run was stopped
 to address CPU GEMM fallback performance. After the native KV zeroer passed all
-eight hardware cases, the 27B original acceptance gate was restarted with the
-BF16 provider and the actual upstream V2 runner; 35B remains pending.
+eight hardware cases, profiling identified the MRoPE cache lookup bottleneck.
+Its native lookup then passed 28 hardware comparisons. The current 27B restart
+uses these changes with the actual upstream V2 runner and pinned FlagCX; 35B
+remains pending.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful
 imports are not model acceptance passes.
+
+Pausing a live TXDA worker for stack sampling coincided with
+`tsm_jobs_ioctl` kernel NULL-pointer faults and an unreleased device context.
+Do not use blocking live-process profilers for this image. The affected task
+processes were stopped without resetting the shared host; subsequent checks
+use other verified idle devices within the allocated group.

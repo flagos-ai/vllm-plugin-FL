@@ -56,9 +56,11 @@ def get_txda_v2_model_runner():
 
     runner_module = importlib.import_module(_DEVICE_MODULES[0])
     from vllm_fl.worker.txda_kv_zeroer import patch_txda_v2_kv_zeroer
+    from vllm_fl.worker.txda_mrope import patch_txda_mrope
     from vllm_fl.worker.txda_v2_preprocess import patch_txda_v2_preprocess
 
     patch_txda_v2_kv_zeroer(runner_module)
+    patch_txda_mrope()
     patch_txda_v2_preprocess()
     for name in _DEVICE_MODULES:
         module = importlib.import_module(name)

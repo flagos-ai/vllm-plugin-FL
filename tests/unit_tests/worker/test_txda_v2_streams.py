@@ -33,6 +33,9 @@ def adapter(monkeypatch):
     zeroer = ModuleType("vllm_fl.worker.txda_kv_zeroer")
     zeroer.patch_txda_v2_kv_zeroer = Mock(return_value=True)
     monkeypatch.setitem(sys.modules, zeroer.__name__, zeroer)
+    mrope = ModuleType("vllm_fl.worker.txda_mrope")
+    mrope.patch_txda_mrope = Mock(return_value=True)
+    monkeypatch.setitem(sys.modules, mrope.__name__, mrope)
     preprocess = ModuleType("vllm_fl.worker.txda_v2_preprocess")
     preprocess.patch_txda_v2_preprocess = Mock(return_value=True)
     monkeypatch.setitem(sys.modules, preprocess.__name__, preprocess)
@@ -52,6 +55,7 @@ def adapter(monkeypatch):
         cls=runner_class,
         preprocess=preprocess.patch_txda_v2_preprocess,
         zeroer=zeroer.patch_txda_v2_kv_zeroer,
+        mrope=mrope.patch_txda_mrope,
     )
 
 
@@ -70,6 +74,7 @@ def test_v2_modules_route_only_stream_calls_to_native_txda(adapter, api):
     assert adapter.torch.cuda is original_cuda
     adapter.preprocess.assert_called_once_with()
     adapter.zeroer.assert_called_once_with(adapter.modules[0])
+    adapter.mrope.assert_called_once_with()
 
 
 def test_repeated_install_preserves_module_views_and_upstream_class(adapter):
