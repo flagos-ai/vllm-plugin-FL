@@ -367,14 +367,15 @@ class TestRunner:
             "-q",
             "-n",
             str(cpu_workers),
-            # multi_gpu tests spawn their own worker processes that pin
+            # GPU tests share the inherited device visibility; multi_gpu
+            # tests also spawn their own worker processes that pin
             # concrete device ordinals (e.g. torch.cuda.set_device(rank));
             # running them concurrently with 16 xdist workers corrupts the
             # vendor device layer (kunlunxin: "CUDA error: invalid device
             # ordinal"). Tests with process-global state use the serial marker.
-            # Both groups run serially in a second pass below.
+            # All three groups run serially in a second pass below.
             "-m",
-            "not multi_gpu and not serial",
+            "not gpu and not multi_gpu and not serial",
             "--cov=vllm_fl",
             "--cov-report=term-missing",
             f"--cov-report=json:coverage-{self.config.platform}.json",
@@ -395,7 +396,7 @@ class TestRunner:
             "--tb=short",
             "-q",
             "-m",
-            "multi_gpu or serial",
+            "gpu or multi_gpu or serial",
             "--cov=vllm_fl",
             "--cov-append",
             "--cov-report=term-missing",
@@ -410,7 +411,7 @@ class TestRunner:
 
         print(
             f"[run] Unit tests parallel: {cpu_workers} workers (CPU-only, no device pinning); "
-            "multi_gpu and serial-marked tests run serially afterwards"
+            "gpu, multi_gpu and serial-marked tests run serially afterwards"
         )
 
         return [
