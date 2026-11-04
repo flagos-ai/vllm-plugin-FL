@@ -3,7 +3,7 @@
 This recipe builds the vLLM 0.28 **inference development and CI** image on the
 required FlagOS runtime. It preserves the TOPS 1.10.6 SDK and vendor torch
 2.11.0+cpu / torch_gcu 2.11.0+3.8.20260713 stack. It does not install FlagScale
-or training frameworks. Both the Dockerfile and `docker/build.sh` default to:
+or training frameworks. Both `Dockerfile.v0.28.0` and `docker/build.sh` default to:
 
 ```text
 harbor.baai.ac.cn/flagos-runtime/flagos-runtime-enflame-tops1.10.6:2.3.0@sha256:6356cd26647a4cbd27f2ad9ece7281df888df7ec9e9c2dc3bb5aaa262f9097c6
@@ -83,6 +83,9 @@ See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
 model serving, and validation commands.
 
 ## Build the runtime-based candidate
+
+The vLLM 0.28 recipe is `docker/enflame/Dockerfile.v0.28.0`. The build helper
+selects this file for Enflame; the unversioned `Dockerfile` is retained unchanged.
 
 Run long builds in a uniquely named tmux session and retain the build log.
 From a private checkout, the underlying build command is:
@@ -215,19 +218,21 @@ Inside that task container, from the private plugin checkout:
 ```bash
 bash .github/scripts/enflame/check.sh
 bash .github/scripts/enflame/setup.sh
-# Preview all registered Enflame nightly tests, including benchmark.
+# Preview PR validation, including benchmark. Nightly is not required for handoff.
 python tests/run.py --platform enflame --device s60 --scope all \
-  --stage nightly --dry-run
+  --stage pr --dry-run
 # Execute them. Use a distinct output directory for every validation attempt.
 python tests/run.py --platform enflame --device s60 --scope all \
-  --stage nightly --output-dir /logs/enflame-nightly
+  --stage pr --output-dir /logs/enflame-pr
 ```
 
 The container must receive `VLLM_PLUGINS=fl`, the verified
 `TOPS_VISIBLE_DEVICES` pair and the runtime environment variables set by
-the Dockerfile. The current Enflame matrix selects both 27B and 35B-A3B TP2 eager cases for
-inference, serving and nightly concurrent tests, plus serve benchmark smoke.
-Weekly falls back to nightly; PR is a subset. The documented graph examples
+the Dockerfile. PR validation selects both 27B and 35B-A3B TP2 eager inference and serving
+cases, UT, FT and serve benchmark smoke. It does not select the concurrent
+cases. Both eight-request concurrent cases and the complete nightly selection
+already passed during image validation; they do not need another run for this
+handoff. Weekly falls back to nightly. The documented graph examples
 are not registered in this branch. Run their original pytest files directly
 with `FL_TEST_MODEL`, `FL_TEST_CASE`, `FL_TEST_PLATFORM` and `FL_TEST_DEVICE`;
 a graph `--case` filter on `tests/run.py` otherwise selects no tests.

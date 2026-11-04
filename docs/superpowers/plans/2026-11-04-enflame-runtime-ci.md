@@ -1,6 +1,8 @@
 # Enflame Runtime CI Implementation Plan
 
-> **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task. Track verified results below.
+> Historical implementation record. On 2026-11-05 the user requested that no
+> further superpowers skills be used, no additional nightly run be made, and
+> the files be shown for confirmation before PR creation.
 
 **Goal:** Build, validate and publish the requested Enflame vLLM 0.28 inference CI image and submit its recipe as a PR.
 
@@ -28,7 +30,7 @@
 
 ### Task 1: Runtime-based candidate recipe
 
-**Files:** `docker/enflame/Dockerfile`, `docker/build.sh`, optional Enflame dependency inputs.
+**Files:** `docker/enflame/Dockerfile.v0.28.0`, `docker/build.sh`, optional Enflame dependency inputs.
 **Interfaces:** Existing `docker/build.sh --platform enflame --target ci`; produces a candidate dependency image.
 
 - [x] Inspect baseline compiler/package metadata and confirm base layer digest.
@@ -54,14 +56,14 @@
 
 - [x] Push final requested tag after validation, verify remote digest and ancestry.
 - [x] Update Enflame image references/build instructions/results using verified new digest.
-- [ ] Run relevant lint/build checks and fresh whole-branch review, resolve important findings.
+- [x] Run relevant lint/build checks and fresh whole-branch review, resolve important findings (reviewed through `48b11a2`; later filename/docs adjustments checked separately).
 - [ ] Push working branch and create PR to the requested base, with honest validation evidence.
 
 ## Verified execution record
 
 - Task 1 complete: recipe `320bbe7`; build 06 passed, required runtime's 16-layer prefix and CI metadata verified, compiler guards and separate clean-image wheel install passed. Shell syntax, ShellCheck and repository typos checks passed.
 - Task 2 complete: source `320bbe7` in a fresh corrected-image container, native nightly `--scope all` exited 0 with 10/10 groups passed (2876.46s). UT 1959+2 passed, FT 71 passed, both models' eager inference/serving/eight-request concurrent and benchmark passed. Original 35B graph serving (2 tests) and 27B graph inference (1 test) also passed on a separate verified device pair.
-- Task 3: final requested tag published and pulled by manifest `sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e`, resolving to tested image `c7efd76...`. CI/usage references updated. Fresh whole-branch review and PR handoff remain pending.
+- Task 3: final requested tag published and pulled by manifest `sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e`, resolving to tested image `c7efd76...`. CI/usage references updated. Independent whole-branch review through `48b11a2` found no actionable issues and independently verified the raw evidence archive. PR creation now waits for user confirmation.
 
 ## Rulings and practical limits
 
@@ -81,3 +83,14 @@
 Detailed sources, failures, corrections and raw evidence locations are in
 `docker/enflame/validation-20261104.md`. No new test exclusions, precision
 changes, weaker assertions or adaptation Gate capacity claims were introduced.
+
+## User review handoff (2026-11-05)
+
+- Merged the latest requested target `ci/thead-0.28` at `0a5fecc`; retained
+  the own branch `codex/enflame-runtime-ci-0.28`.
+- Moved the tested recipe bytes to `docker/enflame/Dockerfile.v0.28.0`,
+  restored the target's unversioned Dockerfile, and selected the versioned
+  recipe in `docker/build.sh`.
+- PR validation plus supplemental graph commands are the current handoff
+  instructions; completed nightly evidence remains recorded without a rerun.
+- No PR has been created; show the changed files before the user confirms.

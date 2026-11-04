@@ -31,6 +31,8 @@ Keep the plugin and its
 revision. The policy selects the GCU attention backend and retains its tested
 FlagGems exclusions. Build instructions and the rationale for the temporary
 vendor adapters are in the [image recipe](../../docker/enflame/README.md).
+The versioned Dockerfile is
+[`docker/enflame/Dockerfile.v0.28.0`](../../docker/enflame/Dockerfile.v0.28.0).
 
 ## 1. Check the host and choose devices
 
@@ -228,12 +230,12 @@ container and retain the generated reports and logs:
 ```bash
 set -euo pipefail
 cd /workspace/vllm-plugin-FL
-# Preview and run all registered Enflame nightly selections.
+# Preview and run PR validation. Nightly is not required for this handoff.
 python tests/run.py --platform enflame --device s60 --scope all \
-  --stage nightly --dry-run
+  --stage pr --dry-run
 python tests/run.py --platform enflame --device s60 --scope all \
-  --stage nightly --output-dir /logs/nightly \
-  2>&1 | tee /logs/nightly-console.log
+  --stage pr --output-dir /logs/enflame-pr \
+  2>&1 | tee /logs/enflame-pr-console.log
 
 # Supplemental documented graph cases are not registered in the CI matrix.
 # Invoke the original pytest files directly so these commands execute tests.
@@ -246,10 +248,12 @@ FL_TEST_CASE=35b_a3b_tp2_graph python -m pytest \
   --junitxml=/logs/35b-graph.xml 2>&1 | tee /logs/35b-graph-console.log
 ```
 
-Use a separate output directory for each validation attempt. The nightly
-selection runs all unit and functional tests, both models' TP2 eager inference,
-serving and concurrent cases, and serve benchmark smoke. PR is a subset;
-weekly falls back to nightly in
+Use a separate output directory for each validation attempt. PR validation
+runs unit and functional tests, both models' TP2 eager inference and serving
+cases, and serve benchmark smoke. Concurrent cases belong to the nightly
+selection; both eight-request cases already passed during image validation.
+No additional nightly run is required for this handoff. Weekly falls back to
+nightly in
 [`tests/platforms/enflame.yaml`](../../tests/platforms/enflame.yaml).
 
 The supplemental graph commands use the original

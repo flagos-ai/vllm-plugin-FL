@@ -235,6 +235,9 @@ fi
 
 BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
 DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
+if [[ "${PLATFORM}" == "enflame" ]]; then
+    DOCKERFILE="${BUILD_CONTEXT}/Dockerfile.v0.28.0"
+fi
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
 fi

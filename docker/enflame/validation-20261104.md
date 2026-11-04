@@ -1,11 +1,20 @@
 # Enflame runtime-based vLLM 0.28 validation
 
-Status: accepted and published. Completed 2026-11-05 (Asia/Shanghai).
+Status: hardware validation passed and image published; PR awaits user file review.
+Completed 2026-11-05 (Asia/Shanghai).
 The native nightly entrypoint passed all 10 groups (0 failures), and the
 supplemental original graph tests passed. These are executions on the supplied
 host; GitHub Actions PR status is separate.
 
 ## Image and source
+
+Handoff update (2026-11-05): the user no longer requires an additional nightly
+run. The completed results below remain the historical acceptance evidence.
+The tested recipe is now named `Dockerfile.v0.28.0` with identical contents;
+only the build-helper selection and documentation changed after validation.
+The working branch has merged `ci/thead-0.28` at
+`0a5fecc72053afa0cc0e67cc3dd63f6d1e4d77d2`; its new target changes affect only
+Ascend and Iluvatar. PR creation waits for the user to review the files.
 
 - Required base: `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-enflame-tops1.10.6:2.3.0@sha256:6356cd26647a4cbd27f2ad9ece7281df888df7ec9e9c2dc3bb5aaa262f9097c6`.
 - Published image: `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e`.
@@ -132,7 +141,8 @@ Pinned vLLM and FlagGems-vllm source bundles were SHA256 checked and served
 through temporary Git mirrors on the Docker bridge. Source commit, wheel hash
 and compiler-file checks remained enabled.
 
-Run the native entrypoint under Bash after check/setup:
+Historical acceptance command (already completed; no additional nightly run
+is required). Run current PR validation as documented in the usage guide:
 
 ```bash
 python tests/run.py --platform enflame --device s60 --scope all \
@@ -151,6 +161,11 @@ controlled environment probe, baseline logs and current native JSON/XML reports.
 Attempt 05 uses `logs/validation-05-console.log` and `logs/validation-05/`;
 35B graph serving uses `logs/validation-08/` with its server log, and
 27B graph inference uses `logs/validation-09/`.
+The local evidence archive is `enflame-validation-20261104.tar.gz`
+(2,670,883 bytes), SHA256
+`f7e7a028ee0e8ef973e3ee1680f89b91b8bd5e54b11d3bd161c0ba526f104d4e`.
+It contains the tested pre-rename recipe and raw logs, not registry credentials.
+
 Use native runner reports and console logs: the old task driver copied stale
 unit-only pytest JSON reports into some other baseline stage directories.
 

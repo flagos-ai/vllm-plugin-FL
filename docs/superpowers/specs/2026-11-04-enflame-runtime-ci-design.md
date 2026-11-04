@@ -1,5 +1,9 @@
 # Enflame runtime-based vLLM 0.28 inference CI image
 
+> Historical design. The 2026-11-05 handoff uses the versioned
+> `docker/enflame/Dockerfile.v0.28.0`, integrates the latest `ci/thead-0.28`,
+> requires no further nightly run, and awaits user file review before PR creation.
+
 ## Intent and scope
 
 Build a reproducible Enflame S60 inference development/CI dependency image from
