@@ -9,8 +9,6 @@ This backend provides operator implementations for Sunrise GPUs.
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 from vllm_fl.dispatch.backends.base import Backend
@@ -22,14 +20,14 @@ class SunriseBackend(Backend):
 
     """
 
-    _available: Optional[bool] = None
+    _available: bool | None = None
 
     @property
     def name(self) -> str:
         return "sunrise"
 
     @property
-    def vendor(self) -> Optional[str]:
+    def vendor(self) -> str | None:
         return "sunrise"
 
     def is_available(self) -> bool:
@@ -40,10 +38,12 @@ class SunriseBackend(Backend):
         is present and functional.
         """
         if SunriseBackend._available is None:
-            # Check if Sunrise device is available
-            if torch.ptpu.is_available() and torch.ptpu.device_count() > 0:
-                SunriseBackend._available = True
-            else:
+            ptpu = getattr(torch, "ptpu", None)
+            try:
+                SunriseBackend._available = bool(
+                    ptpu is not None and ptpu.is_available() and ptpu.device_count() > 0
+                )
+            except (AttributeError, RuntimeError):
                 SunriseBackend._available = False
         return SunriseBackend._available
 
@@ -59,12 +59,12 @@ class SunriseBackend(Backend):
         Returns:
             Fully qualified class path string
         """
-        from vllm.v1.attention.backends.registry import AttentionBackendEnum
-
         if use_mla:
             raise NotImplementedError("NOT support mla now!")
 
         if use_sparse:
             raise ValueError("use_sparse=True requires use_mla=True.")
 
-        return "vllm_fl.dispatch.backends.vendor.sunrise.impl.attention.AttentionFLBackend"
+        return (
+            "vllm_fl.dispatch.backends.vendor.sunrise.impl.attention.AttentionFLBackend"
+        )

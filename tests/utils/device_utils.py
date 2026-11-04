@@ -29,6 +29,7 @@ _PLATFORM_VISIBLE_DEVICE_ENV: dict[str, str] = {
     "ascend": "ASCEND_RT_VISIBLE_DEVICES",
     "enflame": "TOPS_VISIBLE_DEVICES",
     "musa": "MTHREADS_VISIBLE_DEVICES",
+    "sunrise": "TANG_VISIBLE_DEVICES",
 }
 
 
@@ -37,8 +38,9 @@ def get_visible_device_env_var() -> str:
     platform = os.environ.get("FL_TEST_PLATFORM", "").lower()
     if platform in _PLATFORM_VISIBLE_DEVICE_ENV:
         return _PLATFORM_VISIBLE_DEVICE_ENV[platform]
-    if get_backend() == "ascend":
-        return "ASCEND_RT_VISIBLE_DEVICES"
+    backend = get_backend()
+    if backend in ("ascend", "sunrise"):
+        return _PLATFORM_VISIBLE_DEVICE_ENV[backend]
     return "CUDA_VISIBLE_DEVICES"
 
 
@@ -72,6 +74,18 @@ def _gcu_runtime():
     import torch_gcu  # noqa: F401
 
     return torch.gcu
+
+
+def _get_sunrise_runtime():
+    """Load the vendor extension before selecting a PTPU device."""
+    runtime = getattr(torch, "ptpu", None)
+    if runtime is None:
+        try:
+            import torch_ptpu  # noqa: F401
+        except ImportError:
+            return None
+        runtime = getattr(torch, "ptpu", None)
+    return runtime
 
 
 def get_backend() -> str:
@@ -120,6 +134,9 @@ def get_backend() -> str:
             return "musa"
     except ImportError:
         pass  # torch_musa not installed; musa backend not available
+    sunrise = _get_sunrise_runtime()
+    if sunrise is not None and sunrise.is_available():
+        return "sunrise"
     return "cpu"
 
 
@@ -131,6 +148,9 @@ def is_accelerator_available() -> bool:
     if backend == "tsingmicro":
         txda = _txda_runtime()
         return txda is not None and txda.is_available()
+    if backend == "sunrise":
+        sunrise = _get_sunrise_runtime()
+        return sunrise is not None and sunrise.is_available()
     return backend not in ("cpu", "")
 
 
@@ -150,6 +170,10 @@ def get_device(index: int = 0) -> torch.device:
         return torch.device(f"txda:{index}")
     elif backend == "enflame":
         return torch.device(f"gcu:{index}")
+    elif backend == "sunrise":
+        if _get_sunrise_runtime() is None:
+            raise RuntimeError("Sunrise selected but torch_ptpu/PTPU is unavailable")
+        return torch.device(f"ptpu:{index}")
     return torch.device("cpu")
 
 
@@ -187,6 +211,10 @@ def get_device_count() -> int:
             return 0
     elif backend == "enflame":
         return torch.gcu.device_count()
+    elif backend == "sunrise":
+        sunrise = _get_sunrise_runtime()
+        if sunrise is not None and sunrise.is_available():
+            return sunrise.device_count()
     return 0
 
 
