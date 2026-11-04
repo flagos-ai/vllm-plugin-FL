@@ -43,6 +43,7 @@ persistence_m:
         - tests/unit_tests/test_sunrise_python310.py
         - tests/unit_tests/test_sunrise_ir.py
         - tests/unit_tests/test_sunrise_compiler.py
+        - tests/unit_tests/test_sunrise_graph_defaults.py
       exclude: []
     functional:
       include:
