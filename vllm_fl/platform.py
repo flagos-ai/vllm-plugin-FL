@@ -360,7 +360,13 @@ class PlatformFL(Platform):
 
     @classmethod
     def import_ir_kernels(cls) -> None:
-        """Import IR kernel modules. OOT platforms override to import their own."""
+        """Import executable IR providers for the active device."""
+        if cls.device_type == "ptpu":
+            # The empty wheel has no CUDA vllm_c providers. Native IR ops use
+            # real PyTorch operations and retain enabled FlagGems dispatch.
+            import vllm.ir.ops  # noqa: F401
+
+            return
         import vllm.kernels  # noqa: F401
 
     @classmethod
@@ -1076,6 +1082,11 @@ class PlatformFL(Platform):
         """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
+
+        if cls.device_type == "ptpu":
+            # Select only providers registered by the empty/PTPU build; do not
+            # advertise NVIDIA extension kernels that cannot execute here.
+            return IrOpPriorityConfig.with_default(["native"])
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
