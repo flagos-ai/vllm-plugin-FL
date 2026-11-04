@@ -53,7 +53,7 @@ def sunrise_modules(monkeypatch):
     install(
         "vllm.config",
         VllmConfig=SimpleNamespace,
-        get_current_vllm_config=lambda: config,
+        get_current_vllm_config_or_none=lambda: config,
         get_layers_from_vllm_config=lambda *args: {},
     )
     install("vllm.config.cache", CacheDType=str)
@@ -390,3 +390,33 @@ def test_forward_updates_native_v032_logical_kv_cache(sunrise_modules):
     torch.testing.assert_close(logical_cache[0, 0, 3, 8:], value[0, 0])
     assert not logical_cache[:, :, :3].any()
     assert sunrise_modules.flash_kernel.call_args.kwargs["k"].shape == (1, 16, 1, 8)
+
+
+def test_kernel_capability_is_pure_without_a_current_config(
+    sunrise_modules, monkeypatch
+):
+    module = sunrise_modules.attention
+    forbidden_config = Mock(side_effect=AssertionError("No global config is active"))
+    monkeypatch.setattr(module, "get_current_vllm_config_or_none", forbidden_config)
+    backend = module.AttentionFLBackend
+    assert backend.get_supported_kernel_block_sizes() == [16, 32, 64]
+    assert backend.get_supported_kernel_block_sizes(
+        SimpleNamespace(block_size=128)
+    ) == [16, 32, 64]
+    forbidden_config.assert_not_called()
+
+
+def test_legacy_cache_layout_has_a_context_free_nhd_default(
+    sunrise_modules, monkeypatch
+):
+    module = sunrise_modules.attention
+    monkeypatch.setattr(module, "get_current_vllm_config_or_none", lambda: None)
+    assert module.AttentionFLBackend.get_kv_cache_stride_order() == (0, 1, 2, 3, 4)
+    assert module.AttentionFLBackend.get_kv_cache_stride_order(True) == (
+        2,
+        0,
+        1,
+        3,
+        4,
+        5,
+    )
