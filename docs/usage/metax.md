@@ -9,7 +9,7 @@ validated recipe uses four C550 cards (64 GiB each) for tensor parallelism.
 
 | Component | Version or configuration |
 |---|---|
-| Image (Linux AMD64) | `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-metax-ci@sha256:6c14e547566814afb5fd2e60341b8adcb442f526de797c636e257e0ab105d067` |
+| Image (Linux AMD64) | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-metax-ci@sha256:6c14e547566814afb5fd2e60341b8adcb442f526de797c636e257e0ab105d067` |
 | Vendor base | MACA 3.7.0.38 / Ubuntu 22.04.3 / Python 3.12.11 |
 | Kernel-mode driver | 3.9.25 on the validated C550 runner (3.8.1 also works) |
 | vLLM | Distribution `0.28.0+empty` (no `vllm._C`); runtime `0.28.0` |
@@ -43,7 +43,7 @@ the MoE model). Each directory must contain `config.json`, the tokenizer files,
 the chat template and all checkpoint shards.
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-metax-ci@sha256:6c14e547566814afb5fd2e60341b8adcb442f526de797c636e257e0ab105d067
+export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-metax-ci@sha256:6c14e547566814afb5fd2e60341b8adcb442f526de797c636e257e0ab105d067
 export MODEL_ROOT=/data/models
 export MODEL_NAME=Qwen3.6-35B-A3B
 export SERVED_MODEL=metax-qwen36
