@@ -267,6 +267,19 @@ RUN python -m pip install --no-cache-dir \
         pyyaml \
         sqlalchemy
 
+# Match the source pin used by .github/scripts/install_flaggems_vllm.py so
+# setup can reuse the dependency without a network fetch. An optional transport
+# mirror preserves pip's original direct_url.json repository identity.
+ARG FLAGGEMS_VLLM_COMMIT=f775b37f3066e2935742d26c7592a5dd55499159
+ARG FLAGGEMS_VLLM_GIT_MIRROR
+RUN if [ -n "${FLAGGEMS_VLLM_GIT_MIRROR}" ]; then \
+        export GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="url.${FLAGGEMS_VLLM_GIT_MIRROR}.insteadOf" \
+            GIT_CONFIG_VALUE_0=https://github.com/flagos-ai/FlagGems-vllm.git; \
+    fi \
+    && python -m pip install --no-cache-dir --no-deps --no-build-isolation \
+        "flaggems-vllm @ git+https://github.com/flagos-ai/FlagGems-vllm.git@${FLAGGEMS_VLLM_COMMIT}"
+
 # CI dependencies must not overlay FlagTree or replace the vendor torch stack.
 RUN python /usr/local/share/vllm-plugin-fl/enflame-verify-compiler.py
 
