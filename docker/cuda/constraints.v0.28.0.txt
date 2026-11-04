@@ -1,0 +1,15 @@
+# Match the existing vLLM 0.28 CI environment where CUDA-independent.
+numpy==2.2.6
+transformers==5.15.1
+tokenizers==0.22.2
+huggingface-hub==1.28.0
+openai==3.3.1
+xgrammar==0.2.3
+torchcodec==0.16.0
+setuptools==80.10.2
+pytest==9.1.1
+pytest-xdist==3.8.0
+pytest-timeout==2.4.0
+modelscope==1.37.1
+av==18.1.0
+xgboost==3.3.0
