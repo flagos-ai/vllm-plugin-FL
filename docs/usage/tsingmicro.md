@@ -140,6 +140,7 @@ env -u VLLM_VENDOR python -m pip install --no-build-isolation --no-deps -e .
 python .github/scripts/install_flaggems_vllm.py
 python -m pip install --no-deps \
   transformers==5.19.0 xgrammar==0.2.8 oss-harmony==0.0.11 modelscope==1.35.3
+python -m pip install pytest==9.0.2
 python -m pip show vllm vllm-plugin-fl torch torch-txda flagtree flag-gems flaggems-vllm
 ```
 
@@ -267,7 +268,7 @@ vllm serve "$MODEL_PATH" \
   --trust-remote-code --disable-custom-all-reduce --max-model-len 4096 \
   --mamba-cache-mode none --no-enable-prefix-caching \
   --max-num-batched-tokens 512 --max-num-seqs 8 \
-  --kv-cache-memory-bytes 1073741824 \
+  --kv-cache-memory-bytes 4294967296 \
   --allowed-local-media-path "$PWD/images"
 ```
 
@@ -289,12 +290,13 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **488 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **545 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper
 packaging, stream use and communicator cleanup, plus opt-in bootstrap and V2
-stream namespace isolation. The Mamba cases include
+stream namespace isolation, 0.32 worker/PP protocol, native IR priorities and
+context-free SDPA page capabilities. The Mamba cases include
 overlapping copies, padded storage, multiple types, uniform cache groups,
 noncopyable tail states and failed-plan rollback.
 
@@ -304,7 +306,9 @@ preprocessing/sampling preflight have passed with the opt-in bootstrap.
 The pinned source-built FlagCX passed the TP2 preflight: 15 checks on each rank,
 including float32/bfloat16 reductions, int32/int64 aggregation, variable-size
 collectives, broadcast and nested groups. All tensor communication used FlagCX.
-The two-model V2 hardware acceptance gate has **not passed** and remains pending.
+Qwen3.6-27B has reached API readiness with both ranks reporting the actual
+upstream V2 runner class and pinned FlagCX library. The two-model hardware
+acceptance gate has **not passed** and remains in progress.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful
