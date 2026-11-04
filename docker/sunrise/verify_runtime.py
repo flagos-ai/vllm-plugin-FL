@@ -56,12 +56,23 @@ def main() -> None:
     count = torch.ptpu.device_count()
     if count < required:
         raise RuntimeError(f"Need {required} visible devices, found {count}")
+    # Match the worker's real dispatcher/compiler policy before testing device
+    # arithmetic; importing FlagGems alone does not install its ATen kernels.
+    from vllm_fl.worker.runtime import _initialize_fl_runtime
+
+    _initialize_fl_runtime(0)
+    print("Sunrise FL runtime initialized for device arithmetic", flush=True)
     for index in range(required):
         device = f"ptpu:{index}"
         torch.ptpu.set_device(index)
+        print(f"Sunrise arithmetic device={device} stage=ones", flush=True)
         left = torch.ones((16,), device=device)
-        result = (left + left).cpu()
-        torch.testing.assert_close(result, torch.full((16,), 2.0))
+        print(f"Sunrise arithmetic device={device} stage=add", flush=True)
+        result_device = left + left
+        print(f"Sunrise arithmetic device={device} stage=copy-to-cpu", flush=True)
+        result = result_device.cpu()
+        torch.testing.assert_close(result, torch.full((16,), 2.0, device="cpu"))
+        print(f"Sunrise arithmetic device={device} passed", flush=True)
     print(
         json.dumps(
             {
