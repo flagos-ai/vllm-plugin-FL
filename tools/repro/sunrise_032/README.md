@@ -1,5 +1,7 @@
 # 曦望 vLLM 0.32：27B 图片异常与 TP2 graph 排查包
 
+> 2026-11-05 更新：按用户要求在不 reset 的当前环境做了有界基础检查；物理 0、2 的纯 Torch 大张量往返拷贝失败，4 通过。完整 TP2 gate 仍未完成，GPU 测试已再次停止。新增[逐卡全量复现、运行命令及证据](current_environment/README.zh-CN.md)。以下三类模型/graph 入口和 53 项验证是先前 81aea8d 的离线交付记录。
+
 本目录供曦望侧离线审阅和后续在**已获授权的独占环境**手动复现。
 本次只整理了已有脚本与历史证据，并做 CPU/语法检查，**没有重新执行 GPU 测试或 reset**。
 整理版脚本尚未 GPU 重测；下列历史结果不能当作整理版的新运行结果。
@@ -226,7 +228,7 @@ SDPA、布局或通信实现的生产根因。当前材料也没有证明两个�
 由资源管理员协调受影响的互联范围和其他作业，选择维护窗口后单独处理；
 不能因为某张卡进程表为空就直接重置，也不要停止不属于自己的服务。
 
-## 本次整理验证（CPU only）
+## 原始整理包验证（81aea8d，CPU only）
 
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
@@ -240,4 +242,4 @@ python -S tools/repro/sunrise_032/repro_v2_model_graph.py --help
 
 本次本地 CPU 测试为 [53 项通过](validation.json)；Python 3.10 仅做语法兼容检查，未在 GPU 环境重跑整理版。
 这些检查覆盖参数、原请求构造、输出保存、显式设备选择和 GPU 导入之前的失败边界。
-没有进行 HTTP 请求、模型推理或 GPU 复测；硬件结果仍仅来自上面列出的历史证据。
+上述 53 项仅描述原始三类入口的离线整理，没有为它们新增 HTTP 请求、模型推理或 GPU 复测。新增纯 Torch 拷贝检查有独立实测与来源记录，见[当前环境复现](current_environment/README.zh-CN.md)。

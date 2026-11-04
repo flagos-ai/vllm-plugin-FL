@@ -1,0 +1,974 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-11-04T16:04:53.375139+00:00",
+  "status": "executed_historical_evidence_not_a_fix",
+  "line_number_definition": "UTF-8 decode then Python str.splitlines(); one-based ranges, including CR progress refreshes.",
+  "executed_script_sha256": "c9c96bf53575811c0bdadaf8dc64e9dfe1ed602c228bd558f43af23320738d0f",
+  "scope": {
+    "reset": false,
+    "graph": false,
+    "gemm": false,
+    "collective": false,
+    "full_value_comparison": true,
+    "host_source_unchanged_checked": true
+  },
+  "observed_results": [
+    {
+      "physical_device": 0,
+      "comparison_count": 9,
+      "exact_count": 4,
+      "failed_count": 5,
+      "worker_exitcode": 0,
+      "complete": true,
+      "timed_out": false,
+      "all_values_exact": false,
+      "host_sources_unchanged": {
+        "input": true,
+        "weight": true
+      },
+      "first_bad_virtual_addresses": [
+        68706620360
+      ],
+      "outer_timeout_docker_exec_cli_status": 1
+    },
+    {
+      "physical_device": 2,
+      "comparison_count": 9,
+      "exact_count": 4,
+      "failed_count": 5,
+      "worker_exitcode": 0,
+      "complete": true,
+      "timed_out": false,
+      "all_values_exact": false,
+      "host_sources_unchanged": {
+        "input": true,
+        "weight": true
+      },
+      "first_bad_virtual_addresses": [
+        68706620360
+      ],
+      "outer_timeout_docker_exec_cli_status": 1
+    },
+    {
+      "physical_device": 4,
+      "comparison_count": 9,
+      "exact_count": 9,
+      "failed_count": 0,
+      "worker_exitcode": 0,
+      "complete": true,
+      "timed_out": false,
+      "all_values_exact": true,
+      "host_sources_unchanged": {
+        "input": true,
+        "weight": true
+      },
+      "first_bad_virtual_addresses": [],
+      "outer_timeout_docker_exec_cli_status": 0
+    }
+  ],
+  "certainty_limits": [
+    "Virtual GPU/runtime addresses are retained and must not be called physical DRAM addresses.",
+    "Surface-idle status is not a health/exclusivity proof.",
+    "Native PG/small copy success does not imply PyFlagCX or model gate success.",
+    "The complete TP2 model gate remains blocked.",
+    "A child exitcode of0 is not a numeric pass.",
+    "Complete per-card before/after/status receipts are now sourced explicitly; only a compact whitelisted device-state derivative is published."
+  ],
+  "sources": [
+    {
+      "output": "logs/copy-card0-r1/roundtrip.jsonl",
+      "source_basename": "roundtrip.jsonl",
+      "source_relative_path": "copy-card0-r1/roundtrip.jsonl",
+      "source_sha256": "bec88624bbaba3da033b3d59065c2c634fda6664f96e3aa8ed936e6312ac02cc",
+      "source_bytes": 7963,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          12
+        ]
+      ],
+      "output_sha256": "bec88624bbaba3da033b3d59065c2c634fda6664f96e3aa8ed936e6312ac02cc",
+      "output_bytes": 7963,
+      "redactions": [],
+      "address_policy": "Retain GPU/runtime virtual addresses; no CPU host pointers or absolute paths occur in this receipt."
+    },
+    {
+      "output": "logs/copy-card0-r1/summary.json",
+      "source_basename": "summary.json",
+      "source_relative_path": "copy-card0-r1/summary.json",
+      "source_sha256": "cc046e09cc91b1fd566c687f7d6c0e916d241c7ebf2802eae3c4ecc1416520ec",
+      "source_bytes": 574,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          15
+        ]
+      ],
+      "output_sha256": "cc046e09cc91b1fd566c687f7d6c0e916d241c7ebf2802eae3c4ecc1416520ec",
+      "output_bytes": 574,
+      "redactions": [],
+      "address_policy": "Retain GPU/runtime virtual addresses; no CPU host pointers or absolute paths occur in this receipt."
+    },
+    {
+      "output": "logs/copy-card2-r1/roundtrip.jsonl",
+      "source_basename": "roundtrip.jsonl",
+      "source_relative_path": "copy-card2-r1/roundtrip.jsonl",
+      "source_sha256": "07a89a283bdfa508693f93c60c66fee097867cd47a78bfad8ab839b871be2a37",
+      "source_bytes": 7988,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          12
+        ]
+      ],
+      "output_sha256": "07a89a283bdfa508693f93c60c66fee097867cd47a78bfad8ab839b871be2a37",
+      "output_bytes": 7988,
+      "redactions": [],
+      "address_policy": "Retain GPU/runtime virtual addresses; no CPU host pointers or absolute paths occur in this receipt."
+    },
+    {
+      "output": "logs/copy-card2-r1/summary.json",
+      "source_basename": "summary.json",
+      "source_relative_path": "copy-card2-r1/summary.json",
+      "source_sha256": "e001fe5dd76cb5fe223737771ab51b67f50de1c32a826cbbdfce38545fa87a3f",
+      "source_bytes": 574,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          15
+        ]
+      ],
+      "output_sha256": "e001fe5dd76cb5fe223737771ab51b67f50de1c32a826cbbdfce38545fa87a3f",
+      "output_bytes": 574,
+      "redactions": [],
+      "address_policy": "Retain GPU/runtime virtual addresses; no CPU host pointers or absolute paths occur in this receipt."
+    },
+    {
+      "output": "logs/copy-card4-r1/roundtrip.jsonl",
+      "source_basename": "roundtrip.jsonl",
+      "source_relative_path": "copy-card4-r1/roundtrip.jsonl",
+      "source_sha256": "e6888f9e93e99843627ce121e0e2f0d1e58419610f3e48666a7f21a2c4ad4664",
+      "source_bytes": 6970,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          12
+        ]
+      ],
+      "output_sha256": "e6888f9e93e99843627ce121e0e2f0d1e58419610f3e48666a7f21a2c4ad4664",
+      "output_bytes": 6970,
+      "redactions": [],
+      "address_policy": "Retain GPU/runtime virtual addresses; no CPU host pointers or absolute paths occur in this receipt."
+    },
+    {
+      "output": "logs/copy-card4-r1/summary.json",
+      "source_basename": "summary.json",
+      "source_relative_path": "copy-card4-r1/summary.json",
+      "source_sha256": "6fe8bf919d2ad9680fbec130b0d13f9e63b91105ad346ec46086fa7e29b36ada",
+      "source_bytes": 554,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          13
+        ]
+      ],
+      "output_sha256": "6fe8bf919d2ad9680fbec130b0d13f9e63b91105ad346ec46086fa7e29b36ada",
+      "output_bytes": 554,
+      "redactions": [],
+      "address_policy": "Retain GPU/runtime virtual addresses; no CPU host pointers or absolute paths occur in this receipt."
+    },
+    {
+      "output": "logs/executed-commands.txt",
+      "source_basename": "run_copy_cards.sh",
+      "source_relative_path": "run_copy_cards.sh",
+      "source_sha256": "9c2b8cd77460e49ae2add8f36761723d485875bdfc23f280f52d73d34fc8d949",
+      "source_bytes": 1709,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          33
+        ]
+      ],
+      "transformation": "Expand the actually executed loop iterations 0,2,4; redact absolute task root and container identity; preserve options. The selected before files are not supplied as evidence.",
+      "redactions": [
+        "absolute task root",
+        "container identity"
+      ]
+    },
+    {
+      "output": "repro_tensor_roundtrip.py",
+      "source_basename": "tensor_roundtrip.py",
+      "source_relative_path": "tensor_roundtrip.py",
+      "source_sha256": "c9c96bf53575811c0bdadaf8dc64e9dfe1ed602c228bd558f43af23320738d0f",
+      "source_bytes": 9172,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          261
+        ]
+      ],
+      "transformation": "Exact executed script is archived independently by the script owner; all three summary source_sha256 fields match this source.",
+      "redactions": []
+    },
+    {
+      "output": "logs/device-state.json",
+      "source_basename": "copy-card0-before.txt",
+      "source_relative_path": "copy-card0-before.txt",
+      "source_sha256": "8c8a685df34246da0ef01e718c3e74427247ab6e4a6169e1b626e36ab42d3ff1",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          4
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          13,
+          14
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          21,
+          22
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          29,
+          30
+        ],
+        [
+          33,
+          34
+        ],
+        [
+          37,
+          38
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "transformation": "Whitelist device ordinal/model/driver/memory/utilization/ECC and no-listed-process flag. Intermediate snapshots are compacted to selected-device state plus an explicit comparison against latest full table.",
+      "redactions": [
+        "PCI bus IDs",
+        "temperature/power",
+        "container/process listing below the selected health table",
+        "machine identity and unrelated text"
+      ]
+    },
+    {
+      "output": "logs/device-state.json",
+      "source_basename": "copy-card0-after.txt",
+      "source_relative_path": "copy-card0-after.txt",
+      "source_sha256": "3156c5cfc61cc501fa72caba33d447faf52349e16163ad09708a070fdad5699a",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          4
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          13,
+          14
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          21,
+          22
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          29,
+          30
+        ],
+        [
+          33,
+          34
+        ],
+        [
+          37,
+          38
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "transformation": "Whitelist device ordinal/model/driver/memory/utilization/ECC and no-listed-process flag. Intermediate snapshots are compacted to selected-device state plus an explicit comparison against latest full table.",
+      "redactions": [
+        "PCI bus IDs",
+        "temperature/power",
+        "container/process listing below the selected health table",
+        "machine identity and unrelated text"
+      ]
+    },
+    {
+      "output": "logs/device-state.json",
+      "source_basename": "copy-card2-before.txt",
+      "source_relative_path": "copy-card2-before.txt",
+      "source_sha256": "c72184a358e61efeb0e59860507a10784190183894ef003eba4289f5b561fb9d",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          4
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          13,
+          14
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          21,
+          22
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          29,
+          30
+        ],
+        [
+          33,
+          34
+        ],
+        [
+          37,
+          38
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "transformation": "Whitelist device ordinal/model/driver/memory/utilization/ECC and no-listed-process flag. Intermediate snapshots are compacted to selected-device state plus an explicit comparison against latest full table.",
+      "redactions": [
+        "PCI bus IDs",
+        "temperature/power",
+        "container/process listing below the selected health table",
+        "machine identity and unrelated text"
+      ]
+    },
+    {
+      "output": "logs/device-state.json",
+      "source_basename": "copy-card2-after.txt",
+      "source_relative_path": "copy-card2-after.txt",
+      "source_sha256": "9e107390bbf94290a367f52e311403a7243e63989340facd7cf4d80db21a8689",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          4
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          13,
+          14
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          21,
+          22
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          29,
+          30
+        ],
+        [
+          33,
+          34
+        ],
+        [
+          37,
+          38
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "transformation": "Whitelist device ordinal/model/driver/memory/utilization/ECC and no-listed-process flag. Intermediate snapshots are compacted to selected-device state plus an explicit comparison against latest full table.",
+      "redactions": [
+        "PCI bus IDs",
+        "temperature/power",
+        "container/process listing below the selected health table",
+        "machine identity and unrelated text"
+      ]
+    },
+    {
+      "output": "logs/device-state.json",
+      "source_basename": "copy-card4-before.txt",
+      "source_relative_path": "copy-card4-before.txt",
+      "source_sha256": "1428ebcaf9d8548496a19a61cf4d6ee758c4eb5c2b233df8f7559c5d4c530497",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          4
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          13,
+          14
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          21,
+          22
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          29,
+          30
+        ],
+        [
+          33,
+          34
+        ],
+        [
+          37,
+          38
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "transformation": "Whitelist device ordinal/model/driver/memory/utilization/ECC and no-listed-process flag. Intermediate snapshots are compacted to selected-device state plus an explicit comparison against latest full table.",
+      "redactions": [
+        "PCI bus IDs",
+        "temperature/power",
+        "container/process listing below the selected health table",
+        "machine identity and unrelated text"
+      ]
+    },
+    {
+      "output": "logs/device-state.json",
+      "source_basename": "copy-card4-after.txt",
+      "source_relative_path": "copy-card4-after.txt",
+      "source_sha256": "883e60f48df2160a4ee1f1cbb70aae8cf1d3194d1142fe9d1e0e26d064782957",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          4
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          13,
+          14
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          21,
+          22
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          29,
+          30
+        ],
+        [
+          33,
+          34
+        ],
+        [
+          37,
+          38
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "transformation": "Whitelist device ordinal/model/driver/memory/utilization/ECC and no-listed-process flag. Intermediate snapshots are compacted to selected-device state plus an explicit comparison against latest full table.",
+      "redactions": [
+        "PCI bus IDs",
+        "temperature/power",
+        "container/process listing below the selected health table",
+        "machine identity and unrelated text"
+      ]
+    },
+    {
+      "output": "logs/device-state.json",
+      "source_basename": "final-state.txt",
+      "source_relative_path": "final-state.txt",
+      "source_sha256": "3b24022020e0fee4b8c08f6620399b57e2a4c61f5d3b3d3a9bc101fc9bf045ce",
+      "source_bytes": 4214,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          4
+        ],
+        [
+          10,
+          11
+        ],
+        [
+          14,
+          15
+        ],
+        [
+          18,
+          19
+        ],
+        [
+          22,
+          23
+        ],
+        [
+          26,
+          27
+        ],
+        [
+          30,
+          31
+        ],
+        [
+          34,
+          35
+        ],
+        [
+          38,
+          39
+        ],
+        [
+          48,
+          48
+        ]
+      ],
+      "transformation": "Whitelist device ordinal/model/driver/memory/utilization/ECC and no-listed-process flag. Intermediate snapshots are compacted to selected-device state plus an explicit comparison against latest full table.",
+      "redactions": [
+        "PCI bus IDs",
+        "temperature/power",
+        "container/process listing below the selected health table",
+        "machine identity and unrelated text"
+      ]
+    },
+    {
+      "output": "provenance.json:observed_results",
+      "source_basename": "copy-card0.status",
+      "source_relative_path": "copy-card0.status",
+      "source_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "source_bytes": 2,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          1
+        ]
+      ],
+      "transformation": "Parse recorded outer timeout/docker-exec status as integer; 1 is numeric failure for cards0/2, not timeout.",
+      "redactions": []
+    },
+    {
+      "output": "provenance.json:observed_results",
+      "source_basename": "copy-card2.status",
+      "source_relative_path": "copy-card2.status",
+      "source_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "source_bytes": 2,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          1
+        ]
+      ],
+      "transformation": "Parse recorded outer timeout/docker-exec status as integer; 1 is numeric failure for cards0/2, not timeout.",
+      "redactions": []
+    },
+    {
+      "output": "provenance.json:observed_results",
+      "source_basename": "copy-card4.status",
+      "source_relative_path": "copy-card4.status",
+      "source_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source_bytes": 2,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          1
+        ]
+      ],
+      "transformation": "Parse recorded outer timeout/docker-exec status as integer; 1 is numeric failure for cards0/2, not timeout.",
+      "redactions": []
+    },
+    {
+      "output": "README.zh-CN.md:context and provenance.json:context_observations",
+      "source_basename": "dtype-comm.log",
+      "source_relative_path": "dtype-comm.log",
+      "source_sha256": "ce5c421ed56756f44d25480b55e900b0fbc7a21c7bdc0383eb46d83d65ab904c",
+      "source_bytes": 13322,
+      "source_line_ranges_1_based": [
+        [
+          12,
+          39
+        ]
+      ],
+      "transformation": "Historical earlier dtype probe: copy/native-PG success alongside FlagCX AR/AG failure; context only, no stable root cause inference.",
+      "redactions": [
+        "Full raw communication log intentionally not published; only selected scalar observations and source hash/ranges are retained."
+      ]
+    },
+    {
+      "output": "README.zh-CN.md:context and provenance.json:context_observations",
+      "source_basename": "comm-inplace.log",
+      "source_relative_path": "comm-inplace.log",
+      "source_sha256": "df4f0a046f1bf195c059243c3b988cd1ade71d3e9e3a725ba1b8ae359f59bdbf",
+      "source_bytes": 12986,
+      "source_line_ranges_1_based": [
+        [
+          43,
+          43
+        ],
+        [
+          44,
+          44
+        ],
+        [
+          47,
+          47
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          51,
+          51
+        ],
+        [
+          52,
+          52
+        ],
+        [
+          55,
+          55
+        ],
+        [
+          56,
+          56
+        ],
+        [
+          59,
+          59
+        ],
+        [
+          60,
+          60
+        ],
+        [
+          63,
+          63
+        ],
+        [
+          64,
+          64
+        ]
+      ],
+      "transformation": "Later independent AR-only control: numeric_result records independently checked all32 values equal3 and passed=true. No AllGather in this later control.",
+      "redactions": [
+        "Full raw communication log intentionally not published; only selected scalar observations and source hash/ranges are retained."
+      ]
+    },
+    {
+      "output": "provenance.json#context_observations.pointer_queries",
+      "source_basename": "pointer-query.log",
+      "source_relative_path": "pointer-query.log",
+      "source_sha256": "baeb6adc777c78337cae3b02fa55982359a9d8309ba00430f9d219b3fc2955c6",
+      "source_bytes": 6977,
+      "source_line_ranges_1_based": [
+        [
+          14,
+          14
+        ],
+        [
+          15,
+          15
+        ],
+        [
+          16,
+          16
+        ],
+        [
+          17,
+          17
+        ],
+        [
+          18,
+          18
+        ],
+        [
+          19,
+          19
+        ],
+        [
+          20,
+          20
+        ],
+        [
+          21,
+          21
+        ],
+        [
+          26,
+          26
+        ],
+        [
+          27,
+          27
+        ],
+        [
+          28,
+          28
+        ],
+        [
+          29,
+          29
+        ],
+        [
+          30,
+          30
+        ],
+        [
+          31,
+          31
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          33,
+          33
+        ]
+      ],
+      "redactions": [
+        "No wide log copied; only all-16 query equality/success summary retained."
+      ]
+    }
+  ],
+  "generated_outputs": [
+    {
+      "path": "logs/copy-card0-r1/roundtrip.jsonl",
+      "sha256": "bec88624bbaba3da033b3d59065c2c634fda6664f96e3aa8ed936e6312ac02cc",
+      "bytes": 7963
+    },
+    {
+      "path": "logs/copy-card0-r1/summary.json",
+      "sha256": "cc046e09cc91b1fd566c687f7d6c0e916d241c7ebf2802eae3c4ecc1416520ec",
+      "bytes": 574
+    },
+    {
+      "path": "logs/copy-card2-r1/roundtrip.jsonl",
+      "sha256": "07a89a283bdfa508693f93c60c66fee097867cd47a78bfad8ab839b871be2a37",
+      "bytes": 7988
+    },
+    {
+      "path": "logs/copy-card2-r1/summary.json",
+      "sha256": "e001fe5dd76cb5fe223737771ab51b67f50de1c32a826cbbdfce38545fa87a3f",
+      "bytes": 574
+    },
+    {
+      "path": "logs/copy-card4-r1/roundtrip.jsonl",
+      "sha256": "e6888f9e93e99843627ce121e0e2f0d1e58419610f3e48666a7f21a2c4ad4664",
+      "bytes": 6970
+    },
+    {
+      "path": "logs/copy-card4-r1/summary.json",
+      "sha256": "6fe8bf919d2ad9680fbec130b0d13f9e63b91105ad346ec46086fa7e29b36ada",
+      "bytes": 554
+    },
+    {
+      "path": "logs/device-state.json",
+      "sha256": "443562c4a8fa06ba3cdbe463fb613265f58246fcaa06357846b0e3a998596a9d",
+      "bytes": 4894
+    },
+    {
+      "path": "logs/executed-commands.txt",
+      "sha256": "0b136e962ee8e8b15d504b2082950f7cec07710e17e695d9809b65a97743c37d",
+      "bytes": 2021
+    },
+    {
+      "path": "README.zh-CN.md",
+      "sha256": "7792dea749699e8e559af1efdae1dc32a20e270462e028c4c5621d41d1ae6bf6",
+      "bytes": 6428
+    },
+    {
+      "path": "offline-validation.json",
+      "sha256": "e6fb21cd71e532ae53970d28139d64c7afbb6851a33ec55499150e1b3a63e0a3",
+      "bytes": 1584
+    }
+  ],
+  "privacy_scan": {
+    "checked_output_count": 13,
+    "rules": [
+      "url_credentials",
+      "credential_assignment",
+      "ipv4",
+      "ssh_alias",
+      "private_absolute_path"
+    ],
+    "findings": [],
+    "gpu_virtual_pointers_intentionally_retained": true,
+    "cpu_host_pointers_in_selected_receipts": false
+  },
+  "companion_files": [
+    {
+      "path": "repro_tensor_roundtrip.py",
+      "sha256": "c9c96bf53575811c0bdadaf8dc64e9dfe1ed602c228bd558f43af23320738d0f",
+      "bytes": 9172,
+      "owner_note": "Archived by the script/test owner; not modified by this evidence task."
+    },
+    {
+      "path": "test_repro_tensor_roundtrip.py",
+      "sha256": "85d34151583ddd4395c209424022f3437ca07614e885fce9702501cbf729bbec",
+      "bytes": 4351,
+      "owner_note": "Archived by the script/test owner; not modified by this evidence task."
+    }
+  ],
+  "context_observations": {
+    "later_independent_ar_control": {
+      "numeric_result_count": 12,
+      "all_passed_and_all_32_values_equal3": true,
+      "records": [
+        {
+          "rank": 1,
+          "dtype": "torch.float32",
+          "operation": "native_pg_ar",
+          "passed": true
+        },
+        {
+          "rank": 0,
+          "dtype": "torch.float32",
+          "operation": "native_pg_ar",
+          "passed": true
+        },
+        {
+          "rank": 0,
+          "dtype": "torch.float32",
+          "operation": "raw_inplace_ar",
+          "passed": true
+        },
+        {
+          "rank": 1,
+          "dtype": "torch.float32",
+          "operation": "raw_inplace_ar",
+          "passed": true
+        },
+        {
+          "rank": 0,
+          "dtype": "torch.float32",
+          "operation": "raw_outplace_ar",
+          "passed": true
+        },
+        {
+          "rank": 1,
+          "dtype": "torch.float32",
+          "operation": "raw_outplace_ar",
+          "passed": true
+        },
+        {
+          "rank": 0,
+          "dtype": "torch.bfloat16",
+          "operation": "native_pg_ar",
+          "passed": true
+        },
+        {
+          "rank": 1,
+          "dtype": "torch.bfloat16",
+          "operation": "native_pg_ar",
+          "passed": true
+        },
+        {
+          "rank": 1,
+          "dtype": "torch.bfloat16",
+          "operation": "raw_inplace_ar",
+          "passed": true
+        },
+        {
+          "rank": 0,
+          "dtype": "torch.bfloat16",
+          "operation": "raw_inplace_ar",
+          "passed": true
+        },
+        {
+          "rank": 1,
+          "dtype": "torch.bfloat16",
+          "operation": "raw_outplace_ar",
+          "passed": true
+        },
+        {
+          "rank": 0,
+          "dtype": "torch.bfloat16",
+          "operation": "raw_outplace_ar",
+          "passed": true
+        }
+      ],
+      "ag_retested": false,
+      "limit": "Does not establish a stable FlagCX-only failure; does not repair or negate the large full-copy failures."
+    },
+    "pointer_queries": {
+      "count": 16,
+      "all_successful": true,
+      "all_raw_equal_resolved": true,
+      "view_offsets_preserved": true,
+      "not_a_pointer_conversion_fix": true
+    }
+  },
+  "generation_note": "README clarifications/runnable commands and offline-validation added after evidence extraction; frozen raw receipts and executed source unchanged."
+}

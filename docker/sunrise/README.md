@@ -185,3 +185,5 @@ Vendor investigation scripts, exact request/launch parameters, sanitized log
 excerpts and source hashes are collected in the
 [offline reproduction bundle](../../tools/repro/sunrise_032/README.md).
 Those organized entry points have not been GPU-retested; no reset is performed.
+
+2026-11-05 当前环境检查：物理 0、2 的纯 Torch 大张量往返拷贝未通过，4 通过；尚不足以执行可信的完整 TP2 gate。未 reset，未继续 graph。逐卡全量复现和证据见[当前环境检查](../../tools/repro/sunrise_032/current_environment/README.zh-CN.md)。

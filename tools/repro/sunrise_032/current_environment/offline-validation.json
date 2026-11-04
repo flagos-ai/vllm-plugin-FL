@@ -1,0 +1,58 @@
+{
+  "status": "Full TP2 model Gate remains incomplete; no production workaround applied",
+  "reset_performed": false,
+  "new_graph_or_model_test_performed": false,
+  "hardware_scope": "bounded current-environment checks only; GPU work stopped after pure-copy results",
+  "tests": {
+    "tests": 62,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "python310": "grammar only locally; actual pure-copy logs are vendor Python 3.10",
+  "ruff": "pass",
+  "executed_copy_script_sha256": "c9c96bf53575811c0bdadaf8dc64e9dfe1ed602c228bd558f43af23320738d0f",
+  "copy_results": [
+    {
+      "physical_device_argument": 0,
+      "input_exact": 0,
+      "input_comparisons": 5,
+      "weight_exact": 4,
+      "weight_comparisons": 4,
+      "source_host_unchanged": {
+        "input": true,
+        "weight": true
+      },
+      "all_values_exact": false
+    },
+    {
+      "physical_device_argument": 2,
+      "input_exact": 0,
+      "input_comparisons": 5,
+      "weight_exact": 4,
+      "weight_comparisons": 4,
+      "source_host_unchanged": {
+        "input": true,
+        "weight": true
+      },
+      "all_values_exact": false
+    },
+    {
+      "physical_device_argument": 4,
+      "input_exact": 5,
+      "input_comparisons": 5,
+      "weight_exact": 4,
+      "weight_comparisons": 4,
+      "source_host_unchanged": {
+        "input": true,
+        "weight": true
+      },
+      "all_values_exact": true
+    }
+  ],
+  "python": "3.13.9",
+  "new_repro_test_count": 9,
+  "prior_repro_test_count": 53,
+  "executed_script_byte_identical": true,
+  "local_gpu_initialized": false
+}
