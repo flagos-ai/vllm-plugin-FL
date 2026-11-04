@@ -6,6 +6,11 @@
 Published tag: `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci`.
 Runner label: `flagcicd-ascend-910c-k8s-vllm028`.
 
+Published manifest: `sha256:a388a2d44ee7002b2c4b27af59f1421adbf681b32679e0b6ab5dca9edc676412`.
+Published config: `sha256:a55eee4498d16b45ee6263c23b5308fb5ac24f64367f211c5c7cb9a128e4b5ff`.
+The published image has sanitized history and identical runtime config and
+filesystem layers to the preinstalled CI image validated above.
+
 ## Fixed stack
 
 | Component | Version or source |
