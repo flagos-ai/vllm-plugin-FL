@@ -35,7 +35,9 @@ def native_versions() -> dict[str, str]:
             marker in distribution.version.lower()
             for marker in ("sunrise", "ptpu", "tangrt", "flagos")
         )
-        if name not in ("vllm", "vllm-plugin-fl") and (
+        # The pinned shared installer independently verifies the provider source.
+        # It is an intentional addition, rather than a native compiler/runtime.
+        if name not in ("vllm", "vllm-plugin-fl", "flaggems-vllm") and (
             name.startswith(_NATIVE_PREFIXES) or vendor_build
         ):
             if name in versions and versions[name] != distribution.version:
