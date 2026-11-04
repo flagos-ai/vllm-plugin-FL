@@ -50,6 +50,7 @@ PY
 
 # The vendor runtime, vLLM, and FlagGems come from the pinned base image.
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install --extra-index-url https://pypi.org/simple "pytest-xdist>=3.0.0"
 
 python .github/scripts/install_flaggems_vllm.py
 

@@ -1,50 +1,88 @@
 # Copyright 2026 FlagOS Contributors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Licensed under the Apache License, Version 2.0.
 
-# Iluvatar CoreX Platform Configuration
 platform: iluvatar
 vendor: iluvatar
 
 device_types:
-  bi-v150:
+  bi_v150:
     memory_gb: 32
-    tags: [iluvatar, corex, bf16]
+    tags: [iluvatar, corex, bf16, fp16, fp32]
 
 tolerance:
   inference:
-    default:  {rtol: 1e-3, atol: 1e-3}
-    bfloat16: {rtol: 1e-2, atol: 1e-2}
-    float16:  {rtol: 1e-2, atol: 1e-2}
+    default:
+      rtol: 1e-3
+      atol: 1e-3
+    bfloat16:
+      rtol: 1e-2
+      atol: 1e-2
 
-device_overrides: {}
-
-unsupported_features: []
+device_overrides:
+  bi_v150:
+    cases:
+      - qwen3_6/27b_tp4_eager
+      - qwen3_6/35b_a3b_tp4_eager
+    llm:
+      gpu_memory_utilization: 0.90
+      trust_remote_code: true
+    serve:
+      startup_retries: 300
+      extra_engine:
+        # Use replicated MM encoder inputs because TP4 weight sharding
+        # produces incorrect visual features on BI-V150.
+        mm_encoder_tp_mode: data
+        mm_processor_cache_gb: 0
 
 env_defaults:
+  GEMS_VENDOR: "iluvatar"
   VLLM_PLUGINS: "fl"
+  VLLM_ENGINE_ITERATION_TIMEOUT_S: "72000"
+  VLLM_RPC_TIMEOUT: "72000000"
+  VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "7200"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
 
-bi-v150:
-  name: "bi-v150"
+bi_v150:
+  name: "bi_v150"
   tests:
     e2e:
-      inference:
-        qwen2_5: ["7b_tp1", "7b_tp2"]
-      serving:
-        qwen2_5: ["7b_tp2"]
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        serving:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+        concurrent:
+          qwen3_6:
+            - 27b_tp4_eager
+            - 35b_a3b_tp4_eager
+    timeouts:
+      e2e:
+        inference: 180
+        serving: 180
+        concurrent: 180
     functional:
       include: "*"
-      exclude: []
+      # CUDA Graph capture currently fails at capture_begin.
+      # Tracked by flagos-ai/vllm-plugin-FL#539.
+      exclude:
+        - compilation/test_graph_capture.py
     unit:
       include: "*"
-      exclude: []
+    benchmark:
+      pr:
+        enabled: false
+      nightly:
+        enabled: false
