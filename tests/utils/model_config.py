@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -389,8 +390,9 @@ class ModelConfig:
 
         Converts Python-style kwargs to CLI flags::
 
-            tensor_parallel_size=8 → ["--tensor-parallel-size", "8"]
-            enforce_eager=True     → ["--enforce-eager"]
+            tensor_parallel_size=8          → ["--tensor-parallel-size", "8"]
+            enforce_eager=True              → ["--enforce-eager"]
+            compilation_config={"a": 1}     → ["--compilation-config", '{"a": 1}']
 
         The ``tensor_parallel_size`` key is excluded because
         ``VllmServer`` handles it via the ``tp_size`` parameter.
@@ -409,6 +411,11 @@ class ModelConfig:
             if isinstance(value, bool):
                 if value:
                     args.append(flag)
+            elif isinstance(value, (dict, list)):
+                # vLLM parses structured options such as --compilation-config
+                # as JSON. str() would emit a Python repr with single quotes,
+                # which fails validation before the server starts.
+                args.extend([flag, json.dumps(value)])
             else:
                 args.extend([flag, str(value)])
 

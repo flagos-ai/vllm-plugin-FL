@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
+
+import pytest
 
 from tests.utils import platform_config
 from tests.utils.model_config import ModelConfig
@@ -151,3 +154,24 @@ def test_ascend_910c_caps_offline_profile_batch():
         cfg.serve_args()[cfg.serve_args().index("--max-num-batched-tokens") + 1]
         == "4096"
     )
+
+
+@pytest.mark.parametrize(
+    ("platform", "device", "case"),
+    [
+        ("ascend", "910c", "27b_tp2_graph"),
+        ("hygon", "bw1000", "27b_tp2_graph"),
+    ],
+)
+def test_serve_args_emits_structured_options_as_json(platform, device, case):
+    """Structured engine options must reach ``vllm serve`` as JSON.
+
+    ``str()`` on a dict produces a Python repr with single quotes, which vLLM
+    rejects with a pydantic json_invalid error before the server starts.
+    """
+    cfg = ModelConfig.load("qwen3_6", case, platform=platform, device=device)
+
+    args = cfg.serve_args()
+    value = args[args.index("--compilation-config") + 1]
+
+    assert json.loads(value) == cfg.engine_kwargs()["compilation_config"]
