@@ -6899,7 +6899,7 @@ class ModelRunnerFL(
                         profile_logger = init_logger("vllm.musa_graph_profile")
 
                     for i, desc in enumerate(profile_descs):
-                        mem_before = current_platform.torch_device_fn.mem_get_info()[0]
+                        mem_before = torch.accelerator.get_memory_info()[0]
                         if is_musa:
                             profile_logger.info(
                                 "MUSA graph profile bucket begin: "
