@@ -41,7 +41,11 @@ def _runner_class(methods, **namespace):
         ),
         scope,
     )
-    return scope["ModelRunnerFL"]
+    runner_class = scope["ModelRunnerFL"]
+    # AST contracts do not run __init__; emulate its non-Ascend defaults.
+    runner_class.use_ascend_attention = False
+    runner_class.use_ascend_hybrid_cache = False
+    return runner_class
 
 
 def test_allocator_binds_kernel_views_and_preserves_shared_manager_views():

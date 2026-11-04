@@ -64,3 +64,23 @@ def test_fused_moe_factory_still_replaces_unquantized_method(monkeypatch):
 
     assert runner.routed_experts.quant_method is fl_method
     assert runner.replacements == [fl_method]
+
+
+def test_patches_vllm028_factory_in_package_and_layer(monkeypatch):
+    import vllm.model_executor.layers.fused_moe as package
+    import vllm.model_executor.layers.fused_moe.layer as upstream_layer
+
+    from vllm_fl.ops import custom_ops
+
+    # Emulate the unpatched 0.28 exports even when running against 0.32,
+    # which no longer exports FusedMoEFactory. Isolate prior registration.
+    for module in (package, upstream_layer):
+        for name in ("FusedMoE", "FusedMoEFactory"):
+            monkeypatch.setattr(
+                module, name, layer_module._OrigFusedMoEFactory, raising=False
+            )
+    custom_ops._patch_fused_moe_factory()
+    assert package.FusedMoEFactory is layer_module.FusedMoEFactoryFL
+    assert upstream_layer.FusedMoEFactory is layer_module.FusedMoEFactoryFL
+    custom_ops._patch_fused_moe_factory()
+    assert package.FusedMoEFactory is layer_module.FusedMoEFactoryFL

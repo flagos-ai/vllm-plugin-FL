@@ -22,9 +22,17 @@ pytestmark = [pytest.mark.gpu, pytest.mark.flaggems]
 
 
 @pytest.fixture(autouse=True)
-def _require_ascend():
+def _require_ascend(monkeypatch):
     if not torch.npu.is_available() or flag_gems.vendor_name != "ascend":
         pytest.skip("Requires real Ascend NPU and Ascend FlagGems")
+    # This suite audits the complete platform policy, independent of CI/deployment
+    # overrides. Keep checking both enabled kernels and native exclusions.
+    for name in (
+        "VLLM_FL_FLAGOS_WHITELIST",
+        "VLLM_FL_FLAGOS_BLACKLIST",
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @contextmanager

@@ -18,7 +18,7 @@ def test_default_ascend_index_preserves_vision_rope_cache_strides(cache_half):
     reference = cache.chunk(2, dim=-1)[cache_half][indices]
     npu_cache = cache.npu().chunk(2, dim=-1)[cache_half]
     assert not npu_cache.is_contiguous()
-    _, blacklist = get_flag_gems_whitelist_blacklist()
-    with flag_gems.use_gems(exclude=blacklist):
+    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+    with flag_gems.use_gems(include=whitelist, exclude=blacklist):
         actual = npu_cache[indices.npu()]
     torch.testing.assert_close(actual.cpu(), reference, rtol=0, atol=0)
