@@ -450,9 +450,16 @@ in this image; that configuration is not the acceptance setup. The pre-state-ind
 (10/26); the 35B run with native routing passed both text scenarios (9/26).
 After the scoped GDN state-copy adapter passed its eight product hardware
 cases and all CPU regressions, complete acceptance is being rerun on the final
-code. The new 27B run uses physical devices 6,7; 35B is being drained before
-restarting with the same final code on 2,3. Results from earlier runs are kept
-separate. Neither final-code model gate has passed yet.
+runtime code `9ae5f50`. The earlier 27B r16 and 35B r7 runs have drained and
+exited; their partial results do not count toward this final acceptance.
+The current 27B r17 run uses physical devices 6,7 and port 18322: the original
+long-text scenario passed (1/26 requests), and concurrent text is running.
+The current 35B r8 run uses physical devices 2,3 and port 18321: single text
+and eight concurrent text requests passed (9/26 requests), and OCR is running.
+Both ranks of each model have confirmed the real upstream V2 runner, FlagCX
+and scoped GDN state copying. These results are partial: neither model's
+complete final-code gate has passed. All original budgets and assertions
+remain unchanged.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful
