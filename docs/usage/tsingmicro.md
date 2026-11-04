@@ -341,6 +341,29 @@ python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_router.py \
 
 All 48 device comparisons passed against an independent scalar CPU oracle.
 
+## GDN state-cache indexing
+
+The TXDA V2 adapter retains the complete upstream GDN core and scopes a
+`TorchDispatchMode` to its exact SSM state tensor. Eligible leading-row
+gather/scatter operations use native row copies. Other tensors, storage
+aliases, unknown layouts, gradients, duplicate IDs, accumulation and general
+broadcasting retain their original operators. Only single-row setter values
+whose leading dimension Torch removed are normalized back to one row.
+
+```bash
+source /work/task/env.sh
+python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_gdn_state.py \
+  --output /work/task/outputs/gdn-state-probe.json
+```
+
+The eight product-mode hardware cases passed for FP32/BF16, 32/167 padded
+pages and one/eight selected rows. Whole allocations matched the CPU oracle,
+including all unselected rows and padding. In an isolated FP32 167-page test,
+eight-row scatter took about 2.6 ms through the scoped mode versus 2.7 s
+through the advanced-index fallback. This is an operator latency comparison,
+not a model throughput result. Actual V2 inference logs the first copied cache
+shape, strides, device and row count.
+
 ## Model acceptance
 
 Use the unchanged cases in `tools/adaptation-gate-cases` for both
@@ -388,7 +411,7 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **729 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **799 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper
@@ -400,7 +423,9 @@ layouts, virtual blocks, mixed-dtype overlays, storage lifetime, manager mapping
 and complete ID validation before any write. MRoPE regressions check independent
 lookup/rotation oracles, partial tails, dispatch isolation and error propagation.
 MoE routing cases cover both scores, padding, nonfinite inputs, stable ties,
-normalization and backend isolation. The Mamba cases include
+normalization and backend isolation. GDN cases check exact allocation bytes,
+identity scoping, single-row setter normalization, overlap/gradient fallback
+and unchanged upstream core execution. The Mamba cases include
 overlapping copies, padded storage, multiple types, uniform cache groups,
 noncopyable tail states and failed-plan rollback.
 
@@ -420,12 +445,14 @@ validated the current setup on physical devices 4 and 5 with SHM enabled and
 `NCCL_SOCKET_IFNAME=ens29f0`: both default-stream and nondefault-stream FlagCX
 preflights passed all 30 checks. No worker stream patch was needed. Explicitly
 disabling SHM and forcing Socket failed in both FlagCX and native TCCL probes
-in this image; that configuration is not the acceptance setup. The 27B gate
-has passed its long text and eight concurrent text requests (9/26) and is
-running image cases. The 35B run exposed the missing masked top-k operator;
-a native routing fix passed 68 CPU cases and 48 hardware comparisons before
-restarting its full gate. The models now run in parallel on physical groups
-4,5 and 2,3. Neither complete model gate has passed yet.
+in this image; that configuration is not the acceptance setup. The pre-state-indexing
+27B run passed long text, eight concurrent text requests and single-image OCR
+(10/26); the 35B run with native routing passed both text scenarios (9/26).
+After the scoped GDN state-copy adapter passed its eight product hardware
+cases and all CPU regressions, complete acceptance is being rerun on the final
+code. The new 27B run uses physical devices 6,7; 35B is being drained before
+restarting with the same final code on 2,3. Results from earlier runs are kept
+separate. Neither final-code model gate has passed yet.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful

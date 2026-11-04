@@ -33,6 +33,9 @@ def adapter(monkeypatch):
     zeroer = ModuleType("vllm_fl.worker.txda_kv_zeroer")
     zeroer.patch_txda_v2_kv_zeroer = Mock(return_value=True)
     monkeypatch.setitem(sys.modules, zeroer.__name__, zeroer)
+    gdn_state = ModuleType("vllm_fl.worker.txda_gdn_state")
+    gdn_state.patch_txda_gdn_state = Mock(return_value=True)
+    monkeypatch.setitem(sys.modules, gdn_state.__name__, gdn_state)
     mrope = ModuleType("vllm_fl.worker.txda_mrope")
     mrope.patch_txda_mrope = Mock(return_value=True)
     monkeypatch.setitem(sys.modules, mrope.__name__, mrope)
@@ -55,6 +58,7 @@ def adapter(monkeypatch):
         cls=runner_class,
         preprocess=preprocess.patch_txda_v2_preprocess,
         zeroer=zeroer.patch_txda_v2_kv_zeroer,
+        gdn_state=gdn_state.patch_txda_gdn_state,
         mrope=mrope.patch_txda_mrope,
     )
 
@@ -74,6 +78,7 @@ def test_v2_modules_route_only_stream_calls_to_native_txda(adapter, api):
     assert adapter.torch.cuda is original_cuda
     adapter.preprocess.assert_called_once_with()
     adapter.zeroer.assert_called_once_with(adapter.modules[0])
+    adapter.gdn_state.assert_called_once_with()
     adapter.mrope.assert_called_once_with()
 
 

@@ -55,11 +55,13 @@ def get_txda_v2_model_runner():
             raise RuntimeError(f"TXDA runtime is missing the V2 stream API {name}")
 
     runner_module = importlib.import_module(_DEVICE_MODULES[0])
+    from vllm_fl.worker.txda_gdn_state import patch_txda_gdn_state
     from vllm_fl.worker.txda_kv_zeroer import patch_txda_v2_kv_zeroer
     from vllm_fl.worker.txda_mrope import patch_txda_mrope
     from vllm_fl.worker.txda_v2_preprocess import patch_txda_v2_preprocess
 
     patch_txda_v2_kv_zeroer(runner_module)
+    patch_txda_gdn_state()
     patch_txda_mrope()
     patch_txda_v2_preprocess()
     for name in _DEVICE_MODULES:
