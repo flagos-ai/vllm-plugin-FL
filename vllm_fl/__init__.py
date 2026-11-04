@@ -172,12 +172,24 @@ def _patch_custom_ops():
 
 def _init_vendor_device():
     """Apply compatibility hooks that must run before vLLM model imports."""
+    if os.environ.get("GEMS_VENDOR", "").lower() == "sunrise":
+        from vllm_fl.patches.sunrise_compiler import (
+            install_sunrise_libdevice_compat,
+        )
+
+        install_sunrise_libdevice_compat()
     _install_metax_compat()
 
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
-    if vendor_name == "mthreads":
+    if vendor_name == "sunrise":
+        from vllm_fl.patches.sunrise_compiler import (
+            install_sunrise_libdevice_compat,
+        )
+
+        install_sunrise_libdevice_compat()
+    elif vendor_name == "mthreads":
         # The parent process also calls accelerator cleanup when engine startup
         # fails before workers initialize their model/kernel compatibility hooks.
         from vllm_fl.dispatch.backends.vendor.musa.patch import (
