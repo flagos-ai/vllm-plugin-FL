@@ -34,7 +34,8 @@ generate:
 
 serve:
   served_model_name: "qwen"
-  startup_retries: 120
+  # Cold compilation and graph capture on S60 can exceed 20 minutes.
+  startup_retries: 240
   endpoints: ["chat"]
   stream: false
   max_tokens: 256
