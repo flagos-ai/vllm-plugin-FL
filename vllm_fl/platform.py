@@ -973,9 +973,14 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Select IR defaults for each backend's registered implementations."""
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
+
+        if cls.device_type == "txda":
+            # Empty vLLM builds need not provide vllm_c implementations. Native
+            # IR operations dispatch through the active TXDA torch backend.
+            return IrOpPriorityConfig.with_default(["native"])
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
