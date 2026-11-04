@@ -55,9 +55,7 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize(
-    "vendor", ["ascend", "mthreads", "enflame", "gcu"]
-)
+@pytest.mark.parametrize("vendor", ["ascend", "mthreads", "enflame", "gcu"])
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os

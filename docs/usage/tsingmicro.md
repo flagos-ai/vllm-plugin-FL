@@ -16,6 +16,9 @@ installing vLLM and the plugin.
   the single-device fallback.
 - Prefill and decode context parallel sizes must both be 1.
 - Speculative decoding is unsupported. Omit `--speculative-config`.
+- Initial V2 validation uses `--mamba-cache-mode none` and
+  `--no-enable-prefix-caching`; V2 fused state migration is a separate path
+  from the retained V1 copy fallback and has not been validated.
 - Attention uses paged SDPA; MLA, sparse attention, ALiBi and logits soft caps
   are unsupported. Normalization, rotary and SiLU use reference implementations.
 - Generic FlagGems ATen replacement is limited to add/mul, with four extra
@@ -23,13 +26,14 @@ installing vLLM and the plugin.
   throughput guarantee.
 
 The legacy FL/V1 Mamba copy callbacks are keyed by Mamba type in vLLM 0.32.
-The retained TXDA native
-tensor-copy fallback resolves the spec and callbacks for each layer, including
+The retained TXDA native tensor-copy fallback resolves the spec and callbacks for each layer, including
 uniform cache groups containing different state specs. It copies only states
 with upstream callbacks and preserves storage padding and overlapping ranges.
 The existing packed K/V attention path is retained. The V2 runner has separate
 state-management and sampling paths; the legacy copy regressions alone do not
-validate V2 execution.
+validate V2 execution. Its eager Stream/Event calls use a module-local TXDA
+device view, preserving the real upstream V2 runner class and global
+`torch.cuda` namespace.
 
 The image's accelerator memory query reports allocator pool sizes rather than
 whole-device memory. A TXDA-only compatibility hook routes
@@ -126,7 +130,7 @@ export FL_TXDA_PY310_COMPAT=1
 export PYTHONPATH="/work/vllm-plugin-FL/tools/tsingmicro_py310:${PYTHONPATH:-}"
 cd /work/task
 git clone --depth 1 --branch v0.32.0 https://github.com/vllm-project/vllm.git vllm-0.32.0
-VLLM_TARGET_DEVICE=empty python -m pip install \
+TORCH_DEVICE_BACKEND_AUTOLOAD=0 VLLM_TARGET_DEVICE=empty python -m pip install \
   --ignore-requires-python --no-build-isolation --no-deps ./vllm-0.32.0
 cd /work/vllm-plugin-FL
 env -u VLLM_VENDOR python -m pip install --no-build-isolation --no-deps -e .
@@ -193,6 +197,7 @@ vllm serve "$MODEL_PATH" \
   --served-model-name "$MODEL_PATH" --host 127.0.0.1 --port "$PORT" \
   --shutdown-timeout 60 --tensor-parallel-size 8 --enforce-eager \
   --trust-remote-code --disable-custom-all-reduce --max-model-len 4096 \
+  --mamba-cache-mode none --no-enable-prefix-caching \
   --max-num-batched-tokens 512 --max-num-seqs 8 \
   --kv-cache-memory-bytes 1073741824 \
   --allowed-local-media-path "$PWD/images"

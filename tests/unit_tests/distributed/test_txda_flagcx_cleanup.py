@@ -276,6 +276,11 @@ def test_abort_failure_is_logged_and_never_retried(loaded, caplog, failure):
     comm = ready_comm(loaded, library)
     with caplog.at_level(logging.ERROR):
         comm.destroy()
+        # The fixture deliberately bounds destroy() to 30 ms. Wait for this
+        # known nonblocking abort callback before inspecting its thread's
+        # log record; exception formatting can exceed that bound on CI.
+        comm._destroy_thread.join(timeout=5)
+        assert not comm._destroy_thread.is_alive()
         comm.destroy()
     assert "abort failed" in caplog.text
     assert "cleanup is incomplete" in caplog.text

@@ -510,9 +510,16 @@ class WorkerFL(WorkerBase):
 
         # Construct the model runner
         if self.use_v2_model_runner:
-            from vllm.v1.worker.gpu.model_runner import (
-                GPUModelRunner as GPUModelRunnerV2,
-            )
+            if current_platform.device_type == "txda":
+                from vllm_fl.worker.txda_model_runner_v2 import (
+                    get_txda_v2_model_runner,
+                )
+
+                GPUModelRunnerV2 = get_txda_v2_model_runner()
+            else:
+                from vllm.v1.worker.gpu.model_runner import (
+                    GPUModelRunner as GPUModelRunnerV2,
+                )
 
             # HACK(woosuk): This is a temporary fix to avoid type errors.
             self.model_runner: GPUModelRunner = GPUModelRunnerV2(  # type: ignore
