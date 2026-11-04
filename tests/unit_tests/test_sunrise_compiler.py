@@ -4,6 +4,7 @@
 
 import importlib.util
 import sys
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
@@ -22,7 +23,21 @@ def compiler_compat(monkeypatch):
     extra = ModuleType("triton.language.extra")
     for name in ("pow", "erf", "exp", "tanh"):
         setattr(vendor_math, name, Mock(name="ptpu_" + name))
+
+    @dataclass(frozen=True)
+    class SunriseOptions:
+        num_warps: int = 4
+        num_ctas: int = 1
+        num_stages: int = 3
+        enable_fp_fusion: bool = True
+        extern_libs: tuple = ()
+
+        def hash(self):
+            return repr(self.__dict__)
+
+    compiler = SimpleNamespace(SunriseOptions=SunriseOptions)
     modules = {
+        "triton.backends.sunrise.compiler": compiler,
         vendor_package.__name__: vendor_package,
         vendor_math.__name__: vendor_math,
         extra.__name__: extra,
@@ -46,6 +61,7 @@ def compiler_compat(monkeypatch):
         vendor_math=vendor_math,
         extra=extra,
         modules=modules,
+        options_cls=SunriseOptions,
     )
 
 
@@ -67,7 +83,7 @@ def test_existing_vendor_math_is_never_replaced(compiler_compat):
     original = ModuleType(state.module._LEGACY_LIBDEVICE)
     state.modules[original.__name__] = original
     assert state.module.install_sunrise_libdevice_compat() is original
-    assert len(state.module.importlib.import_module.call_args_list) == 1
+    assert len(state.module.importlib.import_module.call_args_list) == 2
     assert not hasattr(state.extra, "tang")
 
 
@@ -109,3 +125,37 @@ def test_sunrise_math_is_installed_before_device_detection(monkeypatch):
     monkeypatch.setattr(vllm_fl.utils, "DeviceInfo", detect_device)
     vllm_fl._init_vendor_device()
     assert hook.call_count == 2
+
+
+def test_generic_jit_hook_metadata_does_not_change_sunrise_options(compiler_compat):
+    state = compiler_compat
+    options = state.options_cls()
+    original_fields = fields(state.options_cls)
+    original_dict = dict(vars(options))
+    original_asdict = asdict(options)
+    original_hash = options.hash()
+    assert not hasattr(options, "launch_cooperative_grid")
+
+    state.module.install_sunrise_options_compat()
+
+    assert options.launch_cooperative_grid is False
+    assert fields(state.options_cls) == original_fields
+    assert vars(options) == original_dict
+    assert asdict(options) == original_asdict
+    assert options.hash() == original_hash
+    # Reproduce the generic JIT hook's diagnostic and payload accesses. The
+    # callback still executes and observes a real, disabled capability value.
+    hook = Mock()
+    diagnostic = f"kernel[launch_cooperative_grid={options.launch_cooperative_grid}]"
+    hook(diagnostic, launch_cooperative_grid=options.launch_cooperative_grid)
+    hook.assert_called_once_with(
+        "kernel[launch_cooperative_grid=False]", launch_cooperative_grid=False
+    )
+
+
+def test_native_options_capability_is_preserved(compiler_compat):
+    state = compiler_compat
+    state.options_cls.launch_cooperative_grid = True
+    state.module.install_sunrise_options_compat()
+    state.module.install_sunrise_options_compat()
+    assert state.options_cls().launch_cooperative_grid is True
