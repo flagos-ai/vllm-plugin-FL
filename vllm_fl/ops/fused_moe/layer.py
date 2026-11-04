@@ -35,6 +35,41 @@ class UnquantizedFusedMoEMethodFL(UnquantizedFusedMoEMethod):
             )
         )
 
+    def _setup_kernel(self, layer, w13, w2):
+        # Keep upstream parameter replacement, layout conversion and gate-config
+        # propagation, including in-place updates of captured parameter storage.
+        first_setup = self.moe_kernel is None
+        super()._setup_kernel(layer, w13, w2)
+        if not first_setup:
+            return
+        from vllm.platforms import current_platform
+        if getattr(current_platform, "vendor_name", None) != "ascend":
+            return
+        parallel = self.moe.moe_parallel_config
+        if (not parallel.use_ep or parallel.ep_size <= 1
+                or not 1024 <= self.moe.hidden_dim <= 8192):
+            return
+        from vllm_fl.distributed.device_communicators.npu_moe_runtime import is_a3_device
+        if not is_a3_device():
+            return
+        from .ascend_bf16_experts import AscendBF16DispatchedExperts
+        # Explicit model SP keeps its existing AgRs prepare/finalize contract.
+        if not AscendBF16DispatchedExperts._supports_parallel_config(parallel):
+            return
+        if not AscendBF16DispatchedExperts._supports_activation(self.moe.activation):
+            raise NotImplementedError("Unsupported Ascend BF16 dispatched activation")
+        from vllm.config import get_current_vllm_config
+        from vllm.distributed import get_ep_group
+        from vllm.model_executor.layers.fused_moe.modular_kernel import FusedMoEKernel
+        from .prepare_finalize import NpuMoEPrepareAndFinalize
+        experts = AscendBF16DispatchedExperts(self.moe, self.moe_quant_config)
+        runtime = get_ep_group().device_communicator.get_moe_runtime(
+            get_current_vllm_config(), device=layer.w13_weight.device,
+        )
+        self.moe_kernel = FusedMoEKernel(
+            NpuMoEPrepareAndFinalize(runtime, self.moe.num_experts), experts,
+        )
+
     @property
     def is_monolithic(self) -> bool:
         if self.moe_kernel is None:

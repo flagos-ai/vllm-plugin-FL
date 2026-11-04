@@ -177,3 +177,15 @@ class VLLMFLBackendBase(ABC):
             - "vllm_fl.dispatch.backends.flaggems.impl.attention.AttentionFLBackend"
         """
         pass
+
+    def bf16_grouped_experts(self, *args, **kwargs):
+        """Compute unquantized already-dispatched expert rows (Ascend provider)."""
+        raise NotImplementedError
+
+    def minimax_m3_kernels(self):
+        """Select one MiniMax stateful cache and attention provider."""
+        raise NotImplementedError
+
+    def topk_bias(self, logits, bias, topk, renormalize, scoring_func):
+        """Select biased expert IDs and return their unbiased routing weights."""
+        raise NotImplementedError

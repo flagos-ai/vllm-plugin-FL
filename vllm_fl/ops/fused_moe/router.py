@@ -22,6 +22,35 @@ from vllm_fl.dispatch import CachedOp
 
 _topk_softmax = CachedOp("topk_softmax")
 _grouped_topk = CachedOp("grouped_topk")
+_topk_bias = CachedOp("topk_bias")
+
+def _fl_fused_topk_bias(
+    hidden_states, gating_output, e_score_correction_bias, topk,
+    renormalize, scoring_func, indices_type=None,
+):
+    """Ascend biased top-k through the vendor operator dispatch."""
+    from vllm.platforms import current_platform
+
+    if (getattr(current_platform, "vendor_name", None) != "ascend"
+            or current_platform.device_type != "npu"):
+        return fused_topk_bias(
+            hidden_states=hidden_states, gating_output=gating_output,
+            e_score_correction_bias=e_score_correction_bias, topk=topk,
+            renormalize=renormalize, scoring_func=scoring_func,
+            indices_type=indices_type,
+        )
+    if hidden_states.shape[0] != gating_output.shape[0]:
+        raise ValueError("Number of routing tokens mismatch")
+    dtype = torch.int32 if indices_type is None else indices_type
+    if gating_output.shape[0] == 0:
+        return (gating_output.new_empty((0, topk), dtype=torch.float32),
+                gating_output.new_empty((0, topk), dtype=dtype))
+    weights, indices = _topk_bias(
+        gating_output, e_score_correction_bias, topk, renormalize, scoring_func,
+    )
+    # Caller applies its routed_scaling_factor exactly once after this helper.
+    return weights.to(torch.float32), indices.to(dtype)
+
 
 def fused_topk(
     hidden_states: torch.Tensor,
@@ -181,7 +210,7 @@ class GroupedTopKRouterFL(GroupedTopKRouter):
 
         if not valid_grouping():
             if self.e_score_correction_bias is not None:
-                topk_weights, topk_ids = fused_topk_bias(
+                topk_weights, topk_ids = _fl_fused_topk_bias(
                     hidden_states=hidden_states,
                     gating_output=router_logits,
                     e_score_correction_bias=self.e_score_correction_bias.data,
@@ -238,7 +267,7 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
         *,
         input_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        topk_weights, topk_ids = fused_topk_bias(
+        topk_weights, topk_ids = _fl_fused_topk_bias(
             hidden_states=hidden_states,
             gating_output=router_logits,
             e_score_correction_bias=self.e_score_correction_bias.data
