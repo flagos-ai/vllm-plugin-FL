@@ -29,10 +29,17 @@ is not interchangeable with this Enflame compiler stack.
 Keep the plugin and its
 [Enflame dispatch policy](../../vllm_fl/dispatch/config/enflame.yaml) on the same
 revision. The policy selects the GCU attention backend and retains its tested
-FlagGems exclusions. Build instructions and the rationale for the temporary
-vendor adapters are in the [image recipe](../../docker/enflame/README.md).
-The versioned Dockerfile is
+FlagGems exclusions. The runtime-based image recipe is
 [`docker/enflame/Dockerfile.v0.28.0`](../../docker/enflame/Dockerfile.v0.28.0).
+Build it from the repository root with:
+
+```bash
+docker/build.sh --platform enflame --target ci \
+  --image-name harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl
+```
+
+The temporary vendor adapter rationale remains in the
+[Enflame backend notes](../../docker/enflame/README.md).
 
 ## 1. Check the host and choose devices
 
@@ -297,7 +304,8 @@ and original Gate for the exact revision you deploy.
 - **Other dependency versions or optional C++ operators:** the compatibility
   adapters target the fixed stack above. The Python FlagGems wheel does not
   establish coverage of the optional native C++ extension; see the
-  [image recipe](../../docker/enflame/README.md) before changing that stack.
+  [versioned image recipe](../../docker/enflame/Dockerfile.v0.28.0) before
+  changing that stack.
 
 After saving results and confirming that this private container has no active
 tests or service, stop it from the host with `docker stop "$CONTAINER"`. Keep

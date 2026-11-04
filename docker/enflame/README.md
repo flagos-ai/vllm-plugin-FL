@@ -1,36 +1,12 @@
 # Enflame S60 recipe for vLLM 0.28
 
-This recipe builds the vLLM 0.28 **inference development and CI** image on the
-required FlagOS runtime. It preserves the TOPS 1.10.6 SDK and vendor torch
-2.11.0+cpu / torch_gcu 2.11.0+3.8.20260713 stack. It does not install FlagScale
-or training frameworks. Both `Dockerfile.v0.28.0` and `docker/build.sh` default to:
+The recipe keeps the vendor torch 2.11.0+cpu / torch_gcu
+2.11.0+3.8.20260713 stack and installs the official vLLM 0.28.0 empty-device
+build. The FL plugin registers the GCU platform. The vendor base is:
 
 ```text
-harbor.baai.ac.cn/flagos-runtime/flagos-runtime-enflame-tops1.10.6:2.3.0@sha256:6356cd26647a4cbd27f2ad9ece7281df888df7ec9e9c2dc3bb5aaa262f9097c6
+harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853
 ```
-
-Published and validated image:
-
-```text
-harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e
-```
-
-The [2026-11-04 validation report](validation-20261104.md) records all ten
-native nightly groups and the original 27B/35B graph checks, their source
-revision, existing skips and dependency metadata limitations. These results
-were obtained on the supplied S60 host using the repository's native runner.
-
-The runtime supplies Python 3.12.13 in `/flagos`; keep its inherited `PATH` and
-`BASH_ENV`. The prior vendor application image is not a build stage or filesystem
-donor. Its validation history below describes the previous image only and does
-not establish acceptance of the runtime-based rebuild.
-
-The runtime's Bash profile also forces `fallback_cpu=all_ops`, which
-synchronizes streams and aborts GCU graph capture. The recipe installs
-`runtime_env.sh` as a late profile fragment to clear that exact inherited
-debug default. The vendor profile, other environment flags and SDK files
-remain intact. The [validation report](validation-20261104.md) records the
-controlled failure reproduction and corrected-image graph/FT results.
 
 The installed packages are pinned to FlagGems 5.4.0, FlagTree
 0.7.0+enflame3.6 and triton-gcu 3.6.0+1.0.20260722. FlagTree's Enflame wheel
@@ -56,10 +32,6 @@ decoding for hybrid align-mode serving. Other speculative/cache combinations
 still require their own validation; accepting a configuration is not evidence
 of device support.
 
-## Historical vendor-image validation
-
-The following results belong to the previous vendor-based image.
-
 The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
 The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
 The original Qwen3.6-27B inference and Qwen3.6-35B-A3B serving cases passed in
@@ -68,24 +40,24 @@ both eager and graph modes at plugin commit
 from each candidate commit's original adaptation Gate. The old vLLM 0.20.2
 vendor wrapper remains available as `Dockerfile.v0.20.2`.
 
-The previous vendor-based dependency image had manifest
-`sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`
-and local image ID
+The local image ID is
 `sha256:4feef9aed222a8cffd9fab610288053c3f2ee5acdfc3540786e47d7daea48f0e`.
-Its historical tag is
+The canonical dependency image name follows the other vLLM 0.28 backends:
+`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci`.
+This tag was published on 2026-10-20 and aliases the unchanged image originally
+published on 2026-10-13 as
 `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci-2cd00248d399-compiler`.
-These identifiers describe the old image, not the runtime-based rebuild.
-The [runtime validation report](validation-20261104.md) records the new image's
-source, ancestry, test results and acceptance status. CI installs the tested
-plugin checkout with `--no-deps`; the dependency image does not bake it in.
+An anonymous manifest lookup confirmed that both names identify the same content.
+Its registry manifest digest is
+`sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.
+Authenticated and anonymous pulls by this digest both resolved to the local
+image ID above. CI uses the canonical tag with this digest and installs the tested plugin checkout
+with `--no-deps`; the dependency image does not bake in that checkout.
 
 See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
 model serving, and validation commands.
 
-## Build the runtime-based candidate
-
-The vLLM 0.28 recipe is `docker/enflame/Dockerfile.v0.28.0`. The build helper
-selects this file for Enflame; the unversioned `Dockerfile` is retained unchanged.
+## Build a local candidate
 
 Run long builds in a uniquely named tmux session and retain the build log.
 From a private checkout, the underlying build command is:
@@ -97,12 +69,7 @@ docker/build.sh --platform enflame --target ci \
 
 The example tag is a local build destination, not a published image.
 The default generated tag includes the selected stage, such as
-`v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push. On hosts with slow PyPI access, add
-`--index-url https://mirrors.cloud.tencent.com/pypi/simple`. This changes only
-the public dependency index; Enflame wheels retain their official index and SHA256 checks.
-For Ubuntu package downloads, optionally add
-`--build-arg UBUNTU_MIRROR=https://mirrors.cloud.tencent.com/ubuntu`.
-Ubuntu repository signatures remain verified by apt.
+`v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push.
 `.github/configs/enflame.yml` references the published vLLM 0.28 dependency
 image by digest. Enflame is enabled in `platforms.yml`, following main's
 existing `enflame-s60` runner label, devices `2,3` and `/data:/data` mount.
@@ -127,13 +94,6 @@ requirements or `.[test]` can replace vendor torch. The metadata guard
 checks the exact requested vLLM base version, empty build and vendor stack;
 it does not initialize hardware during Docker build.
 
-The CI stage includes `pytest-xdist`, the plugin's ModelScope dependency and
-FlagGems-vllm from the same fixed commit used by
-`.github/scripts/install_flaggems_vllm.py`. It installs that source with
-`--no-deps` and keeps pip's original GitHub `direct_url.json` identity so setup
-can reuse it. Builders may pass `FLAGGEMS_VLLM_GIT_MIRROR` to an equivalent Git
-transport mirror; the upstream commit pin remains unchanged.
-
 `xgrammar` can install upstream Triton while resolving the common
 requirements, overwriting FlagTree's `triton` namespace while leaving its
 package metadata intact. The recipe constrains that dependency to 3.6.0,
@@ -151,8 +111,7 @@ task service attempt to fail while importing `vllm.tool_parsers.utils`.
 The next CLI check exposed the bundle's older pandas binary failing against
 NumPy 2 with `numpy.dtype size changed`. After these private environment
 upgrades, `vllm serve --help` exits successfully and vendor torch remains
-unchanged. See the runtime validation report for actual model serving results;
-these dependency checks alone do not establish adaptation Gate acceptance.
+unchanged. Model serving and Gate acceptance remain to be verified.
 
 FlagGems 5.4's Python wheel has no native C++ extension bundled. The optional
 `flag-gems-cpp-gcu` package must match the Python package's version and
@@ -205,39 +164,28 @@ read-only. Keep the container's default private PID namespace because the
 test runner performs process cleanup. Use a unique task container and
 tmux sessions for setup, service and tests.
 
-Historical vendor-image result: Qwen3.6-35B-A3B was validated on S60 in TP2 graph mode with
+On S60, Qwen3.6-35B-A3B was validated in TP2 graph mode with
 `--gpu-memory-utilization 0.94`, `--max-model-len 32768`,
 `--max-num-seqs 256` and FP32 Mamba state. All five original Gate scenarios
 passed (26 requests and 260 checks), with their inputs and checks unchanged.
-That historical capacity test is separate from the current configured TP2
-eager CI, which uses a `0.90` S60 memory budget. The documented graph cases
-are supplemental and retain their model YAML settings.
+Enflame CI shares one device-level memory budget across its four configured
+TP2 eager/graph cases, so the `0.94` override applies to all four while
+retaining their existing model settings and quality thresholds.
 
 Inside that task container, from the private plugin checkout:
 
 ```bash
 bash .github/scripts/enflame/check.sh
 bash .github/scripts/enflame/setup.sh
-# Preview PR validation, including benchmark. Nightly is not required for handoff.
-python tests/run.py --platform enflame --device s60 --scope all \
-  --stage pr --dry-run
-# Execute them. Use a distinct output directory for every validation attempt.
-python tests/run.py --platform enflame --device s60 --scope all \
-  --stage pr --output-dir /logs/enflame-pr
+python tests/run.py --platform enflame --scope unit
+python tests/run.py --platform enflame --scope functional
+python tests/run.py --platform enflame --scope e2e --task inference \
+  --model qwen3_6 --case 27b_tp2_eager
 ```
 
 The container must receive `VLLM_PLUGINS=fl`, the verified
 `TOPS_VISIBLE_DEVICES` pair and the runtime environment variables set by
-the Dockerfile. PR validation selects both 27B and 35B-A3B TP2 eager inference and serving
-cases, UT, FT and serve benchmark smoke. It does not select the concurrent
-cases. Both eight-request concurrent cases and the complete nightly selection
-already passed during image validation; they do not need another run for this
-handoff. Weekly falls back to nightly. The documented graph examples
-are not registered in this branch. Run their original pytest files directly
-with `FL_TEST_MODEL`, `FL_TEST_CASE`, `FL_TEST_PLATFORM` and `FL_TEST_DEVICE`;
-a graph `--case` filter on `tests/run.py` otherwise selects no tests.
-
-These suites supplement the original cases in
+the Dockerfile. These suites supplement the original cases in
 [`tools/adaptation-gate-cases`](../../tools/adaptation-gate-cases/README.md).
 Run the configured models in eager and graph modes and retain each raw
 result JSON; evaluate `summary.passed` and every request's checks before
