@@ -345,6 +345,7 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
         --build-arg "ENFLAME_BASE_IMAGE=${ENFLAME_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${ENFLAME_VLLM_VERSION}"
         --build-arg "DRIVER_VERSION=${ENFLAME_DRIVER_VERSION}"
+        --build-arg "IMAGE_STAGE=${TARGET}"
     )
     [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "PIP_INDEX_URL=${INDEX_URL}")
     if [[ -z "${IMAGE_TAG}" ]]; then
