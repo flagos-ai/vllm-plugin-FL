@@ -17,7 +17,7 @@ from vllm.logger import init_logger
 
 from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 
-logger = init_logger(__name__)
+logger = init_logger("vllm.fl.communicator")
 
 
 class CommunicatorFL(DeviceCommunicatorBase):
@@ -61,12 +61,13 @@ class CommunicatorFL(DeviceCommunicatorBase):
                 library = getattr(getattr(comm.flagcx, "lib", None), "_name", "unknown")
                 logger.info(
                     "TXDA FlagCX enabled: device=%s rank=%d world_size=%d "
-                    "library=%s sync_collectives=%s",
+                    "library=%s sync_collectives=%s wrapper=%s",
                     self.device,
                     comm.rank,
                     comm.world_size,
                     library,
                     getattr(comm, "_sync_collectives", False),
+                    type(comm.flagcx).__module__,
                 )
 
         if self.use_all2all:

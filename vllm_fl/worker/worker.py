@@ -101,7 +101,7 @@ from vllm.v1.worker.workspace import init_workspace_manager
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.worker.runtime import _initialize_fl_runtime
 
-logger = init_logger(__name__)
+logger = init_logger("vllm.fl.worker")
 
 
 def _num_workspace_lanes(vllm_config: VllmConfig, use_v2_model_runner: bool) -> int:
@@ -528,6 +528,15 @@ class WorkerFL(WorkerBase):
             from vllm_fl.worker.model_runner import ModelRunnerFL
 
             self.model_runner = ModelRunnerFL(self.vllm_config, self.device)
+
+        if current_platform.device_type == "txda":
+            runner_type = type(self.model_runner)
+            logger.info(
+                "TXDA runner initialized: rank=%d class=%s use_v2=%s",
+                self.rank,
+                f"{runner_type.__module__}.{runner_type.__qualname__}",
+                self.use_v2_model_runner,
+            )
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.

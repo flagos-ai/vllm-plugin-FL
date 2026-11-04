@@ -10,6 +10,26 @@ from unittest.mock import Mock
 import pytest
 
 
+def test_communicator_logger_uses_the_configured_vllm_namespace():
+    path = Path(__file__).resolve().parents[3] / "vllm_fl/distributed/communicator.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "logger"
+            for target in node.targets
+        )
+    )
+    initialize = Mock()
+    exec(
+        compile(ast.Module(body=[assignment], type_ignores=[]), str(path), "exec"),
+        {"init_logger": initialize, "__name__": "vllm_fl.distributed.communicator"},
+    )
+    initialize.assert_called_once_with("vllm.fl.communicator")
+
+
 @pytest.fixture
 def loaded():
     path = Path(__file__).resolve().parents[3] / "vllm_fl/distributed/communicator.py"
@@ -102,6 +122,7 @@ def test_available_flagcx_is_retained_and_txda_activation_is_auditable(
             "rank=1 world_size=2",
             "library=/sdk/lib/libflagcx.so",
             "sync_collectives=True",
+            f"wrapper={type(native.flagcx).__module__}",
         ):
             assert text in caplog.text
     else:

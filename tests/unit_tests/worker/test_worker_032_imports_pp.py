@@ -2,6 +2,7 @@
 """CPU contracts for the vLLM 0.32 worker import and PP protocol."""
 
 import ast
+import logging
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -16,6 +17,78 @@ SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/worker/worker.py"
 @pytest.fixture(scope="module")
 def source_tree():
     return ast.parse(SOURCE.read_text(encoding="utf-8"), filename=str(SOURCE))
+
+
+def test_worker_logger_uses_the_configured_vllm_namespace(source_tree):
+    assignment = next(
+        node
+        for node in source_tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "logger"
+            for target in node.targets
+        )
+    )
+    initialize = Mock()
+    exec(
+        compile(ast.Module(body=[assignment], type_ignores=[]), str(SOURCE), "exec"),
+        {"init_logger": initialize, "__name__": "vllm_fl.worker.worker"},
+    )
+    initialize.assert_called_once_with("vllm.fl.worker")
+
+
+@pytest.mark.parametrize(
+    "device_type,module_name,class_name",
+    [
+        ("txda", "vllm.v1.worker.gpu.model_runner", "GPUModelRunner"),
+        ("txda", "vllm_fl.worker.model_runner", "ModelRunnerFL"),
+        ("cuda", "vllm.v1.worker.gpu.model_runner", "GPUModelRunner"),
+    ],
+)
+def test_runner_receipt_records_the_actual_constructed_class(
+    source_tree, caplog, device_type, module_name, class_name
+):
+    worker = next(
+        node
+        for node in source_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "WorkerFL"
+    )
+    initialize = next(
+        node
+        for node in worker.body
+        if isinstance(node, ast.FunctionDef) and node.name == "init_device"
+    )
+    receipt = next(
+        node
+        for node in ast.walk(initialize)
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(part, ast.Constant)
+            and isinstance(part.value, str)
+            and part.value.startswith("TXDA runner initialized:")
+            for part in ast.walk(node)
+        )
+    )
+    runner_type = type(class_name, (), {"__module__": module_name})
+    instance = SimpleNamespace(
+        rank=3, model_runner=runner_type(), use_v2_model_runner=True
+    )
+    with caplog.at_level(logging.INFO):
+        exec(
+            compile(ast.Module(body=[receipt], type_ignores=[]), str(SOURCE), "exec"),
+            {
+                "self": instance,
+                "current_platform": SimpleNamespace(device_type=device_type),
+                "logger": logging.getLogger("test.txda.runner.receipt"),
+            },
+        )
+    if device_type == "txda":
+        assert (
+            f"TXDA runner initialized: rank=3 class={module_name}.{class_name} use_v2=True"
+            in caplog.text
+        )
+    else:
+        assert "TXDA runner initialized" not in caplog.text
 
 
 def test_worker_utils_import_runs_with_only_the_vllm_032_exports(
