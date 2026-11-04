@@ -58,6 +58,7 @@ def main() -> None:
         raise RuntimeError(f"Need {required} visible devices, found {count}")
     for index in range(required):
         device = f"ptpu:{index}"
+        torch.ptpu.set_device(index)
         left = torch.ones((16,), device=device)
         result = (left + left).cpu()
         torch.testing.assert_close(result, torch.full((16,), 2.0))
