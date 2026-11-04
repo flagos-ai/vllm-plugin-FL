@@ -176,16 +176,19 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
             return self._forward_encoder(query, key, value, output, attn_metadata)
 
         key_cache, value_cache = _split_txda_kv_cache(kv_cache, self.head_size)
-        cu_seqlens_q = attn_metadata.query_start_loc
-        seq_lens = attn_metadata.seq_lens
+        # This reference backend already uses host lengths and page IDs.
+        # Transfer each metadata vector once: the vendor scalar .item()
+        # path fails with txMemcpyAsync Invalid parameters, even at offset 0.
+        cu_seqlens_q = attn_metadata.query_start_loc.tolist()
+        seq_lens = attn_metadata.seq_lens.tolist()
         block_table = attn_metadata.block_table
 
-        num_reqs = cu_seqlens_q.shape[0] - 1
+        num_reqs = len(cu_seqlens_q) - 1
         window_left = self.sliding_window[0]  # -1 means no sliding window
         for i in range(num_reqs):
-            qs, qe = cu_seqlens_q[i].item(), cu_seqlens_q[i + 1].item()
+            qs, qe = cu_seqlens_q[i], cu_seqlens_q[i + 1]
             q_len = qe - qs
-            seq_len = seq_lens[i].item()
+            seq_len = seq_lens[i]
             if q_len == 0 or seq_len == 0:
                 output[qs:qe] = 0
                 continue
@@ -279,10 +282,10 @@ class TxdaSDPAAttentionImpl(AttentionFLImpl):
         attn_metadata,
     ) -> torch.Tensor:
         """Encoder attention over contiguous q/k/v (no paged cache)."""
-        cu_seqlens_q = attn_metadata.query_start_loc
-        num_reqs = cu_seqlens_q.shape[0] - 1
+        cu_seqlens_q = attn_metadata.query_start_loc.tolist()
+        num_reqs = len(cu_seqlens_q) - 1
         for i in range(num_reqs):
-            qs, qe = cu_seqlens_q[i].item(), cu_seqlens_q[i + 1].item()
+            qs, qe = cu_seqlens_q[i], cu_seqlens_q[i + 1]
             q_len = qe - qs
             if q_len == 0:
                 continue

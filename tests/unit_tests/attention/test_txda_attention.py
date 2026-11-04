@@ -18,6 +18,20 @@ SHARED_SOURCE = ROOT / "vllm_fl/dispatch/backends/flaggems/impl/attention.py"
 CACHE_LAYOUTS = ["NHD", "HND", "LBHNC", "LBNHC"]
 
 
+class _BulkOnlyVector:
+    """Model the working vector copy path when TXDA scalar item() fails."""
+
+    def __init__(self, values):
+        self.values = list(values)
+        self.shape = (len(self.values),)
+
+    def tolist(self):
+        return self.values.copy()
+
+    def __getitem__(self, index):
+        raise AssertionError("TXDA scalar metadata reads must use a bulk vector copy")
+
+
 def _load(monkeypatch, name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -137,7 +151,10 @@ def test_sdpa_matches_explicit_attention(
 @pytest.mark.parametrize("causal", [True, False])
 @pytest.mark.parametrize("window", [-1, 2])
 @pytest.mark.parametrize("layout", CACHE_LAYOUTS)
-def test_paged_mixed_batch_ignores_invalid_padding(attention, causal, window, layout):
+@pytest.mark.parametrize("bulk_only", [False, True])
+def test_paged_mixed_batch_ignores_invalid_padding(
+    attention, causal, window, layout, bulk_only
+):
     impl = _impl(attention, window=window)
     gen = torch.Generator().manual_seed(21)
     block_size = 4
@@ -153,8 +170,8 @@ def test_paged_mixed_batch_ignores_invalid_padding(attention, causal, window, la
     )
     metadata = SimpleNamespace(
         num_actual_tokens=5,
-        query_start_loc=torch.tensor(starts),
-        seq_lens=torch.tensor(lengths),
+        query_start_loc=_BulkOnlyVector(starts) if bulk_only else torch.tensor(starts),
+        seq_lens=_BulkOnlyVector(lengths) if bulk_only else torch.tensor(lengths),
         block_table=block_table,
         use_cascade=False,
         causal=causal,
@@ -187,14 +204,19 @@ def test_cache_update_skips_negative_slots_and_padded_kv(attention, layout):
 
 @pytest.mark.parametrize("window", [-1, 2])
 @pytest.mark.parametrize("attn_type", ["encoder", "encoder_only"])
-def test_encoder_segments_are_bidirectional(attention, window, attn_type):
+@pytest.mark.parametrize("bulk_only", [False, True])
+def test_encoder_segments_are_bidirectional(attention, window, attn_type, bulk_only):
     impl = _impl(attention, window=window, attn_type=attn_type)
     gen = torch.Generator().manual_seed(87)
     q = torch.randn(6, 4, 8, generator=gen)
     k, v = (torch.randn(6, 2, 8, generator=gen) for _ in range(2))
     output = torch.empty_like(q)
     metadata = SimpleNamespace(
-        num_actual_tokens=6, query_start_loc=torch.tensor([0, 2, 6]), use_cascade=False
+        num_actual_tokens=6,
+        query_start_loc=(
+            _BulkOnlyVector([0, 2, 6]) if bulk_only else torch.tensor([0, 2, 6])
+        ),
+        use_cascade=False,
     )
     impl.forward(None, q, k, v, None, metadata, output)
     for lo, hi in [(0, 2), (2, 6)]:
