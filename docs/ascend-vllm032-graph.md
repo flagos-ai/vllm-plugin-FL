@@ -67,6 +67,9 @@ expert parallelism, speculative decoding, prefix caching or chunked prefill.
 - FIA task updates retain graph padding lengths; MoE workspaces are allocated
   before capture. Decode graph failures are propagated rather than silently
   falling back to eager execution.
+- Padded softmax routing uses the native Ascend provider and retains vLLM's
+  `-1` route sentinel. The fixed-size MoE adapter maps inactive routes to a
+  valid expert with zero weight before calling the native routing kernel.
 - Empty builds use native IR providers. FlagGems 5.4's duplicate `ne_` aliases
   are excluded while the canonical operators remain available; RoPE preserves
   the caller's mutation and object-identity contract.
@@ -98,3 +101,28 @@ python tests/run.py --platform ascend --device 910c --scope functional
 Regression coverage includes native packed-cache ownership, changing GDN
 indices across graph replays, bounded state-copy memory, FIA padded lengths,
 MoE expert routing, FlagGems registration and RoPE mutation semantics.
+
+## Validation results
+
+On 910c-201, the runtime above passes all unchanged README gate scenarios with
+`USE_FLAGGEMS=1` and `VLLM_FL_FLAGOS_WHITELIST=zeros`:
+
+| Model | Eager | FULL_DECODE_ONLY |
+|---|---:|---:|
+| Qwen3.6-27B | 26/26 requests | 26/26 requests |
+| Qwen3.6-35B-A3B | 26/26 requests | 26/26 requests |
+
+Both graph runs complete capture and record FULL request batches at sizes
+1, 2, 4 and 8 without fallback to NONE. The installed wheel's Python files and
+dispatch YAML files are checked against the source before serving validation.
+
+The full Ascend unit suite passes 2,071 tests, with 193 platform/dependency
+skips (counting repeated collection skips only once across the parallel and
+serial passes). Functional validation on two visible NPUs passes 29 tests,
+with 58 skips. The CI xdist run on one NPU separately covers 19 passing tests
+and 68 skips, including the multi-device skips.
+
+A standalone probe verifies the actual FlagGems `zeros` provider on 42
+shape/dtype combinations and three native NPU graph replays. CPU `zeros`
+retains its native provider. The CI image also exercises xdist's success and
+failure reporting before the NPU interpreter shutdown workaround takes effect.

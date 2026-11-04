@@ -86,8 +86,9 @@ class TestWeakRefTensors:
 
 
 class TestGraphCaptureFlow:
-    """Test the complete graph capture flow."""
+    """Test inference capture/replay with the model runner's execution mode."""
 
+    @torch.inference_mode()
     def test_graph_basic_capture(self, device):
         """Test basic graph capture and replay."""
         # Simple test without vllm_fl dependencies
@@ -114,6 +115,7 @@ class TestGraphCaptureFlow:
         expected = x * 2 + 1
         assert torch.allclose(y, expected)
 
+    @torch.inference_mode()
     def test_graph_with_different_inputs(self, device):
         """Test graph with different input values."""
 

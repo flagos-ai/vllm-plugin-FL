@@ -31,6 +31,7 @@ for package, expected_version in {
     "pytest-json-report": "1.5.0",
     "pytest-metadata": "3.1.1",
     "pytest-timeout": "2.4.0",
+    "pytest-xdist": "3.6.1",
 }.items():
     actual = version(package)
     if actual != expected_version:

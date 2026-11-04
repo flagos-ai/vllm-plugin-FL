@@ -47,10 +47,16 @@ docker/build.sh \
   --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
 ```
 
-The shared CI currently uses the published
-`ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` image. Build and publish a
-replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
-changing the configuration does not publish it.
+The validated local CI candidate on 910c-201 is
+`vllm-plugin-fl:ascend-vllm0.32.0-a3-ci-20261104-r1-graph`. It was assembled
+offline from the cached CANN CI base and the verified 0.32 runtime, including
+the fixed FlagGems-vllm Git revision. Its interpreter is
+`/opt/vllm032-venv/bin/python`; `PATH` selects that environment by default.
+The registry rejected the publishing attempt with an authorization error.
+Publish a 0.32 runtime, update `ci_image` in `.github/configs/ascend.yml`, and
+enable Ascend in `.github/configs/platforms.yml` before running shared CI.
+The upstream 0.5.0-dev Ascend enablement remains unchanged until then; its
+old 0.28 image is not a valid runtime for this branch.
 `.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an
 old image instead of silently testing another vLLM version.
 

@@ -35,7 +35,7 @@ RUN python -m pip uninstall -y vllm vllm-ascend triton triton-ascend flagtree fl
     && python -m pip install --upgrade pip "setuptools>=77.0.3,<80" \
     && python -m pip install --no-cache-dir \
         scikit-build-core==0.12.2 \
-        "setuptools-scm>=8,<10" \
+        setuptools-scm==8.3.1 \
         "setuptools-rust>=1.9" \
         wheel \
         jinja2 \
@@ -72,6 +72,7 @@ RUN python -m pip install --no-cache-dir \
         coverage==7.16.1 \
         pytest-cov==7.1.0 \
         pytest-json-report==1.5.0 \
+        pytest-xdist==3.6.1 \
         ruff \
         pre-commit
 
