@@ -190,8 +190,14 @@ def get_ascend_v2_attention_state(
     """
     num_reqs = common_attn_metadata.num_reqs
     query_lens = common_attn_metadata.query_start_loc_cpu[: num_reqs + 1].diff()
-    computed = (seq_lens_cpu[:num_reqs] - query_lens).clamp_min(0)
-    scheduled = query_lens.tolist()
+    # V2 pads a three-request decode to a four-request graph with a repeated
+    # query prefix sum and seq_len=0. Those rows own no queries; including
+    # their scheduled=0 would misclassify a uniform decode as cached prefill.
+    # Keep the original metadata buffers intact for native task updates.
+    active = query_lens != 0
+    active_query_lens = query_lens[active]
+    computed = (seq_lens_cpu[:num_reqs][active] - active_query_lens).clamp_min(0)
+    scheduled = active_query_lens.tolist()
     return classify_ascend_attention_state(
         computed.tolist(),
         scheduled,
@@ -199,6 +205,41 @@ def get_ascend_v2_attention_state(
         enable_chunked_prefill,
         speculative_method,
     )
+
+
+def pad_ascend_v2_decode_metadata(
+    common_attn_metadata,
+    query_start_loc_cpu: torch.Tensor,
+    seq_lens_cpu: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Give native fixed-size decode graphs one safe query per padded row.
+
+    V2's shared buffers represent inactive rows with zero queries and KV
+    length zero. Native attention's captured TND shape includes those padded
+    query tokens. Use private metadata with one-token null-block rows while
+    preserving upstream buffers, GDN indices and negative cache-write slots.
+    """
+    num_reqs = common_attn_metadata.num_reqs
+    query_start_loc_cpu = query_start_loc_cpu[: num_reqs + 1]
+    missing_queries = common_attn_metadata.num_actual_tokens - int(
+        query_start_loc_cpu[-1]
+    )
+    if missing_queries <= 0:
+        return query_start_loc_cpu, seq_lens_cpu
+    query_lens = query_start_loc_cpu.diff()
+    active_reqs = int((query_lens != 0).sum())
+    if (
+        missing_queries != num_reqs - active_reqs
+        or not torch.all(query_lens[:active_reqs] == 1)
+        or not torch.all(query_lens[active_reqs:] == 0)
+    ):
+        raise ValueError("Ascend V2 decode padding requires trailing empty requests")
+    padded_query_start_loc = torch.arange(
+        num_reqs + 1, dtype=query_start_loc_cpu.dtype, device=query_start_loc_cpu.device
+    )
+    padded_seq_lens = seq_lens_cpu.clone()
+    padded_seq_lens[active_reqs:] = 1
+    return padded_query_start_loc, padded_seq_lens
 
 
 def get_ascend_dummy_attention_state(
@@ -399,6 +440,13 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
                 getattr(self.speculative_config, "method", None),
             )
         assert attn_state is not None, "Ascend metadata requires an attention state"
+        if (
+            getattr(self.vllm_config, "use_v2_model_runner", False)
+            and attn_state == AscendAttentionState.DecodeOnly
+        ):
+            query_start_loc_cpu, seq_lens = pad_ascend_v2_decode_metadata(
+                common_attn_metadata, query_start_loc_cpu, seq_lens
+            )
 
         # Create attention mask based on state
         attn_mask = self._make_attention_mask(attn_state)

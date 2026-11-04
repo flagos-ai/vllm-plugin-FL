@@ -21,6 +21,9 @@ extend-ignore-re = [
     "[0-9a-fA-F]{32,}",
 ]
 
+[default.extend-identifiers]
+constant_pad_nd = "constant_pad_nd"
+
 [default.extend-words]
 # ML / deep-learning terminology
 arange = "arange"

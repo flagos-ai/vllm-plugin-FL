@@ -1,5 +1,5 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
-"""Preserve V2 penalties on Ascend with bounded tiles and read-only logits.
+"""Preserve V2 sampling transforms with bounded tiles and read-only logits.
 
 The vLLM 0.32 CUDA launcher uses 8192 entries per tile, exceeding Ascend UB.
 Its in-place kernel also reapplies the first vocabulary tile on large Ascend
@@ -13,7 +13,12 @@ import torch
 
 _PENALTIES_MODULE = "vllm.v1.worker.gpu.sample.penalties"
 _ASCEND_KERNEL_MODULE = "vllm_fl.patches.ascend_v2_penalties_kernel"
+_TEMPERATURE_MODULE = "vllm.v1.worker.gpu.sample.gumbel"
+_SAMPLING_STATES_MODULE = "vllm.v1.worker.gpu.sample.states"
+_ASCEND_TEMPERATURE_KERNEL_MODULE = "vllm_fl.patches.ascend_v2_temperature_kernel"
+_ASCEND_GUMBEL_MODULE = "vllm_fl.patches.ascend_v2_gumbel"
 ASCEND_PENALTIES_BLOCK_SIZE = 1024
+ASCEND_TEMPERATURE_BLOCK_SIZE = 1024
 
 
 def apply_ascend_v2_penalties(
@@ -57,12 +62,55 @@ def apply_ascend_v2_penalties(
     )
 
 
+def apply_ascend_v2_temperature(
+    logits: torch.Tensor,
+    expanded_idx_mapping: torch.Tensor,
+    temperature: torch.Tensor,
+) -> None:
+    """Scale each row once, reading immutable input on the current stream."""
+    num_tokens, vocab_size = logits.shape
+    if num_tokens == 0 or vocab_size == 0:
+        return
+    kernels = importlib.import_module(_ASCEND_TEMPERATURE_KERNEL_MODULE)
+    source = logits.clone()
+    block_size = ASCEND_TEMPERATURE_BLOCK_SIZE
+    num_blocks = (vocab_size + block_size - 1) // block_size
+    kernels._temperature_kernel[(num_tokens, num_blocks)](
+        source,
+        source.stride(0),
+        logits,
+        logits.stride(0),
+        expanded_idx_mapping,
+        temperature,
+        vocab_size,
+        BLOCK_SIZE=block_size,
+    )
+
+
 def install_ascend_v2_sampling_shims() -> bool:
-    """Replace only NPU V2 penalty computation; keep sampler and state intact."""
+    """Replace NPU V2 transform launchers; keep the sampler and state intact."""
     from vllm.platforms import current_platform
 
     if current_platform.device_type != "npu":
         return False
     penalties = importlib.import_module(_PENALTIES_MODULE)
     penalties.apply_penalties = apply_ascend_v2_penalties
+    temperature = importlib.import_module(_TEMPERATURE_MODULE)
+    temperature.apply_temperature = apply_ascend_v2_temperature
+    gumbel = importlib.import_module(_ASCEND_GUMBEL_MODULE)
+    # Existing JIT callers resolve these globals at compilation, so importing
+    # gumbel_noised_argmax earlier does not retain the unsigned-shift defect.
+    for name in (
+        "_murmur3_rotl32",
+        "_murmur3_mix",
+        "_murmur3_fmix32",
+        "murmur3_hash32",
+        "murmur3_uniform32",
+        "_uniform64_from_random53",
+        "murmur3_uniform64",
+    ):
+        setattr(temperature, name, getattr(gumbel, name))
+    # SamplingStates imports this function directly at module initialization.
+    states = importlib.import_module(_SAMPLING_STATES_MODULE)
+    states.apply_temperature = apply_ascend_v2_temperature
     return True

@@ -19,18 +19,30 @@ _ENABLED_FACTORIES = {"zeros", "zeros_like"}
 
 
 @pytest.fixture(autouse=True)
-def _require_ascend():
+def _require_ascend(monkeypatch):
+    # Full-policy regressions must not inherit the CI's minimal whitelist or
+    # deployment-specific blacklist overrides from unrelated unit tests.
+    for name in (
+        "VLLM_FL_FLAGOS_WHITELIST",
+        "VLLM_FL_FLAGOS_BLACKLIST",
+        "VLLM_FL_FLAGOS_BLACKLIST_APPEND",
+    ):
+        monkeypatch.delenv(name, raising=False)
     if not torch.npu.is_available() or flag_gems.vendor_name != "ascend":
         pytest.skip("Requires Ascend NPU and Ascend FlagGems")
 
 
 @contextmanager
 def _selected_policy():
-    _, blacklist = get_flag_gems_whitelist_blacklist()
+    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+    assert whitelist is None
+    assert blacklist is not None
+    assert _NATIVE_EMPTY_OPS.issubset(set(blacklist))
+    assert not (_ENABLED_FACTORIES & set(blacklist))
     # Own a temporary registration library rather than replacing the global
     # worker's FlagGems enable() registration. Duplicate-registration handling
     # remains the library's normal behavior in this full-policy regression.
-    with flag_gems.use_gems(exclude=blacklist):
+    with flag_gems.use_gems(include=whitelist, exclude=blacklist):
         registered = set(flag_gems.all_registered_ops())
         assert not (_NATIVE_EMPTY_OPS & registered), (
             "Empty-buffer operations must retain their native NPU routes: "

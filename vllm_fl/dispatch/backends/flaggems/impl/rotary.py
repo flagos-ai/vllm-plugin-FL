@@ -133,9 +133,14 @@ def rotary_embedding_flaggems(
         rotary_interleaved=rotary_interleaved,
         inplace=inplace and not nvidia_inplace,
     )
-    if nvidia_inplace:
+    # Ascend FlagGems 5.4 may return alias tensors for an in-place call.
+    # Preserve the caller's tensor identity as well as its values and strides.
+    ascend_inplace = inplace and getattr(flag_gems, "vendor_name", None) == "ascend"
+    if nvidia_inplace or ascend_inplace:
         q_embed, k_embed = result
-        query.copy_(q_embed)
-        key.copy_(k_embed)
+        if q_embed is not query:
+            query.copy_(q_embed)
+        if k_embed is not key:
+            key.copy_(k_embed)
         return query, key
     return result

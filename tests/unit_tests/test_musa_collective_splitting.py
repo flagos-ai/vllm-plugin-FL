@@ -171,6 +171,7 @@ def fixture(
     config.mode = Mode.VLLM_COMPILE if compile_mode is None else compile_mode
     config.cudagraph_mode = GraphMode.PIECEWISE if graph_mode is None else graph_mode
     config.compile_sizes = None
+    config.decoder_replay_cudagraph_capture_sizes = []
     config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
@@ -179,8 +180,6 @@ def fixture(
             "fuse_attn_quant": False,
             "fuse_rope_kvcache": True,
             "fuse_qk_norm_rope_kvcache": True,
-            "enable_sp": False,
-            "fuse_gemm_comms": False,
             **passes,
         }
     )
@@ -452,16 +451,22 @@ def test_explicit_list_keeps_identity_and_existing_order():
 
 
 @pytest.mark.parametrize(
-    "passes,expected",
+    "options,expected",
     [
         ({}, GraphMode.NONE),
         ({"fuse_attn_quant": True}, GraphMode.FULL),
-        ({"enable_sp": True}, GraphMode.FULL),
-        ({"fuse_gemm_comms": True}, GraphMode.FULL),
+        (
+            {"fuse_attn_quant": True, "graph_mode": GraphMode.FULL_AND_PIECEWISE},
+            GraphMode.FULL,
+        ),
+        ({"fuse_attn_quant": True, "graph_mode": GraphMode.FULL}, GraphMode.FULL),
     ],
 )
-def test_initializer_graph_mode_changes_are_preserved(passes, expected):
-    platform, vconfig, _ = fixture(split=[] if not passes else None, **passes)
+def test_initializer_graph_mode_changes_are_preserved(options, expected):
+    # vLLM 0.32 removed the enable_sp/fuse_gemm_comms branches here. Exercise
+    # supported fusion promotion after MUSA normalizes incoming graph modes.
+    split = None if options.get("fuse_attn_quant") else []
+    platform, vconfig, _ = fixture(split=split, **options)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.cudagraph_mode is expected
     assert vconfig.compilation_config.splitting_ops == []

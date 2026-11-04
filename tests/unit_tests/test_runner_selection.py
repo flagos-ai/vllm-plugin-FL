@@ -241,6 +241,11 @@ def test_ascend_preserves_full_decode_graphs(monkeypatch, use_v2):
     PlatformFL.check_and_update_config(config)
 
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
+    from vllm.config.compilation import CompilationMode
+
+    assert config.compilation_config.mode is (
+        CompilationMode.NONE if use_v2 else CompilationMode.VLLM_COMPILE
+    )
     assert config.compilation_config.backend == "eager"
     assert config.compilation_config.compile_sizes == []
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_DECODE_ONLY
