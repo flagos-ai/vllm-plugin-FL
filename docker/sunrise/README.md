@@ -89,12 +89,14 @@ required by the host installation.
 
 ```bash
 docker run --rm -it --privileged --ipc=host -v /dev:/dev \
-  -e TANG_VISIBLE_DEVICES=6,7 -v /data/models:/data/models:ro \
+  -e TANG_VISIBLE_DEVICES=0,1 -v /data/models:/data/models:ro \
   vllm-plugin-fl:sunrise-0.32.0-empty bash
 # Inside the container:
+export VLLM_USE_V2_MODEL_RUNNER=1
+export PCCL_PROTO=Simple
 python /opt/sunrise-build/verify_runtime.py --min-devices 2
 tmux new-session -d -s sunrise032-smoke \
-  'python /opt/sunrise-build/verify_runtime.py --model /data/models/Qwen3-0.6B --tensor-parallel-size 2 > /tmp/sunrise032-smoke.log 2>&1'
+  'python /opt/sunrise-build/verify_runtime.py --model /data/models/Qwen/Qwen3-4B --tensor-parallel-size 2 > /tmp/sunrise032-smoke.log 2>&1'
 ```
 
 Replace the model path with a real local model. Remote inference and server
@@ -113,7 +115,7 @@ Example eager service, using a conservative explicit per-worker KV budget:
 
 ```bash
 tmux new-session -d -s sunrise032-serve \
-  'vllm serve /data/models/Qwen3-0.6B --host 0.0.0.0 --port 8000 --tensor-parallel-size 2 --enforce-eager --disable-custom-all-reduce --max-model-len 2048 --max-num-seqs 8 --kv-cache-memory-bytes 1073741824 > /tmp/sunrise032-serve.log 2>&1'
+  'vllm serve /data/models/Qwen/Qwen3-4B --host 0.0.0.0 --port 8000 --tensor-parallel-size 2 --enforce-eager --disable-custom-all-reduce --max-model-len 512 --max-num-batched-tokens 512 --max-num-seqs 2 --kv-cache-memory-bytes 1073741824 > /tmp/sunrise032-serve.log 2>&1'
 ```
 
 Adjust the model, context and KV budget to the available memory. Older PTPU
@@ -122,5 +124,25 @@ allocation peaks, so an explicit conservative `--kv-cache-memory-bytes`
 avoids relying on those counters for sizing. Do not enable the historical
 zero-output GDN benchmark workaround during correctness validation.
 
-Actual acceptance results are reported separately from this reproducible
-recipe. The recipe does not claim that the full model/graph matrix has passed.
+## Hardware acceptance, 2026-11-04
+
+The tested implementation is commit
+`4f15be0347eb02a629eec210d8c2bfffd8295f31`, on Sunrise S2 with the vendor
+Python 3.10 stack above and the ordinary `0.32.0+empty` wheel.
+
+| Check | Result |
+| --- | --- |
+| Unit contracts in the actual vLLM environment, including native KV views and IR | 178 passed, zero skips |
+| Sunrise runner selection | 3 passed |
+| Strided combined KV writes on PTPU, NHD and HND | 2 passed |
+| Provider math and activations, FP32/FP16/BF16 | 17 passed |
+| Qwen3-4B, Runner V2, TP=1, eager | Two batches, four correct answers |
+| Qwen3-4B, Runner V2, TP=2, eager | Two batches, four correct answers |
+
+Both inference runs used `max_model_len=512`, `max_num_batched_tokens=512`,
+`max_num_seqs=2`, a 1 GiB per-worker KV budget, and `PCCL_PROTO=Simple`.
+They checked the engine's `use_v2_model_runner` flag, recorded
+`Using Sunrise Model Runner V2`, and returned `Paris`, `2`, `Beijing`, and
+`12`. The TP=2 run selected the FlagCX communicator and PCCL process groups.
+
+Graph replay and the full large-model acceptance matrix remain unverified.
