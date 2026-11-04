@@ -44,12 +44,14 @@ persistence_m:
         - tests/unit_tests/test_sunrise_ir.py
         - tests/unit_tests/test_sunrise_compiler.py
         - tests/unit_tests/test_sunrise_graph_defaults.py
+        - tests/unit_tests/ops/test_sunrise_topk.py
       exclude: []
     functional:
       include:
         - tests/functional_tests/compilation/test_graph_capture.py
         - tests/functional_tests/ops/test_sunrise_kv_cache.py
         - tests/functional_tests/ops/test_sunrise_activation_compat.py
+        - tests/functional_tests/ops/test_sunrise_moe_routing.py
       exclude: []
     e2e:
       serving:

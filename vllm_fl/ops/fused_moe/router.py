@@ -33,6 +33,10 @@ def _is_ascend_npu_tensor(value: torch.Tensor) -> bool:
     return value.device.type == "npu"
 
 
+def _is_sunrise_ptpu_tensor(value: torch.Tensor) -> bool:
+    return value.device.type == "ptpu"
+
+
 def _sqrtsoftplus_topk(
     gating_output: torch.Tensor,
     e_score_correction_bias: torch.Tensor | None,
@@ -79,12 +83,17 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
-    # The FL kernel currently implements the unpadded softmax path. Preserve
-    # v0.28.0 padding and sigmoid semantics by delegating those cases upstream.
-    if (
-        scoring_func != "softmax"
-        or _get_padding_mask(hidden_states.shape[0]) is not None
-    ):
+    padding_mask = (
+        _get_padding_mask(hidden_states.shape[0]) if scoring_func == "softmax" else None
+    )
+    # Sunrise empty builds cannot call the CUDA extension used by upstream's
+    # padded router. The FL kernel computes the same scores; apply v0.32's
+    # padding sentinel to its expert IDs below. Other devices retain their
+    # existing upstream padding/sigmoid path.
+    sunrise_padding = padding_mask is not None and _is_sunrise_ptpu_tensor(
+        gating_output
+    )
+    if scoring_func != "softmax" or (padding_mask is not None and not sunrise_padding):
         return upstream_fused_topk(
             hidden_states=hidden_states,
             gating_output=gating_output,
@@ -117,6 +126,11 @@ def fused_topk(
         gating_output,
         renormalize,
     )
+
+    if sunrise_padding:
+        # Official v0.32 preserves weights/source rows for padding tokens and
+        # marks every selected expert invalid, so MoE kernels skip those rows.
+        topk_ids.masked_fill_(padding_mask.unsqueeze(-1), -1)
 
     return topk_weights, topk_ids, token_expert_indices
 
