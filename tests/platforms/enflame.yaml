@@ -39,6 +39,11 @@ device_overrides:
       disable_custom_all_reduce: false
     serve:
       startup_retries: 240
+    concurrent:
+      text_sampling:
+        # Keep all eight requests and their original answer checks. The
+        # 64-token generic default truncates Qwen3.6 reasoning before answers.
+        max_tokens: 256
 
 env_defaults:
   VLLM_PLUGINS: "fl"
