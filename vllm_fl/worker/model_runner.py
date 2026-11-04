@@ -141,6 +141,18 @@ def _accelerator_synchronize() -> None:
         torch.accelerator.synchronize()
 
 
+# FL: torch.accelerator.get_memory_info() only exists from torch 2.10; the
+# Kunlunxin P800 stack pins torch 2.9.0+cu129, where the CUDA/XPU allocator
+# query still lives in torch.cuda.mem_get_info(). Backfill the accelerator API
+# so the graph-memory profiler stays version-agnostic.
+if not hasattr(torch.accelerator, "get_memory_info"):
+
+    def _accelerator_get_memory_info(device_index: int | None = None):
+        return torch.cuda.mem_get_info(device_index)
+
+    torch.accelerator.get_memory_info = _accelerator_get_memory_info
+
+
 @contextmanager
 def _device_graph_capture(
     device: torch.device,
@@ -6998,12 +7010,15 @@ class ModelRunnerFL(
                     )
         finally:
             set_cudagraph_capturing_enabled(False)
+            CUDAGraphWrapper.clear_all_graphs()
             GraphWrapper.clear_all_graphs()
             BreakableCUDAGraphWrapper.clear_all_graphs()
             if encoder_cudagraph_manager is not None:
                 encoder_cudagraph_manager.clear()
-            all_wrappers = list(GraphWrapper._all_instances) + list(
-                BreakableCUDAGraphWrapper._all_instances
+            all_wrappers = (
+                list(CUDAGraphWrapper._all_instances)
+                + list(GraphWrapper._all_instances)
+                + list(BreakableCUDAGraphWrapper._all_instances)
             )
             for instance in all_wrappers:
                 if id(instance) in original_pools:
