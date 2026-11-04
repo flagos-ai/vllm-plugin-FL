@@ -23,6 +23,24 @@ SOURCE = (
 )
 
 
+def _on_amd_rocm() -> bool:
+    """True only on a real ROCm build with a visible device.
+
+    These contracts exercise a HIP mapping, so they cannot run on another
+    vendor's accelerator. The ``gpu`` marker alone is not enough: it only asks
+    whether *some* accelerator exists, which is true on every other backend's
+    CI runner.
+    """
+    return bool(getattr(torch.version, "hip", None)) and torch.cuda.is_available()
+
+
+# Applies to every test in the module, including the input-validation case,
+# which constructs pinned tensors through the same HIP path.
+pytestmark = pytest.mark.skipif(
+    not _on_amd_rocm(), reason="requires an AMD ROCm (HIP) device"
+)
+
+
 def _load_uva_module():
     spec = importlib.util.spec_from_file_location("_amd_uva_under_test", SOURCE)
     module = importlib.util.module_from_spec(spec)
