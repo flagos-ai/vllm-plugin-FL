@@ -63,10 +63,10 @@ values in source files.
 
 ## CI tools
 
-`ci-requirements.v0.28.0.txt` pins pytest 8.3.2, coverage 7.16.1, pytest-cov 7.1.0,
+The Dockerfile embeds the dependency declarations and pins pytest 8.3.2, coverage 7.16.1, pytest-cov 7.1.0,
 pytest-json-report 1.5.0, pytest-metadata 3.1.1, pytest-timeout 2.4.0,
 pytest-xdist 3.6.1, decorator 5.1.1, build 1.2.2.post1 and scikit-build-core 0.11.0.
-The transitive tool dependencies are pinned separately.
+The transitive tool dependencies are also pinned in the Dockerfile.
 
 FlagGems is built with scikit-build-core 0.12.2 using `wheel.cmake=false` because
 its C++ extension is disabled. Only after that wheel is installed does the CI
@@ -115,9 +115,9 @@ Those results apply to FL commit `9a7eaf1191999422682bf5c6d1cf7b3f88d253b5`.
 They are not a claim that the later `ci/thead-0.28` branch and its separate
 FlagGems-vllm setup have already passed a new full run.
 
-`runtime-constraints.txt` protects the CPU torch/NPU adapter and pinned runtime.
-`reference-constraints.v0.28.0.txt` constrains common dependencies to the earlier
-validated image's versions. OpenCV is explicitly limited to 4.11 for NumPy 1.26.4
+The embedded runtime constraints protect the CPU torch/NPU adapter and pinned
+runtime. Embedded reference constraints select common dependency versions from
+the earlier validated image. OpenCV is explicitly limited to 4.11 for NumPy 1.26.4
 compatibility; the vLLM dependency metadata is patched accordingly. CANN profiler
 tools retain inherited optional-tool dependency gaps and OpenTelemetry conflicts;
 `pip check` is not globally clean. This validation does not cover profiling tools,
