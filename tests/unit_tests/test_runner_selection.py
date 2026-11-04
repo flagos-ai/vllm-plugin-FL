@@ -16,18 +16,21 @@ def _make_ascend_vllm_config(
     if compilation_mode is None:
         compilation_mode = CompilationMode.VLLM_COMPILE
     if cudagraph_mode is None:
-        cudagraph_mode = CUDAGraphMode.PIECEWISE
+        cudagraph_mode = CUDAGraphMode.FULL_DECODE_ONLY
     return SimpleNamespace(
         use_v2_model_runner=False,
+        additional_config={},
         model_config=SimpleNamespace(
             enforce_eager=enforce_eager,
             hf_text_config=SimpleNamespace(model_type="test"),
             is_mm_prefix_lm=False,
+            is_hybrid=False,
             use_mla=False,
         ),
         parallel_config=SimpleNamespace(
             worker_cls=None,
             all2all_backend=None,
+            use_ubatching=False,
             data_parallel_size=1,
         ),
         scheduler_config=SimpleNamespace(
@@ -40,6 +43,7 @@ def _make_ascend_vllm_config(
             backend=backend,
             mode=compilation_mode,
             compile_sizes=None,
+            inductor_compile_config={},
             cudagraph_mode=cudagraph_mode,
             pass_config=SimpleNamespace(
                 fuse_norm_quant=True,
@@ -51,7 +55,9 @@ def _make_ascend_vllm_config(
     )
 
 
-@pytest.mark.parametrize("vendor", ["ascend", "enflame", "gcu", "tsingmicro"])
+@pytest.mark.parametrize(
+    "vendor", ["ascend", "mthreads", "enflame", "gcu", "tsingmicro"]
+)
 @pytest.mark.parametrize("requested, expected", [(None, "0"), ("0", "0"), ("1", "1")])
 def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expected):
     import os
@@ -65,6 +71,7 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
     else:
         monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", requested)
     monkeypatch.setattr(vllm_fl, "_arm_cpu_platform", lambda: None)
+    monkeypatch.setattr(vllm_fl, "_init_vendor_device", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_custom_ops", lambda: None)
     monkeypatch.setattr(vllm_fl, "_patch_flash_attn_import", lambda: None)
     monkeypatch.setattr(vllm_fl, "_get_op_config", lambda: None)
@@ -77,11 +84,17 @@ def test_accelerator_defaults_to_fl_runner(monkeypatch, vendor, requested, expec
 
 
 @pytest.mark.parametrize(
-    "device_type,vendor",
-    [("npu", "ascend"), ("gcu", "enflame"), ("gcu", "gcu"), ("txda", "tsingmicro")],
+    "device_type,vendor,error_pattern",
+    [
+        ("npu", "ascend", "Ascend.*VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("musa", "mthreads", "MUSA.*VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("gcu", "enflame", "VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("gcu", "gcu", "VLLM_USE_V2_MODEL_RUNNER=0"),
+        ("txda", "tsingmicro", "Tsingmicro TXDA.*VLLM_USE_V2_MODEL_RUNNER=0"),
+    ],
 )
 def test_accelerator_rejects_explicit_upstream_v2_runner(
-    monkeypatch, device_type, vendor
+    monkeypatch, device_type, vendor, error_pattern
 ):
     from types import SimpleNamespace
 
@@ -89,8 +102,31 @@ def test_accelerator_rejects_explicit_upstream_v2_runner(
 
     monkeypatch.setattr(PlatformFL, "device_type", device_type)
     monkeypatch.setattr(PlatformFL, "vendor_name", vendor)
-    with pytest.raises(ValueError, match="VLLM_USE_V2_MODEL_RUNNER=0"):
+    with pytest.raises(ValueError, match=error_pattern):
         PlatformFL.check_and_update_config(SimpleNamespace(use_v2_model_runner=True))
+
+
+@pytest.mark.parametrize("tp", [1, 4])
+def test_musa_accepts_fl_runner_for_single_and_multiple_devices(monkeypatch, tp):
+    from vllm.config import CUDAGraphMode
+    from vllm.config.compilation import CompilationMode
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "musa")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "mthreads")
+    monkeypatch.setattr(PlatformFL, "dist_backend", "mccl")
+    config = _make_ascend_vllm_config(
+        compilation_mode=CompilationMode.NONE,
+        cudagraph_mode=CUDAGraphMode.NONE,
+        enforce_eager=True,
+    )
+    config.parallel_config.tensor_parallel_size = tp
+
+    PlatformFL.check_and_update_config(config)
+
+    assert config.use_v2_model_runner is False
+    assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
 
 
 @pytest.mark.parametrize("vendor", ["enflame", "gcu"])
@@ -186,21 +222,21 @@ def test_enflame_rejects_only_hybrid_speculative_align_cache(
     assert config.cache_config.mamba_cache_mode == mamba_cache_mode
 
 
-def test_ascend_accepts_non_eager_and_downgrades_full_graphs(monkeypatch):
+def test_ascend_preserves_full_decode_graphs(monkeypatch):
     from vllm.config import CUDAGraphMode
 
     from vllm_fl.platform import PlatformFL
 
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
     monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
-    config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE)
+    config = _make_ascend_vllm_config(cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY)
 
     PlatformFL.check_and_update_config(config)
 
     assert config.parallel_config.worker_cls == "vllm_fl.worker.worker.WorkerFL"
     assert config.compilation_config.backend == "eager"
     assert config.compilation_config.compile_sizes == []
-    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.PIECEWISE
+    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.FULL_DECODE_ONLY
     assert config.compilation_config.pass_config.fuse_norm_quant is False
     assert config.compilation_config.pass_config.fuse_act_quant is False
     assert config.compilation_config.pass_config.fuse_attn_quant is False
@@ -401,3 +437,19 @@ def test_register_selects_native_cuda_semantics_for_nvidia(monkeypatch):
     )
 
     assert vllm_fl.register() == "vllm_fl.nvidia_platform.NvidiaPlatformFL"
+
+
+def test_ascend_allows_layer_only_vllm_config(monkeypatch):
+    from vllm.config import CompilationMode, CUDAGraphMode, DeviceConfig, VllmConfig
+    from vllm.platforms import current_platform
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(
+        current_platform, "check_and_update_config", PlatformFL.check_and_update_config
+    )
+    config = VllmConfig(device_config=DeviceConfig(device="cpu"))
+    assert config.model_config is None
+    assert config.compilation_config.mode is CompilationMode.NONE
+    assert config.compilation_config.cudagraph_mode is CUDAGraphMode.NONE

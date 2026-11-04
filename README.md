@@ -40,12 +40,12 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 |-------------|--------|-----------|
 | NVIDIA | Supported | [deployment guide](./docs/usage/nvidia.md) |
 | Ascend | Supported | [deployment guide](./docs/usage/ascend.md) |
-| MetaX | Supported | - |
+| MetaX | Supported | [deployment guide](./docs/usage/metax.md) |
 | T-Head | Supported | [deployment guide](./docs/usage/thead.md) |
 | Iluvatar | Supported | [deployment guide](./docs/usage/iluvatar.md) |
 | Enflame | Supported | [deployment guide](./docs/usage/enflame.md) |
 | Tsingmicro | Supported (eager) | [deployment guide](./docs/usage/tsingmicro.md) |
-| Moore Threads | Supported | - |
+| Moore Threads | Supported | [deployment guide](./docs/usage/musa.md) |
 | Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |
 | Sunrise | Supported | - |
 | ARM64 CPU | Supported | - |
@@ -201,6 +201,9 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
+For native decode graph execution with vLLM 0.28, see the
+[Ascend graph guide](./docs/ascend-vllm028-graph.md).
+
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
    and FlagGems revisions
 
@@ -221,9 +224,12 @@ If there are multiple plugins in the current environment, you can specify use vl
     [Ascend image guide](./docker/ascend/README.md) for the complete CANN,
     PyTorch, vLLM empty-package, and dependency constraints.
 
-2. Enable eager execution
+2. Select eager or full-decode graph execution
 
-    Eager execution is the recommended setting for Ascend. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line. Graph mode is still experimental; see the tested cases in the [Ascend image guide](./docker/ascend/README.md).
+    For eager execution, add `enforce_eager=True` to the `LLM` constructor or
+    pass `--enforce-eager` on the command line. For native NPU graph capture and
+    replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=0` and the component versions
+    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm028-graph.md).
 
 
 ### Run a Task

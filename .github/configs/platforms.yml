@@ -101,7 +101,7 @@ platforms:
     exempt_from_global:
       - vllm_fl/dispatch/config/hygon.yaml
   metax:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
@@ -110,7 +110,7 @@ platforms:
       - vllm_fl/dispatch/config/metax.yaml
       - vllm_fl/dispatch/backends/vendor/metax/
   musa:
-    enabled: false
+    enabled: true
     trigger_paths:
       - vllm_fl/dispatch/config/musa.yaml
       - vllm_fl/dispatch/backends/vendor/musa/

@@ -30,9 +30,12 @@ def test_ascend_topk_softmax_renormalization(tokens):
     experts, top_k = 256, 8
     logits = torch.randn(tokens, experts, generator=generator, dtype=torch.bfloat16)
     hidden_states = torch.empty(tokens, 1, dtype=torch.bfloat16, device="npu")
-    _, blacklist = get_flag_gems_whitelist_blacklist()
+    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
 
-    with torch.inference_mode(), flag_gems.use_gems(exclude=blacklist):
+    with (
+        torch.inference_mode(),
+        flag_gems.use_gems(include=whitelist, exclude=blacklist),
+    ):
         weights, ids, _ = fused_topk(
             hidden_states,
             logits.npu(),
@@ -157,8 +160,11 @@ def test_modular_ascend_experts_match_cpu(
     npu_weights, npu_ids = weights.npu(), ids.npu()
     npu_map = None if mapping is None else mapping.npu()
     output = torch.full(x.shape, 123, dtype=x.dtype, device="npu")
-    _, blacklist = get_flag_gems_whitelist_blacklist()
-    with torch.inference_mode(), flag_gems.use_gems(exclude=blacklist):
+    whitelist, blacklist = get_flag_gems_whitelist_blacklist()
+    with (
+        torch.inference_mode(),
+        flag_gems.use_gems(include=whitelist, exclude=blacklist),
+    ):
         prepared, _, _, _, _ = MoEPrepareAndFinalizeNoDPEPModular().prepare(
             x.npu(),
             npu_weights,
