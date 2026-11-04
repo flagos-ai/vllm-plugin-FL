@@ -197,9 +197,11 @@ class PyFlagcxCommunicator:
                 stream = self._current_stream()
                 # A small all_reduce for warmup.
                 data = torch.zeros(1, device=device)
-                self.all_reduce(data)
+                # all_reduce returns a new output allocation. Keep it alive
+                # until the asynchronous native collective has completed.
+                warmup_output = self.all_reduce(data)
                 stream.synchronize()
-                del data
+                del data, warmup_output
             except Exception:
                 # A returned native handle still needs cleanup if warmup fails.
                 # Other vendors retain their existing initialization behavior.
