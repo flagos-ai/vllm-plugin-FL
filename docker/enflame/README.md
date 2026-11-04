@@ -9,10 +9,28 @@ or training frameworks. Both the Dockerfile and `docker/build.sh` default to:
 harbor.baai.ac.cn/flagos-runtime/flagos-runtime-enflame-tops1.10.6:2.3.0@sha256:6356cd26647a4cbd27f2ad9ece7281df888df7ec9e9c2dc3bb5aaa262f9097c6
 ```
 
+Published and validated image:
+
+```text
+harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e
+```
+
+The [2026-11-04 validation report](validation-20261104.md) records all ten
+native nightly groups and the original 27B/35B graph checks, their source
+revision, existing skips and dependency metadata limitations. These results
+were obtained on the supplied S60 host using the repository's native runner.
+
 The runtime supplies Python 3.12.13 in `/flagos`; keep its inherited `PATH` and
 `BASH_ENV`. The prior vendor application image is not a build stage or filesystem
 donor. Its validation history below describes the previous image only and does
 not establish acceptance of the runtime-based rebuild.
+
+The runtime's Bash profile also forces `fallback_cpu=all_ops`, which
+synchronizes streams and aborts GCU graph capture. The recipe installs
+`runtime_env.sh` as a late profile fragment to clear that exact inherited
+debug default. The vendor profile, other environment flags and SDK files
+remain intact. The [validation report](validation-20261104.md) records the
+controlled failure reproduction and corrected-image graph/FT results.
 
 The installed packages are pinned to FlagGems 5.4.0, FlagTree
 0.7.0+enflame3.6 and triton-gcu 3.6.0+1.0.20260722. FlagTree's Enflame wheel
@@ -50,19 +68,16 @@ both eager and graph modes at plugin commit
 from each candidate commit's original adaptation Gate. The old vLLM 0.20.2
 vendor wrapper remains available as `Dockerfile.v0.20.2`.
 
-The local image ID is
+The previous vendor-based dependency image had manifest
+`sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`
+and local image ID
 `sha256:4feef9aed222a8cffd9fab610288053c3f2ee5acdfc3540786e47d7daea48f0e`.
-The canonical dependency image name follows the other vLLM 0.28 backends:
-`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci`.
-This tag was published on 2026-10-20 and aliases the unchanged image originally
-published on 2026-10-13 as
+Its historical tag is
 `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci-2cd00248d399-compiler`.
-An anonymous manifest lookup confirmed that both names identify the same content.
-Its registry manifest digest is
-`sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.
-Authenticated and anonymous pulls by this digest both resolved to the local
-image ID above. CI uses the canonical tag with this digest and installs the tested plugin checkout
-with `--no-deps`; the dependency image does not bake in that checkout.
+These identifiers describe the old image, not the runtime-based rebuild.
+The [runtime validation report](validation-20261104.md) records the new image's
+source, ancestry, test results and acceptance status. CI installs the tested
+plugin checkout with `--no-deps`; the dependency image does not bake it in.
 
 See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
 model serving, and validation commands.
@@ -133,7 +148,8 @@ task service attempt to fail while importing `vllm.tool_parsers.utils`.
 The next CLI check exposed the bundle's older pandas binary failing against
 NumPy 2 with `numpy.dtype size changed`. After these private environment
 upgrades, `vllm serve --help` exits successfully and vendor torch remains
-unchanged. Model serving and Gate acceptance remain to be verified.
+unchanged. See the runtime validation report for actual model serving results;
+these dependency checks alone do not establish adaptation Gate acceptance.
 
 FlagGems 5.4's Python wheel has no native C++ extension bundled. The optional
 `flag-gems-cpp-gcu` package must match the Python package's version and
@@ -190,9 +206,9 @@ Historical vendor-image result: Qwen3.6-35B-A3B was validated on S60 in TP2 grap
 `--gpu-memory-utilization 0.94`, `--max-model-len 32768`,
 `--max-num-seqs 256` and FP32 Mamba state. All five original Gate scenarios
 passed (26 requests and 260 checks), with their inputs and checks unchanged.
-Enflame CI shares one device-level memory budget across its four configured
-TP2 eager/graph cases, so the `0.94` override applies to all four while
-retaining their existing model settings and quality thresholds.
+That historical capacity test is separate from the current configured TP2
+eager CI, which uses a `0.90` S60 memory budget. The documented graph cases
+are supplemental and retain their model YAML settings.
 
 Inside that task container, from the private plugin checkout:
 

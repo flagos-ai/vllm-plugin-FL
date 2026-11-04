@@ -31,49 +31,53 @@
 **Files:** `docker/enflame/Dockerfile`, `docker/build.sh`, optional Enflame dependency inputs.
 **Interfaces:** Existing `docker/build.sh --platform enflame --target ci`; produces a candidate dependency image.
 
-- [ ] Inspect baseline compiler/package metadata and confirm base layer digest.
-- [ ] Change both base defaults, install missing runtime/build/test dependencies, preserve compiler guards.
-- [ ] Run bash syntax and build-helper argument checks; build on S60 with logs in a private tmux session.
-- [ ] Confirm candidate package metadata and compiler integrity; commit recipe.
+- [x] Inspect baseline compiler/package metadata and confirm base layer digest.
+- [x] Change both base defaults, install missing runtime/build/test dependencies, preserve compiler guards.
+- [x] Run bash syntax and build-helper argument checks; build on S60 with logs in a private tmux session.
+- [x] Confirm candidate package metadata and compiler integrity; commit recipe.
 
 ### Task 2: Full configured Enflame validation
 
 **Files:** `docker/enflame/` validation script/report as needed; dependency fixes belong in Task 1 recipe.
 **Interfaces:** Candidate image and selected plugin checkout produce raw logs, exit codes and reports.
 
-- [ ] Run check.sh/setup.sh from a clean private container with read-only models and free devices.
-- [ ] Run all unit and functional tests, retaining output and skip reasons.
-- [ ] Generate PR/nightly/weekly matrices; run every unique Enflame E2E and benchmark selection and available documented graph selections.
-- [ ] Diagnose actual failures, repair necessary image dependencies, rebuild and rerun affected checks.
-- [ ] Record exact source, environment, results, failures and limitations; acceptance requires passing results.
+- [x] Run check.sh/setup.sh from a clean private container with read-only models and free devices.
+- [x] Run all unit and functional tests, retaining output and skip reasons.
+- [x] Generate PR/nightly/weekly matrices; run every unique Enflame E2E and benchmark selection and available documented graph selections.
+- [x] Diagnose actual failures, repair necessary image dependencies, rebuild and rerun affected checks.
+- [x] Record exact source, environment, results, failures and limitations; acceptance requires passing results.
 
 ### Task 3: Publish and PR
 
 **Files:** `.github/configs/enflame.yml`, `docker/enflame/README.md`, `docs/usage/enflame.md`, validation report.
 **Interfaces:** Validated local image produces registry manifest digest and reviewable PR.
 
-- [ ] Push final requested tag after validation, verify remote digest and ancestry.
-- [ ] Update Enflame image references/build instructions/results using verified new digest.
+- [x] Push final requested tag after validation, verify remote digest and ancestry.
+- [x] Update Enflame image references/build instructions/results using verified new digest.
 - [ ] Run relevant lint/build checks and fresh whole-branch review, resolve important findings.
 - [ ] Push working branch and create PR to the requested base, with honest validation evidence.
 
-## Progress
+## Verified execution record
 
-- Recon complete: private clone/branch, host accessible, base pulled, models present, no active device processes at initial inspection.
-- Design builder check: no material unanswered questions. User approved direct execution.
-- Configuration changes use build/runtime verification rather than tautological file-content unit tests.
+- Task 1 complete: recipe `320bbe7`; build 06 passed, required runtime's 16-layer prefix and CI metadata verified, compiler guards and separate clean-image wheel install passed. Shell syntax, ShellCheck and repository typos checks passed.
+- Task 2 complete: source `320bbe7` in a fresh corrected-image container, native nightly `--scope all` exited 0 with 10/10 groups passed (2876.46s). UT 1959+2 passed, FT 71 passed, both models' eager inference/serving/eight-request concurrent and benchmark passed. Original 35B graph serving (2 tests) and 27B graph inference (1 test) also passed on a separate verified device pair.
+- Task 3: final requested tag published and pulled by manifest `sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e`, resolving to tested image `c7efd76...`. CI/usage references updated. Fresh whole-branch review and PR handoff remain pending.
 
-- Task 1: recipe defaults and CI packages committed at df5eb80; bash syntax and build-helper requested-base/output-tag checks passed. Candidate build-01 running in task tmux. Buildx 0.20.1 was extracted from Ubuntu package into task-local Docker config; host installation unchanged.
-- Ruling: configuration migration is verified by actual Docker build, compiler guard, and existing hardware CI suites rather than file-content tests.
-- Ruling: unregistered graph cases require direct original pytest invocation; tests/run.py filters these out and returns zero without executing them.
+## Rulings and practical limits
 
-- Dependency probe: numpy==1.26.4 plus opencv-python-headless==4.13.0.92 failed with ResolutionImpossible; numpy==2.3.5 passed. Matched reference image NumPy 2.3.5, transformers 5.6.0, huggingface-hub 1.33.0, xgrammar 0.2.8, opencv-python-headless 4.13.0.92; recipe committed at 5ee9676dd6eca0be9dda1c0a0d48c53651ca156e.
-- Network ruling: source clone stalled on host. Fetch official v0.28.0 locally, verify 2cf0a6915ce544dc493a0990f2ea38d81601128a, transfer SHA256-checked Git bundle via supplied bastion and expose a temporary Git cache only on Docker bridge. Build still verifies the exact official commit.
+- Verify the recipe/configuration migration with actual builds and existing hardware tests; file-content unit tests would mirror the configuration. Cost: hardware verification is slower.
+- Invoke unregistered graph examples through original pytest files; the native graph filter selects zero cases. Cost: supplemental validation needs separate commands.
+- Match NumPy 2.3.5 to required OpenCV and the reference stack after reproducing the 1.26 resolver conflict. Cost: optional vendor metadata remains incompatible.
+- Use SHA256-checked source bundles and temporary Git mirrors after direct network failures, preserving upstream identity and commit pins. Cost: temporary task daemons require cleanup.
+- Bake the CI-pinned FlagGems-vllm dependency to avoid setup's failing GitHub fetch. Cost: the CI image carries this necessary fixed dependency.
+- Increase S60 concurrent output allowance to 256 after actual 64-token truncation; eight requests and all answer checks remain intact. Cost: additional allowed generation work.
+- Extend 35B graph startup to 40 minutes after an actual 20-minute timeout during capture. Cost: other platforms sharing that YAML also wait longer before reporting failure.
+- Clear the inherited all-ops CPU debug fallback through a late profile: controlled exit134 versus unset exit0, then all 71 original FT cases passed. Cost: untested unsupported native ops cannot depend on that debug fallback.
+- Supersede old-image attempt03 after confirming the environment defect; its interrupted 35B concurrent result is not counted as passing. Cost: no complete old-image aggregate.
+- Reuse only task compiled caches in final validation and retain separate cold-run evidence. Cost: final timings are warm-cache rather than cold capacity claims.
+- Run supplemental graph tests in a separate container, checkout and copied caches on verified idle devices4,5 while nightly uses2,3. Cost: two additional free devices are occupied temporarily.
+- Preserve actual vendor pip-check conflicts instead of replacing vendor Torch/compiler to make metadata superficially green. Cost: ModelOpt and generic dependency re-resolution remain outside validated inference CI.
 
-- Build 04 succeeded; base layer prefix proved (16 runtime layers retained), compiler guard and device check passed. Setup failed on GitHub TLS while installing the required pinned FlagGems-vllm dependency.
-- Ruling: bake CI-pinned FlagGems-vllm into CI stage, preserving direct_url identity; optional task-local Git transport mirror avoids changing package identity. Build 05 at 1af55e7 running.
-- Host terminal long input was interrupted by bastion confirmation; verified no duplicate build/test process, rewrote task script as readable file and restarted normally.
-- Actual dependency metadata conflicts were retained in validation report; do not overwrite FlagTree or vendor Torch to make pip check superficially green.
-
-- Baseline hardware validation: UT/FT, 27B eager inference (1506s), 35B eager inference (1169.5s) passed. Candidate manifest a10eb502e815568815730684dbf4dd52bac1f4afda0b98679445ffaf252b3c4f published; final tag unchanged.
-- PR target advanced to ad8ebc972a7a2b8666796891f14ca81d674618b0 and reverted its earlier Enflame graph/Gate skips. Synchronize existing target changes to avoid duplicate patches/conflicts; preserve baseline test evidence and source transitions.
+Detailed sources, failures, corrections and raw evidence locations are in
+`docker/enflame/validation-20261104.md`. No new test exclusions, precision
+changes, weaker assertions or adaptation Gate capacity claims were introduced.

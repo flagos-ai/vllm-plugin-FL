@@ -10,10 +10,11 @@ contain each candidate's plugin changes.
 | Component | Validated version or configuration |
 |---|---|
 | Prebuilt image | `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci` |
-| Image manifest | `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88` |
+| Image manifest | `sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e` |
+| Runtime base | `flagos-runtime/flagos-runtime-enflame-tops1.10.6:2.3.0` (digest pinned in the recipe) |
 | Accelerator / host driver | Enflame S60 / `1.10.6` |
 | vLLM | `0.28.0+empty` (`VLLM_TARGET_DEVICE=empty`) |
-| Python | `3.12.8` |
+| Python | `3.12.13` |
 | PyTorch | `2.11.0+cpu` with `torch-gcu==2.11.0+3.8.20260713` |
 | FlagTree | `0.7.0+enflame3.6`, the Enflame-specific release |
 | Triton GCU | `3.6.0+1.0.20260722`; FlagTree provides the `triton` Python namespace |
@@ -62,8 +63,10 @@ Keep model weights on the host and mount them read-only. The native test YAMLs
 expect the following two directories under `/data/models/Qwen` in the container:
 
 ```bash
-git clone --branch 0.4.0-dev https://github.com/flagos-ai/vllm-plugin-FL.git
+# Snapshot used for this runtime-image validation; select your intended revision.
+git clone https://github.com/BrianPei/vllm-plugin-FL.git
 cd vllm-plugin-FL
+git checkout 320bbe7436d92553d5cbb4858a582141cf70e4c4
 
 export REPO_DIR="$PWD"
 export MODEL_ROOT=/data/models/Qwen
@@ -77,6 +80,8 @@ git rev-parse HEAD
 `MODEL_ROOT` must point to the actual host directory containing complete model
 weights, tokenizer files, and configuration. The commands do not download
 missing models. Record the selected plugin commit with the validation results.
+The snapshot above includes the S60 concurrent output budget and graph startup
+allowance used in this report. Other checkouts need their own validation.
 
 ## 3. Pull the image and create a private container
 
@@ -84,7 +89,7 @@ The digest pins the dependency image even if its tag changes. Authenticate with
 `docker login harbor.baai.ac.cn` only if required by your registry access.
 
 ```bash
-export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88
+export IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-enflame-ci@sha256:aabdf954a2f4cb60c80e972d1e105a07b80bed321efed887b24997f25195ea5e
 docker pull "$IMAGE"
 docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
 
@@ -166,9 +171,10 @@ the intended compiler is active.
 
 ## 5. Start and query the service
 
-Continue inside the container. These examples use the native TP2 model settings
-and the S60 overrides: `max_model_len=8192`, memory utilization `0.94`, and the
-GCU collective path. Graph mode omits `--enforce-eager`.
+Continue inside the container. These examples use TP2 and
+`max_model_len=8192`. Eager mode follows the S60 CI memory budget `0.90` and
+GCU collective path; graph mode follows the supplemental model YAMLs with
+memory budget `0.95` and custom all-reduce disabled.
 
 ```bash
 case "$MODEL_NAME" in
@@ -177,8 +183,8 @@ case "$MODEL_NAME" in
 esac
 mode_args=()
 case "$MODE" in
-  eager) mode_args+=(--enforce-eager) ;;
-  graph) ;;
+  eager) gpu_memory_budget=0.90; mode_args+=(--enforce-eager) ;;
+  graph) gpu_memory_budget=0.95; mode_args+=(--disable-custom-all-reduce) ;;
   *) echo "MODE must be eager or graph" >&2; exit 2 ;;
 esac
 
@@ -188,7 +194,7 @@ vllm serve "/data/models/Qwen/$MODEL_NAME" \
   --port 8000 \
   --tensor-parallel-size 2 \
   --max-model-len 8192 \
-  --gpu-memory-utilization 0.94 \
+  --gpu-memory-utilization "$gpu_memory_budget" \
   "${mode_args[@]}" 2>&1 | tee "/logs/$MODEL_NAME-$MODE-server.log"
 ```
 
@@ -222,32 +228,36 @@ container and retain the generated reports and logs:
 ```bash
 set -euo pipefail
 cd /workspace/vllm-plugin-FL
-python tests/run.py --platform enflame --device s60 --scope unit \
-  --output-dir /logs/unit 2>&1 | tee /logs/unit-console.log
-python tests/run.py --platform enflame --device s60 --scope functional \
-  --output-dir /logs/functional 2>&1 | tee /logs/functional-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
-  --model qwen3_6 --case 27b_tp2_eager --output-dir /logs/27b-eager \
-  2>&1 | tee /logs/27b-eager-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task inference \
-  --model qwen3_6 --case 27b_tp2_graph --output-dir /logs/27b-graph \
-  2>&1 | tee /logs/27b-graph-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
-  --model qwen3_6 --case 35b_a3b_tp2_eager --output-dir /logs/35b-eager \
-  2>&1 | tee /logs/35b-eager-console.log
-python tests/run.py --platform enflame --device s60 --scope e2e --task serving \
-  --model qwen3_6 --case 35b_a3b_tp2_graph --output-dir /logs/35b-graph \
-  2>&1 | tee /logs/35b-graph-console.log
+# Preview and run all registered Enflame nightly selections.
+python tests/run.py --platform enflame --device s60 --scope all \
+  --stage nightly --dry-run
+python tests/run.py --platform enflame --device s60 --scope all \
+  --stage nightly --output-dir /logs/nightly \
+  2>&1 | tee /logs/nightly-console.log
+
+# Supplemental documented graph cases are not registered in the CI matrix.
+# Invoke the original pytest files directly so these commands execute tests.
+export FL_TEST_PLATFORM=enflame FL_TEST_DEVICE=s60 FL_TEST_MODEL=qwen3_6
+FL_TEST_CASE=27b_tp2_graph python -m pytest \
+  tests/e2e_tests/inference/test_inference_smoke.py -v -s --tb=short \
+  --junitxml=/logs/27b-graph.xml 2>&1 | tee /logs/27b-graph-console.log
+FL_TEST_CASE=35b_a3b_tp2_graph python -m pytest \
+  tests/e2e_tests/serving/test_serving_smoke.py -v -s --tb=short \
+  --junitxml=/logs/35b-graph.xml 2>&1 | tee /logs/35b-graph-console.log
 ```
 
-Each invocation writes to a separate output directory so its JSON/XML reports
-are preserved instead of overwritten by the next run.
+Use a separate output directory for each validation attempt. The nightly
+selection runs all unit and functional tests, both models' TP2 eager inference,
+serving and concurrent cases, and serve benchmark smoke. PR is a subset;
+weekly falls back to nightly in
+[`tests/platforms/enflame.yaml`](../../tests/platforms/enflame.yaml).
 
-These are the cases selected in
-[`tests/platforms/enflame.yaml`](../../tests/platforms/enflame.yaml), with the
-original [Qwen3.6 model YAMLs](../../tests/models/qwen3_6). The 27B inference
-cases check text completion; the 35B serving cases check model listing and
-text/image chat. They do not replace the longer concurrent scenarios in the
+The supplemental graph commands use the original
+[Qwen3.6 model YAMLs](../../tests/models/qwen3_6). A graph `--case` filter on
+`tests/run.py` selects no registered cases in this branch; its zero exit code
+would not establish graph coverage. The 27B inference case checks text
+completion; 35B serving checks model listing and text/image chat.
+These smoke tests do not replace the longer scenarios in the
 [adaptation Gate](../../tools/adaptation-gate-cases/README.md).
 
 Run each Gate model in both eager and graph modes, preserving the original
@@ -270,8 +280,8 @@ and original Gate for the exact revision you deploy.
   success alone does not establish GCU availability.
 - **Compiler guard fails:** retain its output and recreate the container from
   the pinned image. Do not bypass the guard or install a generic Triton wheel.
-- **Out of memory:** first check that the selected pair is available and that
-  the S60 `0.94` budget is applied. Changing context length, concurrency,
+- **Out of memory:** first check that the selected pair is available and inspect
+  the effective model and device memory budget. Changing context length, concurrency,
   precision, or tensor parallelism requires separate validation of that new
   configuration; it is not a passing result for the original Gate.
 - **Runner or speculative-decoding error:** Enflame uses `ModelRunnerFL` for
