@@ -75,6 +75,10 @@ RUN apt-get update \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# Allow a reachable public-package mirror without changing the hash-pinned
+# Enflame wheel index below. This is a build argument, not a runtime setting.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
 # Build tooling for vLLM 0.28 empty mode: setuptools >= 77 (PEP 639 SPDX
 # license) and setuptools-rust are missing from the vendor bundle. cloudpickle is
 # upgraded because the bundle ships 1.6.0, which cannot pickle Python 3.12
