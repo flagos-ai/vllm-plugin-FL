@@ -1,0 +1,169 @@
+{
+  "scope": "Historical read-only status tables. Zero bytes/ECC0/no listed PID are not exclusivity, health or peer-isolation proofs.",
+  "copy_before_after": [
+    {
+      "physical_device": 0,
+      "moment": "before",
+      "source_header_time": "Wed Nov 04 23:57:00 2026",
+      "selected_device": {
+        "ordinal": 0,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      "all_eight_device_rows_match_latest_snapshot": true,
+      "listed_gpu_processes": false
+    },
+    {
+      "physical_device": 0,
+      "moment": "after",
+      "source_header_time": "Wed Nov 04 23:57:04 2026",
+      "selected_device": {
+        "ordinal": 0,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      "all_eight_device_rows_match_latest_snapshot": true,
+      "listed_gpu_processes": false
+    },
+    {
+      "physical_device": 2,
+      "moment": "before",
+      "source_header_time": "Wed Nov 04 23:57:06 2026",
+      "selected_device": {
+        "ordinal": 2,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      "all_eight_device_rows_match_latest_snapshot": true,
+      "listed_gpu_processes": false
+    },
+    {
+      "physical_device": 2,
+      "moment": "after",
+      "source_header_time": "Wed Nov 04 23:57:10 2026",
+      "selected_device": {
+        "ordinal": 2,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      "all_eight_device_rows_match_latest_snapshot": true,
+      "listed_gpu_processes": false
+    },
+    {
+      "physical_device": 4,
+      "moment": "before",
+      "source_header_time": "Wed Nov 04 23:57:12 2026",
+      "selected_device": {
+        "ordinal": 4,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      "all_eight_device_rows_match_latest_snapshot": true,
+      "listed_gpu_processes": false
+    },
+    {
+      "physical_device": 4,
+      "moment": "after",
+      "source_header_time": "Wed Nov 04 23:57:16 2026",
+      "selected_device": {
+        "ordinal": 4,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      "all_eight_device_rows_match_latest_snapshot": true,
+      "listed_gpu_processes": false
+    }
+  ],
+  "latest": {
+    "source_header_time": "Wed Nov 04 23:59:35 2026",
+    "driver_version": "0.24.0",
+    "devices": [
+      {
+        "ordinal": 0,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      {
+        "ordinal": 1,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "1.535GiB",
+        "memory_total": "62847MiB",
+        "utilization_percent": 8,
+        "uncorrected_ecc": 0
+      },
+      {
+        "ordinal": 2,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      {
+        "ordinal": 3,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "1.535GiB",
+        "memory_total": "62847MiB",
+        "utilization_percent": 8,
+        "uncorrected_ecc": 0
+      },
+      {
+        "ordinal": 4,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "0B",
+        "memory_total": "62847MiB",
+        "utilization_percent": 0,
+        "uncorrected_ecc": 0
+      },
+      {
+        "ordinal": 5,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "1.535GiB",
+        "memory_total": "62847MiB",
+        "utilization_percent": 8,
+        "uncorrected_ecc": 0
+      },
+      {
+        "ordinal": 6,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "1.535GiB",
+        "memory_total": "62847MiB",
+        "utilization_percent": 8,
+        "uncorrected_ecc": 0
+      },
+      {
+        "ordinal": 7,
+        "model": "SR-SUN-S2-X1-PCIE",
+        "memory_used": "12.000KiB",
+        "memory_total": "62847MiB",
+        "utilization_percent": 8,
+        "uncorrected_ecc": 0
+      }
+    ],
+    "listed_gpu_processes": false
+  },
+  "latest_recorded_iso_time": "2026-11-04T23:59:35+08:00",
+  "observed_new_residual_allocations": false,
+  "observation_limit": "No new residual allocation is visible in these tables; native context/peer state is not thereby established clean."
+}

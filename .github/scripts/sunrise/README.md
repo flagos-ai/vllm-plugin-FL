@@ -100,4 +100,4 @@ python -m pytest --noconftest -p no:cacheprovider \
 
 厂商排查用的最小客户端、模型无关 TP2 collective 探针、原生 V2 模型入口及
 脱敏关键日志见 [离线复现包](../../../tools/repro/sunrise_032/README.md)。
-该包仅做离线检查；GPU 验证已停止，未执行 reset。
+原三类入口仅做离线整理；新增[当前环境纯拷贝复现](../../../tools/repro/sunrise_032/current_environment/README.zh-CN.md)已在物理 0、2、4 逐卡全量实测。0、2 拷贝完整性失败，4 通过；完整 TP2 gate 仍未完成，GPU 验证已停止，未执行 reset。
