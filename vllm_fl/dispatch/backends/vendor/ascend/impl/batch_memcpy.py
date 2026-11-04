@@ -14,6 +14,7 @@ def batch_memcpy_kernel(src_ptrs, dst_ptrs, sizes, BLOCK_SIZE: tl.constexpr):
     src_ptr = tl.load(src_ptrs + pid)
     dst_ptr = tl.load(dst_ptrs + pid)
     size = tl.load(sizes + pid)
+    is_left_overlap = dst_ptr < src_ptr and dst_ptr + size > src_ptr
 
     # FlagTree's pointer analysis can fail when these casts live in the loop.
     src_ptr = src_ptr.to(tl.pointer_type(tl.uint8))
@@ -27,6 +28,10 @@ def batch_memcpy_kernel(src_ptrs, dst_ptrs, sizes, BLOCK_SIZE: tl.constexpr):
 
         # Mamba states are streaming copies; bypass L1 to avoid cache pollution.
         data = tl.load(curr_src_ptr, mask=mask, cache_modifier=".cg")
+        if is_left_overlap:
+            # vLLM 0.32 shifts convolution states within the same allocation.
+            # Every lane must finish reading before lower-address stores run.
+            tl.debug_barrier()
         tl.store(curr_dst_ptr, data, mask=mask, cache_modifier=".cg")
 
 

@@ -1,5 +1,9 @@
 # Ascend 910C Deployment Guide
 
+> This guide reproduces the validated vLLM 0.28.0 stack. For the
+> `0.5.0-dev` / vLLM 0.32.0 empty build and its current validation status, see
+> the [Ascend image recipe](../../docker/ascend/README.md).
+
 This guide starts an OpenAI-compatible vLLM inference service on Huawei
 Ascend 910C. It follows the NVIDIA deployment guide's prebuilt-image workflow,
 using the Ascend stack validated by this repository. The example uses one 910C

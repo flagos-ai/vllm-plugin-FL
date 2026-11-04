@@ -424,11 +424,10 @@ class PlatformFL(Platform):
             patch_mm_encoder_attention()
 
         if (
-            cls.device_type in {"npu", "musa", "txda"}
+            cls.device_type in {"musa", "txda"}
             and vllm_config.use_v2_model_runner
         ):
             platform_name = {
-                "npu": "Ascend",
                 "musa": "MUSA",
                 "txda": "Tsingmicro TXDA",
             }[cls.device_type]
@@ -980,7 +979,14 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        default = (
+            ["native"]
+            if using_inductor or cls.device_type == "npu"
+            else ["vllm_c", "native"]
+        )
+        # vLLM 0.32 registers vllm_c IR implementations only on CUDA-like
+        # and XPU platforms. Empty NPU wheels must use the native providers,
+        # including newly added IR ops such as sparse GELU.
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

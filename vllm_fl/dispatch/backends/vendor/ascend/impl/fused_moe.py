@@ -23,6 +23,24 @@ def topk_softmax(
     return topk_weights, topk_ids
 
 
+def _prepare_native_routes(hidden_states, topk_ids, topk_weights, num_experts):
+    """Keep invalid routes out of the init-routing/unpermute index contract.
+
+    init_routing_v2 accepts negative expert IDs, but its invalid expanded rows
+    are not a valid permutation for token_unpermute. Map those slots to a
+    real expert with zero probability so the native permutation stays total.
+    Entirely padded rows use zero input, including when their unused buffer
+    contains NaNs. All shapes remain static for the existing graph path.
+    """
+    valid_routes = (topk_ids >= 0) & (topk_ids < num_experts)
+    valid_tokens = valid_routes.any(dim=-1, keepdim=True)
+    return (
+        hidden_states.masked_fill(~valid_tokens, 0),
+        topk_ids.masked_fill(~valid_routes, 0).to(torch.int32),
+        topk_weights.masked_fill(~valid_routes, 0),
+    )
+
+
 def _torch_fused_experts_impl(
     hidden_states: torch.Tensor,
     w1: torch.Tensor,
@@ -52,12 +70,16 @@ def _torch_fused_experts_impl(
     if num_tokens == 0:
         return hidden_states if inplace else torch.empty_like(hidden_states)
 
+    routed_input, native_ids, native_weights = _prepare_native_routes(
+        hidden_states, topk_ids, topk_weights, num_experts
+    )
+
     # The current rc1 dispatcher uses count-mode expert tokens and pairs its
     # init-routing interface with token_unpermute (not finalize_routing).
     # BF16 needs no custom quantization/routing extension.
     routed, row_indices, expert_tokens, _ = torch_npu.npu_moe_init_routing_v2(
-        hidden_states,
-        topk_ids.to(torch.int32),
+        routed_input,
+        native_ids,
         active_num=num_tokens * topk_ids.size(1),
         expert_num=num_experts,
         expert_tokens_num_type=1,
@@ -99,7 +121,7 @@ def _torch_fused_experts_impl(
     result = torch_npu.npu_moe_token_unpermute(
         permuted_tokens=expert_output,
         sorted_indices=torch.abs(row_indices),
-        probs=topk_weights,
+        probs=native_weights,
     )
     if inplace:
         hidden_states.copy_(result)
