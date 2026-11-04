@@ -30,6 +30,10 @@ def _load_registry(monkeypatch, schemas, *, native=False):
     spec = importlib.util.spec_from_file_location("op_schema_registry_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # Other tests may already have installed the empty-wheel fallback schemas.
+    # Exercise this fixture's independent synthetic namespaces regardless.
+    monkeypatch.setattr(module, "_C_ops_present", lambda: False)
+    monkeypatch.setattr(module, "_is_metax_backend", lambda: False)
     return module
 
 

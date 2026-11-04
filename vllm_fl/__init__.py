@@ -47,8 +47,6 @@ def _patch_flag_gems_triton_import_compat():
         triton.knobs = knobs
 
 
-_patch_flag_gems_triton_import_compat()
-
 # torch.float4_e2m1fn_x2 exists only in CUDA builds of PyTorch 2.7+.
 # vllm.ir.tolerances references it at module level, so we inject a sentinel
 # before any vllm.ir import can happen.
@@ -62,6 +60,10 @@ else:
     if not hasattr(_torch, "float4_e2m1fn_x2"):
         _torch.float4_e2m1fn_x2 = _torch.uint8
 del _torch
+
+# Torch's device auto-loader must finish before FlagTree imports Triton;
+# torch_npu's Dynamo setup accesses triton.language during auto-loading.
+_patch_flag_gems_triton_import_compat()
 
 from . import version as version  # PyTorch-style: vllm_fl.version.git_version
 from vllm_fl.utils import get_op_config as _get_op_config

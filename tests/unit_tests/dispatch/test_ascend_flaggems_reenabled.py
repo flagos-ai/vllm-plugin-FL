@@ -64,6 +64,13 @@ def _enable(op, *, native=False):
         torch.npu.synchronize()
 
 
+def test_canonical_ne_inplace_registration_excludes_duplicate_aliases():
+    with _strict_policy():
+        registered = set(flag_gems.all_registered_ops())
+        assert {"ne_scalar_", "ne_"} <= registered
+        assert not {"not_equal_scalar_", "not_equal_"} & registered
+
+
 def _inputs(dtype, layout):
     values = torch.linspace(-1.75, 2.25, 17 * 66).reshape(17, 66).to(dtype)
     base = values.to("npu")

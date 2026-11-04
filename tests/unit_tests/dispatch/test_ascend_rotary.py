@@ -461,6 +461,7 @@ def test_flaggems_six_argument_rotary_compacts_packed_partial_views(
         torch.testing.assert_close(packed, packed_before)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("inplace", [False, True])
 @pytest.mark.parametrize("interleaved", [False, True])
 def test_flaggems_ascend_rotary_packed_partial_views_on_npu(inplace, interleaved):
@@ -472,9 +473,8 @@ def test_flaggems_ascend_rotary_packed_partial_views_on_npu(inplace, interleaved
 
     assert flag_gems.vendor_name == "ascend"
     assert not use_c_extension
-    assert not flaggems_rotary._supports_inplace_argument(
-        flag_gems.apply_rotary_pos_emb
-    )
+    # Both the legacy six-argument and current inplace-aware API must retain
+    # the same packed-view value/mutation contract.
 
     packed_cpu = torch.randn(4, 3, 2, 16, dtype=torch.float32).to(torch.bfloat16)
     packed = packed_cpu.to("npu")
@@ -547,7 +547,7 @@ def test_six_argument_rotary_compatibility_is_ascend_only(monkeypatch):
 
 @pytest.mark.parametrize("inplace", [False, True])
 @pytest.mark.parametrize("use_c_extension", [False, True])
-def test_flaggems_ascend_common_wrapper_preserves_requested_inplace(
+def test_flaggems_ascend_common_wrapper_preserves_inplace_identity(
     monkeypatch, inplace, use_c_extension
 ):
     def legacy_rotary(query, key, cos, sin, position_ids, rotary_interleaved):
@@ -578,7 +578,9 @@ def test_flaggems_ascend_common_wrapper_preserves_requested_inplace(
     assert result_query is query and result_key is key
     assert len(calls) == 1
     assert calls[0]["position_ids"] is positions
-    assert calls[0]["inplace"] is inplace
+    # The provider may return new alias objects for inplace=True. The adapter
+    # requests separate outputs and copies back into the original Q/K objects.
+    assert calls[0]["inplace"] is False
 
 
 def test_flaggems_source_loader_keeps_platform_interface_local(monkeypatch):

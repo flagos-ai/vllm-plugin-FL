@@ -4,3 +4,7 @@ torch==2.10.0+cpu
 torch-npu==2.10.0
 torchvision==0.25.0+cpu
 torchaudio==2.10.0+cpu
+
+# vLLM 0.32 requires NumPy 2 through OpenCV; retain SciPy compatibility.
+numpy==2.2.6
+PyYAML==6.0.1

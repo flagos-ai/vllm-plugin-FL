@@ -74,11 +74,18 @@ def test_gdn_prefill_matches_token_decode():
     torch.testing.assert_close(state, state_decode, atol=0.01, rtol=0.05)
 
 
+@pytest.mark.parametrize("strided", [False, True])
 @torch.inference_mode()
-def test_gdn_decode_capture_updates_live_slots_and_preserves_padding():
+def test_gdn_decode_capture_updates_live_slots_and_preserves_padding(strided):
     from vllm_fl.dispatch.backends.vendor.ascend.impl.gdn_reference import gdn_decode
 
     x, a, b, conv, state, kwargs = _inputs(2)
+    if strided:
+        # Native 0.32 packs other layers/states between successive rows.
+        conv_backing = torch.zeros(4, 2, 16, 3, device="npu", dtype=conv.dtype)
+        state_backing = torch.zeros(4, 2, 2, 4, 4, device="npu", dtype=state.dtype)
+        conv = conv_backing[:, 0]
+        state = state_backing[:, 0]
     indices = torch.tensor([1, -1], device="npu", dtype=torch.int32)
     output = torch.empty(2, 2, 4, device="npu", dtype=torch.bfloat16)
 
@@ -114,3 +121,36 @@ def test_gdn_decode_capture_updates_live_slots_and_preserves_padding():
         assert torch.count_nonzero(output[1]) == 0
         assert torch.count_nonzero(conv[0]) == 0
         assert torch.count_nonzero(state[0]) == 0
+        if strided:
+            assert torch.count_nonzero(conv_backing[:, 1]) == 0
+            assert torch.count_nonzero(state_backing[:, 1]) == 0
+
+
+@torch.inference_mode()
+def test_gdn_strided_cache_copy_memory_is_bounded_by_active_rows():
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.gdn_state import (
+        gather_state_rows,
+        scatter_state_rows,
+    )
+
+    torch.npu.set_device(0)
+    backing = torch.zeros(1024, 2, 2, 64, 64, device="npu")
+    state = backing[:, 0]
+    indices = torch.tensor([1, 127, 511, 1023], device="npu", dtype=torch.int64)
+    rows = gather_state_rows(state, indices)
+    scatter_state_rows(state, indices, rows)
+    del rows
+    torch.npu.synchronize()
+    before = torch.npu.memory_allocated()
+    torch.npu.reset_peak_memory_stats()
+    rows = gather_state_rows(state, indices)
+    rows.fill_(7)
+    scatter_state_rows(state, indices, rows)
+    torch.npu.synchronize()
+    # Four active rows need 128 KiB; a full logical cache copy needs 32 MiB.
+    assert torch.npu.max_memory_allocated() - before < 4 * 1024**2
+    for slot in (1, 127, 511, 1023):
+        torch.testing.assert_close(state[slot], torch.full_like(state[slot], 7))
+    assert torch.count_nonzero(state[0]) == 0
+    assert torch.count_nonzero(state[2]) == 0
+    assert torch.count_nonzero(backing[:, 1]) == 0

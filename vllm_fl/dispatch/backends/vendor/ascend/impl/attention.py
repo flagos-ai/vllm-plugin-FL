@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -35,6 +35,7 @@ import torch.nn as nn
 from vllm.config import CUDAGraphMode, VllmConfig, get_current_vllm_config
 from vllm.forward_context import get_forward_context
 from vllm.utils.math_utils import cdiv
+from vllm.utils.torch_utils import get_dtype_size
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionCGSupport,
@@ -42,11 +43,13 @@ from vllm.v1.attention.backend import (
     AttentionLayer,
     AttentionMetadataBuilder,
     AttentionType,
+    CommonAttentionMetadata,
 )
 from vllm.v1.attention.backends.registry import (
     AttentionBackendEnum,
     register_backend,
 )
+from vllm.v1.kv_cache_layout import KVCacheLayout
 
 from .attention_mask import AttentionMaskBuilder
 
@@ -206,6 +209,13 @@ class FusedInferAttentionGraphParam:
 
 
 @dataclass
+class AscendCommonAttentionMetadata(CommonAttentionMetadata):
+    # AttentionGroup remaps manager blocks with dataclasses.replace in 0.32.
+    # The phase must be a field so it survives that remapping.
+    attn_state: AscendAttentionState | None = None
+
+
+@dataclass
 class AscendMetadata:
     """Metadata for Ascend attention."""
 
@@ -326,12 +336,15 @@ class AscendAttentionMetadataBuilder(AttentionMetadataBuilder[AscendMetadata]):
         )
 
         block_table = common_attn_metadata.block_table_tensor
-        # The private buffer is the authoritative CPU view in current vLLM;
-        # async/spec paths may leave the public compatibility field unset.
-        if getattr(common_attn_metadata, "_seq_lens_cpu", None) is not None:
-            seq_lens = common_attn_metadata._seq_lens_cpu[:num_reqs]
-        elif common_attn_metadata.seq_lens_cpu is not None:
-            seq_lens = common_attn_metadata.seq_lens_cpu[:num_reqs]
+        # vLLM 0.32's CPU bound is exact outside asynchronous speculative
+        # decode. PA/FIA need exact lengths, so synchronize only for that case.
+        cpu_lengths = common_attn_metadata.seq_lens_cpu_upper_bound
+        async_spec = (
+            self.speculative_config is not None
+            and self.vllm_config.scheduler_config.async_scheduling
+        )
+        if cpu_lengths is not None and not async_spec:
+            seq_lens = cpu_lengths[:num_reqs]
         else:
             seq_lens = common_attn_metadata.seq_lens[:num_reqs].to("cpu")
         slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens]
@@ -467,6 +480,24 @@ class AscendAttentionBackend(AttentionBackend):
 
     accept_output_buffer: bool = True
 
+    @classmethod
+    def supported_kv_cache_layouts(cls):
+        # Hybrid groups may have different page sizes. The native allocator
+        # overlays their block-outermost pages in one shared backing buffer.
+        return (KVCacheLayout.BLHNC,)
+
+    @classmethod
+    def customize_spec(cls, spec):
+        if spec.head_size_v != spec.head_size:
+            raise NotImplementedError("Ascend attention requires equal K/V head sizes")
+        return replace(
+            spec,
+            num_head_slots=2,
+            state_content_bytes=spec.num_kv_heads
+            * spec.head_size
+            * get_dtype_size(spec.dtype),
+        )
+
     @staticmethod
     def get_name() -> str:
         return "CUSTOM"
@@ -520,7 +551,7 @@ class AscendAttentionBackend(AttentionBackend):
             value_caches[dst_indices] = value_caches[src_indices]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int]:
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int]:
         return [128]
 
 
@@ -737,8 +768,19 @@ class AscendAttentionBackendImpl(AttentionImpl):
         attn_metadata: AscendMetadata,
     ):
         """Reshape and cache key/value tensors."""
-        if len(kv_cache) > 1:
+        if isinstance(kv_cache, torch.Tensor) and kv_cache.ndim == 4:
+            # vLLM 0.32 binds [B, 2, N, H*D] logical cache views.
+            self.key_cache = kv_cache[:, 0].unflatten(
+                -1, (self.num_kv_heads, self.head_size)
+            )
+            self.value_cache = kv_cache[:, 1].unflatten(
+                -1, (self.num_kv_heads, self.head_size)
+            )
+        elif len(kv_cache) > 1:
             self.key_cache, self.value_cache = kv_cache[0], kv_cache[1]
+        else:
+            return key, value
+        if self.key_cache is not None:
             num_tokens = attn_metadata.num_actual_tokens
             slots = attn_metadata.slot_mapping[:num_tokens]
             if not (

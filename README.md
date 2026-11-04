@@ -181,8 +181,8 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
-For native decode graph execution with vLLM 0.28, see the
-[Ascend graph guide](./docs/ascend-vllm028-graph.md).
+For native decode graph execution with vLLM 0.32, see the
+[Ascend graph guide](./docs/ascend-vllm032-graph.md).
 
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
    and FlagGems revisions
@@ -194,9 +194,9 @@ For native decode graph execution with vLLM 0.28, see the
     python3 -m pip install --no-deps cann-shmem==1.6.0 \
       --index-url=https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/
 
-    git clone --branch qwen-vllm_for_ascend https://github.com/flagos-ai/FlagGems.git
+    git clone --branch v5.4.0 https://github.com/flagos-ai/FlagGems.git
     cd FlagGems
-    git checkout 3b406c36212744b98b9720bf6d0a5387c09fe96b
+    git checkout 6ed2f39071ef85db26b7e64f0652a162f434959c
     python3 -m pip install --no-build-isolation --no-deps .
     ```
 
@@ -208,8 +208,9 @@ For native decode graph execution with vLLM 0.28, see the
 
     For eager execution, add `enforce_eager=True` to the `LLM` constructor or
     pass `--enforce-eager` on the command line. For native NPU graph capture and
-    replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=0` and the component versions
-    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm028-graph.md).
+    replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=1`,
+    `VLLM_FL_FLAGOS_WHITELIST=zeros`, and the component versions
+    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm032-graph.md).
 
 
 ### Run a Task

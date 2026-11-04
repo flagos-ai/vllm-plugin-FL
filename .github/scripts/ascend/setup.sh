@@ -19,10 +19,11 @@ from importlib.metadata import PackageNotFoundError, version
 import numpy
 
 for package, expected_version in {
-    "vllm": "0.28.0+empty",
+    "vllm": "0.32.0+empty",
     "torch": "2.10.0+cpu",
     "torch-npu": "2.10.0",
     "flagtree": "0.6.2a1+ascend3.5",
+    "flag-gems": "5.4.0",
     "cann-shmem": "1.6.0",
     "pytest": "8.3.2",
     "coverage": "7.16.1",
@@ -35,7 +36,7 @@ for package, expected_version in {
     if actual != expected_version:
         raise RuntimeError(
             f"Unexpected {package} version: {actual}; expected {expected_version}. "
-            "Rebuild the Ascend 0.28.0 image before running CI."
+            "Rebuild the Ascend 0.32.0 image before running CI."
         )
     print(f"{package}: {actual}")
 
@@ -47,7 +48,7 @@ for package in ("triton", "triton-ascend"):
         continue
     raise RuntimeError(f"Remove standalone {package}=={installed}; use FlagTree")
 
-expected = "1.26.4"
+expected = "2.2.6"
 if numpy.__version__ != expected:
     raise RuntimeError(
         f"Unexpected NumPy version: {numpy.__version__}; expected {expected}"

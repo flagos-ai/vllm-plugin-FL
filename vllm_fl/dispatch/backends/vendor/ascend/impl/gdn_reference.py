@@ -44,6 +44,23 @@ def _gating(a, b, A_log, dt_bias, *, packed_beta):
     return g, beta
 
 
+def _gather_rows(state, indices):
+    if state.device.type == "npu" and not state.is_contiguous():
+        from .gdn_state import gather_state_rows
+
+        return gather_state_rows(state, indices)
+    return state.index_select(0, indices)
+
+
+def _scatter_rows(state, indices, rows):
+    if state.device.type == "npu" and not state.is_contiguous():
+        from .gdn_state import scatter_state_rows
+
+        scatter_state_rows(state, indices, rows)
+    else:
+        state.index_copy_(0, indices, rows)
+
+
 def gdn_decode(
     x,
     a,
@@ -68,16 +85,16 @@ def gdn_decode(
     indices = indices.long()
     valid = indices > 0
     slots = indices.clamp_min(0)
-    conv_old = conv_state.index_select(0, slots)
+    conv_old = _gather_rows(conv_state, slots)
     conv_new = conv_old.clone()
     x = causal_conv1d_update_torch(
         x.unsqueeze(-1), conv_new, conv_weights, conv_bias, activation
     ).squeeze(-1)
-    conv_state.index_copy_(
-        0, slots, torch.where(valid[:, None, None], conv_new, conv_old)
+    _scatter_rows(
+        conv_state, slots, torch.where(valid[:, None, None], conv_new, conv_old)
     )
     q, k, v = _prepare_qkv(x, num_key_heads, num_value_heads, head_k_dim, head_v_dim)
-    old = ssm_state.index_select(0, slots)
+    old = _gather_rows(ssm_state, slots)
     state = torch.where(valid[:, None, None, None], old, 0).float()
     g, beta = _gating(a, b, A_log, dt_bias, packed_beta=packed_beta)
     state = state * g.exp()[..., None, None]
@@ -85,8 +102,10 @@ def gdn_decode(
     state = state + delta.unsqueeze(-1) * k.unsqueeze(-2)
     result = (state * (q * head_k_dim**-0.5).unsqueeze(-2)).sum(-1)
     output.copy_(torch.where(valid[:, None, None], result, 0).to(output.dtype))
-    ssm_state.index_copy_(
-        0, slots, torch.where(valid[:, None, None, None], state.to(old.dtype), old)
+    _scatter_rows(
+        ssm_state,
+        slots,
+        torch.where(valid[:, None, None, None], state.to(old.dtype), old),
     )
 
 

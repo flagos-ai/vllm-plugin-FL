@@ -89,11 +89,8 @@ def test_full_graph_exclusion_survives_dp_redispatch(
         uniform_decode_query_len=1,
         model_config=SimpleNamespace(is_encoder_decoder=False),
         input_batch=SimpleNamespace(lora_id_to_lora_request={}),
-        _pad_for_sequence_parallelism=lambda tokens: tokens,
         cudagraph_dispatcher=dispatcher,
-        compilation_config=SimpleNamespace(
-            pass_config=SimpleNamespace(enable_sp=False)
-        ),
+        compilation_config=SimpleNamespace(),
         parallel_config=parallel,
         vllm_config=SimpleNamespace(
             parallel_config=parallel,
@@ -275,66 +272,52 @@ class TestGetCumsumAndArange:
         assert cu_num_tokens.dtype == np.int64
 
 
-# =============================================================================
-# Layer 2: _pad_for_sequence_parallelism Logic Tests
-# =============================================================================
+@pytest.mark.parametrize("tp_size", [1, 2, 4, 8])
+@pytest.mark.parametrize("tokens,expected", [(1, 1), (3, 4), (5, 8), (8, 8)])
+def test_native_dispatcher_owns_graph_padding(tp_size, tokens, expected):
+    from vllm.config import CompilationConfig, CUDAGraphMode
+    from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 
+    from vllm_fl.worker.model_runner import ModelRunnerFL
 
-class TestPadForSequenceParallelism:
-    """Test sequence parallelism padding logic."""
-
-    @pytest.fixture
-    def mock_model_runner(self):
-        """Create mock model runner for padding tests."""
-        from vllm_fl.worker.model_runner import ModelRunnerFL
-
-        mock_runner = MagicMock(spec=ModelRunnerFL)
-        mock_runner.vllm_config = MagicMock()
-        mock_runner.vllm_config.parallel_config = MagicMock()
-        mock_runner.compilation_config = MagicMock()
-        mock_runner.compilation_config.pass_config = MagicMock()
-        mock_runner._pad_for_sequence_parallelism = (
-            ModelRunnerFL._pad_for_sequence_parallelism.__get__(
-                mock_runner, ModelRunnerFL
-            )
-        )
-        return mock_runner
-
-    def test_no_padding_when_sp_disabled(self, mock_model_runner):
-        """SP disabled should return original token count."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 4
-        mock_model_runner.compilation_config.pass_config.enable_sp = False
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    def test_no_padding_when_tp_size_1(self, mock_model_runner):
-        """TP size 1 means no parallelism, no padding needed."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 1
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    @pytest.mark.parametrize(
-        "num_tokens,tp_size,expected",
-        [
-            (10, 4, 12),  # 10 -> ceil to multiple of 4
-            (8, 4, 8),  # 8 already multiple of 4
-            (10, 8, 16),  # 10 -> ceil to multiple of 8
-            (1, 4, 4),  # 1 -> ceil to multiple of 4
-            (15, 8, 16),  # 15 -> ceil to multiple of 8
-        ],
+    compilation = CompilationConfig(
+        cudagraph_mode=CUDAGraphMode.FULL_DECODE_ONLY,
+        cudagraph_capture_sizes=[1, 2, 4, 8],
+        max_cudagraph_capture_size=8,
     )
-    def test_padding_calculation(
-        self, mock_model_runner, num_tokens, tp_size, expected
-    ):
-        """Verify padding rounds up to next multiple of tp_size."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = tp_size
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        result = mock_model_runner._pad_for_sequence_parallelism(num_tokens)
-
-        assert result == expected
-        assert result % tp_size == 0  # Must be divisible
+    # vLLM 0.32 removed PassConfig.enable_sp. Token padding belongs to the
+    # dispatcher and must not round a one-token decode up to the TP size.
+    assert not hasattr(compilation.pass_config, "enable_sp")
+    parallel = SimpleNamespace(data_parallel_size=1, tensor_parallel_size=tp_size)
+    config = SimpleNamespace(
+        compilation_config=compilation,
+        num_speculative_tokens=0,
+        lora_config=None,
+        scheduler_config=SimpleNamespace(max_num_seqs=8),
+        parallel_config=parallel,
+        observability_config=SimpleNamespace(cudagraph_metrics=False),
+    )
+    dispatcher = CudagraphDispatcher(config)
+    dispatcher.initialize_cudagraph_keys(CUDAGraphMode.FULL_DECODE_ONLY)
+    runner = SimpleNamespace(
+        vllm_config=config,
+        parallel_config=parallel,
+        compilation_config=compilation,
+        _is_uniform_decode=ModelRunnerFL._is_uniform_decode,
+        uniform_decode_query_len=1,
+        model_config=SimpleNamespace(is_encoder_decoder=False),
+        input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        cudagraph_dispatcher=dispatcher,
+    )
+    mode, descriptor, *_ = ModelRunnerFL._determine_batch_execution_and_padding(
+        runner,
+        tokens,
+        tokens,
+        np.ones(tokens, dtype=np.int32),
+        1,
+    )
+    assert mode is CUDAGraphMode.FULL
+    assert descriptor.num_tokens == descriptor.num_reqs == expected
 
 
 # =============================================================================
@@ -393,12 +376,13 @@ class TestGetPositions:
         assert result.shape == (3, 10)
         torch.testing.assert_close(result, expected)
 
-    def test_xdrope_returns_2d_positions(self, mock_model_runner):
-        """XDRoPE: returns [2, num_tokens] positions."""
-        mock_model_runner.uses_xdrope_dim = 64
+    def test_mrope_returns_2d_positions(self, mock_model_runner):
+        """vLLM 0.32 unifies nonstandard rotary dimensions under MRoPE."""
+        mock_model_runner.uses_mrope = True
+        mock_model_runner.mrope_positions.gpu = torch.zeros(2, 128, dtype=torch.int64)
 
         result = mock_model_runner._get_positions(10)
 
-        expected = mock_model_runner.xdrope_positions.gpu[:, :10]
+        expected = mock_model_runner.mrope_positions.gpu[:, :10]
         assert result.shape == (2, 10)
         torch.testing.assert_close(result, expected)

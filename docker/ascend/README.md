@@ -1,4 +1,4 @@
-# Ascend 910C: vLLM 0.28.0 empty
+# Ascend 910C: vLLM 0.32.0 empty
 
 The image keeps the CANN 9.0.0 and torch_npu 2.10 runtime from the earlier
 910C environment:
@@ -8,22 +8,21 @@ quay.io/ascend/vllm-ascend:v0.20.2rc1-a3
 ```
 
 The Dockerfile removes its vLLM 0.20.2 installation and installs upstream
-`v0.28.0` with `VLLM_TARGET_DEVICE=empty`. The resulting package version is
-`0.28.0+empty`; no NVIDIA vLLM extension is required.
+`v0.32.0` with `VLLM_TARGET_DEVICE=empty`. The resulting package version is
+`0.32.0+empty`; no NVIDIA vLLM extension is required.
 
 | Component | Version / source |
 | --- | --- |
 | Python | 3.11.15, aarch64 |
 | PyTorch / torch_npu | 2.10.0+cpu / 2.10.0 |
-| vLLM | 0.28.0+empty (`v0.28.0`) |
+| vLLM | 0.32.0+empty (`v0.32.0`) |
 | FlagTree | 0.6.2a1+ascend3.5, supplying Triton 3.5.1 |
-| FlagGems | `3b406c36212744b98b9720bf6d0a5387c09fe96b` |
+| FlagGems | v5.4.0, `6ed2f39071ef85db26b7e64f0652a162f434959c` |
 | cann-shmem | 1.6.0 (FlagTree TLE import dependency) |
-| NumPy | 1.26.4 (FlagGems requirement) |
+| NumPy / PyYAML | 2.2.6 / 6.0.1 |
 
-FlagTree and the FlagGems `qwen-vllm_for_ascend` branch follow the
-[official Ascend manual](https://github.com/flagos-ai/FlagTree/wiki/User-manual-for-ascend),
-checked on 2026-09-10. `cann-shmem` is distributed through the
+FlagTree supplies the Ascend Triton compiler; FlagGems is pinned to official
+v5.4.0 for compatibility with the NumPy 2 dependencies required by vLLM 0.32. `cann-shmem` is distributed through the
 [official CANN package index](https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/).
 Standalone `triton` / `triton-ascend` distributions must be removed before
 installing FlagTree because they write to the same Python module directory.
@@ -33,12 +32,9 @@ requirements target another PyTorch version. Runtime constraints preserve the
 CPU PyTorch and NPU adapter while installing vLLM's common dependencies.
 FlagGems is installed without its hardware extras, which specify an older stack.
 
-The upstream dependency metadata currently conflicts: OpenCV 4.13 requires
-NumPy >= 2 on Python 3.11, while this FlagGems revision pins NumPy 1.26.4.
-The image retains FlagGems's pin after installing vLLM common requirements;
-`pip check` will report this conflict. Video processing is not validated by
-the text/image inference checks. The inherited CANN profiler may also report
-optional dependency conflicts.
+The selected NumPy version satisfies the vLLM/OpenCV and FlagGems requirements.
+The inherited CANN profiler can still report optional dependency conflicts;
+video processing and profiler integrations are outside the text/image gate.
 
 ## Build and CI
 
@@ -56,7 +52,7 @@ The shared CI currently uses the published
 replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
 changing the configuration does not publish it.
 `.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an
-old image instead of silently testing vLLM 0.20.2.
+old image instead of silently testing another vLLM version.
 
 The CI image also pins the pytest plugins used by the shared workflows. The
 setup script performs only the editable plugin overlay and version checks, so
@@ -95,9 +91,10 @@ export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
 multi-host jobs must use an interface reachable by all ranks.
 
 Ascend defaults to `ModelRunnerFL` (`VLLM_USE_V2_MODEL_RUNNER=0`). The upstream
-V2 runner requires CUDA/UVA operations unavailable on NPU. Eager execution is
-the validated deployment setting below; NPU graph execution is experimental
-and requires an explicit eager compilation backend. Use:
+V2 runner requires CUDA/UVA operations unavailable on NPU. For the graph
+configuration, operator whitelist and complete Qwen3.6 gate procedure, see
+[Ascend graph with vLLM 0.32](../../docs/ascend-vllm032-graph.md).
+A small eager control can be started with:
 
 ```bash
 vllm serve /models/Qwen3-0.6B \
@@ -136,7 +133,7 @@ known issues in this FlagGems revision: `argmax` registration, vision GELU
 compilation, GDN state-reset `index_put`, and non-contiguous `index` reads.
 The latter is required for correct visual RoPE caches. GDN prefill also
 bridges the upstream state layout and preserves the channel-contiguous
-convolution output expected by vLLM 0.28.
+convolution output expected by the model.
 
 CANN 9.0's ATB RoPE kernel is used only for FP16 and BF16 inputs. FP32 RoPE
 runs through the reference implementation before ATB is launched, avoiding a
@@ -145,14 +142,14 @@ The FlagGems adapter also accepts the six-argument Ascend RoPE interface in the
 pinned `qwen-vllm_for_ascend` revision.
 
 Unquantized modular MoE experts use native `torch_npu.npu_grouped_matmul`.
-The legacy Ascend `fused_experts_impl` patch does not cover vLLM 0.28's
+The legacy Ascend `fused_experts_impl` patch does not cover vLLM's
 modular entry point. Generic Triton MoE kernels failed on 910C with both
 UB overflow and invalid memory accesses after reducing the tile size.
 The native bridge preserves expert mapping, biases and the prepare stage's
 input-side router weighting. Other quantized MoE formats and MoE LoRA remain
 unvalidated.
 
-DeepSeek-V4-Flash ModelSlim checkpoints use the plugin's
+The earlier vLLM 0.28 validation of DeepSeek-V4-Flash ModelSlim checkpoints used the plugin's
 `fl_modelslim_w8a8` quantization config. On 910C, the adapter uses BF16
 short-window attention and a native torch_npu W8A8 MoE path. The validated
 configuration uses TP8, one output projection group per rank, and a maximum
@@ -181,8 +178,8 @@ The shared CI runs setup, unit and functional tests, offline and serving
 inference, and a benchmark smoke test on the configured 910C runner. See the
 [Ascend platform cases](../../tests/platforms/ascend.yaml) for the active
 matrix and [PR #487](https://github.com/flagos-ai/vllm-plugin-FL/pull/487)
-for SHA-bound validation results and limitations. Graph mode and video
-processing are outside the supported deployment settings in this guide.
+for the earlier vLLM 0.28 validation. The vLLM 0.32 graph scope is documented
+in the graph guide above; video processing remains unvalidated.
 
 ## Model provisioning
 
