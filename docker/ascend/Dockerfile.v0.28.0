@@ -276,6 +276,16 @@ RUN printf '%s\n' \
       'exec vllm serve "$@"' \
       > /opt/release/entrypoint.sh
 RUN python -c "from importlib.metadata import version; expected={'vllm':'0.28.0+empty','torch':'2.10.0+cpu','torch-npu':'2.10.0','flagtree':'0.7.0+ascend3.5','flag-gems':'5.4.0','flagcx':'0.14.0+cann9.0.0.910c','cann-shmem':'1.6.0','numpy':'1.26.4'}; assert all(version(k)==v for k,v in expected.items()), expected"
+# Actions uses sh and overrides ENTRYPOINT, so Bash profiles cannot initialize CANN.
+# Mirror the base vendor profile's CANN paths before Torch auto-loads its backends.
+ENV ASCEND_AICPU_PATH=/usr/local/Ascend/cann-9.0.0 \
+    ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.0.0 \
+    ASCEND_OPP_PATH=/usr/local/Ascend/cann-9.0.0/opp \
+    ASCEND_TOOLKIT_HOME=/usr/local/Ascend/cann-9.0.0 \
+    TOOLCHAIN_HOME=/usr/local/Ascend/cann-9.0.0/toolkit
+ENV LD_LIBRARY_PATH=/usr/local/Ascend/cann-9.0.0/lib64:/usr/local/Ascend/cann-9.0.0/lib64/plugin/opskernel:/usr/local/Ascend/cann-9.0.0/lib64/plugin/nnengine:/usr/local/Ascend/cann-9.0.0/opp/built-in/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64:/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/driver/lib64/common:${LD_LIBRARY_PATH}
+ENV PATH=/flagos/bin:/usr/local/Ascend/cann-9.0.0/bin:/usr/local/Ascend/cann-9.0.0/tools/ccec_compiler/bin:${PATH}
+ENV PYTHONPATH=/opt/flagtree:/usr/local/Ascend/cann-9.0.0/python/site-packages:/usr/local/Ascend/cann-9.0.0/opp/built-in/op_impl/ai_core/tbe
 # Match the audited Ascend CI registration policy for FlagGems 5.4.0.
 ENV USE_FLAGGEMS=1 VLLM_FL_FLAGOS_WHITELIST=zeros
 WORKDIR /app
