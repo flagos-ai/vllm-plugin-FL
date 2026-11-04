@@ -30,6 +30,7 @@ def _selector(flag_gems_enabled, blacklist):
     namespace = {
         "current_platform": SimpleNamespace(
             vendor_name="metax",
+            device_type="cuda",
             is_tpu=lambda: False,
             is_cuda=lambda: False,
             is_cpu=lambda: False,
