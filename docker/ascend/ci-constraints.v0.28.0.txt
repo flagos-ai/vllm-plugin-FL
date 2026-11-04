@@ -1,0 +1,5 @@
+# Transitive CI dependencies observed in the successful full test run.
+iniconfig==2.3.0
+pluggy==1.6.0
+execnet==2.1.2
+pyproject-hooks==1.3.3

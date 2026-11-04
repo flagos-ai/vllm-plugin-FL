@@ -1,211 +1,128 @@
-# Ascend 910C: vLLM 0.28.0 empty
+# Ascend 910C: vLLM 0.28.0 CI image
 
-The image keeps the CANN 9.0.0 and torch_npu 2.10 runtime from the earlier
-910C environment:
+`Dockerfile.v0.28.0` builds the validated Ascend runtime on FlagOS runtime 2.3.0.
+`Dockerfile` contains the same recipe for the default Ascend build path.
 
-```text
-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3
-```
+Published tag: `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci`.
+Runner label: `flagcicd-ascend-910c-k8s-vllm028`.
 
-The Dockerfile removes its vLLM 0.20.2 installation and installs upstream
-`v0.28.0` with `VLLM_TARGET_DEVICE=empty`. The resulting package version is
-`0.28.0+empty`; no NVIDIA vLLM extension is required.
+## Fixed stack
 
-| Component | Version / source |
+| Component | Version or source |
 | --- | --- |
-| Python | 3.11.15, aarch64 |
-| PyTorch / torch_npu | 2.10.0+cpu / 2.10.0 |
-| vLLM | 0.28.0+empty (`v0.28.0`) |
-| FlagTree | 0.6.2a1+ascend3.5, supplying Triton 3.5.1 |
-| FlagGems | `3b406c36212744b98b9720bf6d0a5387c09fe96b` |
-| cann-shmem | 1.6.0 (FlagTree TLE import dependency) |
-| NumPy | 1.26.4 (FlagGems requirement) |
+| Base | `harbor.baai.ac.cn/flagos-runtime/flagos-runtime-ascend-cann9.0.0-910c@sha256:6a4692bfa392be9cc97bcf5302362b9393d9867a2b59d23c873fcde4c08cca04` |
+| CANN / Python | 9.0.0 / 3.11.15, aarch64 |
+| torch / torch-npu | 2.10.0+cpu / 2.10.0 |
+| vLLM | 0.28.0+empty, commit `2cf0a6915ce544dc493a0990f2ea38d81601128a` |
+| FlagTree / Triton | 0.6.2a1+ascend3.5 / 3.5.1; FlagTree supplies Triton |
+| FlagGems | commit `3b406c36212744b98b9720bf6d0a5387c09fe96b`, package 5.0.2 |
+| FL wheel / dispatch policy | commit `9a7eaf1191999422682bf5c6d1cf7b3f88d253b5` |
+| cann-shmem / NumPy | 1.6.0 / 1.26.4 |
 
-FlagTree and the FlagGems `qwen-vllm_for_ascend` branch follow the
-[official Ascend manual](https://github.com/flagos-ai/FlagTree/wiki/User-manual-for-ascend),
-checked on 2026-09-10. `cann-shmem` is distributed through the
-[official CANN package index](https://ascend.devcloud.huaweicloud.com/cann/pypi/simple/).
-Standalone `triton` / `triton-ascend` distributions must be removed before
-installing FlagTree because they write to the same Python module directory.
+The base's CANN/PyTorch stack is retained. FlagTree and FlagGems are replaced by
+these fixed versions. The FlagCX Python/Torch plugin is uninstalled; the tested
+inference route uses HCCL. FlagGems uses Python/Triton operators with
+`USE_C_EXTENSION=0`. The image includes a non-editable FL wheel; shared CI then
+overlays the checked-out branch through its existing setup script.
 
-Build isolation must remain disabled for vLLM and the plugin: upstream build
-requirements target another PyTorch version. Runtime constraints preserve the
-CPU PyTorch and NPU adapter while installing vLLM's common dependencies.
-FlagGems is installed without its hardware extras, which specify an older stack.
+The base normally prepends `/opt/flagtree` (0.7.0) to Python's search path.
+`scripts/runtime-env.sh` replaces the dynamic compiler selection profile and
+keeps the fixed `/flagos` installation active, including in non-login shells.
+No package installation is performed by the image entrypoint.
 
-The upstream dependency metadata currently conflicts: OpenCV 4.13 requires
-NumPy >= 2 on Python 3.11, while this FlagGems revision pins NumPy 1.26.4.
-The image retains FlagGems's pin after installing vLLM common requirements;
-`pip check` will report this conflict. Video processing is not validated by
-the text/image inference checks. The inherited CANN profiler may also report
-optional dependency conflicts.
+## Build
 
-## Build and CI
-
-Build the image from the repository root:
+Run on a native ARM64 Docker host from the repository root:
 
 ```bash
-docker/build.sh --platform ascend --target ci
+bash docker/build.sh --platform ascend --target ci \
+  --image-name vllm-plugin-fl-ascend --image-tag 0.28.0-ci-build
 ```
 
-This produces `harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci`,
-matching `ci_image` in `.github/configs/ascend.yml`. Pass `--image-name` or
-`--image-tag` only when publishing somewhere else.
+The helper selects `Dockerfile.v0.28.0` and prepares immutable source checkouts
+under `docker/ascend/sources/`. These checkouts are ignored by Git and included
+in the Docker build context, so wheel versions and source manifests remain
+traceable. Rebuilds reuse existing pinned checkouts.
 
-The shared CI currently uses the published
-`harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci` image. Build and publish a
-replacement tag before updating `ci_image` in `.github/configs/ascend.yml`;
-changing the configuration does not publish it.
-`.github/scripts/ascend/setup.sh` checks the runtime versions and rejects an
-old image instead of silently testing vLLM 0.20.2.
-
-The CI image also pins the pytest plugins used by the shared workflows. The
-setup script performs only the editable plugin overlay and version checks, so
-test startup does not depend on PyPI availability on the NPU runner.
-
-The Dockerfile prepares the runtime and test dependencies, but does not install
-this repository's wheel. For a self-contained image, install the plugin
-non-editably from a checkout and publish the resulting image separately. The
-shared CI overlays the pull-request checkout with an editable install so that
-each run tests the submitted source.
-
-For a deployable image, install a wheel from the selected immutable plugin
-revision without replacing the prepared dependencies:
+For a direct Docker build, prepare the same context first:
 
 ```bash
-python -m pip wheel --no-build-isolation --no-deps --wheel-dir /tmp/vllm-fl-wheels .
-python -m pip install --no-deps --force-reinstall /tmp/vllm-fl-wheels/vllm_plugin_fl-*.whl
+bash docker/ascend/scripts/prepare-v0.28.0.sh
+docker build --target ci -f docker/ascend/Dockerfile.v0.28.0 \
+  -t vllm-plugin-fl-ascend:0.28.0-ci-build docker/ascend
 ```
 
-## Inference settings
+Targets: `release` installs the inference stack; `ci` adds test/build tools;
+`dev` aliases the prepared CI environment. This recipe validates the versions
+above and rejects incompatible version build arguments.
 
-Select the NPUs assigned to the job and load the CANN environment before
-starting inference. Replace the example device ID with the device IDs assigned
-on your host:
+Proxy values come from the caller's environment. If required, add
+`--build-arg http_proxy --build-arg https_proxy --build-arg HTTP_PROXY
+--build-arg HTTPS_PROXY` to the helper invocation. Do not put authentication
+values in source files.
+
+## CI tools
+
+`ci-requirements.v0.28.0.txt` pins pytest 8.3.2, coverage 7.16.1, pytest-cov 7.1.0,
+pytest-json-report 1.5.0, pytest-metadata 3.1.1, pytest-timeout 2.4.0,
+pytest-xdist 3.6.1, decorator 5.1.1, build 1.2.2.post1 and scikit-build-core 0.11.0.
+The transitive tool dependencies are pinned separately.
+
+FlagGems is built with scikit-build-core 0.12.2 using `wheel.cmake=false` because
+its C++ extension is disabled. Only after that wheel is installed does the CI
+stage select 0.11.0, as required by the FL plugin's build metadata.
+
+The shared setup in this branch also installs its pinned FlagGems-vllm package
+through `.github/scripts/install_flaggems_vllm.py`. That existing behavior is
+preserved; it is separate from the fixed FlagGems package in this image.
+
+## Publish
+
+The selected base contains authenticated proxy URLs in its inherited image
+history. Before publishing, scrub the metadata using the included save/load
+helper. The helper asserts identical filesystem layers and runtime config,
+retains the archive and writes a report. It does not execute deletion commands.
 
 ```bash
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-export VLLM_PLUGINS=fl
-export VLLM_FL_PLATFORM=ascend
-export ASCEND_RT_VISIBLE_DEVICES=0
-export GLOO_SOCKET_IFNAME=lo
-export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+python3 docker/ascend/scripts/sanitize-image-history.py \
+  --source vllm-plugin-fl-ascend:0.28.0-ci-build \
+  --target harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci \
+  --archive /path/with/free-space/ascend-ci-clean.tar \
+  --report /path/with/free-space/ascend-ci-publication.json
+docker login harbor.baai.ac.cn
+docker push harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci
 ```
 
-`GLOO_SOCKET_IFNAME=lo` avoids hostname resolution delays for a single host;
-multi-host jobs must use an interface reachable by all ranks.
+If the host Docker daemon cannot push because of its overlay mount issue, a
+registry client can push the same sanitized Docker archive directly:
+`crane push /path/with/free-space/ascend-ci-clean.tar
+harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-ascend-ci`.
 
-Ascend defaults to `ModelRunnerFL` (`VLLM_USE_V2_MODEL_RUNNER=0`). The upstream
-V2 runner requires CUDA/UVA operations unavailable on NPU. Eager execution is
-the validated deployment setting below; NPU graph execution is experimental
-and requires an explicit eager compilation backend. Use:
+History sanitization changes the image config ID and manifest digest, not the
+filesystem layers or startup configuration.
 
-```bash
-vllm serve /models/Qwen3-0.6B \
-  --host 127.0.0.1 --port 7023 \
-  --tensor-parallel-size 1 --dtype bfloat16 \
-  --max-model-len 2048 --gpu-memory-utilization 0.3 \
-  --enforce-eager --no-enable-chunked-prefill \
-  --no-async-scheduling --no-enable-prefix-caching
-```
+## Validation and limits
 
-Run long installations and inference jobs in a named `tmux` session. The
-driver must be usable inside the container. The validated container uses
-`--privileged`; keep process device selection explicit and adapt the driver
-mounts to your host.
+The fixed runtime above, with the listed CI tools, passed the pinned source's
+complete Ascend 910C matrix on devices 14 and 15: 798 unit tests passed with
+15 skips, 16 functional tests passed, Qwen3.6-27B and Qwen3.6-35B-A3B passed TP2
+eager offline inference and text/image serving, and benchmark smoke completed
+five requests with zero failures. The image with tools preinstalled then passed
+runtime/NPU checks, official setup and wheel construction without adding tools;
+164 fixed package versions matched the full test environment.
 
-The multimodal smoke example recreates the reference document's 300x200
-white image, blue rectangle and yellow "Hello VLM" text. It checks the
-capital-of-France answer and the image description, writing outputs and
-token IDs to JSON:
+Those results apply to FL commit `9a7eaf1191999422682bf5c6d1cf7b3f88d253b5`.
+They are not a claim that the later `ci/thead-0.28` branch and its separate
+FlagGems-vllm setup have already passed a new full run.
 
-```bash
-python examples/ascend_multimodal_smoke.py \
-  --model /models/Qwen3.6-27B \
-  --memory 0.8 --max-model-len 4096 \
-  --output qwen27.json
-```
+`runtime-constraints.txt` protects the CPU torch/NPU adapter and pinned runtime.
+`reference-constraints.v0.28.0.txt` constrains common dependencies to the earlier
+validated image's versions. OpenCV is explicitly limited to 4.11 for NumPy 1.26.4
+compatibility; the vLLM dependency metadata is patched accordingly. CANN profiler
+tools retain inherited optional-tool dependency gaps and OpenTelemetry conflicts;
+`pip check` is not globally clean. This validation does not cover profiling tools,
+model graph mode, quantization, or performance tuning.
 
-The example uses TP2 and disables graph capture, chunked prefill, prefix
-caching and async scheduling. Its lower defaults (`--memory 0.5`,
-`--max-model-len 2048`) also support the 27B development check when assigned
-cards have less free memory. Allocate sufficient free memory before using
-the larger settings or the 35B-A3B model.
-
-The Ascend operator policy retains native torch_npu implementations for
-known issues in this FlagGems revision: `argmax` registration, vision GELU
-compilation, GDN state-reset `index_put`, and non-contiguous `index` reads.
-The latter is required for correct visual RoPE caches. GDN prefill also
-bridges the upstream state layout and preserves the channel-contiguous
-convolution output expected by vLLM 0.28.
-
-CANN 9.0's ATB RoPE kernel is used only for FP16 and BF16 inputs. FP32 RoPE
-runs through the reference implementation before ATB is launched, avoiding a
-deferred device error that would otherwise surface during a later operation.
-The FlagGems adapter also accepts the six-argument Ascend RoPE interface in the
-pinned `qwen-vllm_for_ascend` revision.
-
-Unquantized modular MoE experts use native `torch_npu.npu_grouped_matmul`.
-The legacy Ascend `fused_experts_impl` patch does not cover vLLM 0.28's
-modular entry point. Generic Triton MoE kernels failed on 910C with both
-UB overflow and invalid memory accesses after reducing the tile size.
-The native bridge preserves expert mapping, biases and the prepare stage's
-input-side router weighting. Other quantized MoE formats and MoE LoRA remain
-unvalidated.
-
-DeepSeek-V4-Flash ModelSlim checkpoints use the plugin's
-`fl_modelslim_w8a8` quantization config. On 910C, the adapter uses BF16
-short-window attention and a native torch_npu W8A8 MoE path. The validated
-configuration uses TP8, one output projection group per rank, and a maximum
-sequence length equal to the model's 128-token sliding window:
-
-```bash
-vllm serve /models/DeepSeek-V4-Flash-w8a8-mtp \
-  --tensor-parallel-size 8 --dtype bfloat16 \
-  --quantization fl_modelslim_w8a8 \
-  --max-model-len 128 --max-num-seqs 1 \
-  --max-num-batched-tokens 128 --gpu-memory-utilization 0.85 \
-  --enforce-eager
-```
-
-Long-context, MTP speculative decoding, graph capture, and performance tuning
-for this fallback path remain outside the validated configuration.
-
-The vLLM Triton top-k/top-p sampler is disabled on Ascend. FlagTree 0.6.2a1
-cannot lower its large-batch kernel on 910C, including the profiling batch
-used by the OpenAI server. Sampling uses vLLM's PyTorch implementation; this
-allows the normal server batch-size default without changing request behavior.
-
-## Validation scope
-
-The shared CI runs setup, unit and functional tests, offline and serving
-inference, and a benchmark smoke test on the configured 910C runner. See the
-[Ascend platform cases](../../tests/platforms/ascend.yaml) for the active
-matrix and [PR #487](https://github.com/flagos-ai/vllm-plugin-FL/pull/487)
-for SHA-bound validation results and limitations. Graph mode and video
-processing are outside the supported deployment settings in this guide.
-
-## Model provisioning
-
-Provision model weights before starting CI. The mount in
-[the Ascend CI configuration](../../.github/configs/ascend.yml) must expose the
-model paths declared by the model YAML files. For the current matrix, the
-container layout is:
-
-```text
-/data/models/
-└── Qwen/
-    ├── Qwen3-0.6B/
-    ├── Qwen3.6-27B/
-    └── Qwen3.6-35B-A3B/
-```
-
-E2E jobs expect these model directories to be provisioned before CI starts.
-The workflow validates the selected model paths with the shared
-`.github/scripts/generate_matrix.py --check-models` check before running
-`tests/run.py`.
-
-To avoid occupying a scarce NPU runner during development, validate changes
-on the host with the same image, setup script, and `tests/run.py` command
-first. Ascend is enabled in the automatic PR platform registry. Manual runs of
-the same `CI` workflow also use that registry to select enabled platforms.
+Model weights stay outside the image. The existing Ascend workflow volume mounts
+and device selection remain in `.github/configs/ascend.yml`; provision those paths
+and devices on the named runner before running CI.
