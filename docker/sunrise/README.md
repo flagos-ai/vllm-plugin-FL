@@ -56,10 +56,13 @@ The `dev` stage adds development tools, `ci` adds test dependencies, and
 For git-only network configuration, set `SUNRISE_GIT_CONFIG` to a local git
 config file when invoking `docker/build.sh`; it is mounted as an optional
 BuildKit secret for the provider clone and is not copied into image layers.
-If GitHub Git access is unavailable, `SUNRISE_FLAGGEMS_VLLM_BUNDLE` can supply
-a Git bundle whose `HEAD` is the pinned provider commit. It is mounted only
-during the provider installation; Git still checks out the exact commit and
-the shared installer verifies the original source identity.
+If GitHub Git access is unavailable, set `SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR`
+to a directory containing only the public `flaggems-vllm.bundle`, whose `HEAD`
+is the pinned provider commit. This named build context is bound read-only
+during provider installation; the default empty stage uses online Git instead.
+Git still checks out the exact commit and the shared installer verifies the
+original source identity. Only the private git configuration uses a secret;
+the public source bundle is not subject to BuildKit secret size limits.
 
 During image construction, `TORCH_DEVICE_BACKEND_AUTOLOAD=0` is scoped to
 build processes so torch package metadata can be read without host devices.

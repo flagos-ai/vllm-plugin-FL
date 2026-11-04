@@ -278,6 +278,11 @@ def test_abort_failure_is_logged_and_never_retried(loaded, caplog, failure):
     with caplog.at_level(logging.ERROR):
         comm.destroy()
         comm.destroy()
+        # destroy() deliberately uses a bounded join. Its daemon can still be
+        # formatting the first traceback after the fixture's 30 ms timeout;
+        # wait for this test-owned thread before inspecting its final log.
+        comm._destroy_thread.join(2)
+        assert not comm._destroy_thread.is_alive()
     assert "abort failed" in caplog.text
     assert "cleanup is incomplete" in caplog.text
     if failure == "return_code":
