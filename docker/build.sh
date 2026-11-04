@@ -119,6 +119,7 @@ VERSIONS (override via environment variables):
     SUNRISE_BASE_IMAGE   Sunrise vendor stack (default: ${SUNRISE_BASE_IMAGE})
     SUNRISE_VLLM_VERSION vLLM empty version (default: ${SUNRISE_VLLM_VERSION})
     SUNRISE_GIT_CONFIG   Optional git-only config file passed as a BuildKit secret
+    SUNRISE_FLAGGEMS_VLLM_BUNDLE Optional offline Git bundle for the pinned provider
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
@@ -345,6 +346,10 @@ elif [[ "${PLATFORM}" == "sunrise" ]]; then
     if [[ -n "${SUNRISE_GIT_CONFIG:-}" ]]; then
         [[ -f "${SUNRISE_GIT_CONFIG}" ]] || err "SUNRISE_GIT_CONFIG file does not exist."
         BUILD_SECRET_ARGS+=(--secret "id=git_config,src=${SUNRISE_GIT_CONFIG}")
+    fi
+    if [[ -n "${SUNRISE_FLAGGEMS_VLLM_BUNDLE:-}" ]]; then
+        [[ -f "${SUNRISE_FLAGGEMS_VLLM_BUNDLE}" ]] || err "SUNRISE_FLAGGEMS_VLLM_BUNDLE file does not exist."
+        BUILD_SECRET_ARGS+=(--secret "id=flaggems_vllm_bundle,src=${SUNRISE_FLAGGEMS_VLLM_BUNDLE}")
     fi
     BUILD_ARGS+=(
         --build-arg "SUNRISE_BASE_IMAGE=${SUNRISE_BASE_IMAGE}"
