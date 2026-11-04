@@ -308,7 +308,15 @@ if current_platform.dist_backend == "flagcx" or current_platform.device_type in 
     graph_capture = _device_graph_capture
 
 else:
-    from vllm.distributed.parallel_state import graph_capture
+    from vllm.distributed.parallel_state import graph_capture as _upstream_graph_capture
+
+    def graph_capture(
+        device: torch.device,
+        graph_capture_context: GraphCaptureContext | None = None,
+    ):
+        if graph_capture_context is not None:
+            return _device_graph_capture(device, graph_capture_context)
+        return _upstream_graph_capture(device=device)
 
 
 AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
