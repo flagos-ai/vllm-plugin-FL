@@ -141,6 +141,38 @@ def _is_gcu_platform() -> bool:
         return False
 
 
+def _register_gcu_impls() -> int:
+    """Attach the GCU impls to the ``_C`` fragment library (GCU-owned copy).
+
+    Everything ``_C``-related for this platform lives here instead of in the
+    shared ``vllm_fl/ops/_C_ops_registry.py``: that file is cross-vendor, and
+    registering platform fallbacks while it is imported would also hit metax /
+    sunrise / musa / txda (they fail to load ``vllm._C`` just like GCU).
+
+    ``_C`` is registered with ``CompositeExplicitAutograd`` because these are
+    mutation ops (``Tensor!`` schemas); a concrete key would need a separate
+    registration per device and would not cover the CPU tensors used while
+    requantizing FP8 weights.
+    """
+    from vllm_fl.ops._C_ops_registry import register_op_schemas
+
+    # Idempotent, and creates the FRAGMENT library whose handle we must keep
+    # alive; no-op if vLLM's native extension is available (real ``_C``).
+    register_op_schemas()
+    lib = getattr(register_op_schemas, "_lib", None)
+    if lib is None:
+        return 0
+
+    registered = 0
+    for name, fn in _GCU_IMPLS:
+        try:
+            lib.impl(name, fn, "CompositeExplicitAutograd")
+            registered += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to register _C op impl '%s': %s", name, exc)
+    return registered
+
+
 def apply_fp8_quant_ops_gcu_patch() -> None:
     """Register the three ``_C`` fp8 quantization ops for GCU only."""
     global _patched
@@ -152,14 +184,7 @@ def apply_fp8_quant_ops_gcu_patch() -> None:
         return
 
     try:
-        from vllm_fl.ops._C_ops_registry import (
-            register_composite_impls,
-            register_op_schemas,
-        )
-
-        # Idempotent: no-op when vLLM's native extensions are available.
-        register_op_schemas()
-        registered = register_composite_impls(_GCU_IMPLS)
+        registered = _register_gcu_impls()
         if registered:
             _patched = True
             logger.info(

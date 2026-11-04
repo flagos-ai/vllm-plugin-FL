@@ -74,29 +74,6 @@ _CUDA_FALLBACK_IMPLS = [
 ]
 
 
-def register_composite_impls(impls) -> int:
-    """Attach vendor-specific implementations to the ``_C`` fragment library.
-
-    Called by backend patches (e.g. GCU's ``fp8_quant_ops``) so that platform
-    specific fallbacks live next to their backend instead of in this shared
-    module.  Returns the number of implementations actually registered (0 when
-    the fragment library is not available, i.e. when the native vLLM extension
-    was loaded and no fallback schemas were defined).
-    """
-    lib = getattr(register_op_schemas, "_lib", None)
-    if lib is None:
-        return 0
-
-    registered = 0
-    for name, fn in impls:
-        try:
-            lib.impl(name, fn, "CompositeExplicitAutograd")
-            registered += 1
-        except Exception as exc:
-            logger.debug("Failed to register _C op impl '%s': %s", name, exc)
-    return registered
-
-
 def register_op_schemas():
     """Register _C op schemas if not already present."""
     if getattr(register_op_schemas, "_lib", None) is not None:
