@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import textwrap
 
-import pytest
-
 from tests.utils import platform_config
 from tests.utils.model_config import ModelConfig
 
@@ -156,22 +154,71 @@ def test_ascend_910c_caps_offline_profile_batch():
     )
 
 
-@pytest.mark.parametrize(
-    ("platform", "device", "case"),
-    [
-        ("ascend", "910c", "27b_tp2_graph"),
-        ("hygon", "bw1000", "27b_tp2_graph"),
-    ],
-)
-def test_serve_args_emits_structured_options_as_json(platform, device, case):
+def test_serve_args_emits_structured_options_as_json(tmp_path, monkeypatch):
     """Structured engine options must reach ``vllm serve`` as JSON.
 
     ``str()`` on a dict produces a Python repr with single quotes, which vLLM
     rejects with a pydantic json_invalid error before the server starts.
+    Booleans and scalars keep their existing shape.
     """
-    cfg = ModelConfig.load("qwen3_6", case, platform=platform, device=device)
+    models_dir = tmp_path / "models"
+    platforms_dir = tmp_path / "platforms"
+    monkeypatch.setattr(platform_config, "_PLATFORMS_DIR", platforms_dir)
 
+    _write(
+        models_dir / "qwen3_6" / "27b_tp2_graph.yaml",
+        """
+        llm:
+          model: "/data/models/Qwen/Qwen3.6-27B"
+          tensor_parallel_size: 2
+          max_model_len: 8192
+          enforce_eager: false
+          trust_remote_code: false
+          compilation_config:
+            cudagraph_mode: FULL_DECODE_ONLY
+            cudagraph_capture_sizes: [1, 2, 4, 8]
+        generate:
+          prompts:
+            - "Where is the capital of France"
+          sampling:
+            max_tokens: 100
+        serve:
+          endpoints: ["chat"]
+          max_tokens: 256
+        """,
+    )
+    _write(
+        platforms_dir / "demo.yaml",
+        """
+        platform: demo
+        vendor: test
+        device_types:
+          demo_card:
+            memory_gb: 80
+        tolerance: {}
+        device_overrides: {}
+        demo_card:
+          name: "demo_card"
+          tests: {}
+        """,
+    )
+
+    cfg = ModelConfig.load(
+        "qwen3_6",
+        "27b_tp2_graph",
+        models_dir=models_dir,
+        platform="demo",
+        device="demo_card",
+    )
     args = cfg.serve_args()
-    value = args[args.index("--compilation-config") + 1]
 
-    assert json.loads(value) == cfg.engine_kwargs()["compilation_config"]
+    value = args[args.index("--compilation-config") + 1]
+    assert json.loads(value) == {
+        "cudagraph_mode": "FULL_DECODE_ONLY",
+        "cudagraph_capture_sizes": [1, 2, 4, 8],
+    }
+
+    # Scalars and booleans are untouched by the JSON branch.
+    assert args[args.index("--max-model-len") + 1] == "8192"
+    assert "--enforce-eager" not in args
+    assert "--trust-remote-code" not in args
