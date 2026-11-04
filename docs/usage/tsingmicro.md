@@ -36,7 +36,11 @@ device view, preserving the real upstream V2 runner class and global
 `torch.cuda` namespace. TXDA V2 staged writes, block-table gathering and slot
 mapping use native Tensor copies and host integer metadata instead of the
 vendor compiler's incorrect pointer-table kernels. This synchronizes metadata
-and prioritizes correctness over throughput.
+and prioritizes correctness over throughput. V2 KV block zeroing uses real tensor views with the upstream segment geometry,
+including storage offsets, packed layer spans and virtual block splitting. The
+upstream pointer-table zeroing kernel left selected blocks unchanged on TXDA.
+The adapter clears only selected manager blocks and validates every ID before
+writing; unselected data and allocation padding are preserved.
 
 The image's accelerator memory query reports allocator pool sizes rather than
 whole-device memory. A TXDA-only compatibility hook routes
@@ -193,6 +197,10 @@ export FL_BACKEND=tsingmicro
 export FL_MODEL_BASE_PATH=/models
 export NCCL_P2P_DISABLE=1
 export TXDA_LAUNCH_KERNEL_SYNC=0
+unset VLLM_OMP_NUM_THREADS_SET_BY_VLLM
+export OMP_NUM_THREADS=32 MKL_NUM_THREADS=32
+export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
+export FL_TXDA_USE_VENDOR_GEMM=1
 ```
 
 `VLLM_TXDA_SYNC_COLLECTIVES=1` explicitly enables synchronized TXDA
@@ -246,6 +254,48 @@ padded rows, slot mappings across block boundaries and greedy sampling across
 two Triton blocks in both float32 and bfloat16. Passing this probe does not
 replace the model acceptance cases.
 
+The block-zeroing probe compares the entire underlying allocation against an
+independent physical-layout oracle, including nonzero guards and unselected
+blocks:
+
+```bash
+python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_kv_zeroer.py \
+  --implementation txda --dtype bfloat16 \
+  --output /work/task/outputs/kv-zeroer-bf16.json
+```
+
+Repeat with `--dtype float32`. The default `--implementation upstream` tests
+the unmodified upstream zeroer, which failed all four BF16 layouts in this
+image. All eight native adapter cases (four layouts per dtype) passed on TXDA.
+
+## BF16 GEMM preflight
+
+The V2 TXDA worker explicitly selects the image's vendor implementation
+`flag_gems.runtime.backend._tsingmicro.ops.mm.mm` for bias-free BF16
+unquantized linear layers, including the LM head. Batch dimensions are
+flattened and restored around the vendor GEMM. Other dtypes, biased layers
+and autograd retain the original provider. Set `FL_TXDA_USE_VENDOR_GEMM=0`
+to opt out. The first call records the provider, shapes, device and actual
+PyTorch CPU thread count in the worker log.
+
+```bash
+source /work/task/env.sh
+python /work/vllm-plugin-FL/tools/tsingmicro_py310/probe_vendor_mm.py \
+  --bf16-only --output /work/task/outputs/vendor-mm-bf16.json
+```
+
+All 18 audited BF16 cases passed on TXDA: decode and prefill MLP shapes,
+vision projection, LM head and narrow GDN projections. The independent CPU
+float32 reference is rounded to BF16; the normalized L2 limit is 0.01 and
+maximum absolute error limit is 0.002. The largest observed absolute error
+was 0.0009765625. The separate FP32 router case failed its normalized L2
+limit, so FP32 is excluded from this adapter.
+
+Explicit CPU thread settings preserve 32 threads when vLLM creates each
+worker. The 1800-second model RPC timeout permits first-use vendor kernel
+compilation; it does not relax the original gate's output assertions or
+512/128-token budgets.
+
 ## Model acceptance
 
 Use the unchanged cases in `tools/adaptation-gate-cases` for both
@@ -290,13 +340,16 @@ reinitialization. Keep shell scripts in LF format.
 
 ## Validation status
 
-The candidate passed **545 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
+The candidate passed **595 CPU tests** in one run on 2026-11-04 (Python 3.13.9,
 PyTorch 2.10.0+cpu, pytest 9.0.2; exit 0, no skips). These cover TXDA platform
 configuration, packed/legacy K/V numerics, Mamba copy semantics, sampling,
 workspace and allocator contracts, accelerator memory routing, FlagCX wrapper
 packaging, stream use and communicator cleanup, plus opt-in bootstrap and V2
 stream namespace isolation, 0.32 worker/PP protocol, native IR priorities and
-context-free SDPA page capabilities. The Mamba cases include
+context-free SDPA page capabilities, and BF16 GEMM math, dispatch guards and
+provider error propagation. KV zeroing regressions cover seven physical
+layouts, virtual blocks, mixed-dtype overlays, storage lifetime, manager mapping
+and complete ID validation before any write. The Mamba cases include
 overlapping copies, padded storage, multiple types, uniform cache groups,
 noncopyable tail states and failed-plan rollback.
 
@@ -308,7 +361,10 @@ including float32/bfloat16 reductions, int32/int64 aggregation, variable-size
 collectives, broadcast and nested groups. All tensor communication used FlagCX.
 Qwen3.6-27B has reached API readiness with both ranks reporting the actual
 upstream V2 runner class and pinned FlagCX library. The two-model hardware
-acceptance gate has **not passed** and remains in progress.
+acceptance gate has **not passed**. The earlier inference run was stopped
+to address CPU GEMM fallback performance. After the native KV zeroer passed all
+eight hardware cases, the 27B original acceptance gate was restarted with the
+BF16 provider and the actual upstream V2 runner; 35B remains pending.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful
