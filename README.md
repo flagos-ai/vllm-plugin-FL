@@ -31,9 +31,9 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | MiniCPM-o 4.5 | Supported | [example](./examples/minicpm/) |
 | GLM-5 | Supported | [example](./examples/glm_5_offline_inference.py) |
 | Qwen3.5-35B-A3B | Supported | [example](./examples/qwen3_5_offline_inference.py)  |
-| BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
+| BAAI/bge-m3 | Supported | [upstream implementation](https://github.com/vllm-project/vllm/blob/v0.32.0/vllm/model_executor/models/roberta.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
-| DeepSeek-V4-Flash (ModelSlim W8A8, Ascend TP8) | Supported | [Ascend guide](./docker/ascend/README.md) |
+| DeepSeek-V4-Flash (ModelSlim W8A8, Ascend TP8) | Supported on vLLM 0.28 | [0.28 guide](https://github.com/flagos-ai/vllm-plugin-FL/blob/0.4.0-dev/docker/ascend/README.md) |
 
 ### Supported Chips
 
@@ -59,8 +59,8 @@ For NVIDIA on `0.5.0-dev`, follow the [NVIDIA guide](./docs/usage/nvidia.md)
 for the full official vLLM 0.32 CUDA image, pinned development dependencies,
 upstream V1/V2 runners and regression commands. FlagGems remains enabled.
 It replaces the previous NVIDIA 0.28 setup.
-The generic setup below applies to the other backends; their 0.32 validation
-is outside the NVIDIA adaptation. See also the
+For Ascend 0.32, follow the [Ascend guide](./docs/usage/ascend.md).
+The generic setup below applies to backends that still target vLLM 0.28. See also the
 [T-Head PPU guide](./docs/usage/thead.md),
 [Enflame S60 guide](./docs/usage/enflame.md), and
 [Tsingmicro TXDA guide](./docs/usage/tsingmicro.md).
@@ -182,7 +182,7 @@ If there are multiple plugins in the current environment, you can specify use vl
 ### Additional Steps for Ascend
 
 For native decode graph execution with vLLM 0.32, see the
-[Ascend graph guide](./docs/ascend-vllm032-graph.md).
+[Ascend graph guide](./docs/usage/ascend.md#native-decode-graph-mode).
 
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
    and FlagGems revisions
@@ -210,7 +210,7 @@ For native decode graph execution with vLLM 0.32, see the
     pass `--enforce-eager` on the command line. For native NPU graph capture and
     replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=1`,
     `VLLM_FL_FLAGOS_WHITELIST=zeros`, and the component versions
-    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm032-graph.md).
+    and serving arguments in the [Ascend graph guide](./docs/usage/ascend.md#native-decode-graph-mode).
 
 
 ### Run a Task

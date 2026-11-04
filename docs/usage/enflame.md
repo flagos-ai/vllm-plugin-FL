@@ -254,10 +254,9 @@ Run each Gate model in both eager and graph modes, preserving the original
 requests and checks. Record the actual plugin commit, model, mode, port, and
 server arguments alongside the raw scenario JSONs. Acceptance requires every
 `summary.passed` and every request's checks to pass, rather than only a pytest
-exit code. The S60 capacity validation for 35B graph used TP2, max length 32768,
-max sequences 256, memory utilization 0.94, and FP32 Mamba state; the 8192-token
-CI smoke settings above do not reproduce that capacity test. Retain FP32 Mamba
-state and the original quality checks when repeating it.
+exit code. The shorter CI smoke settings do not establish long-context
+capacity. Retain FP32 Mamba state and the original quality checks when running
+the full gate.
 
 The pinned dependency image has hardware validation history, but it does not
 establish acceptance of an arbitrary plugin checkout. Re-run the relevant tests

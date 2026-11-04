@@ -118,14 +118,11 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   -d '{"model":"metax-qwen36","messages":[{"role":"user","content":"The capital of France is"}],"max_tokens":256,"temperature":0}'
 ```
 
-## Tested configurations
+## Serving scope
 
-| Model | TP | Mode | Result |
-|---|---|---|---|
-| Qwen3.6-27B | 4 | eager | serve + chat smoke: 2 passed |
-| Qwen3.6-35B-A3B | 4 | eager | serve + chat smoke: 2 passed |
-| Qwen3.6-27B | 4 | graph (PIECEWISE) | serve + chat smoke: 2 passed |
-| Qwen3.6-35B-A3B | 4 | graph (PIECEWISE) | serve + chat smoke: 2 passed |
+The serving recipes cover Qwen3.6-27B and Qwen3.6-35B-A3B with TP4, in eager
+or PIECEWISE graph mode. Run the model gate for the exact revision and record
+results in the PR or CI artifacts.
 
 ## Automated tests
 

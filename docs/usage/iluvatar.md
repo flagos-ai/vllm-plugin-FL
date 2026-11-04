@@ -77,7 +77,8 @@ git clone https://github.com/flagos-ai/vllm-plugin-FL.git
 cd vllm-plugin-FL
 
 export REPO_DIR="$PWD"
-export MODEL_DIR=/data/models/Qwen/Qwen3.6-27B
+export MODEL_ROOT=/path/to/models
+export MODEL_DIR="$MODEL_ROOT/Qwen3.6-27B"
 export MODEL_NAME=qwen3.6-27b
 export TP_SIZE=4
 
@@ -86,8 +87,8 @@ test -f "$MODEL_DIR/config.json"
 
 The validated models are `Qwen3.6-27B` (dense) and `Qwen3.6-35B-A3B` (MoE). The
 image expects the host model directory to be mounted at
-`/data/models/Qwen`, so a host directory such as `/mnt/share/user_homes/models`
-is mounted to `/data/models/Qwen` and the model is addressed inside the container
+`/data/models/Qwen`, so mount the host directory selected by `MODEL_ROOT`
+to `/data/models/Qwen` and the model is addressed inside the container
 as `/data/models/Qwen/Qwen3.6-27B`.
 
 If the model is not already present, it can be downloaded with ModelScope. Keep
@@ -192,7 +193,7 @@ docker run --rm -d \
   -v /dev:/dev \
   -v /lib/modules:/lib/modules \
   -v /data:/data \
-  -v /mnt/share/user_homes/models:/data/models/Qwen:ro \
+  -v "$MODEL_ROOT:/data/models/Qwen:ro" \
   -v /usr/local/corex-4.5.0/lib64/libcuda.so.1:/usr/local/corex/lib64/libcuda.so.1 \
   -v /usr/local/corex-4.5.0/lib64/libixml.so:/usr/local/corex/lib64/libixml.so \
   -e VLLM_PLUGINS=fl \
