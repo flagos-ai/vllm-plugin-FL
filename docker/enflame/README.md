@@ -1,12 +1,18 @@
 # Enflame S60 recipe for vLLM 0.28
 
-The recipe keeps the vendor torch 2.11.0+cpu / torch_gcu
-2.11.0+3.8.20260713 stack and installs the official vLLM 0.28.0 empty-device
-build. The FL plugin registers the GCU platform. The vendor base is:
+This recipe builds the vLLM 0.28 **inference development and CI** image on the
+required FlagOS runtime. It preserves the TOPS 1.10.6 SDK and vendor torch
+2.11.0+cpu / torch_gcu 2.11.0+3.8.20260713 stack. It does not install FlagScale
+or training frameworks. Both the Dockerfile and `docker/build.sh` default to:
 
 ```text
-harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853
+harbor.baai.ac.cn/flagos-runtime/flagos-runtime-enflame-tops1.10.6:2.3.0@sha256:6356cd26647a4cbd27f2ad9ece7281df888df7ec9e9c2dc3bb5aaa262f9097c6
 ```
+
+The runtime supplies Python 3.12.13 in `/flagos`; keep its inherited `PATH` and
+`BASH_ENV`. The prior vendor application image is not a build stage or filesystem
+donor. Its validation history below describes the previous image only and does
+not establish acceptance of the runtime-based rebuild.
 
 The installed packages are pinned to FlagGems 5.4.0, FlagTree
 0.7.0+enflame3.6 and triton-gcu 3.6.0+1.0.20260722. FlagTree's Enflame wheel
@@ -31,6 +37,10 @@ pointers are not yet translated to GCU device addresses. Disable speculative
 decoding for hybrid align-mode serving. Other speculative/cache combinations
 still require their own validation; accepting a configuration is not evidence
 of device support.
+
+## Historical vendor-image validation
+
+The following results belong to the previous vendor-based image.
 
 The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
 The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
@@ -57,7 +67,7 @@ with `--no-deps`; the dependency image does not bake in that checkout.
 See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
 model serving, and validation commands.
 
-## Build a local candidate
+## Build the runtime-based candidate
 
 Run long builds in a uniquely named tmux session and retain the build log.
 From a private checkout, the underlying build command is:
@@ -69,7 +79,12 @@ docker/build.sh --platform enflame --target ci \
 
 The example tag is a local build destination, not a published image.
 The default generated tag includes the selected stage, such as
-`v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push.
+`v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push. On hosts with slow PyPI access, add
+`--index-url https://mirrors.cloud.tencent.com/pypi/simple`. This changes only
+the public dependency index; Enflame wheels retain their official index and SHA256 checks.
+For Ubuntu package downloads, optionally add
+`--build-arg UBUNTU_MIRROR=https://mirrors.cloud.tencent.com/ubuntu`.
+Ubuntu repository signatures remain verified by apt.
 `.github/configs/enflame.yml` references the published vLLM 0.28 dependency
 image by digest. Enflame is enabled in `platforms.yml`, following main's
 existing `enflame-s60` runner label, devices `2,3` and `/data:/data` mount.
@@ -93,6 +108,13 @@ vendor torch/compiler constraints before installing vLLM with
 requirements or `.[test]` can replace vendor torch. The metadata guard
 checks the exact requested vLLM base version, empty build and vendor stack;
 it does not initialize hardware during Docker build.
+
+The CI stage includes `pytest-xdist`, the plugin's ModelScope dependency and
+FlagGems-vllm from the same fixed commit used by
+`.github/scripts/install_flaggems_vllm.py`. It installs that source with
+`--no-deps` and keeps pip's original GitHub `direct_url.json` identity so setup
+can reuse it. Builders may pass `FLAGGEMS_VLLM_GIT_MIRROR` to an equivalent Git
+transport mirror; the upstream commit pin remains unchanged.
 
 `xgrammar` can install upstream Triton while resolving the common
 requirements, overwriting FlagTree's `triton` namespace while leaving its
@@ -164,7 +186,7 @@ read-only. Keep the container's default private PID namespace because the
 test runner performs process cleanup. Use a unique task container and
 tmux sessions for setup, service and tests.
 
-On S60, Qwen3.6-35B-A3B was validated in TP2 graph mode with
+Historical vendor-image result: Qwen3.6-35B-A3B was validated on S60 in TP2 graph mode with
 `--gpu-memory-utilization 0.94`, `--max-model-len 32768`,
 `--max-num-seqs 256` and FP32 Mamba state. All five original Gate scenarios
 passed (26 requests and 260 checks), with their inputs and checks unchanged.
@@ -177,15 +199,24 @@ Inside that task container, from the private plugin checkout:
 ```bash
 bash .github/scripts/enflame/check.sh
 bash .github/scripts/enflame/setup.sh
-python tests/run.py --platform enflame --scope unit
-python tests/run.py --platform enflame --scope functional
-python tests/run.py --platform enflame --scope e2e --task inference \
-  --model qwen3_6 --case 27b_tp2_eager
+# Preview all registered Enflame nightly tests, including benchmark.
+python tests/run.py --platform enflame --device s60 --scope all \
+  --stage nightly --dry-run
+# Execute them. Use a distinct output directory for every validation attempt.
+python tests/run.py --platform enflame --device s60 --scope all \
+  --stage nightly --output-dir /logs/enflame-nightly
 ```
 
 The container must receive `VLLM_PLUGINS=fl`, the verified
 `TOPS_VISIBLE_DEVICES` pair and the runtime environment variables set by
-the Dockerfile. These suites supplement the original cases in
+the Dockerfile. The current Enflame matrix selects both 27B and 35B-A3B TP2 eager cases for
+inference, serving and nightly concurrent tests, plus serve benchmark smoke.
+Weekly falls back to nightly; PR is a subset. The documented graph examples
+are not registered in this branch. Run their original pytest files directly
+with `FL_TEST_MODEL`, `FL_TEST_CASE`, `FL_TEST_PLATFORM` and `FL_TEST_DEVICE`;
+a graph `--case` filter on `tests/run.py` otherwise selects no tests.
+
+These suites supplement the original cases in
 [`tools/adaptation-gate-cases`](../../tools/adaptation-gate-cases/README.md).
 Run the configured models in eager and graph modes and retain each raw
 result JSON; evaluate `summary.passed` and every request's checks before

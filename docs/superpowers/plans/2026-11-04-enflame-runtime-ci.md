@@ -62,3 +62,18 @@
 - Recon complete: private clone/branch, host accessible, base pulled, models present, no active device processes at initial inspection.
 - Design builder check: no material unanswered questions. User approved direct execution.
 - Configuration changes use build/runtime verification rather than tautological file-content unit tests.
+
+- Task 1: recipe defaults and CI packages committed at df5eb80; bash syntax and build-helper requested-base/output-tag checks passed. Candidate build-01 running in task tmux. Buildx 0.20.1 was extracted from Ubuntu package into task-local Docker config; host installation unchanged.
+- Ruling: configuration migration is verified by actual Docker build, compiler guard, and existing hardware CI suites rather than file-content tests.
+- Ruling: unregistered graph cases require direct original pytest invocation; tests/run.py filters these out and returns zero without executing them.
+
+- Dependency probe: numpy==1.26.4 plus opencv-python-headless==4.13.0.92 failed with ResolutionImpossible; numpy==2.3.5 passed. Matched reference image NumPy 2.3.5, transformers 5.6.0, huggingface-hub 1.33.0, xgrammar 0.2.8, opencv-python-headless 4.13.0.92; recipe committed at 5ee9676dd6eca0be9dda1c0a0d48c53651ca156e.
+- Network ruling: source clone stalled on host. Fetch official v0.28.0 locally, verify 2cf0a6915ce544dc493a0990f2ea38d81601128a, transfer SHA256-checked Git bundle via supplied bastion and expose a temporary Git cache only on Docker bridge. Build still verifies the exact official commit.
+
+- Build 04 succeeded; base layer prefix proved (16 runtime layers retained), compiler guard and device check passed. Setup failed on GitHub TLS while installing the required pinned FlagGems-vllm dependency.
+- Ruling: bake CI-pinned FlagGems-vllm into CI stage, preserving direct_url identity; optional task-local Git transport mirror avoids changing package identity. Build 05 at 1af55e7 running.
+- Host terminal long input was interrupted by bastion confirmation; verified no duplicate build/test process, rewrote task script as readable file and restarted normally.
+- Actual dependency metadata conflicts were retained in validation report; do not overwrite FlagTree or vendor Torch to make pip check superficially green.
+
+- Baseline hardware validation: UT/FT, 27B eager inference (1506s), 35B eager inference (1169.5s) passed. Candidate manifest a10eb502e815568815730684dbf4dd52bac1f4afda0b98679445ffaf252b3c4f published; final tag unchanged.
+- PR target advanced to ad8ebc972a7a2b8666796891f14ca81d674618b0 and reverted its earlier Enflame graph/Gate skips. Synchronize existing target changes to avoid duplicate patches/conflicts; preserve baseline test evidence and source transitions.
