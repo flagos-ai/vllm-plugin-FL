@@ -14,8 +14,22 @@ _LEGACY_PACKAGE = "triton.language.extra.tang"
 _LEGACY_LIBDEVICE = _LEGACY_PACKAGE + ".libdevice"
 
 
+def install_sunrise_options_compat():
+    """Supply missing generic-JIT hook metadata without changing launch options."""
+    compiler = importlib.import_module("triton.backends.sunrise.compiler")
+    options_cls = compiler.SunriseOptions
+    if not hasattr(options_cls, "launch_cooperative_grid"):
+        # FlagTree 3.6 shared JIT hooks read this NVIDIA/AMD option for their
+        # diagnostic repr and callback metadata. The PTPU compiler/launcher
+        # has no cooperative-grid mode. Keep it out of dataclass fields and
+        # instance dictionaries so parsing, serialization and hashes stay intact.
+        options_cls.launch_cooperative_grid = False
+    return options_cls
+
+
 def install_sunrise_libdevice_compat():
-    """Alias a missing historical namespace to executable PTPU device math."""
+    """Install matched FlagTree options and historical device-math compatibility."""
+    install_sunrise_options_compat()
     try:
         return importlib.import_module(_LEGACY_LIBDEVICE)
     except ModuleNotFoundError as exc:
