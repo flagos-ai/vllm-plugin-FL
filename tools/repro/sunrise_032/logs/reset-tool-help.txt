@@ -1,0 +1,18 @@
+# Historical pt_smi help excerpt; reference evidence only.
+# No device reset was executed in the recorded investigation.
+# The help does not establish PCIe/PCCL peer isolation support.
+# source_basename=pt-smi-help-readonly.txt
+# source_sha256=c6a1b7830a597ce59aa0c52296e0c570dfa7a21e27bb84ddd294c8cb47d90a94
+# original_1based_line_ranges=[[6, 7], [36, 38], [40, 41]]
+# Line numbering: original UTF-8 bytes decoded and split with str.splitlines(), including CR boundaries.
+# Redactions: Only the indicated help lines are retained; unrelated help sections are omitted.; No text inside the selected help lines was changed. No complete executable reset command is included.
+# Begin original lines 6-7
+L6:   -i,   --id=ID                     Target a specific GPU by ID.
+L7:                                     Note: valid alone or used with -q/-r/dmon/pmon
+# Begin original lines 36-38
+L36:     -r,   --gpu-reset               Trigger reset of the GPU.
+L37:                                     Can be used to reset the GPU HW state  in situations
+L38:                                     that would otherwise require a machine reboot.
+# Begin original lines 40-41
+L40:                                     Reset operations are not guaranteed to work in
+L41:                                     all cases and should be used with caution.

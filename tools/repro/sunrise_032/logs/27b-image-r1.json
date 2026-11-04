@@ -1,0 +1,413 @@
+{
+  "excerpt_kind": "selected_json_fields",
+  "provenance": {
+    "sources": [
+      {
+        "source_basename": "text_single.json",
+        "source_label": "27B shared Gate text_single",
+        "source_sha256": "3a01ee1b0b36987ce8b68f97b539351f91de568ec9b038b58e65ca59864244ae",
+        "original_1based_line_ranges": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            96,
+            101
+          ]
+        ],
+        "selected_json_pointers": [
+          "/summary",
+          "/case/scenario",
+          "/case/concurrency"
+        ]
+      },
+      {
+        "source_basename": "text_concurrent_8.json",
+        "source_label": "27B shared Gate text_concurrent_8",
+        "source_sha256": "e71cc9ca6529500e03a9b6be4effdaded876aa8e0f977bea4a4e82d78acbd9d9",
+        "original_1based_line_ranges": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            616,
+            621
+          ]
+        ],
+        "selected_json_pointers": [
+          "/summary",
+          "/case/scenario",
+          "/case/concurrency"
+        ]
+      },
+      {
+        "source_basename": "image_single.json",
+        "source_label": "27B shared Gate image_single",
+        "source_sha256": "baa944c411c240455cf8a02a8a1d53f8ace2375209957b0030eaf4ae1e173f13",
+        "original_1based_line_ranges": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            42,
+            42
+          ],
+          [
+            45,
+            58
+          ],
+          [
+            63,
+            63
+          ],
+          [
+            89,
+            90
+          ],
+          [
+            104,
+            109
+          ]
+        ],
+        "selected_json_pointers": [
+          "/summary",
+          "/case/scenario",
+          "/case/concurrency",
+          "/output/0/request_id",
+          "/output/0/text",
+          "/output/0/passed",
+          "/output/0/checks",
+          "/output/0/response/choices/0/finish_reason",
+          "/output/0/response/usage/completion_tokens",
+          "/output/0/response/usage/prompt_tokens"
+        ]
+      },
+      {
+        "source_basename": "image_concurrent_8.json",
+        "source_label": "27B shared Gate image_concurrent_8",
+        "source_sha256": "b20881c5f0b3caf54d96e3d665bf6972fda396f6ffa3d989df934aa41dd64983",
+        "original_1based_line_ranges": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            348,
+            348
+          ],
+          [
+            351,
+            364
+          ],
+          [
+            369,
+            369
+          ],
+          [
+            395,
+            396
+          ],
+          [
+            472,
+            472
+          ],
+          [
+            475,
+            488
+          ],
+          [
+            493,
+            493
+          ],
+          [
+            519,
+            520
+          ],
+          [
+            658,
+            658
+          ],
+          [
+            661,
+            674
+          ],
+          [
+            679,
+            679
+          ],
+          [
+            705,
+            706
+          ],
+          [
+            720,
+            725
+          ]
+        ],
+        "selected_json_pointers": [
+          "/summary",
+          "/case/scenario",
+          "/case/concurrency",
+          "/output/2/request_id",
+          "/output/2/text",
+          "/output/2/passed",
+          "/output/2/checks",
+          "/output/2/response/choices/0/finish_reason",
+          "/output/2/response/usage/completion_tokens",
+          "/output/2/response/usage/prompt_tokens",
+          "/output/4/request_id",
+          "/output/4/text",
+          "/output/4/passed",
+          "/output/4/checks",
+          "/output/4/response/choices/0/finish_reason",
+          "/output/4/response/usage/completion_tokens",
+          "/output/4/response/usage/prompt_tokens",
+          "/output/7/request_id",
+          "/output/7/text",
+          "/output/7/passed",
+          "/output/7/checks",
+          "/output/7/response/choices/0/finish_reason",
+          "/output/7/response/usage/completion_tokens",
+          "/output/7/response/usage/prompt_tokens"
+        ]
+      },
+      {
+        "source_basename": "mixed_concurrent_8.json",
+        "source_label": "27B shared Gate mixed_concurrent_8",
+        "source_sha256": "4622b43ff9f9818b34114fa854a177a73c704f9ba970267bc6e72c1a0d3e0f06",
+        "original_1based_line_ranges": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            548,
+            548
+          ],
+          [
+            551,
+            564
+          ],
+          [
+            569,
+            569
+          ],
+          [
+            595,
+            596
+          ],
+          [
+            672,
+            677
+          ]
+        ],
+        "selected_json_pointers": [
+          "/summary",
+          "/case/scenario",
+          "/case/concurrency",
+          "/output/6/request_id",
+          "/output/6/text",
+          "/output/6/passed",
+          "/output/6/checks",
+          "/output/6/response/choices/0/finish_reason",
+          "/output/6/response/usage/completion_tokens",
+          "/output/6/response/usage/prompt_tokens"
+        ]
+      }
+    ],
+    "redactions": [
+      "Input messages, image locations, private model path, served endpoint/port, response IDs, timings and unrelated response metadata omitted.",
+      "Only directly selected scalar outcomes, checks and per-scenario summaries retained; totals are explicitly derived."
+    ]
+  },
+  "model": "Qwen3.6-27B",
+  "derived_totals": {
+    "request_count": 26,
+    "passed_count": 21,
+    "failed_count": 5
+  },
+  "totals_method": "Sum of the five original per-scenario summary objects.",
+  "scenarios": [
+    {
+      "scenario": "text_single",
+      "concurrency": 1,
+      "summary": {
+        "request_count": 1,
+        "passed_count": 1,
+        "failed_count": 0,
+        "passed": true
+      },
+      "failed_outputs": []
+    },
+    {
+      "scenario": "text_concurrent_8",
+      "concurrency": 8,
+      "summary": {
+        "request_count": 8,
+        "passed_count": 8,
+        "failed_count": 0,
+        "passed": true
+      },
+      "failed_outputs": []
+    },
+    {
+      "scenario": "image_single",
+      "concurrency": 1,
+      "summary": {
+        "request_count": 1,
+        "passed_count": 0,
+        "failed_count": 1,
+        "passed": false
+      },
+      "failed_outputs": [
+        {
+          "request_id": "image-05",
+          "text": "",
+          "passed": false,
+          "checks": {
+            "non_empty": false,
+            "minimum_length": false,
+            "expected_semantics": false,
+            "expected_order": false,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          },
+          "finish_reason": "length",
+          "completion_tokens": 128,
+          "prompt_tokens": 1062
+        }
+      ]
+    },
+    {
+      "scenario": "image_concurrent_8",
+      "concurrency": 8,
+      "summary": {
+        "request_count": 8,
+        "passed_count": 5,
+        "failed_count": 3,
+        "passed": false
+      },
+      "failed_outputs": [
+        {
+          "request_id": "image-03",
+          "text": "",
+          "passed": false,
+          "checks": {
+            "non_empty": false,
+            "minimum_length": false,
+            "expected_semantics": false,
+            "expected_order": false,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          },
+          "finish_reason": "length",
+          "completion_tokens": 128,
+          "prompt_tokens": 189
+        },
+        {
+          "request_id": "image-05",
+          "text": "",
+          "passed": false,
+          "checks": {
+            "non_empty": false,
+            "minimum_length": false,
+            "expected_semantics": false,
+            "expected_order": false,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          },
+          "finish_reason": "length",
+          "completion_tokens": 128,
+          "prompt_tokens": 1050
+        },
+        {
+          "request_id": "image-08",
+          "text": "",
+          "passed": false,
+          "checks": {
+            "non_empty": false,
+            "minimum_length": false,
+            "expected_semantics": false,
+            "expected_order": false,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          },
+          "finish_reason": "length",
+          "completion_tokens": 128,
+          "prompt_tokens": 189
+        }
+      ]
+    },
+    {
+      "scenario": "mixed_concurrent_8",
+      "concurrency": 8,
+      "summary": {
+        "request_count": 8,
+        "passed_count": 7,
+        "failed_count": 1,
+        "passed": false
+      },
+      "failed_outputs": [
+        {
+          "request_id": "image-03",
+          "text": "",
+          "passed": false,
+          "checks": {
+            "non_empty": false,
+            "minimum_length": false,
+            "expected_semantics": false,
+            "expected_order": false,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          },
+          "finish_reason": "length",
+          "completion_tokens": 128,
+          "prompt_tokens": 189
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+# Sanitized line excerpts; not a complete raw log and not a passing Gate.
+# Context: Fresh UUID/stream-fence variant. Operator notes recorded TA_CLOSE_GRAPH_MEMORY as unset; the original log does not print that variable. AllGather watchdog and exit124 are preserved.
+# Redactions: Only the indicated original lines are included; omitted sections are not reconstructed.; PCI bus addresses and ephemeral thread IDs replaced with labelled placeholders.; Private rendezvous path/PID replaced while retaining the exact UUID suffix; raw stream handles replaced.
+# source_basename=comm-graph-stream-fence.log
+# source_sha256=25bf20f4eec06cb90de0c52a18966e065be9606702f46d68cb43bc91c0968403
+# original_1based_line_ranges=[[1, 1], [19, 28], [72, 84]]
+# Begin original lines 1-1
+L1: {"stage": "rendezvous", "path": "<REDACTED_RENDEZVOUS_PATH; uuid=255353a5af4d4568ae86a890bc739393>", "parent_pid": "<REDACTED_PID>"}
+# Begin original lines 19-28
+L19: {"rank": 0, "stage": "capture_begin", "batch": 2, "pool": "(0, 1)", "layers": 32}
+L20: {"rank": 1, "stage": "capture_begin", "batch": 2, "pool": "(0, 1)", "layers": 32}
+L21: {"rank": 1, "stage": "capture_end", "batch": 2, "native_type": "PTPUGraph"}
+L22: {"rank": 1, "stage": "capture_begin", "batch": 1, "pool": "(0, 1)", "layers": 32}
+L23: {"rank": 0, "stage": "capture_end", "batch": 2, "native_type": "PTPUGraph"}
+L24: {"rank": 0, "stage": "capture_begin", "batch": 1, "pool": "(0, 1)", "layers": 32}
+L25: {"rank": 1, "stage": "capture_end", "batch": 1, "native_type": "PTPUGraph"}
+L26: {"rank": 0, "stage": "capture_end", "batch": 1, "native_type": "PTPUGraph"}
+L27: {"rank": 0, "stage": "async_sequence_begin", "batches": [2, 2, 1, 2, 1, 1, 2, 1], "stream": "<REDACTED_STREAM_HANDLE>"}
+L28: {"rank": 1, "stage": "async_sequence_begin", "batches": [2, 2, 1, 2, 1, 1, 2, 1], "stream": "<REDACTED_STREAM_HANDLE>"}
+# Begin original lines 72-84
+L72: {"rank": 1, "stage": "final_synchronize_begin"}
+L73: {"rank": 0, "stage": "async_gather_begin", "iteration": 6, "batch": 2}
+L74: {"rank": 0, "stage": "async_enqueued", "iteration": 6, "batch": 2}
+L75: {"rank": 0, "stage": "async_replay_begin", "iteration": 7, "batch": 1}
+L76: {"rank": 0, "stage": "async_gather_begin", "iteration": 7, "batch": 1}
+L77: {"rank": 0, "stage": "async_enqueued", "iteration": 7, "batch": 1}
+L78: {"rank": 0, "stage": "final_synchronize_begin"}
+L79: F20261104 10:49:44.479903132 <REDACTED_THREAD_ID> TAdevice:147] *******************************************************
+L80: * Running kernel timedout: "pcclAllGatherRingKernel_copy_i8(pcclColl*)"
+L81: *    device: <REDACTED_PCI_ADDRESS> 1/1
+L82: *    clst_idle  : 00000f7f
+L83: *    kernel_idle: 00000000
+L84: *******************************************************
+# source_basename=comm-graph-stream-fence.status
+# source_sha256=ca2ebdf97d7469496b1f4b78958f9dc8447efdcb623953fee7b6996b762f6fff
+# original_1based_line_ranges=[[1, 1]]
+# Begin original lines 1-1
+L1: 124

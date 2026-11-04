@@ -1,0 +1,40 @@
+# Sanitized line excerpts; not a complete raw log and not a passing Gate.
+# Context: Original operator notes recorded TA_CLOSE_GRAPH_MEMORY as unset; this kernel log does not itself print the environment value. Two captures complete, asynchronous final synchronization does not finish; exit124.
+# Redactions: Only the indicated original lines are included; omitted sections are not reconstructed.; PCI bus addresses and ephemeral thread IDs replaced with labelled placeholders.; Raw stream handle integers replaced; unrelated environment is not included.
+# source_basename=comm-graph-extended.log
+# source_sha256=cf7c65672d966102d20845c7321e4d68613b69fcb4b84cfff07939108744e164
+# original_1based_line_ranges=[[18, 27], [67, 83]]
+# Begin original lines 18-27
+L18: {"rank": 0, "stage": "capture_begin", "batch": 2, "pool": "(0, 1)", "layers": 32}
+L19: {"rank": 1, "stage": "capture_begin", "batch": 2, "pool": "(0, 1)", "layers": 32}
+L20: {"rank": 0, "stage": "capture_end", "batch": 2, "native_type": "PTPUGraph"}
+L21: {"rank": 0, "stage": "capture_begin", "batch": 1, "pool": "(0, 1)", "layers": 32}
+L22: {"rank": 1, "stage": "capture_end", "batch": 2, "native_type": "PTPUGraph"}
+L23: {"rank": 1, "stage": "capture_begin", "batch": 1, "pool": "(0, 1)", "layers": 32}
+L24: {"rank": 0, "stage": "capture_end", "batch": 1, "native_type": "PTPUGraph"}
+L25: {"rank": 1, "stage": "capture_end", "batch": 1, "native_type": "PTPUGraph"}
+L26: {"rank": 0, "stage": "async_sequence_begin", "batches": [2, 2, 1, 2, 1, 1, 2, 1], "stream": "<REDACTED_STREAM_HANDLE>"}
+L27: {"rank": 1, "stage": "async_sequence_begin", "batches": [2, 2, 1, 2, 1, 1, 2, 1], "stream": "<REDACTED_STREAM_HANDLE>"}
+# Begin original lines 67-83
+L67: {"rank": 0, "stage": "final_synchronize_begin"}
+L68: {"rank": 1, "stage": "async_replay_begin", "iteration": 5, "batch": 1}
+L69: {"rank": 1, "stage": "async_gather_begin", "iteration": 5, "batch": 1}
+L70: {"rank": 1, "stage": "async_enqueued", "iteration": 5, "batch": 1}
+L71: {"rank": 1, "stage": "async_replay_begin", "iteration": 6, "batch": 2}
+L72: {"rank": 1, "stage": "async_gather_begin", "iteration": 6, "batch": 2}
+L73: {"rank": 1, "stage": "async_enqueued", "iteration": 6, "batch": 2}
+L74: {"rank": 1, "stage": "async_replay_begin", "iteration": 7, "batch": 1}
+L75: {"rank": 1, "stage": "async_gather_begin", "iteration": 7, "batch": 1}
+L76: {"rank": 1, "stage": "async_enqueued", "iteration": 7, "batch": 1}
+L77: {"rank": 1, "stage": "final_synchronize_begin"}
+L78: F20261104 10:28:37.856082594 <REDACTED_THREAD_ID> TAdevice:147] *******************************************************
+L79: * Running kernel timedout: "pcclAllReduceRingKernel_sum_bf16(pcclColl*)"
+L80: *    device: <REDACTED_PCI_ADDRESS> 0/2
+L81: *    clst_idle  : 00000fbf
+L82: *    kernel_idle: 00000000
+L83: *******************************************************
+# source_basename=comm-graph-extended.status
+# source_sha256=ca2ebdf97d7469496b1f4b78958f9dc8447efdcb623953fee7b6996b762f6fff
+# original_1based_line_ranges=[[1, 1]]
+# Begin original lines 1-1
+L1: 124

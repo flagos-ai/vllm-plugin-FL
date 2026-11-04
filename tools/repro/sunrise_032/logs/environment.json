@@ -1,0 +1,76 @@
+{
+  "excerpt_kind": "selected_json_fields",
+  "provenance": {
+    "sources": [
+      {
+        "source_basename": "environment.json",
+        "source_label": "35B runtime package metadata",
+        "source_sha256": "0d785b29eb86be78f469d9f7c31bdb3c4f6d5ef556aaaa1cb308628fee872140",
+        "original_1based_line_ranges": [
+          [
+            2,
+            11
+          ]
+        ],
+        "selected_json_pointers": [
+          "/versions"
+        ]
+      },
+      {
+        "source_basename": "final-receipt.json",
+        "source_label": "Image/runtime receipt",
+        "source_sha256": "bd521b34c6b3041161a83fd0423dc1fbd869c6c0e61f727221af8ebc492bb7ed",
+        "original_1based_line_ranges": [
+          [
+            20,
+            20
+          ],
+          [
+            28,
+            28
+          ],
+          [
+            38,
+            47
+          ]
+        ],
+        "selected_json_pointers": [
+          "/runtime/versions",
+          "/runtime/compiler/version",
+          "/runtime/provider_identity/vcs_info/commit_id"
+        ]
+      },
+      {
+        "source_basename": "receipt.json",
+        "source_label": "Target Python CPU-compatibility receipt",
+        "source_sha256": "212b704609b5119e227f287777ee89fd7671352d82aaea717c0022fc9397a28e",
+        "original_1based_line_ranges": [
+          [
+            5,
+            5
+          ]
+        ],
+        "selected_json_pointers": [
+          "/python"
+        ]
+      }
+    ],
+    "redactions": [
+      "Only version numbers and the public provider commit retained; all paths, container names, host/device assignments, configured environment, URLs and other receipt fields omitted."
+    ]
+  },
+  "package_versions": {
+    "vllm": "0.32.0+empty",
+    "vllm-plugin-fl": "0.5.0.dev0",
+    "torch": "2.11.0+cpu",
+    "torch-ptpu": "0.2.3+torch2.11",
+    "flagtree": "0.7.0+sunrise3.6",
+    "flag-gems": "5.4.0",
+    "flagcx": "0.14.0+tangrt1.2.0",
+    "flaggems-vllm": "0.1.0"
+  },
+  "python": "3.10.20",
+  "triton_version": "3.6.0",
+  "provider_git_commit": "b5c2c2249319277ccda4d41aa0f65164bd9b2a19",
+  "scope": "Versions observed in the retained image/runtime receipts. Version metadata alone does not establish model or graph correctness."
+}

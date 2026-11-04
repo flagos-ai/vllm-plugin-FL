@@ -97,3 +97,7 @@ CPU-only acceptance contracts:
 python -m pytest --noconftest -p no:cacheprovider \
   .github/scripts/sunrise/test_gate.py
 ```
+
+厂商排查用的最小客户端、模型无关 TP2 collective 探针、原生 V2 模型入口及
+脱敏关键日志见 [离线复现包](../../../tools/repro/sunrise_032/README.md)。
+该包仅做离线检查；GPU 验证已停止，未执行 reset。
