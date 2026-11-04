@@ -177,6 +177,32 @@ def test_warmup_failure_aborts_created_txda_handle(loaded, monkeypatch):
     library.flagcxCommDestroy.assert_not_called()
 
 
+@pytest.mark.parametrize("device", ["txda:0", "cuda:0", "npu:0"])
+def test_warmup_output_stays_alive_until_stream_finishes(loaded, monkeypatch, device):
+    class Output:
+        pass
+
+    references = {}
+
+    def all_reduce(self, data):
+        output = Output()
+        references["output"] = weakref.ref(output)
+        return output
+
+    def synchronize():
+        assert references["output"]() is not None
+
+    stream = SimpleNamespace(synchronize=synchronize)
+    loaded.namespace["FLAGCXLibrary"].return_value = Library(Mock(return_value=0))
+    monkeypatch.setattr(loaded.cls, "_current_stream", lambda self: stream)
+    monkeypatch.setattr(loaded.cls, "all_reduce", all_reduce)
+
+    comm = loaded.cls(Group(), device, library_path="unused")
+
+    assert comm.available and not comm.disabled
+    assert references["output"]() is None
+
+
 def test_abort_uses_exact_c_abi_and_device_once(loaded):
     received = []
     callback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(
