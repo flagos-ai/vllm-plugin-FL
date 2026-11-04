@@ -53,10 +53,8 @@ from vllm.distributed.parallel_state import (
     prepare_communication_buffer_for_model,
 )
 from vllm.distributed.weight_transfer.base import SparseWeightPatch
-from vllm.forward_context import (
-    BatchDescriptor,
-    set_forward_context,
-)
+from vllm.forward_context import BatchDescriptor
+from vllm_fl.forward_context import set_forward_context
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping, LoRAMappingType
 from vllm.model_executor.layers.attention import Attention, MLAAttention
@@ -4351,7 +4349,7 @@ class ModelRunnerFL(
                     # returns True. before returning early here we call
                     # dummy run to ensure coordinate_batch_across_dp
                     # is called into to avoid out of sync issues.
-                    self._dummy_run(1)
+                    self._dummy_run(1, num_actual_tokens=0)
                 if not has_kv_transfer_group():
                     # Return empty ModelRunnerOutput if no work to do.
                     return EMPTY_MODEL_RUNNER_OUTPUT
@@ -4575,6 +4573,7 @@ class ModelRunnerFL(
                 attn_metadata,
                 self.vllm_config,
                 num_tokens=num_tokens_padded,
+                num_actual_tokens=scheduler_output.total_num_scheduled_tokens,
                 num_tokens_across_dp=num_tokens_across_dp,
                 cudagraph_runtime_mode=cudagraph_mode,
                 batch_descriptor=batch_desc,
@@ -5964,6 +5963,7 @@ class ModelRunnerFL(
         is_graph_capturing: bool = False,
         num_active_loras: int = 0,
         profile_seq_lens: int | None = None,
+        num_actual_tokens: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Run a dummy forward pass to warm up/profile run or capture the
@@ -6276,6 +6276,9 @@ class ModelRunnerFL(
                     attn_metadata,
                     self.vllm_config,
                     num_tokens=num_tokens_padded,
+                    num_actual_tokens=(num_tokens if num_actual_tokens is None
+                                       else num_actual_tokens),
+                    in_profile_run=is_profile,
                     num_tokens_across_dp=num_tokens_across_dp,
                     cudagraph_runtime_mode=cudagraph_runtime_mode,
                     batch_descriptor=batch_desc,
@@ -6631,6 +6634,28 @@ class ModelRunnerFL(
                         )
                         for i, output in enumerate(dummy_encoder_outputs):
                             self.encoder_cache[f"tmp_{i}"] = output
+
+        if (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+            and self.parallel_config.enable_expert_parallel
+            and self.parallel_config.is_moe_model is not False
+        ):
+            from vllm_fl.distributed.device_communicators.npu_moe_runtime import (
+                get_moe_runtime,
+            )
+
+            runtime = get_moe_runtime()
+            if (
+                runtime is not None
+                and self.max_num_tokens > runtime.mc2_tokens_capacity
+            ):
+                # The large profiling batch selects AllToAll. Also account for
+                # persistent MC2 buffers before calculating the KV-cache budget.
+                mc2_hidden, mc2_last = self._dummy_run(
+                    runtime.mc2_tokens_capacity, uniform_decode=False, is_profile=True
+                )
+                self._sync_device()
+                del mc2_hidden, mc2_last
 
         # Add `is_profile` here to pre-allocate communication buffers
         hidden_states, last_hidden_states = self._dummy_run(

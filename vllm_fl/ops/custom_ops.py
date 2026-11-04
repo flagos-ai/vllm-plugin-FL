@@ -219,7 +219,7 @@ def _patch_fused_moe_factory() -> None:
     # do not touch unrelated callables that merely share the same name.
     patched_model_modules = 0
     for module_name, module in tuple(sys.modules.items()):
-        if not module_name.startswith("vllm.model_executor.models."):
+        if not module_name.startswith(("vllm.model_executor.models.", "vllm.models.")):
             continue
         if getattr(module, "FusedMoE", None) is native_factory:
             setattr(module, "FusedMoE", FusedMoEFL)  # noqa F405
