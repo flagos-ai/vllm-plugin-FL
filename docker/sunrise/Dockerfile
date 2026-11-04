@@ -79,6 +79,7 @@ RUN source /opt/sunrise-build/environment.sh \
 # in a cached layer and avoid HTTP/2 partial-clone failures through the gateway.
 COPY .github/scripts/install_flaggems_vllm.py /opt/sunrise-build/install_flaggems_vllm.py
 RUN --mount=type=secret,id=git_config,required=false \
+    --mount=type=secret,id=flaggems_vllm_bundle,required=false \
     source /opt/sunrise-build/environment.sh \
     && export TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
     && if [ -f /run/secrets/git_config ]; then \
@@ -88,6 +89,13 @@ RUN --mount=type=secret,id=git_config,required=false \
         GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
         GIT_CONFIG_KEY_1=http.lowSpeedLimit GIT_CONFIG_VALUE_1=1 \
         GIT_CONFIG_KEY_2=http.lowSpeedTime GIT_CONFIG_VALUE_2=60 \
+    && if [ -f /run/secrets/flaggems_vllm_bundle ]; then \
+        git bundle list-heads /run/secrets/flaggems_vllm_bundle HEAD \
+            | grep -qx 'b5c2c2249319277ccda4d41aa0f65164bd9b2a19 HEAD' \
+        && export GIT_CONFIG_COUNT=4 \
+            GIT_CONFIG_KEY_3=url./run/secrets/flaggems_vllm_bundle.insteadOf \
+            GIT_CONFIG_VALUE_3=https://github.com/flagos-ai/FlagGems-vllm.git; \
+    fi \
     && python /opt/sunrise-build/install_flaggems_vllm.py \
     && python /opt/sunrise-build/runtime_constraints.py verify \
         /opt/sunrise-stack --vllm-version "${VLLM_VERSION}"
