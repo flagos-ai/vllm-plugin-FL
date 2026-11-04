@@ -46,6 +46,7 @@ persistence_m:
       exclude: []
     functional:
       include:
+        - tests/functional_tests/compilation/test_graph_capture.py
         - tests/functional_tests/ops/test_sunrise_kv_cache.py
         - tests/functional_tests/ops/test_sunrise_activation_compat.py
       exclude: []
