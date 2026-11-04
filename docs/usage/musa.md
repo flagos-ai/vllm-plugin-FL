@@ -20,7 +20,7 @@ runtime baseline is:
 The default [CI configuration](../../.github/configs/musa.yml) pins this image:
 
 ```text
-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
 ```
 
 The image provides the vendor runtime, an ordinary empty vLLM wheel and the
@@ -59,7 +59,7 @@ directory:
 
 ```bash
 set -euo pipefail
-IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
+IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06
 MODEL_DIR="$HOME/models/Qwen3-0.6B"
 SOURCE_DIR="$PWD/vllm-plugin-FL"
 PHYSICAL_DEVICE=0  # Replace with the host card allocated to your job.

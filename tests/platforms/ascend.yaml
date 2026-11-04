@@ -46,16 +46,15 @@ tolerance:
     float16:  {rtol: 1e-2, atol: 1e-2}
 
 # Device-level overrides for specific test cases (optional).
-# Matrix follows the 0.4.0-dev line: eager only — decode graphs land with the
-# ascend graph work (see the ascend graph branch), not with this CI sync.
-# Graph cases are kept commented out rather than deleted; tracked in #646.
+# Graph cases are enabled again now that #646 landed native FULL_DECODE_ONLY
+# decode graphs for Qwen3.6-27B and Qwen3.6-35B-A3B on vLLM 0.28.
 device_overrides:
   910c:
     cases:
       - qwen3_6/27b_tp2_eager
-      # - qwen3_6/27b_tp2_graph
+      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
-      # - qwen3_6/35b_a3b_tp2_graph
+      - qwen3_6/35b_a3b_tp2_graph
     llm:
       max_model_len: 4096
       max_num_batched_tokens: 4096
@@ -95,28 +94,28 @@ env_defaults:
         inference:
           qwen3_6:
             - 27b_tp2_eager
-            # - 27b_tp2_graph
+            - 27b_tp2_graph
             - 35b_a3b_tp2_eager
-            # - 35b_a3b_tp2_graph
+            - 35b_a3b_tp2_graph
         serving:
           qwen3_6:
             - 27b_tp2_eager
-            # - 27b_tp2_graph
+            - 27b_tp2_graph
             - 35b_a3b_tp2_eager
-            # - 35b_a3b_tp2_graph
+            - 35b_a3b_tp2_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
-            # - 27b_tp2_graph
+            - 27b_tp2_graph
             - 35b_a3b_tp2_eager
-            # - 35b_a3b_tp2_graph
+            - 35b_a3b_tp2_graph
         serving:
           qwen3_6:
             - 27b_tp2_eager
-            # - 27b_tp2_graph
+            - 27b_tp2_graph
             - 35b_a3b_tp2_eager
-            # - 35b_a3b_tp2_graph
+            - 35b_a3b_tp2_graph
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
