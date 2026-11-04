@@ -196,6 +196,9 @@ export TXDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export FL_BACKEND=tsingmicro
 export FL_MODEL_BASE_PATH=/models
 export NCCL_P2P_DISABLE=1
+# Use the real host interface; ens29f0 is the validated TX8110-249 setting.
+export NCCL_SOCKET_IFNAME=ens29f0
+unset NCCL_SHM_DISABLE NCCL_IB_DISABLE NCCL_NET
 export TXDA_LAUNCH_KERNEL_SYNC=0
 unset VLLM_OMP_NUM_THREADS_SET_BY_VLLM
 export OMP_NUM_THREADS=32 MKL_NUM_THREADS=32
@@ -215,8 +218,9 @@ and does not establish an overlap or throughput guarantee.
 
 `TXDA_VISIBLE_DEVICES` controls logical-to-physical device mapping. Validate
 collectives on the allocated group before serving a model. Earlier TX8110 runs
-required `NCCL_P2P_DISABLE=1` to avoid stalled FlagCX warmup; it selects socket
-transport and is not forced by the plugin.
+required `NCCL_P2P_DISABLE=1` to avoid stalled FlagCX warmup. This disables
+P2P but does not disable SHM or prove Socket is selected. Inspect the actual
+transport logs; the plugin does not force these transport settings.
 
 An explicit `--kv-cache-memory-bytes` overrides `VLLM_TXDA_KV_CACHE_SIZE`.
 If neither is set, the plugin uses its 20 GiB fallback and skips unsafe
@@ -387,9 +391,14 @@ upstream V2 runner class and pinned FlagCX library. The two-model hardware
 acceptance gate has **not passed**. The earlier inference run was stopped
 to address CPU GEMM fallback performance. After the native KV zeroer passed all
 eight hardware cases, profiling identified the MRoPE cache lookup bottleneck.
-Its native lookup then passed 28 hardware comparisons. The current 27B restart
-uses these changes with the actual upstream V2 runner and pinned FlagCX; 35B
-remains pending.
+Its native lookup then passed 28 hardware comparisons. Subsequent diagnosis
+validated the current setup on physical devices 4 and 5 with SHM enabled and
+`NCCL_SOCKET_IFNAME=ens29f0`: both default-stream and nondefault-stream FlagCX
+preflights passed all 30 checks. No worker stream patch was needed. Explicitly
+disabling SHM and forcing Socket failed in both FlagCX and native TCCL probes
+in this image; that configuration is not the acceptance setup. The 27B gate
+is running with the current KV/MRoPE/GEMM combination; 35B is queued after it.
+Neither model gate has passed yet.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 
 There is no Tsingmicro hardware CI runner. Skipped GitHub jobs and successful
