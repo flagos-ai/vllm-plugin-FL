@@ -263,7 +263,7 @@ export PORT=18320
 cd /work/vllm-plugin-FL/tools/adaptation-gate-cases
 vllm serve "$MODEL_PATH" \
   --served-model-name "$MODEL_PATH" --host 127.0.0.1 --port "$PORT" \
-  --shutdown-timeout 60 --tensor-parallel-size 8 --enforce-eager \
+  --shutdown-timeout 60 --tensor-parallel-size 2 --enforce-eager \
   --trust-remote-code --disable-custom-all-reduce --max-model-len 4096 \
   --mamba-cache-mode none --no-enable-prefix-caching \
   --max-num-batched-tokens 512 --max-num-seqs 8 \
@@ -301,6 +301,9 @@ noncopyable tail states and failed-plan rollback.
 This CPU environment does not have vLLM installed. In the target image, the
 vLLM 0.32 empty build imports, device memory snapshot, native streams and V2
 preprocessing/sampling preflight have passed with the opt-in bootstrap.
+The pinned source-built FlagCX passed the TP2 preflight: 15 checks on each rank,
+including float32/bfloat16 reductions, int32/int64 aggregation, variable-size
+collectives, broadcast and nested groups. All tensor communication used FlagCX.
 The two-model V2 hardware acceptance gate has **not passed** and remains pending.
 The historical 0.28 TP8 passes do not establish 0.32 correctness.
 

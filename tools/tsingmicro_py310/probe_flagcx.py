@@ -84,18 +84,22 @@ def _worker(rank, world_size, port, results):
             output.cpu().tolist(),
             [peer + 1 for peer in range(world_size) for _ in range(sizes[peer])],
         )
-        value = torch.full((4 * world_size,), rank + 1, device=device)
+        value = torch.full(
+            (4 * world_size,), rank + 1, device=device, dtype=torch.float32
+        )
         output = torch.empty(4, device=device)
         comm.reduce_scatter(output, value)
         check("reduce_scatter", output.cpu().tolist(), [total] * 4)
-        value = torch.full((sum(sizes),), rank + 1, device=device)
+        value = torch.full((sum(sizes),), rank + 1, device=device, dtype=torch.float32)
         output = torch.empty(sizes[rank], device=device)
         comm.reduce_scatterv(output, value, sizes)
         check("reduce_scatterv", output.cpu().tolist(), [total] * sizes[rank])
-        value = torch.full((4,), 7 if rank == 0 else 0, device=device)
+        value = torch.full(
+            (4,), 7 if rank == 0 else 0, device=device, dtype=torch.float32
+        )
         comm.broadcast(value, 0)
         check("broadcast", value.cpu().tolist(), [7.0] * 4)
-        value = torch.full((64,), rank + 1, device=device)
+        value = torch.full((64,), rank + 1, device=device, dtype=torch.float32)
         comm.group_start()
         comm.group_start()
         first = comm.all_reduce(value)
