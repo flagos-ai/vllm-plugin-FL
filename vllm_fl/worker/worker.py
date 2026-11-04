@@ -515,6 +515,9 @@ class WorkerFL(WorkerBase):
                 )
 
                 GPUModelRunnerV2 = get_txda_v2_model_runner()
+                from vllm_fl.worker.txda_linear import patch_txda_unquantized_gemm
+
+                patch_txda_unquantized_gemm(rank=self.rank)
             else:
                 from vllm.v1.worker.gpu.model_runner import (
                     GPUModelRunner as GPUModelRunnerV2,
