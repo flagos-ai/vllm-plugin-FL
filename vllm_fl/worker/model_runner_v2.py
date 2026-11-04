@@ -43,7 +43,6 @@ from vllm.v1.worker.gpu.attn_utils import (
     init_attn_backend,
 )
 from vllm.v1.worker.gpu.cudagraph_utils import (
-    ModelCudaGraphManager,
     has_compiled_submodule,
 )
 from vllm.v1.worker.gpu.kv_connector import NO_OP_KV_CONNECTOR, get_kv_connector
@@ -64,6 +63,10 @@ from vllm_fl.kv_cache.ascend.hybrid import (
     zero_block_planes,
 )
 from vllm_fl.worker.ascend_v2_block_table import AscendBlockTables
+from vllm_fl.worker.ascend_v2_graph import (
+    AscendModelGraphManager,
+    install_graph_metadata_bridge,
+)
 
 # vLLM configures INFO handlers for the vllm namespace, not vllm_fl.
 logger = init_logger("vllm.ascend.model_runner_v2")
@@ -88,11 +91,11 @@ class GPUModelRunnerFLV2(GPUModelRunner):
         assert vllm_config.use_v2_model_runner, "Ascend V2 requires use_v2_model_runner"
         if device.type != "npu":
             raise ValueError("GPUModelRunnerFLV2 is the Ascend V2 adapter")
-        if vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE:
-            raise NotImplementedError(
-                "Ascend V2 currently requires eager execution (--enforce-eager); "
-                "the legacy FL runner retains Ascend ACL graph support"
-            )
+        if vllm_config.compilation_config.cudagraph_mode not in (
+            CUDAGraphMode.NONE,
+            CUDAGraphMode.FULL_DECODE_ONLY,
+        ):
+            raise NotImplementedError("Ascend V2 supports NONE/FULL_DECODE_ONLY graphs")
         self.use_ascend_hybrid_cache = uses_dense_hybrid_cache(vllm_config.model_config)
         if self.use_ascend_hybrid_cache and vllm_config.kv_transfer_config is not None:
             raise NotImplementedError(
@@ -151,6 +154,8 @@ class GPUModelRunnerFLV2(GPUModelRunner):
     ) -> None:
         # GPUWorker finalizes the PD interleave before KV cache initialization.
         self.cp_interleave = self.parallel_config.cp_kv_cache_interleave_size
+        # V2 creates model_state in load_model(), after runner construction.
+        install_graph_metadata_bridge(self.model_state, lambda: self.cudagraph_manager)
         kv_cache_config = deepcopy(kv_cache_config)
         self.kv_cache_config = kv_cache_config
 
@@ -283,7 +288,7 @@ class GPUModelRunnerFLV2(GPUModelRunner):
             is_profiling=is_profiling,
             piecewise_capture_available=piecewise_capture_available,
         )
-        self.cudagraph_manager = ModelCudaGraphManager(
+        self.cudagraph_manager = AscendModelGraphManager(
             self.vllm_config,
             self.device,
             cudagraph_mode,
@@ -331,6 +336,21 @@ class GPUModelRunnerFLV2(GPUModelRunner):
                     self.model, self.vllm_config, kv_cache_config
                 )
 
+    def profile_cudagraph_memory(self) -> int:
+        if self.compilation_config.cudagraph_mode == CUDAGraphMode.NONE:
+            return super().profile_cudagraph_memory()
+        try:
+            return super().profile_cudagraph_memory()
+        finally:
+            # Upstream releases its temporary managers/layer caches. Release
+            # Ascend's additional aliases and task registry before real init.
+            from vllm_fl.compilation.graph_params import clear_graph_params
+
+            self._ascend_manager_views.clear()
+            self._ascend_block_planes.clear()
+            self.kv_block_zeroer = None
+            clear_graph_params()
+
     def _init_kv_zero_meta(self) -> None:
         self.kv_block_zeroer = _AscendBlockZeroer(self._ascend_block_planes)
 
@@ -362,6 +382,8 @@ class GPUModelRunnerFLV2(GPUModelRunner):
             )
 
     def shutdown(self) -> None:
+        if isinstance(self.cudagraph_manager, AscendModelGraphManager):
+            self.cudagraph_manager.release_graphs()
         self._ascend_block_planes.clear()
         self._ascend_manager_views.clear()
         self.kv_block_zeroer = None

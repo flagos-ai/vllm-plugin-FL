@@ -123,6 +123,13 @@ def profile_factory():
             ["encoder pool"] if device == "musa" else ["decoder pool", "encoder pool"]
         )
         graph_capture = Mock(return_value=nullcontext())
+
+        def capture_context(*, device, graph_capture_context=None):
+            # vLLM 0.32 omits the optional context on the default-stream path.
+            return graph_capture(
+                device=device, graph_capture_context=graph_capture_context
+            )
+
         stream = object()
         namespace = {
             "set_current_vllm_config": lambda _: nullcontext(),
@@ -143,7 +150,8 @@ def profile_factory():
             "set_cudagraph_capturing_enabled": lambda value: setattr(
                 state, "enabled", value
             ),
-            "graph_capture": graph_capture,
+            "graph_capture": capture_context,
+            "_device_graph_capture": capture_context,
             "GraphCaptureContext": lambda value: NS(stream=value),
             "current_stream": lambda: stream,
             "torch": NS(
@@ -484,6 +492,7 @@ def pool_lifecycle(monkeypatch):
             "CUDAGraphMode": Mode,
             "GraphCaptureContext": lambda s: NS(stream=s),
             "graph_capture": capture_context,
+            "_device_graph_capture": capture_context,
             "current_stream": lambda: "rocm stream",
             "set_cudagraph_capturing_enabled": lambda v: setattr(state, "enabled", v),
             "torch": NS(

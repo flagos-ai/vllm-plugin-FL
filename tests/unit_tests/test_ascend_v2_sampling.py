@@ -44,10 +44,28 @@ class AscendV2SamplingTests(unittest.TestCase):
             "vllm_fl.patches.ascend_v2_penalties_kernel"
         )
         self.ascend_kernel._penalties_kernel = self.kernel
+        self.temperature = types.ModuleType("vllm.v1.worker.gpu.sample.gumbel")
+        self.temperature.apply_temperature = self.upstream_launcher
+        self.states = types.ModuleType("vllm.v1.worker.gpu.sample.states")
+        self.states.apply_temperature = self.upstream_launcher
+        self.gumbel = types.ModuleType("vllm_fl.patches.ascend_v2_gumbel")
+        for name in (
+            "_murmur3_rotl32",
+            "_murmur3_mix",
+            "_murmur3_fmix32",
+            "murmur3_hash32",
+            "murmur3_uniform32",
+            "_uniform64_from_random53",
+            "murmur3_uniform64",
+        ):
+            setattr(self.gumbel, name, object())
         self.platform = types.ModuleType("vllm.platforms")
         self.platform.current_platform = SimpleNamespace(device_type="npu")
         modules = {
             "vllm.platforms": self.platform,
+            "vllm_fl.patches.ascend_v2_gumbel": self.gumbel,
+            "vllm.v1.worker.gpu.sample.gumbel": self.temperature,
+            "vllm.v1.worker.gpu.sample.states": self.states,
             "vllm.v1.worker.gpu.sample.penalties": self.penalties,
             "vllm_fl.patches.ascend_v2_penalties_kernel": self.ascend_kernel,
         }
@@ -121,11 +139,29 @@ class AscendV2SamplingTests(unittest.TestCase):
             self.penalties.apply_penalties, self.adapter.apply_ascend_v2_penalties
         )
         self.assertIs(self.penalties._penalties_kernel, self.kernel)
+        for name in (
+            "_murmur3_rotl32",
+            "_murmur3_mix",
+            "_murmur3_fmix32",
+            "murmur3_hash32",
+            "murmur3_uniform32",
+            "_uniform64_from_random53",
+            "murmur3_uniform64",
+        ):
+            self.assertIs(getattr(self.temperature, name), getattr(self.gumbel, name))
+        self.assertIs(
+            self.temperature.apply_temperature, self.adapter.apply_ascend_v2_temperature
+        )
+        self.assertIs(
+            self.states.apply_temperature, self.adapter.apply_ascend_v2_temperature
+        )
 
     def test_other_platform_install_keeps_upstream_launcher(self):
         self.platform.current_platform.device_type = "cuda"
         self.assertFalse(self.adapter.install_ascend_v2_sampling_shims())
         self.assertIs(self.penalties.apply_penalties, self.upstream_launcher)
+        self.assertIs(self.temperature.apply_temperature, self.upstream_launcher)
+        self.assertIs(self.states.apply_temperature, self.upstream_launcher)
 
 
 def _penalty_fixture(vocab_size):

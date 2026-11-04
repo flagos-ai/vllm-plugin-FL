@@ -46,13 +46,16 @@ tolerance:
     float16:  {rtol: 1e-2, atol: 1e-2}
 
 # Device-level overrides for specific test cases (optional).
-# The vLLM 0.32 matrix exercises the Ascend V2 runner in eager mode.
+# The vLLM 0.32 matrix selects Ascend V2 eager and FULL_DECODE_ONLY cases.
+# Graph compilation settings live only in the Ascend graph case files.
 # The legacy FL runner retains separate Ascend decode-graph support.
 device_overrides:
   910c:
     cases:
       - qwen3_6/27b_tp2_eager
       - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/27b_tp2_graph_ascend
+      - qwen3_6/35b_a3b_tp2_graph_ascend
     llm:
       max_model_len: 4096
       max_num_batched_tokens: 4096
@@ -95,19 +98,27 @@ env_defaults:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
         serving:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
         serving:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 27b_tp2_graph_ascend
+            - 35b_a3b_tp2_graph_ascend
     functional:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

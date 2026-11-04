@@ -59,6 +59,14 @@ op_backends:
 # Vendor-auto-excluded ops (to_copy, copy_, cat, exponential_) need no duplicate
 # entry here. Performance preferences belong in op_backends above.
 flagos_blacklist:
+  # FlagGems 5.4 registers the ne_.Scalar/Tensor schemas twice, through
+  # canonical ne_* and not_equal_* aliases. Exclude only the duplicate aliases;
+  # the canonical scalar inequality kernel remains enabled.
+  - not_equal_scalar_
+  - not_equal_
+  # The canonical tensor ne_ misreads stride-2 views (17/561 wrong values
+  # on FlagGems 5.4). Preserve native in-place tensor comparisons.
+  - ne_
   # qwen-vllm_for_ascend (3b406c36) wraps argmax twice with LibEntry,
   # failing sampler warmup with "Invalid Runtime Function". Use torch_npu.
   - argmax

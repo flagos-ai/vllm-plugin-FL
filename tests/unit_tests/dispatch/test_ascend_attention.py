@@ -247,3 +247,47 @@ def test_interleaved_kv_cache_graph_replays_shared_storage(dtype, slot_dtype):
                 expected[block, 0, offset] = cpu_key[token]
                 expected[block, 1, offset] = -cpu_key[token]
         torch.testing.assert_close(backing.cpu(), expected, rtol=0, atol=0)
+
+
+@pytest.mark.gpu
+def test_native_planar_graph_padding_never_writes_dummy_cache():
+    """Negative write slots stay inactive even when null block zero is nonzero."""
+    import torch
+
+    impl = object.__new__(AscendAttentionBackendImpl)
+    impl.key_cache = impl.value_cache = None
+    cache = torch.full((2, 3, 128, 2, 128), 7, dtype=torch.bfloat16, device="npu")
+    assert cache[0].is_contiguous() and cache[1].is_contiguous()
+    key = torch.zeros(4, 2, 128, dtype=torch.bfloat16, device="npu")
+    value = torch.zeros_like(key)
+    metadata = AscendMetadata(
+        num_actual_tokens=4,
+        slot_mapping=torch.full((4,), -1, dtype=torch.int64, device="npu"),
+    )
+    impl.reshape_and_cache(key, value, cache, metadata)
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        impl.reshape_and_cache(key, value, cache, metadata)
+    expected = torch.full(cache.shape, 7, dtype=cache.dtype)
+    for step, slots in enumerate(
+        ([128, 129, 130, -1], [256, 257, -1, -1], [131, -1, -1, -1], [-1] * 4)
+    ):
+        cpu_key = torch.arange(4 * 2 * 128).view(4, 2, 128).to(cache.dtype) + step
+        # Inactive queries deliberately carry unrelated values. Their slots,
+        # rather than zero-valued query/cache contents, suppress cache writes.
+        cpu_key[-1].fill_(1000 + step)
+        key.copy_(cpu_key)
+        value.copy_(-cpu_key)
+        metadata.slot_mapping.copy_(torch.tensor(slots, dtype=torch.int64))
+        graph.replay()
+        torch.npu.synchronize()
+        for token, slot in enumerate(slots):
+            if slot >= 0:
+                block, offset = divmod(slot, 128)
+                expected[0, block, offset] = cpu_key[token]
+                expected[1, block, offset] = -cpu_key[token]
+        torch.testing.assert_close(cache.cpu(), expected, rtol=0, atol=0)
+        assert torch.all(cache[:, 0].cpu() == 7)
+        assert metadata.num_actual_tokens == 4
+        assert metadata.slot_mapping.cpu().tolist() == slots
