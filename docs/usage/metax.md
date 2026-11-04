@@ -360,7 +360,8 @@ torchrun --standalone --nproc-per-node=2 --module pytest --noconftest \
 The suite has four unique cases per topology: FP32/BF16 eager collectives and
 FP32/BF16 graph replay. It verifies all-reduce, all-gather, reduce-scatter,
 broadcast, all-gatherv, reduce-scatterv and point-to-point exchange against CPU
-references. Graph cases change inputs for three replays. Both the two-rank and
+references. Graph cases change inputs for three replays. The recorded runs in
+this section used a single physical host. Both the two-rank and
 four-rank runs passed all four cases on every rank; the communicator must be
 available and enabled. A single-process skip is not a FlagCX validation result.
 Qwen3.5-4B TP2 eager and PIECEWISE serving also passed HTTP text, repeated-request
@@ -388,6 +389,126 @@ Remove `--enforce-eager` for the recorded PIECEWISE configuration. Use the same
 temperature-zero, no-thinking API requests as the HTTP example above, with
 `model=metax-flagcx`. Keep this serving check separate from the original Gate.
 Pipeline/expert parallelism and FlagCX KV transfer are outside this test scope.
+
+### Validate FlagCX across two physical hosts
+
+The following is a cross-machine validation procedure, not a recorded pass.
+Reserve one idle MetaX GPU on each of two physical hosts. Use the same image,
+plugin revision, pinned FlagCX core/wrapper and complete Qwen3.5-4B checkpoint
+on both hosts. Mount the checkpoint at the same absolute path. Weights are
+loaded on each host; the MP executor does not distribute model files.
+
+Start one isolated container per host using the earlier container options,
+adding `--network host` and the FlagCX mount. Set `MACA_VISIBLE_DEVICES` to the
+single reserved card on that host. Retain the image's original `PYTHONPATH`
+(including `/opt/flagtree`) when prepending the FlagCX path as shown above.
+Before launching, confirm that Torch sees one device per container and record
+its physical GPU UUID. The two hosts need mutually reachable IPs and network
+interfaces. Allow the rendezvous port and the dynamic TCP ports used by Gloo,
+the executor message queues and the selected device transport; opening only
+the master port is insufficient. Run long commands in separate named `tmux`
+sessions and retain both hosts' logs.
+
+In each container, configure the local interface and IP before starting Python:
+
+```bash
+export NODE_RANK=0                         # Set to 1 on the second host.
+export VLLM_HOST_IP="<this-host-routable-IP>"
+export MASTER_ADDR="<node-0-routable-IP>"
+export MASTER_PORT=29500
+export GLOO_SOCKET_IFNAME="<local-network-interface>"
+export FLAGCX_SOCKET_IFNAME="=$GLOO_SOCKET_IFNAME"
+export MCCL_SOCKET_IFNAME="=$GLOO_SOCKET_IFNAME"
+export FLAGCX_USE_HOST_COMM=0
+export FLAGCX_DEBUG=INFO
+export FLAGCX_DEBUG_SUBSYS=INIT,COLL,NET,BOOTSTRAP,GRAPH
+export FLAGCX_DEBUG_FILE=/work/flagcx-%h-%p.log
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+```
+
+Keep `GEMS_VENDOR=metax`, `VLLM_PLUGINS=fl`, `VLLM_USE_V2_MODEL_RUNNER=0`,
+`FLAGCX_PATH` and the import/library paths from the earlier examples on both
+hosts. Retain the execution-RPC watchdog of 1800 seconds. Leave
+`FLAGCX_HOSTID` and `FLAGCX_CLUSTER_SPLIT_LIST` unset so the core can detect the
+real topology. A custom network plugin is optional; the pinned core provides
+built-in network adaptors when `FLAGCX_NET_ADAPTOR_PLUGIN` is unset.
+
+For an explicit TCP socket transport check, set `MCCL_IB_DISABLE=1` on both
+hosts. This remains a native FlagCX device-collective test: the MetaX FlagCX
+CCL adaptor calls MCCL internally. It does not demonstrate RDMA or GPU-direct
+network performance. For an RDMA check, use the actual HCA/GID configuration
+and verify the selected transport in the logs instead. See the pinned
+[FlagCX network configuration](https://github.com/flagos-ai/FlagCX/blob/0beba7aa7e76cc0885a9929f1975857bcd310d5e/docs/environment_variables.md),
+[network plugin contract](https://github.com/flagos-ai/FlagCX/blob/0beba7aa7e76cc0885a9929f1975857bcd310d5e/adaptor_plugin/net/README.md)
+and [MetaX MCCL networking reference](https://developer.metax-tech.com/api/client/document/preview/467/C500_MCCLProgrammingGuide_CN.html).
+
+First run the existing CPU-oracle and live-input graph cases on both hosts:
+
+```bash
+cd /src
+FLAGCX_EXPECT_NODES=2 torchrun \
+  --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+  --master-addr="$MASTER_ADDR" --master-port="$MASTER_PORT" \
+  --module pytest --noconftest \
+  tests/functional_tests/distributed/test_metax_flagcx_collectives.py \
+  -q -s -p no:cacheprovider
+```
+
+Do not add `--standalone`. Keep `--noconftest`: the general `multi_gpu` marker
+checks the local GPU count and would skip a one-card-per-host launch.
+`FLAGCX_EXPECT_NODES=2` gathers small identity records over the CPU Gloo group
+and rejects a single physical host even when its containers have different
+hostnames. `FLAGCX_TOPOLOGY` records the SHA256 of each kernel boot ID,
+hostname, global/local ranks, world sizes, visible device count and only the
+explicit `VLLM_HOST_IP` / `MASTER_ADDR` IP settings. It does not log the raw
+boot ID or the environment. Both ranks must report four passed cases and zero
+skips, with two distinct boot hashes and `LOCAL_WORLD_SIZE=1`. The native
+communicator must remain available and enabled.
+
+Then start the two-node TP2 HTTP service, first in eager mode. vLLM 0.32's
+[multi-node MP launch path](https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/entrypoints/cli/serve.py#L218)
+uses the following CLI settings; torchrun environment variables alone do not
+replace `--nnodes`, `--master-addr` or `--master-port`. The second node requires
+an explicit `--headless` flag.
+
+Run on both hosts with their respective `NODE_RANK`:
+
+```bash
+export SMALL_MODEL_PATH=/data/models/Qwen3.5-4B
+node_args=(--node-rank "$NODE_RANK")
+if [[ "$NODE_RANK" == 0 ]]; then
+  node_args+=(--host 0.0.0.0 --port 18020)
+else
+  node_args+=(--headless)
+fi
+mode_args=(--enforce-eager)
+vllm serve "$SMALL_MODEL_PATH" \
+  --served-model-name metax-flagcx \
+  --distributed-executor-backend mp --nnodes 2 \
+  --master-addr "$MASTER_ADDR" --master-port 29501 \
+  --tensor-parallel-size 2 --pipeline-parallel-size 1 \
+  --data-parallel-size 1 --data-parallel-backend mp --dtype bfloat16 \
+  --max-model-len 2048 --max-num-batched-tokens 512 --max-num-seqs 4 \
+  --gpu-memory-utilization 0.70 --disable-custom-all-reduce \
+  "${node_args[@]}" "${mode_args[@]}"
+```
+
+For PIECEWISE, stop both owned service processes, replace the `mode_args`
+assignment on both hosts with the following, and rerun the same command:
+
+```bash
+mode_args=(--compilation-config '{"mode":3,"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4],"cudagraph_mm_encoder":false}')
+```
+
+Use the same temperature-zero, no-thinking text, arithmetic, repeated-request
+and image checks against the main host's port 18020 in each mode. Retain the
+actual commands, responses, quality assertions, exit statuses and logs from
+both hosts. Record the rank-to-host/GPU mapping, actual `CommunicatorFL` class,
+FlagCX library/wrapper fingerprints and enabled state. Confirm successful
+native FlagCX calls during model execution, beyond the one-element startup
+warmup, and during graph capture/replay for the PIECEWISE run. Gloo bootstrap
+success or a disabled communicator is insufficient. Report cross-machine
+results separately from the earlier single-host runs and the adaptation Gate.
 
 ## Compatibility boundaries
 

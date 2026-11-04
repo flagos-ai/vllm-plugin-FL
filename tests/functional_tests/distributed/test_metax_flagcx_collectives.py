@@ -7,11 +7,18 @@ Run inside an isolated MACA environment with a built FlagCX source tree:
       torchrun --standalone --nproc-per-node=2 --module pytest --noconftest \
       tests/functional_tests/distributed/test_metax_flagcx_collectives.py -q -s
 
-Gloo exchanges the bootstrap ID only. Every tested device operation calls
-PyFlagcxCommunicator directly and rejects a disabled communicator.
+Set FLAGCX_EXPECT_NODES=2 with a two-node torchrun launch to require two
+physical host boot identities. Gloo exchanges bootstrap and host metadata;
+every tested device operation calls PyFlagcxCommunicator directly and rejects
+a disabled communicator.
 """
 
+import hashlib
+import ipaddress
+import json
 import os
+import socket
+import uuid
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,9 +30,101 @@ import torch.distributed as dist
 pytestmark = [pytest.mark.gpu, pytest.mark.multi_gpu, pytest.mark.flagcx]
 
 
+def _expected_nodes(value: str | None, world_size: int) -> int | None:
+    if value is None:
+        return None
+    try:
+        nodes = int(value)
+    except ValueError as exc:
+        raise ValueError("FLAGCX_EXPECT_NODES must be a positive integer") from exc
+    if not 1 <= nodes <= world_size:
+        raise ValueError("FLAGCX_EXPECT_NODES must be between 1 and WORLD_SIZE")
+    return nodes
+
+
+def _host_identity(rank: int, local_rank: int, world_size: int, device_count: int):
+    # Containers on one physical host share its kernel boot ID. Hostnames and
+    # container machine IDs alone cannot distinguish a two-host launch.
+    try:
+        boot_id = str(
+            uuid.UUID(
+                Path("/proc/sys/kernel/random/boot_id")
+                .read_text(encoding="ascii")
+                .strip()
+            )
+        )
+        boot_hash = hashlib.sha256(boot_id.encode("ascii")).hexdigest()
+    except (OSError, ValueError):
+        boot_hash = None
+    ips = {}
+    # Record only explicitly named IP settings, never the full environment or
+    # interface inventory. DNS names are not copied into this IP-only field.
+    for name in ("VLLM_HOST_IP", "MASTER_ADDR"):
+        value = os.environ.get(name, "").strip()
+        try:
+            ips[name] = str(ipaddress.ip_address(value))
+        except ValueError:
+            continue
+    return {
+        "host_boot_id_sha256": boot_hash,
+        "hostname": socket.gethostname(),
+        "rank": rank,
+        "local_rank": local_rank,
+        "world_size": world_size,
+        "local_world_size": int(os.environ.get("LOCAL_WORLD_SIZE", "1")),
+        "device_count": device_count,
+        "ips": ips,
+    }
+
+
+def _validate_host_topology(records: list[dict], expected_nodes: int):
+    world_size = len(records)
+    assert 1 <= expected_nodes <= world_size, "Invalid expected physical host count"
+    hosts = {}
+    for record in records:
+        for field in (
+            "rank",
+            "local_rank",
+            "world_size",
+            "local_world_size",
+            "device_count",
+        ):
+            assert type(record[field]) is int, (
+                f"Host metadata {field} must be an integer"
+            )
+        assert record["world_size"] == world_size, "Inconsistent WORLD_SIZE metadata"
+        boot_hash = record["host_boot_id_sha256"]
+        assert (
+            isinstance(boot_hash, str)
+            and len(boot_hash) == 64
+            and all(char in "0123456789abcdef" for char in boot_hash)
+        ), "Every rank must supply a valid /proc host boot ID SHA256"
+        hosts.setdefault(boot_hash, []).append(record)
+    assert sorted(record["rank"] for record in records) == list(range(world_size)), (
+        "Host metadata must contain every global rank exactly once"
+    )
+    assert len(hosts) == expected_nodes, (
+        f"Expected {expected_nodes} physical hosts, observed {len(hosts)} boot identities"
+    )
+    for ranks in hosts.values():
+        local_size = len(ranks)
+        assert all(record["local_world_size"] == local_size for record in ranks), (
+            "LOCAL_WORLD_SIZE must match the ranks on each physical host"
+        )
+        assert sorted(record["local_rank"] for record in ranks) == list(
+            range(local_size)
+        ), "Each physical host must have distinct, contiguous local ranks"
+        device_counts = {record["device_count"] for record in ranks}
+        assert len(device_counts) == 1 and next(iter(device_counts)) >= local_size, (
+            "Each physical host must expose enough devices for its local ranks"
+        )
+
+
 @pytest.fixture(scope="module")
 def flagcx_runtime():
-    if int(os.getenv("WORLD_SIZE", "1")) < 2:
+    world_size = int(os.getenv("WORLD_SIZE", "1"))
+    expected_nodes = _expected_nodes(os.getenv("FLAGCX_EXPECT_NODES"), world_size)
+    if world_size < 2:
         pytest.skip("Launch with torchrun and at least two processes")
     if not os.getenv("FLAGCX_PATH"):
         pytest.skip("Set FLAGCX_PATH to a built MetaX FlagCX source tree")
@@ -48,6 +147,27 @@ def flagcx_runtime():
     assert current_platform.device_type == "cuda"
     assert not dist.is_initialized(), "Use an isolated torchrun process group"
     dist.init_process_group("gloo", timeout=timedelta(seconds=180))
+    if expected_nodes is not None:
+        try:
+            identity = _host_identity(
+                dist.get_rank(),
+                local_rank,
+                dist.get_world_size(),
+                torch.cuda.device_count(),
+            )
+            records = [None] * dist.get_world_size()
+            dist.all_gather_object(records, identity, group=dist.group.WORLD)
+            _validate_host_topology(records, expected_nodes)
+            print(
+                "FLAGCX_TOPOLOGY "
+                + json.dumps(
+                    {"expected_nodes": expected_nodes, "ranks": records}, sort_keys=True
+                ),
+                flush=True,
+            )
+        except Exception:
+            dist.destroy_process_group()
+            raise
     from vllm_fl.distributed.device_communicators.flagcx import PyFlagcxCommunicator
 
     library = Path(os.environ["FLAGCX_PATH"]) / "build/lib/libflagcx.so"
