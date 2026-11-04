@@ -193,7 +193,7 @@ class PlatformFL(Platform):
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     # Backend for vLLM's standalone ``@torch.compile`` call sites. A few layers
-    # compile themselves through ``current_platform.simple_compile_backend`` —
+    # compile themselves through ``current_platform.simple_compile_backend`` --
     # ``get_masked_input_and_mask`` in
     # ``vllm/model_executor/layers/vocab_parallel_embedding.py`` is the one an
     # ordinary model hits. Those decorators read the attribute directly, so they
@@ -270,9 +270,9 @@ class PlatformFL(Platform):
 
         ``PlatformFL`` registers as ``PlatformEnum.OOT``, so the base
         implementation answers False for every vendor. vLLM gates a great deal
-        of behaviour on ``is_rocm()`` — including skipping the TileLang JIT hook,
+        of behaviour on ``is_rocm()`` -- including skipping the TileLang JIT hook,
         whose symbols are broken on ROCm and abort the process inside
-        ``tvm_ffi`` — so AMD must answer truthfully here.
+        ``tvm_ffi`` -- so AMD must answer truthfully here.
         """
         return self.vendor_name == "amd"
 
@@ -878,8 +878,8 @@ class PlatformFL(Platform):
             # and segfaults on RDNA (observed on gfx1100 inside
             # ck_tile::FmhaFwdKernel via mha_varlen_fwd while profiling a
             # Qwen3.6 vision encoder). vLLM's own ROCm platform already splits
-            # the architectures — Composable Kernel on CDNA, Triton flash
-            # attention on gfx11xx/gfx12xx — so defer to it and inherit any
+            # the architectures -- Composable Kernel on CDNA, Triton flash
+            # attention on gfx11xx/gfx12xx -- so defer to it and inherit any
             # upstream fix.
             from vllm.platforms.rocm import RocmPlatform
 
@@ -1178,7 +1178,7 @@ class PlatformFL(Platform):
         implementations.``
 
         Every field of ``IrOpPriorityConfig`` is checked, because
-        ``with_default`` applies the default list to all of them — including
+        ``with_default`` applies the default list to all of them -- including
         ops such as ``gelu_and_mul_sparse`` that this platform does not name
         explicitly. Enumerating the config's fields keeps that in step if
         upstream adds more.
