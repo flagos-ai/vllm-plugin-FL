@@ -96,6 +96,7 @@ def loaded():
         "flagcxComm_t": ctypes.c_void_p,
         "logger": logging.getLogger("test.txda.flagcx.cleanup"),
         "_TXDA_ABORT_TIMEOUT_SECONDS": 0.03,
+        "_flagcx_wheel_api": False,
     }
     module = ast.Module(
         body=[

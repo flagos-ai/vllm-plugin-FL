@@ -17,6 +17,9 @@ matrix, scenarios, and usage.
 | `main` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
 | `0.5.0-dev` (NVIDIA CUDA adaptation) | [v0.32.0](https://github.com/vllm-project/vllm/tree/v0.32.0) |
 
+For the Sunrise/PTPU vLLM 0.32.0 empty build on the vendor Python 3.10 stack,
+see the [Sunrise build and validation guide](./docker/sunrise/README.md).
+
 ## Supported Models and Chips
 
 In theory, vllm-plugin-FL can support all models available in vLLM, as long as no unsupported operators are involved. The tables below summarize the current support status of end-to-end verified models and chips, including both fully supported and in-progress ("Merging") entries.

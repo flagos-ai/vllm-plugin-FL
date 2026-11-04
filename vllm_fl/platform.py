@@ -424,13 +424,14 @@ class PlatformFL(Platform):
             patch_mm_encoder_attention()
 
         if (
-            cls.device_type in {"npu", "musa", "txda"}
+            cls.device_type in {"npu", "musa", "txda", "ptpu"}
             and vllm_config.use_v2_model_runner
         ):
             platform_name = {
                 "npu": "Ascend",
                 "musa": "MUSA",
                 "txda": "Tsingmicro TXDA",
+                "ptpu": "Sunrise",
             }[cls.device_type]
             raise ValueError(
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
@@ -487,7 +488,11 @@ class PlatformFL(Platform):
                 # Revalidate after changing MLA/KV-head semantics so DCP and TP
                 # constraints are checked against the dense architecture.
                 model_config.verify_with_parallel_config(parallel_config)
-        parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+        parallel_config.worker_cls = (
+            "vllm_fl.worker.sunrise_worker.SunriseWorker"
+            if cls.device_type == "ptpu"
+            else "vllm_fl.worker.worker.WorkerFL"
+        )
 
         scheduler_config = vllm_config.scheduler_config
         if (
@@ -809,6 +814,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "sunrise",
         ]
 
     @classmethod

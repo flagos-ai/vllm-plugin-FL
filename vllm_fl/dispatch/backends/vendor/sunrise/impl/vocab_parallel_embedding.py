@@ -7,6 +7,7 @@ import torch
 from vllm.distributed import tensor_model_parallel_all_reduce
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
+    is_fp8,
 )
 
 
@@ -42,6 +43,9 @@ class SunriseVocabParallelEmbedding(VocabParallelEmbedding):
     """Sunrise/PTPU version that use eager mode get_masked_input_and_mask."""
 
     def forward(self, input_: torch.Tensor) -> torch.Tensor:
+        if self.tp_size == 1:
+            return self.quant_method.embedding(self, input_.long())
+
         if self.tp_size > 1:
             masked_input, input_mask = _get_masked_input_and_mask_eager(
                 input_,
@@ -55,9 +59,18 @@ class SunriseVocabParallelEmbedding(VocabParallelEmbedding):
             masked_input, input_mask = input_, None
 
         output_parallel = self.quant_method.embedding(self, masked_input.long())
-        if self.tp_size > 1:
-            output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
-        return tensor_model_parallel_all_reduce(output_parallel)
+        output_dtype = output_parallel.dtype
+        if is_fp8(output_dtype):
+            # Each vocabulary token has one owner; reduce FP8 storage as bytes.
+            output_parallel = output_parallel.view(torch.int8)
+        output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
+        if self.reduce_results:
+            output_parallel = (
+                self.parallel_group.all_reduce(output_parallel)
+                if self.parallel_group is not None
+                else tensor_model_parallel_all_reduce(output_parallel)
+            )
+        return output_parallel.view(output_dtype)
 
     def forward_native(self, input_: torch.Tensor) -> torch.Tensor:
         return self.forward(input_)
