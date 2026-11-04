@@ -448,7 +448,7 @@ Final runtime code `9ae5f50` has the following model acceptance results:
 | Model | Run / physical devices / port | Final-code result |
 | --- | --- | --- |
 | Qwen3.6-35B-A3B | r8 / 2,3 / 18321 | **5/5 scenarios and 26/26 requests PASS** |
-| Qwen3.6-27B | r17 / 6,7 / 18322 | Long text passed (1/26); concurrent short answers under investigation |
+| Qwen3.6-27B | r17 / 6,7 / 18322 | **FAIL:** long text 1/1; concurrent text 3/8; remaining scenarios not completed |
 
 For 35B, all 26 saved responses were independently rechecked against the
 original inputs, image fixtures, required terms and ten quality checks.
@@ -456,10 +456,14 @@ Both ranks recorded the actual upstream V2 runner, pinned FlagCX library,
 native BF16 GEMM, KV zeroer and scoped GDN adapter. The supervisor reported
 passed; test, host and server exit codes were all zero, with no forced cleanup.
 
-The 27B concurrent short-answer scenario has generated over 400 tokens versus
-21 in the earlier baseline, with five requests still running at this snapshot.
-The cause is unconfirmed; the GDN adapter has not been established as the cause.
-The complete 27B gate, and therefore the two-model acceptance, **has not passed**.
+The 27B concurrent short-answer scenario failed five of eight requests. Those
+responses started with plausible answers, then repeated `!` or `@` until the
+unchanged 128-token limit. The earlier baseline returned eight correct short
+answers. The cause is unconfirmed; GDN state copying and dynamic-batch execution
+remain candidates. The remaining scenarios were canceled after preserving the
+failed responses. All requests drained before a clean server exit (code zero,
+no forced cleanup). Both model services have exited. The two-model acceptance
+**has not passed**.
 All original budgets and assertions remain unchanged. Earlier partial runs and
 historical 0.28 TP8 results do not count toward this final acceptance.
 
