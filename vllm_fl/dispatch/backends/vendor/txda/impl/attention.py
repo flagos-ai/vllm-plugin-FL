@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import torch
 
-from vllm.v1.attention.backend import AttentionCGSupport, AttentionType
+from vllm.v1.attention.backend import AttentionCGSupport, AttentionType, MultipleOf
 
 from vllm_fl.dispatch.backends.flaggems.impl.attention import (
     AttentionFLBackend,
@@ -37,6 +37,12 @@ class TxdaSDPAAttentionBackend(AttentionFLBackend):
     """Attention backend for tsingmicro TX devices using torch SDPA."""
 
     forward_includes_kv_cache_update: bool = False
+
+    @staticmethod
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int | MultipleOf]:
+        # Native tensor indexing supports every positive page size, including
+        # hybrid Mamba pages. V2 asks this outside a global config context.
+        return [MultipleOf(1)]
 
     @staticmethod
     def get_builder_cls() -> type[TxdaSDPAMetadataBuilder]:
