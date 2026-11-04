@@ -241,7 +241,7 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro", "sunrise"):
+    if vendor_name in ("ascend", "mthreads", "enflame", "gcu", "tsingmicro"):
         # These backends use the V1 execution protocol; select it before
         # VllmConfig reads model defaults for the upstream V2 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")

@@ -424,14 +424,13 @@ class PlatformFL(Platform):
             patch_mm_encoder_attention()
 
         if (
-            cls.device_type in {"npu", "musa", "txda", "ptpu"}
+            cls.device_type in {"npu", "musa", "txda"}
             and vllm_config.use_v2_model_runner
         ):
             platform_name = {
                 "npu": "Ascend",
                 "musa": "MUSA",
                 "txda": "Tsingmicro TXDA",
-                "ptpu": "Sunrise",
             }[cls.device_type]
             raise ValueError(
                 f"{platform_name} requires ModelRunnerFL; the upstream V2 runner uses "
