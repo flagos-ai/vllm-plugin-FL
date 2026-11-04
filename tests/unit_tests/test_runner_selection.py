@@ -452,11 +452,15 @@ def test_ascend_allows_layer_only_vllm_config(monkeypatch):
 
     from vllm_fl.platform import PlatformFL
 
+    # Match Ascend registration even when the host CI image selects V2.
+    monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "0")
     monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    monkeypatch.setattr(PlatformFL, "vendor_name", "ascend")
     monkeypatch.setattr(
         current_platform, "check_and_update_config", PlatformFL.check_and_update_config
     )
     config = VllmConfig(device_config=DeviceConfig(device="cpu"))
+    assert config.use_v2_model_runner is False
     assert config.model_config is None
     assert config.compilation_config.mode is CompilationMode.NONE
     assert config.compilation_config.cudagraph_mode is CUDAGraphMode.NONE
