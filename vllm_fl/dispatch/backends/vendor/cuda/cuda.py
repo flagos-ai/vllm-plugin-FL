@@ -50,13 +50,12 @@ class CudaBackend(Backend):
 
                 from vllm.platforms import current_platform
 
-                if (
-                    hasattr(current_platform, "device_name")
-                    and current_platform.device_name == "nvidia"
-                ):
-                    CudaBackend._available = True
-                else:
-                    CudaBackend._available = False
+                # vLLM's built-in NVIDIA platform identifies as "cuda".
+                # Reject out-of-tree CUDA-like platforms such as MACA.
+                CudaBackend._available = (
+                    type(current_platform).__module__ == "vllm.platforms.cuda"
+                    and getattr(current_platform, "device_name", None) == "cuda"
+                )
             except Exception:
                 CudaBackend._available = False
         return CudaBackend._available
