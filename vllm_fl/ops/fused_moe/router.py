@@ -324,6 +324,8 @@ class FusedTopKBiasRouterFL(FusedTopKBiasRouter):
                 input_tokens=input_ids,
                 hash_indices_table=self._hash_indices_table,
                 routed_scaling_factor=self.routed_scaling_factor,
+                bias_vl=self.bias_vl.data if self.bias_vl is not None else None,
+                image_sentinel_lo=self.image_sentinel_lo,
             )
 
         if self.num_fused_shared_experts > 0:

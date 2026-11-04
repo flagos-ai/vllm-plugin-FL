@@ -1,6 +1,6 @@
 # Copyright (c) 2026 BAAI. All rights reserved.
 
-"""NVIDIA-specific FlagCX communicator bridge for vLLM 0.28."""
+"""NVIDIA-specific FlagCX communicator bridge for vLLM 0.32."""
 
 import torch
 from torch.distributed import ProcessGroup
@@ -49,10 +49,12 @@ class NvidiaCommunicatorFL(CommunicatorFL, CudaCommunicator):
         self.use_custom_allreduce = False
         self.use_torch_symm_mem = False
         self.use_flashinfer_allreduce = False
+        self.use_flashinfer_pcie_ipc_allreduce = False
         self.use_aiter_allreduce = False
         self.pynccl_comm = None
         self.ca_comm = None
         self.qr_comm = None
         self.symm_mem_comm = None
         self.fi_ar_comm = None
+        self.fi_pcie_ipc_ar_comm = None
         self.aiter_ar_comm = None
