@@ -1,0 +1,204 @@
+{
+  "excerpt_kind": "selected_json_fields",
+  "provenance": {
+    "sources": [
+      {
+        "source_basename": "gate-27b-prefill-token-repro-r2.json",
+        "source_label": "27B controlled text and image responses",
+        "source_sha256": "dca974e4ac8dfa179ba119443aeec339d64c9367d94da645d883d4adb44474c3",
+        "original_1based_line_ranges": [
+          [
+            3,
+            3
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            23,
+            23
+          ],
+          [
+            25,
+            29
+          ],
+          [
+            36,
+            36
+          ],
+          [
+            38,
+            38
+          ],
+          [
+            80,
+            80
+          ],
+          [
+            92,
+            92
+          ],
+          [
+            100,
+            100
+          ],
+          [
+            102,
+            110
+          ],
+          [
+            117,
+            117
+          ],
+          [
+            119,
+            119
+          ],
+          [
+            1197,
+            1197
+          ],
+          [
+            1209,
+            1209
+          ],
+          [
+            1217,
+            1217
+          ],
+          [
+            1219,
+            1227
+          ],
+          [
+            1234,
+            1234
+          ],
+          [
+            1236,
+            1236
+          ],
+          [
+            5354,
+            5354
+          ],
+          [
+            5366,
+            5366
+          ],
+          [
+            5374,
+            5374
+          ],
+          [
+            5376,
+            5385
+          ],
+          [
+            5392,
+            5392
+          ],
+          [
+            5394,
+            5394
+          ]
+        ],
+        "selected_json_pointers": [
+          "/0/name",
+          "/0/response/choices/0/message/content",
+          "/0/response/choices/0/finish_reason",
+          "/0/response/choices/0/token_ids",
+          "/0/response/usage/prompt_tokens",
+          "/0/response/usage/completion_tokens",
+          "/1/name",
+          "/1/response/choices/0/message/content",
+          "/1/response/choices/0/finish_reason",
+          "/1/response/choices/0/token_ids",
+          "/1/response/usage/prompt_tokens",
+          "/1/response/usage/completion_tokens",
+          "/2/name",
+          "/2/response/choices/0/message/content",
+          "/2/response/choices/0/finish_reason",
+          "/2/response/choices/0/token_ids",
+          "/2/response/usage/prompt_tokens",
+          "/2/response/usage/completion_tokens",
+          "/3/name",
+          "/3/response/choices/0/message/content",
+          "/3/response/choices/0/finish_reason",
+          "/3/response/choices/0/token_ids",
+          "/3/response/usage/prompt_tokens",
+          "/3/response/usage/completion_tokens"
+        ]
+      }
+    ],
+    "redactions": [
+      "Prompt bodies, prompt-token arrays, endpoints, model locations, response IDs and unrelated response metadata omitted.",
+      "Returned output token IDs are retained exactly; no clipping or replacement performed."
+    ]
+  },
+  "observations": [
+    {
+      "name": "short-control",
+      "content": "42",
+      "finish_reason": "stop",
+      "token_ids": [
+        19,
+        17,
+        248046
+      ],
+      "prompt_tokens": 27,
+      "completion_tokens": 3
+    },
+    {
+      "name": "plain-prefill-1062",
+      "content": "violet maple 42",
+      "finish_reason": "stop",
+      "token_ids": [
+        85,
+        29899,
+        52556,
+        220,
+        19,
+        17,
+        248046
+      ],
+      "prompt_tokens": 1063,
+      "completion_tokens": 7
+    },
+    {
+      "name": "plain-prefill-4096",
+      "content": "violet maple 42",
+      "finish_reason": "stop",
+      "token_ids": [
+        85,
+        29899,
+        52556,
+        220,
+        19,
+        17,
+        248046
+      ],
+      "prompt_tokens": 4103,
+      "completion_tokens": 7
+    },
+    {
+      "name": "same-image-no-logprobs",
+      "content": "",
+      "finish_reason": "length",
+      "token_ids": [
+        248320,
+        248320,
+        248320,
+        248320,
+        248320,
+        248320,
+        248320,
+        248320
+      ],
+      "prompt_tokens": 1062,
+      "completion_tokens": 8
+    }
+  ],
+  "scope": "Controls are separate diagnostic requests; they do not turn the failed shared Gate into a pass."
+}

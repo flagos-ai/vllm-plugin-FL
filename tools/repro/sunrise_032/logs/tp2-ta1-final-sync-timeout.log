@@ -1,0 +1,38 @@
+# Sanitized line excerpts; not a complete raw log and not a passing Gate.
+# Context: The original log explicitly prints TA_CLOSE_GRAPH_MEMORY=1. Both ranks reach final_synchronize_begin, with no completion line before EOF; status124. This excerpt does not invent a kernel-name watchdog absent from the original TA1 log.
+# Redactions: Only the indicated original lines are included; omitted sections are not reconstructed.; PCI bus addresses and ephemeral thread IDs replaced with labelled placeholders.; Private rendezvous path/PID replaced while retaining the exact UUID suffix; raw stream handles replaced.
+# source_basename=comm-graph-ta1.log
+# source_sha256=1922a90619d1d4101f0527b05f965e1603f014042f2ffd9d71dea8b71dc1be63
+# original_1based_line_ranges=[[1, 2], [20, 29], [68, 79]]
+# Begin original lines 1-2
+L1: TA_CLOSE_GRAPH_MEMORY=1
+L2: {"stage": "rendezvous", "path": "<REDACTED_RENDEZVOUS_PATH; uuid=23405aa509154774b4aa7298461af490>", "parent_pid": "<REDACTED_PID>"}
+# Begin original lines 20-29
+L20: {"rank": 1, "stage": "capture_begin", "batch": 2, "pool": "(0, 1)", "layers": 32}
+L21: {"rank": 0, "stage": "capture_begin", "batch": 2, "pool": "(0, 1)", "layers": 32}
+L22: {"rank": 1, "stage": "capture_end", "batch": 2, "native_type": "PTPUGraph"}
+L23: {"rank": 1, "stage": "capture_begin", "batch": 1, "pool": "(0, 1)", "layers": 32}
+L24: {"rank": 0, "stage": "capture_end", "batch": 2, "native_type": "PTPUGraph"}
+L25: {"rank": 0, "stage": "capture_begin", "batch": 1, "pool": "(0, 1)", "layers": 32}
+L26: {"rank": 1, "stage": "capture_end", "batch": 1, "native_type": "PTPUGraph"}
+L27: {"rank": 0, "stage": "capture_end", "batch": 1, "native_type": "PTPUGraph"}
+L28: {"rank": 0, "stage": "async_sequence_begin", "batches": [2, 2, 1, 2, 1, 1, 2, 1], "stream": "<REDACTED_STREAM_HANDLE>"}
+L29: {"rank": 1, "stage": "async_sequence_begin", "batches": [2, 2, 1, 2, 1, 1, 2, 1], "stream": "<REDACTED_STREAM_HANDLE>"}
+# Begin original lines 68-79
+L68: {"rank": 1, "stage": "async_replay_begin", "iteration": 7, "batch": 1}
+L69: {"rank": 0, "stage": "async_enqueued", "iteration": 5, "batch": 1}
+L70: {"rank": 1, "stage": "async_gather_begin", "iteration": 7, "batch": 1}
+L71: {"rank": 0, "stage": "async_replay_begin", "iteration": 6, "batch": 2}
+L72: {"rank": 0, "stage": "async_gather_begin", "iteration": 6, "batch": 2}
+L73: {"rank": 1, "stage": "async_enqueued", "iteration": 7, "batch": 1}
+L74: {"rank": 1, "stage": "final_synchronize_begin"}
+L75: {"rank": 0, "stage": "async_enqueued", "iteration": 6, "batch": 2}
+L76: {"rank": 0, "stage": "async_replay_begin", "iteration": 7, "batch": 1}
+L77: {"rank": 0, "stage": "async_gather_begin", "iteration": 7, "batch": 1}
+L78: {"rank": 0, "stage": "async_enqueued", "iteration": 7, "batch": 1}
+L79: {"rank": 0, "stage": "final_synchronize_begin"}
+# source_basename=comm-graph-ta1.status
+# source_sha256=ca2ebdf97d7469496b1f4b78958f9dc8447efdcb623953fee7b6996b762f6fff
+# original_1based_line_ranges=[[1, 1]]
+# Begin original lines 1-1
+L1: 124

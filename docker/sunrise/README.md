@@ -181,3 +181,7 @@ requires all four model/mode groups: 20 shared scenarios / 104 requests plus
 four measured long-prefill requests, and request-time native FULL graph
 execution evidence for each graph group. Successful imports, a built image,
 unit tests or TP1 graph replay do not replace that matrix.
+Vendor investigation scripts, exact request/launch parameters, sanitized log
+excerpts and source hashes are collected in the
+[offline reproduction bundle](../../tools/repro/sunrise_032/README.md).
+Those organized entry points have not been GPU-retested; no reset is performed.

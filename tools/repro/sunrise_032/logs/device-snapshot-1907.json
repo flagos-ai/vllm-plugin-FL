@@ -1,0 +1,135 @@
+{
+  "excerpt_kind": "selected_json_fields",
+  "provenance": {
+    "sources": [
+      {
+        "source_basename": "devices.txt",
+        "source_label": "Read-only device status at 19:07:34",
+        "source_sha256": "c8034254eb52164c3f7eb2e149a3e36c770ac962226c188aad8344a335d0e371",
+        "original_1based_line_ranges": [
+          [
+            1,
+            3
+          ],
+          [
+            9,
+            10
+          ],
+          [
+            13,
+            14
+          ],
+          [
+            17,
+            18
+          ],
+          [
+            21,
+            22
+          ],
+          [
+            25,
+            26
+          ],
+          [
+            29,
+            30
+          ],
+          [
+            33,
+            34
+          ],
+          [
+            37,
+            38
+          ],
+          [
+            43,
+            50
+          ]
+        ]
+      }
+    ],
+    "redactions": [
+      "Hostname, SSH connection information, PCI addresses, PIDs, process names, temperatures, clocks and power readings omitted.",
+      "Process table reduced to a per-device boolean; device model, allocation, utilization and ECC retained."
+    ]
+  },
+  "snapshot_time_as_recorded": "Wed Nov 04 19:07:34 2026",
+  "driver_version": "0.24.0",
+  "devices": [
+    {
+      "device_id": 0,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "31.921GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": true
+    },
+    {
+      "device_id": 1,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": false
+    },
+    {
+      "device_id": 2,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "31.921GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": true
+    },
+    {
+      "device_id": 3,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": false
+    },
+    {
+      "device_id": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": false
+    },
+    {
+      "device_id": 5,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": false
+    },
+    {
+      "device_id": 6,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": false
+    },
+    {
+      "device_id": 7,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "12.000KiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "volatile_uncorrectable_ecc": 0,
+      "has_listed_process": false
+    }
+  ],
+  "scope": "Historical snapshot only. It does not establish present health, peer isolation, or the cause of residual allocation."
+}

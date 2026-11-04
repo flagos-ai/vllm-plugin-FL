@@ -1,0 +1,102 @@
+{
+  "excerpt_kind": "selected_json_fields",
+  "provenance": {
+    "sources": [
+      {
+        "source_basename": "summary.json",
+        "source_label": "35B eager Gate summary",
+        "source_sha256": "a7e9f45e47aadaa7996d726490f0d933d40bd9375a0f716915dc07fe7ad715da",
+        "original_1based_line_ranges": [
+          [
+            3,
+            3
+          ],
+          [
+            39,
+            39
+          ],
+          [
+            41,
+            41
+          ],
+          [
+            50,
+            54
+          ],
+          [
+            63,
+            74
+          ]
+        ],
+        "selected_json_pointers": [
+          "/mode",
+          "/passed",
+          "/runner_v2",
+          "/gate",
+          "/effective_configuration"
+        ]
+      },
+      {
+        "source_basename": "long-prefill.json",
+        "source_label": "35B supplemental long prefill",
+        "source_sha256": "374e7293729fab533fd4fcd81aa370ede80228cb8168da8e3663c322570e122a",
+        "original_1based_line_ranges": [
+          [
+            6,
+            6
+          ],
+          [
+            32,
+            32
+          ],
+          [
+            40,
+            40
+          ],
+          [
+            74,
+            74
+          ]
+        ],
+        "selected_json_pointers": [
+          "/passed",
+          "/measured_prompt_tokens",
+          "/response/choices/0/message/content",
+          "/response/choices/0/finish_reason"
+        ]
+      }
+    ],
+    "redactions": [
+      "Private model/server paths, endpoint/port, full prompt body, response IDs and unrelated response fields omitted.",
+      "Public model basename retained as the label."
+    ]
+  },
+  "model": "Qwen3.6-35B-A3B",
+  "mode": "eager",
+  "passed": true,
+  "runner_v2": true,
+  "shared_gate": {
+    "scenarios": 5,
+    "requests": 26,
+    "passed": true
+  },
+  "effective_configuration": {
+    "tensor_parallel_size": 2,
+    "max_model_len": 8192,
+    "max_num_seqs": 8,
+    "kv_cache_memory_bytes": 4294967296,
+    "enforce_eager": true,
+    "use_v2_model_runner": true,
+    "compilation_mode": 0,
+    "compilation_backend": "eager",
+    "cudagraph_mode": "NONE",
+    "cudagraph_capture_sizes": []
+  },
+  "long_prefill": {
+    "passed": true,
+    "measured_prompt_tokens": 4118,
+    "answer": "violet maple 42",
+    "finish_reason": "stop"
+  },
+  "scope": "A distinct eager passing control, not evidence that 27B or TP2 model graph acceptance passed."
+}
