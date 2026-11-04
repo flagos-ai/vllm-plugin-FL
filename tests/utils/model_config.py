@@ -390,9 +390,8 @@ class ModelConfig:
 
         Converts Python-style kwargs to CLI flags::
 
-            tensor_parallel_size=8          → ["--tensor-parallel-size", "8"]
-            enforce_eager=True              → ["--enforce-eager"]
-            compilation_config={"a": 1}     → ["--compilation-config", '{"a": 1}']
+            tensor_parallel_size=8 → ["--tensor-parallel-size", "8"]
+            enforce_eager=True     → ["--enforce-eager"]
 
         The ``tensor_parallel_size`` key is excluded because
         ``VllmServer`` handles it via the ``tp_size`` parameter.
