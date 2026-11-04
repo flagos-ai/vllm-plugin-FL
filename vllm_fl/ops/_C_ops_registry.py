@@ -5,6 +5,7 @@
 # is not compiled for this platform.
 
 import logging
+from contextlib import suppress
 
 import torch
 
@@ -60,12 +61,10 @@ def register_op_schemas():
     if getattr(register_op_schemas, "_lib", None) is not None:
         return
 
-    try:
+    with suppress(ImportError, OSError):
         import vllm._C  # noqa: F401
 
         return
-    except (ImportError, OSError):
-        pass
 
     # Pre-load mcoplib._C (MetaX) so its TORCH_LIBRARY registrations land
     # before our FRAGMENT definitions.  The hasattr check below will then
@@ -100,15 +99,11 @@ def register_op_schemas():
             logger.debug("Failed to register _C op schema '%s': %s", full_name, e)
 
     for name, fn in _QUERY_OP_IMPLS:
-        try:
+        with suppress(Exception):
             lib.impl(name, fn, "CompositeImplicitAutograd")
-        except Exception:
-            pass
 
     for name, fn in _CUDA_FALLBACK_IMPLS:
-        try:
+        with suppress(Exception):
             lib.impl(name, fn, "CUDA")
-        except Exception:
-            pass
 
     register_op_schemas._lib = lib

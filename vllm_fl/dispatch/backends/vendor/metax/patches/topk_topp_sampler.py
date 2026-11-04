@@ -12,8 +12,18 @@ import vllm.v1.sample.ops.topk_topp_sampler as topk_topp_sampler
 from vllm_fl import envs as fl_envs
 
 _POSITIVE_NATIVE_NOISE = ContextVar("metax_positive_native_noise", default=False)
-_native_random_sample = topk_topp_sampler.random_sample
-_native_sample_with_noise = topk_topp_sampler.sample_with_exponential_noise
+
+
+def _original(function):
+    return (
+        function.__wrapped__
+        if getattr(function, "_fl_metax_sampling_patch", False)
+        else function
+    )
+
+
+_native_random_sample = _original(topk_topp_sampler.random_sample)
+_native_sample_with_noise = _original(topk_topp_sampler.sample_with_exponential_noise)
 
 
 def _supported(x):
@@ -86,6 +96,25 @@ def _sample_with_exponential_noise(probs, noise):
     return _native_sample_with_noise(probs, noise)
 
 
-topk_topp_sampler.apply_top_k_top_p = _apply_top_k_top_p_no_triton
-topk_topp_sampler.random_sample = _random_sample
-topk_topp_sampler.sample_with_exponential_noise = _sample_with_exponential_noise
+def install_metax_sampling_patches():
+    """Publish the filter and paired RNG hooks once, without partial setup."""
+    from vllm_fl.patches._qwen38_installation import apply_attributes
+
+    changes = (
+        ("apply_top_k_top_p", _apply_top_k_top_p_no_triton),
+        ("random_sample", _random_sample),
+        ("sample_with_exponential_noise", _sample_with_exponential_noise),
+    )
+    for name, _ in changes:
+        if not callable(getattr(topk_topp_sampler, name, None)):
+            raise TypeError(f"MetaX sampling requires native {name}")
+    if all(
+        getattr(getattr(topk_topp_sampler, name), "_fl_metax_sampling_patch", False)
+        for name, _ in changes
+    ):
+        return
+    for _, function in changes:
+        function._fl_metax_sampling_patch = True
+    apply_attributes(
+        [(topk_topp_sampler, name, function) for name, function in changes]
+    )

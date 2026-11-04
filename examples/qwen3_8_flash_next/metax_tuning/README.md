@@ -1,6 +1,6 @@
 # Qwen3.8 Flash Next MetaX tuning configuration
 
-Use [serve_metax.py](../serve_metax.py) to select the model configuration.
+Use [serve_metax.sh](../serve_metax.sh) to select the model configuration.
 It defaults to MTP off, synchronous scheduling, shared CPU lookup and MBT2048;
 MTP-off deployments may explicitly select async scheduling, UVA auto and
 MBT4096/8192. The [model guide](../../../docs/models/qwen3_8_flash_next.md)

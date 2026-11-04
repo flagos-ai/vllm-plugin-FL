@@ -8,6 +8,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
 from unittest.mock import patch
 
+import pytest
 import torch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +54,10 @@ def registration_modules():
         "vllm_fl.models.qwen3_8_flash_next.gpu.runtime",
     ]
     modules = {name: ModuleType(name) for name in names}
+    modules["vllm_fl.patches"] = ModuleType("vllm_fl.patches")
+    modules["vllm_fl.patches._qwen38_installation"] = load_file(
+        "qwen38_setup_test_helper", ROOT / "vllm_fl/patches/_qwen38_installation.py"
+    )
     modules["vllm_fl.models.qwen3_8_flash_next.gpu.runtime"].is_metax = lambda: True
     modules["vllm"].__version__ = "0.24.0"
     modules["vllm"].envs = modules["vllm.envs"]
@@ -65,6 +70,7 @@ def registration_modules():
 
     class Registry:
         registered = {}
+        models = registered
 
         @classmethod
         def get_supported_archs(cls):
@@ -231,7 +237,10 @@ class LazyRegistrationTest(unittest.TestCase):
                 parallel_config=NS(
                     enable_dbo=False, ubatch_size=1, pipeline_parallel_size=1
                 ),
-                scheduler_config=NS(async_scheduling=False),
+                scheduler_config=NS(
+                    async_scheduling=False, max_num_batched_tokens=2048
+                ),
+                additional_config={},
             )
             verify = (
                 registration.Qwen3_8FlashNextForCausalLMConfig.verify_and_update_config
@@ -248,3 +257,52 @@ class LazyRegistrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize(
+    "k,async_mode,lookup,mbt,valid",
+    [
+        (0, True, "uva_auto", 8192, True),
+        (1, False, "shared_buffer", 2048, True),
+        (2, False, "shared_buffer", 2048, True),
+        (3, False, "shared_buffer", 2048, True),
+        (1, True, "shared_buffer", 2048, False),
+        (1, False, "uva_auto", 2048, False),
+        (1, False, "shared_buffer", 8192, False),
+        (0, True, "uva_auto", 16384, False),
+    ],
+)
+def test_native_serving_configuration_guards(k, async_mode, lookup, mbt, valid):
+    modules, _, _ = registration_modules()
+    with patch.dict(sys.modules, modules):
+        model = load_file(
+            "qwen_shell_native_verifier", ROOT / "vllm_fl/patches/qwen3_8_flash_next.py"
+        )
+        config = NS(
+            model_config=NS(
+                dtype=torch.bfloat16, multimodal_config=NS(language_model_only=True)
+            ),
+            cache_config=NS(
+                mamba_ssm_cache_dtype="float32",
+                mamba_cache_mode="none",
+                enable_prefix_caching=False,
+            ),
+            speculative_config=NS(
+                num_speculative_tokens=k, disable_padded_drafter_batch=True
+            )
+            if k
+            else None,
+            scheduler_config=NS(
+                async_scheduling=async_mode, max_num_batched_tokens=mbt
+            ),
+            parallel_config=NS(pipeline_parallel_size=1),
+            additional_config={
+                "qwen38_ngram_mode": lookup,
+                "qwen38_tuning_profile": True,
+            },
+        )
+        if valid:
+            model._verify_metax_config(config)
+        else:
+            with pytest.raises((ValueError, NotImplementedError)):
+                model._verify_metax_config(config)

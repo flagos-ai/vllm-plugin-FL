@@ -11,7 +11,9 @@
     "FG-index-address-product": "https://github.com/flagos-ai/FlagGems/pull/7981",
     "FGV-PLE": "https://github.com/flagos-ai/FlagGems-vllm/pull/959",
     "FGV-inplace-MoE": "https://github.com/flagos-ai/FlagGems-vllm/pull/1000",
-    "FGV-per-row-topk": "https://github.com/flagos-ai/FlagGems-vllm/pull/1024"
+    "FGV-per-row-topk": "https://github.com/flagos-ai/FlagGems-vllm/pull/1024",
+    "FG-index-select-host-iteration": "https://github.com/flagos-ai/FlagGems/pull/8299",
+    "FGV-GDN-caller-metadata": "https://github.com/flagos-ai/FlagGems-vllm/pull/1056"
   },
   "private_sources": [
     {
@@ -20,7 +22,12 @@
       "sha256": "a403e7a46f5596d0fb251fd6c806a3f36be81a7acfd04a74fe066d44c03e7147",
       "purpose": "Remove ineffective generator assertion and host tensor iteration",
       "introduced": "01-hotpaths",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Exact source file matches a public PR head; composed runtime installation is not yet public",
+      "published_counterpart": {
+        "pr": "https://github.com/flagos-ai/FlagGems/pull/8299",
+        "commit": "2920f89194b56fe1b4a0f4b02cdce7614cd148a2",
+        "exact_file_match": true
+      }
     },
     {
       "package": "flaggems_vllm",
@@ -28,7 +35,7 @@
       "sha256": "f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e",
       "purpose": "Existing large-row QSA TopK dependency",
       "introduced": "published-parent",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -36,7 +43,7 @@
       "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4",
       "purpose": "Existing generic sampling fallback",
       "introduced": "published-parent",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -44,7 +51,7 @@
       "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84",
       "purpose": "Existing exported sampling fallback",
       "introduced": "published-parent",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flag_gems",
@@ -52,7 +59,7 @@
       "sha256": "87921767027917f1781f90450d70061d8e0605217df8663c991694d62dd05b31",
       "purpose": "Existing fallback dependency",
       "introduced": "published-parent",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -60,7 +67,7 @@
       "sha256": "c1cea3fd6db8dd25306f80b36aab2b9fe9f387b7980b854f92d00dd99f819186",
       "purpose": "Block Top20 and top-p filtering",
       "introduced": "01-hotpaths",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -68,7 +75,7 @@
       "sha256": "ade13cc1ef45c6d66cdc58f20cf2e2e644119bc388b29f975ad2341e6ee82156",
       "purpose": "Race reduction with native RNG",
       "introduced": "01-hotpaths",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -76,7 +83,7 @@
       "sha256": "3edb369a293d0d7281d9c0c0cafbb5ffe0ffd4f34c22cacab4202df70f37cf9f",
       "purpose": "Head/query packing with the reviewed BF16 contract; single-split direct output; opt-in sparse-prefill loop/page-map optimization",
       "introduced": "01-hotpaths",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -84,7 +91,7 @@
       "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0",
       "purpose": "BF16 plans, AvBv scales and GEMM execution",
       "introduced": "01-hotpaths",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flag_gems",
@@ -92,7 +99,12 @@
       "sha256": "56ec63b69230f5d436e63bd97b4912835f420c31134175e545bfc60f2e0a45d4",
       "purpose": "GPU boolean scalar assignment without host readback; int64 address multiplication for int32-indexed paged state writes",
       "introduced": "02-host-preparation",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Published address fix plus unpublished model-scoped masked-scalar optimization; keep provenance separate",
+      "published_counterpart": {
+        "pr": "https://github.com/flagos-ai/FlagGems/pull/7981",
+        "commit": "d73a0ba84da8a180c373d1dfc12b09031468b3ef",
+        "exact_file_match": false
+      }
     },
     {
       "package": "flaggems_vllm",
@@ -100,7 +112,7 @@
       "sha256": "cefed0e793627d5e1726279c7b53ac578b081b6984565b062a803a6b602c0480",
       "purpose": "Grouped norm, gate reduction and residual injection preserving eager BF16 intermediate rounding",
       "introduced": "hc-prefill-longctx-20261101",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -108,7 +120,7 @@
       "sha256": "f8356d0788a11b9d398edf0385befaed7450ab6b7f986d89ae7597f60d89fd05",
       "purpose": "Generic BF16/int32/FP32 mapped-host row gather with optional head-column selection and int64 large-table addressing",
       "introduced": "UVA lookup integration",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     },
     {
       "package": "flaggems_vllm",
@@ -116,7 +128,12 @@
       "sha256": "a7adff278d0c51958b9edc736ba463e81320e622cc30e48a8e1f3a91abab2ec8",
       "purpose": "Reuse caller chunk indices and optional host-derived skew; preserve existing kernels and fallback",
       "introduced": "p4k-gdn-host-metadata-20261102",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Exact source file matches a public PR head; composed runtime installation is not yet public",
+      "published_counterpart": {
+        "pr": "https://github.com/flagos-ai/FlagGems-vllm/pull/1056",
+        "commit": "bf7e04fecc74aac2dfc4642a639a4dd8765f9fd2",
+        "exact_file_match": true
+      }
     },
     {
       "package": "flaggems_vllm",
@@ -124,7 +141,12 @@
       "sha256": "f1338b987757ac9dfb903f41fe6ffc6ff88fc0104a185f8c062d0cb5b9f1a7e6",
       "purpose": "Reuse caller chunk indices and optional host-derived skew; preserve existing kernels and fallback",
       "introduced": "p4k-gdn-host-metadata-20261102",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Exact source file matches a public PR head; composed runtime installation is not yet public",
+      "published_counterpart": {
+        "pr": "https://github.com/flagos-ai/FlagGems-vllm/pull/1056",
+        "commit": "bf7e04fecc74aac2dfc4642a639a4dd8765f9fd2",
+        "exact_file_match": true
+      }
     },
     {
       "package": "flaggems_vllm",
@@ -132,7 +154,7 @@
       "sha256": "181aaa4d227ea30d2387b5bae3a43775429e38012d9abd0b89fa556757362898",
       "purpose": "BF16 partial/1D/MRoPE with eager rounding and optional paged cache store",
       "introduced": "p4k-mbt8192-buffer-fusions-20261102",
-      "status": "Source-locked model integration validated; standalone operator publication pending review"
+      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
     }
   ],
   "active_launch_source_guards": {
@@ -281,5 +303,11 @@
         "sha256": "c330739f946545f87ab26953499891e844cb506a780ca56b3b7f17a4247a3144"
       }
     ]
-  }
+  },
+  "publication_requirements": [
+    "Publish required numerical APIs and tests before replacing source fingerprints with team-accessible commits",
+    "Preserve the exact measured launch choices and native MoE alias capability when reconciling pins",
+    "Do not copy numerical source or source-replacement scripts into the model plugin",
+    "QSA operator publication remains deferred; this manifest is not a public installation lock"
+  ]
 }

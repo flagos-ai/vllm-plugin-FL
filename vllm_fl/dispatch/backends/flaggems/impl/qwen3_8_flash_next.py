@@ -55,9 +55,7 @@ def _fgv(name):
 
 
 def is_available(name):
-    if name in {
-        "qwen38_small_projection", "qwen38_ple_gate", "qwen38_gdn_mixed_qkv"
-    }:
+    if name in {"qwen38_small_projection", "qwen38_ple_gate", "qwen38_gdn_mixed_qkv"}:
         return True
     import vllm_fl.envs as fl_envs
 
@@ -227,7 +225,9 @@ def expand_qsa_block_indices(
     # scalar in its noncontiguous mul path is materialized via torch.tensor
     # on CUDA, which is not capture-safe. Build the integer constant on device
     # and use tensor/tensor multiplication for every ratio product here.
-    ratio = torch.full((), compress_ratio, dtype=torch.int64, device=block_indices.device)
+    ratio = torch.full(
+        (), compress_ratio, dtype=torch.int64, device=block_indices.device
+    )
     expanded_count = complete * ratio
     tail_start = (
         torch.div((positions + 1).clamp_min(0), compress_ratio, rounding_mode="floor")

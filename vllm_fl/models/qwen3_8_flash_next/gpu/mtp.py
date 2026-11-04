@@ -6,6 +6,7 @@ The residual-linear-shared fusion follows vLLM qwen4_exp/nvidia/mtp.py at
 7b1d07440dde8426a8b3d85e5f5815c06913eb82. The decoder and checkpoint loader
 use this plugin's vLLM 0.24 interfaces; no upstream source is replaced.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -23,8 +24,12 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.models.qwen3_next import QwenNextMixtureOfExperts
 from vllm.model_executor.models.utils import AutoWeightsLoader, maybe_prefix
 
+from ..common.hyperconnection import (
+    GatedResidualSimple,
+    GroupedGemmaRMSNorm,
+    HyperConnectionConfig,
+)
 from .model import Qwen3_8FlashNextDecoderLayer, Qwen3_8FlashNextModel
-from ..common.hyperconnection import GatedResidualSimple, GroupedGemmaRMSNorm, HyperConnectionConfig
 
 
 def remap_mtp_weight_name(name: str) -> str | None:
@@ -35,8 +40,11 @@ def remap_mtp_weight_name(name: str) -> str | None:
             break
     if name.startswith("model.mtp."):
         name = name.removeprefix("model.")
-    for prefix in ("mtp.shared_head.head.", "model.shared_head.head.",
-                   "shared_head.head."):
+    for prefix in (
+        "mtp.shared_head.head.",
+        "model.shared_head.head.",
+        "shared_head.head.",
+    ):
         if name.startswith(prefix):
             return "lm_head." + name.removeprefix(prefix)
     if name.startswith("mtp."):
@@ -67,36 +75,49 @@ class Qwen3_8FlashNextMultiTokenPredictor(nn.Module):
         )
         self._qsa_layer_ids = frozenset(range(self.num_mtp_layers))
         self.embed_tokens = VocabParallelEmbedding(
-            config.vocab_size, self.hidden_size,
+            config.vocab_size,
+            self.hidden_size,
             prefix=maybe_prefix(prefix, "embed_tokens"),
         )
         linear_kwargs = dict(gather_output=True, bias=False, return_bias=False)
         self.fc_embedding = ColumnParallelLinear(
-            self.hidden_size, self.hidden_size,
-            prefix=maybe_prefix(prefix, "fc_embedding"), **linear_kwargs,
+            self.hidden_size,
+            self.hidden_size,
+            prefix=maybe_prefix(prefix, "fc_embedding"),
+            **linear_kwargs,
         )
         self.fc_hidden = ColumnParallelLinear(
-            self.hidden_size, self.hidden_size,
-            prefix=maybe_prefix(prefix, "fc_hidden"), **linear_kwargs,
+            self.hidden_size,
+            self.hidden_size,
+            prefix=maybe_prefix(prefix, "fc_hidden"),
+            **linear_kwargs,
         )
         self.pre_fc_norm_embedding = GroupedGemmaRMSNorm(
-            self.hidden_size, config.rms_norm_eps, group_size=None,
-            dtype=vllm_config.model_config.dtype, use_fused_ops=False,
+            self.hidden_size,
+            config.rms_norm_eps,
+            group_size=None,
+            dtype=vllm_config.model_config.dtype,
+            use_fused_ops=False,
         )
         # The checkpoint normalizes the entire 4H stream before shared H->H FC.
         self.pre_fc_norm_hidden = GroupedGemmaRMSNorm(
-            self.hc_count * self.hidden_size, config.rms_norm_eps, group_size=None,
-            dtype=vllm_config.model_config.dtype, use_fused_ops=False,
+            self.hc_count * self.hidden_size,
+            config.rms_norm_eps,
+            group_size=None,
+            dtype=vllm_config.model_config.dtype,
+            use_fused_ops=False,
         )
-        self.layers = nn.ModuleList([
-            Qwen3_8FlashNextDecoderLayer(
-                vllm_config,
-                layer_type="full_attention",
-                prefix=f"{prefix}.layers.{config.num_hidden_layers + layer_idx}",
-                force_disable_ple=True,
-            )
-            for layer_idx in range(self.num_mtp_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                Qwen3_8FlashNextDecoderLayer(
+                    vllm_config,
+                    layer_type="full_attention",
+                    prefix=f"{prefix}.layers.{config.num_hidden_layers + layer_idx}",
+                    force_disable_ple=True,
+                )
+                for layer_idx in range(self.num_mtp_layers)
+            ]
+        )
         self.hyper_connection_mixer = GatedResidualSimple(
             HyperConnectionConfig(
                 hc_count=self.hc_count,
@@ -133,7 +154,9 @@ class Qwen3_8FlashNextMultiTokenPredictor(nn.Module):
         )
         hidden = self.fc_hidden(hidden) + embedding.unsqueeze(-2)
         hidden, _, _ = self.layers[spec_step_idx % self.num_mtp_layers](
-            hidden_states=hidden.flatten(-2), residual=None, positions=positions,
+            hidden_states=hidden.flatten(-2),
+            residual=None,
+            positions=positions,
         )
         sample_hidden, _ = self.hyper_connection_mixer.mix(hidden)
         return sample_hidden, hidden
@@ -167,10 +190,12 @@ class Qwen3_8FlashNextMTP(nn.Module, QwenNextMixtureOfExperts):
         self.vllm_config = vllm_config
         self.quant_config = None
         self.model = Qwen3_8FlashNextMultiTokenPredictor(
-            vllm_config=vllm_config, prefix=maybe_prefix(prefix, "mtp"),
+            vllm_config=vllm_config,
+            prefix=maybe_prefix(prefix, "mtp"),
         )
         self.lm_head = ParallelLMHead(
-            self.config.vocab_size, self.config.hidden_size,
+            self.config.vocab_size,
+            self.config.hidden_size,
             prefix=maybe_prefix(prefix, "lm_head"),
         )
         self.logits_processor = LogitsProcessor(self.config.vocab_size)
@@ -193,7 +218,11 @@ class Qwen3_8FlashNextMTP(nn.Module, QwenNextMixtureOfExperts):
         if intermediate_tensors is not None:
             raise ValueError("PP intermediate tensors are unsupported for Qwen3.8 MTP")
         return self.model(
-            input_ids, positions, hidden_states, inputs_embeds, spec_step_idx,
+            input_ids,
+            positions,
+            hidden_states,
+            inputs_embeds,
+            spec_step_idx,
         )
 
     def compute_logits(self, hidden_states: torch.Tensor, spec_step_idx: int = 0):
@@ -205,6 +234,7 @@ class Qwen3_8FlashNextMTP(nn.Module, QwenNextMixtureOfExperts):
                 mapped = remap_mtp_weight_name(name)
                 if mapped is not None:
                     yield mapped, weight
+
         return AutoWeightsLoader(self).load_weights(remapped())
 
 

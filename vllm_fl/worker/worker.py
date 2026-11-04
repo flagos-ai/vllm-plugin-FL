@@ -6,10 +6,11 @@
 
 import gc
 import os
-from contextlib import contextmanager, nullcontext
+from collections.abc import Generator
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from types import NoneType
-from typing import TYPE_CHECKING, Any, Generator, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
@@ -166,10 +167,8 @@ def memory_profiling_fl(
     torch_device_fn.empty_cache()
 
     # Reset peak memory stats - platform agnostic
-    try:
+    with suppress(AttributeError, RuntimeError):
         torch_device_fn.reset_peak_memory_stats()
-    except (AttributeError, RuntimeError):
-        pass  # Some platforms may not support this
 
     result = MemoryProfilingResult()
     result.before_create = baseline_snapshot
@@ -1062,7 +1061,7 @@ class WorkerFL(WorkerBase):
 
         return None
 
-    def take_draft_token_ids(self) -> Optional[DraftTokenIds]:
+    def take_draft_token_ids(self) -> DraftTokenIds | None:
         return self.model_runner.take_draft_token_ids()
 
     def profile(self, is_start: bool = True, profile_prefix: str | None = None):
@@ -1155,7 +1154,7 @@ class WorkerFL(WorkerBase):
         self,
         old_ep_size: int,
         new_ep_size: int,
-        global_expert_loads: Optional[torch.Tensor],
+        global_expert_loads: torch.Tensor | None,
     ) -> None:
         from vllm.distributed.parallel_state import get_ep_group
 
@@ -1200,7 +1199,7 @@ class WorkerFL(WorkerBase):
 
     def _reconfigure_moe(
         self, old_ep_size: int, new_ep_size: int
-    ) -> Optional[torch.Tensor]:
+    ) -> torch.Tensor | None:
         """
         Reconfigure MoE modules with provided reconfig_request
 
@@ -1350,8 +1349,8 @@ class WorkerFL(WorkerBase):
     def save_sharded_state(
         self,
         path: str,
-        pattern: Optional[str] = None,
-        max_size: Optional[int] = None,
+        pattern: str | None = None,
+        max_size: int | None = None,
     ) -> None:
         from vllm.model_executor.model_loader import ShardedStateLoader
 
@@ -1382,7 +1381,7 @@ class WorkerFL(WorkerBase):
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
     rank: int,
-    distributed_init_method: Optional[str] = None,
+    distributed_init_method: str | None = None,
     local_rank: int = -1,
     backend: str = "nccl",
 ) -> None:

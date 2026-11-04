@@ -92,6 +92,7 @@ class MTPContractTest(unittest.TestCase):
 
         class Registry:
             registered = {}
+            models = registered
 
             @classmethod
             def get_supported_archs(cls):
@@ -113,6 +114,13 @@ class MTPContractTest(unittest.TestCase):
             "vllm.v1.spec_decode.llm_base_proposer",
         ]:
             modules[name] = types.ModuleType(name)
+        helper_spec = importlib.util.spec_from_file_location(
+            "qwen38_mtp_install_helper",
+            ROOT / "vllm_fl/patches/_qwen38_installation.py",
+        )
+        helper = importlib.util.module_from_spec(helper_spec)
+        helper_spec.loader.exec_module(helper)
+        modules["vllm_fl.patches._qwen38_installation"] = helper
         modules["vllm"].__version__ = "0.24.0"
         modules["vllm.config.speculative"].SpeculativeConfig = Spec
         modules["vllm.model_executor.models"].ModelRegistry = Registry

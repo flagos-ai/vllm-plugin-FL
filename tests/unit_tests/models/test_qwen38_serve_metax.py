@@ -1,413 +1,145 @@
-"""Portable CPU contracts for the native Qwen3.8 MetaX serving example.
+# Copyright 2026 FlagOS Contributors
+# SPDX-License-Identifier: Apache-2.0
+"""Test the POSIX entry and native configuration without starting a service."""
 
-The execute tests intercept execvpe before any server starts. The optional
-native integration runs in an isolated CPU subprocess with a tiny local
-generation-config fixture; no checkpoint, HTTP service or accelerator is used.
-"""
-
-import builtins
-import importlib.util
 import json
 import os
 import subprocess
-import sys
-import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
-LAUNCHER = ROOT / "examples/qwen3_8_flash_next/serve_metax.py"
+ENTRY = ROOT / "examples/qwen3_8_flash_next/serve_metax.sh"
 
 
-@pytest.fixture
-def launcher():
-    spec = importlib.util.spec_from_file_location("qwen38_serve_contract", LAUNCHER)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-@pytest.fixture
-def launch_paths(tmp_path, monkeypatch):
-    fg = tmp_path / "fg" / "flag_gems"
-    fgv = tmp_path / "fgv" / "flaggems_vllm"
-    for package in (fg, fgv):
-        package.mkdir(parents=True)
-        (package / "__init__.py").write_text("")
-    cache = tmp_path / "cache"
-    monkeypatch.setenv("QWEN38_FLAGGEMS_ROOT", str(fg))
-    monkeypatch.setenv("QWEN38_FGV_ROOT", str(fgv))
-    monkeypatch.setenv("QWEN38_CACHE_ROOT", str(cache))
-    monkeypatch.setenv("MODEL_PATH", "/checkpoint")
-    return fg, fgv, cache
-
-
-@pytest.mark.parametrize("mode,k", (("off", 0), ("k1", 1), ("k2", 2), ("k3", 3)))
-def test_mtp_configuration_contract(launcher, mode, k):
-    config = launcher.build_config("/checkpoint", mode)
-    assert config["generation_config"] == "auto"
-    assert "override_generation_config" not in config
-    assert "worker_extension_cls" not in config
-    assert config["tensor_parallel_size"] == 8
-    assert config["pipeline_parallel_size"] == 1
-    assert config["dtype"] == "bfloat16"
-    assert config["max_num_seqs"] == 64
-    assert config["max_num_batched_tokens"] == 2048
-    assert config["max_model_len"] == 69632
-    assert config["gpu_memory_utilization"] == 0.92
-    assert config["mamba_ssm_cache_dtype"] == "float32"
-    assert config["enable_prefix_caching"] is False
-    assert config["async_scheduling"] is False
-    assert config["additional_config"] == {
-        "flaggems_record_ops": False,
-        "qwen38_fused_qsa_metadata": not bool(k),
-        "qwen38_fused_gemma_norm": not bool(k),
-        "qwen38_hc_small_fusions": not bool(k),
-        "qwen38_qsa_long_context": not bool(k),
-        "qwen38_qsa_native_attention": not bool(k),
-        "qwen38_reuse_gdn_metadata": not bool(k),
-        "qwen38_gdn_host_metadata": not bool(k),
-        "qwen38_ple_cpu_metadata": not bool(k),
-        "qwen38_ngram_mode": "shared_buffer",
-        "qwen38_mtp_graph": bool(k),
-        "qwen38_qsa_length_buckets": True,
-        "qwen38_qsa_packing": k == 0,
-        "qwen38_tuning_profile": True,
-    }
-    buckets = [(k + 1) * value for value in (1, 2, 4, 8, 16, 32, 64)]
-    assert config["compilation_config"] == {
-        "mode": 0,
-        "cudagraph_mode": "FULL_DECODE_ONLY",
-        "cudagraph_capture_sizes": buckets,
-        "max_cudagraph_capture_size": buckets[-1],
-    }
-    if k:
-        assert config["speculative_config"] == {
-            "method": "mtp",
-            "num_speculative_tokens": k,
-            "parallel_drafting": False,
-            "use_local_argmax_reduction": False,
-            "disable_padded_drafter_batch": True,
-        }
-    else:
-        assert "speculative_config" not in config
-
-
-def test_default_dry_run_has_no_backend_import_or_cache_write(
-    launcher, launch_paths, monkeypatch, capsys
-):
-    _, _, cache = launch_paths
-    monkeypatch.setattr(sys, "argv", [str(LAUNCHER)])
-    original_import = builtins.__import__
-
-    def guarded_import(name, *args, **kwargs):
-        assert name.split(".")[0] not in {
-            "torch",
-            "vllm",
-            "vllm_fl",
-            "flag_gems",
-            "flaggems_vllm",
-        }
-        return original_import(name, *args, **kwargs)
-
-    def unexpected_exec(*args, **kwargs):
-        raise AssertionError("Dry run attempted to start a process")
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-    monkeypatch.setattr(launcher.os, "execvpe", unexpected_exec)
-    launcher.main()
-    record, _ = json.JSONDecoder().raw_decode(capsys.readouterr().out)
-    assert record["mtp"] == "off"
-    assert record["execute"] is False
-    assert "speculative_config" not in record["config"]
-    assert not cache.exists()
-
-
-class _ExecIntercepted(Exception):
-    pass
-
-
-@pytest.mark.parametrize("mode,k", ((None, 0), ("k1", 1), ("k2", 2), ("k3", 3)))
-def test_execute_passes_effective_environment_to_native_cli(
-    launcher, launch_paths, tmp_path, monkeypatch, mode, k
-):
-    fg, fgv, cache = launch_paths
-    old_log = tmp_path / "historical-enabled-ops.txt"
-    old_log.write_text("historical evidence\n")
-    for key in launcher.UNSET_ENV:
-        monkeypatch.setenv(key, "stale")
-    monkeypatch.setenv("VLLM_FL_PREFER", "vendor")
-    monkeypatch.setenv("VLLM_FL_OOT_ENABLED", "0")
-    monkeypatch.setenv("FLAGGEMS_ENABLE_OPLIST_PATH", str(old_log))
-    monkeypatch.setenv("PYTHONPATH", "/retained/path")
-    original_visibility = {
-        key: os.environ.get(key)
-        for key in ("CUDA_VISIBLE_DEVICES", "MACA_VISIBLE_DEVICES")
-    }
-    argv = [str(LAUNCHER), "--execute", "--vllm-bin", "/native/vllm"]
-    if mode:
-        argv.extend(("--mtp", mode))
-    monkeypatch.setattr(sys, "argv", argv)
-    captured = {}
-
-    def intercept(program, command, environment):
-        captured.update(program=program, command=command, environment=environment)
-        raise _ExecIntercepted
-
-    monkeypatch.setattr(launcher.os, "execvpe", intercept)
-    with pytest.raises(_ExecIntercepted):
-        launcher.main()
-    command = captured["command"]
-    env = captured["environment"]
-    effective_mode = mode or "off"
-    assert captured["program"] == "/native/vllm"
-    assert command[:3] == ["/native/vllm", "serve", "/checkpoint"]
-    assert command[command.index("--generation-config") + 1] == "auto"
-    assert "--override-generation-config" not in command
-    assert "--worker-extension-cls" not in command
-    if k:
-        spec = json.loads(command[command.index("--speculative-config") + 1])
-        assert spec["num_speculative_tokens"] == k
-    else:
-        assert "--speculative-config" not in command
-    assert all(key not in env for key in launcher.UNSET_ENV)
-    assert env["VLLM_FL_PREFER"] == "flagos"
-    assert env["VLLM_FL_OOT_ENABLED"] == "1"
-    assert env["USE_FLAGGEMS"] == env["VLLM_FL_USE_FLAGGEMS_VLLM"] == "1"
-    assert env["PYTHONPATH"].split(os.pathsep)[:3] == [
-        str(ROOT),
-        str(fg.parent),
-        str(fgv.parent),
-    ]
-    assert "/retained/path" in env["PYTHONPATH"].split(os.pathsep)
-    assert env["VLLM_FL_CONFIG"] == str(
-        ROOT / "vllm_fl/dispatch/config/qwen3_8_flash_next_metax.yaml"
+def launch(tmp_path, mode="off", extra=(), missing=None):
+    spy = tmp_path / "native vllm"
+    spy.write_text(r"""#!/bin/sh
+printf '%s\0' "$@" > "$ARG_LOG"
+printf '%s\n' "$USE_FLAGGEMS|$VLLM_FL_USE_FLAGGEMS_VLLM|$TRITON_CACHE_DIR|$PYTHONPATH|$OMP_NUM_THREADS" > "$ENV_LOG"
+""")
+    spy.chmod(0o755)
+    env = dict(
+        os.environ,
+        MODEL_PATH="/checkpoint with spaces",
+        QWEN38_CACHE_ROOT=str(tmp_path / "cache root"),
+        MTP=mode,
+        VLLM_BIN=str(spy),
+        ARG_LOG=str(tmp_path / "argv"),
+        ENV_LOG=str(tmp_path / "env"),
+        PYTHONPATH="/existing packages",
+        OMP_NUM_THREADS="7",
+        FLAGCX_PATH="/unused",
     )
-    assert env["FLAGGEMS_ENABLE_OPLIST_PATH"] == str(
-        cache / effective_mode / "enabled-ops.txt"
+    if missing:
+        env.pop(missing, None)
+    result = subprocess.run(
+        ["sh", str(ENTRY), *extra], env=env, capture_output=True, text=True
     )
-    assert env["TRITON_CACHE_DIR"] == str(cache / effective_mode / "triton")
-    assert (cache / effective_mode / "triton").is_dir()
-    assert old_log.read_text() == "historical evidence\n"
-    assert {key: env.get(key) for key in original_visibility} == original_visibility
-
-
-def test_plan_output_never_overwrites_existing_evidence(
-    launcher, launch_paths, tmp_path, monkeypatch
-):
-    output = tmp_path / "plan"
-    monkeypatch.setattr(sys, "argv", [str(LAUNCHER), "--output-dir", str(output)])
-    launcher.main()
-    before = {path.name: path.read_bytes() for path in output.iterdir()}
-    assert set(before) == {
-        "server-config.json",
-        "command.json",
-        "environment.json",
-        "launch-plan.json",
-    }
-    with pytest.raises(FileExistsError):
-        launcher.main()
-    assert {path.name: path.read_bytes() for path in output.iterdir()} == before
-
-
-def test_missing_operator_package_fails_before_execution(
-    launcher, launch_paths, monkeypatch, tmp_path
-):
-    monkeypatch.setenv("QWEN38_FLAGGEMS_ROOT", str(tmp_path / "missing" / "flag_gems"))
-    monkeypatch.setattr(sys, "argv", [str(LAUNCHER), "--execute"])
-    calls = []
-    monkeypatch.setattr(launcher.os, "execvpe", lambda *args: calls.append(args))
-    with pytest.raises(FileNotFoundError):
-        launcher.main()
-    assert calls == []
-
-
-def test_native_parser_and_checkpoint_sampling_in_cpu_subprocess(tmp_path):
-    if importlib.util.find_spec("vllm") is None:
-        pytest.skip("Native vLLM is needed for parser/sampling integration")
-    model = tmp_path / "checkpoint"
-    model.mkdir()
-    (model / "generation_config.json").write_text(
-        json.dumps({"do_sample": True, "temperature": 1.0, "top_p": 0.95, "top_k": 20})
+    args = (
+        (tmp_path / "argv").read_bytes().decode().split("\0")[:-1]
+        if (tmp_path / "argv").exists()
+        else []
     )
-    code = textwrap.dedent(
-        """
-        import importlib.util
-        import json
-        import sys
-        import torch
-        assert not torch.cuda.is_initialized()
-        def no_device_init(*args, **kwargs):
-            raise AssertionError("GPU initialization is forbidden")
-        torch.cuda._lazy_init = no_device_init
-        torch.cuda.init = no_device_init
-
-        import vllm.platforms as platforms
-        from vllm.platforms.cpu import CpuPlatform
-        platforms._current_platform = CpuPlatform()
-        from vllm.config.model import ModelConfig
-        from vllm.entrypoints.openai.cli_args import make_arg_parser
-        from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
-        from vllm.entrypoints.openai.completion.protocol import CompletionRequest
-        from vllm.sampling_params import SamplingType
-        from vllm.utils.argparse_utils import FlexibleArgumentParser
-
-        spec = importlib.util.spec_from_file_location("launcher", sys.argv[1])
-        launcher = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(launcher)
-        parser = make_arg_parser(FlexibleArgumentParser())
-        for mode, count in launcher.MTP_COUNTS.items():
-            config = launcher.build_config(sys.argv[2], mode)
-            command = launcher.native_command(
-                config, host="127.0.0.1", port=18170,
-                served_model_name="qwen38", vllm_bin="vllm")
-            parsed = parser.parse_args(command[2:])
-            assert parsed.generation_config == "auto"
-            assert parsed.override_generation_config == {}
-            assert parsed.additional_config["qwen38_mtp_graph"] == bool(count)
-            if count:
-                assert parsed.speculative_config["num_speculative_tokens"] == count
-            else:
-                assert parsed.speculative_config is None
-
-        config = object.__new__(ModelConfig)
-        for key, value in {
-            "model": sys.argv[2], "hf_config_path": None,
-            "generation_config": "auto", "override_generation_config": {},
-            "trust_remote_code": False, "revision": None,
-            "config_format": "auto", "hf_token": None,
-        }.items():
-            setattr(config, key, value)
-        defaults = config.get_diff_sampling_param()
-        cases = [
-            (ChatCompletionRequest, {"model": "qwen38", "messages": [{"role": "user", "content": "hi"}]}),
-            (CompletionRequest, {"model": "qwen38", "prompt": "hi"}),
-        ]
-        rows = []
-        for Request, payload in cases:
-            request = Request(**payload)
-            params = request.to_sampling_params(max_tokens=32, default_sampling_params=defaults)
-            assert (params.temperature, params.top_p, params.top_k) == (1.0, 0.95, 20)
-            assert params.seed is None and not params.ignore_eos
-            assert params.sampling_type is SamplingType.RANDOM
-            if isinstance(request, ChatCompletionRequest):
-                assert request.chat_template_kwargs is None
-            override = Request(**payload, temperature=0.7, top_p=0.8, top_k=7, seed=123)
-            explicit = override.to_sampling_params(max_tokens=32, default_sampling_params=defaults)
-            assert (explicit.temperature, explicit.top_p, explicit.top_k, explicit.seed) == (0.7, 0.8, 7, 123)
-            assert explicit.sampling_type is SamplingType.RANDOM_SEED
-            rows.append(params.sampling_type.name)
-        assert not torch.cuda.is_initialized()
-        print(json.dumps({"modes": list(launcher.MTP_COUNTS), "sampling": rows, "cuda_initialized": False}))
-        """
-    )
-    environment = dict(os.environ)
-    environment.update(
-        CUDA_VISIBLE_DEVICES="",
-        MACA_VISIBLE_DEVICES="",
-        VLLM_PLUGINS="",
-        HF_HUB_OFFLINE="1",
-        TRANSFORMERS_OFFLINE="1",
-        PYTHONDONTWRITEBYTECODE="1",
-    )
-    completed = subprocess.run(
-        [sys.executable, "-c", code, str(LAUNCHER), str(model)],
-        env=environment,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=120,
-    )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert json.loads(completed.stdout.splitlines()[-1]) == {
-        "modes": ["off", "k1", "k2", "k3"],
-        "sampling": ["RANDOM", "RANDOM"],
-        "cuda_initialized": False,
-    }
+    return result, args, tmp_path / "env"
 
 
-def test_operator_logging_default_and_explicit_opt_in(
-    launcher, launch_paths, monkeypatch, capsys
-):
-    for mode in launcher.MTP_COUNTS:
-        assert (
-            launcher.build_config("/model", mode)["additional_config"][
-                "flaggems_record_ops"
-            ]
-            is False
-        )
-        assert (
-            launcher.build_config("/model", mode, record_flaggems_ops=True)[
-                "additional_config"
-            ]["flaggems_record_ops"]
-            is True
-        )
-    monkeypatch.setattr(sys, "argv", [str(LAUNCHER), "--record-flaggems-ops"])
-    launcher.main()
-    record, _ = json.JSONDecoder().raw_decode(capsys.readouterr().out)
-    assert record["config"]["additional_config"]["flaggems_record_ops"] is True
+def effective(args):
+    config = yaml.safe_load(Path(args[args.index("--config") + 1]).read_text())
+    rest = args[args.index("--config") + 2 :]
+    i = 0
+    while i < len(rest):
+        flag = rest[i]
+        if flag.startswith("--no-"):
+            config[flag.removeprefix("--no-")] = False
+            i += 1
+        else:
+            value = rest[i + 1]
+            config[flag.removeprefix("--")] = (
+                json.loads(value)
+                if flag in ("--compilation-config", "--speculative-config")
+                else value
+            )
+            i += 2
+    return config
 
 
-def test_async_scheduling_is_explicit_and_mtp_stays_synchronous(launcher):
-    config = launcher.build_config("/checkpoint", async_scheduling=True)
-    assert config["async_scheduling"] is True
-    assert "speculative_config" not in config
-    command = launcher.native_command(
-        config,
-        host="127.0.0.1",
-        port=18170,
-        served_model_name="qwen38",
-        vllm_bin="vllm",
-    )
-    assert "--async-scheduling" in command
-    assert launcher.parser().parse_args(["--async-scheduling"]).async_scheduling is True
+@pytest.mark.parametrize("mode,k", [("off", 0), ("k1", 1), ("k2", 2), ("k3", 3)])
+def test_direct_native_entry_preserves_mode_contract(tmp_path, mode, k):
+    result, args, env_file = launch(tmp_path, mode)
+    assert result.returncode == 0, result.stderr
+    assert args[:2] == ["serve", "/checkpoint with spaces"]
+    config = effective(args)
+    assert config["dtype"] == "bfloat16" and config["tensor-parallel-size"] == 8
+    assert config["pipeline-parallel-size"] == 1
+    assert config["mamba-ssm-cache-dtype"] == "float32"
+    assert config["generation-config"] == "auto"
+    assert "seed" not in config and "override-generation-config" not in config
+    assert config["max-num-seqs"] == 64 and config["max-model-len"] == 69632
+    assert not config["enable-prefix-caching"] and config["enable-chunked-prefill"]
+    assert config["max-num-batched-tokens"] == (2048 if k else 8192)
+    assert config["async-scheduling"] is (not bool(k))
+    extra = config["additional-config"]
+    assert extra["qwen38_ngram_mode"] == ("shared_buffer" if k else "uva_auto")
+    assert extra["qwen38_mtp_graph"] is bool(k)
+    for key in (
+        "qwen38_qsa_native_attention",
+        "qwen38_qsa_packing",
+        "qwen38_fused_qsa_metadata",
+        "qwen38_hc_small_fusions",
+        "qwen38_reuse_gdn_metadata",
+        "qwen38_ple_cpu_metadata",
+    ):
+        assert extra[key] is (not bool(k))
+    compilation = config["compilation-config"]
     assert (
-        launcher.parser().parse_args(["--no-async-scheduling"]).async_scheduling
-        is False
+        compilation["mode"] == 0 and compilation["cudagraph_mode"] == "FULL_DECODE_ONLY"
     )
-    for mode in ("k1", "k2", "k3"):
-        with pytest.raises(ValueError, match="MTP off"):
-            launcher.build_config("/checkpoint", mode, async_scheduling=True)
-
-
-@pytest.mark.parametrize("mode", ("uva_broadcast", "uva_sharded", "uva_auto"))
-def test_uva_explicit_option_and_mtp_guard(launcher, mode):
-    config = launcher.build_config(
-        "/checkpoint", "off", async_scheduling=True, ngram_mode=mode
-    )
-    assert config["additional_config"]["qwen38_ngram_mode"] == mode
-    assert config["generation_config"] == "auto"
-    with pytest.raises(ValueError, match="MTP off"):
-        launcher.build_config("/checkpoint", "k1", ngram_mode=mode)
-
-
-def test_unvalidated_full_replication_not_exposed(launcher):
-    with pytest.raises(ValueError, match="Invalid N-gram"):
-        launcher.build_config("/checkpoint", ngram_mode="uva_direct")
-
-
-@pytest.mark.parametrize("mbt", (4096, 8192))
-def test_large_mbt_is_an_explicit_native_mtp_off_option(launcher, mbt):
-    base = launcher.build_config("/checkpoint")
-    candidate = launcher.build_config("/checkpoint", max_num_batched_tokens=mbt)
-    assert base["max_num_batched_tokens"] == 2048
-    assert candidate == dict(base, max_num_batched_tokens=mbt)
-    for mode in ("k1", "k2", "k3"):
-        with pytest.raises(ValueError, match="MTP off"):
-            launcher.build_config("/checkpoint", mode, max_num_batched_tokens=mbt)
-    with pytest.raises(ValueError, match="MBT"):
-        launcher.build_config("/checkpoint", max_num_batched_tokens=16384)
+    assert compilation["cudagraph_capture_sizes"] == [
+        (k + 1) * n for n in (1, 2, 4, 8, 16, 32, 64)
+    ]
+    assert compilation["max_cudagraph_capture_size"] == (k + 1) * 64
+    if k:
+        spec = config["speculative-config"]
+        assert spec["method"] == "mtp" and spec["num_speculative_tokens"] == k
+        assert spec["disable_padded_drafter_batch"] and not spec["parallel_drafting"]
+    else:
+        assert "speculative-config" not in config
+    fields = env_file.read_text().strip().split("|")
+    assert fields[:2] == ["1", "1"]
+    assert fields[2].endswith(mode + "/triton")
+    assert fields[3] == str(ROOT) + ":/existing packages"
+    assert fields[4] == "7"
 
 
 @pytest.mark.parametrize("mode", ["off", "k1", "k2", "k3"])
-def test_host_chunk_metadata_can_be_disabled(launcher, mode):
-    config = launcher.build_config("/checkpoint", mode, gdn_host_metadata=False)
-    assert config["additional_config"]["qwen38_gdn_host_metadata"] is False
+def test_native_arguments_are_passed_without_reparsing(tmp_path, mode):
+    extra = ("--port", "18480", "--served-model-name", "name with spaces")
+    result, args, _ = launch(tmp_path, mode, extra)
+    assert result.returncode == 0
+    assert args[-len(extra) :] == list(extra)
 
 
-def test_host_chunk_metadata_cli_disable(launcher, launch_paths, monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", [str(LAUNCHER), "--no-gdn-host-metadata"])
-    launcher.main()
-    record, _ = json.JSONDecoder().raw_decode(capsys.readouterr().out)
-    assert record["config"]["additional_config"]["qwen38_gdn_host_metadata"] is False
+@pytest.mark.parametrize("mode", ["k0", "k4", "invalid"])
+def test_invalid_mode_does_not_execute(tmp_path, mode):
+    result, args, _ = launch(tmp_path, mode)
+    assert result.returncode != 0 and not args
+    assert not (tmp_path / "cache root").exists()
+
+
+@pytest.mark.parametrize("name", ["MODEL_PATH", "QWEN38_CACHE_ROOT"])
+def test_required_paths_fail_before_native_execution(tmp_path, name):
+    result, args, _ = launch(tmp_path, missing=name)
+    assert result.returncode != 0 and not args
+
+
+def test_shell_is_posix_and_has_no_custom_interpreter_layer():
+    result = subprocess.run(["sh", "-n", str(ENTRY)], capture_output=True, text=True)
+    assert result.returncode == 0
+    text = ENTRY.read_text()
+    assert text.startswith("#!/bin/sh")
+    assert not (ENTRY.parent / "serve_metax.py").exists()
+    assert "python " not in text.lower() and "serve_metax.py" not in text
+    assert "exec " in text and " serve " in text

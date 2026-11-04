@@ -6,7 +6,6 @@
 
 import dataclasses
 import weakref
-from collections import Counter
 from collections.abc import Callable
 from contextlib import ExitStack, nullcontext
 from typing import Any, ClassVar
@@ -34,6 +33,7 @@ logger = init_logger(__name__)
 def weak_ref_tensors(tensor: Any) -> Any:
     try:
         from vllm.utils.torch_utils import weak_ref_tensors
+
         return weak_ref_tensors(tensor)
     except Exception:
         return tensor
@@ -122,12 +122,14 @@ class GraphWrapper:
         for instance in list(cls._all_instances):
             instance.clear_graphs()
 
-    def __init__(self,
-                 runnable: Callable,
-                 vllm_config: VllmConfig,
-                 runtime_mode: CUDAGraphMode,
-                 cudagraph_options: GraphOptions | None = None,
-                 graph_runtime: Any | None = None):
+    def __init__(
+        self,
+        runnable: Callable,
+        vllm_config: VllmConfig,
+        runtime_mode: CUDAGraphMode,
+        cudagraph_options: GraphOptions | None = None,
+        graph_runtime: Any | None = None,
+    ):
         self.runnable = runnable
         self.vllm_config = vllm_config
         self.runtime_mode = runtime_mode
@@ -206,7 +208,8 @@ class GraphWrapper:
         key_builder = getattr(self.runnable, "get_cudagraph_key", None)
         graph_key = (
             key_builder(batch_descriptor, forward_context)
-            if key_builder is not None else batch_descriptor
+            if key_builder is not None
+            else batch_descriptor
         )
         if graph_key not in self.concrete_graph_entries:
             # create a new entry for this batch descriptor
@@ -246,8 +249,7 @@ class GraphWrapper:
                     stack.enter_context(patch("gc.collect", lambda: None))
                     # FL-specific: patch our platform's empty_cache
                     stack.enter_context(
-                        patch("vllm_fl.platform.PlatformFL.empty_cache",
-                              lambda: None)
+                        patch("vllm_fl.platform.PlatformFL.empty_cache", lambda: None)
                     )
 
                 if self.graph_pool is not None:
@@ -258,6 +260,7 @@ class GraphWrapper:
                 # Sync offloader's copy stream before capture if available.
                 try:
                     from vllm.model_executor.offloader.base import get_offloader
+
                     get_offloader().sync_prev_onload()
                 except (ImportError, RuntimeError):
                     # Offloader hooks are optional across FL runtime builds.
@@ -279,22 +282,29 @@ class GraphWrapper:
                     from vllm_fl.dispatch.backends.vendor.txda.patch import (
                         capture_guard_context,
                     )
+
                     capture_ctx = capture_guard_context()
                     capture_kwargs["capture_error_mode"] = "relaxed"
 
                 # FL-specific: use platform-agnostic graph capture
                 capture_scope = (
                     self.graph_runtime.capture_scope(forward_context)
-                    if self.graph_runtime is not None else nullcontext()
+                    if self.graph_runtime is not None
+                    else nullcontext()
                 )
-                with capture_scope, capture_ctx, current_platform.torch_device_fn.graph(
-                    graph, pool=self.graph_pool, **capture_kwargs
+                with (
+                    capture_scope,
+                    capture_ctx,
+                    current_platform.torch_device_fn.graph(
+                        graph, pool=self.graph_pool, **capture_kwargs
+                    ),
                 ):
                     # `output` is managed by pytorch's cudagraph pool
                     output = self.runnable(*args, **kwargs)
                     # Join offloader's copy stream after forward if available
                     try:
                         from vllm.model_executor.offloader.base import get_offloader
+
                         get_offloader().join_after_forward()
                     except (ImportError, RuntimeError):
                         # Keep the existing path without optional offloader hooks.
@@ -327,6 +337,7 @@ class GraphWrapper:
         # Sync offloader before replay if available
         try:
             from vllm.model_executor.offloader.base import get_offloader
+
             get_offloader().sync_prev_onload()
         except (ImportError, RuntimeError):
             pass

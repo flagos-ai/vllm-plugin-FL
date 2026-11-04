@@ -80,9 +80,7 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
 
     compilation = vllm_config.compilation_config
     model_config = vllm_config.model_config
-    enforce_eager = bool(
-        model_config is not None and model_config.enforce_eager
-    )
+    enforce_eager = bool(model_config is not None and model_config.enforce_eager)
     if enforce_eager or compilation.cudagraph_mode == CUDAGraphMode.NONE:
         compilation.mode = CompilationMode.NONE
         compilation.cudagraph_mode = CUDAGraphMode.NONE
@@ -105,7 +103,9 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
             "FL basic Ascend FULL decode graphs do not support ubatching"
         )
     if compilation.mode not in (
-        None, CompilationMode.NONE, CompilationMode.VLLM_COMPILE
+        None,
+        CompilationMode.NONE,
+        CompilationMode.VLLM_COMPILE,
     ):
         raise NotImplementedError(
             "FL Ascend graph compilation supports VLLM_COMPILE or NONE"
@@ -121,6 +121,7 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     compilation.pass_config.fuse_norm_quant = False
     compilation.pass_config.fuse_act_quant = False
     compilation.pass_config.fuse_attn_quant = False
+
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -214,7 +215,9 @@ class PlatformFL(Platform):
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
     dist_backend: str = (
-        "flagcx" if _flagcx_backend_enabled() else dist_backend_dict.get(device_name, "nccl")
+        "flagcx"
+        if _flagcx_backend_enabled()
+        else dist_backend_dict.get(device_name, "nccl")
     )
     # Dispatched per vendor via VENDOR_DEVICE_MAP so a logical device ID can be
     # translated into the ordinal visible to this process. Leaving the
@@ -339,7 +342,10 @@ class PlatformFL(Platform):
 
         if cls.device_type == "txda":
             try:
-                from vllm_fl.dispatch.backends.vendor.txda.patch import apply_txda_patches
+                from vllm_fl.dispatch.backends.vendor.txda.patch import (
+                    apply_txda_patches,
+                )
+
                 apply_txda_patches()
             except Exception as e:
                 logger.warning(f"Failed to apply txda patches: {e}")
@@ -749,10 +755,7 @@ class PlatformFL(Platform):
                 # path — the GroupCoordinator that matters is built after
                 # check_and_update_config has finalized cudagraph_mode.
                 return False
-            return (
-                vllm_config.compilation_config.cudagraph_mode
-                != CUDAGraphMode.NONE
-            )
+            return vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         # HIP communicators also use ctypes. Keep them opaque to Dynamo,
         # matching vLLM's ROCm platform even when is_cuda_alike() is False.
         return cls.vendor_name in ("nvidia", "amd", "hygon", "thead", "iluvatar")

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import copy
 from importlib import import_module
 from importlib.resources import files
 from pathlib import Path
+from threading import RLock
 
 import torch
 import triton
@@ -19,6 +21,7 @@ import triton
 from .shape_limits import max_prefill_rows
 
 _enabled = False
+_install_lock = RLock()
 
 
 def _jit(entry):
@@ -219,66 +222,72 @@ class _GDNOutput:
         return entry.run(*args, grid=grid, **kwargs)
 
 
-def install_qwen38_launch_profile(vllm_config=None):
-    """Install before model construction/capture; geometry misses retain native defaults."""
-    global _enabled
-    if _enabled:
-        return
-    from flag_gems import runtime
-    from flag_gems.utils.libentry import clear_libentry_dispatch_cache
+class _PresetConfigCache:
+    """Process-local immutable presets over the native cache.
 
-    if (
-        runtime.device.vendor_name != "metax"
-        or "C550" not in torch.cuda.get_device_name()
-    ):
-        raise ValueError("The Qwen launch profile requires MetaX C550")
-    if vllm_config is not None:
-        cfg = vllm_config.model_config.hf_text_config
-        if (
-            vllm_config.model_config.dtype != torch.bfloat16
-            or cfg.hidden_size != 2560
-            or cfg.hc_count != 4
-            or cfg.ple_conv_kernel_size != 4
-            or cfg.ngram_size != 3
-        ):
-            raise ValueError(
-                "The Qwen launch profile requires the reviewed BF16 geometry"
-            )
-    # Native BF16 projections keep the same FP32 accumulation contract.
-    # Set once before warmup/capture, never by toggling backend state per call.
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
-    profile = json.loads(
-        files("vllm_fl.dispatch.config")
-        .joinpath("qwen3_8_flash_next_metax_tuning.json")
-        .read_text()
-    )
-    for package, requirements in profile["source_files"].items():
-        package_root = Path(import_module(package).__file__).parent
-        for requirement in requirements:
-            path = package_root / requirement["path"]
-            actual = hashlib.sha256(path.read_bytes()).hexdigest()
-            if actual != requirement["sha256"]:
-                raise RuntimeError(f"Qwen launch profile dependency mismatch: {path}")
+    Startup never writes preset rows to SQLite. Unspecified keys retain the
+    native cache's read/write behavior. Rewriting a pinned key is a no-op,
+    matching ConfigCache.put_config for an existing record.
+    """
+
+    def __init__(self, native, presets):
+        self.native = native
+        self.presets = dict(presets)
+
+    def __getattr__(self, name):
+        return getattr(self.native, name)
+
+    def get(self, key):
+        return self.presets[key] if key in self.presets else self.native.get(key)
+
+    def __contains__(self, key):
+        return self.get(key) is not None
+
+    def __getitem__(self, key):
+        result = self.get(key)
+        if result is None:
+            raise KeyError(key)
+        return result
+
+    def __setitem__(self, key, config):
+        if key not in self.presets:
+            self.native[key] = config
+
+    def set(self, key, config):
+        self[key] = config
+
+
+def _copy_entry(entry, fn):
+    """Use a fresh dispatch cache without clearing the published entry's caches."""
+    result = copy(entry)
+    result.fn = fn
+    result.kernel_cache = [dict() for _ in entry.kernel_cache]
+    result._cpu_cache = {}
+    return result
+
+
+def _prepare_launch_profile(profile, vllm_config):
+    """Resolve dependencies and construct all replacements before publication."""
+    changes = []
+    entries = {}
     for operator in ("linear", "mv"):
-        entry = getattr(
-            import_module("flag_gems.ops." + operator), operator + "_kernel"
-        )
-        tuner = entry.fn
+        module = import_module("flag_gems.ops." + operator)
+        original = getattr(module, operator + "_kernel")
+        tuner = copy(original.fn)
         candidates = (
             [_config(row) for row in profile["linear"]]
             if operator == "linear"
-            else (list(tuner.configs) + [_config(row) for row in profile["mv_extra"]])
+            else list(tuner.configs) + [_config(row) for row in profile["mv_extra"]]
         )
         tuner._set_configs_and_strategy(candidates, tuner.strategy)
-        clear_libentry_dispatch_cache(entry)
-    # Seed the same reviewed, dtype-qualified ConfigCache entries used by the formal run.
+        entries[operator] = tuner
+        changes.append((module, operator + "_kernel", _copy_entry(original, tuner)))
+
     dummy = torch.empty(1, device="cuda", dtype=torch.bfloat16)
+    presets = {name: {} for name in entries}
     for row in profile["fg_shapes"]:
         operator, shape, selected = row["operator"], row["shape"], row["config"]
-        tuner = getattr(
-            import_module("flag_gems.ops." + operator), operator + "_kernel"
-        ).fn
+        tuner = entries[operator]
         args = (
             dict(
                 input_ptr=dummy,
@@ -288,24 +297,30 @@ def install_qwen38_launch_profile(vllm_config=None):
                 **shape,
             )
             if operator == "linear"
-            else (dict(A=dummy, B=dummy, C=dummy, N=shape["M"], M=shape["K"]))
+            else dict(A=dummy, B=dummy, C=dummy, N=shape["M"], M=shape["K"])
         )
-        cfg = triton.Config(
+        config = triton.Config(
             {k: v for k, v in selected.items() if k not in ("num_warps", "num_stages")},
             num_warps=selected["num_warps"],
             num_stages=selected["num_stages"],
         )
         key = tuner.get_key(args)
-        existing = tuner.cache.get(key)
-        if existing is not None and existing.all_kwargs() != cfg.all_kwargs():
+        existing = presets[operator].get(key)
+        if existing is None:
+            existing = tuner.cache.get(key)
+        if existing is not None and existing.all_kwargs() != config.all_kwargs():
             raise RuntimeError(
                 "Conflicting Qwen ConfigCache entry; use a separate cache"
             )
-        tuner.cache[key] = cfg
+        presets[operator][key] = config
+    for name, tuner in entries.items():
+        tuner.cache = _PresetConfigCache(tuner.cache, presets[name])
 
     mean = import_module("flag_gems.ops.mean")
-    heuristics = dict(mean.mean_dim_kernel_inner.fn.values)
-    mean.mean_dim_kernel_inner.fn.values = heuristics
+    original = mean.mean_dim_kernel_inner
+    inner = copy(original.fn)
+    heuristics = dict(inner.values)
+    inner.values = heuristics
     old_tile, old_warps = heuristics["TILE_N"], heuristics["num_warps"]
     old_stages = heuristics.get("num_stages", lambda meta: 3)
     heuristics["TILE_N"] = lambda m: (
@@ -323,52 +338,81 @@ def install_qwen38_launch_profile(vllm_config=None):
     )
     heuristics["num_warps"] = lambda m: 1 if _mean_inner(m) else old_warps(m)
     heuristics["num_stages"] = lambda m: 1 if _mean_inner(m) else old_stages(m)
-    clear_libentry_dispatch_cache(mean.mean_dim_kernel_inner)
-    mean.mean_dim_kernel_non_inner_vec = _Launch(
-        mean.mean_dim_kernel_non_inner_vec,
-        _mean_vec,
-        lambda m, grid: (
-            m["M"],
-            triton.cdiv(m["K"], m["BLOCK_SIZE_K"] * m["VEC_SIZE"]),
-        ),
+    changes.append((mean, "mean_dim_kernel_inner", _copy_entry(original, inner)))
+    changes.append(
+        (
+            mean,
+            "mean_dim_kernel_non_inner_vec",
+            _Launch(
+                mean.mean_dim_kernel_non_inner_vec,
+                _mean_vec,
+                lambda m, grid: (
+                    m["M"],
+                    triton.cdiv(m["K"], m["BLOCK_SIZE_K"] * m["VEC_SIZE"]),
+                ),
+            ),
+        )
     )
+
     ple = import_module("flaggems_vllm.ops.qwen4.ple_conv")
-    ple._ple_conv_kernel = _Launch(
-        ple._ple_conv_kernel,
-        _ple_conv,
-        lambda m, grid: (
-            triton.cdiv(m["tokens"], m["BT"]),
-            triton.cdiv(m["channels"], m["BC"]),
-        ),
+    changes.extend(
+        [
+            (
+                ple,
+                "_ple_conv_kernel",
+                _Launch(
+                    ple._ple_conv_kernel,
+                    _ple_conv,
+                    lambda m, grid: (
+                        triton.cdiv(m["tokens"], m["BT"]),
+                        triton.cdiv(m["channels"], m["BC"]),
+                    ),
+                ),
+            ),
+            (
+                ple,
+                "_ple_conv_state_kernel",
+                _Launch(ple._ple_conv_state_kernel, _ple_state),
+            ),
+        ]
     )
-    ple._ple_conv_state_kernel = _Launch(ple._ple_conv_state_kernel, _ple_state)
     qsa = import_module("flaggems_vllm.ops.qwen4.qsa_attention")
-    qsa._qsa_sparse_paged_gqa_kernel = _Launch(
-        qsa._qsa_sparse_paged_gqa_kernel, _qsa_attention
-    )
-    qsa._qsa_sparse_paged_gqa_split_kernel = _Launch(
-        qsa._qsa_sparse_paged_gqa_split_kernel, _qsa_attention
-    )
+    for name in ("_qsa_sparse_paged_gqa_kernel", "_qsa_sparse_paged_gqa_split_kernel"):
+        changes.append((qsa, name, _Launch(getattr(qsa, name), _qsa_attention)))
     if vllm_config is None or (
         vllm_config.speculative_config is None
         and vllm_config.additional_config.get("qwen38_qsa_long_context", False)
     ):
         indexer = import_module("flaggems_vllm.ops.qwen4.qsa")
-        indexer._qsa_mqa_paged_dot_kernel = _Launch(
-            indexer._qsa_mqa_paged_dot_kernel,
-            lambda meta: _qsa_score(meta, profile["qsa_indexer_launch"]),
-            lambda meta, grid: (
-                meta["num_rows"],
-                triton.cdiv(meta["num_columns"], meta["BLOCK_N"]),
-            ),
+        changes.append(
+            (
+                indexer,
+                "_qsa_mqa_paged_dot_kernel",
+                _Launch(
+                    indexer._qsa_mqa_paged_dot_kernel,
+                    lambda meta: _qsa_score(meta, profile["qsa_indexer_launch"]),
+                    lambda m, grid: (
+                        m["num_rows"],
+                        triton.cdiv(m["num_columns"], m["BLOCK_N"]),
+                    ),
+                ),
+            )
         )
         radix = import_module("flaggems_vllm.runtime.backend._metax.ops.radix_topk")
-        radix._radix_topk_indices = _Launch(
-            radix._radix_topk_indices,
-            lambda meta: _qsa_radix(meta, profile["qsa_radix_short"]),
+        changes.append(
+            (
+                radix,
+                "_radix_topk_indices",
+                _Launch(
+                    radix._radix_topk_indices,
+                    lambda meta: _qsa_radix(meta, profile["qsa_radix_short"]),
+                ),
+            )
         )
     wy = import_module("flaggems_vllm.ops.FLA.wy_fast")
-    wy.recompute_w_u_fwd_kernel = _Launch(wy.recompute_w_u_fwd_kernel, _wy)
+    changes.append(
+        (wy, "recompute_w_u_fwd_kernel", _Launch(wy.recompute_w_u_fwd_kernel, _wy))
+    )
     original_wy = wy.recompute_w_u_fwd
 
     def recompute_w_u(
@@ -404,21 +448,94 @@ def install_qwen38_launch_profile(vllm_config=None):
             chunk_indices=chunk_indices,
         )
 
-    wy.recompute_w_u_fwd = recompute_w_u
     chunk = import_module("flaggems_vllm.runtime.backend._metax.fused.gdn_chunk")
-    chunk.recompute_w_u_fwd = recompute_w_u
-    chunk.chunk_fwd_kernel_o = _GDNOutput(
-        chunk.chunk_fwd_kernel_o,
-        [_config(row) for row in profile["gdn_chunk_o"]],
+    changes.extend(
+        [
+            (wy, "recompute_w_u_fwd", recompute_w_u),
+            (chunk, "recompute_w_u_fwd", recompute_w_u),
+            (
+                chunk,
+                "chunk_fwd_kernel_o",
+                _GDNOutput(
+                    chunk.chunk_fwd_kernel_o,
+                    [_config(row) for row in profile["gdn_chunk_o"]],
+                ),
+            ),
+        ]
     )
     sigmoid = import_module("vllm.model_executor.layers.fla.ops.fused_sigmoid_gating")
-    sigmoid.fused_sigmoid_gating_delta_rule_update_kernel = _Launch(
-        sigmoid.fused_sigmoid_gating_delta_rule_update_kernel,
-        _sigmoid,
-        lambda m, grid: (
-            triton.cdiv(m["K"], m["BK"]),
-            triton.cdiv(m["V"], m["BV"]),
-            m["N"] * m["HV"],
-        ),
+    name = "fused_sigmoid_gating_delta_rule_update_kernel"
+    changes.append(
+        (
+            sigmoid,
+            name,
+            _Launch(
+                getattr(sigmoid, name),
+                _sigmoid,
+                lambda m, grid: (
+                    triton.cdiv(m["K"], m["BK"]),
+                    triton.cdiv(m["V"], m["BV"]),
+                    m["N"] * m["HV"],
+                ),
+            ),
+        )
     )
-    _enabled = True
+    changes.extend(
+        [
+            (torch.backends.cuda.matmul, "allow_tf32", False),
+            (
+                torch.backends.cuda.matmul,
+                "allow_bf16_reduced_precision_reduction",
+                False,
+            ),
+        ]
+    )
+    return changes
+
+
+def install_qwen38_launch_profile(vllm_config=None):
+    """Atomically install the scoped profile before construction or capture."""
+    global _enabled
+    from flag_gems import runtime
+
+    from vllm_fl.patches._qwen38_installation import apply_attributes
+
+    with _install_lock:
+        if _enabled:
+            return
+        if (
+            runtime.device.vendor_name != "metax"
+            or "C550" not in torch.cuda.get_device_name()
+        ):
+            raise ValueError("The Qwen launch profile requires MetaX C550")
+        if vllm_config is not None:
+            cfg = vllm_config.model_config.hf_text_config
+            if (
+                vllm_config.model_config.dtype != torch.bfloat16
+                or cfg.hidden_size != 2560
+                or cfg.hc_count != 4
+                or cfg.ple_conv_kernel_size != 4
+                or cfg.ngram_size != 3
+            ):
+                raise ValueError(
+                    "The Qwen launch profile requires the reviewed BF16 geometry"
+                )
+        profile = json.loads(
+            files("vllm_fl.dispatch.config")
+            .joinpath("qwen3_8_flash_next_metax_tuning.json")
+            .read_text()
+        )
+        for package, requirements in profile["source_files"].items():
+            package_root = Path(import_module(package).__file__).parent
+            for requirement in requirements:
+                path = package_root / requirement["path"]
+                if (
+                    hashlib.sha256(path.read_bytes()).hexdigest()
+                    != requirement["sha256"]
+                ):
+                    raise RuntimeError(
+                        f"Qwen launch profile dependency mismatch: {path}"
+                    )
+        changes = _prepare_launch_profile(profile, vllm_config)
+        apply_attributes(changes)
+        _enabled = True

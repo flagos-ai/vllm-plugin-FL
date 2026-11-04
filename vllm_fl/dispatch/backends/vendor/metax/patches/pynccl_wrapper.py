@@ -10,6 +10,7 @@ import ctypes
 import platform
 from typing import Any
 
+from vllm import envs
 from vllm.distributed.device_communicators.pynccl_wrapper import (
     Function,
     buffer_type,
@@ -19,8 +20,8 @@ from vllm.distributed.device_communicators.pynccl_wrapper import (
     ncclDataType_t,
     ncclRedOp_t,
     ncclResult_t,
-    ncclWindow_t,
     ncclUniqueId,
+    ncclWindow_t,
 )
 
 from .utils_patch import find_mccl_library
@@ -238,19 +239,19 @@ class MCCLLibrary:
                     f.argtypes = func.argtypes
                     _funcs[func.name] = f
                 except AttributeError:
-                    if func.name in [
-                        "ncclCommWindowRegister",
-                        "ncclCommWindowDeregister",
-                    ]:
-                        if envs.VLLM_USE_NCCL_SYMM_MEM:
-                            logger.warning_once(
-                                "The symbol %s is not found in the NCCL "
-                                "library %s. To enable VLLM_USE_NCCL_SYMM_MEM "
-                                " please update your NCCL version to >= "
-                                "2.27.03.",
-                                func.name,
-                                so_file,
-                            )
+                    if (
+                        func.name
+                        in ["ncclCommWindowRegister", "ncclCommWindowDeregister"]
+                        and envs.VLLM_USE_NCCL_SYMM_MEM
+                    ):
+                        logger.warning_once(
+                            "The symbol %s is not found in the NCCL "
+                            "library %s. To enable VLLM_USE_NCCL_SYMM_MEM "
+                            " please update your NCCL version to >= "
+                            "2.27.03.",
+                            func.name,
+                            so_file,
+                        )
                     raise
             MCCLLibrary.path_to_dict_mapping[so_file] = _funcs
         self._funcs = MCCLLibrary.path_to_dict_mapping[so_file]
@@ -462,6 +463,7 @@ pynccl_wrapper.NCCLLibrary = MCCLLibrary
 # cannot trace ctypes calls. Replace CudaCommunicator.all_reduce with a
 # torch.distributed call which Dynamo can trace natively.
 import torch.distributed as dist
+
 from vllm.distributed.device_communicators.cuda_communicator import CudaCommunicator
 
 

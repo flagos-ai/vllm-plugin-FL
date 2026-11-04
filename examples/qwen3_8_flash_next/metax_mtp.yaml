@@ -1,0 +1,35 @@
+# Native vLLM serving profile; checkpoint sampling remains authoritative.
+tensor-parallel-size: 8
+pipeline-parallel-size: 1
+dtype: "bfloat16"
+max-model-len: 69632
+max-num-seqs: 64
+max-num-batched-tokens: 2048
+gpu-memory-utilization: 0.92
+language-model-only: true
+enable-prefix-caching: false
+enable-chunked-prefill: true
+mamba-cache-mode: "none"
+mamba-ssm-cache-dtype: "float32"
+async-scheduling: false
+generation-config: "auto"
+disable-custom-all-reduce: true
+cudagraph-metrics: true
+additional-config:
+  flaggems_record_ops: false
+  qwen38_ngram_mode: "shared_buffer"
+  qwen38_mtp_graph: true
+  qwen38_qsa_length_buckets: true
+  qwen38_qsa_packing: false
+  qwen38_fused_qsa_metadata: false
+  qwen38_fused_gemma_norm: false
+  qwen38_hc_small_fusions: false
+  qwen38_qsa_long_context: false
+  qwen38_qsa_native_attention: false
+  qwen38_reuse_gdn_metadata: false
+  qwen38_gdn_host_metadata: false
+  qwen38_ple_cpu_metadata: false
+  qwen38_tuning_profile: true
+host: "127.0.0.1"
+port: 18170
+served-model-name: "qwen38"

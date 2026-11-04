@@ -5,6 +5,7 @@ The large table stays private to the producer. Only bounded gathered rows use
 shared memory. Every consumer copies to its own pinned staging before release,
 so no asynchronous H2D transfer can observe a later publication.
 """
+
 from __future__ import annotations
 
 import mmap
@@ -27,7 +28,12 @@ class SharedNgramBuffer:
         self.consumptions = 0
         self._epoch = 0
         self._closed = False
-        size = 4096 + max_tokens * embedding_dim * torch.empty((), dtype=dtype, device="cpu").element_size()
+        size = (
+            4096
+            + max_tokens
+            * embedding_dim
+            * torch.empty((), dtype=dtype, device="cpu").element_size()
+        )
         path = None
         if self.is_producer:
             fd, path = tempfile.mkstemp(prefix="qwen38-ngram-", dir="/dev/shm")
@@ -35,7 +41,9 @@ class SharedNgramBuffer:
             os.close(fd)
         payload = [path]
         if self.world_size > 1:
-            dist.broadcast_object_list(payload, src=group.ranks[0], group=group.cpu_group)
+            dist.broadcast_object_list(
+                payload, src=group.ranks[0], group=group.cpu_group
+            )
         path = payload[0]
         fd = os.open(path, os.O_RDWR)
         try:
@@ -44,8 +52,10 @@ class SharedNgramBuffer:
             os.close(fd)
         self.header = torch.frombuffer(self._mapping, dtype=torch.int64, count=3)
         self.rows = torch.frombuffer(
-            self._mapping, dtype=dtype,
-            count=max_tokens * embedding_dim, offset=4096,
+            self._mapping,
+            dtype=dtype,
+            count=max_tokens * embedding_dim,
+            offset=4096,
         ).reshape(max_tokens, embedding_dim)
         self._barrier()
         if self.is_producer:
@@ -72,17 +82,29 @@ class SharedNgramBuffer:
                 actual = int(producer(self.rows))
                 if not 0 <= actual <= capacity:
                     raise ValueError("N-gram actual tokens exceed publication capacity")
-                self.header.copy_(torch.tensor([self._epoch, capacity, actual], dtype=torch.int64, device="cpu"))
+                self.header.copy_(
+                    torch.tensor(
+                        [self._epoch, capacity, actual], dtype=torch.int64, device="cpu"
+                    )
+                )
                 self.productions += 1
             except Exception as exc:
                 error = exc
-                self.header.copy_(torch.tensor([self._epoch, capacity, -1], dtype=torch.int64, device="cpu"))
+                self.header.copy_(
+                    torch.tensor(
+                        [self._epoch, capacity, -1], dtype=torch.int64, device="cpu"
+                    )
+                )
         self._barrier()
         epoch, published_capacity, actual = self.header.tolist()
         if actual < 0:
-            raise RuntimeError("N-gram CPU producer failed before publication") from error
+            raise RuntimeError(
+                "N-gram CPU producer failed before publication"
+            ) from error
         if epoch != self._epoch or published_capacity != capacity:
-            raise RuntimeError("N-gram TP ranks disagree on publication generation/shape")
+            raise RuntimeError(
+                "N-gram TP ranks disagree on publication generation/shape"
+            )
         if actual:
             destination[:actual].copy_(self.rows[:actual])
         self.consumptions += 1

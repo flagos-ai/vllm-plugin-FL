@@ -77,7 +77,10 @@ def test_mrv1_metadata_context_restores_after_builder_error():
         cache_config=SimpleNamespace(
             mamba_cache_mode="none", enable_prefix_caching=False
         ),
-        scheduler_config=SimpleNamespace(async_scheduling=False),
+        scheduler_config=SimpleNamespace(
+            async_scheduling=False, max_num_batched_tokens=2048
+        ),
+        additional_config={},
     )
     runner.num_accepted_tokens = SimpleNamespace(gpu=torch.tensor([2, 1]))
     runner.num_decode_draft_tokens = SimpleNamespace(cpu=torch.tensor([1, 0]))
@@ -161,7 +164,10 @@ def test_metax_config_accepts_only_validated_mtp_lengths(monkeypatch, k, allowed
             mamba_cache_mode="none",
             enable_prefix_caching=False,
         ),
-        scheduler_config=SimpleNamespace(async_scheduling=False),
+        scheduler_config=SimpleNamespace(
+            async_scheduling=False, max_num_batched_tokens=2048
+        ),
+        additional_config={},
         parallel_config=SimpleNamespace(pipeline_parallel_size=1),
     )
     if allowed:
