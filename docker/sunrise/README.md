@@ -126,23 +126,58 @@ zero-output GDN benchmark workaround during correctness validation.
 
 ## Hardware acceptance, 2026-11-04
 
-The tested implementation is commit
-`4f15be0347eb02a629eec210d8c2bfffd8295f31`, on Sunrise S2 with the vendor
-Python 3.10 stack above and the ordinary `0.32.0+empty` wheel.
+The current production changes were tested at
+`ed99a0e7c47bae1df5b2e9ecaecd00ed91dc9bb3`, with the vendor Python 3.10
+stack above and the ordinary `0.32.0+empty` wheel. The later Gate-script
+changes verify the effective server configuration instead of treating caller
+arguments as runtime evidence. **The full Sunrise Gate is not yet passing.**
+Per-check receipts retain their tested revisions: baseline cache/math and eager
+smoke at `4f15be0`, graph functional tests at `10b7293`, V2 graph smoke at
+`2489ee1`, and the current unit/routing/35B eager checks at `ed99a0e`.
 
 | Check | Result |
 | --- | --- |
-| Unit contracts in the actual vLLM environment, including native KV views and IR | 178 passed, zero skips |
-| Sunrise runner selection | 3 passed |
+| Plugin unit contracts in the actual vLLM environment | 227 passed, zero skips |
 | Strided combined KV writes on PTPU, NHD and HND | 2 passed |
 | Provider math and activations, FP32/FP16/BF16 | 17 passed |
-| Qwen3-4B, Runner V2, TP=1, eager | Two batches, four correct answers |
-| Qwen3-4B, Runner V2, TP=2, eager | Two batches, four correct answers |
+| Native PTPU graph capture and changed-input/KV replay | 9 passed, zero skips |
+| Masked MoE routing against numerical references | 24 passed |
+| Native GDN prefill against CPU recurrence, both model dimensions | 10 passed |
+| Qwen3-4B, Runner V2, TP1 and TP2, eager | Both passed semantic smoke checks |
+| Qwen3-4B, Runner V2, TP1, FULL_DECODE_ONLY | Five correct answers; two native graphs replayed 4 and 5 times after readiness |
+| Qwen3.6-35B-A3B, Runner V2, TP2, eager | All 26 shared Gate requests and the 4118-token supplemental prefill passed |
+| Qwen3.6-27B, Runner V2, TP2, eager | First shared Gate run: 21/26 passed; five image-containing requests failed |
+| Qwen3.6-27B and 35B-A3B, TP2, graph | Full model Gates remain pending; prerequisite asynchronous collective replay checks failed |
 
-Both inference runs used `max_model_len=512`, `max_num_batched_tokens=512`,
-`max_num_seqs=2`, a 1 GiB per-worker KV budget, and `PCCL_PROTO=Simple`.
-They checked the engine's `use_v2_model_runner` flag, recorded
-`Using Sunrise Model Runner V2`, and returned `Paris`, `2`, `Beijing`, and
-`12`. The TP=2 run selected the FlagCX communicator and PCCL process groups.
+The 35B-A3B Gate retained the original prompts, quality checks and 300-second
+request timeout. It covered text single, image single, text concurrency eight,
+image concurrency eight, and mixed concurrency eight. Actual server evidence
+confirmed TP2, context 8192, eight sequences, a 4 GiB per-worker KV budget,
+eager execution, and the Sunrise V2 worker. The supplemental request returned
+the expected passphrase with 4118 server-reported prompt tokens.
 
-Graph replay and the full large-model acceptance matrix remain unverified.
+The earlier Qwen3-4B eager smoke used context/batch limit 512, two sequences,
+and 1 GiB KV per worker. TP2 selected FlagCX and PCCL process groups. The TP1
+graph smoke additionally checked actual `PTPUGraph` instances and counted only
+request-time replay; capture and warmup were excluded from its replay counts.
+
+TP2 graph experiments reproduced asynchronous PCCL timeouts in both model
+smoke and an isolated BF16 multi-layer collective probe. The isolated probe
+also timed out with `TA_CLOSE_GRAPH_MEMORY=1`; adding stream-event dependencies
+did not establish a passing result. No production stream-fence workaround was
+installed. The native synchronous scheduling configuration is a separate,
+unverified follow-up, and must not be counted as a graph pass.
+
+The failed 27B image case returned invalid token IDs. Later diagnostics found
+non-finite vision features, but graph failures also left residual peer-device
+state; clean-device reproduction is required before assigning the final root
+cause. Pure-text controls with 1063 and 4103 prompt tokens returned the correct
+passphrase. Separate FP32 vision-attention probes showed numerical errors;
+this does not extend the accepted BF16 model coverage to FP32 vision models.
+
+Use the reproducible matrix in
+[the Sunrise V2 Gate guide](../../.github/scripts/sunrise/README.md). Acceptance
+requires all four model/mode groups: 20 shared scenarios / 104 requests plus
+four measured long-prefill requests, and request-time native FULL graph
+execution evidence for each graph group. Successful imports, a built image,
+unit tests or TP1 graph replay do not replace that matrix.
