@@ -713,6 +713,14 @@ class WorkerFL(WorkerBase):
                 - non_kv_cache_memory
                 - redundancy_buffer_memory
             )
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                # The free-memory hint already excludes initial occupancy;
+                # the requested-total-memory hint must account for it here.
+                kv_cache_memory_bytes_to_requested_limit = physical_kv_cache_budget(
+                    self.requested_memory,
+                    non_kv_cache_memory + redundancy_buffer_memory,
+                    self.init_snapshot.non_torch_memory,
+                )
 
             msg = (
                 f"Free memory on device "

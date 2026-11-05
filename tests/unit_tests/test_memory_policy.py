@@ -4,6 +4,7 @@
 
 import ast
 import importlib.util
+import re
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,7 +19,7 @@ POLICY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(POLICY)
 
 
-def _worker_method(namespace):
+def _worker_method(namespace, name="determine_available_memory"):
     tree = ast.parse((ROOT / "vllm_fl/worker/worker.py").read_text())
     worker = next(
         node
@@ -28,8 +29,7 @@ def _worker_method(namespace):
     method = next(
         node
         for node in worker.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "determine_available_memory"
+        if isinstance(node, ast.FunctionDef) and node.name == name
     )
     # Exercise the actual host-side method without importing Torch or its
     # inference-mode decorator. Runtime dependencies are supplied by each test.
@@ -174,6 +174,124 @@ class WorkerBudgetTest(unittest.TestCase):
         self.profiling.assert_not_called()
         self.policy.assert_not_called()
         self.worker.model_runner.profile_run.assert_not_called()
+
+
+class WarmupBudgetHintTest(unittest.TestCase):
+    def setUp(self):
+        self.mib = 1 << 20
+        self.events = []
+        self.policy = Mock(wraps=POLICY.physical_kv_cache_budget)
+        self.platform = SimpleNamespace(vendor_name="metax", device_type="cuda")
+        self.logger = Mock()
+        self.logger.debug.side_effect = lambda _message: self.events.append("hint")
+        compilation = SimpleNamespace(
+            mode="compile",
+            compile_sizes=[4, 8],
+            cudagraph_mode="full",
+            cudagraph_capture_sizes=[8],
+            get_compile_ranges=lambda: [],
+        )
+
+        def capture():
+            self.events.append("capture")
+            return 30 * self.mib
+
+        runner = SimpleNamespace(
+            model_memory_usage=200 * self.mib,
+            lora_config=None,
+            _dummy_run=Mock(
+                side_effect=lambda *_a, **_kw: self.events.append("compile")
+            ),
+            maybe_remove_all_loras=Mock(),
+            capture_model=Mock(side_effect=capture),
+        )
+        # Post-profiling state: initial non-Torch=100MiB, growth=50MiB,
+        # weights=200MiB, activations=100MiB. Initial free memory already
+        # excludes the 100MiB initial occupancy. Auto KV budget is 450MiB.
+        self.worker = SimpleNamespace(
+            vllm_config=SimpleNamespace(compilation_config=compilation),
+            compilation_config=SimpleNamespace(
+                compilation_time=0,
+                encoder_compilation_time=0,
+            ),
+            cache_config=SimpleNamespace(
+                kv_cache_memory_bytes=None,
+                gpu_memory_utilization=0.9,
+            ),
+            init_snapshot=SimpleNamespace(
+                total_memory=1000 * self.mib,
+                free_memory=900 * self.mib,
+                non_torch_memory=100 * self.mib,
+            ),
+            requested_memory=900 * self.mib,
+            peak_activation_memory=100 * self.mib,
+            non_torch_memory=50 * self.mib,
+            available_kv_cache_memory_bytes=450 * self.mib,
+            model_runner=runner,
+            model_config=SimpleNamespace(seed=42),
+        )
+        self.kernel_warmup = Mock(
+            side_effect=lambda _worker: self.events.append("kernel")
+        )
+        self.method = _worker_method(
+            {
+                "current_platform": self.platform,
+                "physical_kv_cache_budget": self.policy,
+                "CompilationMode": SimpleNamespace(VLLM_COMPILE="compile"),
+                "CUDAGraphMode": SimpleNamespace(NONE="none"),
+                "CompilationTimes": SimpleNamespace,
+                "kernel_warmup": self.kernel_warmup,
+                "get_pp_group": lambda: SimpleNamespace(is_last_rank=False),
+                "set_random_seed": Mock(),
+                "logger": self.logger,
+                "GiB_bytes": 1 << 30,
+            },
+            name="compile_or_warm_up_model",
+        )
+
+    def _hints_after_warmup(self):
+        self.method(self.worker)
+        message = self.logger.debug.call_args.args[0]
+        return [int(value) for value in re.findall(r"--kv-cache-memory=(\d+)", message)]
+
+    def test_metax_requested_hint_after_warmup_counts_initial_once(self):
+        # Requested: 900-200-100-50-30(graph)-150(buffer)-100(initial)=270.
+        # Free-based: 900-200-100-50-30-150=370, without another initial debit.
+        self.assertEqual(self._hints_after_warmup(), [270 * self.mib, 370 * self.mib])
+        self.assertEqual(self.events, ["compile", "kernel", "capture", "hint"])
+        self.policy.assert_called_once_with(
+            900 * self.mib,
+            530 * self.mib,
+            100 * self.mib,
+        )
+        self.assertEqual(self.worker.non_torch_memory, 50 * self.mib)
+        self.assertEqual(self.worker.available_kv_cache_memory_bytes, 450 * self.mib)
+
+    def test_other_vendors_keep_both_original_hints(self):
+        for vendor in ["nvidia", "musa", None]:
+            with self.subTest(vendor=vendor):
+                self.platform.vendor_name = vendor
+                self.assertEqual(
+                    self._hints_after_warmup(),
+                    [370 * self.mib, 370 * self.mib],
+                )
+        del self.platform.vendor_name
+        self.assertEqual(self._hints_after_warmup(), [370 * self.mib, 370 * self.mib])
+        self.policy.assert_not_called()
+
+    def test_explicit_override_emits_no_automatic_hints(self):
+        self.worker.cache_config.kv_cache_memory_bytes = 1200 * self.mib
+        self.method(self.worker)
+        self.logger.debug.assert_not_called()
+        self.policy.assert_not_called()
+        self.worker.model_runner.capture_model.assert_called_once_with()
+
+    def test_requested_hint_without_graph_capture(self):
+        self.worker.vllm_config.compilation_config.cudagraph_mode = "none"
+        self.assertEqual(self._hints_after_warmup(), [300 * self.mib, 400 * self.mib])
+        self.worker.model_runner.capture_model.assert_not_called()
+        self.kernel_warmup.assert_called_once_with(self.worker)
+        self.assertEqual(self.worker.non_torch_memory, 50 * self.mib)
 
 
 if __name__ == "__main__":
