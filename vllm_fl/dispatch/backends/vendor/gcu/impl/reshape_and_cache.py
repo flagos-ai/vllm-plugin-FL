@@ -9,6 +9,36 @@ from flag_gems.fused.reshape_and_cache_flash import (
     reshape_and_cache_flash as _gems_reshape_and_cache_flash,
 )
 
+from vllm.triton_utils import tl, triton
+
+
+@triton.jit
+def _strided_cache_kernel(
+    K,
+    V,
+    KC,
+    VC,
+    S,
+    KS: tl.constexpr,
+    VS: tl.constexpr,
+    BS: tl.constexpr,
+    TS: tl.constexpr,
+    HS: tl.constexpr,
+    N: tl.constexpr,
+    H: tl.constexpr,
+    D: tl.constexpr,
+    WIDTH: tl.constexpr,
+):
+    token = tl.program_id(0).to(tl.int32)
+    slot = tl.load(S + token).to(tl.int32)
+    if slot >= 0:
+        i = tl.arange(0, WIDTH).to(tl.int32)
+        mask = i < H * D
+        dst = (slot // N) * BS + (slot % N) * TS + (i // D) * HS + i % D
+        tl.store(KC + dst, tl.load(K + token * KS + i, mask=mask), mask=mask)
+        tl.store(VC + dst, tl.load(V + token * VS + i, mask=mask), mask=mask)
+
+
 _INT32_MAX = 2**31 - 1
 _MAX_GRID_X = 65535
 
@@ -68,7 +98,6 @@ def reshape_and_cache_flash(
     if min(blocks, block_size, heads, head_size) <= 0:
         raise ValueError("GCU cache dimensions must be positive")
     width = heads * head_size
-    block_elements = block_size * width
     for t in (key, value):
         if (
             t.shape[0] < num_tokens
@@ -77,11 +106,20 @@ def reshape_and_cache_flash(
             or t.stride(0) < width
         ):
             raise ValueError("GCU cache inputs require contiguous heads within tokens")
+    cache_strides = key_cache.stride()
+    packed = cache_strides[1:] == (width, head_size, 1)
+    standardized = cache_strides[1:] in (
+        (2 * head_size, 2 * block_size * head_size, 1),
+        (2 * width, 2 * head_size, 1),
+    )
+    cache_span = 1 + sum(
+        (n - 1) * s for n, s in zip(key_cache.shape[1:], cache_strides[1:])
+    )
     for t in (key_cache, value_cache):
         if (
-            t.stride()[1:] != (width, head_size, 1)
-            or t.stride(0) < block_elements
-            or t.stride(0) != key_cache.stride(0)
+            not (packed or standardized)
+            or t.stride() != cache_strides
+            or t.stride(0) < cache_span
         ):
             raise ValueError(
                 "GCU caches require matching strides and contiguous blocks"
@@ -89,7 +127,7 @@ def reshape_and_cache_flash(
     if (
         blocks * block_size - 1 > _INT32_MAX
         or key_cache.stride(0) > _INT32_MAX
-        or (blocks - 1) * key_cache.stride(0) + block_elements - 1 > _INT32_MAX
+        or (blocks - 1) * key_cache.stride(0) + cache_span - 1 > _INT32_MAX
         or any(
             t.stride(0) > _INT32_MAX
             or (min(num_tokens, _MAX_GRID_X) - 1) * t.stride(0) + width - 1 > _INT32_MAX
@@ -107,6 +145,22 @@ def reshape_and_cache_flash(
     # all calls compatible with graph capture, including long prefills.
     for start in range(0, num_tokens, _MAX_GRID_X):
         count = min(num_tokens - start, _MAX_GRID_X)
+        if not packed:
+            _strided_cache_kernel[(count,)](
+                key.narrow(0, start, count),
+                value.narrow(0, start, count),
+                key_cache,
+                value_cache,
+                slots.narrow(0, start, count),
+                key.stride(0),
+                value.stride(0),
+                *cache_strides[:3],
+                block_size,
+                heads,
+                head_size,
+                triton.next_power_of_2(width),
+            )
+            continue
         _gems_reshape_and_cache_flash(
             key.narrow(0, start, count),
             value.narrow(0, start, count),

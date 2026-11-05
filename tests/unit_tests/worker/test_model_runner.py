@@ -19,9 +19,11 @@ import numpy as np
 import pytest
 import torch
 
-# =============================================================================
+# ======================================================================        )
+
+
 # Test Utilities - Check availability before importing
-# =============================================================================
+# ======================================================================        )
 
 
 def has_vllm_model_runner():
@@ -69,6 +71,41 @@ def test_device_graph_capture_uses_accelerator_stream(monkeypatch, reuse_context
         device_api.Stream.assert_called_once_with(device=torch.device("cpu"))
     capture_stream.wait_stream.assert_called_once_with(current_stream)
     device_api.stream.assert_called_once_with(capture_stream)
+
+
+@pytest.mark.parametrize("method", ["unknown", "future_draft_method"])
+def test_propose_draft_token_ids_rejects_unsupported_method(method):
+    from types import SimpleNamespace
+
+    from vllm_fl.worker.model_runner import ModelRunnerFL
+
+    config = SimpleNamespace(
+        method=method,
+        use_ngram_gpu=lambda: False,
+        uses_extract_hidden_states=lambda: False,
+        use_eagle=lambda: False,
+        use_dflash=lambda: False,
+        uses_draft_model=lambda: False,
+    )
+    runner = SimpleNamespace(speculative_config=config)
+    scheduler_output = SimpleNamespace(
+        total_num_scheduled_tokens=0, num_spec_tokens_to_schedule=0
+    )
+    with pytest.raises(
+        ValueError, match=f"Unsupported speculative decoding method: {method}"
+    ):
+        ModelRunnerFL.propose_draft_token_ids(
+            runner,
+            scheduler_output=scheduler_output,
+            sampled_token_ids=[],
+            sampling_metadata=None,
+            hidden_states=None,
+            sample_hidden_states=None,
+            aux_hidden_states=None,
+            spec_decode_metadata=None,
+            common_attn_metadata=None,
+            slot_mappings=None,
+        )
 
 
 @pytest.mark.parametrize("disable_full", [False, True])
@@ -122,9 +159,11 @@ def test_full_graph_exclusion_survives_dp_redispatch(
         )
 
 
-# =============================================================================
+# ======================================================================        )
+
+
 # Layer 1: ExecuteModelState Data Structure Tests
-# =============================================================================
+# ======================================================================        )
 
 
 class TestExecuteModelState:
@@ -196,9 +235,11 @@ class TestExecuteModelState:
         assert torch.equal(logits, mock_logits)
 
 
-# =============================================================================
+# ======================================================================        )
+
+
 # Layer 2: _get_cumsum_and_arange Algorithm Tests
-# =============================================================================
+# ======================================================================        )
 
 
 class TestGetCumsumAndArange:
@@ -275,71 +316,11 @@ class TestGetCumsumAndArange:
         assert cu_num_tokens.dtype == np.int64
 
 
-# =============================================================================
-# Layer 2: _pad_for_sequence_parallelism Logic Tests
-# =============================================================================
+# ======================================================================        )
 
 
-class TestPadForSequenceParallelism:
-    """Test sequence parallelism padding logic."""
-
-    @pytest.fixture
-    def mock_model_runner(self):
-        """Create mock model runner for padding tests."""
-        from vllm_fl.worker.model_runner import ModelRunnerFL
-
-        mock_runner = MagicMock(spec=ModelRunnerFL)
-        mock_runner.vllm_config = MagicMock()
-        mock_runner.vllm_config.parallel_config = MagicMock()
-        mock_runner.compilation_config = MagicMock()
-        mock_runner.compilation_config.pass_config = MagicMock()
-        mock_runner._pad_for_sequence_parallelism = (
-            ModelRunnerFL._pad_for_sequence_parallelism.__get__(
-                mock_runner, ModelRunnerFL
-            )
-        )
-        return mock_runner
-
-    def test_no_padding_when_sp_disabled(self, mock_model_runner):
-        """SP disabled should return original token count."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 4
-        mock_model_runner.compilation_config.pass_config.enable_sp = False
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    def test_no_padding_when_tp_size_1(self, mock_model_runner):
-        """TP size 1 means no parallelism, no padding needed."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = 1
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        assert mock_model_runner._pad_for_sequence_parallelism(10) == 10
-
-    @pytest.mark.parametrize(
-        "num_tokens,tp_size,expected",
-        [
-            (10, 4, 12),  # 10 -> ceil to multiple of 4
-            (8, 4, 8),  # 8 already multiple of 4
-            (10, 8, 16),  # 10 -> ceil to multiple of 8
-            (1, 4, 4),  # 1 -> ceil to multiple of 4
-            (15, 8, 16),  # 15 -> ceil to multiple of 8
-        ],
-    )
-    def test_padding_calculation(
-        self, mock_model_runner, num_tokens, tp_size, expected
-    ):
-        """Verify padding rounds up to next multiple of tp_size."""
-        mock_model_runner.vllm_config.parallel_config.tensor_parallel_size = tp_size
-        mock_model_runner.compilation_config.pass_config.enable_sp = True
-
-        result = mock_model_runner._pad_for_sequence_parallelism(num_tokens)
-
-        assert result == expected
-        assert result % tp_size == 0  # Must be divisible
-
-
-# =============================================================================
 # Layer 2: _get_positions Routing Tests
-# =============================================================================
+# ======================================================================        )
 
 
 class TestGetPositions:
@@ -359,12 +340,7 @@ class TestGetPositions:
         mock_runner.mrope_positions = MagicMock()
         mock_runner.mrope_positions.gpu = torch.arange(300).reshape(3, 100)
 
-        # XDRoPE positions (2D)
-        mock_runner.xdrope_positions = MagicMock()
-        mock_runner.xdrope_positions.gpu = torch.arange(200).reshape(2, 100)
-
         mock_runner.uses_mrope = False
-        mock_runner.uses_xdrope_dim = 0
 
         mock_runner._get_positions = ModelRunnerFL._get_positions.__get__(
             mock_runner, ModelRunnerFL
@@ -393,12 +369,62 @@ class TestGetPositions:
         assert result.shape == (3, 10)
         torch.testing.assert_close(result, expected)
 
-    def test_xdrope_returns_2d_positions(self, mock_model_runner):
-        """XDRoPE: returns [2, num_tokens] positions."""
-        mock_model_runner.uses_xdrope_dim = 64
-
-        result = mock_model_runner._get_positions(10)
-
-        expected = mock_model_runner.xdrope_positions.gpu[:, :10]
-        assert result.shape == (2, 10)
+    def test_mrope_returns_indexed_positions(self, mock_model_runner):
+        """0.32 routes indexed multimodal positions through MRoPE."""
+        mock_model_runner.uses_mrope = True
+        indices = torch.tensor([15, 0, 99, 5])
+        result = mock_model_runner._get_positions(indices)
+        expected = mock_model_runner.mrope_positions.gpu[:, indices]
+        assert result.shape == (3, 4)
         torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize("dense_hybrid", [False, True])
+def test_cache_initialization_preserves_native_and_dense_binding(
+    monkeypatch, dense_hybrid
+):
+    from contextlib import nullcontext
+
+    module = import_module("vllm_fl.worker.model_runner")
+    hybrid = import_module("vllm_fl.kv_cache.ascend.hybrid")
+    config = object()
+    caches = {"layer": torch.zeros(1), "mamba": torch.zeros(1)}
+    mapped = {"layer": torch.ones(1)}
+    native_allocator = MagicMock(return_value=dict(caches))
+    dense_allocator = MagicMock(return_value=dict(caches))
+    mapper = MagicMock(return_value=mapped)
+    binder = MagicMock()
+    monkeypatch.setattr(module, "allocate_kv_cache", native_allocator)
+    monkeypatch.setattr(hybrid, "allocate_dense_hybrid_cache", dense_allocator)
+    monkeypatch.setattr(module, "map_kv_caches_to_kernel_blocks", mapper)
+    monkeypatch.setattr(module, "bind_kv_cache", binder)
+    runner = SimpleNamespace(
+        use_ascend_hybrid_cache=dense_hybrid,
+        device=torch.device("cpu"),
+        cache_config=SimpleNamespace(
+            cache_dtype="auto", get_resolved_kv_cache_layout=lambda: "layout"
+        ),
+        attn_groups=[[]],
+        shared_kv_cache_layers={"shared": "layer"},
+        model_config=SimpleNamespace(hf_config=SimpleNamespace(model_type="test")),
+        speculative_config=None,
+        compilation_config=SimpleNamespace(static_forward_context={}),
+        kv_caches=[],
+    )
+    config = SimpleNamespace(kv_cache_groups=[])
+    result = module.ModelRunnerFL.initialize_kv_cache_tensors(
+        runner, config, [1], nullcontext()
+    )
+    assert result["shared"] is result["layer"]
+    if dense_hybrid:
+        dense_allocator.assert_called_once_with(
+            config, runner.device, [[]], [1], "auto"
+        )
+        native_allocator.assert_not_called()
+        mapper.assert_not_called()
+        assert binder.call_args.kwargs["layer_kv_caches"] is result
+    else:
+        native_allocator.assert_called_once_with(config, runner.device, "layout", [1])
+        dense_allocator.assert_not_called()
+        mapper.assert_called_once_with(result, [])
+        assert binder.call_args.kwargs["layer_kv_caches"] is mapped

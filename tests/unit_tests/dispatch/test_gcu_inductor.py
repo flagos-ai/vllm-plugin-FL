@@ -56,6 +56,10 @@ def make_provider(function=None, shared_heuristics=None):
                 self.required, self.limit, self.name = required, limit, name
 
         heuristics.OutOfResources = OutOfResources
+    if not hasattr(heuristics, "PTXASError"):
+        from triton.runtime.errors import PTXASError
+
+        heuristics.PTXASError = PTXASError
     registrations = []
 
     class GCUInductorPatcher:
@@ -183,9 +187,7 @@ def test_gcu_i64_option_reaches_compiler_without_narrowing_metadata(dtype, style
     assert heuristics.CachingAutotuner._create_compile_options is wrapped
 
 
-@pytest.mark.parametrize(
-    "device,dtype", [("cuda", "i64"), ("cpu", "i64"), ("gcu", "i32")]
-)
+@pytest.mark.parametrize("device,dtype", [("cuda", "i64"), ("cpu", "i64")])
 def test_i64_option_does_not_change_other_kernels(device, dtype):
     _, heuristics, _, _, _ = make_provider()
     inductor._install_gcu_i64_compile_options(heuristics)
@@ -478,3 +480,61 @@ def test_non_enflame_entry_point_does_not_import_or_modify_provider(monkeypatch)
     monkeypatch.setattr(inductor, "_install_gcu_inductor_hooks", install)
     inductor.apply_inductor_gcu_patch()
     install.assert_not_called()
+
+
+def test_gcu_internal_i64_enabled_with_i32_argument_signature():
+    # Embedding kernels widen indices internally despite an i32-only ABI.
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_i64_compile_options(heuristics)
+    autotuner = heuristics.CachingAutotuner("gcu")
+    meta = {"signature": {"in_ptr0": "*i32", "xnumel": "i32"}}
+    assert autotuner._create_compile_options(object(), meta)["enable_i64"] is True
+    assert "enable_i64" not in meta
+
+
+@pytest.mark.parametrize("part", ["LO", "HI"])
+def test_gcu_bf16_linker_failure_skips_only_unsupported_candidate(part):
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_resource_errors(heuristics)
+    autotuner = heuristics.CachingAutotuner("gcu")
+    failure = Exception(
+        f"ld.lld: error: relocation R_DTU_ADDR16_{part}_ICALL cannot be "
+        "used against symbol tops_truncf_v2_fp32_to_v1_bf16; recompile with -fPIC"
+    )
+    first, last = object(), object()
+    autotuner.compile_results = []
+    autotuner.launchers = []
+    autotuner.configs = [first, failure, last]
+    CachingAutotuner._precompile_worker(autotuner)
+    assert autotuner.compile_results == [first, last]
+    with pytest.raises(heuristics.PTXASError) as caught:
+        autotuner._precompile_config(failure)
+    assert caught.value.__cause__ is failure
+    assert str(failure) in str(caught.value)
+    autotuner.compile_results = []
+    autotuner.configs = [failure]
+    with pytest.raises(Exception, match="No valid triton configs"):
+        CachingAutotuner._precompile_worker(autotuner)
+
+
+@pytest.mark.parametrize("device", ["gcu", "cpu", "cuda"])
+@pytest.mark.parametrize("variant", ["other_symbol", "context", "runtime", "exact"])
+def test_gcu_linker_adapter_preserves_unrelated_failures(device, variant):
+    _, heuristics, _, _, _ = make_provider()
+    inductor._install_gcu_resource_errors(heuristics)
+    message = (
+        "ld.lld: error: relocation R_DTU_ADDR16_LO_ICALL cannot be used against "
+        "symbol tops_truncf_v2_fp32_to_v1_bf16; recompile with -fPIC"
+    )
+    if variant == "other_symbol":
+        message = message.replace("tops_truncf_v2_fp32_to_v1_bf16", "other_symbol")
+    if variant == "context":
+        message = "context\n" + message
+    failure = RuntimeError(message) if variant == "runtime" else Exception(message)
+    if variant == "exact" and device == "gcu":
+        return
+    with pytest.raises(type(failure)) as caught:
+        heuristics.CachingAutotuner(device)._precompile_config(failure)
+    assert caught.value is failure

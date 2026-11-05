@@ -4,6 +4,7 @@
 import __future__
 
 import ast
+from contextlib import nullcontext
 from enum import IntEnum
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,6 +54,9 @@ class _Runner:
         self.events = []
         self.dummy_calls = []
         self.lora_config = object()
+
+    def get_model(self):
+        return self
 
     def _dummy_run(self, size, **kwargs):
         self.events.append(("dummy", size))
@@ -138,6 +142,9 @@ def _run_warmup(
         scheduler_config=SimpleNamespace(max_num_batched_tokens=512),
         model_config=SimpleNamespace(enforce_eager=enforce_eager),
         model_runner=runner,
+        use_v2_model_runner=False,
+        randomize_dummy_inputs=False,
+        _get_cudagraph_capture_context=nullcontext,
     )
     kernel_warmup = Mock(side_effect=lambda _: runner.events.append(("kernels",)))
     namespace = {
@@ -147,6 +154,7 @@ def _run_warmup(
         "current_platform": SimpleNamespace(device_type=device),
         "logger": Mock(),
         "kernel_warmup": kernel_warmup,
+        "has_compiled_submodule": lambda model: model is runner,
     }
     exec(code, namespace)
     namespace["compile_or_warm_up_model"](worker)
@@ -175,8 +183,8 @@ def test_other_platforms_keep_compile_warmups_and_profiled_capacity(
         profiled_tokens=512,
     )
     assert runner.dummy_calls == [
-        (256, {"skip_eplb": True, "remove_lora": False}),
-        (64, {"skip_eplb": True, "remove_lora": False}),
+        (256, {"skip_eplb": True, "remove_lora": False, "randomize_inputs": False}),
+        (64, {"skip_eplb": True, "remove_lora": False, "randomize_inputs": False}),
     ]
     assert runner.events == [
         ("dummy", 256),

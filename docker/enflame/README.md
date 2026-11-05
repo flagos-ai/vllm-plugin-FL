@@ -1,7 +1,14 @@
-# Enflame S60 recipe for vLLM 0.28
+# Enflame S60 recipe for vLLM 0.32
+
+The Dockerfile now targets official vLLM 0.32.0 at commit
+`5df63a7203cdb9328d824a27b682e77c7b9928be`. This updated image has not been
+built or published in the adaptation environment (Docker is unavailable).
+The published 0.28 images and validation results below are historical;
+CI setup now rejects their vLLM version. See
+[the adaptation status](../../docs/usage/enflame-vllm032.md) for current checks.
 
 The recipe keeps the vendor torch 2.11.0+cpu / torch_gcu
-2.11.0+3.8.20260713 stack and installs the official vLLM 0.28.0 empty-device
+2.11.0+3.8.20260713 stack and installs the official vLLM 0.32.0 empty-device
 build. The FL plugin registers the GCU platform. The vendor base is:
 
 ```text
@@ -31,6 +38,8 @@ pointers are not yet translated to GCU device addresses. Disable speculative
 decoding for hybrid align-mode serving. Other speculative/cache combinations
 still require their own validation; accepting a configuration is not evidence
 of device support.
+
+## Historical 0.28 image validation
 
 The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
 The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
@@ -64,15 +73,22 @@ From a private checkout, the underlying build command is:
 
 ```bash
 docker/build.sh --platform enflame --target ci \
-  --image-name local/vllm-plugin-fl --image-tag v0.28.0-enflame-candidate
+  --image-name local/vllm-plugin-fl --image-tag v0.32.0-enflame-candidate
 ```
 
 The example tag is a local build destination, not a published image.
 The default generated tag includes the selected stage, such as
-`v0.28.0-enflame-ci` or `v0.28.0-enflame-dev`. This command does not push.
+the branch defaults from `docker/build.sh`. Pass the explicit candidate tag
+above when building 0.32. This command does not push.
 `.github/configs/enflame.yml` references the published vLLM 0.28 dependency
-image by digest. Enflame is enabled in `platforms.yml`, following main's
-existing `enflame-s60` runner label, devices `2,3` and `/data:/data` mount.
+image by digest. Enflame is enabled in `platforms.yml`; the existing
+configuration retains the `enflame-s60` runner label, devices `2,3` and
+`/data:/data` mount. Its strict setup gate rejects the old dependency image;
+this is an external image-publication blocker, not a passing hardware CI run.
+Keep the gate and platform enabled. Select a replacement digest only after
+building, publishing and validating a real 0.32 dependency image. See the
+[current publication audit](../../docs/ci-pr675-latest.md#enflame-image-publication-audit)
+for the required base-image access, builder and registry permissions.
 The reference is main commit `6182281a42ce857fa52ef73ec1abafca941cdf3a`.
 Publishing the image and selecting this configuration do not establish
 that hardware CI has passed; record the actual workflow results separately.
@@ -80,8 +96,8 @@ The S60 e2e jobs allow 120 minutes for cold-cache compilation, graph capture
 and both original model cases; the measured 35B serving run took 3607 seconds.
 
 `VLLM_VERSION` and `VLLM_SOURCE_COMMIT` select the source version and exact
-commit; the default official v0.28.0 commit is
-`2cf0a6915ce544dc493a0990f2ea38d81601128a`. Pass matching values with
+commit; the default official v0.32.0 commit is
+`5df63a7203cdb9328d824a27b682e77c7b9928be`. Pass matching values with
 `--build-arg` when changing the source version, and use `VLLM_SOURCE_URL`
 for a verified mirror when necessary. Wheel versions, hashes and the
 official backend index are also Docker build arguments. Change a version

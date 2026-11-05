@@ -171,6 +171,7 @@ def fixture(
     config.mode = Mode.VLLM_COMPILE if compile_mode is None else compile_mode
     config.cudagraph_mode = GraphMode.PIECEWISE if graph_mode is None else graph_mode
     config.compile_sizes = None
+    config.decoder_replay_cudagraph_capture_sizes = []
     config.inductor_compile_config = {}
     config.splitting_ops = split
     config.use_inductor_graph_partition = inductor
@@ -456,15 +457,18 @@ def test_explicit_list_keeps_identity_and_existing_order():
     [
         ({}, GraphMode.NONE),
         ({"fuse_attn_quant": True}, GraphMode.FULL),
-        ({"enable_sp": True}, GraphMode.FULL),
-        ({"fuse_gemm_comms": True}, GraphMode.FULL),
+        ({"enable_sp": True}, GraphMode.PIECEWISE),
+        ({"fuse_gemm_comms": True}, GraphMode.PIECEWISE),
     ],
 )
 def test_initializer_graph_mode_changes_are_preserved(passes, expected):
     platform, vconfig, _ = fixture(split=[] if not passes else None, **passes)
     platform.check_and_update_config(vconfig)
     assert vconfig.compilation_config.cudagraph_mode is expected
-    assert vconfig.compilation_config.splitting_ops == []
+    if expected is GraphMode.PIECEWISE:
+        assert "vllm::all_reduce" in vconfig.compilation_config.splitting_ops
+    else:
+        assert vconfig.compilation_config.splitting_ops == []
     vconfig.compilation_config.set_splitting_ops_for_v1("allgather_reducescatter", 3)
     assert vconfig.compilation_config.cudagraph_mode is expected
 
@@ -709,7 +713,7 @@ def run_actual_load_model_dispatch_guard(device, mode, warmup):
         ("npu", Mode.VLLM_COMPILE, True),
         ("npu", Mode.NONE, False),
         ("cuda", Mode.VLLM_COMPILE, False),
-        ("gcu", Mode.VLLM_COMPILE, False),
+        ("gcu", Mode.VLLM_COMPILE, True),
     ],
 )
 def test_actual_load_model_warms_dispatch_before_tracing(device, mode, expected):

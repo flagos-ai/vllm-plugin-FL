@@ -11,6 +11,7 @@ GPU kernel correctness still needs hardware acceptance.
 
 import ast
 import builtins
+import logging
 import math
 import sys
 from pathlib import Path
@@ -23,6 +24,33 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 
 ROOT = Path(__file__).resolve().parents[2]
 IMPL = ROOT / "vllm_fl/dispatch/backends/flaggems/impl"
+
+
+@pytest.mark.parametrize("shape", [(2, 16), (2, 3, 32)])
+def test_gcu_silu_fullgraph_bypasses_autograd_logging(boundary, monkeypatch, shape):
+    logger = logging.getLogger("silu_compile_regression")
+
+    class LoggedSilu(torch.autograd.Function):
+        @staticmethod
+        def forward(context, first, second):
+            logger.debug("GEMS SILU AND MUL FORWARD")
+            return silu_reference(first, second)
+
+    kernels = ModuleType("flaggems_vllm.ops.silu_and_mul")
+    kernels.silu_and_mul_kernel = silu_reference
+    monkeypatch.setitem(sys.modules, "flaggems_vllm.ops.silu_and_mul", kernels)
+    monkeypatch.setattr(boundary.silu_module, "gems_silu_and_mul", LoggedSilu.apply)
+    boundary.platform.device_type = "gcu"
+    value = torch.randn(shape)
+    graphs = []
+    actual = compiled(lambda value: boundary.original_activation(None, value), graphs)(
+        value
+    )
+    half = shape[-1] // 2
+    torch.testing.assert_close(
+        actual, silu_reference(value[..., :half], value[..., half:])
+    )
+    assert len(graphs) == 1
 
 
 def rms_kernel(x, residual, weight, epsilon):

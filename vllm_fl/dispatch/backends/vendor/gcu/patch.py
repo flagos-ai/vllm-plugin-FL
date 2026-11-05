@@ -13,6 +13,7 @@ from .impl.inductor import apply_inductor_gcu_patch
 from .impl.kv_zeroer import apply_kv_zeroer_gcu_patch
 from .impl.mamba_copy import apply_mamba_copy_gcu_patch
 from .impl.sampler import apply_sampler_cpu_detour
+from .impl.vocab_mask import apply_vocab_mask_gcu_patch
 
 logger = logging.getLogger(__name__)
 _patches_applied = False
@@ -39,6 +40,7 @@ def apply_gcu_patches() -> None:
     apply_mamba_copy_gcu_patch()
     apply_index_fill_gcu_patch()
     apply_inductor_gcu_patch()
+    apply_vocab_mask_gcu_patch()
     _patches_applied = True
 
 

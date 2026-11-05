@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# vLLM 0.28 empty-device recipe for Enflame S60. Keep the vendor torch_gcu
+# vLLM 0.32 empty-device recipe for Enflame S60. Keep the vendor torch_gcu
 # 2.11 stack and install official Enflame compiler/operator wheels.
 # The runtime is validated on driver 1.10.6. The old vendor wrapper
 # remains in Dockerfile.v0.20.2.
@@ -25,9 +25,9 @@ ARG VLLM_SOURCE_URL=https://github.com/vllm-project/vllm.git
 FROM ${ENFLAME_BASE_IMAGE} AS base
 
 ARG ENFLAME_BASE_IMAGE
-ARG VLLM_VERSION=0.28.0
+ARG VLLM_VERSION=0.32.0
 ARG VLLM_SOURCE_URL
-ARG VLLM_SOURCE_COMMIT=2cf0a6915ce544dc493a0990f2ea38d81601128a
+ARG VLLM_SOURCE_COMMIT=5df63a7203cdb9328d824a27b682e77c7b9928be
 ARG DRIVER_VERSION=1.10.6
 ARG FLAGOS_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-enflame/simple
 ARG FLAGGEMS_VERSION=5.4.0
@@ -71,7 +71,7 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-# Build tooling for vLLM 0.28 empty mode: setuptools >= 77 (PEP 639 SPDX
+# Build tooling for vLLM 0.32 empty mode: setuptools >= 77 (PEP 639 SPDX
 # license) and setuptools-rust are missing from the vendor bundle. cloudpickle is
 # upgraded because the bundle ships 1.6.0, which cannot pickle Python 3.12
 # code objects (no qualname field) and breaks vLLM's model-registry

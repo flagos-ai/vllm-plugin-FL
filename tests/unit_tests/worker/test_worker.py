@@ -160,7 +160,7 @@ def test_worker_selects_v1_or_v2_model_runner():
 
     from vllm_fl.worker.worker import WorkerFL
 
-    source = inspect.getsource(WorkerFL.init_device)
+    source = inspect.getsource(WorkerFL._make_model_runner)
     assert "GPUModelRunnerV2" in source
     assert "vllm_fl.worker.model_runner" in source
     assert "ModelRunnerFL" in source

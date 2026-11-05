@@ -33,12 +33,16 @@ device_overrides:
   s60:
     cases:
       - qwen3_6/27b_tp2_eager
+      - qwen3_6/27b_tp2_graph
       - qwen3_6/35b_a3b_tp2_eager
+      - qwen3_6/35b_a3b_tp2_graph
     llm:
-      gpu_memory_utilization: 0.90
+      gpu_memory_utilization: 0.94
       disable_custom_all_reduce: false
+      compilation_config:
+        custom_ops: ["none", "+SiluAndMul"]
     serve:
-      startup_retries: 240
+      startup_retries: 360
 
 env_defaults:
   VLLM_PLUGINS: "fl"
@@ -46,6 +50,7 @@ env_defaults:
   TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
   ENABLE_I64_CHECK: "0"
   TORCHGCU_INDUCTOR_ENABLE: "1"
+  TORCHINDUCTOR_EMULATE_PRECISION_CASTS: "1"
 
 s60:
   name: "s60"
@@ -55,27 +60,27 @@ s60:
         inference:
           qwen3_6:
             - 27b_tp2_eager
-            - 35b_a3b_tp2_eager
+            - 27b_tp2_graph
         serving:
           qwen3_6:
-            - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
       nightly:
         inference:
           qwen3_6:
             - 27b_tp2_eager
-            - 35b_a3b_tp2_eager
+            - 27b_tp2_graph
         serving:
           qwen3_6:
-            - 27b_tp2_eager
             - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
         concurrent:
           qwen3_6:
             - 27b_tp2_eager
             - 35b_a3b_tp2_eager
     timeouts:
       e2e:
-        inference: 90
+        inference: 120
         serving: 120
         concurrent: 120
     functional:

@@ -79,12 +79,7 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), "Number of tokens mismatch"
 
-    # The FL kernel currently implements the unpadded softmax path. Preserve
-    # v0.28.0 padding and sigmoid semantics by delegating those cases upstream.
-    if (
-        scoring_func != "softmax"
-        or _get_padding_mask(hidden_states.shape[0]) is not None
-    ):
+    if scoring_func != "softmax":
         return upstream_fused_topk(
             hidden_states=hidden_states,
             gating_output=gating_output,
@@ -117,6 +112,10 @@ def fused_topk(
         gating_output,
         renormalize,
     )
+
+    padding_mask = _get_padding_mask(M)
+    if padding_mask is not None:
+        topk_ids = torch.where(padding_mask[:, None], -1, topk_ids)
 
     return topk_weights, topk_ids, token_expert_indices
 

@@ -2,27 +2,33 @@
 
 from __future__ import annotations
 
-from typing import Optional, Union
-
 import torch
 
 
 def rms_norm_gcu(
     obj,
     x: torch.Tensor,
-    residual: Optional[torch.Tensor] = None,
-) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-    weight = obj.weight
-    epsilon = obj.variance_epsilon
-
+    residual: torch.Tensor | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """Match CUDA RMSNorm's accumulation and low-precision rounding points."""
+    dtype = x.dtype
+    value = x.float()
     if residual is not None:
-        x = x + residual
-        residual = x
+        # CUDA fused_add_rms_norm stores the residual sum in scalar_t before
+        # computing variance. Keep that rounding point for BF16/FP16 inputs.
+        residual = (value + residual.float()).to(dtype)
+        value = residual.float()
 
-    variance = x.pow(2).mean(-1, keepdim=True)
-    x = x * torch.rsqrt(variance + epsilon)
-    output = weight * x
-
-    if residual is not None:
-        return output, residual
-    return output
+    variance_size = getattr(obj, "variance_size_override", None)
+    variance_input = value if variance_size is None else value[..., :variance_size]
+    variance = variance_input.square().mean(dim=-1, keepdim=True)
+    output = value * torch.rsqrt(variance + obj.variance_epsilon)
+    pass_weight = getattr(
+        obj, "pass_weight_add" if residual is not None else "pass_weight", True
+    )
+    if pass_weight:
+        # Casting before this multiplication introduces a second BF16 rounding
+        # that the upstream CUDA kernel does not perform.
+        output = output * obj.weight.float()
+    output = output.to(dtype)
+    return output if residual is None else (output, residual)

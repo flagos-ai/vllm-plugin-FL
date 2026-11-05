@@ -361,7 +361,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -417,6 +425,15 @@ class PlatformFL(Platform):
                     "speculative decoding for this configuration."
                 )
         if cls.vendor_name in ("gcu", "enflame"):
+            # vLLM may load a compiled artifact before invoking Inductor, so
+            # invalidate its cache as well as Torch's dtype-corrupted artifacts.
+            additional = getattr(vllm_config, "additional_config", {})
+            if not isinstance(additional, dict):
+                raise TypeError("Enflame additional_config must be a dictionary")
+            vllm_config.additional_config = {
+                **additional,
+                "fl_gcu_codegen": "preserve_dtype_v1",
+            }
             from vllm_fl.attention.utils import patch_mm_encoder_attention
 
             # Install before CustomOp caches even a disabled encoder's native
@@ -923,7 +940,7 @@ class PlatformFL(Platform):
         # Retain the registered collective routes for TXDA and native MCCL.
         return (
             cls.device_type == "txda"
-            or cls.vendor_name in ("nvidia", "thead", "iluvatar")
+            or cls.vendor_name in ("nvidia", "thead", "iluvatar", "enflame", "gcu")
             or (cls.device_type == "musa" and cls.dist_backend == "mccl")
         )
 
@@ -980,7 +997,14 @@ class PlatformFL(Platform):
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
-        default = ["native"] if using_inductor else ["vllm_c", "native"]
+        # vLLM registers vllm_c IR providers only on CUDA-alike/XPU devices.
+        # GCU's layer overrides dispatch through FL; remaining IR calls must
+        # use the portable provider rather than an unregistered CUDA provider.
+        default = (
+            ["native"]
+            if using_inductor or cls.device_type == "gcu"
+            else ["vllm_c", "native"]
+        )
         return IrOpPriorityConfig.with_default(
             default,
             rms_norm=default,

@@ -37,6 +37,14 @@ def silu_and_mul_flaggems(obj, x: torch.Tensor) -> torch.Tensor:
 
     d = x.shape[-1] // 2
     x1, x2 = x[..., :d], x[..., d:]
+    if (
+        current_platform.device_type == "gcu"
+        and torch.compiler.is_compiling()
+        and not torch.is_grad_enabled()
+    ):
+        from flaggems_vllm.ops.silu_and_mul import silu_and_mul_kernel
+
+        return silu_and_mul_kernel(x1, x2)
     return gems_silu_and_mul(x1, x2)
 
 

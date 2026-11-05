@@ -29,8 +29,8 @@ from packaging.version import Version
 
 vllm_version = version("vllm")
 parsed = Version(vllm_version)
-if parsed.base_version != "0.28.0" or "empty" not in (parsed.local or "").split("."):
-    raise RuntimeError(f"Expected vLLM 0.28.0 empty build, found {vllm_version}")
+if parsed.base_version != "0.32.0" or "empty" not in (parsed.local or "").split("."):
+    raise RuntimeError(f"Expected vLLM 0.32.0 empty build, found {vllm_version}")
 
 expected = {
     "torch": "2.11.0+cpu",
@@ -43,9 +43,10 @@ expected = {
 }
 for package, wanted in expected.items():
     actual = version(package)
-    if actual != wanted:
+    matches = Version(actual).public == wanted if package == "flag-gems" else actual == wanted
+    if not matches:
         raise RuntimeError(f"Expected {package} {wanted}, found {actual}")
-print("Enflame CI package versions match the vLLM 0.28 recipe")
+print("Enflame CI package versions match the vLLM 0.32 recipe")
 PY
 
 # The vendor runtime, vLLM, and FlagGems come from the pinned base image.
