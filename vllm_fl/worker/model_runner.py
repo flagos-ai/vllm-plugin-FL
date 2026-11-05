@@ -5634,8 +5634,6 @@ class ModelRunnerFL(
             # Dispatch operators are lazily resolved behind a process-safe
             # RLock. Resolve imported CachedOps before Dynamo starts tracing,
             # because fullgraph compilation cannot enter that context manager.
-            from vllm_fl.dispatch import warmup_cached_ops
-
             if current_platform.device_type == "musa":
                 import logging
 
