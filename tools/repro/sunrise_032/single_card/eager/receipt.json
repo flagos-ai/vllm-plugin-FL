@@ -1,0 +1,64 @@
+{
+  "mode": "eager",
+  "model": "<MODEL_ROOT>/Qwen3-4B",
+  "physical_device": 4,
+  "tensor_parallel_size": 1,
+  "source_sha256": "e0bb0b35491c6f448622cde983350900512a3f6bb2212fea677ea44ae6cd2671",
+  "passed": true,
+  "derived_from": "smoke_v2_graph.py",
+  "native_async_default_preserved": true,
+  "before": [
+    {
+      "rank": 0,
+      "runner": "SunriseV2ModelRunner",
+      "runner_v2": true,
+      "tensor_parallel_size": 1,
+      "enforce_eager": true,
+      "async_scheduling": true,
+      "graph_mode": "NONE",
+      "capture_sizes": [],
+      "graphs": []
+    }
+  ],
+  "requests": [
+    {
+      "question": "What is the capital of France? Answer with only the city name.",
+      "expected": "paris",
+      "answer": "Paris"
+    },
+    {
+      "question": "Compute 1 + 1. Answer with only the number.",
+      "expected": "2",
+      "answer": "2"
+    },
+    {
+      "question": "What is the capital of China? Answer with only the city name.",
+      "expected": "beijing",
+      "answer": "Beijing."
+    },
+    {
+      "question": "Compute 7 + 5. Answer with only the number.",
+      "expected": "12",
+      "answer": "12"
+    },
+    {
+      "question": "What is the capital of France? Answer with only the city name.",
+      "expected": "paris",
+      "answer": "Paris."
+    }
+  ],
+  "after": [
+    {
+      "rank": 0,
+      "runner": "SunriseV2ModelRunner",
+      "runner_v2": true,
+      "tensor_parallel_size": 1,
+      "enforce_eager": true,
+      "async_scheduling": true,
+      "graph_mode": "NONE",
+      "capture_sizes": [],
+      "graphs": []
+    }
+  ],
+  "seconds": 34.5545114169945
+}

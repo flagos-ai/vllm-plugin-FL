@@ -1,0 +1,15 @@
+{
+  "scope": "Offline contracts only; real GPU results have separate receipts",
+  "python": "3.13.9",
+  "cpu_tests": {
+    "tests": 77,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "new_smoke_contracts": 15,
+  "ruff": "pass",
+  "python310": "grammar pass",
+  "smoke_sha256": "e0bb0b35491c6f448622cde983350900512a3f6bb2212fea677ea44ae6cd2671",
+  "full_tp2_gate_passed": false
+}

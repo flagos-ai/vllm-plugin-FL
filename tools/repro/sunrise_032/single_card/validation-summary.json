@@ -1,0 +1,61 @@
+{
+  "status": "executed_smoke_pass_not_full_model_gate",
+  "model": "Qwen3-4B",
+  "physical_device": 4,
+  "tensor_parallel_size": 1,
+  "installed_plugin_source_commit": "7e0a83b5abe39bd6e7796ec9ea957003a5ae0dc4",
+  "script_sha256": "e0bb0b35491c6f448622cde983350900512a3f6bb2212fea677ea44ae6cd2671",
+  "runtime_modes": {
+    "eager": {
+      "outer_status": 0,
+      "passed": true,
+      "requests": 5,
+      "runner_v2": true,
+      "async_scheduling": true,
+      "graph_mode": "NONE",
+      "native_graphs_after_ready": []
+    },
+    "graph": {
+      "outer_status": 0,
+      "passed": true,
+      "requests": 5,
+      "runner_v2": true,
+      "async_scheduling": true,
+      "graph_mode": "FULL_DECODE_ONLY",
+      "native_graphs_after_ready": [
+        {
+          "descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=2, num_reqs=2, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)",
+          "native_type": "PTPUGraph",
+          "replays": 3
+        },
+        {
+          "descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=1, num_reqs=1, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)",
+          "native_type": "PTPUGraph",
+          "replays": 5
+        }
+      ]
+    }
+  },
+  "installation": {
+    "listed_python_and_versions_unchanged": true,
+    "installed_file_hash_count": 3,
+    "install_flags_recorded": [
+      "--no-deps",
+      "--no-build-isolation"
+    ],
+    "triton_metadata_null_interpretation": "No triton-named distribution metadata in this receipt; this does not establish absence of importable Triton supplied by FlagTree."
+  },
+  "proof_method": {
+    "replay_counter_installed_after_ready": true,
+    "capture_warmups_counted": false,
+    "counts_are_native_replay_calls_not_request_counts": true,
+    "request_check": "Expected lower-case substring in actual answer; all original prompt/expected/answer triples retained."
+  },
+  "limits": [
+    "Existing task container with installed plugin overlay; this is not a newly rebuilt immutable image receipt.",
+    "The pre-update TP1 metadata-field failure was from the old4f installation; archived TP2 timeouts on2489/ed99 remain valid failures.",
+    "Current TP1 smoke success does not establish a fix for old TP2 failure.",
+    "27B/35B complete gate results are not inferred here.",
+    "No reset or reboot was performed for this preparation."
+  ]
+}

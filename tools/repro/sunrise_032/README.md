@@ -1,5 +1,7 @@
 # 曦望 vLLM 0.32：27B 图片异常与 TP2 graph 排查包
 
+> 同日单卡补充：在已安装PR固定提交的物理4上，4B Runner V2 eager/graph各5/5通过，实际请求graph回放3/5次；见[单卡验证](single_card/README.zh-CN.md)。这不替代标准TP2矩阵。
+
 > 2026-11-05 更新：按用户要求在不 reset 的当前环境做了有界基础检查；物理 0、2 的纯 Torch 大张量往返拷贝失败，4 通过。完整 TP2 gate 仍未完成，GPU 测试已再次停止。新增[逐卡全量复现、运行命令及证据](current_environment/README.zh-CN.md)。以下三类模型/graph 入口和 53 项验证是先前 81aea8d 的离线交付记录。
 
 本目录供曦望侧离线审阅和后续在**已获授权的独占环境**手动复现。
