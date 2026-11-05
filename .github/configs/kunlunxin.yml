@@ -42,6 +42,6 @@ container_options: >-
   --env VLLM_PLUGINS=fl
   --env USE_FLAGGEMS=1
   --env FLAGCX_PATH=/workspace/FlagCX
-  --env CUDA_VISIBLE_DEVICES=4,5,6,7
+  --env CUDA_VISIBLE_DEVICES=0,1,2,3
   --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
   --env VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800
