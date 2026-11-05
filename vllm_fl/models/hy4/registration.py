@@ -47,6 +47,15 @@ def register_hy_v4_support() -> bool:
 
     register_flaggems_mla_prefill()
 
+    # HYV4 uses <think:opensource> tokens; upstream vLLM only ships hy_v3.
+    from vllm.reasoning import ReasoningParserManager
+
+    ReasoningParserManager.register_lazy_module(
+        "hy_v4",
+        "vllm_fl.reasoning.hy_v4_reasoning",
+        "HYV4ReasoningParser",
+    )
+
     logger.info("Registered HY4 runtime components")
     return True
 
