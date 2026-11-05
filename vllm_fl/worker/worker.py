@@ -67,6 +67,7 @@ from vllm.v1.worker.workspace import init_workspace_manager
 import vllm_fl.envs as fl_envs
 
 from vllm_fl.ops.custom_ops import register_oot_ops
+from vllm_fl.worker.memory_policy import physical_kv_cache_budget
 from vllm_fl.dispatch.io_common import managed_inference_mode
 from vllm_fl.utils import get_flag_gems_whitelist_blacklist
 
@@ -560,6 +561,21 @@ class WorkerFL(WorkerBase):
             self.available_kv_cache_memory_bytes = (
                 self.requested_memory - profile_result.non_kv_cache_memory
             )
+            if getattr(current_platform, "vendor_name", None) == "metax":
+                # Profiling counts non-Torch growth, not the initial occupancy.
+                # Keep gpu_memory_utilization as the requested physical budget.
+                self.available_kv_cache_memory_bytes = physical_kv_cache_budget(
+                    self.requested_memory,
+                    profile_result.non_kv_cache_memory,
+                    profile_result.before_create.non_torch_memory,
+                )
+                logger.info(
+                    "MetaX KV budget includes %.2f GiB initial non-Torch occupancy; "
+                    "KV budget %.2f GiB at utilization %.3f",
+                    GiB(max(0, profile_result.before_create.non_torch_memory)),
+                    GiB(self.available_kv_cache_memory_bytes),
+                    self.cache_config.gpu_memory_utilization,
+                )
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
         if current_platform.device_type != "npu":
