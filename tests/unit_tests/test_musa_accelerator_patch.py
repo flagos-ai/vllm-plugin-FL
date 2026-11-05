@@ -283,6 +283,16 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
         "_patch_custom_ops": Mock(),
         "_patch_flash_attn_import": Mock(),
         "_get_op_config": Mock(),
+        # vllm_fl register() also references the module-level hardening
+        # helpers; the AST extraction only carries register() over.
+        "_preload_platform_class": lambda: None,
+        "_install_xpu_device_guard": lambda: None,
+        "_install_fla_relocation_alias": lambda: None,
+        "_patch_transformers_compat": lambda: None,
+        "_run_best_effort": lambda *steps: [step() for step in steps],
+        "_force_adopt_platform": lambda: False,
+        "_register_in_progress": False,
+        "_PLATFORM_QUALNAME": "vllm_fl.platform.PlatformFL",
     }
     exec(
         compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"),

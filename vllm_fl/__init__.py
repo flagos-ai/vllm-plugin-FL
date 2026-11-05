@@ -311,13 +311,14 @@ def _install_metax_compat():
 def register():
     """Register the FL platform.
 
-    Must never raise and never return ``None``: vLLM 0.28 calls this entry
-    point from ``resolve_current_platform_cls_qualname()`` inside a bare
-    ``except Exception: pass``, so an escaping exception surfaces not as a
-    traceback but as ``current_platform`` silently pinned to
-    ``UnspecifiedPlatform`` for the life of the process.  Every optional patch
-    is therefore best-effort -- a patch module that only ships on some plugin
-    revisions must degrade to a debug log, not abort platform registration.
+    vLLM 0.28 calls this entry point from
+    ``resolve_current_platform_cls_qualname()`` inside a bare
+    ``except Exception: pass``, so optional patches are installed best-effort:
+    a patch module that only ships on some plugin revisions degrades to a debug
+    log instead of aborting platform registration.  Required steps -- the
+    vendor allocator bridge and the custom-ops registry -- are called directly:
+    masking their failures would leave the platform half installed, and the
+    MetaX/Kunlunxin tests assert those errors surface.
     """
     global _register_in_progress
     if _register_in_progress:
@@ -331,8 +332,10 @@ def register():
         _run_best_effort(
             _install_xpu_device_guard,
             _install_fla_relocation_alias,
-            _init_vendor_device,
         )
+        # Required: an unusable vendor allocator bridge must surface to the
+        # caller instead of leaving a half-registered platform behind.
+        _init_vendor_device()
 
         # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
         # preserve vLLM's stock CPU platform and install kernels in register_model().
@@ -345,8 +348,10 @@ def register():
             logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
             return arm_cpu_platform
 
+        # Required: custom ops back every later kernel call, so a failure here
+        # is a hard error rather than an optional patch that can be skipped.
+        _patch_custom_ops()
         _run_best_effort(
-            _patch_custom_ops,
             _patch_flash_attn_import,
             _patch_transformers_compat,
         )
@@ -388,12 +393,13 @@ def register():
 
         _force_adopt_platform()
         return _PLATFORM_QUALNAME
-    except Exception as _register_exc:  # pragma: no cover - defensive
-        logger.warning(
-            "[vllm_fl] register() failed, still reporting the platform: %s",
-            _register_exc,
-        )
-        return _PLATFORM_QUALNAME
+    except Exception as _register_exc:
+        # Optional patches have already degraded to debug logs; whatever
+        # reaches this point is a required step (vendor allocator bridge or
+        # the ops registry).  Log it for diagnosability and let it surface --
+        # vLLM's callers must not end up with a half-registered platform.
+        logger.warning("[vllm_fl] register() failed: %s", _register_exc)
+        raise
     finally:
         _register_in_progress = False
 
