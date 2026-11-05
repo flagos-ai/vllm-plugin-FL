@@ -1,17 +1,39 @@
-ARG MUSA_BASE_IMAGE=registry.mthreads.com/mcconline/inference/vllm:v0.20.2-ph1-4.3.5-torch2.7.1-v1.1.0
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# FlagOS 2.2 release runtime for Moore Threads: MUSA SDK 4.3.6, Python 3.10,
+# torch 2.9.0 + torch_musa 2.9.0, FlagTree 0.7.0, FlagGems 5.4.0.
+# https://flagos.io/resourcedownload -> release-info/runtime/mthreads-musa4.3.6
+ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/flagos-runtime/flagos-runtime-mthreads-musa4.3.6:2.2.0
 
 # ---------- base stage ----------
 FROM ${MUSA_BASE_IMAGE} AS base
 
 ARG PYTHON_VERSION=3.10
-ARG VLLM_VERSION=0.20.2
-ARG FLAGGEMS_VERSION=5.0.0
+ARG VLLM_VERSION=0.32.0
+ARG FLAGGEMS_VERSION=5.4.0
+ARG INDEX_URL=""
+ARG EXTRA_INDEX_URL=""
+# Source archive for the vLLM tree; override with an internal mirror when the
+# build host cannot reach codeload.github.com.
+ARG VLLM_SOURCE_URL=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
     VLLM_PLUGINS=fl
 
-# Keep the vendor runtime from the base image and add only the tools required
-# to build the checked-out plugin in CI.
+# Keep the FlagOS runtime stack and add only the tools needed to build the
+# checked-out plugin in CI.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -20,23 +42,125 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir \
+RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
+    if [ -n "${EXTRA_INDEX_URL}" ]; then export PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL}"; fi; \
+    python -m pip install --no-cache-dir \
         "setuptools>=77.0.3,<81.0.0" \
         wheel \
-        setuptools-scm \
+        "setuptools-scm>=8" \
+        "setuptools-rust>=1.9" \
         scikit-build-core==0.11 \
         pybind11 \
         ninja \
         cmake
 
+# vLLM 0.32 requires Python >= 3.11 while torch_musa only ships cp310 wheels, so
+# the empty wheel is installed with --ignore-requires-python and the 3.11-only
+# names it imports at module load are back-filled by the .pth shim installed
+# below.
+RUN set -eu; \
+    url="${VLLM_SOURCE_URL:-https://codeload.github.com/vllm-project/vllm/tar.gz/refs/tags/v${VLLM_VERSION}}"; \
+    mkdir -p /workspace/vllm; \
+    curl -fsSL --retry 5 --retry-delay 5 --max-time 900 "$url" -o /tmp/vllm-src.tar.gz; \
+    tar -xzf /tmp/vllm-src.tar.gz -C /workspace/vllm --strip-components=1; \
+    rm -f /tmp/vllm-src.tar.gz; \
+    VLLM_TARGET_DEVICE=empty \
+        VLLM_USE_PRECOMPILED=0 \
+        VLLM_USE_PRECOMPILED_RUST=0 \
+        VLLM_VENDOR= \
+        SETUPTOOLS_SCM_PRETEND_VERSION="${VLLM_VERSION}+empty" \
+        python -m pip install --no-cache-dir --no-build-isolation --no-deps \
+            --ignore-requires-python /workspace/vllm
+
+# vLLM's own dependencies are installed with --no-deps so that pip cannot
+# replace the vendor stack (compressed-tensors==0.17.0 asks for torch>=2.10 and
+# would install an upstream CUDA torch over the MUSA build).
+COPY req032.txt /workspace/req032.txt
+
+RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
+    if [ -n "${EXTRA_INDEX_URL}" ]; then export PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL}"; fi; \
+    python -m pip install --no-cache-dir --ignore-requires-python --no-deps \
+        -r /workspace/req032.txt
+
+# Extras and transitive dependencies skipped by --no-deps above.
+RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
+    if [ -n "${EXTRA_INDEX_URL}" ]; then export PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL}"; fi; \
+    python -m pip install --no-cache-dir --ignore-requires-python \
+        "fastapi[standard]>=0.133.0,<0.137.0"
+
+# Transitive dependencies of the list above (skipped by --no-deps), plus extras
+# such as fastapi[standard] -> uvloop. rpds-py is pinned to the last release that
+# ships a cp310 wheel; newer releases are Rust sdists and would bootstrap a
+# toolchain from static.rust-lang.org during the build.
+RUN if [ -n "${INDEX_URL}" ]; then export PIP_INDEX_URL="${INDEX_URL}"; fi; \
+    if [ -n "${EXTRA_INDEX_URL}" ]; then export PIP_EXTRA_INDEX_URL="${EXTRA_INDEX_URL}"; fi; \
+    python -m pip install --no-cache-dir --ignore-requires-python \
+        aiohappyeyeballs \
+        aiosignal \
+        annotated-doc \
+        anyio \
+        apache-tvm-ffi \
+        astor \
+        async-timeout \
+        attrs \
+        certifi \
+        charset-normalizer \
+        click \
+        dill \
+        dnspython \
+        docstring-parser \
+        email-validator \
+        frozenlist \
+        h11 \
+        hf-xet \
+        httpcore \
+        httpx2 \
+        idna \
+        interegular \
+        jiter \
+        jmespath \
+        jsonschema-specifications \
+        loguru \
+        mcp-types \
+        multidict \
+        opentelemetry-exporter-otlp-proto-grpc \
+        opentelemetry-exporter-otlp-proto-http \
+        opentelemetry-semantic-conventions \
+        propcache \
+        pycountry \
+        pydantic-core \
+        pydantic-extra-types \
+        pyjwt \
+        referencing \
+        rpds-py==0.30.0 \
+        sniffio \
+        sse-starlette \
+        supervisor \
+        typing-inspection \
+        typer \
+        urllib3 \
+        yarl \
+    && python -m pip install --no-cache-dir --no-deps \
+        "python-multipart==0.0.20"
+
+# Must run before any vLLM import: py3.10 back-fills for the 0.32 stack.
+COPY vllm_fl_py310_compat.py zz_vllm_fl_py310_compat.pth /tmp/compat/
+
+RUN python -c "import shutil, site; sp = site.getsitepackages()[0]; \
+[shutil.copy('/tmp/compat/' + f, sp) for f in ('vllm_fl_py310_compat.py', \
+'zz_vllm_fl_py310_compat.pth')]" \
+    && rm -rf /tmp/compat
+
 # Fail early when a different vendor base image is supplied accidentally.
 RUN python -c 'from importlib.metadata import version; \
-vllm = version("vllm"); \
+import vllm; \
+vllm_version = version("vllm"); \
 flag_gems = version("flag-gems"); \
-assert "empty" in vllm, vllm; \
-assert flag_gems == "5.0.0", flag_gems; \
-print("vLLM:", vllm); \
-print("FlagGems:", flag_gems)'
+assert vllm_version.startswith("0.32.0"), vllm_version; \
+assert flag_gems == "5.4.0", flag_gems; \
+print("vLLM:", vllm_version); \
+print("FlagGems:", flag_gems)' \
+    && rm -rf /workspace/vllm
 
 WORKDIR /workspace
 

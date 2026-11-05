@@ -196,9 +196,11 @@ def register():
         os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     _get_op_config()
 
-    if vendor_name in ("ascend", "enflame", "gcu"):
+    if vendor_name in ("ascend", "enflame", "gcu", "mthreads"):
         # These backends use ModelRunnerFL; choose it before VllmConfig reads
-        # model defaults for the upstream V2 runner.
+        # model defaults for the upstream V2 runner.  The upstream V2 runner
+        # drives raw ``torch.cuda`` streams/allocs, which torch_musa cannot
+        # satisfy, so MUSA stays on the FL V1 runner.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"

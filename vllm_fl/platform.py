@@ -47,6 +47,43 @@ from vllm_fl.utils import (
 
 logger = init_logger(__name__)
 
+# Collectives that torch_musa's MCCL cannot submit while a graph is recording.
+MUSA_COLLECTIVE_SPLITTING_OPS = (
+    "_c10d_functional::all_reduce_",
+    "_c10d_functional::all_reduce",
+    "_c10d_functional::reduce_scatter",
+    "_c10d_functional::all_gather_into_tensor",
+    "_c10d_functional::wait_tensor",
+)
+
+# torch_musa does not share the cudagraph memory pool across captures, so every
+# captured batch size costs a complete activation footprint (~2.4 GiB for a 27B
+# model at TP4 with a 512-token max batch). The upstream 51-size ladder then
+# needs >100 GiB and fails the memory check, so the ladder is thinned out.
+MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES = 10
+
+
+def _thin_cudagraph_capture_sizes(sizes: list[int]) -> list[int]:
+    """Keep a power-of-two ladder (plus the largest size) for MUSA."""
+    kept = sorted({s for s in sizes if s & (s - 1) == 0})
+    if len(kept) < min(4, len(sizes)):
+        # No useful power-of-two ladder: sample the range evenly instead.
+        count = min(len(sizes), MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES)
+        step = len(sizes) / count
+        kept = sorted({sizes[min(int(i * step), len(sizes) - 1)] for i in range(count)})
+    if sizes and sizes[-1] not in kept:
+        kept.append(sizes[-1])
+    kept = sorted(set(kept))
+    if len(kept) > MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES:
+        count = MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES
+        step = len(kept) / (count - 1)
+        kept = sorted(
+            {kept[min(int(i * step), len(kept) - 1)] for i in range(count - 1)}
+            | {kept[-1]}
+        )
+    return kept
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -417,6 +454,76 @@ class PlatformFL(Platform):
             compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
 
         if (
+            cls.device_type == "musa"
+            and compilation_config.mode != CompilationMode.NONE
+            and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+            and not compilation_config.use_inductor_graph_partition
+            and not compilation_config.pass_config.fuse_attn_quant
+        ):
+            # torch_musa's ProcessGroupMCCL enqueues collectives on its own
+            # communication stream; submitting them while a graph is being
+            # recorded aborts the capture with
+            #   "MUSA error: operation not permitted when stream is capturing"
+            # (both the launch itself and MCCL's watchdog poll of the work).
+            # Inductor otherwise keeps the TP all-reduce inside the compiled
+            # region, so the c10d ops have to be excluded via ``splitting_ops``:
+            # they then run eagerly between the captured regions.
+            #
+            # This must happen here, in ``check_and_update_config``: vLLM
+            # compiles (and caches) the piecewise graph while profiling memory,
+            # i.e. before the model runner exists. ``splitting_ops`` is also
+            # finalised by ``CompilationConfig.set_splitting_ops_for_v1``
+            # right after this hook, but that only fills in the default when
+            # nothing was set, so providing the full list here is respected.
+            splitting_ops = list(
+                compilation_config.splitting_ops
+                or compilation_config._attention_ops
+            )
+            # Mirror what ``set_splitting_ops_for_v1`` would have appended.
+            for _op in (
+                "vllm::unified_kv_cache_update",
+                "vllm::unified_mla_kv_cache_update",
+            ):
+                if _op not in splitting_ops:
+                    splitting_ops.append(_op)
+            if compilation_config.pass_config.fuse_rope_kvcache:
+                logger.warning(
+                    "MUSA: disabling fuse_rope_kvcache because the KV-cache "
+                    "update ops are splitting ops on this platform."
+                )
+                compilation_config.pass_config.fuse_rope_kvcache = False
+            if compilation_config.pass_config.fuse_qk_norm_rope_kvcache:
+                logger.warning(
+                    "MUSA: disabling fuse_qk_norm_rope_kvcache because the "
+                    "KV-cache update ops are splitting ops on this platform."
+                )
+                compilation_config.pass_config.fuse_qk_norm_rope_kvcache = False
+            for _op in MUSA_COLLECTIVE_SPLITTING_OPS:
+                if _op not in splitting_ops:
+                    splitting_ops.append(_op)
+            compilation_config.splitting_ops = splitting_ops
+            logger.info(
+                "MUSA: excluding c10d collectives from cudagraphs "
+                "(MCCL is not capture-safe); splitting_ops=%s",
+                splitting_ops,
+            )
+
+        if (
+            cls.device_type == "musa"
+            and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+        ):
+            capture_sizes = list(compilation_config.cudagraph_capture_sizes or [])
+            if len(capture_sizes) > MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES:
+                capture_sizes = _thin_cudagraph_capture_sizes(capture_sizes)
+                compilation_config.cudagraph_capture_sizes = capture_sizes
+                logger.info(
+                    "MUSA: limiting cudagraph capture to %d batch sizes %s "
+                    "(torch_musa does not share the graph pool across captures)",
+                    len(capture_sizes),
+                    capture_sizes,
+                )
+
+        if (
             parallel_config.all2all_backend == "deepep_high_throughput"
             and parallel_config.data_parallel_size > 1
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
@@ -736,18 +843,27 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Mirror upstream CUDA's IR-op defaults without hardcoding CUDA APIs.
+
+        vLLM 0.32 registers ``gelu_and_mul_sparse`` only for the ``triton`` and
+        ``native`` providers, so the generic ``["vllm_c", "native"]`` default is
+        rejected there by ``IrOp._filter_priority_impls``.  Keep upstream's
+        per-op override so EMPTY builds (MUSA and other OOT vendors) start.
+        """
+        from dataclasses import fields
+
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["vllm_c", "native"]
-        return IrOpPriorityConfig.with_default(
-            default,
-            rms_norm=default,
-            fused_add_rms_norm=default,
-        )
+        overrides = {"rms_norm": default, "fused_add_rms_norm": default}
+        # Only override ops the installed vLLM knows about: with_default() forwards
+        # kwargs straight to the dataclass, so an unknown name is a TypeError.
+        if any(f.name == "gelu_and_mul_sparse" for f in fields(IrOpPriorityConfig)):
+            overrides["gelu_and_mul_sparse"] = ["triton", "native"]
+        return IrOpPriorityConfig.with_default(default, **overrides)
 
     @classmethod
     def is_arch_support_pdl(cls) -> bool:

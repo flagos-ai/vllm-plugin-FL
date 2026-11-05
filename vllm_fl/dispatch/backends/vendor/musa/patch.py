@@ -26,6 +26,7 @@ def apply_musa_patches():
     patch_moe_topk_softmax_for_musa()
     patch_triton_mtgpu_alias_for_musa()
     patch_device_config_for_musa()
+    patch_flag_gems_capture_safe_tuning()
 
 
 def patch_topk_topp_sampler():
@@ -119,9 +120,31 @@ def patch_accelerator_missing_attrs():
         torch.accelerator.empty_cache = torch_musa.empty_cache
         logger.info("Patched torch.accelerator.empty_cache for MUSA")
 
-        # max_memory_allocated is called by base_loader after model load.
-        torch.accelerator.max_memory_allocated = torch_musa.max_memory_allocated
-        logger.info("Patched torch.accelerator.max_memory_allocated for MUSA")
+        # vLLM >= 0.32 measures memory through torch.accelerator; every one of
+        # these goes through _accelerator_isAllocatorInitialized(), which aborts
+        # with "Allocator for musa is not a DeviceAllocator".  Delegate the whole
+        # family to the torch_musa allocator API.
+        for _name in (
+            "memory_stats",
+            "memory_allocated",
+            "memory_reserved",
+            "max_memory_allocated",
+            "max_memory_reserved",
+            "reset_peak_memory_stats",
+        ):
+            _impl = getattr(torch_musa, _name, None)
+            if _impl is not None:
+                setattr(torch.accelerator, _name, _impl)
+        if hasattr(torch_musa, "mem_get_info"):
+            torch.accelerator.get_memory_info = torch_musa.mem_get_info
+        # vLLM 0.32 synchronizes through torch.accelerator; the generic
+        # implementation cannot drive MUSA streams.
+        if hasattr(torch_musa, "synchronize"):
+            torch.accelerator.synchronize = torch_musa.synchronize
+        logger.info(
+            "Patched torch.accelerator memory APIs for MUSA "
+            "(memory_stats/reserved/get_memory_info)"
+        )
 
         if not hasattr(torch.accelerator, 'device_index'):
             torch.accelerator.device_index = torch_musa.device
@@ -500,3 +523,74 @@ def patch_device_config_for_musa():
     except Exception as exc:
         logger.warning(
             "patch_device_config_for_musa failed: %s", exc)
+
+
+def patch_flag_gems_capture_safe_tuning():
+    """Make FlagGems/libentry autotuning safe inside MUSA graph capture.
+
+    ``LibTuner.run`` benchmarks every candidate config with device events and
+    synchronizes.  Running those benchmark launches while ``torch.musa.graph``
+    is recording aborts the capture with
+    "MUSA error: an illegal memory access was encountered"; the tuner surfaces
+    it as ``[libentry] config ... failed to compile`` because it catches the
+    RuntimeError and keeps benchmarking.
+
+    Under capture, reuse the config already cached for these arguments (or the
+    first static config when nothing is cached) and launch it directly, which
+    mirrors what triton's own Autotuner does for the single-config case.
+    """
+    try:
+        import importlib
+
+        import torch
+        import torch_musa  # noqa: F401 — registers the musa device type
+
+        # NOTE: ``from flag_gems.utils import libentry`` yields the decorator
+        # function, because flag_gems/utils/__init__.py re-exports it under the
+        # same name and shadows the submodule.
+        _libentry = importlib.import_module("flag_gems.utils.libentry")
+    except Exception as exc:
+        logger.debug(
+            "flag_gems libentry unavailable, skipping capture-safe tuning: %s",
+            exc)
+        return
+
+    tuner_cls = getattr(_libentry, "LibTuner", None)
+    if tuner_cls is None or getattr(tuner_cls, "_fl_capture_safe", False):
+        return
+
+    _orig_run = tuner_cls.run
+
+    def _run_capture_safe(self, *args, **kwargs):
+        if not torch.musa.is_current_stream_capturing():
+            return _orig_run(self, *args, **kwargs)
+
+        self.seen_tuned_metas = {}
+        self.nargs = dict(zip(self.arg_names, args))
+        config = None
+        try:
+            all_args = {**self.nargs, **kwargs}
+            key_args = {k: v for k, v in all_args.items() if k in self.arg_names}
+            config = self.cache.get(self.get_key(key_args))
+        except Exception:
+            config = None
+        if config is None:
+            configs = list(self.configs)
+            config = configs[0] if configs else None
+        if config is None:
+            self.nargs = None
+            return _orig_run(self, *args, **kwargs)
+
+        self.best_config = config
+        try:
+            if getattr(config, "pre_hook", None) is not None:
+                config.pre_hook({**self.nargs, **kwargs, **config.all_kwargs()})
+            return self.fn.run(*args, **kwargs, **config.all_kwargs())
+        finally:
+            self.nargs = None
+
+    tuner_cls.run = _run_capture_safe
+    tuner_cls._fl_capture_safe = True
+    logger.info(
+        "Patched flag_gems LibTuner.run for MUSA graph capture "
+        "(no autotune while capturing)")
