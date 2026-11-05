@@ -10,8 +10,8 @@ from pathlib import Path
 
 TRITON_VERSION = "3.6.0"
 REPAIR = (
-    "Follow README.md 'Additional Steps for MUSA' to remove standalone Triton "
-    "and install the FlagTree version pinned in requirements/musa.txt."
+    "Use the MUSA CI image pinned in .github/configs/musa.yml, or rebuild "
+    "docker/musa/Dockerfile to install the matching FlagTree compiler."
 )
 
 

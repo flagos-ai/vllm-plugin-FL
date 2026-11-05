@@ -8,29 +8,14 @@ harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base
 ```
 
 The base provides MUSA 4.3.5, torch 2.9.0 + torch_musa 2.9.0, vLLM 0.24.0
-(empty-device build), FlagGems 5.3.2.post1.dev22 (`b1f939eb5`), FlagTree
-`b97f8214` with the MUSA graph-capture fixes. `Dockerfile` replaces any plugin
-from the base with the repository's `vllm-plugin-fl` package, adds build
+(empty-device build), and FlagGems 5.3.2.post1.dev22 (`b1f939eb5`). `Dockerfile`
+installs `flagtree==0.6.1a2+mthreads3.6` (Triton 3.6.0) by default after removing
+conflicting compiler distributions, replaces the base's plugin with the
+repository's `vllm-plugin-fl` package, adds build
 tooling and CI test dependencies, and fails the build if the base does not
 carry the expected vendor stack. The resulting dev, CI, and release images
 work without mounting a source checkout. The v0.20.2 image that wrapped Moore
 Threads' own registry image directly is kept as `Dockerfile.v0.20.2`.
-
-## Compiler compatibility
-
-The vLLM 0.24 / torch 2.9 MUSA stack uses the Triton **3.6.0** API.
-For manual installations, `requirements/musa.txt` pins
-`flagtree==0.6.1a2+mthreads3.6`, matching the MUSA 4.3.5 reference environment.
-See the [MUSA installation steps](../../README.md#additional-steps-for-musa)
-for the installation order and removal of conflicting standalone Triton packages.
-
-Keep this image's graph-fixed FlagTree source build at `b97f8214` rather than
-replacing it with the wheel. The Docker build validates the installed FlagTree
-provider and Triton API version without importing GPU runtimes; CI setup also
-checks the actively imported `triton` module. Both accept the packaged source
-build. A Triton 3.2 compiler or a co-installed standalone Triton package fails
-these checks before graph-mode inference reaches an incompatible API such as
-`AttrsDescriptor` ([#633](https://github.com/flagos-ai/vllm-plugin-FL/issues/633)).
 
 ## Build and push
 

@@ -43,6 +43,7 @@ MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.24.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
 MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
 MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.3.2.post1.dev22+gb1f939eb5}"
+MUSA_FLAGTREE_VERSION="${MUSA_FLAGTREE_VERSION:-0.6.1a2+mthreads3.6}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.20.2}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3e6528cf04f5f964a7b0fa6628de6f0410dbfd02}"
@@ -206,6 +207,7 @@ VERSIONS (override via environment variables):
     MUSA_PYTHON_VERSION  Python version in base image (default: ${MUSA_PYTHON_VERSION})
     MUSA_TORCH_VERSION   PyTorch version in base image (default: ${MUSA_TORCH_VERSION})
     MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
+    MUSA_FLAGTREE_VERSION FlagTree version installed in the image (default: ${MUSA_FLAGTREE_VERSION})
   Enflame:
     ENFLAME_BASE_IMAGE     Base image (default: ${ENFLAME_BASE_IMAGE})
     ENFLAME_DRIVER_VERSION Driver version used in generated image tag (default: ${ENFLAME_DRIVER_VERSION})
@@ -396,6 +398,7 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
         --build-arg "VLLM_VERSION=${MUSA_VLLM_VERSION}"
         --build-arg "TORCH_VERSION=${MUSA_TORCH_VERSION}"
         --build-arg "FLAGGEMS_VERSION=${MUSA_FLAGGEMS_VERSION}"
+        --build-arg "FLAGTREE_VERSION=${MUSA_FLAGTREE_VERSION}"
         --build-arg "VLLM_PLUGIN_FL_PACKAGE_VERSION=${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
@@ -481,6 +484,7 @@ elif [[ "${PLATFORM}" == "musa" ]]; then
     msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
     msg "  MUSA PyTorch:   ${MUSA_TORCH_VERSION}"
     msg "  FlagGems:       ${MUSA_FLAGGEMS_VERSION}"
+    msg "  FlagTree:       ${MUSA_FLAGTREE_VERSION}"
     msg "  Plugin:         ${VLLM_PLUGIN_FL_PACKAGE_VERSION}"
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     msg "  Driver:         ${ENFLAME_DRIVER_VERSION}"

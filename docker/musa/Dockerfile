@@ -26,6 +26,8 @@ ARG MUSA_BASE_IMAGE
 ARG VLLM_VERSION=0.24.0
 ARG TORCH_VERSION=2.9.0
 ARG FLAGGEMS_VERSION=5.3.2.post1.dev22+gb1f939eb5
+ARG FLAGTREE_VERSION=0.6.1a2+mthreads3.6
+ARG FLAGTREE_INDEX_URL=https://resource.flagos.net/repository/flagos-pypi-hosted/simple
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG IMAGE_VERSION=unknown
@@ -44,7 +46,8 @@ LABEL org.opencontainers.image.title="vllm-plugin-fl" \
       io.flagos.image.stage="${IMAGE_STAGE}" \
       io.flagos.vllm.version="${VLLM_VERSION}" \
       io.flagos.torch.version="${TORCH_VERSION}" \
-      io.flagos.flaggems.version="${FLAGGEMS_VERSION}"
+      io.flagos.flaggems.version="${FLAGGEMS_VERSION}" \
+      io.flagos.flagtree.version="${FLAGTREE_VERSION}"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     VLLM_PLUGINS=fl
@@ -84,8 +87,12 @@ print(f"vLLM {vllm} / torch {torch} / torch_musa {torch_musa} / "
       f"FlagGems {flag_gems} — base stack OK")
 PY
 
-# Preserve the base's graph-fixed FlagTree source build, but reject a compiler
-# from another Triton API line or a conflicting standalone Triton distribution.
+# Install the compiler paired with this MUSA / torch stack by default. Both
+# distributions own the triton namespace, so remove both before installing it.
+RUN python -m pip uninstall -y triton flagtree \
+    && python -m pip install --no-cache-dir --no-deps \
+        --index-url "${FLAGTREE_INDEX_URL}" "flagtree==${FLAGTREE_VERSION}"
+
 # Metadata-only validation does not initialize the MUSA driver during builds.
 COPY docker/musa/check_compiler.py /tmp/check_musa_compiler.py
 RUN python /tmp/check_musa_compiler.py --metadata-only \
