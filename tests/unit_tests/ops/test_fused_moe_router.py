@@ -2,8 +2,45 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 import torch.nn.functional as F
+
+
+@pytest.mark.parametrize("renormalize", [False, True])
+@pytest.mark.parametrize("indices_type", [torch.int32, torch.int64])
+def test_ascend_padded_softmax_preserves_v032_route_sentinels(
+    monkeypatch, renormalize, indices_type
+):
+    import vllm_fl.ops.fused_moe.router as router_mod
+
+    padding = torch.tensor([False, True, False])
+    logits = torch.tensor([[0.0, 3.0, 1.0], [2.0, 0.0, 1.0], [1.0, 2.0, 4.0]])
+    monkeypatch.setattr(router_mod, "_get_padding_mask", lambda tokens: padding)
+    monkeypatch.setattr(router_mod, "_is_ascend_npu_tensor", lambda value: True)
+
+    def native_topk(weights, ids, scratch, scores, normalize):
+        values, selected = scores.float().softmax(-1).topk(2, dim=-1)
+        if normalize:
+            values /= values.sum(-1, keepdim=True)
+        weights.copy_(values)
+        ids.copy_(selected)
+        return weights, ids
+
+    def reject_cuda(**kwargs):
+        raise AssertionError("Ascend empty builds must not call the CUDA router")
+
+    monkeypatch.setattr(router_mod, "_topk_softmax", native_topk)
+    monkeypatch.setattr(router_mod, "upstream_fused_topk", reject_cuda)
+    weights, ids, _ = router_mod.fused_topk(
+        torch.zeros(3, 4), logits, 2, renormalize, indices_type=indices_type
+    )
+    values, selected = logits.softmax(-1).topk(2, dim=-1)
+    if renormalize:
+        values /= values.sum(-1, keepdim=True)
+    selected[padding] = -1
+    torch.testing.assert_close(weights, values)
+    torch.testing.assert_close(ids, selected.to(indices_type))
 
 
 def test_bias_router_preserves_hash_scaling_and_shared_experts(monkeypatch):

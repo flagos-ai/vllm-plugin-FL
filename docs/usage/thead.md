@@ -57,34 +57,17 @@ The published image digest is
 `sha256:1ec87ed25bce8a523bd9a24f20695821363b385f7b58a878bb87df7bef58c414`.
 The image includes vendor PyTorch, the PPU SDK and `flash_attn_3`, plus the
 ordinary Python stack in the table.
-The following versions were confirmed on 2026-10-14 on the same host and
-container used for model acceptance. SDK/runtime versions come from the
-container; VBIOS was checked on all four reserved host cards (12–15).
-
-| Component | Recorded version |
-|---|---|
-| Host kernel | `5.10.134-013.13.4.kangaroo.al8.x86_64` |
-| PPU driver | `1.3.2-d7f5a2` |
-| PPU-SMI | `1.28` |
-| HGGC | `13.0` |
-| PPU SDK | `2.1.0-a5f865` |
-| clang | `13.0.1 (2.1.0-a5f865)` |
-| HGGC Driver / Runtime | `4.2` / `3.0` |
-| PCCL | `2.1.0` |
-| VBIOS (host cards 12–15) | `1.6.12-af69f0` |
-
-These identify the recorded acceptance environment, not minimum supported
-versions or a kernel/firmware compatibility range. The exact vendor base build
-and PyTorch/FA3 build identities are recorded in section 3. Keep that SDK,
-PyTorch backend, and FA3 build together; obtain the hardware provider's
-compatibility matrix before using a different combination.
+Keep the image's PPU SDK, vendor PyTorch, FA3 and compiler builds together.
+Obtain the hardware provider's driver and firmware compatibility matrix before
+using a different combination. Host kernel, firmware and device assignments
+are deployment-specific and are not defined by this guide.
 
 ```bash
 docker version
 uname -r
 /usr/local/PPU_SDK/ppu-smi/bin/ppu-smi
 # Record the selected host card's details, including VBIOS; change its index as needed.
-/usr/local/PPU_SDK/ppu-smi/bin/ppu-smi -q -i 12
+/usr/local/PPU_SDK/ppu-smi/bin/ppu-smi -q
 ls -l /dev/alixpu /dev/alixpu_ctl /dev/alixpu_ppu*
 ```
 
@@ -367,7 +350,7 @@ environment activation and the exports from step 4. Then, on the host:
 
 ```bash
 tmux new-session -d -s thead-serve \
-    'docker exec vllm-fl-thead bash /work/serve-thead.sh > /data/thead-work/thead-serve.log 2>&1'
+    "docker exec vllm-fl-thead bash /work/serve-thead.sh > \"$WORK_DIR/thead-serve.log\" 2>&1"
 ```
 
 Adjust the host log path to `WORK_DIR`. This does not require tmux to be
@@ -456,7 +439,8 @@ every response, including repetition, encoding, and control-character checks.
 
 ## CI configuration
 
-The reusable workflow is [`.github/workflows/_thead_test.yml`](../../.github/workflows/_thead_test.yml).
+The shared platform workflow is
+[`.github/workflows/_platform_test.yml`](../../.github/workflows/_platform_test.yml).
 It uses the same configuration loader as the other platforms, with
 [the T-Head configuration](../../.github/configs/thead.yml). Use the published
 versioned image below and reserve four PPU cards on a registered runner. Device mounts
@@ -528,29 +512,6 @@ cache/attention tests, with zero skips. Reference tensors run on CPU using the
 normal package imports and the test suite's existing device fixture. Retain the
 JUnit reports, per-request JSON results, source/provider snapshots, and logs.
 
-## Recorded acceptance
-
-Acceptance of the complete upstream FlagGems wheel at `317b7632` is pending
-T-Head CI. The following results belong to the earlier repaired runtime,
-with FlagGems metadata `5.4.0rc2.post1+gb4b37a751` and image digest
-`sha256:fc75bd7811813ac824773f4719a76821e749f5f30ecb3f22fe7fc07bb7a107bb`.
-The earlier CI run passed all 93 unit tests (43 shared reference, 5 CPU cache,
-and 45 PPU cache/attention cases) and all four model Gate modes. These historical
-results do not validate the updated wheel.
-
-That earlier runtime passed the serial TP4 matrix on 2026-10-09 with the
-original shared Gate checks:
-
-| Model | Eager requests | Graph requests |
-|---|---:|---:|
-| `Qwen3.8-27B` | 26/26 | 26/26 |
-| `Qwen3.6-35B-A3B` | 26/26 | 26/26 |
-
-All 104 requests and 1040 response checks passed. The available dense model was
-`Qwen3.8-27B`; this result does not claim that the Gate's originally named
-`Qwen3.6-27B` weights were tested. These are results for the stated software,
-models, and TP4 configuration, not a blanket result for every PPU/model setup.
-
 ## Troubleshooting
 
 - **Images produce wrong answers or repeated punctuation:** verify that the
@@ -569,11 +530,10 @@ models, and TP4 configuration, not a blanket result for every PPU/model setup.
 - **Socket creation or multiprocessing startup fails on a mounted path:** set
   `TMPDIR=/tmp`, not a FUSE-backed workspace directory.
 - **Cold compilation fails with `Resource temporarily unavailable` or a
-  `log_file` `NameError`:** on the validated 176-CPU host, a container PID/thread
-  limit of 512 made `ppu-llc` fail to create threads (`EAGAIN`). FlagTree's error
+  `log_file` `NameError`:** an insufficient container PID/thread
+  limit can prevent `ppu-llc` from creating threads (`EAGAIN`). FlagTree's error
   handler then referenced an undefined `log_file`, hiding the compiler error.
-  Removing that added limit restored the original nine-call D72 SDPA smoke
-  test without changing package bytes or numerical tolerances. Size the thread
+  Size the thread
   budget for the host and concurrent compilation; the baseline does not impose
   a low PID limit. Keep the other container isolation settings. This diagnosis
   does not claim that FlagTree's error handler has been fixed.
@@ -582,5 +542,4 @@ models, and TP4 configuration, not a blanket result for every PPU/model setup.
   substitute for the PPU implementation.
 - **Out of memory:** inspect competing jobs first. Increase tensor parallelism
   only where the model supports it, or lower memory/sequence limits and record
-  the new settings. Re-run both modes rather than presenting a changed setup as
-  the TP4 acceptance result above.
+  the new settings. Re-run both modes for the selected configuration.

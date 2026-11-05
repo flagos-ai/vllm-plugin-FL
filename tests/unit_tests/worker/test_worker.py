@@ -155,15 +155,32 @@ def test_worker_keeps_target_lifecycle_contract():
     assert not missing, f"WorkerFL is missing v0.28.0 methods: {missing}"
 
 
-def test_worker_selects_v1_or_v2_model_runner():
-    import inspect
+@pytest.mark.parametrize("use_v2", [False, True])
+def test_worker_selects_v1_or_v2_model_runner(monkeypatch, use_v2):
+    import sys
+    from importlib import import_module
+    from types import ModuleType, SimpleNamespace
+    from unittest.mock import Mock
 
     from vllm_fl.worker.worker import WorkerFL
 
-    source = inspect.getsource(WorkerFL.init_device)
-    assert "GPUModelRunnerV2" in source
-    assert "vllm_fl.worker.model_runner" in source
-    assert "ModelRunnerFL" in source
+    native_module = ModuleType("vllm.v1.worker.gpu.model_runner")
+    native_factory = Mock()
+    native_module.GPUModelRunner = native_factory
+    monkeypatch.setitem(sys.modules, native_module.__name__, native_module)
+    fl_factory = Mock()
+    monkeypatch.setattr(
+        import_module("vllm_fl.worker.model_runner"), "ModelRunnerFL", fl_factory
+    )
+    config, device = SimpleNamespace(is_mm_encoder_only=False), object()
+    worker = SimpleNamespace(
+        use_v2_model_runner=use_v2, vllm_config=config, device=device
+    )
+    expected = native_factory if use_v2 else fl_factory
+    other = fl_factory if use_v2 else native_factory
+    assert WorkerFL._make_model_runner(worker) is expected.return_value
+    expected.assert_called_once_with(config, device)
+    other.assert_not_called()
 
 
 def test_platform_accepts_v2_model_runner(monkeypatch):

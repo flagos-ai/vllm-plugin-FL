@@ -59,7 +59,7 @@ pip install --no-build-isolation -e .
 
 ## 3. Start the Prefill Instance
 
-Run on the **Prefill node** (e.g. `10.8.2.168`):
+Run on the **Prefill node**:
 
 ```bash
 # ---- Network / RDMA settings (adjust to your cluster) ----
@@ -96,7 +96,7 @@ vllm serve <model_path> \
 
 ## 4. Start the Decode Instance
 
-Run on the **Decode node** (e.g. `10.8.2.169`):
+Run on the **Decode node**:
 
 ```bash
 # ---- Network / RDMA settings (same as Prefill) ----

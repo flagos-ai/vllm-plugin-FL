@@ -74,6 +74,66 @@ def test_grouped_moe_capture_reads_live_expert_routes(tokens):
                     * weights_cpu[token, route]
                 )
 
+        output.fill_(float("nan"))
         graph.replay()
         torch.npu.synchronize()
         torch.testing.assert_close(output.cpu().float(), expected, rtol=0.03, atol=0.03)
+
+
+@torch.inference_mode()
+def test_padded_router_and_grouped_moe_capture_reads_live_mask(monkeypatch):
+    from vllm_fl.dispatch.backends.vendor.ascend.impl.grouped_moe import grouped_experts
+    from vllm_fl.ops.fused_moe import router
+
+    torch.npu.set_device(0)
+    torch.manual_seed(23)
+    x = (torch.randn(4, 128) * 0.1).bfloat16().npu()
+    w1 = (torch.randn(8, 128, 128) * 0.1).bfloat16().npu()
+    w2 = (torch.randn(8, 128, 64) * 0.1).bfloat16().npu()
+    logits = torch.randn(4, 8, device="npu")
+    padding = torch.tensor([False, False, True, True], device="npu")
+    monkeypatch.setattr(router, "_get_padding_mask", lambda tokens: padding)
+
+    def forward():
+        weights, ids, _ = router.fused_topk(x, logits, 2, True)
+        return grouped_experts(
+            x,
+            w1,
+            w2,
+            weights,
+            ids,
+            activation="silu",
+            expert_map=None,
+            apply_router_weight_on_input=False,
+        )
+
+    forward()
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        output = forward()
+    for mask in ([False, True, False, True], [True] * 4, [False] * 4):
+        logits.normal_()
+        padding.copy_(torch.tensor(mask, device="npu"))
+        scores, ids = logits.cpu().softmax(-1).topk(2, dim=-1)
+        scores /= scores.sum(-1, keepdim=True)
+        expected = torch.zeros(4, 128)
+        for token in range(4):
+            if mask[token]:
+                continue
+            for route in range(2):
+                expert = int(ids[token, route])
+                gate, up = (
+                    F.linear(x[token].cpu().float(), w1[expert].cpu().float())
+                    .bfloat16()
+                    .float()
+                    .chunk(2)
+                )
+                activated = (F.silu(gate) * up).bfloat16().float()
+                expected[token] += (
+                    F.linear(activated, w2[expert].cpu().float()) * scores[token, route]
+                )
+        output.fill_(float("nan"))
+        graph.replay()
+        torch.npu.synchronize()
+        torch.testing.assert_close(output.cpu().float(), expected, atol=0.03, rtol=0.03)

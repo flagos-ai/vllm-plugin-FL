@@ -169,14 +169,17 @@ def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):
     ascend_patch.patch_mamba_batch_memcpy()
     assert mamba_utils.MambaCopyBuffers.create.__func__ is patched_create
 
-    mamba_spec = object()
-    monkeypatch.setattr(
-        mamba_utils,
-        "get_mamba_groups",
-        lambda _config: ([0], mamba_spec),
+    from vllm.v1.kv_cache_interface import MambaSpec
+
+    mamba_spec = MambaSpec(
+        block_size=128, shapes=((2, 3), (4, 4)), dtypes=(torch.float16, torch.float32)
     )
     kv_cache_config = SimpleNamespace(
-        kv_cache_groups=[SimpleNamespace(layer_names=["layer.0", "layer.1"])]
+        kv_cache_groups=[
+            SimpleNamespace(
+                layer_names=["layer.0", "layer.1"], kv_cache_spec=mamba_spec
+            )
+        ]
     )
     allocations = []
 
@@ -187,7 +190,7 @@ def test_mamba_copy_buffers_use_ascend_supported_pointer_dtype(monkeypatch):
     buffers = mamba_utils.MambaCopyBuffers.create(
         max_num_reqs=3,
         kv_cache_config=kv_cache_config,
-        copy_funcs=(object(), object()),
+        copy_funcs={mamba_spec.mamba_type: (object(), object())},
         make_buffer=make_buffer,
     )
 
@@ -207,13 +210,13 @@ def test_mamba_copy_buffers_create_allocates_on_npu(monkeypatch):
     from vllm.v1.worker import mamba_utils
 
     ascend_patch.patch_mamba_batch_memcpy()
-    monkeypatch.setattr(
-        mamba_utils,
-        "get_mamba_groups",
-        lambda _config: ([0], object()),
-    )
+    from vllm.v1.kv_cache_interface import MambaSpec
+
+    mamba_spec = MambaSpec(block_size=128, shapes=((2, 3),), dtypes=(torch.float16,))
     kv_cache_config = SimpleNamespace(
-        kv_cache_groups=[SimpleNamespace(layer_names=["layer.0"])]
+        kv_cache_groups=[
+            SimpleNamespace(layer_names=["layer.0"], kv_cache_spec=mamba_spec)
+        ]
     )
 
     def make_buffer(*size, dtype):
@@ -227,7 +230,7 @@ def test_mamba_copy_buffers_create_allocates_on_npu(monkeypatch):
     buffers = mamba_utils.MambaCopyBuffers.create(
         max_num_reqs=2,
         kv_cache_config=kv_cache_config,
-        copy_funcs=(object(),),
+        copy_funcs={mamba_spec.mamba_type: (object(),)},
         make_buffer=make_buffer,
     )
 

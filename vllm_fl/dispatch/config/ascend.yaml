@@ -4,10 +4,9 @@
 # Preferred default backend type: flagos, vendor, reference
 prefer: flagos
 
-# Strict Mode:
-#   true  = Raise an error immediately on failure; do not attempt other backends.
-#   false = Attempt the next available backend in sequence upon failure (Default).
-strict: false
+# Propagate execution errors: retrying after a state update or graph launch can
+# corrupt cache contents. Capability-based selection still happens before use.
+strict: true
 
 # Vendor Whitelist (Optional, allows all if not set)
 # allow_vendors:
@@ -53,11 +52,15 @@ op_backends:
     - flagos
     - reference
 
-# Exclusions validated against the image's FlagGems 3b406c36 / FlagTree ascend3.5.
+# Exclusions validated against FlagGems 5.4.0 / FlagTree ascend3.5.
 # ATen exclusions use implementation function names, not torch schema names.
 # Vendor-auto-excluded ops (to_copy, copy_, cat, exponential_) need no duplicate
 # entry here. Performance preferences belong in op_backends above.
 flagos_blacklist:
+  # 5.4.0 registers these aliases under the same ATen keys as ne_scalar_/ne_.
+  # Keep the canonical implementations and avoid duplicate lib.impl calls.
+  - not_equal_scalar_
+  - not_equal_
   # qwen-vllm_for_ascend (3b406c36) wraps argmax twice with LibEntry,
   # failing sampler warmup with "Invalid Runtime Function". Use torch_npu.
   - argmax

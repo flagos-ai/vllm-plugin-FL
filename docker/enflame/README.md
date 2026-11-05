@@ -32,27 +32,13 @@ decoding for hybrid align-mode serving. Other speculative/cache combinations
 still require their own validation; accepting a configuration is not evidence
 of device support.
 
-The 2026-10-13 dependency image was validated on S60 with host driver 1.10.6.
-The compiler-file guard and 12 cold-cache FlagGems normal-operator cases passed.
-The original Qwen3.6-27B inference and Qwen3.6-35B-A3B serving cases passed in
-both eager and graph modes at plugin commit
-`2cd00248d3992088b2432201629ab295d4d94034`. These image checks are separate
-from each candidate commit's original adaptation Gate. The old vLLM 0.20.2
-vendor wrapper remains available as `Dockerfile.v0.20.2`.
-
-The local image ID is
-`sha256:4feef9aed222a8cffd9fab610288053c3f2ee5acdfc3540786e47d7daea48f0e`.
-The canonical dependency image name follows the other vLLM 0.28 backends:
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci`.
-This tag was published on 2026-10-20 and aliases the unchanged image originally
-published on 2026-10-13 as
-`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci-2cd00248d399-compiler`.
-An anonymous manifest lookup confirmed that both names identify the same content.
-Its registry manifest digest is
+The canonical dependency image is
+`harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-enflame-ci`, pinned by registry
+manifest digest
 `sha256:f21e53101ffcf00fa5b70b39913bd401be93c0d1834c0ae8d07684bf0690bc88`.
-Authenticated and anonymous pulls by this digest both resolved to the local
-image ID above. CI uses the canonical tag with this digest and installs the tested plugin checkout
-with `--no-deps`; the dependency image does not bake in that checkout.
+CI installs the selected plugin checkout with `--no-deps`; the dependency image
+does not bake in that checkout. The legacy vLLM 0.20.2 vendor wrapper remains
+available as `Dockerfile.v0.20.2`.
 
 See the [Enflame usage guide](../../docs/usage/enflame.md) for container setup,
 model serving, and validation commands.
@@ -164,15 +150,11 @@ read-only. Keep the container's default private PID namespace because the
 test runner performs process cleanup. Use a unique task container and
 tmux sessions for setup, service and tests.
 
-On S60, Qwen3.6-35B-A3B was validated in TP2 graph mode with
-`--gpu-memory-utilization 0.94`, `--max-model-len 32768`,
-`--max-num-seqs 256` and FP32 Mamba state. All five original Gate scenarios
-passed (26 requests and 260 checks), with their inputs and checks unchanged.
 Enflame CI shares one device-level memory budget across its four configured
 TP2 eager/graph cases, so the `0.94` override applies to all four while
 retaining their existing model settings and quality thresholds.
 
-Inside that task container, from the private plugin checkout:
+Inside that container, from the plugin checkout:
 
 ```bash
 bash .github/scripts/enflame/check.sh

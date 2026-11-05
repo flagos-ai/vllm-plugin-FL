@@ -55,9 +55,14 @@ def _torch_fused_experts_impl(
     # The current rc1 dispatcher uses count-mode expert tokens and pairs its
     # init-routing interface with token_unpermute (not finalize_routing).
     # BF16 needs no custom quantization/routing extension.
+    # vLLM 0.32 marks padded routes with -1. Native fixed-size routing expects
+    # valid expert IDs, so give inactive routes a harmless expert and zero weight.
+    valid_routes = (topk_ids >= 0) & (topk_ids < num_experts)
+    route_ids = torch.where(valid_routes, topk_ids, 0).to(torch.int32)
+    route_weights = torch.where(valid_routes, topk_weights, 0)
     routed, row_indices, expert_tokens, _ = torch_npu.npu_moe_init_routing_v2(
         hidden_states,
-        topk_ids.to(torch.int32),
+        route_ids,
         active_num=num_tokens * topk_ids.size(1),
         expert_num=num_experts,
         expert_tokens_num_type=1,
@@ -99,7 +104,7 @@ def _torch_fused_experts_impl(
     result = torch_npu.npu_moe_token_unpermute(
         permuted_tokens=expert_output,
         sorted_indices=torch.abs(row_indices),
-        probs=topk_weights,
+        probs=route_weights,
     )
     if inplace:
         hidden_states.copy_(result)

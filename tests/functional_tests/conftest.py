@@ -10,27 +10,41 @@ Note: Common fixtures (device, has_accelerator, markers) are inherited
 from the root tests/conftest.py. Only functional-specific fixtures belong here.
 """
 
+import os
+import sys
+
 import pytest
+
+
+def _is_ascend(config):
+    return "ascend" in {
+        config.getoption("platform", default=""),
+        os.environ.get("FL_TEST_PLATFORM", ""),
+        os.environ.get("VLLM_FL_PLATFORM", ""),
+    }
 
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
-    """Force clean exit after all plugins finish to avoid NPU GC destructor crash.
+    """Drain NPU compiler workers and retain the test exit status.
 
     On Ascend ARM64 Python 3.11, torch_npu C++ destructors corrupt memory
     during interpreter shutdown, causing a segfault at a random GC location
     (e.g. _pytest/mark/structures.py) even after all tests have passed.
 
-    trylast=True ensures this hook runs after all other plugins (json-report,
-    coverage, etc.) have flushed their output files. os._exit() then bypasses
-    Python GC entirely, preventing the NPU destructor crash.
+    The hard exit runs in pytest_unconfigure, after sessionfinish wrappers have
+    reported results. Exiting here kills xdist workers before they can send
+    workerfinished, so the controller restarts an otherwise successful worker.
 
     It also drains any residual inductor SubprocPool whose _read_thread could
     segfault when the subprocess pipe breaks during NPU teardown.
     """
     import contextlib
-    import os
     import threading
+
+    if not _is_ascend(session.config):
+        return
+    session.config._fl_ascend_session = session
 
     # --- drain residual inductor subprocess pool (if any) ---
     try:
@@ -61,5 +75,11 @@ def pytest_sessionfinish(session, exitstatus):
             if isinstance(read_thread, threading.Thread) and read_thread.is_alive():
                 read_thread.join(timeout=3.0)
 
-    # --- bypass Python GC to avoid NPU destructor memory corruption ---
-    os._exit(int(exitstatus))
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    # JSON/coverage and xdist's workerfinished message have all been emitted.
+    if _is_ascend(config) and hasattr(config, "_fl_ascend_session"):
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(int(config._fl_ascend_session.exitstatus))

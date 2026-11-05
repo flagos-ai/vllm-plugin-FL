@@ -42,7 +42,8 @@ def test_upstream_creates_ascend_metadata_builder():
     )
     config = SimpleNamespace(
         model_config=SimpleNamespace(max_model_len=2048),
-        scheduler_config=SimpleNamespace(enable_chunked_prefill=False),
+        parallel_config=SimpleNamespace(decode_context_parallel_size=1),
+        scheduler_config=SimpleNamespace(enable_chunked_prefill=False, max_num_seqs=8),
         speculative_config=None,
     )
     group = AttentionGroup(AscendAttentionBackend, ["attention"], spec, 0)

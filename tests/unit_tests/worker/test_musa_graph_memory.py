@@ -126,6 +126,7 @@ def profile_factory():
         stream = object()
         namespace = {
             "set_current_vllm_config": lambda _: nullcontext(),
+            "_accelerator_synchronize": Mock(),
             "compilation_counter": counter,
             "logger": Mock(),
             "init_logger": state.profile_logger_factory,
@@ -187,11 +188,10 @@ def profile_factory():
                         encoder.clear.assert_called_once()
                     kwargs = graph_capture.call_args.kwargs
                     assert kwargs["device"] == runner.device
-                    context = kwargs["graph_capture_context"]
-                    if device in ("rocm", "musa"):
-                        assert context.stream is stream
+                    if device == "musa":
+                        assert kwargs["graph_capture_context"].stream is stream
                     else:
-                        assert context is None
+                        assert "graph_capture_context" not in kwargs
 
         return invoke, state
 
@@ -283,6 +283,8 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
     )
     runner = NS(
         device=device + ":0",
+        _scoped_allocator_max_split=lambda **_: nullcontext(),
+        randomize_dummy_inputs=False,
         cache_config=NS(kv_cache_memory_bytes=None, gpu_memory_utilization=0.8),
         init_snapshot=NS(total_memory=100 * MIB, free_memory=100 * MIB),
         requested_memory=80 * MIB,
@@ -310,6 +312,8 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
                 ),
             ),
             "maybe_apply_startup_plan": Mock(),
+            "set_current_vllm_config": lambda _: nullcontext(),
+            "maybe_rocm_profiling_fallback": lambda _: None,
             "memory_profiling": lambda *args, **kwargs: nullcontext(profile),
             "CUDAGraphMode": Mode,
             "envs": NS(VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=estimate_enabled),
@@ -320,7 +324,7 @@ def test_exhausted_budget_diagnostics_preserve_accounting(
         },
     )
     assert method(runner) == expected_mib * MIB
-    runner.model_runner.profile_run.assert_called_once()
+    runner.model_runner.profile_run.assert_called_once_with(randomize_inputs=False)
     runner.model_runner.profile_cudagraph_memory.assert_called_once()
     reserve.assert_called_once_with(
         expected_mib * MIB, runner.model_config.multimodal_config, 2
@@ -476,6 +480,7 @@ def pool_lifecycle(monkeypatch):
             "current_platform": platform,
             "compilation_counter": counter,
             "set_current_vllm_config": lambda _: nullcontext(),
+            "_accelerator_synchronize": Mock(),
             "logger": Mock(),
             "init_logger": Mock(return_value=Mock()),
             "GraphWrapper": Wrapper,

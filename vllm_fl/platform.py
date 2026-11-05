@@ -361,7 +361,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -838,13 +846,16 @@ class PlatformFL(Platform):
     @classmethod
     def _align_hybrid_block_size(cls, vllm_config, backend_cls) -> None:
         if cls.vendor_name == "ascend":
-            from vllm_fl.kv_cache.ascend.hybrid import (
-                align_hybrid_block_size,
-                uses_dense_hybrid_cache,
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                AscendAttentionBackend,
             )
 
-            if uses_dense_hybrid_cache(vllm_config.model_config):
-                align_hybrid_block_size(vllm_config)
+            if backend_cls is AscendAttentionBackend:
+                # 0.32's BLHNC allocator packs unequal attention/state pages.
+                # Legacy alignment enlarges attention blocks (e.g. to 896),
+                # which cannot be split into 128-token kernels once packed.
+                if vllm_config.cache_config.block_size != 128:
+                    raise ValueError("Ascend attention requires 128-token cache blocks")
                 return
         super()._align_hybrid_block_size(vllm_config, backend_cls)
 
@@ -974,9 +985,14 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
+        """Select implementations present in the platform's vLLM build."""
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
+
+        if cls.device_type == "npu":
+            # Empty wheels do not register every CUDA provider (e.g. 0.32's
+            # gelu_and_mul_sparse), even when an op is unused by this model.
+            return IrOpPriorityConfig.with_default(["native"])
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE

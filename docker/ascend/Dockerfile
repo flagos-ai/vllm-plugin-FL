@@ -18,10 +18,10 @@ ARG ASCEND_BASE_IMAGE=quay.io/ascend/vllm-ascend:v0.20.2rc1-a3
 # ---------- base stage ----------
 FROM ${ASCEND_BASE_IMAGE} AS base
 
-ARG VLLM_VERSION=0.28.0
+ARG VLLM_VERSION=0.32.0
 ARG FLAGTREE_VERSION=0.6.2a1+ascend3.5
-# Official FlagTree Ascend manual's qwen-vllm_for_ascend branch.
-ARG FLAGGEMS_VERSION=3b406c36212744b98b9720bf6d0a5387c09fe96b
+# Official FlagGems v5.4.0; supports the NumPy 2 runtime required by vLLM.
+ARG FLAGGEMS_VERSION=6ed2f39071ef85db26b7e64f0652a162f434959c
 
 ENV DEBIAN_FRONTEND=noninteractive \
     VLLM_PLUGINS=fl \
@@ -35,7 +35,7 @@ RUN python -m pip uninstall -y vllm vllm-ascend triton triton-ascend flagtree fl
     && python -m pip install --upgrade pip "setuptools>=77.0.3,<80" \
     && python -m pip install --no-cache-dir \
         scikit-build-core==0.12.2 \
-        "setuptools-scm>=8" \
+        setuptools-scm==8.3.1 \
         "setuptools-rust>=1.9" \
         wheel \
         jinja2 \
@@ -57,7 +57,7 @@ RUN python -m pip uninstall -y vllm vllm-ascend triton triton-ascend flagtree fl
     && git clone https://github.com/flagos-ai/FlagGems.git /workspace/FlagGems \
     && git -C /workspace/FlagGems checkout "${FLAGGEMS_VERSION}" \
     && python -m pip install --no-cache-dir \
-        packaging==26.0 PyYAML==6.0.3 sqlalchemy==2.0.48 numpy==1.26.4 \
+        packaging==26.3 PyYAML==6.0.1 sqlalchemy==2.0.48 numpy==2.2.6 \
     && python -m pip install --no-build-isolation --no-deps /workspace/FlagGems \
     && python -c "from importlib.metadata import version; assert version('vllm') == '${VLLM_VERSION}+empty'; assert version('flagtree') == '${FLAGTREE_VERSION}'" \
     && python -m pip cache purge
@@ -72,6 +72,7 @@ RUN python -m pip install --no-cache-dir \
         coverage==7.16.1 \
         pytest-cov==7.1.0 \
         pytest-json-report==1.5.0 \
+        pytest-xdist==3.6.1 \
         ruff \
         pre-commit
 
@@ -81,12 +82,12 @@ FROM dev AS ci
 RUN python -m pip install --no-cache-dir \
         pytest-timeout==2.4.0 \
         pytest-metadata==3.1.1 \
-        numpy==1.26.4 \
+        numpy==2.2.6 \
         requests \
         openai \
         decorator \
         pyyaml \
-        "modelscope>=1.18.1" \
+        "modelscope==1.35.3" \
         "huggingface_hub>=0.34"
 
 # ---------- release stage ----------

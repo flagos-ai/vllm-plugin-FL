@@ -5,6 +5,21 @@
 import pytest
 
 
+def test_ascend_ir_defaults_only_reference_registered_providers(monkeypatch):
+    from dataclasses import asdict
+    from types import SimpleNamespace
+
+    from vllm_fl.platform import PlatformFL
+
+    monkeypatch.setattr(PlatformFL, "device_type", "npu")
+    priority = PlatformFL.get_default_ir_op_priority(SimpleNamespace())
+    assert all(providers == ["native"] for providers in asdict(priority).values())
+    # WorkerBase installs priorities before constructing any model layers.
+    # Validate every IR op, including ones Qwen never calls.
+    with priority.set_priority():
+        pass
+
+
 def _make_ascend_vllm_config(
     *, backend="eager", compilation_mode=None, cudagraph_mode=None, enforce_eager=False
 ):

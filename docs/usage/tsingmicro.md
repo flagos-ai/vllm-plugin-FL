@@ -23,9 +23,9 @@ containing the TXDA 0.28 adaptation described here.
   examples below use bounded smoke-test settings, not recommended production
   capacity limits.
 
-## Reference environment
+## Software dependencies
 
-The starting image comes from the 2026-09-17 vLLM 0.24.0 inference record:
+The vendor base image supplies the TXDA runtime:
 
 ```text
 harbor.baai.ac.cn/plugin/tsingmicro001-gems5.4.0-treenone-triton3.6.0-cx0.1.0-plugin0.3.0-vllm0.24.0-cp310-pt211-x64-v260610164501.01:202609171640
@@ -56,9 +56,9 @@ Use a dedicated task directory and container name.
 
 ```bash
 plugin_checkout=/path/to/vllm-plugin-FL
-task_root=/root/tsingmicro-vllm-028
+task_root=/path/to/task
 mkdir -p "$task_root/outputs"
-docker run -d --init --name codex-tsingmicro-028 --network host --ipc=host --privileged \
+docker run -d --init --name vllm-fl-tsingmicro --network host --ipc=host --privileged \
   -v /dev:/dev -v /sys:/sys -v /lib/modules:/lib/modules \
   -v /models:/models:ro \
   -v "$plugin_checkout:/work/vllm-plugin-FL" \
@@ -96,7 +96,7 @@ Launch it on the host:
 
 ```bash
 tmux new-session -d -s txda-028-setup \
-  "docker exec codex-tsingmicro-028 bash -lc 'bash /work/task/setup.sh' >'$task_root/outputs/setup.log' 2>&1"
+  "docker exec vllm-fl-tsingmicro bash -lc 'bash /work/task/setup.sh' >'$task_root/outputs/setup.log' 2>&1"
 tmux capture-pane -t txda-028-setup -p
 tail -n 80 "$task_root/outputs/setup.log"
 ```
@@ -122,7 +122,7 @@ links cleanly and then fails at import with `undefined symbol` errors such as
 
 ```bash
 docker run -d --name flagtree-build --privileged \
-  -v /root/ft-build:/work/task \
+  -v "$task_root:/work/task" \
   harbor.baai.ac.cn/flagos-dev/flagtree-builder-tsingmicro:2.3.0 tail -f /dev/null
 ```
 
@@ -193,12 +193,11 @@ issues are resolved: FlagTree
 
 ## Configure the runtime
 
-Save the following as `$task_root/env.sh`. The FlagCX root shown here is the
-working path in the reference image; update it for another vendor image. The
-image's inherited `FLAGCX_PATH` may point at an obsolete directory.
+Save the following as `$task_root/env.sh`. Set `FLAGCX_PATH` to your FlagCX
+installation. Check the image's inherited value before using it.
 
 ```bash
-export FLAGCX_PATH=/home/secure/260604163331/flagcx
+export FLAGCX_PATH=/path/to/FlagCX
 test -f "$FLAGCX_PATH/plugin/interservice/flagcx_wrapper.py"
 test -f "$FLAGCX_PATH/build/lib/libflagcx.so"
 export LD_LIBRARY_PATH="$FLAGCX_PATH/build/lib:${LD_LIBRARY_PATH:-}"
@@ -318,48 +317,10 @@ synchronization. The longer request timeout changes waiting time only. Keep
 Use LF line endings for the shell scripts on Linux; a Windows CRLF checkout
 cannot be executed directly by Bash.
 
-## Validation status
+## Support boundary
 
-The following are historical eager results on TX8110 with the reference vendor
-packages and vLLM `0.28.0+empty`, built from upstream tag commit
-`2cf0a6915ce544dc493a0990f2ea38d81601128a`. Each row is one complete original
-five-scenario run with unchanged 512/128-token budgets, fixtures and assertions.
-Both used TP8, the default asynchronous scheduler, 4096-token context, at most
-eight sequences, a 512-token scheduling batch and 1 GiB of KV cache per worker.
-
-| Model | Historical snapshot | Scenarios | Requests |
-| --- | --- | --- | --- |
-| Qwen3.6-27B | R6d eager | 5/5 PASS | 26/26 PASS |
-| Qwen3.6-35B-A3B | R9 eager | 5/5 PASS | 26/26 PASS |
-
-These historical runs total **10 scenarios and 52 requests**. They were not
-rerun on the newly merged eager-only revision. The merged R12 candidate passed
-458 CPU regression tests in the reference environment; 17 tests were skipped
-under their original conditions (475 collected, pytest exit code 0). This CPU
-result does not constitute a rerun of the historical hardware requests.
-
-| Historical snapshot | Candidate archive SHA256 |
-| --- | --- |
-| R6d | `ab6df28db9181968848db71a7093a6197ccf62f112b13d9b2a190994fa81943e` |
-| R9 | `d44944533f73613d3cce500dd2bfec41c13e2f17ba5a0360428db894a6093fb7` |
-
-R6d selected add/mul for Dense; the R9 MoE run used the additional four MoE
-selectors listed in the backend configuration. The conservative dispatch
-selection follows device failures observed with broader generic FlagGems
-replacement. The recorded passes establish correctness for those runs, without
-a throughput or production-capacity guarantee.
-
-The Dense eager receipt originally recorded Windows checkout hashes for five
-Python files whose executed copies used LF. The corrected audit preserves the
-original receipt and verifies the actual archived files: the Python bytes match
-the baseline Git blobs, their ASTs and assertions are unchanged, and all image
-fixtures are byte-identical. The corrected summary supports the result above.
-
-The R9 MoE eager run completed normal worker shutdown with 16 successful native
-Abort calls and no forced worker kill. Separate lifecycle checks also verified
-bounded teardown, including a delayed peer. These results do not establish
-recovery of stalled devices or complete SDK resource release.
-
-Keep the reference vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX
-versions. This adaptation adds no Tsingmicro hardware CI job; skipped GitHub
-workflows are not hardware test passes.
+Keep the vendor PyTorch, torch_txda, Triton, FlagGems and FlagCX versions in
+this guide together. This recipe covers eager execution; broader FlagGems
+replacement, graph mode and device recovery require separate validation.
+Record gate and regression results for the selected revision in the PR or CI
+artifacts. Skipped hardware workflows do not establish device support.

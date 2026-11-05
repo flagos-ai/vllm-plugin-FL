@@ -321,7 +321,7 @@ Environment variables can override specific items from platform config. If not s
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VLLM_FL_PREFER` | `flagos` | Preferred backend: `flagos`, `vendor`, `reference` |
-| `VLLM_FL_STRICT` | `0` | Strict mode: `1` = fail on error, `0` = try fallback |
+| `VLLM_FL_STRICT` | Platform policy | Unset: retain the platform default; `1` = fail on error, `0` = try fallback |
 | `VLLM_FL_PER_OP` | (none) | Per-operator order: `op1=a\|b\|c;op2=x\|y` |
 | `VLLM_FL_HOPPER_LONG_CONTEXT_OPT` | `0` | On NVIDIA Hopper, route attention to FA3 and `mm`/`mm_out` to native CUDA |
 | `VLLM_FL_ALLOW_VENDORS` | (none) | Vendor whitelist, comma-separated |

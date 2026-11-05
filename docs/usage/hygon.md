@@ -41,16 +41,16 @@ current utilization, memory, and KFD processes with the host's `hy-smi` or DTK
 A small driver memory reservation can remain on an idle card; verify that no
 workload owns either selected device before starting a container.
 
-The example below uses host physical DCUs **2 and 3**, whose render nodes were
-`renderD130` and `renderD131` on the validated host. Resolve the device mapping
-on your own host before reusing these paths. The container exposes only that
-pair; its runtime device indices are **0 and 1**. Do not pass host indices
-`2,3` as the logical indices inside this isolated container.
+Set the render nodes for the two allocated DCUs after resolving the mapping
+on your host. The isolated container exposes that pair as logical devices
+`0,1`; use logical indices inside the container.
 
 ```bash
-ls -l /dev/kfd /dev/mkfd /dev/dri/renderD130 /dev/dri/renderD131
-readlink -f /sys/class/drm/renderD130/device
-readlink -f /sys/class/drm/renderD131/device
+export DCU_RENDER_NODE_0=/dev/dri/renderDXXX
+export DCU_RENDER_NODE_1=/dev/dri/renderDYYY
+ls -l /dev/kfd /dev/mkfd "$DCU_RENDER_NODE_0" "$DCU_RENDER_NODE_1"
+readlink -f "/sys/class/drm/${DCU_RENDER_NODE_0##*/}/device"
+readlink -f "/sys/class/drm/${DCU_RENDER_NODE_1##*/}/device"
 ```
 
 ## 2. Prepare the image and local model directory
@@ -61,7 +61,7 @@ shards. Set `MODEL_ROOT` to the parent directory containing these models.
 
 ```bash
 export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-hygon-ci@sha256:e5a84bc28e4bfcae413e1e9288a605a49aea352ecc8b35f4b58b3ebba5e6fc9d
-export MODEL_ROOT=/public-flash/models
+export MODEL_ROOT=/path/to/models
 export MODEL_NAME=Qwen3.6-27B
 export SERVED_MODEL=hygon-qwen36
 export CONTAINER=hygon-qwen36-tp2
@@ -80,7 +80,7 @@ The 0.24 vendor base image alone does not contain the 0.28 deployment stack.
 docker run --detach --name "$CONTAINER" \
   --network host --ipc host \
   --device /dev/kfd --device /dev/mkfd \
-  --device /dev/dri/renderD130 --device /dev/dri/renderD131 \
+  --device "$DCU_RENDER_NODE_0" --device "$DCU_RENDER_NODE_1" \
   --group-add video \
   --security-opt seccomp=unconfined \
   --volume /opt/hyhal:/opt/hyhal:ro \

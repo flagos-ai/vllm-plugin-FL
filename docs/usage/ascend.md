@@ -1,371 +1,175 @@
 # Ascend 910C Deployment Guide
 
-This guide starts an OpenAI-compatible vLLM inference service on Huawei
-Ascend 910C. It follows the NVIDIA deployment guide's prebuilt-image workflow,
-using the Ascend stack validated by this repository. The example uses one 910C
-and Qwen3-0.6B; choose other free device IDs and a larger tensor-parallel size
-for larger models.
+Run an OpenAI-compatible service with vLLM 0.32's empty build and the FL
+plugin. Native `torch.npu.NPUGraph` captures decode; prefill, vision encoding
+and sampling execute outside the decode graph.
 
-## Validated software stack
+## Software dependencies
 
-| Component | Validated version or configuration |
+Use the pinned [Ascend Dockerfile](../../docker/ascend/Dockerfile) and
+[runtime constraints](../../docker/ascend/runtime-constraints.txt):
+
+| Component | Version / source |
 |---|---|
-| Prebuilt CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.28.0-a3-ci-20260922-r5-gas-clean` |
-| Image manifest | `sha256:d80f4616b04fda507ce6d9dc54d36983d4ef134730bb9305b45409931260d688` |
-| Plugin source and dispatch policy | `9a7eaf1191999422682bf5c6d1cf7b3f88d253b5` |
 | Base image | `quay.io/ascend/vllm-ascend:v0.20.2rc1-a3` |
-| CANN | `9.0.0` |
-| Python | `3.11.15` on aarch64 |
-| PyTorch / torch-npu | `2.10.0+cpu` / `2.10.0` |
-| vLLM | `0.28.0+empty` |
-| FlagTree / Triton | `0.6.2a1+ascend3.5` / `3.5.1` (Triton supplied by FlagTree) |
-| FlagGems | commit `3b406c36212744b98b9720bf6d0a5387c09fe96b` |
-| cann-shmem / NumPy | `1.6.0` / `1.26.4` |
+| CANN | 9.0.0 |
+| Python | 3.11, aarch64 |
+| PyTorch / torch-npu | 2.10.0+cpu / 2.10.0 |
+| vLLM | 0.32.0+empty, official `v0.32.0` source |
+| FlagTree / Triton | 0.6.2a1+ascend3.5 / 3.5.1, supplied by FlagTree |
+| FlagGems | 5.4.0, `6ed2f39071ef85db26b7e64f0652a162f434959c` |
+| FlagGems-vllm | v0.2.0, installed by the repository's pinned installer |
+| NumPy / PyYAML | 2.2.6 / 6.0.1 |
+| cann-shmem | 1.6.0 |
 
-The checked-in [Ascend dispatch policy](../../vllm_fl/dispatch/config/ascend.yaml)
-loads automatically. Keep it and the plugin checkout on the same revision.
-The CI image contains the validated runtime, but its packaged plugin wheel
-predates some changes in this guide. Step 5 builds and installs a non-editable
-wheel from the selected plugin revision without changing runtime dependencies.
-For build details, see the
-[Ascend image guide](../../docker/ascend/README.md).
+Retain the vendor Torch/torch-npu pair when installing vLLM's common Python
+dependencies. Disable build isolation for vLLM and the plugin. FlagTree owns
+the `triton` module: remove standalone `triton` and `triton-ascend` distributions
+before installing FlagTree. Use FlagGems's Python/Triton mode (`USE_C_EXTENSION=0`).
+Keep the [Ascend dispatch policy](../../vllm_fl/dispatch/config/ascend.yaml)
+and plugin checkout on the same revision.
 
-### FlagGems execution mode
+## Build the runtime image
 
-The validated image uses FlagGems's Python/Triton operators with
-`USE_C_EXTENSION=0` and `flag_gems.config.use_c_extension == False`. The
-installation in the Ascend Dockerfile needs no C++ extension:
-
-```bash
-python -m pip install --no-build-isolation --no-deps /workspace/FlagGems
-```
-
-`use_c_extension` is a FlagGems runtime flag. Enabling it requires building
-the optional C++ extension for NPU and setting `USE_C_EXTENSION=1` before
-importing FlagGems. See the pinned
-[FlagGems source-installation instructions](https://github.com/flagos-ai/FlagGems/blob/3b406c36212744b98b9720bf6d0a5387c09fe96b/docs/content/en/getting-started/install.md#331-install-with-c-extension)
-for the build dependencies and the `FLAGGEMS_BACKEND=NPU` and
-`FLAGGEMS_BUILD_C_EXTENSIONS=ON` options. That optional mode has not been
-validated by this deployment recipe; keep `USE_C_EXTENSION=0` to reproduce
-the tested stack.
-
-## 1. Check the host
-
-The host needs a working CANN driver, Docker, and an Ascend container runtime.
-The commands below use a runtime registered as `ascend`, as on the validated
-910C host. Confirm its name and select free physical NPU IDs before starting:
+On an aarch64 host with Docker, check out the desired plugin revision, then
+build from the repository root:
 
 ```bash
-npu-smi info
-docker version
-docker info --format '{{json .Runtimes}}'
-test -e /dev/davinci_manager
-test -f /etc/ascend_install.info
-```
-
-Set the visible devices explicitly. `0` is an example; use the devices
-assigned on your host. For tensor parallelism, the number of selected devices
-must match `TP_SIZE`.
-
-```bash
-export NPU_IDS=0
-export TP_SIZE=1
-```
-
-The example uses a privileged task container, matching the working 910C
-configuration. If your host uses different driver or runtime paths, adjust
-the mounts in steps 4 and 5 to match its Ascend installation.
-
-## 2. Prepare the repository and model
-
-The executable example pins the reviewed PR #487 runtime commit. Fetch the PR
-ref before checking out that immutable revision; its checked-in Ascend policy
-is the policy paired with the image runtime above. Provision model weights on
-the host outside the container:
-
-```bash
-git clone https://github.com/flagos-ai/vllm-plugin-FL.git
-cd vllm-plugin-FL
-git fetch origin refs/pull/487/head
-export PLUGIN_REVISION=9a7eaf1191999422682bf5c6d1cf7b3f88d253b5
-git checkout --detach "$PLUGIN_REVISION"
-test "$(git rev-parse HEAD)" = "$PLUGIN_REVISION"
-test -f vllm_fl/dispatch/config/ascend.yaml
-
+docker/build.sh --platform ascend --target ci \
+  --image-name vllm-plugin-fl --image-tag ascend-vllm0.32.0
+export IMAGE=vllm-plugin-fl:ascend-vllm0.32.0
 export REPO_DIR="$PWD"
-export MODEL_DIR=/data/models/Qwen3-0.6B
-test -f "$MODEL_DIR/config.json"
+export MODEL_DIR=/path/to/models
 ```
 
-The single-NPU example below follows the validated Qwen3-0.6B eager settings.
-The shared Ascend CI also validates Qwen3.6-27B and Qwen3.6-35B-A3B on two
-910C NPUs for offline and serving E2E. Those models need their own weights,
-`TP_SIZE=2`, and the memory/length settings in
-[`tests/platforms/ascend.yaml`](../../tests/platforms/ascend.yaml).
+The Dockerfile prepares runtime and test dependencies; install the plugin and
+FlagGems-vllm in the container as shown below. For image stages and shared CI
+configuration, see the [image guide](../../docker/ascend/README.md).
 
-## 3. Pull the validated image
+## Create a container
 
-Authenticate interactively if Harbor requires it; keep registry credentials
-out of scripts and shell history.
-
-```bash
-docker login harbor.baai.ac.cn
-
-export IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:d80f4616b04fda507ce6d9dc54d36983d4ef134730bb9305b45409931260d688
-docker pull "$IMAGE"
-docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
-```
-
-For an exact reproduction, pull the image by the manifest digest in the table
-after confirming the registry still exposes it. The tag may be republished
-independently of this repository.
-
-## 4. Verify the image runtime
-
-This checks NPU access and the pinned empty-vLLM stack before loading a model.
-FlagTree must own the `triton` module; a separately installed `triton` or
-`triton-ascend` distribution is not part of the validated image.
+The host needs a compatible Ascend driver and container runtime. Confirm the
+registered runtime name, inspect device utilization, and select two allocated
+NPUs for the TP2 recipe. Adjust driver mounts to the host installation.
 
 ```bash
-docker run --rm \
-  --runtime=ascend --privileged --network=host --ipc=host \
-  -e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
-  -e USE_C_EXTENSION=0 \
-  -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
-  -v /usr/local/dcmi:/usr/local/dcmi \
-  -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
-  -v /etc/ascend_install.info:/etc/ascend_install.info \
-  --entrypoint /bin/bash "$IMAGE" -lc '
-set -euo pipefail
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
 npu-smi info
-python - <<PY
-from importlib.metadata import PackageNotFoundError, version
-import torch  # Initialize torch_npu before FlagTree's Triton backend discovery.
-import triton
-import flag_gems
-from flag_gems.config import use_c_extension
+docker info --format '{{json .Runtimes}}'
+export NPU_IDS=0,1  # Replace with the physical devices assigned to the job.
+test -f "$MODEL_DIR/Qwen3.6-27B/config.json"
 
-expected = {
-    "vllm": "0.28.0+empty",
-    "torch": "2.10.0+cpu",
-    "torch-npu": "2.10.0",
-    "flagtree": "0.6.2a1+ascend3.5",
-    "cann-shmem": "1.6.0",
-    "numpy": "1.26.4",
-}
-for name, pinned in expected.items():
-    actual = version(name)
-    assert actual == pinned, (name, actual, pinned)
-    print(f"{name}={actual}")
-assert triton.__version__.startswith("3.5.1"), triton.__version__
-for name in ("triton", "triton-ascend"):
-    try:
-        installed = version(name)
-    except PackageNotFoundError:
-        continue
-    raise RuntimeError(f"Remove standalone {name}=={installed}; use FlagTree")
-print(f"Triton={triton.__version__} (from FlagTree)")
-assert flag_gems.vendor_name == "ascend", flag_gems.vendor_name
-assert not use_c_extension, "Use USE_C_EXTENSION=0 for the validated Ascend stack"
-print("FlagGems=Ascend Python/Triton operators (C++ extension disabled)")
-PY
-'
+docker run --detach --name vllm-fl-ascend \
+  --runtime=ascend --network=host --ipc=host \
+  -e ASCEND_VISIBLE_DEVICES="$NPU_IDS" \
+  -v /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro \
+  -v /usr/local/dcmi:/usr/local/dcmi:ro \
+  -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi:ro \
+  -v /etc/ascend_install.info:/etc/ascend_install.info:ro \
+  -v "$REPO_DIR:/workspace/vllm-plugin-FL" \
+  -v "$MODEL_DIR:/models:ro" \
+  --entrypoint /bin/bash "$IMAGE" -lc 'exec sleep infinity'
+docker exec -it vllm-fl-ascend bash
 ```
 
-## 5. Start the inference service
+Run the remaining commands inside this container. Physical device selection is
+handled by the container runtime; the two visible devices have logical indices
+`0,1`. For a single-host service, `GLOO_SOCKET_IFNAME=lo` avoids hostname
+resolution delays. Multi-host communication needs a reachable network interface.
 
-The command builds a wheel from the selected plugin revision and installs it
-non-editably without resolving dependencies. It checks that the installed
-module and Ascend dispatch policy come from site-packages, rather than the
-mounted checkout. Shared CI uses an editable checkout for pull-request tests;
-this deployment path validates the package that will be delivered.
+## Install the plugin
 
 ```bash
-docker run --rm -d \
-  --name vllm-fl-ascend \
-  --runtime=ascend --privileged --network=host --ipc=host \
-  --hostname vllm-plugin-fl \
-  --ulimit nofile=65535:65535 \
-  -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
-  -v /usr/local/dcmi:/usr/local/dcmi \
-  -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
-  -v /etc/ascend_install.info:/etc/ascend_install.info \
-  -v "$REPO_DIR:/workspace/vllm-plugin-FL" \
-  -v "$MODEL_DIR:/models/Qwen3-0.6B:ro" \
-  -e VLLM_PLUGINS=fl \
-  -e VLLM_FL_PLATFORM=ascend \
-  -e USE_C_EXTENSION=0 \
-  -e PLUGIN_REVISION="$PLUGIN_REVISION" \
-  -e ASCEND_RT_VISIBLE_DEVICES="$NPU_IDS" \
-  -e GLOO_SOCKET_IFNAME=lo \
-  -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800 \
-  -e TP_SIZE="$TP_SIZE" \
-  --entrypoint /bin/bash "$IMAGE" -lc '
-set -euo pipefail
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 cd /workspace/vllm-plugin-FL
+python .github/scripts/install_flaggems_vllm.py
 python -m pip wheel --no-build-isolation --no-deps \
   --wheel-dir /tmp/vllm-fl-wheels .
+cd /tmp
 python -m pip install --no-deps --force-reinstall \
   /tmp/vllm-fl-wheels/vllm_plugin_fl-*.whl
-cd /tmp
-python - <<PY
-from importlib.resources import files
-from pathlib import Path
-import os
-import torch  # Initialize torch_npu before importing the FL plugin.
-import vllm_fl
-from vllm_fl.version import git_version
-
-module_path = Path(vllm_fl.__file__).resolve()
-assert "site-packages" in str(module_path), module_path
-policy = files("vllm_fl.dispatch.config").joinpath("ascend.yaml")
-assert policy.read_bytes() == Path(
-    "/workspace/vllm-plugin-FL/vllm_fl/dispatch/config/ascend.yaml"
-).read_bytes()
-assert git_version != "Unknown" and os.environ["PLUGIN_REVISION"].startswith(git_version)
-print(f"Installed plugin: {module_path}")
-PY
-exec vllm serve /models/Qwen3-0.6B \
-  --served-model-name qwen3-0.6b \
-  --host 127.0.0.1 --port 8000 \
-  --tensor-parallel-size "$TP_SIZE" \
-  --dtype bfloat16 \
-  --max-model-len 2048 \
-  --gpu-memory-utilization 0.3 \
-  --enforce-eager \
-  --no-enable-chunked-prefill \
-  --no-async-scheduling \
-  --no-enable-prefix-caching \
-  --trust-remote-code
-'
+python -c 'import torch; import vllm_fl; print(vllm_fl.__file__)'
 ```
 
-`--network=host` makes the service's `127.0.0.1:8000` endpoint available on
-the host loopback interface. For remote clients, choose an appropriate bind
-address and network policy. `GLOO_SOCKET_IFNAME=lo` is for a single-host job;
-multi-host jobs need an interface reachable by every rank. Eager execution is
-the supported deployment setting here. NPU graph execution is experimental
-and is outside this guide's startup recipe.
+The imported plugin should resolve to the installed package. Shared CI instead
+uses an editable install to test the submitted checkout.
 
-## 6. Verify inference
+## Native decode graph mode
 
-Follow startup logs in one terminal:
+This recipe covers BF16 Qwen3.6-27B and Qwen3.6-35B-A3B with TP2 and DP1.
+Async scheduling, chunked prefill, prefix caching, expert parallelism and
+speculative decoding are outside this configuration. Ascend uses `ModelRunnerFL`
+(`VLLM_USE_V2_MODEL_RUNNER=0`); the upstream V2 runner requires CUDA/UVA APIs.
 
 ```bash
-docker logs -f vllm-fl-ascend
+export VLLM_PLUGINS=fl VLLM_FL_PLATFORM=ascend USE_C_EXTENSION=0
+export USE_FLAGGEMS=1 VLLM_FL_FLAGOS_WHITELIST=zeros
+export TRITON_ALL_BLOCKS_PARALLEL=1 TORCHINDUCTOR_COMPILE_THREADS=1
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export ASCEND_RT_VISIBLE_DEVICES=0,1 GLOO_SOCKET_IFNAME=lo
+unset VLLM_FL_FLAGOS_BLACKLIST FLAGCX_PATH
+
+vllm serve /models/Qwen3.6-27B \
+  --served-model-name Qwen3.6-27B --host 127.0.0.1 --port 8000 \
+  --tensor-parallel-size 2 --dtype bfloat16 \
+  --max-model-len 32768 --max-num-batched-tokens 32768 --max-num-seqs 8 \
+  --gpu-memory-utilization 0.80 --trust-remote-code \
+  --allowed-local-media-path /workspace/vllm-plugin-FL/tools/adaptation-gate-cases/images \
+  --no-enable-chunked-prefill --no-async-scheduling --no-enable-prefix-caching \
+  --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,4,8]}'
 ```
 
-Wait for the endpoint in another terminal:
+Substitute `Qwen3.6-35B-A3B` in both the model path and served name for the MoE
+model. Native HCCL is selected with `FLAGCX_PATH` unset. This configuration
+allows only FlagGems `zeros` ATen replacement; unrestricted FlagGems replacement
+is outside its correctness guarantee. A nonempty `VLLM_FL_FLAGOS_WHITELIST` replaces platform selection, including
+its blacklist and `VLLM_FL_FLAGOS_BLACKLIST_APPEND`. Do not set
+`VLLM_FL_FLAGOS_BLACKLIST` at the same time; the two overrides conflict.
+
+Attention uses native BLHNC packed caches and 128-token attention pages; Mamba
+states retain their allocator-owned storage and strides. GDN state copy plans
+select only active rows. Padded FIA lengths and MoE routes retain graph shapes.
+The Ascend dispatch policy propagates execution failures without retrying an
+operator after it may have updated state. Graph failures propagate to the caller.
+
+For an eager control, replace `--compilation-config` with `--enforce-eager`.
+The host loopback endpoint is accessible with `--network=host`; choose a bind
+address and network policy appropriate for remote clients.
+
+## Verify inference
+
+After startup, query the service and run the existing adaptation gate:
 
 ```bash
-for attempt in $(seq 1 120); do
-  if curl --silent --fail http://127.0.0.1:8000/v1/models >/dev/null; then
-    echo "service is ready"
-    break
-  fi
-  if ! docker inspect -f '{{.State.Running}}' vllm-fl-ascend 2>/dev/null \
-      | grep -q true; then
-    docker logs vllm-fl-ascend
-    exit 1
-  fi
-  if [ "$attempt" -eq 120 ]; then
-    echo "service did not become ready" >&2
-    docker logs vllm-fl-ascend
-    exit 1
-  fi
-  sleep 5
-done
+curl --fail http://127.0.0.1:8000/v1/models
+cd /workspace/vllm-plugin-FL/tools/adaptation-gate-cases
+MODEL_PATH=/models/Qwen3.6-27B SERVED_MODEL_NAME=Qwen3.6-27B PORT=8000 \
+  ./run_test.sh
 ```
 
-Send a deterministic completion request:
+Follow the [gate README](../../tools/adaptation-gate-cases/README.md) for its
+fixtures, request budgets and checks. Repeat for each model and eager/graph
+configuration. With `VLLM_LOGGING_LEVEL=DEBUG`, verify completed capture and
+actual request batches with `cudagraph_mode: FULL` at padded sizes 1, 2, 4 and 8.
+Startup alone does not demonstrate replay. Record results in the PR or CI
+artifacts for the exact tested revision.
+
+Run regression suites using the same interpreter and operator policy:
 
 ```bash
-curl --fail http://127.0.0.1:8000/v1/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "qwen3-0.6b",
-    "prompt": "The capital of France is",
-    "temperature": 0,
-    "max_tokens": 16
-  }'
+python tests/run.py --platform ascend --device 910c --scope unit
+python tests/run.py --platform ascend --device 910c --scope functional
 ```
-
-The deployment is working when `/v1/models` returns HTTP 200 and the
-completion has non-empty `choices[0].text` without a server-side error.
-Stop this example with `docker stop vllm-fl-ascend`.
-
-## 7. Optional: enable FlagCX device collectives
-
-The published image does **not** bundle FlagCX. The separately validated
-FlagCX v0.13.0 configuration mounted a built FlagCX core library and set
-`FLAGCX_PATH`. It used HCCL for PyTorch process groups and FlagCX's C API for
-tensor-parallel device collectives; the FlagCX Torch plugin was not installed.
-The validated FlagCX setup covers TP2 eager inference and two-rank
-`all_reduce`, `all_gather`, `all_gatherv`, and `reduce_scatterv`. Pipeline
-and expert parallelism have not been validated.
-
-Build the v0.13.0 core for Ascend in an environment with CANN development
-headers, following the [FlagCX build instructions](https://github.com/flagos-ai/FlagCX/blob/v0.13.0/docs/getting_started.md).
-The validated build used `make USE_ASCEND=1`; ensure its development
-dependencies, including `nlohmann/json.hpp`, are present. Then verify:
-
-```bash
-export FLAGCX_DIR=/path/to/FlagCX
-test -f "$FLAGCX_DIR/build/lib/libflagcx.so"
-```
-
-For a TP2 run, select two free NPUs and set `TP_SIZE=2`. Add these options to
-the `docker run` command in step 5, before `--entrypoint`:
-
-```bash
--v "$FLAGCX_DIR:/opt/FlagCX:ro" \
--e FLAGCX_PATH=/opt/FlagCX \
-```
-
-Keep the same plugin checkout inside the container. Do not install the FlagCX
-Torch plugin to reproduce this tested NPU path; `FLAGCX_PATH` is enough to
-select the plugin's FlagCX device communicator.
-
-## 8. Build the same stack from the official base image
-
-When the prebuilt Harbor image is unavailable, build the checked-in Ascend
-Dockerfile on an aarch64 machine. It starts from the base image in the table,
-removes the inherited vLLM 0.20.2 installation, and installs upstream vLLM
-0.28.0 with `VLLM_TARGET_DEVICE=empty` plus the pinned FlagTree and FlagGems
-stack. Give the local build an explicit tag:
-
-```bash
-docker/build.sh \
-  --platform ascend \
-  --target ci \
-  --image-name vllm-plugin-fl \
-  --image-tag ascend-vllm0.28.0-local
-
-export IMAGE=vllm-plugin-fl:ascend-vllm0.28.0-local
-```
-
-Run step 4 before serving. The Dockerfile prepares the runtime and CI tools
-but does not install this repository's current plugin wheel. Use the step 5
-wheel build, or publish a separate release image with that fixed wheel. The
-[image guide](../../docker/ascend/README.md) documents build constraints and
-the known OpenCV/NumPy dependency conflict in this pinned stack.
 
 ## Troubleshooting
 
-- **No NPU inside the container:** inspect `npu-smi info`,
-  `ASCEND_RT_VISIBLE_DEVICES`, the Ascend runtime, driver mounts, and device
-  access. The validated task container uses `--privileged`.
-- **Wrong vLLM or Triton version:** rerun step 4. Non-NVIDIA devices require
-  `vllm==0.28.0+empty`; FlagTree supplies Triton 3.5.1 without a standalone
-  `triton` or `triton-ascend` distribution.
-- **Plugin not active:** check `VLLM_PLUGINS=fl`, `VLLM_FL_PLATFORM=ascend`,
-  the wheel installation in step 5, and the platform activation in container logs.
-- **Out of memory:** choose free NPUs, lower `--max-model-len` or
-  `--gpu-memory-utilization`, or use a supported tensor-parallel size.
-- **First request is slow:** FlagTree kernels may JIT compile during warm-up.
-  Check logs before treating that delay as a failure.
-- **FlagCX initialization fails:** verify `FLAGCX_PATH` points to the mounted
-  v0.13.0 source tree containing `build/lib/libflagcx.so`. Leave the variable
-  unset when using the default HCCL-only path.
+- **No NPU:** check the registered container runtime, driver mounts, assigned
+  device IDs and permissions with `npu-smi info` inside the container.
+- **Dependency mismatch:** compare installed versions to the Dockerfile and
+  runtime constraints; a vLLM 0.28 image cannot run this 0.32 adapter.
+- **Plugin inactive:** check `VLLM_PLUGINS=fl`, `VLLM_FL_PLATFORM=ascend` and
+  the imported package path.
+- **Out of memory:** inspect free device memory and adjust context length,
+  scheduling limits or memory utilization together. Graph capture reserves
+  memory in addition to the model and cache.
+- **First request is slow:** inspect compilation and warmup logs before
+  treating the delay as a failure.
