@@ -145,7 +145,9 @@ def test_load_without_matching_device_case_override_uses_base_config(
     "case",
     ["27b_tp2_eager", "27b_tp2_graph", "35b_a3b_tp2_eager", "35b_a3b_tp2_graph"],
 )
-def test_enflame_s60_compilation_config_reaches_engine_and_cli(case):
+def test_enflame_s60_compilation_config_reaches_engine_and_cli(case, monkeypatch):
+    monkeypatch.delenv("FL_TEST_PLATFORM", raising=False)
+    monkeypatch.delenv("FL_TEST_DEVICE", raising=False)
     cfg = ModelConfig.load("qwen3_6", case, platform="enflame", device="s60")
     expected = {"custom_ops": ["none", "+SiluAndMul"]}
     assert cfg.engine_kwargs()["compilation_config"] == expected
@@ -153,6 +155,22 @@ def test_enflame_s60_compilation_config_reaches_engine_and_cli(case):
     assert json.loads(args[args.index("--compilation-config") + 1]) == expected
     baseline = ModelConfig.load("qwen3_6", case)
     assert "compilation_config" not in baseline.engine_kwargs()
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["27b_tp2_eager", "27b_tp2_graph", "35b_a3b_tp2_eager", "35b_a3b_tp2_graph"],
+)
+def test_enflame_s60_compilation_config_inherits_runner_environment(case, monkeypatch):
+    monkeypatch.setenv("FL_TEST_PLATFORM", "enflame")
+    monkeypatch.setenv("FL_TEST_DEVICE", "s60")
+    inherited = ModelConfig.load("qwen3_6", case)
+    explicit = ModelConfig.load("qwen3_6", case, platform="enflame", device="s60")
+    assert inherited.engine_kwargs() == explicit.engine_kwargs()
+    assert inherited.engine_kwargs()["compilation_config"] == {
+        "custom_ops": ["none", "+SiluAndMul"]
+    }
+    assert inherited.serve_args() == explicit.serve_args()
 
 
 def test_serve_args_serializes_nested_json(tmp_path):
