@@ -22,14 +22,15 @@ Threads' own registry image directly is kept as `Dockerfile.v0.20.2`.
 From the repository root:
 
 ```bash
-docker/build.sh --platform musa --target ci
-# -> harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-musa-ci
+IMAGE_TAG="v0.24.0-musa-ci-$(git rev-parse --short HEAD)"
+docker/build.sh --platform musa --target ci --image-tag "$IMAGE_TAG" \
+  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
 
-docker push harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.24.0-musa-ci
+docker push "harbor.baai.ac.cn/plugin/vllm-plugin-fl:$IMAGE_TAG"
 ```
 
-`.github/configs/musa.yml` references `v0.24.0-musa-ci`, and the MUSA platform
-is enabled in `.github/configs/platforms.yml`.
+`.github/configs/musa.yml` pins the published CI image by tag and digest. The
+MUSA platform is enabled in `.github/configs/platforms.yml`.
 
 ## Validate on a MUSA host before enabling CI
 
