@@ -42,15 +42,22 @@
 - 35B 的受控诊断：新 image UUID 的串行请求正确，仅换文本仍错；新 UUID 的 8 路并发再次出错，随后同 UUID 串行仍错，表明错误视觉特征进入 encoder cache。视觉编码器未启用 compile。分块 SDPA（含 storage offset）及 BHSD/BSHD 拼接的独立 GPU 探针均与 native 结果一致（max abs error=0），该最小探针尚不能排除完整视觉网络中的其他批量算子。
 - 进一步真实 TP4 视觉投影诊断：各 rank 归约前串行/批量输入一致，BF16 FlagCX 归约的最大差为 0.0625，FP32 归约为 2.38e-7。插件新增限定 Iluvatar Qwen 视觉 forward 的 FP32 归约，返回原 dtype，不改变 decoder 归约；21 项相关回归通过，真实编码器最大串行/批量差降至 0–0.0234375。新服务 `qwen36-35b-graph-v4.log` 已完成全部捕获及 5 场景/26 请求，但只有 text_single 场景通过，另外 4 个场景失败（20/26 请求通过）。JSON 实读发现 text_concurrent 的算术也错误，说明视觉归约补丁并未解决 graph 整体正确性；同补丁 eager v4 对照已完整通过 5 场景/26 请求（`gate-35b-eager-v4.log`），目前错误限定在 graph 路径；PIECEWISE 单独模式已执行全部 5 场景/26 请求，3 场景通过、2 场景失败，23/26 请求通过（`gate-35b-piecewise-v1.log`）；图像 9 请求全通过，文本并发与混合仍有错误，尚不能计为 graph 验收通过。v3 曾因旧服务占用端口而启动失败，其 gate 结果无效。
 - 27B 同预算诊断运行 `qwen36-27b-graph-memory.log` 再次在 autotune 的 256 MiB cache 分配处 OOM：PyTorch 已分配 29.37 GiB，其中 graph private pool 仅 49.31 MiB；设备剩余 166 MiB。后续显式逐档诊断观察到捕获形状从 512 降至 88 时 allocated 从约 19.4 GB 增至 31.6 GB。独立 GPU 探针确认 FlagGems autotuner 保留诊断参数；限定 Iluvatar 的释放补丁及 16 项回归通过，最小探针保留量从 17.7 MB 降为 0。但完整 memory-v3 仍在 29.99 GiB allocated 时 OOM，证明该修复不足以解决整体问题；GPU 探针确认 EMPTY wheel 缺失 weak_ref_tensor 原语，插件回退持有强引用。现限定 Iluvatar 使用 PyTorch cudagraph_trees 同样的借用 storage 重建；新增 5 项测试通过，涵盖视图元数据、非持有生命周期、replay 和三个形状的共享池复用（后续 allocated 增量低于 1 MiB），既有 graph 测试为 20 passed / 5 skipped。受控重跑使用同一 TP4 / 0.70 / 4096 参数：27B 从 512 到 2 tokens 的 PIECEWISE allocated 保持约 20.12–20.20 GB，35B 已完成 51 个 PIECEWISE 与 35 个 FULL 形状捕获，allocated 约 22.09 GB。27B 也已完成 51 个 PIECEWISE 与 35 个 FULL 捕获，受控重跑不再 OOM。两个完整 gate 的 JSON 已读取：27B 为 4/5 场景、25/26 请求通过，长文本单请求约 30 tokens 后退化为重复感叹号；35B 为 2/5 场景、21/26 请求通过，并发文本、图像和混合仍有错误（`summary-27b-graph-borrowed-v2.txt`、`summary-35b-graph-borrowed-v1.txt`）。因此显存持有已修复，但 graph 生成正确性仍未验收通过。独立 TP4 FlagCX graph 探针对 FP32/BF16、3 个大小各 10 次更新输入后 replay 均精确通过，尚不能据此排除完整模型的通信与状态交互。最新汇总回归 `regression032-v10.log` 为 136 passed / 5 skipped；删除临时打印后 runner 回归 8 passed，补充缺失原语报错与 NVIDIA 隔离回归后 graph 组为 23 passed / 5 skipped（`graph-refs032-final-tests.log`）。`stack032-v10.log` 的实际依赖栈断言通过。
-- CI 新增 `_iluvatar_gate.yml` 与 `run_gates.sh`，串行执行两模型 × eager/graph，上传失败时的原始日志；聚合通知在 Iluvatar gate 被跳过时不得成功。平台 registry 继续保持原 opt-in 策略。CI 需将 `ILUVATAR_FLAGCX_PATH` 仓库变量指向容器已有挂载内的实际 FlagCX 构建根目录，缺失即失败，不用空库代替。
+- CI 新增 `_iluvatar_gate.yml` 与 `run_gates.sh`，串行执行两模型 × eager/graph，上传失败时的原始日志；聚合通知在 Iluvatar gate 被跳过时不得成功。平台 registry 继续保持原 opt-in 策略。CI 默认构建固定版本 FlagCX；可用 `ILUVATAR_FLAGCX_PATH` 仓库变量复用容器已有挂载内的实际构建根目录，指定无效路径仍立即失败，不用空库代替。
 - 新增 graph 参数传递与 CI wiring / 缺失模型拒绝回归，8 passed；`bash -n` 和 `git diff --check` 通过。这些检查不等价于远端硬件 CI 已运行。
 
 ## CI FlagCX 前置条件
 
-Iluvatar 模型门禁读取上游仓库 Actions 变量 `ILUVATAR_FLAGCX_PATH`，并将其作为
-`FLAGCX_PATH` 传入测试容器。它必须指向 **CI 容器内可见**、已为 CoreX 构建的
-FlagCX 根目录，而不是开发容器中的历史路径。该目录必须同时包含
-`build/lib/libflagcx.so` 和 `plugin/interservice/flagcx_wrapper.py`。
+Iluvatar 模型门禁先运行 `.github/scripts/iluvatar/install_flagcx.sh`。
+未配置 Actions 变量 `ILUVATAR_FLAGCX_PATH` 时，脚本在 runner 临时目录检出
+`flagos-ai/FlagCX` 的固定 commit `6143384797219733aee89bd3118b2cb184ad4959`，
+初始化 JSON 子模块并以 `USE_ILUVATAR_COREX=1` 从源码构建，验证动态库可加载后
+通过 `GITHUB_ENV` 将 `FLAGCX_PATH` 传给后续步骤。CI 镜像需要 Git、Make、C++
+编译器及 CoreX 开发依赖，并能访问 GitHub。
+
+可选的 `ILUVATAR_FLAGCX_PATH` 用于复用预构建目录；设置时不自动回退构建。
+它必须指向 **CI 容器内可见**、已为 CoreX 构建的 FlagCX 根目录，而不是开发容器中的
+历史路径。该目录必须同时包含 `build/lib/libflagcx.so` 和
+`plugin/interservice/flagcx_wrapper.py`，且动态库必须能加载。
 
 维护者需要先检查 runner 的实际安装位置：如果构建目录位于现有 `/data` 挂载中，
 可直接使用对应容器路径；否则先在 `.github/configs/iluvatar.yml` 的
@@ -74,9 +81,9 @@ test -f "$FLAGCX_PATH/plugin/interservice/flagcx_wrapper.py"
 python -c 'import ctypes, os; ctypes.CDLL(os.path.join(os.environ["FLAGCX_PATH"], "build/lib/libflagcx.so"))'
 ```
 
-路径是必须由维护者替换的占位符。确认配置后重新运行失败的模型门禁任务。
-变量为空或所需文件缺失时，门禁在启动模型前失败；不能通过空库、跳过门禁或
-将未执行的模型测试记为通过来解决。`a34eded` 的 CI 已确认因变量为空而退出，
+上述路径是使用预构建目录时必须由维护者替换的占位符；默认源码构建无需设置该变量。
+确认修复进入 PR 后重新运行模型门禁任务。构建失败、所需文件缺失或动态库不可加载时，
+任务在启动模型前失败；不能通过空库、跳过门禁或将未执行的模型测试记为通过来解决。`a34eded` 的 CI 已确认因变量为空而退出，
 尚未执行模型请求；这与同一轮 MUSA 单测 fixture 字段类型错误是两个独立问题。
 
 ## 编译路径进一步对照

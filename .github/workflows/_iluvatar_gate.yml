@@ -19,6 +19,8 @@ jobs:
       FLAGCX_PATH: ${{ vars.ILUVATAR_FLAGCX_PATH }}
     steps:
       - uses: actions/checkout@v4
+      - name: Provision and validate FlagCX
+        run: bash .github/scripts/iluvatar/install_flagcx.sh
       - name: Install exact EMPTY framework and plugin
         run: bash .github/scripts/iluvatar/setup.sh
       - name: All model/mode groups and request assertions
