@@ -200,7 +200,6 @@ class PlatformFL(Platform):
         if (device_type == "cuda" and vendor_name not in ("iluvatar", "hygon"))
         else device_type
     )
-    device_type = device_info.device_type
     # Keep small torch.compile helpers on the native NPU execution path.
     simple_compile_backend = "eager" if device_type == "npu" else "inductor"
     dispatch_key = device_info.dispatch_key
