@@ -35,8 +35,7 @@ def linear_or_none(x, weight):
         return None
     from flaggems_vllm.runtime.backend._metax.ops.mctlass_bf16 import linear
 
-    result = linear(x, weight, identity=_LINEAR[tuple(weight.shape)])
-    return result
+    return linear(x, weight, identity=_LINEAR[tuple(weight.shape)])
 
 
 def install_linear_methods(module):

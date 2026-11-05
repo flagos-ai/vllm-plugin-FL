@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
 """CPU contract harness for a runtime whose FlagTree import requires a device.
 
 Executes declarations from the real source files; only framework base classes
 and distributed/dispatch imports are stubbed. This is not a runtime-import or
-GPU-kernel validation. Device tests live separately in test_qwen38_ple_device.
+GPU-kernel validation. Device tests live separately in tests/models/qwen3_8_flash_next/.
 """
 
 import __future__
@@ -23,6 +24,14 @@ from torch import nn
 
 ROOT = Path(__file__).resolve().parents[3]
 
+_limits_spec = importlib.util.spec_from_file_location(
+    "qwen_cpu_tuning",
+    ROOT
+    / "vllm_fl/dispatch/backends/vendor/metax/impl/qwen3_8_flash_next/shape_limits.py",
+)
+_limits = importlib.util.module_from_spec(_limits_spec)
+_limits_spec.loader.exec_module(_limits)
+
 
 def declarations(path, name, namespace=None, names=None):
     module = ModuleType(name)
@@ -38,6 +47,7 @@ def declarations(path, name, namespace=None, names=None):
         SimpleNamespace=SimpleNamespace,
         ContextVar=ContextVar,
         wraps=wraps,
+        load_tuning_config=_limits.load_tuning_config,
     )
     if namespace:
         module.__dict__.update(namespace)

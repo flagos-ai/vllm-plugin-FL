@@ -8,17 +8,15 @@ launch geometry and native LibTuner configurations; it never edits sources.
 from __future__ import annotations
 
 import hashlib
-import json
 from copy import copy
 from importlib import import_module
-from importlib.resources import files
 from pathlib import Path
 from threading import RLock
 
 import torch
 import triton
 
-from .shape_limits import max_prefill_rows
+from .shape_limits import load_tuning_config, max_prefill_rows
 
 _enabled = False
 _install_lock = RLock()
@@ -520,11 +518,7 @@ def install_qwen38_launch_profile(vllm_config=None):
                 raise ValueError(
                     "The Qwen launch profile requires the reviewed BF16 geometry"
                 )
-        profile = json.loads(
-            files("vllm_fl.dispatch.config")
-            .joinpath("qwen3_8_flash_next_metax_tuning.json")
-            .read_text()
-        )
+        profile = load_tuning_config()
         for package, requirements in profile["source_files"].items():
             package_root = Path(import_module(package).__file__).parent
             for requirement in requirements:

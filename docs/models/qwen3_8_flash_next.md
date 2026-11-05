@@ -1,202 +1,106 @@
 # Qwen3.8 Flash Next on MetaX
 
-This entry integrates the checkpoint architecture with plugin-FL on MetaX C550.
-The current supported serving composition uses BF16, single-host TP8/PP1 and
-vLLM 0.24.0. The example is text-only. It does not claim multimodal acceptance
-or a new model-quality evaluation.
+The supported development composition serves BF16 text on a single MetaX C550
+host with TP8/PP1, FP32 recurrent state and vLLM 0.24.0. Multimodal serving is not
+accepted by this MetaX profile.
 
-## Runtime and operator dependencies
+## Installation requirements
 
-Use the matching MetaX Torch/MACA/FlagTree environment and the exact
-[operator composition](../../examples/qwen3_8_flash_next/metax_tuning/operator_dependencies.json).
-The vLLM base is ee0da84ab9e04ac7610e28580af62c365e898389. The current development
-composition also requires the default-off modular-expert output-buffer
-capability documented in that manifest; the unmodified base does not provide
-it. Make that native source/package take precedence over the base installation.
+Use matching MetaX Torch/MACA and FlagTree 0.6.1+metax3.6, the vLLM base
+ee0da84ab9e04ac7610e28580af62c365e898389, and the
+[operator requirements](../../examples/qwen3_8_flash_next/metax_tuning/operator_dependencies.json).
+Some optimized FG/FGV APIs and the native modular-expert output alias remain
+unpublished. The base revisions alone do not form a public optimized installation.
+Publish those APIs/tests and pin accessible revisions before public delivery.
 
-Several FG/FGV changes remain unpublished. Their source fingerprints identify
-the reviewed development assembly; they are not public installation revisions.
-Before public delivery, publish the required operator APIs and tests and replace
-the private source requirements with team-accessible fixed revisions. Do not
-substitute a floating branch, silently edit installed sources, or disable FlagOS.
+UVA additionally requires the plugin host-memory extension built with
+VLLM_VENDOR=metax and the matching Torch/MACA ABI. Source guards reject
+incompatible numerical sources. Required optimized APIs must still be provided by the validated development composition. Source guards
+are compatibility checks, not package installation instructions.
 
-The MetaX UVA mode additionally needs the plugin native host-memory extension,
-built with VLLM_VENDOR=metax and the matching Torch/MACA ABI. The generic
-host-row gather, BF16 fusion, sampling and QSA numerical implementations belong
-to the operator libraries. Model metadata, resource lifetime and routing policy
-remain in the plugin. No patch or diff delivery files are installed.
+## Start serving
 
-## Serving entry point
+Configure the dependencies and MODEL_PATH, then use the POSIX
+[entry](../../examples/qwen3_8_flash_next/serve_metax.sh), which directly executes
+native vllm serve:
 
-Install the pinned plugin/operator composition and matching native extension.
-The POSIX [serve_metax.sh](../../examples/qwen3_8_flash_next/serve_metax.sh) calls
-native vllm serve directly. It has no Python launcher, source rewrite,
-dependency download or service-recovery step.
-
-```sh
+~~~sh
 MODEL_PATH=/path/to/checkpoint \
 QWEN38_CACHE_ROOT=/path/to/service-cache \
 sh examples/qwen3_8_flash_next/serve_metax.sh --port 18480
-```
+~~~
 
-The default [metax.yaml](../../examples/qwen3_8_flash_next/metax.yaml) selects
-MTP off, MBT8192, asynchronous scheduling and UVA auto. Additional arguments
-are passed directly to native vLLM; normal CLI-over-config precedence applies.
-The script selects the model dispatch configuration, enables FG/FGV, and
-isolates the kernel/config caches by service and MTP mode. Other dispatch
-environment overrides keep their framework-defined precedence. It does not
-impose OMP/Torch thread counts.
+The [default profile](../../examples/qwen3_8_flash_next/metax.yaml) selects MTP off,
+MBT8192, max_num_seqs64, asynchronous scheduling and UVA auto. Additional CLI
+arguments follow native CLI-over-config precedence. The entry enables FG/FGV,
+selects the model dispatch configuration and isolates caches by service/MTP mode.
+It preserves the caller's OMP/Torch thread settings.
 
-Optional MTP keeps its separate
-[metax_mtp.yaml](../../examples/qwen3_8_flash_next/metax_mtp.yaml) profile:
+Optional [MTP profiles](../../examples/qwen3_8_flash_next/metax_mtp.yaml):
 
-```sh
+~~~sh
 MODEL_PATH=/path/to/checkpoint \
 QWEN38_CACHE_ROOT=/path/to/service-cache \
 MTP=k2 sh examples/qwen3_8_flash_next/serve_metax.sh --port 18480
-```
+~~~
 
-MTP accepts k1/k2/k3 and uses MBT2048, synchronous scheduling and shared_buffer
-lookup. The shell selects only the native draft count and graph buckets.
-Invalid combinations fail in the model's native config verifier. Prefix
-caching remains disabled, chunked prefill enabled, and max length is 69632.
-A max_num_seqs of 64 does not guarantee that 64 long requests fit in KV cache.
-
-The previous Python plan generator and its --execute/--output-dir/package-root
-options are removed. Configure installed dependencies (or an explicitly
-selected development PYTHONPATH) before launch. For persistent flag changes,
-edit a copy of the native YAML; --additional-config replaces the whole object.
-
-## Sampling and optional MTP
-
-MTP is off by default. MTP=k1, k2 or k3 explicitly enables the corresponding
-native draft count, with matching graph buckets. These modes require synchronous
-scheduling, shared_buffer lookup and MBT2048. Accepted GDN state and the native
-draft acceptance/rejection contract are preserved.
+MTP accepts k1/k2/k3, requires synchronous scheduling, shared_buffer lookup and
+MBT2048, and selects the corresponding draft/graph buckets. Configuration
+verification rejects unsupported combinations. Prefix caching is disabled,
+chunked prefill is enabled and maximum length is 69632. A max_num_seqs of 64
+does not imply that 64 long requests fit in the KV cache.
 
 generation_config=auto retains checkpoint sampling defaults. Clients may
-override native request fields. The checkpoint thinking defaults used here are
-temperature=1, top_p=0.95 and top_k=20; this entry does not force greedy decoding
-or change thinking templates. Fixed output length and ignore_eos are benchmark
-request choices, not serving defaults.
+override native request fields. This checkpoint uses temperature=1/top_p=0.95/
+top_k=20 for thinking mode. Fixed output length and ignore_eos are request choices.
 
-## N-gram lookup and asynchronous scheduling
+--additional-config replaces the complete native object. Copy a supplied YAML
+when changing persistent settings so required flags remain explicit.
 
-shared_buffer uses the existing shared CPU lookup path. uva_broadcast maps the
-full table on rank zero and broadcasts fetched rows; uva_sharded maps each
-rank's head range and gathers rows across ranks. uva_auto selects these
-strategies by the centralized token threshold without changing hash semantics.
+## Lookup and state lifetime
 
-The table is loaded once into shared host storage. Native device views retain
-the CPU allocation and registration until all dependent work has completed.
-The table address remains stable for the service lifetime. Auto mode maps the
-full table only on rank zero and local ranges on the other ranks.
+shared_buffer publishes CPU-gathered rows. uva_broadcast maps the full table
+on rank zero and broadcasts fetched rows. uva_sharded maps each rank's head range
+and gathers rows across ranks. uva_auto selects by the centralized token threshold.
 
-This checkpoint needs about 95.37 GiB of shared host storage, sufficient host
-RAM/lockable pages, and compatible device registration support. Initialization
-errors fail explicitly. The serving implementation does not drop system page
-caches, change runtime protection settings or silently switch lookup strategy.
+The table uses about 95.37 GiB of shared host storage and requires sufficient
+host RAM, lockable pages and device registration support. Storage/registrations
+are retained for device access and errors propagate explicitly. The entry does
+not alter system page caches or runtime protection settings.
 
-GPU suffix history supplies sampled token IDs to the next asynchronous step;
-CPU placeholder token IDs are not used for hashing. Lookup preparation runs on
-the ordered current device stream outside the target forward graph. Request
-reordering and lifecycle reset retain the existing history/cache contracts.
+GPU suffix history supplies actual consumed token IDs to asynchronous steps.
+Request reordering, reuse and EOS boundaries preserve the history/cache contract.
+Lookup preparation remains outside the target forward graph.
 
-## MetaX tuning and support boundaries
+## Operator, graph and configuration scope
 
-The [tuning configuration](../../vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json)
-is the source of shape limits, launch parameters and dependency guards.
-The launch-profile module selects parameters over existing library kernels;
-it is not a torch.profiler observer and does not rewrite library sources.
+The [runtime configuration](../../vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json)
+owns shape limits, launch choices and source guards. MTP-off policies cover
+validated prefill rows through 8192 with dtype/layout/parallelism guards and
+retained fallbacks.
 
-MTP-off policies cover the selected prefill shapes through 8192 rows, with
-dtype/layout/parallelism guards and original fallbacks for unsupported shapes:
+- HC uses the original projection/residual order and BF16 intermediate boundaries.
+- QSA selects 512 compressed groups, expands up to 2048 raw tokens plus up to 3
+  causal tail positions, and preserves invalid-index/request/page masks.
+- MetaX native QSA attention uses the MACA paged varlen API for BF16
+  Q[rows,3,256], one local KV head and the four-token block/tail format. MTP uses
+  the retained provider. Unsupported layouts select a provider before execution.
+- Indexer packing shares groups only within the same request/cache geometry.
+  Scratch ownership and stream isolation belong to the framework.
+- GDN preserves FP32 state, reuses caller chunk metadata and accepts a CPU skew
+  hint. qwen38_gdn_host_metadata=false disables the hint without undoing WY reuse.
+- Quantized, LoRA, non-target and unsupported parallel/layout modes retain their
+  native contracts. Errors after computation/state updates begin do not retry.
 
-- HC grouped normalization, gate reduction, residual injection and divide/SiLU
-  preserve BF16 intermediate rounding. Projection and residual order stay intact.
-- QSA keeps 512 compressed groups, expansion to 2048 raw tokens plus at most
-  three causal tail positions, request/page boundaries and invalid-index masks.
-  Short shared-column packing and per-query folding use separate metadata
-  contracts. Score buckets include 512/2048/8192 and the current cache capacity.
-- Indexer/TopK and attention parameters are selected by actual score width and
-  query rows. Small-row decode retains its own split and graph choices.
-- GDN reuses chunk metadata already prepared by the framework. CPU-computed
-  skew hints avoid device scalar readback. qwen38_gdn_host_metadata=false in additional-config disables the
-  skew hint; it does not undo the separate WY chunk-index reuse.
-- Eligible BF16 experts consume caller-owned activation/output buffers.
-  Non-target layouts, quantized modes, LoRA and unsupported parallelism retain
-  their original path.
-- MCTlass BF16 projection/expert paths are selected before execution where the
-  required capability and shapes match. Execution errors propagate; they do not
-  trigger a second backend after computation or state mutation has begun.
+Target pure decode uses FULL_DECODE_ONLY with buckets 1/2/4/8/16/32/64. MTP token
+buckets scale by K+1. Prefill/mixed remain eager. Caller-owned workspaces are
+prepared before capture and retained for replay, with step/stream isolation.
+Dual-batch overlap and microbatching remain unsupported.
 
-## Graphs, diagnostics and evidence
+Setup hooks install atomically and idempotently. Failed setup restores prior
+entry points, caches, registries and matmul flags. Fixed presets are process-local;
+unspecified shapes retain native cache behavior.
 
-Target pure decode uses FULL_DECODE_ONLY with request buckets 1/2/4/8/16/32/64;
-optional MTP multiplies graph token buckets by K+1. Caller-owned workspaces keep
-addresses stable. Prefill/mixed remain eager; this entry does not enable full
-prefill graphs. Sampling and lookup preparation remain outside the target
-forward graph.
-
-Operator recording is off by default; flaggems_record_ops=true is an explicit
-diagnostic option and may add host overhead. Benchmark RPC extensions, paired
-correctness observers, trace parsers, startup cache advice and container-recovery
-scripts are private experiment tools, not installed serving behavior.
-
-Unit tests retain dispatch, fallback/error, mutable-state and ownership
-contracts. Numerical and changed-input graph evidence, hardware measurements,
-failed experiments and per-change results belong in PR/CI artifacts, not this
-user guide. The dependency manifest records any remaining delivery limitations.
-
-
-### QSA score packing and native attention
-
-The MTP-off MetaX launcher enables qwen38_qsa_native_attention. Target prefill,
-mixed and decode use the installed MACA flash_attn_2_cuda varlen API with
-four-token virtual pages over the original strided K/V storage. There is no
-small-batch performance split. MTP modes keep the previous path.
-
-This is a local VENDOR policy for BF16 Q[rows,3,256], one local KV head and the
-QSA four-token block/tail index format. A global FGV operator blacklist cannot
-express this model/layout scope while retaining other backends and speculative
-paths. Unsupported layouts retain the existing provider.
-
-Indexer batches with request groups use BF16 query packing and skip fully
-invisible column tiles. Groups are prepared once within the metadata-builder
-scope and shared across QSA layers. Decode uses its measured single-query
-launch settings where beneficial; the all-visible <=512-column bucket retains
-the existing score/TopK bypass. FP8 cache experiments were not selected.
-
-Native attention scratch belongs to one forward context and CUDA stream,
-rather than persisting per layer. Score matrices remain temporary. The selected
-numerical sources are qsa_indexer_fast.py and qsa_paged_native.py under FGV's
-MetaX backend, with hashes in the tuning profile and dependency manifest.
-
-Native attention preserves the reviewed BF16 module tolerance, rather than
-bitwise equality with the previous reduction. Workspace allocation and selected
-page metadata belong to the framework; the native numerical API consumes those
-buffers. Missing paged API capabilities select the existing provider before
-execution. Numerical or metadata execution errors propagate without retry.
-The optimized numerical dependencies remain unpublished; this working tree is
-not a complete public installation lock.
-
-### Startup installation and failure recovery
-
-Launch presets are constructed before publication. Fixed shape presets live in
-a process-local overlay; initialization does not seed them into SQLite.
-Unspecified shapes keep the native cache behavior. Failed installation restores
-the original entry points, caches and matmul flags; repeated initialization
-does not stack wrappers. Model registration and MTP compatibility hooks also
-restore their registries and descriptors if setup fails.
-
-These transactions protect initialization only. Exceptions after metadata,
-state, kernel or collective execution begins propagate and never retry another
-backend. An incompatible dependency fails before starting serving.
-
-Native graph buffers are retained by the model after step metadata is released,
-keyed by rows, device, capture stream and score bucket. Eager large-row buffers
-remain scoped to a step. In the supported decode configuration, seven row
-buckets sum to 127 rows: about 0.436 MiB per score bucket/stream; four score
-buckets use about 1.745 MiB of distinct workspace, shared across QSA layers.
-The references are released with the model. This does not enable dual-batch
-overlap or microbatching, which remain explicitly unsupported.
+Operator recording is disabled by default. flaggems_record_ops=true explicitly
+enables recording and can add host overhead. Hardware measurements and validation
+results are maintained in PR/CI artifacts.

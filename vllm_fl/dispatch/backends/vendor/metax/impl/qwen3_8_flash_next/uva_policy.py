@@ -1,18 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Measured MetaX PLE lookup strategy and row-gather launch settings."""
 
-import json
 from functools import lru_cache
-from pathlib import Path
+
+from .shape_limits import load_tuning_config
 
 
 @lru_cache(maxsize=1)
 def lookup_settings():
-    path = (
-        Path(__file__).resolve().parents[5]
-        / "config/qwen3_8_flash_next_metax_tuning.json"
-    )
-    settings = json.loads(path.read_text())["ngram_uva"]
+    settings = load_tuning_config()["ngram_uva"]
     if (
         type(settings["broadcast_max_tokens"]) is not int
         or settings["broadcast_max_tokens"] < 0

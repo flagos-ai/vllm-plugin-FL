@@ -24,8 +24,6 @@ class SharedNgramBuffer:
         self.is_producer = self.rank == 0
         self.max_tokens = max_tokens
         self.embedding_dim = embedding_dim
-        self.productions = 0
-        self.consumptions = 0
         self._epoch = 0
         self._closed = False
         size = (
@@ -87,7 +85,6 @@ class SharedNgramBuffer:
                         [self._epoch, capacity, actual], dtype=torch.int64, device="cpu"
                     )
                 )
-                self.productions += 1
             except Exception as exc:
                 error = exc
                 self.header.copy_(
@@ -107,7 +104,6 @@ class SharedNgramBuffer:
             )
         if actual:
             destination[:actual].copy_(self.rows[:actual])
-        self.consumptions += 1
         self._barrier()
         self._epoch += 1
         return actual

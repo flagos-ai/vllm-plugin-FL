@@ -8,6 +8,7 @@ from importlib import import_module
 
 import torch
 
+from . import hc_policy
 from .qsa_policy import (
     qsa_select_paged_tokens as qsa_select_paged_tokens,
     qsa_sparse_paged_attention as qsa_sparse_paged_attention,
@@ -15,6 +16,11 @@ from .qsa_policy import (
 )
 from .shape_limits import max_prefill_rows
 from vllm_fl.dispatch.backends.flaggems.impl import qwen3_8_flash_next as portable
+
+qwen38_hc_down_activation = hc_policy.down_activation
+qwen38_hc_gate_reduce = hc_policy.gate_reduce
+qwen38_hc_grouped_norm = hc_policy.grouped_norm
+qwen38_hc_inject_combine = hc_policy.inject_combine
 
 
 def gdn_prefill(
@@ -152,24 +158,6 @@ def qwen38_grup_projection(x, weight):
     return torch.nn.functional.linear(x, weight) if result is None else result
 
 
-def qwen38_hc_grouped_norm(x, weight, groups, eps):
-    from .hc_policy import grouped_norm
-
-    return grouped_norm(x, weight, groups, eps)
-
-
-def qwen38_hc_gate_reduce(logits, normed, groups):
-    from .hc_policy import gate_reduce
-
-    return gate_reduce(logits, normed, groups)
-
-
-def qwen38_hc_inject_combine(logits, block_output, residual, groups):
-    from .hc_policy import inject_combine
-
-    return inject_combine(logits, block_output, residual, groups)
-
-
 # This provider writes every active row or initializes its fallback output.
 # functools.wraps in registration carries the capability to the resolved call.
 qsa_sparse_paged_attention._qwen38_full_output = True
@@ -259,21 +247,16 @@ def qwen38_qsa_compress_norm_rope(
     return True
 
 
-def qwen38_hc_down_activation(x, groups):
-    from .hc_policy import down_activation
-
-    return down_activation(x, groups)
-
-
 def register_qwen38_operators(registry, *, is_platform_available):
     from vllm_fl.dispatch.types import BackendImplKind, BackendPriority, OpImpl
 
     def available(name):
         if not is_platform_available():
             return False
-        if name in {"qwen38_grdown_projection", "qwen38_grup_projection"}:
-            return True
         if name in {
+            "qwen38_grdown_projection",
+            "qwen38_grup_projection",
+            "qwen38_gdn_mixed_qkv",
             "qwen38_hc_grouped_norm",
             "qwen38_hc_gate_reduce",
             "qwen38_hc_inject_combine",
@@ -281,8 +264,6 @@ def register_qwen38_operators(registry, *, is_platform_available):
             "qwen38_qsa_rope",
             "qwen38_qsa_compress_norm_rope",
         }:
-            return True
-        if name == "qwen38_gdn_mixed_qkv":
             return True
         if name in {"qwen38_small_projection", "qwen38_ple_gate"}:
             import flag_gems

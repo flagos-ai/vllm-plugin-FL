@@ -1,15 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CPU branch contracts for the Qwen-local GDN layout boundary."""
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""Qwen3.8 integration and contract regressions."""
 
 import importlib.util
 import sys
+from dataclasses import fields, replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
+from _qwen38_cpu import ROOT, declarations
 
-ROOT = Path(__file__).resolve().parents[3]
+# Layout contracts.
+
+# SPDX-License-Identifier: Apache-2.0
 
 
 @pytest.mark.parametrize(
@@ -96,7 +101,7 @@ def test_layout_provider_runs_only_before_mixed_native_gather(
         assert actual.stride() == (2048, 1)
 
 
-def _metadata_classes(monkeypatch):
+def layout__metadata_classes(monkeypatch):
     """Execute pinned native metadata declarations with CPU framework stubs."""
     from dataclasses import dataclass
 
@@ -137,7 +142,7 @@ def _metadata_classes(monkeypatch):
     return native.GDNAttentionMetadataBuilder, local.Qwen38GDNAttentionMetadataBuilder
 
 
-def _metadata_builder(cls, k=3, graph=False):
+def layout__metadata_builder(cls, k=3, graph=False):
     builder = cls.__new__(cls)
     builder.num_spec = k
     builder.use_spec_decode = k > 0
@@ -157,7 +162,7 @@ def _metadata_builder(cls, k=3, graph=False):
     return builder
 
 
-def _metadata_common(lengths, k=3, padded_tokens=0):
+def layout__metadata_common(lengths, k=3, padded_tokens=0):
     starts = torch.tensor(
         [0, *torch.tensor(lengths).cumsum(0).tolist()], dtype=torch.int32
     )
@@ -189,12 +194,14 @@ def _metadata_common(lengths, k=3, padded_tokens=0):
 def test_gdn_k3_accepted_prefixes_survive_zero_draft_and_padding(
     monkeypatch, graph, lengths, counts
 ):
-    native, local = _metadata_classes(monkeypatch)
-    common = _metadata_common(lengths, padded_tokens=2)
+    native, local = layout__metadata_classes(monkeypatch)
+    common = layout__metadata_common(lengths, padded_tokens=2)
     accepted = torch.tensor([1, 2, 3, 4, 1], dtype=torch.int32)
     counts = torch.tensor(counts, dtype=torch.int32)
     saved_counts = counts.clone()
-    metadata = _metadata_builder(local, graph=graph).build(0, common, accepted, counts)
+    metadata = layout__metadata_builder(local, graph=graph).build(
+        0, common, accepted, counts
+    )
     # a accepted drafts means a+1 verified tokens, including the mandatory
     # target token. Native recurrent state and conv both read accepted-1.
     assert metadata.num_accepted_tokens[:4].tolist() == [1, 2, 3, 4]
@@ -216,7 +223,7 @@ def test_gdn_k3_accepted_prefixes_survive_zero_draft_and_padding(
     if max(lengths) == 1:
         # Regression control: the unmodified 0.24 builder discards all accepted
         # offsets and selects column zero when the whole batch has no drafts.
-        control = _metadata_builder(native).build(0, common, accepted, counts)
+        control = layout__metadata_builder(native).build(0, common, accepted, counts)
         assert control.num_accepted_tokens is None
         assert control.non_spec_state_indices_tensor[:4].tolist() == [1, 5, 9, 13]
 
@@ -232,7 +239,7 @@ def test_gdn_k3_accepted_prefixes_survive_zero_draft_and_padding(
 def test_gdn_classification_preserves_prefill_and_disabled_spec(
     monkeypatch, k, counts, expected
 ):
-    native, local = _metadata_classes(monkeypatch)
+    native, local = layout__metadata_classes(monkeypatch)
     received = []
 
     def capture(self, prefix, common, accepted, markers, fast):
@@ -241,7 +248,7 @@ def test_gdn_classification_preserves_prefill_and_disabled_spec(
 
     monkeypatch.setattr(native, "build", capture)
     counts = None if counts is None else torch.tensor(counts, dtype=torch.int32)
-    result = _metadata_builder(local, k=k).build(0, object(), None, counts)
+    result = layout__metadata_builder(local, k=k).build(0, object(), None, counts)
     assert result == "unchanged-native-result"
     assert (None if received[0] is None else received[0].tolist()) == expected
     if k == 0 or counts is None:
@@ -250,13 +257,13 @@ def test_gdn_classification_preserves_prefill_and_disabled_spec(
 
 @pytest.mark.parametrize("graph", [False, True])
 def test_gdn_k1_zero_current_draft_restores_prior_accepted_state(monkeypatch, graph):
-    native, local = _metadata_classes(monkeypatch)
-    common = _metadata_common([1, 1, 0], k=1)
+    native, local = layout__metadata_classes(monkeypatch)
+    common = layout__metadata_common([1, 1, 0], k=1)
     counts = torch.tensor([0, 0, -1], dtype=torch.int32)
     accepted = torch.tensor([1, 2, 1], dtype=torch.int32)
     saved_counts = counts.clone()
     saved_starts = common.query_start_loc.clone()
-    metadata = _metadata_builder(local, k=1, graph=graph).build(
+    metadata = layout__metadata_builder(local, k=1, graph=graph).build(
         0, common, accepted, counts
     )
     assert metadata.num_accepted_tokens[:2].tolist() == [1, 2]
@@ -275,7 +282,7 @@ def test_gdn_k1_zero_current_draft_restores_prior_accepted_state(monkeypatch, gr
     # The native classification defect precedes graph-buffer rebinding.
     # Keep this negative control eager: the fixed path above separately
     # exercises both CPU metadata graph modes, not a GPU graph launch.
-    control = _metadata_builder(native, k=1).build(0, common, accepted, counts)
+    control = layout__metadata_builder(native, k=1).build(0, common, accepted, counts)
     assert control.num_accepted_tokens is None
     assert control.non_spec_state_indices_tensor[:2].tolist() == [1, 3]
 
@@ -295,7 +302,7 @@ def test_gdn_k1_zero_current_draft_restores_prior_accepted_state(monkeypatch, gr
 def test_gdn_metadata_reuse_is_explicit_and_keeps_unvalidated_paths(
     monkeypatch, enabled, vendor, device, spec, mode, backend, expected
 ):
-    native, local = _metadata_classes(monkeypatch)
+    native, local = layout__metadata_classes(monkeypatch)
 
     def init(self, kv_spec, names, config, dev):
         self.speculative_config = config.speculative_config
@@ -314,3 +321,152 @@ def test_gdn_metadata_reuse_is_explicit_and_keeps_unvalidated_paths(
     )
     builder = local(object(), [], config, SimpleNamespace(type=device))
     assert builder.supports_update_block_table is expected
+
+
+# Metadata contracts.
+
+# SPDX-License-Identifier: Apache-2.0
+
+
+@pytest.fixture(name="gdn_host")
+def metadata_gdn_host(monkeypatch):
+    native_path = (
+        Path(importlib.util.find_spec("vllm").origin).parent
+        / "v1/attention/backends/gdn_attn.py"
+    )
+    native = declarations(
+        native_path, "_gdn_host_native", names={"GDNAttentionMetadata"}
+    )
+
+    class Parent:
+        def build(self, *args):
+            return self.native_metadata
+
+    context = SimpleNamespace(available=True, attn_metadata=None, calls=[])
+    mod = declarations(
+        ROOT / "vllm_fl/models/qwen3_8_flash_next/gdn.py",
+        "_gdn_host_local",
+        {
+            "GDNAttentionMetadata": native.GDNAttentionMetadata,
+            "GDNAttentionMetadataBuilder": Parent,
+            "fields": fields,
+            "NULL_BLOCK_ID": 0,
+            "resolve_op": lambda name: lambda **kw: context.calls.append(kw),
+            "get_forward_context": lambda: context,
+            "is_forward_context_available": lambda: context.available,
+        },
+        names={
+            "chunk_skew_bucket_from_query_starts",
+            "Qwen38GDNAttentionMetadata",
+            "Qwen38GDNAttentionMetadataBuilder",
+            "_FGVPrefill",
+        },
+    )
+    utils = ModuleType("vllm.model_executor.layers.fla.ops.utils")
+    utils.FLA_CHUNK_SIZE = 64
+    monkeypatch.setitem(sys.modules, utils.__name__, utils)
+    return mod, native.GDNAttentionMetadata, context
+
+
+def test_host_bucket_matches_device_statistics_for_irregular_lengths(gdn_host):
+    mod, _, _ = gdn_host
+    rng = torch.Generator().manual_seed(248320)
+    for n in [1, 2, 3, 7, 64]:
+        for _ in range(20):
+            lengths = torch.randint(0, 8193, (n,), generator=rng)
+            counts = (lengths + 63) // 64
+            max_nt, sum_nt = int(counts.max()), int(counts.sum())
+            ratio = max_nt / (sum_nt / n) if sum_nt else 1
+            expected = (
+                0
+                if n <= 1 or ratio <= 1.15
+                else 1
+                if ratio <= 1.5
+                else 2
+                if ratio <= 2.5
+                else 3
+            )
+            starts = [0, 1, 2] + (lengths.cumsum(0) + 2).tolist()
+            assert mod.chunk_skew_bucket_from_query_starts(starts, 2, n, 64) == expected
+
+
+@pytest.mark.parametrize(
+    "starts,d,p,c",
+    [([0, 1], -1, 1, 64), ([0, 1], 0, 2, 64), ([0, 2, 1], 0, 2, 64), ([0, 1], 0, 1, 0)],
+)
+def test_invalid_host_geometry_rejected(gdn_host, starts, d, p, c):
+    with pytest.raises(ValueError):
+        gdn_host[0].chunk_skew_bucket_from_query_starts(starts, d, p, c)
+
+
+def metadata_metadata_for(native):
+    values = {f.name: None for f in fields(native)}
+    values.update(
+        num_prefills=2,
+        num_decodes=2,
+        num_spec_decodes=0,
+        chunk_indices=torch.tensor([[0, 0], [1, 0], [1, 1]], dtype=torch.int32),
+        chunk_offsets=torch.tensor([0, 1, 3], dtype=torch.int32),
+        non_spec_query_start_loc=torch.tensor([0, 1, 2, 65, 193], dtype=torch.int32),
+    )
+    return native(**values)
+
+
+def test_builder_and_group_rebinding_preserve_host_hint_and_independent_slots(gdn_host):
+    mod, native, _ = gdn_host
+    builder = mod.Qwen38GDNAttentionMetadataBuilder.__new__(
+        mod.Qwen38GDNAttentionMetadataBuilder
+    )
+    builder.use_spec_decode = False
+    builder.use_host_chunk_metadata = True
+    builder.supports_update_block_table = True
+    builder.use_full_cuda_graph = False
+    builder.native_metadata = metadata_metadata_for(native)
+    common = SimpleNamespace(query_start_loc_cpu=torch.tensor([0, 1, 2, 65, 193]))
+    m = builder.build(0, common)
+    assert m.chunk_skew_bucket == 1
+    assert m.chunk_indices is builder.native_metadata.chunk_indices
+    assert m.chunk_offsets is builder.native_metadata.chunk_offsets
+    a = builder.update_block_table(m, torch.tensor([[1], [2], [3], [4]]), None)
+    b = builder.update_block_table(m, torch.tensor([[5], [6], [7], [8]]), None)
+    assert type(a) is type(m) is type(b)
+    assert a.chunk_skew_bucket == b.chunk_skew_bucket == 1
+    assert a.prefill_state_indices.tolist() == [3, 4]
+    assert b.prefill_state_indices.tolist() == [7, 8]
+    assert a.chunk_offsets is b.chunk_offsets is m.chunk_offsets
+    builder.native_metadata = replace(builder.native_metadata, chunk_indices=None)
+    with pytest.raises(ValueError, match="precomputed"):
+        builder.build(0, common)
+
+
+@pytest.mark.parametrize(
+    "bucket,available", [(0, True), (3, True), (None, True), (0, False)]
+)
+def test_prefill_optional_hint_and_no_context_fallback(gdn_host, bucket, available):
+    mod, native, context = gdn_host
+    m = metadata_metadata_for(native)
+    values = {f.name: getattr(m, f.name) for f in fields(m)}
+    context.attn_metadata = {
+        "layer": mod.Qwen38GDNAttentionMetadata(**values, chunk_skew_bucket=bucket)
+    }
+    context.available = available
+    layer = mod._FGVPrefill("layer")
+    x = torch.empty(1)
+    layer(
+        x,
+        x,
+        x,
+        x,
+        x,
+        None,
+        True,
+        chunk_indices=m.chunk_indices,
+        chunk_offsets=m.chunk_offsets,
+    )
+    sent = context.calls[-1]
+    assert sent["chunk_indices"] is m.chunk_indices
+    assert sent["chunk_offsets"] is m.chunk_offsets
+    if bucket is not None and available:
+        assert sent["chunk_skew_bucket"] == bucket
+    else:
+        assert "chunk_skew_bucket" not in sent

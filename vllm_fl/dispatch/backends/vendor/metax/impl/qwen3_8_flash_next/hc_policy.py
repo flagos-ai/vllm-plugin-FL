@@ -1,22 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """MetaX HC small-op selection with unchanged model projections and rounding."""
 
-import json
 from functools import lru_cache
-from pathlib import Path
 
 import torch
 
-from .shape_limits import max_prefill_rows
+from .shape_limits import load_tuning_config, max_prefill_rows
 
 
 @lru_cache(maxsize=1)
 def _settings():
-    path = (
-        Path(__file__).resolve().parents[5]
-        / "config/qwen3_8_flash_next_metax_tuning.json"
-    )
-    return json.loads(path.read_text())["hc_small_ops"]
+    return load_tuning_config()["hc_small_ops"]
 
 
 def _eligible(x, groups):

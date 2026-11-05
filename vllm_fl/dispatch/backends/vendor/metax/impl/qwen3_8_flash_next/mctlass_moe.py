@@ -1,22 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Qwen expert GEMM selection; assignment and activation remain framework-owned."""
 
-import json
 from functools import lru_cache
-from pathlib import Path
 
 import torch
 
-from .shape_limits import max_prefill_rows
+from .shape_limits import load_tuning_config, max_prefill_rows
 
 
 @lru_cache(maxsize=1)
 def _capacity_settings():
-    path = (
-        Path(__file__).resolve().parents[5]
-        / "config/qwen3_8_flash_next_metax_tuning.json"
-    )
-    return json.loads(path.read_text())["moe_capacity"]
+    return load_tuning_config()["moe_capacity"]
 
 
 def _closed_rows(rows):

@@ -1,12 +1,13 @@
 {
-  "schema_version": 1,
-  "scope": "Reviewed development composition; not a public installation lock; no model-side source rewriting",
-  "vllm": {
-    "version": "0.24.0",
-    "commit": "ee0da84ab9e04ac7610e28580af62c365e898389"
+  "schema_version": 2,
+  "status": "Development composition; required optimized APIs are not all publicly installable",
+  "runtime": {
+    "vllm_version": "0.24.0",
+    "vllm_base": "ee0da84ab9e04ac7610e28580af62c365e898389",
+    "flag_gems_base": "a7620cc191a0b42e040194622c5758b22a7a25dc",
+    "flaggems_vllm_base": "0f3df8ecbff9b48b2f8745c7160e0df8cb5486b5",
+    "flagtree": "0.6.1+metax3.6"
   },
-  "flag_gems_base": "a7620cc191a0b42e040194622c5758b22a7a25dc",
-  "flaggems_vllm_base": "0f3df8ecbff9b48b2f8745c7160e0df8cb5486b5",
   "published_component_references": {
     "FG-index-address-product": "https://github.com/flagos-ai/FlagGems/pull/7981",
     "FGV-PLE": "https://github.com/flagos-ai/FlagGems-vllm/pull/959",
@@ -15,299 +16,19 @@
     "FG-index-select-host-iteration": "https://github.com/flagos-ai/FlagGems/pull/8299",
     "FGV-GDN-caller-metadata": "https://github.com/flagos-ai/FlagGems-vllm/pull/1056"
   },
-  "private_sources": [
-    {
-      "package": "flag_gems",
-      "path": "runtime/backend/_metax/ops/index_select.py",
-      "sha256": "a403e7a46f5596d0fb251fd6c806a3f36be81a7acfd04a74fe066d44c03e7147",
-      "purpose": "Remove ineffective generator assertion and host tensor iteration",
-      "introduced": "01-hotpaths",
-      "status": "Exact source file matches a public PR head; composed runtime installation is not yet public",
-      "published_counterpart": {
-        "pr": "https://github.com/flagos-ai/FlagGems/pull/8299",
-        "commit": "2920f89194b56fe1b4a0f4b02cdce7614cd148a2",
-        "exact_file_match": true
-      }
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/radix_topk.py",
-      "sha256": "f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e",
-      "purpose": "Existing large-row QSA TopK dependency",
-      "introduced": "published-parent",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/top_k_top_p.py",
-      "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4",
-      "purpose": "Existing generic sampling fallback",
-      "introduced": "published-parent",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "ops/top_k_top_p.py",
-      "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84",
-      "purpose": "Existing exported sampling fallback",
-      "introduced": "published-parent",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flag_gems",
-      "path": "runtime/backend/_metax/ops/sort.py",
-      "sha256": "87921767027917f1781f90450d70061d8e0605217df8663c991694d62dd05b31",
-      "purpose": "Existing fallback dependency",
-      "introduced": "published-parent",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/sampling_top20.py",
-      "sha256": "c1cea3fd6db8dd25306f80b36aab2b9fe9f387b7980b854f92d00dd99f819186",
-      "purpose": "Block Top20 and top-p filtering",
-      "introduced": "01-hotpaths",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/sampling_race.py",
-      "sha256": "ade13cc1ef45c6d66cdc58f20cf2e2e644119bc388b29f975ad2341e6ee82156",
-      "purpose": "Race reduction with native RNG",
-      "introduced": "01-hotpaths",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/qsa_packed.py",
-      "sha256": "3edb369a293d0d7281d9c0c0cafbb5ffe0ffd4f34c22cacab4202df70f37cf9f",
-      "purpose": "Head/query packing with the reviewed BF16 contract; single-split direct output; opt-in sparse-prefill loop/page-map optimization",
-      "introduced": "01-hotpaths",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
-      "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0",
-      "purpose": "BF16 plans, AvBv scales and GEMM execution",
-      "introduced": "01-hotpaths",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flag_gems",
-      "path": "runtime/backend/_metax/ops/index_put.py",
-      "sha256": "56ec63b69230f5d436e63bd97b4912835f420c31134175e545bfc60f2e0a45d4",
-      "purpose": "GPU boolean scalar assignment without host readback; int64 address multiplication for int32-indexed paged state writes",
-      "introduced": "02-host-preparation",
-      "status": "Published address fix plus unpublished model-scoped masked-scalar optimization; keep provenance separate",
-      "published_counterpart": {
-        "pr": "https://github.com/flagos-ai/FlagGems/pull/7981",
-        "commit": "d73a0ba84da8a180c373d1dfc12b09031468b3ef",
-        "exact_file_match": false
-      }
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/hyperconnection_bf16.py",
-      "sha256": "cefed0e793627d5e1726279c7b53ac578b081b6984565b062a803a6b602c0480",
-      "purpose": "Grouped norm, gate reduction and residual injection preserving eager BF16 intermediate rounding",
-      "introduced": "hc-prefill-longctx-20261101",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/host_embedding.py",
-      "sha256": "f8356d0788a11b9d398edf0385befaed7450ab6b7f986d89ae7597f60d89fd05",
-      "purpose": "Generic BF16/int32/FP32 mapped-host row gather with optional head-column selection and int64 large-table addressing",
-      "introduced": "UVA lookup integration",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "ops/FLA/wy_fast.py",
-      "sha256": "a7adff278d0c51958b9edc736ba463e81320e622cc30e48a8e1f3a91abab2ec8",
-      "purpose": "Reuse caller chunk indices and optional host-derived skew; preserve existing kernels and fallback",
-      "introduced": "p4k-gdn-host-metadata-20261102",
-      "status": "Exact source file matches a public PR head; composed runtime installation is not yet public",
-      "published_counterpart": {
-        "pr": "https://github.com/flagos-ai/FlagGems-vllm/pull/1056",
-        "commit": "bf7e04fecc74aac2dfc4642a639a4dd8765f9fd2",
-        "exact_file_match": true
-      }
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/fused/gdn_chunk.py",
-      "sha256": "f1338b987757ac9dfb903f41fe6ffc6ff88fc0104a185f8c062d0cb5b9f1a7e6",
-      "purpose": "Reuse caller chunk indices and optional host-derived skew; preserve existing kernels and fallback",
-      "introduced": "p4k-gdn-host-metadata-20261102",
-      "status": "Exact source file matches a public PR head; composed runtime installation is not yet public",
-      "published_counterpart": {
-        "pr": "https://github.com/flagos-ai/FlagGems-vllm/pull/1056",
-        "commit": "bf7e04fecc74aac2dfc4642a639a4dd8765f9fd2",
-        "exact_file_match": true
-      }
-    },
-    {
-      "package": "flaggems_vllm",
-      "path": "runtime/backend/_metax/ops/rotary_bf16.py",
-      "sha256": "181aaa4d227ea30d2387b5bae3a43775429e38012d9abd0b89fa556757362898",
-      "purpose": "BF16 partial/1D/MRoPE with eager rounding and optional paged cache store",
-      "introduced": "p4k-mbt8192-buffer-fusions-20261102",
-      "status": "Retained development source; no validated public composition pin. API delivery or equivalent replacement remains required"
-    }
+  "required_unpublished_apis": [
+    "MetaX block Top20/top-p and optional race sampling",
+    "MetaX BF16 projection/expert GEMM plans",
+    "HC grouped norm, gate/reduce, residual injection and divide/SiLU",
+    "Mapped-host row gather and BF16 partial/MRoPE/cache-store",
+    "QSA indexer packing and native paged-attention wrappers",
+    "Model-scoped masked scalar assignment"
   ],
-  "active_launch_source_guards": {
-    "flag_gems": [
-      {
-        "path": "ops/mean.py",
-        "sha256": "c968ad14d3ba76ed87c29e5e9346a0e392cdaeaeb01c0774cfd7c5c489394d1c"
-      },
-      {
-        "path": "ops/topk.py",
-        "sha256": "e6d433c2ab1fd63da45ac2d93d3ebed902453637f6a25aaf983b616b17ed7a65"
-      },
-      {
-        "path": "runtime/backend/_metax/heuristics_config_utils.py",
-        "sha256": "2e88725d4ce6c27f3847963bdc0c425493be1537ebe53fbc80779ff9ac560aa2"
-      },
-      {
-        "path": "runtime/backend/_metax/tune_configs.yaml",
-        "sha256": "65b3090adf0bdbb94b625a380b33cfb02895960b884f0234d0cd040cfb9aec0a"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/index_select.py",
-        "sha256": "a403e7a46f5596d0fb251fd6c806a3f36be81a7acfd04a74fe066d44c03e7147"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/index_put.py",
-        "sha256": "56ec63b69230f5d436e63bd97b4912835f420c31134175e545bfc60f2e0a45d4"
-      }
-    ],
-    "flaggems_vllm": [
-      {
-        "path": "ops/FLA/wy_fast.py",
-        "sha256": "a7adff278d0c51958b9edc736ba463e81320e622cc30e48a8e1f3a91abab2ec8"
-      },
-      {
-        "path": "ops/qwen4/ple_conv.py",
-        "sha256": "2f273afafdfd1a991dd0138b0d330d001cf0cd17bdcb96b83a22a5f3929140c0"
-      },
-      {
-        "path": "ops/qwen4/qsa_attention.py",
-        "sha256": "89c0bb3e47fedfb7ef73512ceff6fe4d464863a296e874eadb411a54342efb42"
-      },
-      {
-        "path": "runtime/backend/_metax/fused/gdn_chunk.py",
-        "sha256": "f1338b987757ac9dfb903f41fe6ffc6ff88fc0104a185f8c062d0cb5b9f1a7e6"
-      },
-      {
-        "path": "runtime/backend/_metax/heuristics_config_utils.py",
-        "sha256": "65325853d03d9aa436b21ebbfa7fb15d7d0a4d7df3171266461824816ebd008e"
-      },
-      {
-        "path": "runtime/backend/_metax/tune_configs.yaml",
-        "sha256": "0d6d1d76f8b3f9f75fc27367a32f2a7435282443e3c275f9f5cfead17f62311d"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/__init__.py",
-        "sha256": "5ccb1a7467477c5209d724e3dc89e8b5559be51ddf35817740b2c7ee4c40fcda"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/top_k_top_p.py",
-        "sha256": "4b6213058e266879673bac961719804aaaf08ab0e190b1f4c818bcbd34b6e0d4"
-      },
-      {
-        "path": "ops/top_k_top_p.py",
-        "sha256": "275a38c8e8d03bee79e7d0beb46ef6a6b88a3016d4982d3ec523e7f3a6019d84"
-      },
-      {
-        "path": "ops/__init__.py",
-        "sha256": "80de99b5416f586ffc4131046876cbe2bf2028a745f078194033ef112226ec5d"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/sampling_top20.py",
-        "sha256": "c1cea3fd6db8dd25306f80b36aab2b9fe9f387b7980b854f92d00dd99f819186"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/sampling_race.py",
-        "sha256": "ade13cc1ef45c6d66cdc58f20cf2e2e644119bc388b29f975ad2341e6ee82156"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/qsa_packed.py",
-        "sha256": "3edb369a293d0d7281d9c0c0cafbb5ffe0ffd4f34c22cacab4202df70f37cf9f"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/mctlass_bf16.py",
-        "sha256": "7cb58947d6f399c7812eb05cd5c129f2896fe0f72c8b620ee43aa2705c8442a0"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/hyperconnection_bf16.py",
-        "sha256": "cefed0e793627d5e1726279c7b53ac578b081b6984565b062a803a6b602c0480"
-      },
-      {
-        "path": "ops/qwen4/qsa.py",
-        "sha256": "460a001aec9806a65450e9e018af8e92df00505533b8c9e2cc3bdab415b20d59"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/radix_topk.py",
-        "sha256": "f77b097c984199b324efc933d5b4756a5ed0b8a30f3cc280246e35818e61710e"
-      }
-    ],
-    "vllm": [
-      {
-        "path": "model_executor/layers/fla/ops/fused_sigmoid_gating.py",
-        "sha256": "000ab8996af9788fdb8843a6a3b91833e7a14c8acc0e1ea073a536330f64cb6f"
-      }
-    ]
+  "native_vllm_capability": {
+    "api": "default-off modular expert output-buffer alias",
+    "status": "Not in the unmodified vLLM base; requires separately delivered native support"
   },
-  "accuracy": "No new quantization, RNG distribution or model accuracy claim",
-  "portability": "Source hashes identify reproduction files, not public installable revisions; operator publication is separate.",
-  "vllm_local_capability": {
-    "base": "ee0da84ab9e04ac7610e28580af62c365e898389",
-    "path": "model_executor/layers/fused_moe/modular_kernel.py",
-    "sha256": "b50933dd1f2c525eedb485f68cd032e6bfaaaba03a9c672b49c984b4d8155b58",
-    "purpose": "Default-off modular expert output-buffer alias capability",
-    "status": "Source-locked native capability; model integration validated; standalone publication deferred"
-  },
-  "qsa_native_candidate": {
-    "status": "Unpublished API composition; numerical/changed-graph validation recorded separately; no public-release claim",
-    "apis": [
-      "qsa_indexer_fast",
-      "native_qsa_attention"
-    ],
-    "files": [
-      {
-        "path": "runtime/backend/_metax/ops/qsa_indexer_fast.py",
-        "sha256": "ad0313eadd9c24b9d60fc7e8d6cb6e1ef6066e77e6e99c350840b47447e1c141"
-      },
-      {
-        "path": "runtime/backend/_metax/ops/qsa_paged_native.py",
-        "sha256": "97b33e9196d13e16969c9dd9ca2ecea3b6f224b1153364a54db4d0b03601c71b"
-      }
-    ],
-    "native_binary_sha256": "1b5a65a404de34072c47cf244ab516fac8831c929d84c6a329642806e032d9b9",
-    "precision": "BF16 module tolerances; full-model accuracy pending",
-    "mode": "MTP off; prefill/mixed/decode; main attention has no small-batch performance split",
-    "public_api_paths": [
-      "ops/qwen4/qsa_indexer_fast.py",
-      "ops/qwen4/qsa_native.py"
-    ],
-    "public_api_sources": [
-      {
-        "path": "ops/qwen4/qsa_indexer_fast.py",
-        "sha256": "7d41c0351f21390641e2353ddbca5774d6fd2c0cef7e7c46a5f0e0057bc8fad4"
-      },
-      {
-        "path": "ops/qwen4/qsa_native.py",
-        "sha256": "c330739f946545f87ab26953499891e844cb506a780ca56b3b7f17a4247a3144"
-      }
-    ]
-  },
-  "publication_requirements": [
-    "Publish required numerical APIs and tests before replacing source fingerprints with team-accessible commits",
-    "Preserve the exact measured launch choices and native MoE alias capability when reconciling pins",
-    "Do not copy numerical source or source-replacement scripts into the model plugin",
-    "QSA operator publication remains deferred; this manifest is not a public installation lock"
-  ]
+  "runtime_source_guards": "vllm_fl/dispatch/config/qwen3_8_flash_next_metax_tuning.json: source_files",
+  "installation_requirement": "Publish the required APIs/tests and pin accessible commits before claiming a public optimized installation. Source SHA guards alone are not installable revisions.",
+  "fallback_requirement": "Keep native/reference paths and sampling contracts. Do not edit installed sources or disable FlagOS to conceal a missing dependency."
 }

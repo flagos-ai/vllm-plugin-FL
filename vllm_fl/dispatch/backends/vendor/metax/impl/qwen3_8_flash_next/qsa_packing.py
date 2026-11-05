@@ -1,22 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Model shape/metadata policy over library QSA kernels."""
 
-import json
 from functools import lru_cache
-from pathlib import Path
 
 import torch
 
-from .shape_limits import max_prefill_rows
+from .shape_limits import load_tuning_config, max_prefill_rows
 
 
 @lru_cache(maxsize=1)
 def _long_context_settings():
-    path = (
-        Path(__file__).resolve().parents[5]
-        / "config/qwen3_8_flash_next_metax_tuning.json"
-    )
-    return json.loads(path.read_text())["qsa_long_context"]
+    return load_tuning_config()["qsa_long_context"]
 
 
 def packed_attention(

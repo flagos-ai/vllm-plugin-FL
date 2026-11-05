@@ -1,12 +1,454 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""Qwen3.8 integration and contract regressions."""
+
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 import torch.nn.functional as F
-from _qwen38_cpu import ple, ple_metadata
+from _qwen38_cpu import (
+    ROOT,
+    ngram,
+    ple,
+    ple_metadata as convolution_ple_metadata,
+    worker,
+)
+
+# Hash contracts.
 
 
-def native_conv(
+def hash_oracle(ids, starts, contexts, multipliers, sizes, offsets, heads, eos):
+    result = []
+    for r, (begin, end) in enumerate(zip(starts, starts[1:])):
+        history = list(contexts[r])
+        for token in ids[begin:end]:
+            sequence = history + [token]
+            previous_eos = max(
+                (i for i, v in enumerate(sequence[:-1]) if v == eos), default=-1
+            )
+            shifted = [sequence[-1]]
+            for distance in range(1, len(multipliers)):
+                position = len(sequence) - 1 - distance
+                shifted.append(
+                    sequence[position]
+                    if position >= 0 and position > previous_eos
+                    else eos
+                )
+            values = []
+            for order in range(2, len(multipliers) + 1):
+                value = 0
+                for i in range(order):
+                    value ^= (shifted[i] * multipliers[i]) & ((1 << 64) - 1)
+                if value >= 1 << 63:
+                    value -= 1 << 64
+                for h in range((order - 2) * heads, (order - 1) * heads):
+                    values.append(value % sizes[h] + offsets[h])
+            result.append(values)
+            history.append(token)
+    return torch.tensor(result, dtype=torch.int64)
+
+
+def test_hash_matches_independent_signed_integer_oracle_and_eos():
+    ids, starts, context = [3, 9, 5, 7, 4], [0, 3, 3, 5], [[9, 2], [6, 7], [8, 9]]
+    multipliers, sizes, offsets = [2**62 + 3, 19, 29], [23, 31, 37, 41], [0, 23, 54, 91]
+    actual = ngram.compute_ngram_ids_cpu(
+        torch.tensor(ids),
+        torch.tensor(starts),
+        torch.tensor(context),
+        multipliers=torch.tensor(multipliers),
+        vocab_sizes=torch.tensor(sizes),
+        vocab_offsets=torch.tensor(offsets),
+        heads_per_ngram=2,
+        eos_token_id=9,
+    )
+    assert torch.equal(
+        actual, hash_oracle(ids, starts, context, multipliers, sizes, offsets, 2, 9)
+    )
+
+
+def test_hash_is_chunk_invariant():
+    params = dict(
+        multipliers=torch.tensor([5, 7, 11]),
+        vocab_sizes=torch.tensor([23, 29]),
+        vocab_offsets=torch.tensor([0, 23]),
+        heads_per_ngram=1,
+        eos_token_id=9,
+    )
+    whole = ngram.compute_ngram_ids_cpu(
+        torch.tensor([1, 2, 9, 3, 4]),
+        torch.tensor([0, 5]),
+        torch.tensor([[9, 9]]),
+        **params,
+    )
+    first = ngram.compute_ngram_ids_cpu(
+        torch.tensor([1, 2, 9]), torch.tensor([0, 3]), torch.tensor([[9, 9]]), **params
+    )
+    second = ngram.compute_ngram_ids_cpu(
+        torch.tensor([3, 4]), torch.tensor([0, 2]), torch.tensor([[2, 9]]), **params
+    )
+    assert torch.equal(torch.cat((first, second)), whole)
+
+
+def hash_make_model(monkeypatch, rank):
+    monkeypatch.setattr(ngram, "get_tensor_model_parallel_world_size", lambda: 2)
+    monkeypatch.setattr(ngram, "get_tensor_model_parallel_rank", lambda: rank)
+    monkeypatch.setattr(ngram, "tensor_model_parallel_all_reduce", lambda value: value)
+    cfg = SimpleNamespace(
+        ngram_size=3,
+        heads_per_ngram=1,
+        eos_token_id=9,
+        vocab_size=64,
+        split_ngram_parts=4,
+        seed=1234,
+        ngram_vocab_size_base=17,
+        make_ngram_vocab_size_divisible_by=8,
+    )
+    return ngram.HostNGramEmbedding(cfg, 8, 0, 16, 4, "ple")
+
+
+def test_host_shards_load_and_sum_to_unsharded_embedding(monkeypatch):
+    models = [hash_make_model(monkeypatch, rank) for rank in (0, 1)]
+    rows = models[0].ngram_embedding.org_vocab_size
+    full = (torch.arange(rows)[:, None] % 23 + torch.arange(4)[None, :] / 8).bfloat16()
+    shard_size = (rows + 3) // 4
+    for model in models:
+        model.load_weights(
+            [
+                (
+                    f"ngram_embedding.shard_{i}.weight",
+                    full[i * shard_size : (i + 1) * shard_size],
+                )
+                for i in range(4)
+            ]
+        )
+        assert model.ngram_embedding.weight.device.type == "cpu"
+        assert model.ngram_embedding.weight.shape[0] == rows // 2
+    ids, starts, context = (
+        torch.tensor([1, 2, 3, 4]),
+        torch.tensor([0, 2, 4]),
+        torch.tensor([[9, 9], [8, 9]]),
+    )
+    outputs = []
+    for model in models:
+        with pytest.raises(RuntimeError, match="not prepared"):
+            model(ids, starts, context)
+        pointer = model.prepared_embeddings.data_ptr()
+        model.prepare_host_lookup(ids, starts, context)
+        outputs.append(model(ids, starts, context).clone())
+        # The model forward reads a fixed allocation; it cannot invoke hashing.
+        assert model.prepared_embeddings.data_ptr() == pointer
+    m = models[0]
+    hashes = ngram.compute_ngram_ids_cpu(
+        ids,
+        starts,
+        context,
+        multipliers=m.layer_multipliers,
+        vocab_sizes=m.ngram_heads_vocab_sizes,
+        vocab_offsets=m.ngram_heads_offsets,
+        heads_per_ngram=1,
+        eos_token_id=9,
+    )
+    expected = full[hashes].flatten(-2)
+    assert torch.equal(outputs[0] + outputs[1], expected)
+
+
+def test_graph_padding_is_zero_and_host_weight_stays_host(monkeypatch):
+    model = hash_make_model(monkeypatch, 0)
+    model.ngram_embedding.weight.data.fill_(1)
+    ids, starts, context = (
+        torch.tensor([1, 2, 7, 7]),
+        torch.tensor([0, 2]),
+        torch.tensor([[9, 9]]),
+    )
+    model.prepare_host_lookup(ids, starts, context)
+    assert torch.count_nonzero(model(ids, starts, context)[2:]) == 0
+    model.to("cpu")
+    assert model.layer_multipliers.device.type == "cpu"
+    assert model.ngram_embedding.weight.device.type == "cpu"
+    with pytest.raises(ValueError, match="must not be omitted"):
+        model(ids, None, context)
+
+
+def test_shared_owner_loads_once_and_matches_hash_oracle_without_reduction(monkeypatch):
+    model = hash_make_model(monkeypatch, 0)
+    rows = model.ngram_embedding.org_vocab_size
+    model.ngram_embedding = ngram.HostVocabEmbedding(
+        rows, 4, tp_rank=0, tp_size=1, dtype=torch.bfloat16
+    )
+    group = SimpleNamespace(rank_in_group=0, world_size=1, ranks=[0], cpu_group=None)
+    model._shared_lookup = shared_load_buffer()(group, 16, 8, torch.bfloat16)
+    model.host_lookup_mode = "shared_buffer"
+
+    def forbidden_reduce(_):
+        raise AssertionError("shared CPU lookup must not reduce on GPUs")
+
+    monkeypatch.setattr(ngram, "tensor_model_parallel_all_reduce", forbidden_reduce)
+    full = (torch.arange(rows)[:, None] % 23 + torch.arange(4)[None, :] / 8).bfloat16()
+    model.load_weights(
+        [
+            (f"ngram_embedding.shard_{i}.weight", part)
+            for i, part in enumerate(full.chunk(4))
+        ]
+    )
+    assert torch.equal(model.ngram_embedding.weight, full)
+    for ids, starts, context in [
+        ([1, 2, 9, 4, 7, 7], [0, 2, 4], [[9, 9], [3, 9]]),
+        ([5, 6, 8, 8], [0, 1, 2], [[1, 2], [9, 4]]),
+    ]:
+        ids, starts, context = map(torch.tensor, (ids, starts, context))
+        model.prepare_host_lookup(ids, starts, context)
+        actual = int(starts[-1])
+        hashes = hash_oracle(
+            ids[:actual].tolist(),
+            starts.tolist(),
+            context.tolist(),
+            model.layer_multipliers.tolist(),
+            model.ngram_heads_vocab_sizes.tolist(),
+            model.ngram_heads_offsets.tolist(),
+            1,
+            9,
+        )
+        assert torch.equal(model.prepared_embeddings[:actual], full[hashes].flatten(-2))
+        assert not torch.count_nonzero(model.prepared_embeddings[actual:])
+    assert model._shared_lookup._epoch == 2
+    model._shared_lookup.close()
+
+
+def test_shared_consumer_validates_checkpoint_without_allocating_table(monkeypatch):
+    model = hash_make_model(monkeypatch, 1)
+    rows = model.ngram_embedding.org_vocab_size
+    model.ngram_embedding = ngram.HostVocabEmbedding(
+        rows, 4, tp_rank=0, tp_size=1, dtype=torch.bfloat16, allocate=False
+    )
+    model._shared_lookup = object()
+    full = torch.zeros(rows, 4, dtype=torch.bfloat16)
+    loaded = model.load_weights(
+        [
+            (f"ngram_embedding.shard_{i}.weight", part)
+            for i, part in enumerate(full.chunk(4))
+        ]
+    )
+    assert loaded == {"ngram_embedding.weight"}
+    assert model.ngram_embedding.weight.numel() == 0
+    with pytest.raises(ValueError, match="Shape mismatch"):
+        model.load_weights([("ngram_embedding.shard_0.weight", torch.zeros(1, 4))])
+
+
+@pytest.mark.parametrize("order,heads", [(2, 1), (3, 8), (4, 2), (6, 1)])
+def test_packed_hash_with_empty_requests_strides_and_signed_overflow(order, heads):
+    generator = torch.Generator().manual_seed(311 + order)
+    lengths = [0, 1, 0, 17, 1, 33, 0]
+    starts = [0]
+    for length in lengths:
+        starts.append(starts[-1] + length)
+    ids = torch.randint(0, 12, (starts[-1], 2), generator=generator)[:, 0]
+    context = torch.randint(0, 12, (len(lengths), order - 1, 2), generator=generator)[
+        ..., 0
+    ]
+    offsets = torch.tensor([[s, s] for s in starts], dtype=torch.int32)[:, 0]
+    ids[::7] = 9
+    context[::2] = 9
+    multipliers = torch.tensor([2**62 + 3 + 2 * i for i in range(order)])
+    sizes = torch.arange((order - 1) * heads, dtype=torch.int64) + 23
+    vocab_offsets = sizes.cumsum(0) - sizes
+    actual = ngram.compute_ngram_ids_cpu(
+        ids,
+        offsets,
+        context,
+        multipliers=multipliers,
+        vocab_sizes=sizes,
+        vocab_offsets=vocab_offsets,
+        heads_per_ngram=heads,
+        eos_token_id=9,
+    )
+    expected = hash_oracle(
+        ids.tolist(),
+        starts,
+        context.tolist(),
+        multipliers.tolist(),
+        sizes.tolist(),
+        vocab_offsets.tolist(),
+        heads,
+        9,
+    )
+    assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("requests", [0, 3])
+def test_empty_packed_hash_has_exact_shape(requests):
+    actual = ngram.compute_ngram_ids_cpu(
+        torch.empty(0, dtype=torch.int64),
+        torch.zeros(requests + 1, dtype=torch.int64),
+        torch.full((requests, 2), 9, dtype=torch.int64),
+        multipliers=torch.tensor([5, 7, 11]),
+        vocab_sizes=torch.tensor([23, 29]),
+        vocab_offsets=torch.tensor([0, 23]),
+        heads_per_ngram=1,
+        eos_token_id=9,
+    )
+    assert actual.shape == (0, 2)
+    assert actual.dtype == torch.int64
+    assert actual.device.type == "cpu"
+
+
+def test_uva_weight_fragments_wait_for_outer_completion(monkeypatch):
+    model = hash_make_model(monkeypatch, 0)
+    calls = []
+    model._uva_lookup = SimpleNamespace(finish_loading=lambda *args: calls.append(args))
+    model._ple_embedding_load_state = {"shards": set(), "full": False, "buffers": set()}
+    rows = model.ngram_embedding.org_vocab_size
+    shard_size = (rows + 3) // 4
+    full = torch.zeros((rows, 4), dtype=torch.bfloat16)
+    for i in range(4):
+        model.load_weights(
+            [
+                (
+                    f"ngram_embedding.shard_{i}.weight",
+                    full[i * shard_size : (i + 1) * shard_size],
+                )
+            ]
+        )
+        assert not calls
+    with pytest.raises(ValueError, match="hash buffer"):
+        model._finish_host_lookup_loading()
+    model.load_weights(
+        [
+            (name, getattr(model, name).clone())
+            for name in (
+                "layer_multipliers",
+                "ngram_heads_vocab_sizes",
+                "ngram_heads_offsets",
+            )
+        ]
+    )
+    assert not calls
+    model._finish_host_lookup_loading()
+    assert len(calls) == 1
+
+
+def test_uva_direct_weight_transaction_registers_once(monkeypatch):
+    model = hash_make_model(monkeypatch, 0)
+    calls = []
+    model._uva_lookup = SimpleNamespace(finish_loading=lambda *args: calls.append(args))
+    rows = model.ngram_embedding.org_vocab_size
+    shard_size = (rows + 3) // 4
+    full = torch.zeros((rows, 4), dtype=torch.bfloat16)
+    weights = [
+        (name, getattr(model, name).clone())
+        for name in (
+            "layer_multipliers",
+            "ngram_heads_vocab_sizes",
+            "ngram_heads_offsets",
+        )
+    ]
+    weights += [
+        (
+            f"ngram_embedding.shard_{i}.weight",
+            full[i * shard_size : (i + 1) * shard_size],
+        )
+        for i in range(4)
+    ]
+    model.load_weights(weights)
+    assert len(calls) == 1
+    assert not hasattr(model, "_ple_embedding_load_state")
+
+
+# Shared contracts.
+
+# SPDX-License-Identifier: Apache-2.0
+
+
+def shared_load_buffer():
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "vllm_fl/models/qwen3_8_flash_next/host_lookup.py"
+    )
+    spec = importlib.util.spec_from_file_location("qwen_shared_buffer_cpu", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SharedNgramBuffer
+
+
+def shared_publish_worker(rank, rendezvous, result_dir):
+    dist.init_process_group(
+        "gloo", init_method="file://" + rendezvous, rank=rank, world_size=3
+    )
+    group = SimpleNamespace(
+        rank_in_group=rank,
+        world_size=3,
+        ranks=list(range(3)),
+        cpu_group=dist.group.WORLD,
+    )
+    Buffer = shared_load_buffer()
+    buffer = Buffer(group, 17, 32, torch.bfloat16)
+    destination = torch.empty(17, 32, dtype=torch.bfloat16)
+    lookups = 0
+    retained = []
+    for epoch, actual in enumerate([0, 1, 17, 6, 3, 16, 2, 17]):
+        expected = (
+            torch.arange(actual * 32, dtype=torch.float32)
+            .reshape(actual, 32)
+            .add(epoch * 1000)
+            .to(torch.bfloat16)
+        )
+
+        def produce(rows, actual=actual, expected=expected):
+            nonlocal lookups
+            assert rank == 0
+            lookups += 1
+            rows[:actual].copy_(expected)
+            return actual
+
+        destination.fill_(-1)
+        got = buffer.exchange(produce, destination, 17)
+        assert got == actual
+        torch.testing.assert_close(destination[:actual], expected, rtol=0, atol=0)
+        assert torch.all(destination[actual:] == -1)
+        retained.append((destination.clone(), actual, expected.clone()))
+    # Saved consumer staging does not alias a reused shared publication.
+    for saved, actual, expected in retained:
+        torch.testing.assert_close(saved[:actual], expected, rtol=0, atol=0)
+
+    def fail(_):
+        raise ValueError("intentional producer fixture failure")
+
+    try:
+        buffer.exchange(fail, destination, 17)
+    except RuntimeError as exc:
+        assert "producer failed" in str(exc)
+    else:
+        raise AssertionError("producer error was not visible to every rank")
+    assert lookups == (8 if rank == 0 else 0)
+    assert len(retained) == 8
+    buffer.close()
+    buffer.close()
+    Path(result_dir, f"rank{rank}.txt").write_text(f"{lookups}:8")
+    dist.destroy_process_group()
+
+
+def test_shared_result_has_one_producer_and_safe_multi_rank_reuse(tmp_path):
+    mp.spawn(
+        shared_publish_worker,
+        args=(str(tmp_path / "gloo"), str(tmp_path)),
+        nprocs=3,
+        join=True,
+    )
+    assert [(tmp_path / f"rank{i}.txt").read_text() for i in range(3)] == [
+        "8:8",
+        "0:8",
+        "0:8",
+    ]
+
+
+# Convolution contracts.
+
+
+def convolution_native_conv(
     x,
     out,
     state,
@@ -44,9 +486,9 @@ def native_conv(
             state[index, :, :count].copy_(history[:, 1 : count + 1])
 
 
-def make_builder(k, monkeypatch):
-    builder = ple_metadata.PleShortConvAttentionMetadataBuilder.__new__(
-        ple_metadata.PleShortConvAttentionMetadataBuilder
+def convolution_make_builder(k, monkeypatch):
+    builder = convolution_ple_metadata.PleShortConvAttentionMetadataBuilder.__new__(
+        convolution_ple_metadata.PleShortConvAttentionMetadataBuilder
     )
     builder.use_spec_decode = True
     builder.num_spec = k
@@ -56,7 +498,9 @@ def make_builder(k, monkeypatch):
         cache_config=SimpleNamespace(mamba_cache_mode="none")
     )
     monkeypatch.setattr(
-        ple_metadata, "mamba_get_block_table_tensor", lambda table, *args: table
+        convolution_ple_metadata,
+        "mamba_get_block_table_tensor",
+        lambda table, *args: table,
     )
     return builder
 
@@ -80,7 +524,7 @@ def test_ragged_spec_prefill_and_zero_draft_mapping_matches_native(k, monkeypatc
     )
     accepted = torch.tensor([k + 1, 1, k + 1, 1], dtype=torch.int32)
     counts = torch.tensor([k, -1, 0, -1], dtype=torch.int32)
-    metadata = make_builder(k, monkeypatch).build(
+    metadata = convolution_make_builder(k, monkeypatch).build(
         0, common, num_accepted_tokens=accepted, num_decode_draft_tokens_cpu=counts
     )
     assert metadata.spec_state_indices_tensor.tolist() == [1, 3]
@@ -106,7 +550,7 @@ def test_ragged_spec_prefill_and_zero_draft_mapping_matches_native(k, monkeypatc
             kwargs.update(accepted_tokens=accepted[r : r + 1], max_query_len=k + 1)
         else:
             kwargs.update(has_initial_state=torch.tensor([False]))
-        native_conv(
+        convolution_native_conv(
             x[a:b],
             expected[a:b],
             expected_state,
@@ -114,7 +558,9 @@ def test_ragged_spec_prefill_and_zero_draft_mapping_matches_native(k, monkeypatc
             torch.tensor([r + 1]),
             **kwargs,
         )
-    monkeypatch.setattr(layer, "_ple_short_conv", native_conv, raising=False)
+    monkeypatch.setattr(
+        layer, "_ple_short_conv", convolution_native_conv, raising=False
+    )
     actual = layer._short_conv_dispatch_metax(x, metadata, state, weights)
     torch.testing.assert_close(actual, expected)
     torch.testing.assert_close(state, expected_state, atol=0, rtol=0)
@@ -136,7 +582,9 @@ def test_spec_padding_keeps_null_cache_and_zeroes_output(monkeypatch):
         num_accepted_tokens=torch.tensor([3, 1]),
         spec_query_len=4,
     )
-    monkeypatch.setattr(layer, "_ple_short_conv", native_conv, raising=False)
+    monkeypatch.setattr(
+        layer, "_ple_short_conv", convolution_native_conv, raising=False
+    )
     output = layer._short_conv_dispatch_metax(x, metadata, state, weights)
     assert torch.equal(state[0], null)
     assert torch.count_nonzero(output[2:]) == 0
@@ -149,7 +597,7 @@ def test_mtp_metadata_fails_without_worker_acceptance_context(monkeypatch):
 
     # Scope this lazy framework import stub to this test only.
     monkeypatch.setitem(sys.modules, "vllm_fl.worker.qwen3_8_flash_next", worker)
-    builder = make_builder(1, monkeypatch)
+    builder = convolution_make_builder(1, monkeypatch)
     with pytest.raises(RuntimeError, match="worker hook"):
         builder.build(0, SimpleNamespace(num_reqs=1))
 
@@ -189,3 +637,330 @@ def test_ple_state_addresses_use_wide_indices(monkeypatch, speculative):
         torch.ones(7, 4),
     )
     assert len(calls) == 1 and original.dtype == torch.int32
+
+
+# Worker contracts.
+
+
+def test_committed_context_excludes_rejected_draft_suffix():
+    history = torch.tensor(
+        [[10, 11, 12, 91, 92], [20, 81, 82, 83, 84], [99, 99, 99, 99, 99]]
+    )
+    result = worker.committed_context_cpu(history, [3, 1, 0], 2, 0)
+    assert result.tolist() == [[11, 12], [0, 20], [0, 0]]
+    with pytest.raises(ValueError, match="outside"):
+        worker.committed_context_cpu(history, [6], 2, 0)
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_zero_draft_decode_keeps_restore_path_and_prefill_does_not(k):
+    counts = worker.spec_decode_counts(
+        [1, k + 1, 1, 8, 0], [False, False, True, True, False], k
+    )
+    assert counts.tolist() == [0, k, -1, -1, -1]
+
+
+def test_mrv1_hooks_are_idempotent_and_leave_other_models_unchanged():
+    class Runner:
+        model_config = SimpleNamespace(hf_text_config=SimpleNamespace(ple_layer_ids=[]))
+
+        def _init_model_kwargs(self):
+            return {"existing": 1}
+
+        def _dummy_run(self, num_tokens):
+            return num_tokens
+
+        def _build_attention_metadata(self, **kwargs):
+            return kwargs
+
+    worker.install_qwen38_runner_hooks(Runner)
+    first = Runner._init_model_kwargs
+    worker.install_qwen38_runner_hooks(Runner)
+    assert Runner._init_model_kwargs is first
+    instance = Runner()
+    assert instance._init_model_kwargs() == {"existing": 1}
+    assert instance._dummy_run(4) == 4
+    assert not hasattr(instance, "_qwen38_dummy_tokens")
+    assert instance._build_attention_metadata(value=3) == {"value": 3}
+    assert worker.get_ple_spec_metadata() is None
+
+
+def test_mrv1_metadata_context_restores_after_builder_error():
+    class Runner:
+        def _init_model_kwargs(self):
+            return {}
+
+        def _dummy_run(self, n):
+            return n
+
+        def _build_attention_metadata(self, **kwargs):
+            accepted, draft_counts = worker.get_ple_spec_metadata()
+            assert accepted is self.num_accepted_tokens.gpu
+            assert draft_counts is self.num_decode_draft_tokens.cpu
+            assert kwargs["use_spec_decode"] is True
+            raise RuntimeError("builder failure")
+
+    worker.install_qwen38_runner_hooks(Runner)
+    runner = Runner.__new__(Runner)
+    runner.model_config = SimpleNamespace(
+        hf_text_config=SimpleNamespace(
+            supports_qwen38_ngram_context=True,
+            ple_layer_ids=[2],
+        )
+    )
+    runner.speculative_config = SimpleNamespace(num_speculative_tokens=1)
+    runner.vllm_config = SimpleNamespace(
+        parallel_config=SimpleNamespace(pipeline_parallel_size=1),
+        cache_config=SimpleNamespace(
+            mamba_cache_mode="none", enable_prefix_caching=False
+        ),
+        scheduler_config=SimpleNamespace(
+            async_scheduling=False, max_num_batched_tokens=2048
+        ),
+        additional_config={},
+    )
+    runner.num_accepted_tokens = SimpleNamespace(gpu=torch.tensor([2, 1]))
+    runner.num_decode_draft_tokens = SimpleNamespace(cpu=torch.tensor([1, 0]))
+    previous = ("outer context",)
+    token = worker._ple_spec_context.set(previous)
+    try:
+        with pytest.raises(RuntimeError, match="builder failure"):
+            runner._build_attention_metadata(for_cudagraph_capture=True)
+        assert worker.get_ple_spec_metadata() is previous
+    finally:
+        worker._ple_spec_context.reset(token)
+
+
+def test_prefill_tail_cannot_alias_k1_decode_graph(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    import numpy as np
+    from _qwen38_cpu import worker
+
+    class Runner:
+        def __init__(self):
+            self.model_config = NS(
+                hf_text_config=NS(supports_qwen38_ngram_context=True, ple_layer_ids=[2])
+            )
+            self.input_batch = NS(
+                num_computed_tokens_cpu=np.array([20, 18]),
+                num_prompt_tokens=np.array([20, 20]),
+            )
+
+        def _init_model_kwargs(self):
+            return {}
+
+        def _dummy_run(self, *args, **kwargs):
+            return None
+
+        def _build_attention_metadata(self, *args, **kwargs):
+            return None
+
+        def _determine_batch_execution_and_padding(self, *args, **kwargs):
+            return kwargs
+
+    worker.install_qwen38_runner_hooks(Runner)
+    runner = Runner()
+    assert runner._determine_batch_execution_and_padding(num_reqs=2, force_eager=False)[
+        "force_eager"
+    ]
+    assert not runner._determine_batch_execution_and_padding(
+        num_reqs=1, force_eager=False
+    )["force_eager"]
+    runner._qwen38_dummy_tokens = 4
+    assert not runner._determine_batch_execution_and_padding(
+        num_reqs=2, force_eager=False
+    )["force_eager"]
+    runner._qwen38_dummy_tokens = None
+    runner.model_config.hf_text_config.supports_qwen38_ngram_context = False
+    assert not runner._determine_batch_execution_and_padding(
+        num_reqs=2, force_eager=False
+    )["force_eager"]
+
+
+@pytest.mark.parametrize("k,allowed", [(1, True), (2, True), (3, True), (4, False)])
+def test_metax_config_accepts_only_validated_mtp_lengths(monkeypatch, k, allowed):
+    from _qwen38_cpu import declarations
+
+    from vllm import envs
+
+    monkeypatch.setattr(envs, "VLLM_USE_V2_MODEL_RUNNER", False)
+    config_module = declarations(
+        ROOT / "vllm_fl/patches/qwen3_8_flash_next.py",
+        "_qwen38_metax_config_cpu",
+        names={"_verify_metax_config"},
+    )
+    config = SimpleNamespace(
+        speculative_config=SimpleNamespace(
+            num_speculative_tokens=k,
+            disable_padded_drafter_batch=True,
+        ),
+        model_config=SimpleNamespace(dtype=torch.bfloat16, multimodal_config=None),
+        cache_config=SimpleNamespace(
+            mamba_ssm_cache_dtype="float32",
+            mamba_cache_mode="none",
+            enable_prefix_caching=False,
+        ),
+        scheduler_config=SimpleNamespace(
+            async_scheduling=False, max_num_batched_tokens=2048
+        ),
+        additional_config={},
+        parallel_config=SimpleNamespace(pipeline_parallel_size=1),
+    )
+    if allowed:
+        config_module._verify_metax_config(config)
+    else:
+        with pytest.raises(NotImplementedError, match="MTP K1, K2 or K3"):
+            config_module._verify_metax_config(config)
+
+
+@pytest.mark.parametrize(
+    "enabled,counts,spec,prompt_embeds,want_cpu",
+    [
+        (True, [0, 1], None, False, True),
+        (False, [0, 1], None, False, False),
+        (True, [4, 1], None, False, False),
+        (True, [4, 4], None, False, False),
+        (True, [0, 1], object(), False, False),
+        (True, [0, 1], None, True, False),
+    ],
+)
+def test_ple_uses_cpu_ids_only_for_synchronous_plain_prefill(
+    enabled, counts, spec, prompt_embeds, want_cpu
+):
+    import numpy as np
+
+    NS = SimpleNamespace
+    captured = {}
+
+    def prepare(ids, starts, context, **kwargs):
+        captured.update(ids=ids, starts=starts, context=context, **kwargs)
+        return captured
+
+    runner = NS(
+        vllm_config=NS(
+            parallel_config=NS(pipeline_parallel_size=1),
+            cache_config=NS(mamba_cache_mode="none", enable_prefix_caching=False),
+            scheduler_config=NS(async_scheduling=False),
+            additional_config={"qwen38_ple_cpu_metadata": enabled},
+        ),
+        model_config=NS(hf_text_config=NS(eos_token_id=0)),
+        _qwen38_host_inputs=NS(context_len=2, prepare=prepare),
+        input_batch=NS(
+            num_reqs=2,
+            token_ids_cpu_tensor=torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]]),
+            num_computed_tokens_cpu=np.array(counts),
+            num_prompt_tokens=np.array([4, 4]),
+        ),
+        input_ids=NS(cpu=object(), gpu=object()),
+        query_start_loc=NS(cpu=torch.tensor([0, 3, 4])),
+        speculative_config=spec,
+        enable_prompt_embeds=prompt_embeds,
+    )
+    result = worker._mrv1_prepare(runner)
+    assert result["ids"] is (runner.input_ids.cpu if want_cpu else runner.input_ids.gpu)
+    assert result["use_cpu_metadata"] is enabled
+
+
+def test_host_metadata_fast_path_keeps_forward_buffers_and_hash_identical():
+    from _qwen38_cpu import ngram
+
+    outputs = []
+    config = SimpleNamespace(eos_token_id=0)
+    ids = torch.tensor([3, 0, 5, 7, 8])
+    starts = torch.tensor([0, 3, 5], dtype=torch.int32)
+    context = torch.tensor([[0, 1], [2, 6]], dtype=torch.int64)
+
+    def make():
+        buffers = worker._HostInputBuffers.__new__(worker._HostInputBuffers)
+        buffers.config = config
+        buffers.query_start_loc = torch.zeros(5, dtype=torch.int32)
+        buffers.context = torch.zeros((4, 2), dtype=torch.int64)
+
+        def prepare(tokens, offsets, histories, dummy=False):
+            actual = int(offsets[-1])
+            outputs.append(
+                ngram.compute_ngram_ids_cpu(
+                    tokens[:actual],
+                    offsets,
+                    histories,
+                    multipliers=torch.tensor([3, 5, 7]),
+                    vocab_sizes=torch.tensor([31, 37]),
+                    vocab_offsets=torch.tensor([0, 31]),
+                    heads_per_ngram=1,
+                    eos_token_id=0,
+                )
+            )
+
+        buffers.layers = [SimpleNamespace(prepare_host_lookup=prepare)]
+        return buffers
+
+    old, new = make(), make()
+    old_result = old.prepare(ids, starts, context)
+    new_result = new.prepare(ids, starts, context, use_cpu_metadata=True)
+    assert torch.equal(outputs[0], outputs[1])
+    assert torch.equal(old_result["query_start_loc"], new_result["query_start_loc"])
+    assert torch.equal(old_result["ngram_context"], new_result["ngram_context"])
+
+
+def test_async_history_plan_handles_reorder_resume_and_reused_request_ids():
+    states = {k: object() for k in ("a", "b", "c")}
+    old = {"a": (states["a"], 4, 0), "b": (states["b"], 8, 1)}
+    tokens = torch.full((3, 16), -1, dtype=torch.int32)
+    tokens[2, :3] = torch.tensor([5, 6, 7])
+    meta, following = worker.async_context_plan(
+        ["b", "a", "c"],
+        states,
+        [8, 4, 3],
+        torch.tensor([0, 1, 2, 5]),
+        tokens,
+        old,
+        2,
+        99,
+    )
+    assert meta.tolist() == [[1, 99, 99], [0, 99, 99], [-1, 6, 7]]
+    assert [(v[1], v[2]) for v in following.values()] == [(9, 0), (5, 1), (6, 2)]
+    # Recompute from zero and a reused logical ID cannot inherit stale suffixes.
+    states["b"] = object()
+    meta, _ = worker.async_context_plan(
+        ["b", "a"],
+        states,
+        [0, 0],
+        torch.tensor([0, 1, 2]),
+        tokens[:2],
+        old,
+        2,
+        99,
+    )
+    assert meta.tolist() == [[-1, 99, 99], [-1, 99, 99]]
+
+
+def test_async_history_never_seeds_unresolved_native_placeholders():
+    state = {"a": object()}
+    with pytest.raises(ValueError, match="unresolved"):
+        worker.async_context_plan(
+            ["a"],
+            state,
+            [3],
+            torch.tensor([0, 1]),
+            torch.tensor([[1, -1, -1]]),
+            {},
+            2,
+            0,
+        )
+
+
+def test_async_history_seed_padding_and_zero_length_requests():
+    states = {k: object() for k in ("a", "b")}
+    meta, following = worker.async_context_plan(
+        ["a", "b"],
+        states,
+        [1, 0],
+        torch.tensor([0, 0, 3]),
+        torch.tensor([[7, 8, 9], [1, 2, 3]]),
+        {},
+        2,
+        99,
+    )
+    assert meta.tolist() == [[-1, 99, 7], [-1, 99, 99]]
+    assert following["a"][1] == 1 and following["b"][1] == 3
