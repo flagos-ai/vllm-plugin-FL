@@ -61,8 +61,11 @@ try:  # pragma: no cover - vLLM version compat
         prepare_communication_buffer_for_model as _prepare_comm_buffer,
     )
 except ImportError:  # vLLM >= 0.28 dropped the symbol
+
     def _prepare_comm_buffer(*args, **kwargs):
         return None
+
+
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -211,13 +214,17 @@ def _call_native_worker_with_managed_inference(
 class NvidiaWorkerFL(NativeGPUWorker):
     """Thin FL wrapper around vLLM's target-version NVIDIA worker.
 
-    NVIDIA uses the upstream v0.28 GPU worker and V2 model runner unchanged;
+    NVIDIA uses the upstream v0.28 GPU worker and its configured model runner;
     the plugin only installs its dispatch hooks before model construction.
     Keeping this as a delegating wrapper prevents the copied multi-vendor
     worker below from drifting from CUDA behavior in future vLLM releases.
     """
 
     def __init__(self, *args, **kwargs):
+        from vllm_fl.models.hy_v4.nvidia.runtime import prepare_runtime_for_worker
+
+        config = kwargs.get("vllm_config", args[0] if args else None)
+        prepare_runtime_for_worker(config)
         super().__init__(*args, **kwargs)
         self._fl_io_dump_initialized = False
         _initialize_fl_runtime(self.rank)
@@ -324,7 +331,6 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
         # kernels inside spawned workers; when every rank shares the default
         # Triton cache directory, concurrent compilation of the same kernel

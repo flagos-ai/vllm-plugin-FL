@@ -14,7 +14,7 @@ matrix, scenarios, and usage.
 | vllm-plugin-FL Branch | Community vLLM Version |
 |-----------------------|------------------------|
 | `release/0.2` | [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) |
-| `main` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
+| `0.4.0-dev` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
 
 ## Supported Models and Chips
 
@@ -24,6 +24,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 | Model | Status | Reference |
 |-------|--------|-----------|
+| Hy4-preview (W8A8, BF16 MTP) | Draft: text and image adaptation; full quality qualification pending | [H100 serving example](./examples/hy4_preview_serve.sh) |
 | Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
@@ -33,6 +34,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | BAAI/bge-m3 | Supported | [implementation](./vllm_fl/models/bge_m3.py) |
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
 | DeepSeek-V4-Flash (ModelSlim W8A8, Ascend TP8) | Supported | [Ascend guide](./docker/ascend/README.md) |
+
 
 ### Supported Chips
 
@@ -162,6 +164,69 @@ that are native in vLLM 0.28.0 and Transformers 5 are not duplicated here.
 Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
+
+### Hy4-preview on H100
+
+The Hy4 adapter retains the checkpoint model identities, attention sinks,
+sparse INT8 indexer, iHC and multimodal processor. The H100 recipe uses vLLM
+0.28, TP16/EP16, FP8 main KV, an INT8 sparse indexer, MTP3, a maximum context
+of 204800, the V1 runner, and combined FULL/PIECEWISE graph execution.
+
+The `hy4` installation extra pins official vLLM 0.28.0 and the matching
+numerical-library revisions. The plugin installs model-scoped runtime monkey
+patches through its registration entry point. Install one matching
+FlagGems-vllm wheel containing the RMS and other Hy4 APIs.
+
+Install the plugin and its pinned dependencies:
+
+```sh
+pip install --no-build-isolation '.[hy4]'
+```
+
+The experimental H100 environment used Torch 2.13/CUDA 12.9 and FlagTree with
+Triton 3.6.
+To exercise the selected TLE TopK routes, install the fixed
+[FlagTree source](https://github.com/flagos-ai/FlagTree/tree/f48ad96327288226f54e7dbf4fcb501e02195072)
+after the native dependencies. Its installer replaces Triton; use the same
+environment for all nodes:
+
+```sh
+FLAGTREE_BACKEND=nvidia TRITON_BUILD_PROTON=OFF pip install --no-build-isolation "flagtree @ git+https://github.com/flagos-ai/FlagTree.git@f48ad96327288226f54e7dbf4fcb501e02195072"
+```
+
+Missing TLE capability retains the original pre-launch selection and does not
+establish the historical optimized throughput. The combined package needs
+hardware qualification in the deployment environment.
+
+MTP `eh_proj` must contain the genuine original BF16 weight and be excluded
+from quantization. Prepare a separate checkpoint with:
+
+```sh
+python examples/prepare_hy4_mtp_checkpoint.py W8A8_CHECKPOINT BF16_CHECKPOINT OUTPUT_CHECKPOINT
+```
+
+The example reads and writes one shard on CPU. Other files link to the W8A8
+source, which must remain available; neither source checkpoint is changed.
+Casting an INT8 tensor to BF16 does not restore the original weight.
+
+Run [the service example](./examples/hy4_preview_serve.sh) on each of two H100
+nodes with the same checkpoint and master address and distinct node ranks:
+
+```sh
+bash examples/hy4_preview_serve.sh OUTPUT_CHECKPOINT MASTER_ADDR NODE_RANK
+```
+
+The example uses existing FlagOS policy controls and `HY4_INDEXER_DTYPE=int8`.
+Existing operator allow/deny rules remain effective. The 16k/32k score buckets
+apply only when current-step metadata proves every relevant request fits;
+FULL/decode and unproven metadata retain the complete score width. The BF16
+reader uses actual query/gather capacities. These selections do not shorten
+the model's maximum context.
+
+This remains a Draft integration. Complete-model quality, mixed-reader output
+changes, long-context accuracy and the integrated graph path need current-head
+hardware qualification. The optional FP32 attention reduction candidate is
+excluded from this recipe. Historical performance is recorded in the PR body.
 
 ### Operator profiling
 
