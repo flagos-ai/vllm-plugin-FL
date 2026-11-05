@@ -8,24 +8,25 @@
 # TODO(hank): Remove this once the torch issue is resolved.
 # _____________________________________________________
 
-import torch
 import copy
+import inspect
+from collections.abc import Sequence
+from typing import Any, Literal
 
-from .._compat import legacy_torch_runtime
-
-from torch._functorch._aot_autograd.schemas import AOTConfig
+import torch
 from torch._functorch._aot_autograd.autograd_cache import (
-    check_cacheable,
     AOTAutogradCacheDetails,
     AOTAutogradCachePickler,
+    check_cacheable,
 )
+from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._inductor.compile_fx import _CompileFxKwargs
-
+from torch._inductor.standalone_compile import CompiledArtifact, config, log
+from torch._inductor.utils import InputType
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch._inductor.standalone_compile import CompiledArtifact, config, log
-from typing import Literal, Sequence, Any
-from torch._inductor.utils import InputType
+
+from .._compat import legacy_torch_runtime
 
 
 def autograd_cache_key(
@@ -48,6 +49,20 @@ def autograd_cache_key(
     return key, debug_lines
 
 
+def _get_compiled_artifact_type() -> type[CompiledArtifact]:
+    """Resolve the native cache artifact before compilation has side effects."""
+    if not inspect.isabstract(CompiledArtifact):
+        return CompiledArtifact
+
+    from torch._inductor.standalone_compile import CacheCompiledArtifact
+
+    if inspect.isabstract(CacheCompiledArtifact):
+        raise TypeError(
+            "MetaX standalone compilation requires a concrete CacheCompiledArtifact"
+        )
+    return CacheCompiledArtifact
+
+
 def standalone_compile_impl(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[InputType],
@@ -55,9 +70,10 @@ def standalone_compile_impl(
     dynamic_shapes: Any,
     options: Any,
 ) -> CompiledArtifact:
-    from torch.compiler._cache import CacheArtifactManager
+    artifact_type = _get_compiled_artifact_type()
 
     from torch._inductor.compile_fx import compile_fx
+    from torch.compiler._cache import CacheArtifactManager
 
     ignore_shape_env = False
     if dynamic_shapes == "from_example_inputs":
@@ -126,7 +142,7 @@ def standalone_compile_impl(
                 "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
             )
 
-    return CompiledArtifact(compiled_fn, artifacts)
+    return artifact_type(compiled_fn, artifacts)
 
 
 def standalone_compile(
@@ -179,7 +195,9 @@ if legacy_torch_runtime():
 import torch._functorch._aot_autograd.autograd_cache
 
 if legacy_torch_runtime():
-    torch._functorch._aot_autograd.autograd_cache.autograd_cache_key = autograd_cache_key
+    torch._functorch._aot_autograd.autograd_cache.autograd_cache_key = (
+        autograd_cache_key
+    )
 
 
 # -------------------------------------------------------------------

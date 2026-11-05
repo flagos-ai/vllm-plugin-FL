@@ -276,11 +276,13 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
     ]
     namespace = {
         "os": os,
+        # The extracted hooks still call the unrelated MetaX installer.
         "_install_metax_compat": Mock(),
         "_arm_cpu_platform": lambda: None,
         "_patch_custom_ops": Mock(),
         "_patch_flash_attn_import": Mock(),
         "_get_op_config": Mock(),
+        "_install_kunlunxin_fla_alias": Mock(),
     }
     exec(
         compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"),
@@ -370,6 +372,7 @@ def test_parent_registration_keeps_other_vendor_allocator_unchanged(
     utils.DeviceInfo.return_value.vendor_name = vendor
     original = vars(torch.accelerator).copy()
     result = namespace["register"]()
+    namespace["_install_metax_compat"].assert_called_once_with()
     assert result == (
         "vllm_fl.nvidia_platform.NvidiaPlatformFL"
         if vendor == "nvidia"
