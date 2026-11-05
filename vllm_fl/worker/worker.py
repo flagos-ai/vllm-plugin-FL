@@ -214,7 +214,6 @@ class WorkerFL(WorkerBase):
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # GCU (Enflame): the torch_gcu Triton build JIT-compiles flag_gems
         # kernels inside spawned workers; when every rank shares the default
         # Triton cache directory, concurrent compilation of the same kernel
