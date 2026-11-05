@@ -547,6 +547,13 @@ class ModelRunnerFL(
         # Async scheduling
         self.use_async_scheduling = self.scheduler_config.async_scheduling
 
+        # Defer GDN registration until vLLM imports finish, but keep it before
+        # load_model() constructs layers. Eager platform patch imports can cycle.
+        if getattr(current_platform, "vendor_name", None) == "metax":
+            from vllm_fl.dispatch.backends.vendor.metax.patches import (
+                gdn_linear_attn,  # noqa: F401 - registers the MetaX GDN layer
+            )
+
         # Sampler
         self.sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
 
