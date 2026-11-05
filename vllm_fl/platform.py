@@ -140,43 +140,6 @@ def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     compilation.pass_config.fuse_attn_quant = False
 
 
-# Collectives that torch_musa's MCCL cannot submit while a graph is recording.
-MUSA_COLLECTIVE_SPLITTING_OPS = (
-    "_c10d_functional::all_reduce_",
-    "_c10d_functional::all_reduce",
-    "_c10d_functional::reduce_scatter",
-    "_c10d_functional::all_gather_into_tensor",
-    "_c10d_functional::wait_tensor",
-)
-
-# torch_musa does not share the cudagraph memory pool across captures, so every
-# captured batch size costs a complete activation footprint (~2.4 GiB for a 27B
-# model at TP4 with a 512-token max batch). The upstream 51-size ladder then
-# needs >100 GiB and fails the memory check, so the ladder is thinned out.
-MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES = 10
-
-
-def _thin_cudagraph_capture_sizes(sizes: list[int]) -> list[int]:
-    """Keep a power-of-two ladder (plus the largest size) for MUSA."""
-    kept = sorted({s for s in sizes if s & (s - 1) == 0})
-    if len(kept) < min(4, len(sizes)):
-        # No useful power-of-two ladder: sample the range evenly instead.
-        count = min(len(sizes), MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES)
-        step = len(sizes) / count
-        kept = sorted({sizes[min(int(i * step), len(sizes) - 1)] for i in range(count)})
-    if sizes and sizes[-1] not in kept:
-        kept.append(sizes[-1])
-    kept = sorted(set(kept))
-    if len(kept) > MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES:
-        count = MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES
-        step = len(kept) / (count - 1)
-        kept = sorted(
-            {kept[min(int(i * step), len(kept) - 1)] for i in range(count - 1)}
-            | {kept[-1]}
-        )
-    return kept
-
-
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
@@ -644,15 +607,17 @@ class PlatformFL(Platform):
             cls.device_type == "musa"
             and compilation_config.cudagraph_mode != CUDAGraphMode.NONE
         ):
-            capture_sizes = list(compilation_config.cudagraph_capture_sizes or [])
-            if len(capture_sizes) > MUSA_MAX_CUDAGRAPH_CAPTURE_SIZES:
-                capture_sizes = _thin_cudagraph_capture_sizes(capture_sizes)
-                compilation_config.cudagraph_capture_sizes = capture_sizes
+            from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
+                limit_cudagraph_capture_sizes,
+            )
+
+            thinned = limit_cudagraph_capture_sizes(compilation_config)
+            if thinned is not None:
                 logger.info(
                     "MUSA: limiting cudagraph capture to %d batch sizes %s "
                     "(torch_musa does not share the graph pool across captures)",
-                    len(capture_sizes),
-                    capture_sizes,
+                    len(thinned),
+                    thinned,
                 )
 
         if (
@@ -722,12 +687,11 @@ class PlatformFL(Platform):
             # `vllm::all_reduce` wrapper. torch_musa's MCCL cannot submit or poll
             # those while a graph is recording, so split them out too; they then
             # run eagerly between the captured regions.
-            added = False
-            for _op in MUSA_COLLECTIVE_SPLITTING_OPS:
-                if _op not in compilation_config.splitting_ops:
-                    compilation_config.splitting_ops.append(_op)
-                    added = True
-            if added:
+            from vllm_fl.dispatch.backends.vendor.musa.graph_config import (
+                append_collective_splitting_ops,
+            )
+
+            if append_collective_splitting_ops(compilation_config.splitting_ops):
                 logger.info(
                     "MUSA: excluding c10d collectives from cudagraphs "
                     "(MCCL is not capture-safe); splitting_ops=%s",
