@@ -1,0 +1,53 @@
+{
+  "snapshots": [
+    {
+      "mode": "eager",
+      "moment": "before",
+      "source_header_time": "Thu Nov 05 11:03:59 2026",
+      "physical_device": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0,
+      "listed_gpu_processes": false
+    },
+    {
+      "mode": "eager",
+      "moment": "after",
+      "source_header_time": "Thu Nov 05 11:04:39 2026",
+      "physical_device": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0,
+      "listed_gpu_processes": false
+    },
+    {
+      "mode": "graph",
+      "moment": "before",
+      "source_header_time": "Thu Nov 05 11:04:40 2026",
+      "physical_device": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0,
+      "listed_gpu_processes": false
+    },
+    {
+      "mode": "graph",
+      "moment": "after",
+      "source_header_time": "Thu Nov 05 11:05:22 2026",
+      "physical_device": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0,
+      "listed_gpu_processes": false
+    }
+  ],
+  "limitation": "Only a surface state table; not a proof that all devices or peer state are healthy."
+}
