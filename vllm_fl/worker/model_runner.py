@@ -573,6 +573,23 @@ class ModelRunnerFL(
         parallel_config = self.parallel_config
         self.device = device
         self.pin_memory = is_pin_memory_available()
+        self.use_ascend_attention = (
+            getattr(current_platform, "vendor_name", None) == "ascend"
+        )
+        self.use_ascend_hybrid_cache = False
+        if self.use_ascend_attention:
+            from vllm_fl.kv_cache.ascend.hybrid import uses_dense_hybrid_cache
+
+            self.use_ascend_hybrid_cache = uses_dense_hybrid_cache(model_config)
+        self._ascend_attn_state = None
+        self.graph_runtime = None
+        if self.use_ascend_attention:
+            from vllm_fl.compilation.graph_runtime import GraphRuntimeController
+
+            self.graph_runtime = GraphRuntimeController(
+                vllm_config=vllm_config,
+                full_graph_wrapper_type=GraphWrapper,
+            )
         self.dtype = self.model_config.dtype
 
         self.kv_cache_dtype = kv_cache_dtype_str_to_dtype(
@@ -2066,6 +2083,24 @@ class ModelRunnerFL(
         # E.g., [2, 5, 3] -> [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
         req_indices = np.repeat(self.arange_np[:num_reqs], num_scheduled_tokens)
 
+        if self.use_ascend_attention:
+            from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                classify_ascend_attention_state,
+            )
+
+            num_valid_tokens = num_scheduled_tokens.copy()
+            for req_idx, req_id in enumerate(self.input_batch.req_ids):
+                num_valid_tokens[req_idx] -= len(
+                    scheduler_output.scheduled_spec_decode_tokens.get(req_id, [])
+                )
+            self._ascend_attn_state = classify_ascend_attention_state(
+                self.input_batch.num_computed_tokens_cpu[:num_reqs],
+                num_scheduled_tokens,
+                num_valid_tokens,
+                self.scheduler_config.enable_chunked_prefill,
+                self.speculative_config.method if self.speculative_config else None,
+            )
+
         # cu_num_tokens: [2, 5, 3] -> [2, 7, 10]
         # self.query_pos.np[:10]: [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
         cu_num_tokens = self._get_cumsum_and_arange(
@@ -2400,6 +2435,7 @@ class ModelRunnerFL(
         cascade_attn_prefix_lens: list[list[int]] | None = None,
         slot_mappings: dict[int, torch.Tensor] | None = None,
         block_table_rows_are_current: bool = False,
+        ascend_attn_state: Any | None = None,
     ) -> tuple[PerLayerAttnMetadata, CommonAttentionMetadata | None]:
         """
         :return: tuple[attn_metadata, spec_decode_common_attn_metadata]
@@ -2530,6 +2566,17 @@ class ModelRunnerFL(
             positions=self.positions[:num_tokens_padded],
             mm_req_doc_ranges=req_doc_ranges,
         )
+
+        if self.use_ascend_attention:
+            phase = (
+                ascend_attn_state
+                if ascend_attn_state is not None
+                else self._ascend_attn_state
+            )
+            assert phase is not None, (
+                "Ascend metadata requires an explicit attention state"
+            )
+            cm_base.attn_state = phase
 
         if self.dcp_world_size > 1:
             self.dcp_local_seq_lens.cpu[:num_reqs] = get_dcp_local_seq_lens(
@@ -3609,6 +3656,35 @@ class ModelRunnerFL(
             return round_up(num_scheduled_tokens, tp_size)
         return num_scheduled_tokens
 
+    def _pad_query_start_loc_for_fia(
+        self,
+        query_start_loc: CpuGpuBuffer,
+        num_tokens_padded: int,
+        num_reqs: int,
+        batch_desc_num_reqs: int | None = None,
+    ) -> int:
+        """Pad FIA query starts for FULL_DECODE_ONLY decode/capture batches."""
+        num_reqs_padded = (
+            batch_desc_num_reqs if batch_desc_num_reqs is not None else num_reqs
+        )
+
+        if num_tokens_padded == num_reqs_padded * self.uniform_decode_query_len:
+            assert num_reqs <= num_reqs_padded
+            last_loc = query_start_loc.np[num_reqs]
+            query_start_loc.np[num_reqs + 1 : num_reqs_padded + 1] = (
+                self.arange_np[1 : num_reqs_padded + 1 - num_reqs]
+                * self.uniform_decode_query_len
+                + last_loc
+            )
+        else:
+            assert num_reqs == num_reqs_padded
+            if query_start_loc.np[num_reqs_padded] < num_tokens_padded:
+                query_start_loc.np[num_reqs_padded + 1] = num_tokens_padded
+                num_reqs_padded += 1
+
+        query_start_loc.copy_to_gpu()
+        return num_reqs_padded
+
     def _prepare_mm_inputs(
         self, num_tokens: int
     ) -> tuple[torch.Tensor | None, torch.Tensor]:
@@ -4023,6 +4099,7 @@ class ModelRunnerFL(
         use_cascade_attn: bool,
         allow_microbatching: bool = True,
         force_eager: bool = False,
+        disable_full: bool = False,
         # For cudagraph capture TODO(lucas): Refactor how we capture cudagraphs (will
         # be improved in model runner v2)
         force_uniform_decode: bool | None = None,
@@ -4059,7 +4136,9 @@ class ModelRunnerFL(
 
         num_tokens_padded = self._pad_for_sequence_parallelism(num_tokens)
 
-        def dispatch_cudagraph(num_tokens, disable_full=False, valid_modes=None):
+        disable_full = disable_full or use_cascade_attn or has_encoder_output
+
+        def dispatch_cudagraph(num_tokens, valid_modes=None):
             return self.cudagraph_dispatcher.dispatch(
                 num_tokens=num_tokens,
                 has_lora=has_lora,
@@ -4069,9 +4148,7 @@ class ModelRunnerFL(
                 invalid_modes={CUDAGraphMode.FULL} if disable_full else None,
             )
 
-        cudagraph_mode, batch_descriptor = dispatch_cudagraph(
-            num_tokens_padded, disable_full=use_cascade_attn or has_encoder_output
-        )
+        cudagraph_mode, batch_descriptor = dispatch_cudagraph(num_tokens_padded)
         num_tokens_padded = batch_descriptor.num_tokens
         if self.compilation_config.pass_config.enable_sp:
             assert (
@@ -4372,6 +4449,18 @@ class ModelRunnerFL(
                 num_scheduled_tokens_np,
             )
 
+            disable_full = False
+            if self.use_ascend_attention:
+                from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                    AscendAttentionState,
+                )
+
+                # A fresh one-token prompt also looks uniform to the dispatcher,
+                # but the captured attention tasks only support DecodeOnly.
+                disable_full = (
+                    self._ascend_attn_state != AscendAttentionState.DecodeOnly
+                )
+
             cascade_attn_prefix_lens = None
             # Disable cascade attention when using microbatching (DBO)
             if self.cascade_attn_enabled and not self.parallel_config.use_ubatching:
@@ -4394,6 +4483,7 @@ class ModelRunnerFL(
                 num_scheduled_tokens_np=num_scheduled_tokens_np,
                 max_num_scheduled_tokens=max_num_scheduled_tokens,
                 use_cascade_attn=cascade_attn_prefix_lens is not None,
+                disable_full=disable_full,
                 num_encoder_reqs=len(scheduler_output.scheduled_encoder_inputs),
             )
 
@@ -4483,6 +4573,13 @@ class ModelRunnerFL(
             use_spec_decode = len(scheduler_output.scheduled_spec_decode_tokens) > 0
             ubatch_slices_attn = ubatch_slices_padded if pad_attn else ubatch_slices
 
+            if self.use_ascend_attention and cudagraph_mode == CUDAGraphMode.FULL:
+                num_reqs_padded = self._pad_query_start_loc_for_fia(
+                    self.query_start_loc,
+                    num_tokens_padded,
+                    num_reqs,
+                    batch_desc.num_reqs,
+                )
             self._run_common_attention_metadata(num_reqs_padded, cudagraph_mode)
             slot_mappings_by_group, slot_mappings = self._get_slot_mappings(
                 num_tokens_padded=num_tokens_padded
@@ -5590,8 +5687,16 @@ class ModelRunnerFL(
             graph_wrapper_cls = resolve_obj_by_qualname(
                 current_platform.get_static_graph_wrapper_cls()
             )
+            graph_wrapper_kwargs = (
+                {"graph_runtime": self.graph_runtime}
+                if self.graph_runtime is not None
+                else {}
+            )
             self.model = graph_wrapper_cls(
-                self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL
+                self.model,
+                self.vllm_config,
+                runtime_mode=CUDAGraphMode.FULL,
+                **graph_wrapper_kwargs,
             )
         elif self.parallel_config.use_ubatching:
             if cudagraph_mode.has_full_cudagraphs():
@@ -6140,11 +6245,40 @@ class ModelRunnerFL(
                 )
                 self.query_start_loc.np[0] = 0
                 self.query_start_loc.np[1 : num_reqs + 1] = cum_num_tokens
-                self.query_start_loc.np[num_reqs + 1 :].fill(
-                    cum_num_tokens[-1]
-                )
+                self.query_start_loc.np[num_reqs + 1 :].fill(cum_num_tokens[-1])
                 self.query_start_loc.copy_to_gpu()
 
+                prepare_dcp_dummy_context_metadata(
+                    input_batch=self.input_batch,
+                    kv_cache_config=getattr(self, "kv_cache_config", None),
+                    query_pos=self.query_pos,
+                    positions=self.positions,
+                    query_start_loc=self.query_start_loc,
+                    num_reqs=num_reqs,
+                    num_tokens_unpadded=num_tokens_unpadded,
+                    dcp_dummy_context_len=dcp_dummy_context_len,
+                )
+
+                if (
+                    self.use_ascend_attention
+                    and cudagraph_runtime_mode == CUDAGraphMode.FULL
+                ):
+                    num_reqs_padded = self._pad_query_start_loc_for_fia(
+                        self.query_start_loc,
+                        num_tokens_padded,
+                        num_reqs,
+                        batch_desc.num_reqs,
+                    )
+                prepare_dcp_dummy_context_metadata(
+                    input_batch=self.input_batch,
+                    kv_cache_config=getattr(self, "kv_cache_config", None),
+                    query_pos=self.query_pos,
+                    positions=self.positions,
+                    query_start_loc=self.query_start_loc,
+                    num_reqs=num_reqs,
+                    num_tokens_unpadded=num_tokens_unpadded,
+                    dcp_dummy_context_len=dcp_dummy_context_len,
+                )
                 # Sync block table CPU->GPU so cleared rows from
                 # remove_request() are visible to the attention metadata
                 # builder. Without this, stale block IDs from finished
@@ -6157,6 +6291,21 @@ class ModelRunnerFL(
                 )
 
             if build_attention:
+                ascend_dummy_attn_state = None
+                if self.use_ascend_attention:
+                    from vllm_fl.dispatch.backends.vendor.ascend.impl.attention import (
+                        get_ascend_dummy_attention_state,
+                    )
+
+                    ascend_dummy_attn_state = get_ascend_dummy_attention_state(
+                        create_mixed_batch,
+                        speculative_method=(
+                            self.speculative_config.method
+                            if self.speculative_config
+                            else None
+                        ),
+                        use_mla=self.model_config.use_mla,
+                    )
                 pad_attn = cudagraph_runtime_mode == CUDAGraphMode.FULL
                 attn_metadata, _ = self._build_attention_metadata(
                     num_tokens=num_tokens_unpadded,
@@ -6168,6 +6317,7 @@ class ModelRunnerFL(
                     slot_mappings=slot_mappings_by_group,
                     use_spec_decode=self.speculative_config is not None,
                     block_table_rows_are_current=self.common_attention_metadata_graph is not None,
+                    ascend_attn_state=ascend_dummy_attn_state,
                 )
 
             # Dummy forwards must not update real KV-cache slots. Capture the
@@ -6661,6 +6811,8 @@ class ModelRunnerFL(
         from vllm.v1.worker.workspace import reset_workspace_manager
 
         # Calls torch.accelerator.synchronize()
+        if self.graph_runtime is not None:
+            self.graph_runtime.clear_decoder_graphs()
         self._cleanup_profiling_kv_cache()
         if current_platform.is_rocm():
             # Drop captured graphs before distributed teardown. On ROCm, delayed
@@ -7011,7 +7163,10 @@ class ModelRunnerFL(
         finally:
             set_cudagraph_capturing_enabled(False)
             CUDAGraphWrapper.clear_all_graphs()
-            GraphWrapper.clear_all_graphs()
+            if self.graph_runtime is not None:
+                self.graph_runtime.clear_decoder_graphs()
+            else:
+                GraphWrapper.clear_all_graphs()
             BreakableCUDAGraphWrapper.clear_all_graphs()
             if encoder_cudagraph_manager is not None:
                 encoder_cudagraph_manager.clear()
@@ -7675,6 +7830,10 @@ class ModelRunnerFL(
         kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
         packed_backing: torch.Tensor | None = None
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
+            if self.use_ascend_hybrid_cache and kv_cache_tensor.block_stride > 0:
+                raise NotImplementedError(
+                    "Ascend dense hybrid cache does not support packed pools"
+                )
             if kv_cache_tensor.block_stride > 0:
                 # Allocate once; all packed tensors alias the same backing.
                 if packed_backing is None:
@@ -7775,6 +7934,13 @@ class ModelRunnerFL(
                         kv_cache_spec.head_size,
                         cache_dtype_str=self.cache_config.cache_dtype,
                     )
+                    if self.use_ascend_hybrid_cache:
+                        from vllm_fl.kv_cache.ascend.hybrid import dense_attention_view
+
+                        kv_caches[layer_name] = dense_attention_view(
+                            raw_tensor, kv_cache_spec, kv_cache_shape
+                        )
+                        continue
                     try:
                         kv_cache_stride_order = attn_backend.get_kv_cache_stride_order()
                         assert len(kv_cache_stride_order) == len(kv_cache_shape)
@@ -7810,10 +7976,44 @@ class ModelRunnerFL(
                 else:
                     raise NotImplementedError
 
-        if has_attn and has_mamba:
+        # Reconcile divergent KV layouts to blocks-first. Triggered by hybrid
+        # attention/mamba models, and by encoder-decoder models whose shared
+        # decoder/cross-attention allocation mixes K/V-first and blocks-first
+        # backends (see _has_mixed_attention_kv_layout).
+        if (
+            has_attn
+            and not self.use_ascend_hybrid_cache
+            and (has_mamba or self._has_mixed_attention_kv_layout(kernel_block_sizes))
+        ):
             self._update_hybrid_attention_mamba_layout(kv_caches, kernel_block_sizes)
 
         return kv_caches
+
+    def _has_mixed_attention_kv_layout(self, kernel_block_sizes: list[int]) -> bool:
+        """Whether attention groups disagree on the physical KV cache layout.
+
+        Encoder-decoder models (e.g. Whisper) share one raw KV allocation
+        between a decoder self-attention layer (K/V-first ROCM_ATTN, block dim
+        1) and a cross-attention layer (blocks-first, block dim 0). Mixed block
+        dims mean a block ID maps to different bytes per layer, so the shared
+        buffer must be normalized to a single (blocks-first) layout.
+        """
+        block_dims: set[int] = set()
+        for group in self._kv_cache_spec_attn_group_iterator():
+            kv_cache_spec = group.kv_cache_spec
+            if not isinstance(kv_cache_spec, AttentionSpec):
+                continue
+            if group.kv_cache_group_id == len(kernel_block_sizes):
+                continue
+            block_dims.add(
+                group.backend.get_kv_cache_block_dim(
+                    kernel_block_sizes[group.kv_cache_group_id],
+                    kv_cache_spec.num_kv_heads,
+                    kv_cache_spec.head_size,
+                    cache_dtype_str=self.cache_config.cache_dtype,
+                )
+            )
+        return len(block_dims) > 1
 
     def _update_hybrid_attention_mamba_layout(
         self, kv_caches: dict[str, torch.Tensor], kernel_block_sizes: list[int]
@@ -7964,6 +8164,8 @@ class ModelRunnerFL(
 
         # create metadata builders
         self.initialize_metadata_builders(kv_cache_config, kernel_block_sizes)
+        if self.graph_runtime is not None:
+            self.graph_runtime.bind_attention_groups(self.attn_groups)
 
         # Reinitialize need to after initialize_attn_backend
         self.may_reinitialize_input_batch(kv_cache_config, kernel_block_sizes)
@@ -8127,6 +8329,12 @@ class ModelRunnerFL(
                     spec = replace(spec, indexes_kv_by_block_stride=indexes)
                 kv_cache_spec[layer_name] = spec
 
+        if self.use_ascend_hybrid_cache:
+            from vllm_fl.kv_cache.ascend.hybrid import pad_attention_specs
+
+            kv_cache_spec = pad_attention_specs(
+                kv_cache_spec, self.cache_config.mamba_page_size_padded
+            )
         return kv_cache_spec
 
     def _to_list(self, sampled_token_ids: torch.Tensor) -> list[list[int]]:
