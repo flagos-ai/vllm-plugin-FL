@@ -1050,9 +1050,13 @@ class WorkerFL(WorkerBase):
 
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
+        # These vendors never execute the Triton Qwen GDN kernels that the
+        # generic warmup drives; iluvatar additionally trips the warmup's
+        # conv-state shape assertion, so skip it instead of failing startup.
         if (
             current_platform.device_type == "txda"
-            or getattr(current_platform, "vendor_name", None) == "kunlunxin"
+            or getattr(current_platform, "vendor_name", None)
+            in ("kunlunxin", "iluvatar")
         ):
             logger.warning(
                 "Detected %s device, skipping generic kernel_warmup",
