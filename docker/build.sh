@@ -96,7 +96,7 @@ Build the vllm-plugin-FL Docker image.
 OPTIONS:
     --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
-    --image-name NAME      Image name (default: ${IMAGE_NAME})
+    --image-name NAME      Image repository (default: ${IMAGE_NAME}; Ascend: harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend)
     --image-tag TAG        Image tag (default: auto-generated)
     --index-url URL        PyPI index URL (for custom mirrors)
     --extra-index-url URL  Extra PyPI index URL
@@ -116,8 +116,7 @@ VERSIONS (override via environment variables):
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
     ASCEND_VLLM_VERSION  vLLM version to install in empty mode (default: ${ASCEND_VLLM_VERSION})
     ASCEND_BASE_IMAGE    Ascend CANN / torch_npu base image (default: ${ASCEND_BASE_IMAGE})
-    ASCEND_FLAGGEMS_VERSION FlagGems git ref for Ascend (default: ${ASCEND_FLAGGEMS_VERSION})
-    ASCEND_FLAGTREE_VERSION FlagTree Ascend wheel (default: ${ASCEND_FLAGTREE_VERSION})
+    FlagGems / FlagTree  Retained from ASCEND_BASE_IMAGE; not installed from separate refs
   MetaX:
     METAX_BASE_IMAGE     Base image (default: ${METAX_BASE_IMAGE})
     METAX_MACA_VERSION   MACA version used in generated image tag (default: ${METAX_MACA_VERSION})
@@ -282,6 +281,9 @@ elif [[ "${PLATFORM}" == "cuda" ]]; then
     fi
 elif [[ "${PLATFORM}" == "ascend" ]]; then
     VLLM_VERSION="${ASCEND_VLLM_VERSION}"
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend"
+    fi
     BUILD_ARGS+=(
         --build-arg "ASCEND_BASE_IMAGE=${ASCEND_BASE_IMAGE}"
         --build-arg "VLLM_VERSION=${ASCEND_VLLM_VERSION}"
@@ -289,7 +291,7 @@ elif [[ "${PLATFORM}" == "ascend" ]]; then
     [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
     [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="ascend-vllm${VLLM_VERSION}-a3-${TARGET}"
+        IMAGE_TAG="vllm${VLLM_VERSION}-a3-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "hygon" ]]; then
     PYTHON_VERSION="${HYGON_PYTHON_VERSION}"

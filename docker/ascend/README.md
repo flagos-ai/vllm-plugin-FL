@@ -35,15 +35,24 @@ FlagTree/CANN Python paths and driver/CANN library paths in Docker `ENV` so
 `/etc/bash_env.sh`. The inherited library paths remain available. Inspection
 of this application image on 2026-11-04 found the following packages:
 
-| Component | Installed version in the selected base |
-| --- | --- |
-| PyTorch / torch-npu | `2.10.0+cpu` / `2.10.0` |
-| FlagTree | `0.7.0+ascend3.5` |
-| FlagGems | `5.4.0` |
-| NumPy | `1.26.4` |
-| compressed-tensors | `0.17.0+flagos` |
-| OpenCV | `5.0.0.93+flagos` |
-| xgrammar | `0.2.3+flagos` |
+| Component | Installed version in the selected base | Source identity |
+| --- | --- | --- |
+| PyTorch | `2.10.0+cpu` | `449b1768410104d3ed79d3bcfe4ba1d65c7f22c0` from `torch/version.py` |
+| torch-npu | `2.10.0` | `94f8a8e6b523d7ba553e1b80d5b5248478391526` from `torch_npu/version.py` |
+| FlagTree / active Triton | `0.7.0+ascend3.5` / `3.5.1` | No Git commit exposed by the installed package; retained from the pinned base digest |
+| FlagGems | `5.4.0` | `_version.py` reports `g6ed2f3907`, resolving to `6ed2f39071ef85db26b7e64f0652a162f434959c` |
+| NumPy | `1.26.4` | Retained from the pinned base digest |
+| compressed-tensors | `0.17.0+flagos` | Retained from the pinned base digest |
+| OpenCV | `5.0.0.93+flagos` | Retained from the pinned base digest |
+| xgrammar | `0.2.3+flagos` | Retained from the pinned base digest |
+
+The upstream vLLM `v0.32.0` tag resolves to
+`5df63a7203cdb9328d824a27b682e77c7b9928be`; its source archive is locked
+by SHA256 `bf592c132f27bbb5f65cff0bbd2ee873eae722b79c8286934fd5b5cf88b43d61`
+in the Dockerfile. CI installs FlagGems-vllm `v0.2.0` commit
+`b5c2c2249319277ccda4d41aa0f65164bd9b2a19` (its package metadata still
+reports `0.1.0`). The active FlagTree Triton entrypoint has SHA256
+`4ec1df745c6bfd03257370a2aab1534e7a31eaa62110cad2ff6c3b56a67cfc50`.
 
 These are observed base-image versions, rather than a new model-validation
 matrix. The older runtime documentation's package table does not describe
@@ -83,10 +92,10 @@ From the repository root on a Linux/aarch64 Docker host:
 docker/build.sh \
   --platform ascend \
   --target ci \
-  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl
+  --image-name harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend
 ```
 
-The generated tag is `ascend-vllm0.32.0-a3-ci`. The build also accepts
+The generated tag is `vllm0.32.0-a3-ci`. The build also accepts
 `--index-url <URL>` and `--extra-index-url <URL>` for package mirrors. These
 options are forwarded to the Ascend Docker build without changing its native
 package overrides.
@@ -109,22 +118,30 @@ Run remote image pulls, builds, installations and tests inside a named
 
 ### Connect the shared CI
 
+Use the following naming pattern for new backend image publications:
+`vllm-plugin-fl-<backend>:vllm<version>-<hardware>-<stage>-<build-id>`.
+The backend has its own repository, the tag records the vLLM version,
+and CI pins the full `repository:tag@sha256:...` reference. The Ascend
+build helper defaults to `harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend`.
+
 The validated dependency image has been published as:
 
 ```text
-harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.32.0-a3-ci-20261104-v2-0b420101
+harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-ci-20261104-v2-0b420101
 ```
 
 [The Ascend CI configuration](../../.github/configs/ascend.yml) now selects
 this immutable reference for `ci_image`:
 
 ```yaml
-ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5
+ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-ci-20261104-v2-0b420101@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5
 ```
 
 Registry manifest inspection confirmed that its config ID matches the
 validated local image recorded below. Pulling by this digest also succeeded;
 the pulled image is `linux/arm64` and its ID matches the validated build.
+The backend-specific repository is a retag of that exact image; its
+native stack and plugin-installation procedure are unchanged.
 
 The [platform registry](../../.github/configs/platforms.yml) enables Ascend
 for PR routing and manual, nightly and weekly discovery. The PR workflow
@@ -143,9 +160,9 @@ For future updates, build and validate a new dependency image, then publish
 it under a new tag with the following procedure:
 
 ```bash
-export LOCAL_IMAGE=codex/vllm-plugin-fl:ascend-vllm0.32.0-a3-ci
-export PUBLISH_TAG="ascend-vllm0.32.0-a3-ci-$(date -u +%Y%m%d)-$(git rev-parse --short=12 HEAD)"
-export PUBLISH_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl:${PUBLISH_TAG}"
+export LOCAL_IMAGE=harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-ci
+export PUBLISH_TAG="vllm0.32.0-a3-ci-$(date -u +%Y%m%d)-$(git rev-parse --short=12 HEAD)"
+export PUBLISH_IMAGE="harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:${PUBLISH_TAG}"
 docker image inspect "$LOCAL_IMAGE" --format '{{.Id}}'
 docker tag "$LOCAL_IMAGE" "$PUBLISH_IMAGE"
 docker login harbor.baai.ac.cn
@@ -163,7 +180,7 @@ docker pull "$PUBLISH_IMAGE"
 docker image inspect "$PUBLISH_IMAGE" --format '{{json .RepoDigests}}'
 ```
 
-Set `ci_image` to that verified `repository@sha256:...` reference, then run the
+Set `ci_image` to that verified `repository:tag@sha256:...` reference, then run the
 shared Ascend workflow with the checked-out plugin revision. Keep the driver
 mounts, model mounts and allocated CI device IDs aligned with the selected
 runner.
@@ -421,8 +438,8 @@ these results to another host. The host driver was retained.
 
 | Artifact | Identity / status |
 | --- | --- |
-| Published dependency image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl:ascend-vllm0.32.0-a3-ci-20261104-v2-0b420101` |
-| Immutable CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5` |
+| Published dependency image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-ci-20261104-v2-0b420101` |
+| Immutable CI image | `harbor.baai.ac.cn/plugin/vllm-plugin-fl-ascend:vllm0.32.0-a3-ci-20261104-v2-0b420101@sha256:eadc6f0fa34d2b8291db76c2ff24f4dddfadfb449b9f5c282147ef7c229a5ad5` |
 | Docker config/image ID | `sha256:0b420101520066407a2e208d3fc3fb7f406fa4afe84c38eb2cf8e86bef97c3d2` |
 | Published-image verification | Manifest/config match; digest pull succeeded and returned the same `linux/arm64` build |
 | vLLM | Ordinary `0.32.0+empty` wheel |
