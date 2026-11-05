@@ -14,6 +14,8 @@ python -m pip install "pytest-xdist>=3.0.0"
 
 python .github/scripts/install_flaggems_vllm.py
 
+python docker/musa/check_compiler.py
+
 python - <<'PY'
 import flag_gems
 import torch

@@ -184,6 +184,35 @@ reproducible native-vLLM and plugin comparison workflow.
 
 If there are multiple plugins in the current environment, you can specify use vllm-plugin-fl via VLLM_PLUGINS='fl'.
 
+### Additional Steps for MUSA
+
+For the `main` branch's vLLM 0.24.0 empty-device build, use MUSA 4.3.5,
+torch 2.9.0 + torch_musa 2.9.0, and **FlagTree 0.6.1a2+mthreads3.6**
+(Triton 3.6.0). The wheel is available for CPython 3.10 on Linux x86_64.
+The packaged [MUSA CI image](./docker/musa/README.md) already includes a
+compatible source build of FlagTree with graph-capture fixes; keep that build
+when using the image.
+
+For a manual installation, install vendor PyTorch, vLLM, and FlagGems first,
+then install the compiler pinned in [`requirements/musa.txt`](./requirements/musa.txt):
+
+```sh
+# Run from the vllm-plugin-FL repository root, after installing the vendor stack.
+python -m pip uninstall -y triton flagtree
+python -m pip install --no-deps -r requirements/musa.txt
+python docker/musa/check_compiler.py
+export GEMS_VENDOR=mthreads
+export VLLM_PLUGINS=fl
+```
+
+FlagTree supplies the Python `triton` module. Reinstall it last if another
+dependency installs standalone Triton, since the packages share files.
+The MThreads Triton 3.2 and 3.6 APIs differ: `AttrsDescriptor` is absent in
+3.6, which uses dictionary attributes. Mixing compiler versions can cause
+the graph-mode failure described in [issue #633](https://github.com/flagos-ai/vllm-plugin-FL/issues/633).
+The compiler check verifies the provider and API version before model loading;
+it does not replace a graph-mode inference test on MUSA hardware.
+
 ### Additional Steps for Ascend
 
 1. Install [FlagTree](https://github.com/flagos-ai/flagtree/)

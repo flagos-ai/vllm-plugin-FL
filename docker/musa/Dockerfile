@@ -84,6 +84,13 @@ print(f"vLLM {vllm} / torch {torch} / torch_musa {torch_musa} / "
       f"FlagGems {flag_gems} — base stack OK")
 PY
 
+# Preserve the base's graph-fixed FlagTree source build, but reject a compiler
+# from another Triton API line or a conflicting standalone Triton distribution.
+# Metadata-only validation does not initialize the MUSA driver during builds.
+COPY docker/musa/check_compiler.py /tmp/check_musa_compiler.py
+RUN python /tmp/check_musa_compiler.py --metadata-only \
+    && rm /tmp/check_musa_compiler.py
+
 # Keep the vendor runtime from the base image and add only the tools required
 # to build the checked-out plugin in CI.
 RUN apt-get update \
