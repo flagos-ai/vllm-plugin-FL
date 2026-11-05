@@ -36,20 +36,20 @@ METAX_PYTHON_VERSION="${METAX_PYTHON_VERSION:-3.12}"
 METAX_PYTHON_TAG="${METAX_PYTHON_TAG:-py312}"
 METAX_MACA_VERSION="${METAX_MACA_VERSION:-3.7.0.107}"
 METAX_VLLM_VERSION="${METAX_VLLM_VERSION:-0.20.2}"
-MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-registry.mthreads.com/mcconline/inference/vllm:v0.20.2-ph1-4.3.5-torch2.7.1-v1.1.0}"
+MUSA_BASE_IMAGE="${MUSA_BASE_IMAGE:-harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.28.0-musa-ci@sha256:8f865d2e2ee21e62b1c0c56f06079c072f9c2023d82fe7e240af4919fc75ce06}"
 MUSA_VERSION="${MUSA_VERSION:-4.3.5}"
-MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.20.2}"
+MUSA_VLLM_VERSION="${MUSA_VLLM_VERSION:-0.28.0}"
 MUSA_PYTHON_VERSION="${MUSA_PYTHON_VERSION:-3.10}"
-MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.7.1}"
-MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.0.0}"
+MUSA_TORCH_VERSION="${MUSA_TORCH_VERSION:-2.9.0}"
+MUSA_FLAGGEMS_VERSION="${MUSA_FLAGGEMS_VERSION:-5.4.0+archive.gbfc6c49d2c4d.pr6894.musafix2}"
 ASCEND_VLLM_VERSION="${ASCEND_VLLM_VERSION:-0.28.0}"
 ASCEND_BASE_IMAGE="${ASCEND_BASE_IMAGE:-quay.io/ascend/vllm-ascend:v0.20.2rc1-a3}"
 ASCEND_FLAGGEMS_VERSION="${ASCEND_FLAGGEMS_VERSION:-3b406c36212744b98b9720bf6d0a5387c09fe96b}"
 ASCEND_FLAGTREE_VERSION="${ASCEND_FLAGTREE_VERSION:-0.6.2a1+ascend3.5}"
 ENFLAME_BASE_IMAGE="${ENFLAME_BASE_IMAGE:-harbor.baai.ac.cn/flagos-inner-models-release/flagrelease-qwen3.6-enflame-gems_5.4.0.dev0-sglang_0.5.11-sglang_plugin_0.1.0-cx_0.13.0-python_3.12.8-torch_gcu_2.11.0_3.8.20260713-pcp_tops3.8.20260714-gpu_s60-arc_amd64-driver_1.9.10:202608141853}"
-ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.9.10}"
+ENFLAME_DRIVER_VERSION="${ENFLAME_DRIVER_VERSION:-1.10.6}"
 ENFLAME_PYTHON_VERSION="${ENFLAME_PYTHON_VERSION:-3.12}"
-ENFLAME_VLLM_VERSION="${ENFLAME_VLLM_VERSION:-0.24.0}"
+ENFLAME_VLLM_VERSION="${ENFLAME_VLLM_VERSION:-0.28.0}"
 KUNLUNXIN_BASE_IMAGE="${KUNLUNXIN_BASE_IMAGE:-harbor.baai.ac.cn/plugin/xvllm-ubuntu2204-py310-torch29-0200:v20.0.10.0}"
 KUNLUNXIN_DRIVER_VERSION="${KUNLUNXIN_DRIVER_VERSION:-5.0.21.43}"
 KUNLUNXIN_PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION:-3.10}"
@@ -135,9 +135,9 @@ VERSIONS (override via environment variables):
     MUSA_FLAGGEMS_VERSION FlagGems version in base image (default: ${MUSA_FLAGGEMS_VERSION})
   Enflame:
     ENFLAME_BASE_IMAGE     Base image (default: ${ENFLAME_BASE_IMAGE})
-    ENFLAME_DRIVER_VERSION Driver version used in generated image tag (default: ${ENFLAME_DRIVER_VERSION})
+    ENFLAME_DRIVER_VERSION Driver version recorded in image metadata (default: ${ENFLAME_DRIVER_VERSION})
     ENFLAME_PYTHON_VERSION Python version in the base image (default: ${ENFLAME_PYTHON_VERSION})
-    ENFLAME_VLLM_VERSION   vLLM version in the base image (default: ${ENFLAME_VLLM_VERSION})
+    ENFLAME_VLLM_VERSION   vLLM version installed in empty mode (default: ${ENFLAME_VLLM_VERSION})
   Kunlunxin:
     KUNLUNXIN_BASE_IMAGE     Base image (default: ${KUNLUNXIN_BASE_IMAGE})
     KUNLUNXIN_DRIVER_VERSION Driver version used in generated image tag (default: ${KUNLUNXIN_DRIVER_VERSION})
@@ -233,7 +233,8 @@ if ! command -v docker &>/dev/null; then
     err "docker is not installed or not in PATH."
 fi
 
-DOCKERFILE="${SCRIPT_DIR}/${PLATFORM}/Dockerfile"
+BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
+DOCKERFILE="${BUILD_CONTEXT}/Dockerfile"
 if [[ ! -f "${DOCKERFILE}" ]]; then
     err "Dockerfile not found: ${DOCKERFILE}"
 fi
@@ -242,8 +243,7 @@ fi
 # Build
 # ==============================================================================
 
-# Build context is the platform-specific directory (e.g. docker/ascend/)
-BUILD_CONTEXT="${SCRIPT_DIR}/${PLATFORM}"
+# Other backends keep the platform-specific context (e.g. docker/ascend/).
 
 # Platform-specific build args and auto-tag
 BUILD_ARGS=()
@@ -328,12 +328,12 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
 elif [[ "${PLATFORM}" == "musa" ]]; then
     PYTHON_VERSION="${MUSA_PYTHON_VERSION}"
     VLLM_VERSION="${MUSA_VLLM_VERSION}"
-    BUILD_ARGS+=(
-        --build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}"
-        --build-arg "FLAGGEMS_VERSION=${MUSA_FLAGGEMS_VERSION}"
-    )
+    if [[ "${IMAGE_NAME}" == "harbor.baai.ac.cn/flagscale/vllm-plugin-fl" ]]; then
+        IMAGE_NAME="harbor.baai.ac.cn/plugin/vllm-plugin-fl"
+    fi
+    BUILD_ARGS+=(--build-arg "MUSA_BASE_IMAGE=${MUSA_BASE_IMAGE}")
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="musa${MUSA_VERSION}-vllm${VLLM_VERSION}-torch${MUSA_TORCH_VERSION}-py${MUSA_PYTHON_VERSION}-${TARGET}"
+        IMAGE_TAG="v${VLLM_VERSION}-musa-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "enflame" ]]; then
     PYTHON_VERSION="${ENFLAME_PYTHON_VERSION}"
@@ -347,7 +347,7 @@ elif [[ "${PLATFORM}" == "enflame" ]]; then
         --build-arg "DRIVER_VERSION=${ENFLAME_DRIVER_VERSION}"
     )
     if [[ -z "${IMAGE_TAG}" ]]; then
-        IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-ci"
+        IMAGE_TAG="v${ENFLAME_VLLM_VERSION}-enflame-${TARGET}"
     fi
 elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     PYTHON_VERSION="${KUNLUNXIN_PYTHON_VERSION}"

@@ -2,19 +2,16 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """MLA attention and lightning indexer for HY V4 (NVIDIA).
 
-NOTE: The reference implementation also offers a fused MLA preprocessing
-wrapper, which is not available here, so this port keeps the eager MLA path
-with an FP8 indexer cache. TODO: restore the fused preprocessing once the
-kernel lands. The HPC gated-MLA GEMM *is* wired up: it replaces the eager
-output gating when the hpc package is installed, ``VLLM_ENABLE_HPC_OPS=1``
-and the elementwise/dtype/alignment constraints hold.
+The indexer retains explicit FP8 and INT8 precision/cache paths. Optional
+FlagGems-vllm consumers share the plugin's operator policy; their metadata
+selection and graph boundaries remain in this model adapter. The optional HPC
+gated-MLA provider keeps its original eligibility and call contract.
 
 The per-head learnable sink is supported through `.flashmla_sparse`, which
 subclasses the platform's sparse MLA backend to forward ``attn_sink``.
 """
 
 from typing import cast
-from vllm_fl.quantization.w8a8.gate_quant_input import maybe_gate_quant_input
 
 import regex as re
 import torch
@@ -27,7 +24,6 @@ from vllm.config.cache import CacheDType
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention import MLAAttention
-from vllm_fl.models.hy_v4.gated_mla import hpc_gated_mla_gemm, hpc_gated_mla_supported
 from vllm.model_executor.layers.layernorm import LayerNorm, RMSNorm
 from vllm.model_executor.layers.linear import (
     ColumnParallelLinear,
@@ -46,7 +42,14 @@ from vllm.platforms import current_platform
 from vllm.v1.attention.backend import AttentionBackend, AttentionType
 from vllm.v1.attention.selector import get_attn_backend
 
+from .gate_overlap import GateOverlap
 from .mrope_direct_cache import maybe_mrope_direct_cache
+from vllm_fl.models.hy_v4.gated_mla import hpc_gated_mla_gemm, hpc_gated_mla_supported
+from vllm_fl.quantization.w8a8.gate_quant_input import maybe_gate_quant_input
+from vllm_fl.quantization.w8a8.q_a_rms_quant import (
+    configure_q_a_rms_quant,
+    maybe_q_a_rms_quant,
+)
 
 logger = init_logger(__name__)
 
@@ -188,7 +191,12 @@ class Indexer(nn.Module):
         # FP8 naive cache: values in fp8 plus one fp32 scale per
         # ``quant_block_size`` elements.
         assert cache_config is not None, "HYV4 indexer requires cache_config"
-        self.k_cache = DeepseekV32IndexerCache(
+        cache_cls = DeepseekV32IndexerCache
+        if self.use_int8:
+            from .int8_indexer_backend import HYV4Int8IndexerCache
+
+            cache_cls = HYV4Int8IndexerCache
+        self.k_cache = cache_cls(
             head_dim=self.head_dim + self.head_dim // self.quant_block_size * 4,
             dtype=torch.uint8,
             prefix=f"{prefix}.k_cache",
@@ -279,7 +287,7 @@ class Indexer(nn.Module):
         # Only q is quantized here; k quantization is fused with cache insertion.
         q = q.view(-1, self.head_dim)
         if self.use_int8:
-            from flag_gems.fused.int8_sparse_indexer import int8_indexer_quantize
+            from flaggems_vllm import int8_indexer_quantize
 
             q_fp8, q_scale = int8_indexer_quantize(q)
         else:
@@ -435,6 +443,11 @@ class HYV4MLAAttention(nn.Module):
                 quant_config=quant_config,
                 prefix=f"{prefix}.q_proj",
             )
+        # create_weights has selected the native q_b scheme; its original
+        # loading/postprocess still runs after this one-time optional selection.
+        self._hy4_q_a_rms_quant_policy = configure_q_a_rms_quant(
+            self.q_a_layernorm, self.q_b_proj
+        )
         self.kv_a_layernorm = RMSNorm(self.kv_lora_rank, eps=config.rms_norm_eps)
         self.kv_b_proj = ColumnParallelLinear(
             self.kv_lora_rank,
@@ -472,9 +485,9 @@ class HYV4MLAAttention(nn.Module):
             )
             # The indexer projects its queries from the MLA q_lora activations,
             # so a sparse layer requires a query down-projection.
-            assert (
-                q_lora_rank is not None
-            ), "HYV4 sparse attention requires q_lora_rank to be set"
+            assert q_lora_rank is not None, (
+                "HYV4 sparse attention requires q_lora_rank to be set"
+            )
             self.indexer = Indexer(
                 vllm_config,
                 config,
@@ -511,6 +524,7 @@ class HYV4MLAAttention(nn.Module):
         else:
             self.linear_gate = None
             self.use_hpc_gated_mla = False
+        self._hy4_gate_overlap = GateOverlap() if self.gated_mla else None
         self.prefix = prefix
 
         # Per-head learnable attention sink. Created BEFORE ``MLAAttention`` so
@@ -693,8 +707,22 @@ class HYV4MLAAttention(nn.Module):
                 [self.q_lora_rank, self.kv_lora_rank + self.qk_rope_head_dim],
                 dim=-1,
             )
-            q_c = self.q_a_layernorm(q_c)
-            q = self.q_b_proj(q_c)[0]
+            fused_q_a = maybe_q_a_rms_quant(
+                self._hy4_q_a_rms_quant_policy,
+                self.q_a_layernorm,
+                self.q_b_proj,
+                q_c,
+            )
+            if fused_q_a is None:
+                q_c = self.q_a_layernorm(q_c)
+                q_b_input = q_c
+            else:
+                # Keep the original BF16 q_c for indexer.wq_b. Only q_b sees
+                # the standard QuantizedActivation, consumed immediately.
+                q_c, q_b_input = fused_q_a
+            q = self.q_b_proj(q_b_input)[0]
+            # Match native temporary lifetime before the eager attention break.
+            del q_b_input, fused_q_a
         else:
             assert self.q_proj is not None
             assert self.kv_a_proj_with_mqa is not None
@@ -744,12 +772,25 @@ class HYV4MLAAttention(nn.Module):
         attn_out = torch.empty(
             output_shape, dtype=hidden_states.dtype, device=hidden_states.device
         )
-        self._indexer_and_attn(
-            hidden_states, q_c, positions, q, kv_c_normed, k_pe, attn_out
+        gate_ticket = (
+            None
+            if self._hy4_gate_overlap is None
+            else self._hy4_gate_overlap.begin(self, hidden_states)
         )
+        gate_factor = None
+        try:
+            self._indexer_and_attn(
+                hidden_states, q_c, positions, q, kv_c_normed, k_pe, attn_out
+            )
+        finally:
+            if gate_ticket is not None:
+                gate_factor = gate_ticket.finish()
 
         if self.gated_mla and self.linear_gate is not None:
-            if self.use_hpc_gated_mla:
+            if gate_factor is not None:
+                quantized = maybe_gate_quant_input(self.o_proj, attn_out, gate_factor)
+                attn_out = attn_out * gate_factor if quantized is None else quantized
+            elif self.use_hpc_gated_mla:
                 # Projection, sigmoid and the product in one launch. The gate
                 # is column-parallel and unbiased, so its local weight shard
                 # maps straight onto the local attn_out columns.
@@ -801,16 +842,10 @@ class HYV4MLAAttention(nn.Module):
         the capture is no longer active inside an eager segment.
         """
         if self.indexer is not None and self.is_sparse and not self.skip_topk:
-            self.indexer(hidden_states, q_c, positions, self.indexer_rope_emb)
-        # v0.28 converts each attention call from the preserved logical buffer;
-        # newer index-group readiness bookkeeping is not present.
-        if self.is_sparse and hasattr(self.mla_attn.impl, "record_logical_topk_ready"):
-            self.mla_attn.impl.record_logical_topk_ready()
-        out.copy_(
-            self.mla_attn(
-                q,
-                kv_c_normed,
-                k_pe,
-                output_shape=out.shape,
-            )
-        )
+            from vllm.forward_context import get_forward_context
+
+            from .score_width_dispatch import score_width_attention_scope
+
+            with score_width_attention_scope(get_forward_context()):
+                self.indexer(hidden_states, q_c, positions, self.indexer_rope_emb)
+        out.copy_(self.mla_attn(q, kv_c_normed, k_pe, output_shape=out.shape))

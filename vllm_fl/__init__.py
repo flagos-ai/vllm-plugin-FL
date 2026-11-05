@@ -135,8 +135,23 @@ def _patch_flash_attn_import():
         sys.modules["vllm.vllm_flash_attn"] = stub
 
 
+def _is_metax_backend() -> bool:
+    """True when this process runs on the MetaX (maca) backend."""
+    from vllm_fl.ops._C_ops_registry import _is_metax_backend as _impl
+
+    return _impl()
+
+
 def _patch_custom_ops():
     """Register fallback schemas when neither vLLM extension ABI is present."""
+    # On MetaX the maca mcoplib._C already registered every _C operator.
+    # Importing vLLM's own vllm._C .so on top of it raises a
+    # duplicate-registration c10::Error, so skip the probe entirely.
+    if _is_metax_backend():
+        logger.debug(
+            "[vllm_fl] MetaX backend owns torch.ops._C; skipping vllm._C import"
+        )
+        return
     for module_name in ("vllm._C", "vllm._C_stable_libtorch"):
         try:
             importlib.import_module(module_name)
@@ -156,14 +171,44 @@ def _patch_custom_ops():
 
 def _init_vendor_device():
     """Apply compatibility hooks that must run before vLLM model imports."""
+    _install_metax_compat()
+
     from vllm_fl.utils import DeviceInfo
 
-    if DeviceInfo().vendor_name == "kunlunxin":
+    vendor_name = DeviceInfo().vendor_name
+    if vendor_name == "mthreads":
+        # The parent process also calls accelerator cleanup when engine startup
+        # fails before workers initialize their model/kernel compatibility hooks.
+        from vllm_fl.dispatch.backends.vendor.musa.patch import (
+            patch_accelerator_missing_attrs,
+        )
+
+        if not patch_accelerator_missing_attrs():
+            raise RuntimeError("Failed to initialize MUSA accelerator allocator APIs")
+    elif vendor_name == "kunlunxin":
         from vllm_fl.dispatch.backends.vendor.kunlunxin.patches.patch_fla_utils import (
             _patch_xpu_get_device,
         )
 
         _patch_xpu_get_device()
+
+
+def _install_metax_compat():
+    """Apply the MetaX vLLM 0.28 compatibility shims before any kernel runs.
+
+    These shims used to be installed as ``.pth`` hooks in ``site-packages`` so
+    that they ran at interpreter start-up. Every one of them either arms a
+    ``sys.meta_path`` hook for a lazily imported module or rebinds a module
+    that is already imported, so the plugin entry point runs early enough and
+    a plain ``pip install`` is sufficient.
+    """
+    try:
+        from vllm_fl.dispatch.backends.vendor.metax.shims import install, metax_active
+
+        if metax_active():
+            install()
+    except Exception as exc:  # pragma: no cover - never block registration
+        logger.warning("[vllm_fl] MetaX compatibility shims not installed: %s", exc)
 
 
 def register():
@@ -192,9 +237,9 @@ def register():
     from vllm_fl.utils import DeviceInfo
 
     vendor_name = DeviceInfo().vendor_name
-    if vendor_name == "ascend":
-        # v0.28 defaults some models to the upstream CUDA/UVA runner. Ascend
-        # uses ModelRunnerFL, so select it before VllmConfig reads the default.
+    if vendor_name in {"ascend", "mthreads", "enflame", "gcu", "tsingmicro"}:
+        # v0.28 defaults some models to the upstream V2 runner. These backends
+        # use ModelRunnerFL; choose it before VllmConfig reads model defaults.
         os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
     if vendor_name == "nvidia":
         return "vllm_fl.nvidia_platform.NvidiaPlatformFL"

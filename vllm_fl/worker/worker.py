@@ -54,6 +54,15 @@ from vllm.distributed.weight_transfer import (
     WeightTransferEngineFactory,
 )
 from vllm.logger import init_logger
+
+# FL: vLLM >= 0.28 removed userbuffer comm-GEMM overlap; tolerate its absence.
+try:  # pragma: no cover - vLLM version compat
+    from vllm.distributed.parallel_state import (
+        prepare_communication_buffer_for_model as _prepare_comm_buffer,
+    )
+except ImportError:  # vLLM >= 0.28 dropped the symbol
+    def _prepare_comm_buffer(*args, **kwargs):
+        return None
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.model_loader import TensorizerLoader
 from vllm.model_executor.warmup.kernel_warmup import kernel_warmup
@@ -341,6 +350,9 @@ class WorkerFL(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
+        # ModelRunnerFL implements vLLM's v1 runner; 0.28 warmup code uses
+        # this flag to select the matching block-table and KV-cache kernels.
+        self.use_v2_model_runner = False
 
         _initialize_fl_runtime(self.rank)
 
@@ -695,16 +707,29 @@ class WorkerFL(WorkerBase):
             by adjusting the `gpu_memory_utilization` parameter.
         """
         if current_platform.device_type == "txda":
-            # Avoid memory profiling OOM on txda platform, return a dummy/fallback value
-            # e.g., 20 GiB or similar default cache memory size.
-            fallback_val = int(
-                os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * 1024 * 1024 * 1024)
-            )
+            # TXDA cannot profile the peak allocation safely. Honor the vLLM
+            # byte budget first, retaining the legacy override/default when
+            # no explicit budget was supplied.
+            kv_cache_memory_bytes = self.cache_config.kv_cache_memory_bytes
+            if kv_cache_memory_bytes is None:
+                try:
+                    kv_cache_memory_bytes = int(
+                        os.environ.get("VLLM_TXDA_KV_CACHE_SIZE", 20 * GiB_bytes)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "VLLM_TXDA_KV_CACHE_SIZE must be a positive integer in bytes."
+                    ) from exc
+            if kv_cache_memory_bytes <= 0:
+                raise ValueError(
+                    "TXDA KV cache memory must be positive; check "
+                    "kv_cache_memory_bytes or VLLM_TXDA_KV_CACHE_SIZE."
+                )
             logger.info(
-                "txda platform detected. Skipping memory profiling to avoid OOM. "
-                f"Using KV cache memory fallback size: {fallback_val / GiB_bytes:.2f} GiB."
+                "TXDA: skipping memory profiling; using %.2f GiB for KV cache.",
+                kv_cache_memory_bytes / GiB_bytes,
             )
-            return fallback_val
+            return kv_cache_memory_bytes
 
         maybe_apply_startup_plan(self)
 
@@ -783,6 +808,52 @@ class WorkerFL(WorkerBase):
             - profile_result.non_kv_cache_memory
             - cudagraph_memory_estimate_applied
         )
+
+        if current_platform.device_type == "musa":
+            native_free_after_graph_profile = int(
+                current_platform.torch_device_fn.mem_get_info(self.device)[0]
+            )
+            init_logger("vllm.musa_graph_profile").info(
+                "MUSA KV budget before MM IPC reserve on %s (bytes): "
+                "requested=%d, non_kv=%d, total_consumed=%d, transient_peak=%d, "
+                "graph_estimate=%d, graph_applied=%d, available_kv=%d, "
+                "initial_free=%d, profile_free=%d, native_free_after_graph_profile=%d, "
+                "total=%d",
+                self.device,
+                self.requested_memory,
+                profile_result.non_kv_cache_memory,
+                profile_result.total_consumed,
+                profile_result.transient_peak_headroom,
+                cudagraph_memory_estimate,
+                cudagraph_memory_estimate_applied,
+                self.available_kv_cache_memory_bytes,
+                self.init_snapshot.free_memory,
+                free_gpu_memory,
+                native_free_after_graph_profile,
+                self.init_snapshot.total_memory,
+            )
+
+        if (
+            current_platform.device_type == "musa"
+            and self.available_kv_cache_memory_bytes <= 0
+        ):
+            logger.error(
+                "MUSA KV cache memory budget exhausted on %s (bytes): "
+                "requested=%d, non_kv=%d, total_consumed=%d, transient_peak=%d, "
+                "graph_estimate=%d, graph_applied=%d, available_kv=%d, "
+                "initial_free=%d, profile_free=%d, total=%d",
+                self.device,
+                self.requested_memory,
+                profile_result.non_kv_cache_memory,
+                profile_result.total_consumed,
+                profile_result.transient_peak_headroom,
+                cudagraph_memory_estimate,
+                cudagraph_memory_estimate_applied,
+                self.available_kv_cache_memory_bytes,
+                self.init_snapshot.free_memory,
+                free_gpu_memory,
+                self.init_snapshot.total_memory,
+            )
 
         unrequested_memory = self.init_snapshot.free_memory - self.requested_memory
         logger.debug(

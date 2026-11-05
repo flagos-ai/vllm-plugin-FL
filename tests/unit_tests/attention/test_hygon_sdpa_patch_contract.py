@@ -1,9 +1,13 @@
 """CPU numerics for the real Hygon adapter; only vLLM dependencies are stubbed."""
 
+import hashlib
 import importlib.machinery
 import importlib.util
 import os
+import subprocess
 import sys
+import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import nullcontext
 from pathlib import Path
@@ -15,6 +19,73 @@ import torch.nn.functional as F
 
 PRODUCTION_SOURCE = Path(__file__).resolve().parents[3] / "vllm_fl/attention/utils.py"
 WRAPPER_MEMBER = "vllm/v1/attention/ops/vit_attn_wrappers.py"
+
+
+def _run_isolated_cpu_case(request):
+    # TorchGCU replaces the public SDPA composite registration, including CPU
+    # calls. Backend flags cannot restore that registration. Run these CPU
+    # contracts in a fresh interpreter while keeping the real adapter and SDPA.
+    gcu_loaded = any(
+        name == "torch_gcu" or name.startswith("torch_gcu.") for name in sys.modules
+    )
+    if os.environ.get("FL_HYGON_CPU_CHILD") == "1":
+        assert not gcu_loaded, "TorchGCU must not load in the isolated CPU test"
+        return False
+    if not gcu_loaded:
+        return False
+
+    reports = Path(
+        os.environ.get("FL_CPU_CONTRACT_REPORT_DIR", "test-results-cpu-contracts")
+    ).resolve()
+    reports.mkdir(parents=True, exist_ok=True)
+    node_hash = hashlib.sha256(request.node.nodeid.encode()).hexdigest()[:12]
+    case_dir = Path(tempfile.mkdtemp(prefix=f"hygon-sdpa-{node_hash}-", dir=reports))
+    junit = case_dir / "junit.xml"
+    request.node.user_properties.append(("cpu_child_nodeid", request.node.nodeid))
+    request.node.user_properties.append(("cpu_child_reports", str(case_dir)))
+    env = dict(os.environ)
+    env.update(
+        TORCH_DEVICE_BACKEND_AUTOLOAD="0",
+        PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
+        PYTEST_ADDOPTS="",
+        FL_HYGON_CPU_CHILD="1",
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "--noconftest",
+        "-p",
+        "no:cacheprovider",
+        "-o",
+        "addopts=",
+        "--junitxml=" + str(junit),
+        "-q",
+        request.node.nodeid,
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=request.config.rootpath,
+            env=env,
+            capture_output=True,
+            timeout=180,
+            check=False,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        (case_dir / "stdout.log").write_bytes(error.stdout or b"")
+        (case_dir / "stderr.log").write_bytes(error.stderr or b"")
+        raise AssertionError(f"Isolated CPU test timed out; see {case_dir}") from error
+    (case_dir / "stdout.log").write_bytes(result.stdout)
+    (case_dir / "stderr.log").write_bytes(result.stderr)
+    request.node.user_properties.append(("cpu_child_returncode", result.returncode))
+    assert result.returncode == 0, f"Isolated CPU test failed; see {case_dir}"
+    assert junit.is_file(), f"Isolated CPU test did not produce {junit}"
+    cases = ET.parse(junit).getroot().findall(".//testcase")
+    assert len(cases) == 1 and cases[0].get("name") == request.node.name
+    assert all(cases[0].find(tag) is None for tag in ("failure", "error", "skipped"))
+    return True
 
 
 @pytest.fixture(scope="module")
@@ -127,8 +198,10 @@ def unpadded_sdpa(q, k, v, scale=None, enable_gqa=False):
     ],
 )
 def test_patched_sdpa_matches_unpadded_cpu_reference(
-    patched_sdpa, dim, value_dim, scale, enable_gqa, dtype
+    patched_sdpa, dim, value_dim, scale, enable_gqa, dtype, request
 ):
+    if _run_isolated_cpu_case(request):
+        return
     inputs = tensors(dim, value_dim, kv_heads=2 if enable_gqa else 4, dtype=dtype)
     before = [(tensor.clone(), tensor.stride(), tensor.data_ptr()) for tensor in inputs]
     assert all(not tensor.is_contiguous() for tensor in inputs)
@@ -142,7 +215,9 @@ def test_patched_sdpa_matches_unpadded_cpu_reference(
         assert tensor.stride() == stride and tensor.data_ptr() == pointer
 
 
-def test_pre_registered_wrapper_uses_patched_helper(patched_sdpa, monkeypatch):
+def test_pre_registered_wrapper_uses_patched_helper(patched_sdpa, monkeypatch, request):
+    if _run_isolated_cpu_case(request):
+        return
     vit = patched_sdpa.vit
     helper = vit.apply_sdpa
     assert helper is not patched_sdpa.original_apply
@@ -170,7 +245,9 @@ def test_pre_registered_wrapper_uses_patched_helper(patched_sdpa, monkeypatch):
     torch.testing.assert_close(output, unpadded_sdpa(*inputs, scale=0.37))
 
 
-def test_cu_seqlens_preserves_three_independent_segments(patched_sdpa):
+def test_cu_seqlens_preserves_three_independent_segments(patched_sdpa, request):
+    if _run_isolated_cpu_case(request):
+        return
     inputs = tensors(kv_heads=2)
     lengths = [2, 3, 4]
     output = patched_sdpa.wrapper(

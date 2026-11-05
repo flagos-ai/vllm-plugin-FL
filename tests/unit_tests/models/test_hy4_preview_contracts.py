@@ -26,7 +26,7 @@ def load(name, relative):
 def test_registration_connects_config_model_and_mtp_hooks(monkeypatch):
     registration = load("hy4_registry_contract", "register.py")
     registration.__package__ = "hy4_registry_fixture"
-    configs, models = {}, {}
+    configs, models, parsers = {}, {}, {}
     text_config, vl_config = type("TextConfig", (), {}), type("VLConfig", (), {})
 
     class SpeculativeConfig:
@@ -49,6 +49,23 @@ def test_registration_connects_config_model_and_mtp_hooks(monkeypatch):
             )
         },
         "vllm.config.speculative": {"SpeculativeConfig": SpeculativeConfig},
+        "vllm.reasoning": {
+            "ReasoningParserManager": SimpleNamespace(
+                register_lazy_module=lambda name, module, cls: parsers.update(
+                    {"reasoning": (name, module, cls)}
+                )
+            )
+        },
+        "vllm.tool_parsers.abstract_tool_parser": {
+            "ToolParserManager": SimpleNamespace(
+                register_lazy_module=lambda name, module, cls: parsers.update(
+                    {"tool": (name, module, cls)}
+                )
+            )
+        },
+        "hy4_registry_fixture.nvidia.runtime_hooks": {
+            "register_runtime_hooks": lambda: None
+        },
         "hy4_registry_fixture.config": {
             "HYV4Config": text_config,
             "HYV4VLConfig": vl_config,
@@ -70,77 +87,18 @@ def test_registration_connects_config_model_and_mtp_hooks(monkeypatch):
     for target in models.values():
         module, _ = target.split(":")
         assert (ROOT / Path(*module.split("."))).with_suffix(".py").is_file()
+    assert set(parsers) == {"reasoning", "tool"}
+    for name, module, cls in parsers.values():
+        assert name == "hy_v4"
+        assert (ROOT / Path(*module.split("."))).with_suffix(".py").is_file()
+    assert models["HYV4VLForConditionalGeneration"].endswith(
+        "nvidia.vl_model:HYV4VLForConditionalGeneration"
+    )
     assert SpeculativeConfig.hf_config_override is mtp.hyv4_mtp_hf_config_override
     assert SpeculativeConfig.__post_init__ is mtp.hyv4_mtp_speculative_post_init
 
 
-def test_outer_architecture_keeps_normal_text_inputs_and_rejects_media(monkeypatch):
-    class CausalModel:
-        def forward(self, *args, **kwargs):
-            return args, kwargs
-
-        def load_weights(self, weights):
-            return list(weights)
-
-    class TextPositions:
-        def __init__(self, count):
-            self.count = count
-
-        def repeat(self, axes, copies):
-            assert copies == 1
-            return [list(range(self.count)) for _ in range(axes)]
-
-    fixtures = {
-        "torch": {
-            "long": "long",
-            "arange": lambda count, **kwargs: TextPositions(count),
-        },
-        "vllm.model_executor.models.interfaces": {
-            "SupportsMRoPE": type("MRoPE", (), {})
-        },
-        "hy4_text_fixture.model": {"HYV4ForCausalLM": CausalModel},
-    }
-    for name, attrs in fixtures.items():
-        module = ModuleType(name)
-        vars(module).update(attrs)
-        monkeypatch.setitem(sys.modules, name, module)
-    wrapper = load("hy4_text_fixture.text_compat", "nvidia/text_compat.py")
-    model = wrapper.HYV4VLForConditionalGeneration()
-    ids, positions, intermediate, embeddings = [object() for _ in range(4)]
-    args, kwargs = model.forward(ids, positions, intermediate, embeddings)
-    assert args == (ids, positions, intermediate, embeddings)
-    assert kwargs == {}
-    assert model.supports_multimodal is False
-    assert model.get_mrope_input_positions([7, 8, 9], []) == (
-        [[0, 1, 2], [0, 1, 2], [0, 1, 2]],
-        0,
-    )
-    for key in (
-        "pixel_values",
-        "pixel_values_videos",
-        "image_embeds",
-        "multi_modal_data",
-    ):
-        with pytest.raises(NotImplementedError, match="text-only"):
-            model.forward(ids, positions, **{key: object()})
-    with pytest.raises(NotImplementedError, match="text-only"):
-        model.get_mrope_input_positions([7], [object()])
-    with pytest.raises(NotImplementedError, match="text-only"):
-        model.embed_multimodal(pixel_values=object())
-    with pytest.raises(NotImplementedError, match="text-only"):
-        model.get_placeholder_str("image", 0)
-    value = object()
-    assert model.load_weights(
-        [
-            ("model.embed_tokens.weight", value),
-            ("language_model.lm_head.weight", value),
-            ("vit.embeddings.weight", object()),
-            ("visual.layers.0.weight", object()),
-        ]
-    ) == [("model.embed_tokens.weight", value), ("lm_head.weight", value)]
-
-
-def test_real_text_config_accepts_checkpoint_header_without_media_components(
+def test_real_multimodal_config_retains_vision_and_text_contracts(
     monkeypatch,
 ):
     pytest.importorskip("transformers")
@@ -164,8 +122,8 @@ def test_real_text_config_accepts_checkpoint_header_without_media_components(
     assert config.text_config.quantization_config == quantization
     assert config.architectures == ["HYV4VLForConditionalGeneration"]
     assert config.text_config.rope_parameters["mrope_section"] == [12, 10, 10]
-    assert not hasattr(config, "vision_config")
-    assert not hasattr(config, "image_token_id")
+    assert config.vision_config.hidden_size == 1152
+    assert config.image_token_id == 120120
 
 
 def test_hy4_config_override_copies_only_the_draft():

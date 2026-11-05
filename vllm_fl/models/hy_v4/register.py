@@ -4,6 +4,7 @@
 
 def register_hy_v4():
     from transformers import AutoConfig
+
     from vllm.model_executor.models import ModelRegistry
 
     from .config import HYV4Config, HYV4VLConfig
@@ -15,7 +16,7 @@ def register_hy_v4():
     )
     ModelRegistry.register_model(
         "HYV4VLForConditionalGeneration",
-        "vllm_fl.models.hy_v4.nvidia.text_compat:HYV4VLForConditionalGeneration",
+        "vllm_fl.models.hy_v4.nvidia.vl_model:HYV4VLForConditionalGeneration",
     )
     ModelRegistry.register_model("HYV4MTP", "vllm_fl.models.hy_v4.nvidia.mtp:HYV4MTP")
 
@@ -26,3 +27,22 @@ def register_hy_v4():
 
     install_hyv4_mtp_config_override()
     install_hyv4_mtp_parallel_config()
+
+    register_hy_v4_parsers()
+
+    from .nvidia.runtime_hooks import register_runtime_hooks
+
+    register_runtime_hooks()
+
+
+def register_hy_v4_parsers():
+    """Expose parser names without importing parser implementations eagerly."""
+    from vllm.reasoning import ReasoningParserManager
+    from vllm.tool_parsers.abstract_tool_parser import ToolParserManager
+
+    ReasoningParserManager.register_lazy_module(
+        "hy_v4", "vllm_fl.models.hy_v4.hy_v4_reasoning_parser", "HYV4ReasoningParser"
+    )
+    ToolParserManager.register_lazy_module(
+        "hy_v4", "vllm_fl.models.hy_v4.hy_v4_tool_parser", "HYV4ToolParser"
+    )

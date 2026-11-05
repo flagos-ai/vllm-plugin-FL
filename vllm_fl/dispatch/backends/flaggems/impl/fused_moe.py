@@ -5,9 +5,11 @@ FlagGems fused moe operator implementations.
 """
 
 import torch
-
+from vllm.logger import init_logger
 from vllm.triton_utils import triton
 from vllm.utils.math_utils import round_up
+
+logger = init_logger(__name__)
 
 
 def moe_align_block_size_flaggems(
@@ -18,7 +20,14 @@ def moe_align_block_size_flaggems(
     pad_sorted_ids: bool = False,
     ignore_invalid_experts: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    from flaggems_vllm import moe_align_block_size_triton
+    if topk_ids.device.type == "gcu":
+        # FlagGems-vllm's generic four-stage kernel uses atomic RMW operations
+        # unsupported by the pinned GCU compiler. Keep the official FlagGems
+        # GCU implementation until the new provider has a native implementation
+        # that passes the align value/padding and graph replay regressions.
+        from flag_gems import moe_align_block_size_triton
+    else:
+        from flaggems_vllm import moe_align_block_size_triton
 
     max_num_tokens_padded = topk_ids.numel() + num_experts * (block_size - 1)
     if pad_sorted_ids:
@@ -154,6 +163,39 @@ def grouped_topk_flaggems(
 
 
 def moe_sum_flaggems(inp, out):
-    from flaggems_vllm import moe_sum
+    if inp.device.type == "gcu" and inp.is_contiguous() and out.is_contiguous():
+        # FlagGems-vllm's MT kernel puts the token count on grid.y, which can
+        # exceed GCU's 255-block limit. Keep its input contract before using
+        # the official GCU kernel; retain the stride-aware provider below.
+        # Remove this branch once the pinned provider supports GCU launch
+        # limits and passes large-token value and graph-replay checks.
+        from flaggems_vllm.ops.moe_sum import _check_moe_sum_inputs
 
-    moe_sum(inp, out)
+        _check_moe_sum_inputs(inp, out)
+        from flag_gems import moe_sum
+
+        moe_sum(inp, out)
+        return
+
+    try:
+        from flaggems_vllm import moe_sum
+
+        moe_sum(inp, out)
+        return
+    except Exception:
+        # MetaX C550: flaggems-vllm ships no working moe_sum kernel for MACA,
+        # so dispatch reports "All implementations for op='moe_sum' have
+        # failed". The upstream flag_gems kernel is the validated path on this
+        # vendor; keep the failure visible everywhere else.
+        import flag_gems
+
+        if str(getattr(flag_gems, "vendor_name", "")).lower() != "metax":
+            raise
+        logger.debug(
+            "flaggems_vllm.moe_sum failed on MetaX; falling back to flag_gems",
+            exc_info=True,
+        )
+
+    from flag_gems import moe_sum as flag_gems_moe_sum
+
+    flag_gems_moe_sum(inp, out)

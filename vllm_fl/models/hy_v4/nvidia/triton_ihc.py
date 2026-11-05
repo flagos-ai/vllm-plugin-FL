@@ -17,12 +17,12 @@ def triton_ihc_supported(x):
 
 
 def triton_ihc_pre(x, weight, scale, base, magnitude, hc_eps, norm_eps):
-    from flaggems_vllm.ops.ihc.ihc_pre import ihc_pre
+    from flaggems_vllm import ihc_pre
 
     return ihc_pre(x, weight, scale, base, magnitude, hc_eps, norm_eps)
 
 
 def triton_ihc_post(x, residual, post):
-    from flaggems_vllm.ops.ihc.ihc_post import ihc_post
+    from flaggems_vllm import ihc_post
 
     return ihc_post(x, residual, post)

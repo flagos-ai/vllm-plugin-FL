@@ -17,19 +17,20 @@ The subclass intentionally keeps the inherited ``get_name()``
 `_canonicalize_sparse_mla_kv_cache_dtype` promotes a quantized KV cache to
 ``fp8_ds_mla`` for it, and `FlashMLASparseImpl` asserts that layout — so a new
 name would silently change KV cache behaviour. Sink support and kernel wrappers
-remain unchanged; metadata uses the native builder.
+remain unchanged; qualified prefill composes the native builder metadata.
 """
 
-from vllm_fl.utils import use_flaggems_op
 from typing import TYPE_CHECKING
 
 import torch
 
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 from vllm.v1.attention.backends.mla.flashmla_sparse import (
     FlashMLASparseBackend,
     FlashMLASparseImpl,
     FlashMLASparseMetadata,
+    FlashMLASparseMetadataBuilder,
 )
 from vllm.v1.attention.ops.flashmla import (
     flash_mla_sparse_fwd,
@@ -37,8 +38,11 @@ from vllm.v1.attention.ops.flashmla import (
 )
 from vllm.v1.worker.workspace import current_workspace_manager
 
+from vllm_fl.utils import use_flaggems_op
+
 if TYPE_CHECKING:
     from vllm.model_executor.models.deepseek_v2 import Indexer
+
 
 logger = init_logger(__name__)
 
@@ -182,7 +186,20 @@ class HYV4FlashMLASparseImpl(FlashMLASparseImpl):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # q shape: (batch, seq_len, num_heads, head_dim)
         actual_num_heads = q.size(2)
+        logical_query_len = q.size(1)
         padded_num_heads = self.fp8_decode_padded_heads
+        # Keep the normal reader's physical query shape consistent with q4
+        # verification. Dummy query rows never contribute to returned rows.
+        align_single_query = (
+            self.kv_cache_dtype == "fp8_ds_mla"
+            and q.shape == (1, 1, 4, 576)
+            and q.dtype == torch.bfloat16
+            and topk_indices.shape == (1, 1, 2048)
+            and topk_indices.dtype == torch.int32
+            and self.softmax_scale == 1 / 16
+            and current_platform.is_device_capability(90)
+        )
+        physical_query_len = 4 if align_single_query else logical_query_len
         attn_sink = self._sinks_for_query(q, head_dim=2, kernel_heads=padded_num_heads)
 
         # Pad query if needed (kernel only supports h_q = 64 or 128)
@@ -191,9 +208,15 @@ class HYV4FlashMLASparseImpl(FlashMLASparseImpl):
                 f"Padding num_heads from {actual_num_heads} to "
                 f"{padded_num_heads} for FP8 sparse decode kernel"
             )
-            q_padded = q.new_zeros((q.size(0), q.size(1), padded_num_heads, q.size(3)))
-            q_padded[:, :, :actual_num_heads, :] = q
+            q_padded = q.new_zeros(
+                (q.size(0), physical_query_len, padded_num_heads, q.size(3))
+            )
+            q_padded[:, :logical_query_len, :actual_num_heads, :] = q
             q = q_padded
+        if align_single_query:
+            # The three zero-query rows use the same legal keys as q0. No
+            # future query or KV entry is needed to align the physical shape.
+            topk_indices = topk_indices.expand(-1, physical_query_len, -1).contiguous()
 
         out, lse = flash_mla_with_kvcache(
             q=q,
@@ -208,46 +231,16 @@ class HYV4FlashMLASparseImpl(FlashMLASparseImpl):
             attn_sink=attn_sink,
         )
 
+        if align_single_query:
+            out = out[:, :logical_query_len, :, :]
+            lse = lse[:, :, :logical_query_len]
+
         # Slice output and lse back to actual head count if we padded
         if actual_num_heads < padded_num_heads:
             out = out[:, :, :actual_num_heads, :]
             lse = lse[:, :actual_num_heads, :]
 
         return out, lse
-
-    def forward_mqa(self, q, kv_c_and_k_pe_cache, attn_metadata, layer):
-        if use_flaggems_op("concat_pad_mla_q_and_sink", default=False):
-            from .mla_composite_staging import maybe_prepare_mla_composite
-
-            prepared = maybe_prepare_mla_composite(self, q)
-            if prepared is not None:
-                from vllm.v1.attention.backends.mla.sparse_utils import (
-                    triton_convert_req_index_to_global_index,
-                )
-
-                num_tokens = prepared[0].shape[0]
-                assert self.topk_indices_buffer is not None
-                topk_indices = self.topk_indices_buffer[:num_tokens]
-                topk_indices, topk_length = triton_convert_req_index_to_global_index(
-                    attn_metadata.req_id_per_token[: topk_indices.shape[0]],
-                    attn_metadata.block_table,
-                    topk_indices,
-                    BLOCK_SIZE=attn_metadata.block_size,
-                    NUM_TOPK_TOKENS=topk_indices.shape[1],
-                    return_valid_counts=True,
-                )
-                return (
-                    self._bf16_flash_mla_kernel(
-                        prepared[0],
-                        kv_c_and_k_pe_cache,
-                        topk_indices,
-                        topk_length,
-                        actual_num_heads=4,
-                        _prepared_q_sink=prepared,
-                    ),
-                    None,
-                )
-        return super().forward_mqa(q, kv_c_and_k_pe_cache, attn_metadata, layer)
 
     def _bf16_flash_mla_kernel(
         self,
@@ -270,6 +263,57 @@ class HYV4FlashMLASparseImpl(FlashMLASparseImpl):
         # all-gathered before this.
         if actual_num_heads is None:
             actual_num_heads = q.shape[1]
+        if (
+            use_flaggems_op("pad_mla_q_sink_slot_bound", default=False)
+            and self.kv_cache_dtype == "fp8_ds_mla"
+            and self.num_heads == 4
+            and self.prefill_padding == 64
+            and current_platform.is_device_capability(90)
+            and actual_num_heads == 4
+            and 1 <= num_tokens <= 2048
+            and q.shape == (num_tokens, 4, 576)
+            and q.dtype == torch.bfloat16
+            and q.stride() == (2304, 576, 1)
+            and self.softmax_scale == 1 / 16
+            and num_tokens
+            <= kv_c_and_k_pe_cache.shape[0]
+            <= self.prefill_bf16_workspace.shape[0]
+            and kv_c_and_k_pe_cache.shape[1:] == (1, 576)
+            and kv_c_and_k_pe_cache.dtype == torch.bfloat16
+            and kv_c_and_k_pe_cache.stride() == (576, 576, 1)
+            and topk_indices.shape == (num_tokens, 2048)
+            and topk_indices.dtype == torch.int32
+            and topk_indices.stride() == (2048, 1)
+            and q.device == kv_c_and_k_pe_cache.device == topk_indices.device
+            and self.sinks is not None
+            and self.sinks.dtype == torch.float32
+            and self.sinks.shape == (4,)
+            and self.sinks.stride() == (1,)
+            and self.sinks.device == q.device
+            and (
+                topk_length is None
+                or (
+                    topk_length.shape == (num_tokens,)
+                    and topk_length.dtype == torch.int32
+                    and topk_length.stride() == (1,)
+                    and topk_length.device == q.device
+                )
+            )
+            and out is None
+            and _prepared_q_sink is None
+        ):
+            q_padded = torch.empty(
+                (num_tokens, 64, 576), dtype=q.dtype, device=q.device
+            )
+            sink_padded = torch.empty((64,), dtype=self.sinks.dtype, device=q.device)
+            slot_bound = torch.empty((num_tokens,), dtype=torch.int32, device=q.device)
+            from flaggems_vllm import pad_mla_q_sink_slot_bound
+
+            pad_mla_q_sink_slot_bound(
+                q, self.sinks, topk_indices, q_padded, sink_padded, slot_bound
+            )
+            topk_length = slot_bound
+            _prepared_q_sink = (q_padded, sink_padded)
         padded_num_heads = (
             (actual_num_heads + self.prefill_padding - 1)
             // self.prefill_padding
@@ -322,11 +366,242 @@ class HYV4FlashMLASparseImpl(FlashMLASparseImpl):
         return output
 
 
+class HYV4FlashMLASparseMetadataBuilder(FlashMLASparseMetadataBuilder):
+    """Compose native metadata for qualified Hy4-preview sparse prefill."""
+
+    def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
+        super().__init__(kv_cache_spec, layer_names, vllm_config, device)
+        parallel = vllm_config.parallel_config
+        dims = self.mla_dims
+        self._fp8_bf16_prefill_supported = (
+            self.use_fp8_kv_cache
+            and self.num_heads == 4
+            and self.topk_tokens == 2048
+            and self.model_config.dtype == torch.bfloat16
+            and kv_cache_spec.block_size == 64
+            and (
+                dims.kv_lora_rank,
+                dims.qk_nope_head_dim,
+                dims.qk_rope_head_dim,
+                dims.v_head_dim,
+            )
+            == (512, 192, 64, 256)
+            and current_platform.is_device_capability(90)
+            and not self.use_pcp
+            and self.dcp_world_size == 1
+            and not parallel.use_ubatching
+            and vllm_config.lora_config is None
+            and vllm_config.attention_config.sparse_mla_force_mqa
+            and bool(layer_names)
+            and all(
+                self._supports_fp8_bf16_prefill_layer(
+                    vllm_config.compilation_config.static_forward_context[name]
+                )
+                for name in layer_names
+            )
+        )
+        # Native constructor-owned buffers: no model-context identity check.
+        self._fp8_bf16_prefill_query_capacity = (
+            min(
+                vllm_config.compilation_config.static_forward_context[
+                    name
+                ].impl.q_concat_buffer.shape[0]
+                for name in layer_names
+            )
+            if self._fp8_bf16_prefill_supported
+            else 0
+        )
+        self._fp8_bf16_prefill_workspace_capacity = (
+            min(
+                vllm_config.compilation_config.static_forward_context[
+                    name
+                ].impl.prefill_bf16_workspace.shape[0]
+                for name in layer_names
+            )
+            if self._fp8_bf16_prefill_supported
+            else 0
+        )
+        self._fp8_bf16_prefill_max_context = (
+            min(
+                self.model_config.max_model_len,
+                *(
+                    vllm_config.compilation_config.static_forward_context[
+                        name
+                    ].impl.prefill_bf16_workspace.shape[0]
+                    for name in layer_names
+                ),
+            )
+            if self._fp8_bf16_prefill_supported
+            else 0
+        )
+
+    @staticmethod
+    def _supports_fp8_bf16_prefill_layer(layer):
+        impl = layer.impl
+        return (
+            isinstance(impl, HYV4FlashMLASparseImpl)
+            and impl.num_heads == 4
+            and impl.kv_cache_dtype == "fp8_ds_mla"
+            and impl.softmax_scale == 1 / 16
+            and impl.prefill_padding == 64
+            and impl.sinks is not None
+            and impl.sinks.dtype == torch.float32
+            and impl.sinks.shape == (4,)
+            and impl.sinks.stride() == (1,)
+            and impl.prefill_bf16_workspace.dtype == torch.bfloat16
+            and impl.prefill_bf16_workspace.ndim == 2
+            and impl.prefill_bf16_workspace.shape[0] >= 1024
+            and impl.prefill_bf16_workspace.shape[1] == 576
+            and impl.prefill_bf16_workspace.stride() == (576, 1)
+            and impl.q_concat_buffer.dtype == torch.bfloat16
+            and impl.q_concat_buffer.shape[0] >= 1024
+            and impl.q_concat_buffer.shape[1:] == (4, 576)
+            and impl.q_concat_buffer.stride() == (2304, 576, 1)
+            and impl.sinks.device == impl.q_concat_buffer.device
+            and impl.prefill_bf16_workspace.device == impl.q_concat_buffer.device
+        )
+
+    def _use_fp8_bf16_mixed_prefill(self, common_prefix_len, common, metadata):
+        """Use the native contiguous prefill reader when its real buffers fit.
+
+        The native q4 decode prefix remains unchanged. Only prefill lengths
+        proven from this input step's immutable packet may plan the gather.
+        Request-local score capacity and concatenated gather capacity differ.
+        """
+        num_decodes = metadata.num_decodes
+        num_prefills = metadata.num_prefills
+        if not (
+            self._fp8_bf16_prefill_supported
+            and use_flaggems_op("pad_mla_q_sink_slot_bound", default=False)
+            and common_prefix_len == 0
+            and num_decodes > 0
+            and num_prefills > 0
+            and common.num_reqs == num_decodes + num_prefills
+            and metadata.num_decode_tokens == 4 * num_decodes
+            and metadata.num_decode_tokens
+            < common.num_actual_tokens
+            <= self._fp8_bf16_prefill_query_capacity
+            and common.causal is True
+            and common.mm_req_doc_ranges is None
+            and metadata.fp8_use_mixed_batch
+            and isinstance(
+                metadata.fp8_extra_metadata, FlashMLASparseMetadata.FP8KernelMetadata
+            )
+            and (metadata.prefill is None or not metadata.prefill.use_dense_mha)
+        ):
+            return False
+        from vllm.v1.attention import backend
+
+        proof_type = getattr(backend, "CPUSequenceLengthsProof", None)
+        current_proof = getattr(backend, "get_current_cpu_seq_lens_proof", None)
+        proof = getattr(common, "cpu_seq_lens_proof", None)
+        if (
+            not isinstance(proof_type, type)
+            or not callable(current_proof)
+            or not isinstance(proof, proof_type)
+            or proof is not current_proof()
+        ):
+            return False
+        starts, lengths = common.query_start_loc_cpu, common.seq_lens_cpu_upper_bound
+        if (
+            lengths is None
+            or common.is_prefilling is None
+            or common.is_prefilling.device.type != "cpu"
+            or starts.device.type != "cpu"
+            or lengths.device.type != "cpu"
+            or tuple(starts.shape) != (common.num_reqs + 1,)
+            or tuple(lengths.shape) != (common.num_reqs,)
+        ):
+            return False
+        query_starts = tuple(int(x) for x in starts)
+        if (
+            query_starts != proof.query_starts
+            or query_starts[: num_decodes + 1]
+            != tuple(range(0, 4 * num_decodes + 1, 4))
+            or query_starts[-1] != common.num_actual_tokens
+        ):
+            return False
+        prefill_lengths = []
+        for i in range(num_decodes, common.num_reqs):
+            q_len = query_starts[i + 1] - query_starts[i]
+            prev, draft = proof.previous_positions[i], proof.previous_drafts[i]
+            bound = proof.computed[i] + q_len
+            if (
+                q_len <= 0
+                or not bool(common.is_prefilling[i])
+                or proof.computed[i] < 0
+                or not proof.computed[i] < proof.prompt_lengths[i]
+                or not ((prev == -1 and draft == -1) or (prev >= 0 and draft == 0))
+                or int(lengths[i]) != bound
+                or not q_len <= bound <= self.model_config.max_model_len
+            ):
+                return False
+            prefill_lengths.append(bound)
+        # This is the concatenated native BF16 gather, so it needs SUM, not MAX.
+        # Both capacities were read from the constructor-owned layer buffers,
+        # before capture. No new storage is allocated or rebound in this selector.
+        return sum(prefill_lengths) <= self._fp8_bf16_prefill_workspace_capacity
+
+    def _use_fp8_bf16_prefill(self, common_prefix_len, common, metadata):
+        if self._use_fp8_bf16_mixed_prefill(common_prefix_len, common, metadata):
+            return True
+        if not (
+            self._fp8_bf16_prefill_supported
+            and use_flaggems_op("pad_mla_q_sink_slot_bound", default=False)
+            and common_prefix_len == 0
+            and common.num_reqs == 1
+            and common.num_actual_tokens == 1024
+            and common.max_query_len == 1024
+            and 1024 <= common.max_seq_len <= self._fp8_bf16_prefill_max_context
+            and common.causal is True
+            and common.mm_req_doc_ranges is None
+            and metadata.num_prefills == 1
+            and metadata.num_decodes == 0
+            and metadata.num_decode_tokens == 0
+            and metadata.fp8_use_mixed_batch
+            and isinstance(
+                metadata.fp8_extra_metadata, FlashMLASparseMetadata.FP8KernelMetadata
+            )
+            and (metadata.prefill is None or not metadata.prefill.use_dense_mha)
+        ):
+            return False
+        query_starts = common.query_start_loc_cpu
+        seq_lens = getattr(common, "seq_lens_cpu_upper_bound", None)
+        if (
+            seq_lens is None
+            or query_starts.device.type != "cpu"
+            or seq_lens.device.type != "cpu"
+            or query_starts.shape != (2,)
+            or seq_lens.shape != (1,)
+        ):
+            return False
+        # Prefill CPU upper bounds are exact. No device-value read or sync.
+        return query_starts.tolist() == [0, 1024] and seq_lens.tolist() == [
+            common.max_seq_len
+        ]
+
+    def build(self, common_prefix_len, common_attn_metadata, fast_build=False):
+        metadata = super().build(common_prefix_len, common_attn_metadata, fast_build)
+        if self._use_fp8_bf16_prefill(
+            common_prefix_len, common_attn_metadata, metadata
+        ):
+            extra_metadata = self._build_fp8_separate_prefill_decode(
+                common_attn_metadata, metadata
+            )
+            metadata.fp8_extra_metadata = extra_metadata
+            metadata.fp8_use_mixed_batch = False
+        return metadata
+
+
 class HYV4FlashMLASparseBackend(FlashMLASparseBackend):
     """``FLASHMLA_SPARSE`` with attention-sink support for HY V4.
 
-    Keeps the parent's name and native metadata builder.
+    Keeps the parent's name and composes existing native metadata APIs.
     """
+
+    @staticmethod
+    def get_builder_cls() -> type[HYV4FlashMLASparseMetadataBuilder]:
+        return HYV4FlashMLASparseMetadataBuilder
 
     @staticmethod
     def get_impl_cls() -> type[HYV4FlashMLASparseImpl]:

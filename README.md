@@ -14,7 +14,7 @@ matrix, scenarios, and usage.
 | vllm-plugin-FL Branch | Community vLLM Version |
 |-----------------------|------------------------|
 | `release/0.2` | [v0.20.2](https://github.com/vllm-project/vllm/tree/v0.20.2) |
-| `main` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
+| `0.4.0-dev` | [v0.28.0](https://github.com/vllm-project/vllm/tree/v0.28.0) |
 
 ## Supported Models and Chips
 
@@ -24,6 +24,7 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 
 | Model | Status | Reference |
 |-------|--------|-----------|
+| Hy4-preview (W8A8, BF16 MTP) | Draft: text and image adaptation; full quality qualification pending | [H100 serving example](./examples/hy4_preview_serve.sh) |
 | Qwen3.5-397B-A17B | Supported | [example](./examples/qwen3_5_offline_inference.py) |
 | Qwen3-Next-80B-A3B | Supported | [example](./examples/qwen3_next_offline_inference.py) |
 | Qwen3-4B | Supported | [example](./examples/offline_inference.py) |
@@ -34,17 +35,19 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 | MiniMax-M2.7 | Supported | [implementation](./examples/minimax_m27_offline_inference.py) |
 | DeepSeek-V4-Flash (ModelSlim W8A8, Ascend TP8) | Supported | [Ascend guide](./docker/ascend/README.md) |
 
+
 ### Supported Chips
 
 | Chip Vendor | Status | Reference |
 |-------------|--------|-----------|
 | NVIDIA | Supported | [deployment guide](./docs/usage/nvidia.md) |
 | Ascend | Supported | [deployment guide](./docs/usage/ascend.md) |
-| MetaX | Supported | - |
+| MetaX | Supported | [deployment guide](./docs/usage/metax.md) |
 | T-Head | Supported | [deployment guide](./docs/usage/thead.md) |
 | Iluvatar | Supported | [deployment guide](./docs/usage/iluvatar.md) |
-| Tsingmicro | Supported | - |
-| Moore Threads | Supported | - |
+| Enflame | Supported | [deployment guide](./docs/usage/enflame.md) |
+| Tsingmicro | Supported (eager) | [deployment guide](./docs/usage/tsingmicro.md) |
+| Moore Threads | Supported | [deployment guide](./docs/usage/musa.md) |
 | Hygon | Supported | [deployment guide](./docs/usage/hygon.md) |
 | Sunrise | Supported | - |
 | ARM64 CPU | Supported | - |
@@ -54,8 +57,10 @@ In theory, vllm-plugin-FL can support all models available in vLLM, as long as n
 ### Setup
 
 For hardware-specific deployment and validation, see the
-[NVIDIA guide](./docs/usage/nvidia.md) and
-[T-Head PPU guide](./docs/usage/thead.md).
+[NVIDIA guide](./docs/usage/nvidia.md),
+[T-Head PPU guide](./docs/usage/thead.md),
+[Enflame S60 guide](./docs/usage/enflame.md), and
+[Tsingmicro TXDA guide](./docs/usage/tsingmicro.md).
 
 1. Install vLLM
 
@@ -160,63 +165,69 @@ Operator adapters use the plugin dispatch manager, so backend selection,
 fallback, per-op policy, operator-list recording, and I/O diagnostics continue
 to follow the common FlagOS controls.
 
-### Hy4-preview text inference
+### Hy4-preview on H100
 
-This branch ports the text model/configuration, weight mapping, attention sinks
-and bundled MTP block from the prior main-line adaptation. The existing
-`HYV4VLForConditionalGeneration` checkpoint identifier uses the causal text
-model and rejects media; no processor or vision encoder is installed.
+The Hy4 adapter retains the checkpoint model identities, attention sinks,
+sparse INT8 indexer, iHC and multimodal processor. The H100 recipe uses vLLM
+0.28, TP16/EP16, FP8 main KV, an INT8 sparse indexer, MTP3, a maximum context
+of 204800, and combined FULL/PIECEWISE graph execution.
 
-Use the native dependency declared by this branch (`vllm==0.28.0`). The model
-uses native sparse-MLA/indexer metadata and ordinary runner/proposer APIs; no
-native source patch or `_hy4_call_model` hook is required. `HY4_INDEXER_DTYPE`
-selects `auto`, `fp8` or `int8`; auto retains FP8 on NVIDIA SM90+ and selects
-INT8 elsewhere. INT8 uses the published quantize/cache-store/paged-logits APIs in
-[FlagGems #7782](https://github.com/flagos-ai/FlagGems/pull/7782). Install the
-exact public revision when selecting INT8:
+The native runtime companion and numerical-library revisions must match this
+PR's `hy4` installation extra. The companion exposes optional model-runtime hooks;
+ordinary vLLM users do not need to overwrite installed source files. Install
+one matching FlagGems-vllm wheel containing the RMS and other Hy4 APIs.
 
-```sh
-pip install --no-deps "flag_gems @ git+https://github.com/CherryLemon/FlagGems.git@b3cb254c55b52c450131ada0ba87109ca18c6c25"
-```
-
-The API retains finite BF16/FP16/FP32 inputs and the packed cache layout.
-An isolated H100 public-wheel run at prior Core revision
-`bfb7b3fab3487a20e37ffb535ee3854eeefcff95` recorded 51 passes and one failure:
-the strict FP32 nextafter power-of-two quantization scale was half the independent
-reference. That failure is preserved. The pinned corrected Core wheel passed all
-72 component-packet tests on H100/SM90 with Torch 2.13.0+cu129 and Triton 3.6.0,
-including strict query/cache scale boundaries and ordinary mutable-input graph
-replay for the three public INT8 APIs. This total includes CPU reference and
-metadata tests; it is not 72 GPU mathematics cases. The run used the real installed
-package and did not execute this framework adapter. Combined-package GPU math,
-framework graph replay and whole-model equivalence remain unqualified. NVIDIA
-SM90+ auto selection retains the native FP8 indexer; this dependency update does
-not change the framework's precision policy.
-
-
-
-
-Optional iHC post/pre, MLA concat/pad, M-RoPE cache and INT8 O-projection
-consumers use the existing FlagGems operator controls (including whitelist and
-blacklist), with the provider default off. Their numerical APIs are delivered
-separately in [FlagGems-vllm #1002](https://github.com/flagos-ai/FlagGems-vllm/pull/1002);
-install its published revision:
+Install the pinned native and numerical sources in an environment with
+the vLLM 0.28 CUDA build prerequisites:
 
 ```sh
-pip install --no-deps "flaggems_vllm @ git+https://github.com/CherryLemon/FlagGems-vllm.git@ead30f59a34869f12b4837147fbb425581e47280"
+VLLM_VERSION_OVERRIDE=0.28.0+hy4 pip install --no-build-isolation '.[hy4]'
 ```
-The independent RMS API is in [#1001](https://github.com/flagos-ai/FlagGems-vllm/pull/1001).
-Unsupported shapes/providers retain their native call before numerical launch;
-selected launch failures propagate. MTP body/full/tail graph experiments,
-async input staging and private indexer candidates are excluded.
 
-Kernel ownership follows the implementation language: TileLang kernels stay
-in the framework; generic Triton kernels belong to FlagGems and framework-specific
-Triton kernels to its companion library. Existing native backend calls are reused.
+The local version suffix identifies the patched 0.28 source. The experimental
+H100 environment used Torch 2.13/CUDA 12.9 and FlagTree with Triton 3.6.
+To exercise the selected TLE TopK routes, install the fixed
+[FlagTree source](https://github.com/flagos-ai/FlagTree/tree/f48ad96327288226f54e7dbf4fcb501e02195072)
+after the native dependencies. Its installer replaces Triton; use the same
+environment for all nodes:
 
-Current validation covers CPU contracts, native registration/import and Python
-wheel contents. Current combined-package GPU numerics, graph replay, serving,
-whole-model accuracy and performance remain unqualified.
+```sh
+FLAGTREE_BACKEND=nvidia TRITON_BUILD_PROTON=OFF pip install --no-build-isolation "flagtree @ git+https://github.com/flagos-ai/FlagTree.git@f48ad96327288226f54e7dbf4fcb501e02195072"
+```
+
+Missing TLE capability retains the original pre-launch selection and does not
+establish the historical optimized throughput. Native CUDA extensions and the
+combined package need hardware qualification after building these sources.
+
+MTP `eh_proj` must contain the genuine original BF16 weight and be excluded
+from quantization. Prepare a separate checkpoint with:
+
+```sh
+python examples/prepare_hy4_mtp_checkpoint.py W8A8_CHECKPOINT BF16_CHECKPOINT OUTPUT_CHECKPOINT
+```
+
+The example reads and writes one shard on CPU. Other files link to the W8A8
+source, which must remain available; neither source checkpoint is changed.
+Casting an INT8 tensor to BF16 does not restore the original weight.
+
+Run [the service example](./examples/hy4_preview_serve.sh) on each of two H100
+nodes with the same checkpoint and master address and distinct node ranks:
+
+```sh
+bash examples/hy4_preview_serve.sh OUTPUT_CHECKPOINT MASTER_ADDR NODE_RANK
+```
+
+The example uses existing FlagOS policy controls and `HY4_INDEXER_DTYPE=int8`.
+Existing operator allow/deny rules remain effective. The 16k/32k score buckets
+apply only when current-step metadata proves every relevant request fits;
+FULL/decode and unproven metadata retain the complete score width. The BF16
+reader uses actual query/gather capacities. These selections do not shorten
+the model's maximum context.
+
+This remains a Draft integration. Complete-model quality, mixed-reader output
+changes, long-context accuracy and the integrated graph path need current-head
+hardware qualification. The optional FP32 attention reduction candidate is
+excluded from this recipe. Historical performance is recorded in the PR body.
 
 ### Operator profiling
 
@@ -256,6 +267,9 @@ If there are multiple plugins in the current environment, you can specify use vl
 
 ### Additional Steps for Ascend
 
+For native decode graph execution with vLLM 0.28, see the
+[Ascend graph guide](./docs/ascend-vllm028-graph.md).
+
 1. Install the validated [FlagTree](https://github.com/flagos-ai/flagtree/)
    and FlagGems revisions
 
@@ -276,9 +290,12 @@ If there are multiple plugins in the current environment, you can specify use vl
     [Ascend image guide](./docker/ascend/README.md) for the complete CANN,
     PyTorch, vLLM empty-package, and dependency constraints.
 
-2. Enable eager execution
+2. Select eager or full-decode graph execution
 
-    Eager execution is the recommended setting for Ascend. Add `enforce_eager=True` to the `LLM` constructor or pass `--enforce-eager` on the command line. Graph mode is still experimental; see the tested cases in the [Ascend image guide](./docker/ascend/README.md).
+    For eager execution, add `enforce_eager=True` to the `LLM` constructor or
+    pass `--enforce-eager` on the command line. For native NPU graph capture and
+    replay, use `FULL_DECODE_ONLY` with `USE_FLAGGEMS=0` and the component versions
+    and serving arguments in the [Ascend graph guide](./docs/ascend-vllm028-graph.md).
 
 
 ### Run a Task

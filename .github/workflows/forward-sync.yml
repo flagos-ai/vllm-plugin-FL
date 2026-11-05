@@ -11,7 +11,9 @@ on:
     paths:
       - .github/workflows/forward-sync.yml
       - .github/scripts/forward-sync.cjs
+      - .github/scripts/forward-sync-projection.cjs
       - .github/scripts/tests/forward-sync.test.cjs
+      - .github/scripts/tests/forward-sync-projection.test.cjs
   # GitHub enables manual dispatch only after this file also exists on main.
   workflow_dispatch:
 
@@ -28,7 +30,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Test reconciliation without GitHub writes
-        run: node --test .github/scripts/tests/forward-sync.test.cjs
+        run: node --test .github/scripts/tests/forward-sync.test.cjs .github/scripts/tests/forward-sync-projection.test.cjs
 
   sync:
     name: Create or update forward-sync PR

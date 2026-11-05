@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Default-off orchestration for the one intra-layer post/pre boundary."""
 
-from vllm_fl.utils import use_flaggems_op
-
 from torch.nn.modules import module as nn_module
+
+from vllm_fl.utils import use_flaggems_op
 
 
 def maybe_ihc_post_pre(owner, output, residual, post_gates):
-    if not use_flaggems_op("ihc_post_pre", default=False):
+    if not (
+        use_flaggems_op("ihc_post_pre", default=False)
+        or use_flaggems_op("ihc_post_pre_pair", default=False)
+    ):
         return None
     from .hc import HYV4HCLayer, HYV4HCPostLayer, HYV4HCPreLayer
     from .triton_ihc import triton_ihc_supported
@@ -58,7 +61,7 @@ def maybe_ihc_post_pre(owner, output, residual, post_gates):
         )
     ):
         return None
-    from flaggems_vllm.ops.ihc_post_pre import can_ihc_post_pre, ihc_post_pre
+    from flaggems_vllm import can_ihc_post_pre, ihc_post_pre
 
     args = (
         output,
@@ -71,6 +74,13 @@ def maybe_ihc_post_pre(owner, output, residual, post_gates):
         pre_layer.hc_eps,
         pre_layer.layernorm_epsilon,
     )
-    if not can_ihc_post_pre(*args):
+    from .ihc_pair import maybe_ihc_pair_post_pre
+
+    paired = maybe_ihc_pair_post_pre(*args)
+    if paired is not None:
+        return paired
+    if not use_flaggems_op("ihc_post_pre", default=False) or not can_ihc_post_pre(
+        *args
+    ):
         return None
     return ihc_post_pre(*args)

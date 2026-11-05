@@ -10,9 +10,21 @@ contract can also be exercised by standard CUDA CI.
 import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
+
+
+@pytest.fixture(autouse=True)
+def require_cuda_cache_device(request):
+    # Keep CPU contract checks active on every backend. TorchGCU can alias
+    # torch.cuda to GCU, so CUDA availability alone does not identify the device.
+    if request.node.get_closest_marker("gpu") is None:
+        return
+    platforms = pytest.importorskip("vllm.platforms")
+    if platforms.current_platform.device_type != "cuda":
+        pytest.skip("THead cache device tests require a native CUDA/PPU backend")
 
 
 @pytest.fixture(scope="module")
@@ -295,3 +307,39 @@ def test_quantized_tensor_storage_is_rejected_even_with_auto(cache_writer):
     scale = torch.ones(())
     with pytest.raises(NotImplementedError, match="require FP16 or BF16"):
         cache_writer(key, key, cache, cache, slots, "auto", scale, scale)
+
+
+@pytest.mark.parametrize(
+    "device_type,device_test,should_skip",
+    [
+        ("cuda", True, False),
+        ("gcu", True, True),
+        ("npu", True, True),
+        ("musa", True, True),
+        ("cpu", True, True),
+        ("gcu", False, False),
+        ("cpu", False, False),
+    ],
+)
+def test_device_selection_rejects_cuda_aliases(
+    monkeypatch, device_type, device_test, should_skip
+):
+    # Reproduce the misleading availability check without launching a device op.
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    package = ModuleType("vllm")
+    package.__path__ = []
+    platforms = ModuleType("vllm.platforms")
+    platforms.current_platform = SimpleNamespace(device_type=device_type)
+    package.platforms = platforms
+    monkeypatch.setitem(sys.modules, "vllm", package)
+    monkeypatch.setitem(sys.modules, "vllm.platforms", platforms)
+    request = SimpleNamespace(
+        node=SimpleNamespace(
+            get_closest_marker=lambda name: object() if device_test else None
+        )
+    )
+    if should_skip:
+        with pytest.raises(pytest.skip.Exception, match="native CUDA/PPU"):
+            require_cuda_cache_device.__wrapped__(request)
+    else:
+        require_cuda_cache_device.__wrapped__(request)

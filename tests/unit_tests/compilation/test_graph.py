@@ -11,7 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 
 
-def test_npu_weak_refs_are_recursive(monkeypatch):
+@pytest.mark.parametrize("device_type", ["npu", "gcu"])
+def test_device_weak_refs_are_recursive(monkeypatch, device_type):
     import torch
 
     from vllm.sequence import IntermediateTensors
@@ -24,8 +25,8 @@ def test_npu_weak_refs_are_recursive(monkeypatch):
         weak_refs[id(tensor)] = object()
         return weak_refs[id(tensor)]
 
-    monkeypatch.setattr(graph_module.current_platform, "device_type", "npu")
-    monkeypatch.setattr(graph_module, "_weak_ref_npu_tensor", fake_weak_ref)
+    monkeypatch.setattr(graph_module.current_platform, "device_type", device_type)
+    monkeypatch.setattr(graph_module, f"_weak_ref_{device_type}_tensor", fake_weak_ref)
 
     first = torch.ones(1)
     second = torch.ones(2)
@@ -143,7 +144,11 @@ def test_npu_graph_capture_uses_active_accelerator_stream(monkeypatch):
         "torch_device_fn",
         SimpleNamespace(current_stream=npu_current_stream),
     )
-    monkeypatch.setattr(graph_module, "current_stream", stale_vllm_stream)
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "current_stream",
+        stale_vllm_stream,
+    )
 
     assert graph_module._graph_capture_stream() is active_stream
     npu_current_stream.assert_called_once_with()
@@ -156,7 +161,11 @@ def test_non_npu_graph_capture_preserves_vllm_stream(monkeypatch):
     expected_stream = object()
     vllm_current_stream = MagicMock(return_value=expected_stream)
     monkeypatch.setattr(graph_module.current_platform, "device_type", "cuda")
-    monkeypatch.setattr(graph_module, "current_stream", vllm_current_stream)
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "current_stream",
+        vllm_current_stream,
+    )
 
     assert graph_module._graph_capture_stream() is expected_stream
     vllm_current_stream.assert_called_once_with()
@@ -180,10 +189,20 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
     forward_context = SimpleNamespace(
         batch_descriptor=descriptor, cudagraph_runtime_mode=mode
     )
-    monkeypatch.setattr(graph_module, "is_forward_context_available", lambda: True)
-    monkeypatch.setattr(graph_module, "get_forward_context", lambda: forward_context)
     monkeypatch.setattr(
-        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+        import_module("vllm_fl.compilation.graph"),
+        "is_forward_context_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "get_forward_context",
+        lambda: forward_context,
+    )
+    monkeypatch.setattr(
+        import_module("vllm_fl.compilation.graph"),
+        "validate_cudagraph_capturing_enabled",
+        lambda: None,
     )
 
     calls = []
@@ -238,6 +257,93 @@ def test_npu_graph_wrapper_capture_and_replay(monkeypatch, weak_ref_output):
         assert len(calls) == 1
 
 
+@pytest.mark.gpu
+def test_npu_workspace_releases_ownership_across_capture_descriptors(monkeypatch):
+    import gc
+    import weakref
+
+    import torch
+
+    from vllm.config import CUDAGraphMode
+    from vllm.forward_context import (
+        BatchDescriptor,
+        get_forward_context,
+        override_forward_context,
+    )
+
+    from vllm_fl.compilation.graph_params import clear_graph_params, get_graph_params
+    from vllm_fl.compilation.graph_runtime import GraphRuntimeController
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "npu":
+        pytest.skip("Requires an Ascend NPU")
+
+    clear_graph_params()
+    config = SimpleNamespace(compilation_config=SimpleNamespace())
+    runtime = GraphRuntimeController(vllm_config=config)
+    runtime.attention_impls = ()
+    owners, addresses = {}, {}
+
+    def runnable(x):
+        descriptor = get_forward_context().batch_descriptor
+        workspace = torch.empty(1024 * 1024, dtype=torch.float32, device="npu")
+        owners[descriptor] = weakref.ref(workspace)
+        addresses[descriptor] = workspace.data_ptr()
+        get_graph_params().workspaces[descriptor] = workspace
+        workspace.fill_(descriptor.num_active_loras + 1)
+        return x + workspace[: x.numel()]
+
+    monkeypatch.setattr(
+        graph_module, "validate_cudagraph_capturing_enabled", lambda: None
+    )
+    wrapper = graph_module.GraphWrapper(
+        runnable, config, CUDAGraphMode.FULL, graph_runtime=runtime
+    )
+    # Keep the three graphs on one pool, like the model runner's captures.
+    wrapper.graph_pool = torch.npu.graph_pool_handle()
+    descriptors = [
+        BatchDescriptor(num_tokens=8, num_reqs=8, uniform=True),
+        BatchDescriptor(
+            num_tokens=4, num_reqs=4, uniform=True, has_lora=True, num_active_loras=1
+        ),
+        BatchDescriptor(num_tokens=4, num_reqs=4, uniform=True),
+    ]
+    inputs = {
+        descriptor: torch.arange(descriptor.num_tokens, device="npu").float()
+        for descriptor in descriptors
+    }
+    context = SimpleNamespace(cudagraph_runtime_mode=CUDAGraphMode.FULL)
+    capture_stream = torch.npu.Stream()
+    capture_stream.wait_stream(torch.npu.current_stream())
+    with torch.npu.stream(capture_stream), override_forward_context(context):
+        for descriptor in descriptors:
+            context.batch_descriptor = descriptor
+            wrapper(inputs[descriptor])
+    torch.npu.current_stream().wait_stream(capture_stream)
+    torch.npu.synchronize()
+    gc.collect()
+
+    assert set(wrapper.concrete_graph_entries) == set(descriptors)
+    for descriptor in descriptors:
+        assert owners[descriptor]() is None
+        assert (
+            get_graph_params().workspaces[descriptor].data_ptr()
+            == addresses[descriptor]
+        )
+
+    with override_forward_context(context):
+        for descriptor in (*reversed(descriptors), *descriptors):
+            context.batch_descriptor = descriptor
+            inputs[descriptor].add_(1)
+            result = wrapper(inputs[descriptor])
+            torch.npu.synchronize()
+            torch.testing.assert_close(
+                result, inputs[descriptor] + descriptor.num_active_loras + 1
+            )
+    wrapper.clear_graphs()
+    clear_graph_params()
+
+
 class TestGraphOptions:
     """Test GraphOptions dataclass."""
 
@@ -278,3 +384,121 @@ class TestGraphEntry:
         assert entry.graph is None
         assert entry.output is None
         assert entry.input_addresses is None
+
+
+def test_gcu_weak_ref_keeps_cpu_tensors(monkeypatch):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "gcu")
+    # CPU values must not require a vendor runtime primitive.
+    monkeypatch.setitem(sys.modules, "torch_gcu", SimpleNamespace())
+    value = torch.ones(2)
+    assert graph_module.weak_ref_tensors({"cpu": value})["cpu"] is value
+
+
+@pytest.mark.parametrize("missing", ["storage", "tensor"])
+@pytest.mark.parametrize("primitive", [None, object()])
+def test_gcu_weak_ref_requires_runtime_primitives(monkeypatch, missing, primitive):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    tensor = MagicMock(spec=torch.Tensor)
+    tensor.device = SimpleNamespace(type="gcu")
+    storage_constructor = primitive if missing == "storage" else lambda *args: None
+    tensor_constructor = primitive if missing == "tensor" else lambda *args: None
+    monkeypatch.setattr(
+        torch._C,
+        "_construct_storage_from_data_pointer",
+        storage_constructor,
+        raising=False,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_gcu",
+        SimpleNamespace(
+            _C=SimpleNamespace(
+                _construct_GCU_Tensor_From_Storage_And_Metadata=tensor_constructor
+            )
+        ),
+    )
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "gcu")
+    with pytest.raises(RuntimeError, match="GCU graph weak references require"):
+        graph_module.weak_ref_tensors(tensor)
+
+
+def test_gcu_weak_ref_propagates_construction_failure(monkeypatch):
+    import sys
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    tensor = MagicMock(spec=torch.Tensor)
+    tensor.device = SimpleNamespace(type="gcu")
+
+    def incompatible(*args):
+        raise ValueError("incompatible vendor tensor metadata")
+
+    monkeypatch.setattr(
+        torch._C,
+        "_construct_storage_from_data_pointer",
+        lambda *args: object(),
+        raising=False,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch_gcu",
+        SimpleNamespace(
+            _C=SimpleNamespace(
+                _construct_GCU_Tensor_From_Storage_And_Metadata=incompatible
+            )
+        ),
+    )
+    monkeypatch.setattr(graph_module.current_platform, "device_type", "gcu")
+    with pytest.raises(ValueError, match="incompatible vendor tensor metadata"):
+        graph_module.weak_ref_tensors(tensor)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype_name", ["float32", "bfloat16"])
+def test_gcu_weak_ref_preserves_views_without_owning_storage(dtype_name):
+    import gc
+    import weakref
+
+    import torch
+
+    graph_module = import_module("vllm_fl.compilation.graph")
+    if graph_module.current_platform.device_type != "gcu":
+        pytest.skip("Requires an Enflame GCU")
+
+    torch.gcu.synchronize()
+    baseline = torch.gcu.memory_allocated()
+    owner = torch.arange(32, device="gcu", dtype=getattr(torch, dtype_name)).reshape(
+        4, 8
+    )
+    view = owner[1:, 1::2]
+    alias = graph_module.weak_ref_tensors(view)
+    empty = graph_module.weak_ref_tensors(view[:0])
+    assert alias is not view
+    assert alias.data_ptr() == view.data_ptr()
+    assert alias.shape == view.shape and alias.stride() == view.stride()
+    assert alias.storage_offset() == view.storage_offset()
+    assert alias.untyped_storage()._cdata != view.untyped_storage()._cdata
+    assert alias.untyped_storage().nbytes() == view.untyped_storage().nbytes()
+    assert empty.shape == view[:0].shape and empty.stride() == view.stride()
+    assert empty.storage_offset() == view.storage_offset()
+    assert empty.untyped_storage()._cdata != view.untyped_storage()._cdata
+    torch.testing.assert_close(alias.cpu(), view.cpu(), rtol=0, atol=0)
+
+    owner_ref, view_ref = weakref.ref(owner), weakref.ref(view)
+    del owner, view
+    gc.collect()
+    torch.gcu.synchronize()
+    assert owner_ref() is None and view_ref() is None
+    # Borrowed aliases stay alive but their original allocation must be released.
+    # Never dereference either alias after its owning tensor/graph is released.
+    assert torch.gcu.memory_allocated() <= baseline

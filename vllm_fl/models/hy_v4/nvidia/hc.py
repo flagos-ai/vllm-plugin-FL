@@ -19,13 +19,16 @@ import torch
 from torch import nn
 from transformers import PreTrainedConfig
 
-from vllm_fl.models.hy_v4.hpc_ihc import HpcIHCHead, HpcIHCPost, HpcIHCPre
 from vllm.model_executor.layers.linear import ReplicatedLinear
+
+from vllm_fl.models.hy_v4.hpc_ihc import HpcIHCHead, HpcIHCPost, HpcIHCPre
+from vllm_fl.models.hy_v4.nvidia.ihc_pair import maybe_ihc_pair_pre
 from vllm_fl.models.hy_v4.nvidia.triton_ihc import (
     triton_ihc_post,
     triton_ihc_pre,
     triton_ihc_supported,
 )
+from vllm_fl.utils import use_flaggems_op
 
 
 class HYV4HCPreLayer(nn.Module):
@@ -112,15 +115,19 @@ class HYV4HCPreLayer(nn.Module):
         if self.hpc_op is not None:
             return self.hpc_op(x)
         if triton_ihc_supported(x):
-            return triton_ihc_pre(
-                x,
-                self.hc_fn.weight,
-                self.hc_scale,
-                self.hc_base,
-                self.magnitude,
-                self.hc_eps,
-                self.layernorm_epsilon,
-            )
+            pair_result = maybe_ihc_pair_pre(self, x)
+            if pair_result is not None:
+                return pair_result
+            if use_flaggems_op("ihc_pre"):
+                return triton_ihc_pre(
+                    x,
+                    self.hc_fn.weight,
+                    self.hc_scale,
+                    self.hc_base,
+                    self.magnitude,
+                    self.hc_eps,
+                    self.layernorm_epsilon,
+                )
 
         shape = x.size()  # [num_tokens, hc, d]
         hc = self.hc_mult
@@ -191,7 +198,7 @@ class HYV4HCPostLayer(nn.Module):
         """
         if self.hpc_op is not None:
             return self.hpc_op(x, residual, post)
-        if triton_ihc_supported(x):
+        if triton_ihc_supported(x) and use_flaggems_op("ihc_post"):
             return triton_ihc_post(x, residual, post)
 
         dtype = x.dtype

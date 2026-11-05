@@ -10,6 +10,13 @@ from __future__ import annotations
 import torch
 
 
+def initialize_rotary_embedding_ascend() -> None:
+    """Resolve torch-npu's lazy ATB registration before model tracing."""
+    from torch_npu.op_plugin.atb._atb_ops import _register_atb_extensions
+
+    _register_atb_extensions()
+
+
 def _can_use_ascend_rotary_kernel(
     query: torch.Tensor,
     key: torch.Tensor,
