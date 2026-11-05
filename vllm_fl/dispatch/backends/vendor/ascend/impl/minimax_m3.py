@@ -34,11 +34,17 @@ def partial_neox_rope(x, positions, cos_sin_cache, rotary_dim):
 def norm_rope(x, norm, positions, rotary_emb):
     shape = x.shape
     dtype = x.dtype
-    x = gemma_norm(x.float().reshape(shape[0], -1, norm.weight.numel()),
-                   norm.weight, norm.variance_epsilon)
-    return partial_neox_rope(
-        x, positions, rotary_emb.cos_sin_cache, rotary_emb.rotary_dim
-    ).to(dtype).reshape(shape).contiguous()
+    x = gemma_norm(
+        x.float().reshape(shape[0], -1, norm.weight.numel()),
+        norm.weight,
+        norm.variance_epsilon,
+    )
+    return (
+        partial_neox_rope(x, positions, rotary_emb.cos_sin_cache, rotary_emb.rotary_dim)
+        .to(dtype)
+        .reshape(shape)
+        .contiguous()
+    )
 
 
 def _update_graph_params(update_stream, forward_context, num_tokens, vllm_config):
@@ -51,6 +57,7 @@ class AscendMiniMaxSparseImpl(MiniMaxM3SparseTritonImpl):
 
     def forward(self, layer, query, kv_cache, output):
         from vllm.forward_context import get_forward_context
+
         from .minimax_m3_attention import minimax_m3_sparse_attn
 
         metadata = get_forward_context().attn_metadata
@@ -65,23 +72,44 @@ class AscendMiniMaxSparseImpl(MiniMaxM3SparseTritonImpl):
         if md.num_decodes:
             d = md.decode
             batch = d.seq_lens.shape[0]
-            cu = torch.arange(batch + 1, device=q.device, dtype=torch.int32) * d.decode_query_len
+            cu = (
+                torch.arange(batch + 1, device=q.device, dtype=torch.int32)
+                * d.decode_query_len
+            )
             prefix = (d.seq_lens - d.decode_query_len).clamp(min=0)
             minimax_m3_sparse_attn(
-                q[:nd], (kv_cache[:, 0], kv_cache[:, 1]), selected[:, :nd], d.block_table,
-                cu, d.seq_lens, prefix, d.decode_query_len,
-                self.num_kv_heads, self.scale, out[:nd],
+                q[:nd],
+                (kv_cache[:, 0], kv_cache[:, 1]),
+                selected[:, :nd],
+                d.block_table,
+                cu,
+                d.seq_lens,
+                prefix,
+                d.decode_query_len,
+                self.num_kv_heads,
+                self.scale,
+                out[:nd],
             )
             # Empty padded requests have no softmax domain; zero only those
             # rows, keeping nonempty-request NaNs visible to correctness gates.
-            valid = (d.seq_lens > 0)[:, None].expand(batch, d.decode_query_len).reshape(-1)
+            valid = (
+                (d.seq_lens > 0)[:, None].expand(batch, d.decode_query_len).reshape(-1)
+            )
             out[:nd].copy_(torch.where(valid[:, None, None], out[:nd], 0))
         if md.num_prefills:
             p = md.prefill
             minimax_m3_sparse_attn(
-                q[nd:], (kv_cache[:, 0], kv_cache[:, 1]), selected[:, nd:total], p.block_table,
-                p.cu_seqlens_q, p.seq_lens, p.context_lens, p.max_query_len,
-                self.num_kv_heads, self.scale, out[nd:],
+                q[nd:],
+                (kv_cache[:, 0], kv_cache[:, 1]),
+                selected[:, nd:total],
+                p.block_table,
+                p.cu_seqlens_q,
+                p.seq_lens,
+                p.context_lens,
+                p.max_query_len,
+                self.num_kv_heads,
+                self.scale,
+                out[nd:],
             )
         output[total:].zero_()
         return output
@@ -151,10 +179,13 @@ class MiniMaxM3Kernels:
         # Validate every layout before the first write. Reuse the existing
         # padding-safe writer byte-for-byte; no fallback after any mutation.
         plans = (
-            _plan(key.contiguous(), main_slots[:key.shape[0]], key_cache),
-            _plan(value.contiguous(), main_slots[:value.shape[0]], value_cache),
-            _plan(index_key.reshape(-1, layer.idx_head_dim).contiguous(),
-                  index_slots[:index_key.shape[0]], index_cache),
+            _plan(key.contiguous(), main_slots[: key.shape[0]], key_cache),
+            _plan(value.contiguous(), main_slots[: value.shape[0]], value_cache),
+            _plan(
+                index_key.reshape(-1, layer.idx_head_dim).contiguous(),
+                index_slots[: index_key.shape[0]],
+                index_cache,
+            ),
         )
         for plan in plans:
             _launch(plan)

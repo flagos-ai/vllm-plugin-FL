@@ -25,6 +25,16 @@ def get_forward_execution_facts() -> ForwardExecutionFacts | None:
 
 @contextmanager
 def set_forward_context(*args, num_actual_tokens=None, in_profile_run=False, **kwargs):
+    from vllm.platforms import current_platform
+
+    if (
+        getattr(current_platform, "vendor_name", None) != "ascend"
+        or current_platform.device_type != "npu"
+    ):
+        with _set_forward_context(*args, **kwargs):
+            yield
+        return
+
     # The platform hook runs inside upstream's context entry, before either
     # capture or replay. Keep actual activity separate from public DP padding.
     token = _execution_facts.set(

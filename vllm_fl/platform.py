@@ -255,7 +255,6 @@ class PlatformFL(Platform):
             )
         }
 
-
     def is_cuda_alike(self) -> bool:
         """Stateless version of [torch.cuda.is_available][]."""
         if self.vendor_name == "iluvatar":

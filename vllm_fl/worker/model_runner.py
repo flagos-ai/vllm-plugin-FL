@@ -54,7 +54,6 @@ from vllm.distributed.parallel_state import (
 )
 from vllm.distributed.weight_transfer.base import SparseWeightPatch
 from vllm.forward_context import BatchDescriptor
-from vllm_fl.forward_context import set_forward_context
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping, LoRAMappingType
 from vllm.model_executor.layers.attention import Attention, MLAAttention
@@ -107,6 +106,8 @@ from vllm.multimodal.inputs import (
 )
 from vllm.multimodal.utils import get_mm_features_in_window, group_and_batch_mm_kwargs
 from vllm.platforms import current_platform
+
+from vllm_fl.forward_context import set_forward_context
 
 
 def _accelerator_synchronize() -> None:

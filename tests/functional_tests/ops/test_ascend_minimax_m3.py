@@ -13,7 +13,11 @@ from vllm_fl.dispatch.backends.vendor.ascend.impl.minimax_m3 import (
     norm_rope,
 )
 
-pytestmark = pytest.mark.skipif(not torch.npu.is_available(), reason="requires NPU")
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.functional,
+    pytest.mark.skipif(not torch.npu.is_available(), reason="requires NPU"),
+]
 
 
 def test_gemma_partial_rope_keeps_tail():

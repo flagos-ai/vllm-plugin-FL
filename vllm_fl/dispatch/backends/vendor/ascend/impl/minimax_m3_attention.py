@@ -9,6 +9,7 @@ Source: vllm_ascend/models/minimax_m3/ops/msa_m3_triton.py.
 from __future__ import annotations
 
 import torch
+
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
@@ -34,7 +35,9 @@ def _split_triton_main_kv_cache(
         else:
             raise ValueError(f"Unexpected main kv cache shape: {tuple(kv_cache.shape)}")
     if k_cache.ndim != 4 or v_cache.ndim != 4:
-        raise ValueError(f"Unexpected split main kv cache shapes: {tuple(k_cache.shape)}, {tuple(v_cache.shape)}")
+        raise ValueError(
+            f"Unexpected split main kv cache shapes: {tuple(k_cache.shape)}, {tuple(v_cache.shape)}"
+        )
     return k_cache, v_cache
 
 
@@ -65,7 +68,9 @@ def _sparse_attn_num_stages_kwarg() -> dict:
         "BLOCK_SIZE_D": lambda args: triton.next_power_of_2(args["head_dim"]),
         "BLOCK_SIZE_H": lambda args: triton.next_power_of_2(args["gqa_group_size"]),
         "BLOCK_SIZE_T": lambda args: triton.next_power_of_2(args["max_topk"]),
-        "BLOCK_SIZE_QH": lambda args: args["BLOCK_SIZE_Q"] * triton.next_power_of_2(args["gqa_group_size"]),
+        "BLOCK_SIZE_QH": lambda args: (
+            args["BLOCK_SIZE_Q"] * triton.next_power_of_2(args["gqa_group_size"])
+        ),
     }
 )
 @triton.jit(do_not_specialize_on_alignment=["seq_lens", "prefix_lens"])
