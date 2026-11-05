@@ -1,0 +1,16 @@
+{
+  "scope": "offline preparation only; no new HTTP requests, GPU runs, SSH, reset or package changes",
+  "python": "3.13.9",
+  "cpu_tests": {
+    "tests": 53,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "python310_grammar_files": 5,
+  "ruff_check": "passed",
+  "evidence_hashes_verified": 10,
+  "local_readme_links_verified": 17,
+  "log_privacy_scan": "passed",
+  "hardware_retested": false
+}

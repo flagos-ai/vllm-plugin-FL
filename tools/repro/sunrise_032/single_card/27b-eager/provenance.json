@@ -1,0 +1,838 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-11-05T03:43:36.266095+00:00",
+  "publication_state": "reviewed_executed_tp1_supplement",
+  "line_number_definition": "UTF-8 decoding then Python str.splitlines(); one-based ranges including CR refreshes.",
+  "json_pointer_definition": "RFC6901; ~ and / escaped as ~0 and ~1; empty string selects the root.",
+  "normalization_rules": {
+    "model": "<MODEL_ROOT>/Qwen3.6-27B",
+    "case_media": "file://<CASE_ROOT>/images/<original basename>",
+    "run": "<RUN_ROOT>",
+    "served_alias": "<SERVED_MODEL>",
+    "loopback": "<LOCALHOST>",
+    "python_executable": "<PYTHON_EXECUTABLE>"
+  },
+  "scope": {
+    "physical_device": 4,
+    "tensor_parallel_size": 1,
+    "mode": "eager",
+    "runner_v2": true,
+    "shared_requests": 26,
+    "original_checks": 260,
+    "long_prompt_tokens": 4118,
+    "long_checks": 10,
+    "tp2_matrix_eligible": false,
+    "source_files_match_Git7e": 17,
+    "source_match_is_wheel_attestation": false
+  },
+  "sources": [
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/requests/Qwen3.6-27B/port-48995/image_concurrent_8.json",
+      "source_basename": "image_concurrent_8.json",
+      "source_sha256": "1f2832bd4195d0dc46253b5dcc2234b7c47349b94d477c26de501f97aed434dc",
+      "source_bytes": 21582,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          726
+        ]
+      ],
+      "output": "reports/image_concurrent_8.json",
+      "json_pointers": [
+        "/case",
+        "/input",
+        "/output",
+        "/summary"
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/case/model_path",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/case/served_model_name",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/input/0/messages/0/content/1/image_url/url",
+          "original_value_sha256": "7deadf89f2c3d527c596c7effdc29f2352b7267aaa41689aa87bc637c8e356d1",
+          "normalized_value": "file://<CASE_ROOT>/images/image_01.png"
+        },
+        {
+          "json_pointer": "/input/0/image_path",
+          "original_value_sha256": "72ab40a846e676bf76065bda5b2dc10bac65bf5ed840ff8f2065d71d0e8a4f15",
+          "normalized_value": "<CASE_ROOT>/images/image_01.png"
+        },
+        {
+          "json_pointer": "/input/1/messages/0/content/1/image_url/url",
+          "original_value_sha256": "536a047e55438e8a656a81a61c554d576535d6b8b5270f4c370332f688e634b6",
+          "normalized_value": "file://<CASE_ROOT>/images/image_02.png"
+        },
+        {
+          "json_pointer": "/input/1/image_path",
+          "original_value_sha256": "5f546e71bc70b3dd577e70460b4f9b5397412ab6d9a2c42391497e920aafa0d2",
+          "normalized_value": "<CASE_ROOT>/images/image_02.png"
+        },
+        {
+          "json_pointer": "/input/2/messages/0/content/1/image_url/url",
+          "original_value_sha256": "2dfa4b93bb348c9af152b5350b6598e0cf6f8816a4a82f663101d8bb5a14a440",
+          "normalized_value": "file://<CASE_ROOT>/images/image_03.png"
+        },
+        {
+          "json_pointer": "/input/2/image_path",
+          "original_value_sha256": "1e15cec2c98388c6842655c6d68a8927e09a87a3550a682b06716ea6c2021cd4",
+          "normalized_value": "<CASE_ROOT>/images/image_03.png"
+        },
+        {
+          "json_pointer": "/input/3/messages/0/content/1/image_url/url",
+          "original_value_sha256": "daccef5fcf710795b2c5cb947eca2494ec6600a5dc85e95fbd385fdc0f87486f",
+          "normalized_value": "file://<CASE_ROOT>/images/image_04.png"
+        },
+        {
+          "json_pointer": "/input/3/image_path",
+          "original_value_sha256": "8a6f4f2b026fd7d8696d578b2938bcaa2595191bd25fc4ca816f523730fe6afe",
+          "normalized_value": "<CASE_ROOT>/images/image_04.png"
+        },
+        {
+          "json_pointer": "/input/4/messages/0/content/1/image_url/url",
+          "original_value_sha256": "cc2b7d3abbc027ff8487274cacbda85603b587c8dd7c7d9a1b5d66b734d9f134",
+          "normalized_value": "file://<CASE_ROOT>/images/image_05.png"
+        },
+        {
+          "json_pointer": "/input/4/image_path",
+          "original_value_sha256": "799aa48952931e0b13620c43f297a895fe7156e489cf3beee9793ede09b04ff9",
+          "normalized_value": "<CASE_ROOT>/images/image_05.png"
+        },
+        {
+          "json_pointer": "/input/5/messages/0/content/1/image_url/url",
+          "original_value_sha256": "3389b72f33714ce7f143797a91d8662ede8ba0835f7867b2759b14587e0d3d6a",
+          "normalized_value": "file://<CASE_ROOT>/images/image_06.png"
+        },
+        {
+          "json_pointer": "/input/5/image_path",
+          "original_value_sha256": "034e25ef675b2f86687fd10be6e4a349ac33214bd43c40f5fbfb38e8f9a89df5",
+          "normalized_value": "<CASE_ROOT>/images/image_06.png"
+        },
+        {
+          "json_pointer": "/input/6/messages/0/content/1/image_url/url",
+          "original_value_sha256": "29d2d0b71dee359d62a275a74c23d36b6e16fc4e832e8473b2cedcd56ddf4ee2",
+          "normalized_value": "file://<CASE_ROOT>/images/image_07.png"
+        },
+        {
+          "json_pointer": "/input/6/image_path",
+          "original_value_sha256": "122db6f27af56e6404ffc5cf0532b01668c96e88ac92a647e8a934c607dc4aac",
+          "normalized_value": "<CASE_ROOT>/images/image_07.png"
+        },
+        {
+          "json_pointer": "/input/7/messages/0/content/1/image_url/url",
+          "original_value_sha256": "feee7d829f1f2df6282de15104cca7b45896ee7537de6a2500771955dc6e2864",
+          "normalized_value": "file://<CASE_ROOT>/images/image_08.png"
+        },
+        {
+          "json_pointer": "/input/7/image_path",
+          "original_value_sha256": "50fb919934b0527af6f1002100908b3ab8d8d27ebe14c2d9cf34facffa2bceff",
+          "normalized_value": "<CASE_ROOT>/images/image_08.png"
+        },
+        {
+          "json_pointer": "/output/0/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/1/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/2/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/3/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/4/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/5/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/6/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/7/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/requests/Qwen3.6-27B/port-48995/image_single.json",
+      "source_basename": "image_single.json",
+      "source_sha256": "f0e901cda7a55e21fbbf59f4d47c8375508c197d3523ddebeead2170d54b00c3",
+      "source_bytes": 3170,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          110
+        ]
+      ],
+      "output": "reports/image_single.json",
+      "json_pointers": [
+        "/case",
+        "/input",
+        "/output",
+        "/summary"
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/case/model_path",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/case/served_model_name",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/input/0/messages/0/content/1/image_url/url",
+          "original_value_sha256": "cc2b7d3abbc027ff8487274cacbda85603b587c8dd7c7d9a1b5d66b734d9f134",
+          "normalized_value": "file://<CASE_ROOT>/images/image_05.png"
+        },
+        {
+          "json_pointer": "/input/0/image_path",
+          "original_value_sha256": "799aa48952931e0b13620c43f297a895fe7156e489cf3beee9793ede09b04ff9",
+          "normalized_value": "<CASE_ROOT>/images/image_05.png"
+        },
+        {
+          "json_pointer": "/output/0/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/requests/Qwen3.6-27B/port-48995/mixed_concurrent_8.json",
+      "source_basename": "mixed_concurrent_8.json",
+      "source_sha256": "946119e8f3dd6b4daa8c30ae3d516e271098d057c593a2e19ad9f3b0a7d7af64",
+      "source_bytes": 19497,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          678
+        ]
+      ],
+      "output": "reports/mixed_concurrent_8.json",
+      "json_pointers": [
+        "/case",
+        "/input",
+        "/output",
+        "/summary"
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/case/model_path",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/case/served_model_name",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/input/4/messages/0/content/1/image_url/url",
+          "original_value_sha256": "7deadf89f2c3d527c596c7effdc29f2352b7267aaa41689aa87bc637c8e356d1",
+          "normalized_value": "file://<CASE_ROOT>/images/image_01.png"
+        },
+        {
+          "json_pointer": "/input/4/image_path",
+          "original_value_sha256": "72ab40a846e676bf76065bda5b2dc10bac65bf5ed840ff8f2065d71d0e8a4f15",
+          "normalized_value": "<CASE_ROOT>/images/image_01.png"
+        },
+        {
+          "json_pointer": "/input/5/messages/0/content/1/image_url/url",
+          "original_value_sha256": "536a047e55438e8a656a81a61c554d576535d6b8b5270f4c370332f688e634b6",
+          "normalized_value": "file://<CASE_ROOT>/images/image_02.png"
+        },
+        {
+          "json_pointer": "/input/5/image_path",
+          "original_value_sha256": "5f546e71bc70b3dd577e70460b4f9b5397412ab6d9a2c42391497e920aafa0d2",
+          "normalized_value": "<CASE_ROOT>/images/image_02.png"
+        },
+        {
+          "json_pointer": "/input/6/messages/0/content/1/image_url/url",
+          "original_value_sha256": "2dfa4b93bb348c9af152b5350b6598e0cf6f8816a4a82f663101d8bb5a14a440",
+          "normalized_value": "file://<CASE_ROOT>/images/image_03.png"
+        },
+        {
+          "json_pointer": "/input/6/image_path",
+          "original_value_sha256": "1e15cec2c98388c6842655c6d68a8927e09a87a3550a682b06716ea6c2021cd4",
+          "normalized_value": "<CASE_ROOT>/images/image_03.png"
+        },
+        {
+          "json_pointer": "/input/7/messages/0/content/1/image_url/url",
+          "original_value_sha256": "daccef5fcf710795b2c5cb947eca2494ec6600a5dc85e95fbd385fdc0f87486f",
+          "normalized_value": "file://<CASE_ROOT>/images/image_04.png"
+        },
+        {
+          "json_pointer": "/input/7/image_path",
+          "original_value_sha256": "8a6f4f2b026fd7d8696d578b2938bcaa2595191bd25fc4ca816f523730fe6afe",
+          "normalized_value": "<CASE_ROOT>/images/image_04.png"
+        },
+        {
+          "json_pointer": "/output/0/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/1/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/2/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/3/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/4/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/5/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/6/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/7/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/requests/Qwen3.6-27B/port-48995/text_concurrent_8.json",
+      "source_basename": "text_concurrent_8.json",
+      "source_sha256": "abd97a95e998f291e27b5168dd613109a2082f63e663e50a46736e575d32dee0",
+      "source_bytes": 17130,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          622
+        ]
+      ],
+      "output": "reports/text_concurrent_8.json",
+      "json_pointers": [
+        "/case",
+        "/input",
+        "/output",
+        "/summary"
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/case/model_path",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/case/served_model_name",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/0/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/1/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/2/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/3/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/4/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/5/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/6/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/7/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/requests/Qwen3.6-27B/port-48995/text_single.json",
+      "source_basename": "text_single.json",
+      "source_sha256": "5b3f94b7886bb9ded4e54483d6f13cff306d42135425c25c8172d93c6678b758",
+      "source_bytes": 6332,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          102
+        ]
+      ],
+      "output": "reports/text_single.json",
+      "json_pointers": [
+        "/case",
+        "/input",
+        "/output",
+        "/summary"
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/case/model_path",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/case/served_model_name",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/output/0/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/long-prefill.json",
+      "source_basename": "long-prefill.json",
+      "source_sha256": "1ac489b6f33331f0a897f43fe3041c1b2becb61494792ca09b3d3234438a7e9d",
+      "source_bytes": 19825,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          75
+        ]
+      ],
+      "output": "long-prefill.json",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/model",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/input/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/response/model",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/summary.json",
+      "source_basename": "summary.json",
+      "source_sha256": "eb30b324b923d81278ff29bd6ea79174759619d1b0e650f52671654e2657e0af",
+      "source_bytes": 4046,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          107
+        ]
+      ],
+      "output": "summary.json",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/model",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/served_model_name",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/server_command/0",
+          "original_value_sha256": "95687411670a8c22c1aed3d8fa4240c154fb52d536f83a5bb7ea4f098654cef2",
+          "normalized_value": "<PYTHON_EXECUTABLE>"
+        },
+        {
+          "json_pointer": "/server_command/4",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/server_command/6",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        },
+        {
+          "json_pointer": "/server_command/8",
+          "original_value_sha256": "12ca17b49af2289436f303e0166030a21e525d266e209267433801a8fd4071a0",
+          "normalized_value": "<LOCALHOST>"
+        },
+        {
+          "json_pointer": "/server_command/27",
+          "original_value_sha256": "5f70fafa728b455dc484dc280a42e77f6f88ab9474aa720069cb240430fe99c5",
+          "normalized_value": "<CASE_ROOT>/images"
+        },
+        {
+          "json_pointer": "/server_log",
+          "original_value_sha256": "462572f30b15172bf41a416614302d73cd7b1ab87c80cde7706936dde7baf523",
+          "normalized_value": "<RUN_ROOT>/server.log"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/effective-configuration.json",
+      "source_basename": "effective-configuration.json",
+      "source_sha256": "ea0aa13a3ad41849524796c99dd937fdbe67ad18bc6c187f11bdf402d28c3935",
+      "source_bytes": 498,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          18
+        ]
+      ],
+      "output": "effective-configuration.json",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/model",
+          "original_value_sha256": "63b42214c442b0945a0289754bf24ab5066c678153558f01b33c24c21019810c",
+          "normalized_value": "<MODEL_ROOT>/Qwen3.6-27B"
+        },
+        {
+          "json_pointer": "/served_model_name",
+          "original_value_sha256": "97db97de9200f41e5b763913eaf9f9e5176f545a06be55894b807ab26e7dfa0a",
+          "normalized_value": "<SERVED_MODEL>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "verification-27b-eager-tp1-supplement.json",
+      "source_basename": "verification-27b-eager-tp1-supplement.json",
+      "source_sha256": "55eee4ad6c1b66468cb7364a3ac2ea9f06ce89370686f99f82168d082ce0a051",
+      "source_bytes": 29752,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          780
+        ]
+      ],
+      "output": "independent-verification.json",
+      "json_pointers": [
+        "/scope",
+        "/tp2_matrix_eligible",
+        "/original_shared_source_files_verified",
+        "/original_shared_source_sha256",
+        "/actual_configuration_from_native_startup_log",
+        "/recomputed_shared_quality_assertions",
+        "/scenarios",
+        "/supplemental_long_prefill",
+        "/device_snapshots",
+        "/input_file_sha256"
+      ],
+      "redactions": [
+        {
+          "json_pointer": "/input_directory",
+          "original_value_sha256": "2c907d25529914a55434e4002bd919b0e2aad97a1792d3ecacb40810c908e30a",
+          "normalized_value": "<RUN_ROOT>"
+        }
+      ]
+    },
+    {
+      "source_relative_path": "gate-results/27b-eager-tp1-supplement/server.log",
+      "source_basename": "server.log",
+      "source_sha256": "abc5e83f3840c9c98b3692bdad2d6ad0aa6352db0e2a8c6a78a2c242848d197e",
+      "source_bytes": 338667,
+      "source_line_ranges_1_based": [
+        [
+          8,
+          8
+        ],
+        [
+          46,
+          46
+        ],
+        [
+          70,
+          70
+        ],
+        [
+          1725,
+          1725
+        ],
+        [
+          1726,
+          1726
+        ],
+        [
+          1815,
+          1815
+        ]
+      ],
+      "output": "startup-excerpt.log",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        "Select complete original lines; substitute explicit model/case/run/Python paths, loopback, served alias and PID."
+      ],
+      "note": "V1 engine label is distinct from actual Sunrise Model Runner V2 worker."
+    },
+    {
+      "source_relative_path": "27b-eager-tp1.before.txt",
+      "source_basename": "27b-eager-tp1.before.txt",
+      "source_sha256": "7cdbd7ae660d0aaa85f645766d067601c583038c26009a50be20a497fbc9e772",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          3
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "output": "device-state.json",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        "Whitelist physical4 model/memory/utilization/ECC/no-listed-process flag; omit PCI addresses, power, temperature and other devices."
+      ]
+    },
+    {
+      "source_relative_path": "27b-eager-tp1.after.txt",
+      "source_basename": "27b-eager-tp1.after.txt",
+      "source_sha256": "ae5fc3a7a84ecdb72935315c4944195b5115d519f449d2faa241e55087290172",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          3
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "output": "device-state.json",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        "Whitelist physical4 model/memory/utilization/ECC/no-listed-process flag; omit PCI addresses, power, temperature and other devices."
+      ]
+    },
+    {
+      "source_relative_path": "27b-eager-tp1.status",
+      "source_basename": "27b-eager-tp1.status",
+      "source_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source_bytes": 2,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          1
+        ]
+      ],
+      "output": "device-state.json:/outer_status",
+      "json_pointers": [
+        "/outer_status"
+      ],
+      "redactions": []
+    },
+    {
+      "source_relative_path": "inside_tp1_27b_gate.sh",
+      "source_basename": "inside_tp1_27b_gate.sh",
+      "source_sha256": "d5f0315263af246c89de235b6acef11b7f879b9b745d5e8580df5ed66580a76d",
+      "source_bytes": 955,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          12
+        ]
+      ],
+      "output": "provenance.json:hash_only",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        "Only source hash/bytes/line range recorded; full shell/environment/local paths not republished."
+      ]
+    },
+    {
+      "source_relative_path": "run_tp1_27b_gate.sh",
+      "source_basename": "run_tp1_27b_gate.sh",
+      "source_sha256": "371ae7af1ec88289cc2e46e63f82a5dff371ba2a93754236acb5f86790a79d3a",
+      "source_bytes": 1451,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          29
+        ]
+      ],
+      "output": "provenance.json:hash_only",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        "Only source hash/bytes/line range recorded; full shell/environment/local paths not republished."
+      ]
+    },
+    {
+      "source_relative_path": "verify_27b_tp1_eager_offline.py",
+      "source_basename": "verify_27b_tp1_eager_offline.py",
+      "source_sha256": "6d5b5c92be882af7f8bd5d6986db951b258aa74c2fe47ff072756bcde892a6b1",
+      "source_bytes": 9920,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          170
+        ]
+      ],
+      "output": "provenance.json:hash_only",
+      "json_pointers": [
+        ""
+      ],
+      "redactions": [
+        "Only source hash/bytes/line range recorded; full shell/environment/local paths not republished."
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "path": "README.zh-CN.md",
+      "sha256": "109fb098cbc2742dd2a0a877a997f04aa8e37d4f4c8f730f04e493d6d7fd0185",
+      "bytes": 3100
+    },
+    {
+      "path": "device-state.json",
+      "sha256": "3e1156550ad2e56f93134286787be3d95f3e02f8d96a2e75e9637524b5ab8dad",
+      "bytes": 823
+    },
+    {
+      "path": "effective-configuration.json",
+      "sha256": "796e4f90e74e0f28ffd689be1c6130ebf459cd66c62bcebd200f21af9c647dd0",
+      "bytes": 462
+    },
+    {
+      "path": "independent-verification.json",
+      "sha256": "7aec2bee6fa66aff3e11dcc803c30ba08921c9e44270738e2e5551954c585441",
+      "bytes": 28892
+    },
+    {
+      "path": "long-prefill.json",
+      "sha256": "7590cb586d2facb34f09fdf6d56d3aadd7cc417a2c6d806e518b59486740cd13",
+      "bytes": 19758
+    },
+    {
+      "path": "reports/image_concurrent_8.json",
+      "sha256": "c1086d15bff765bf5f4d38b307b7d46659b7d9d097e250abdfe87cbd35730dd9",
+      "bytes": 19890
+    },
+    {
+      "path": "reports/image_single.json",
+      "sha256": "53226ee2fe4b860ad592f5b9a04b22d48f8401ff2527fefab4ea5b8b1dd50fca",
+      "bytes": 2927
+    },
+    {
+      "path": "reports/mixed_concurrent_8.json",
+      "sha256": "7ccd5c21756fbfa7e720aa59bd2eef58eb7efca5dbe2e1b9148f9b7d8739619a",
+      "bytes": 18509
+    },
+    {
+      "path": "reports/text_concurrent_8.json",
+      "sha256": "efcc5ba80bd8a697e494471f55c88ba010952d1603c5a987c2a80bdd77d083fe",
+      "bytes": 16840
+    },
+    {
+      "path": "reports/text_single.json",
+      "sha256": "fe63f863a6174754d0856576835d6c64792f892005d491a23f510f3519d02e14",
+      "bytes": 6265
+    },
+    {
+      "path": "startup-excerpt.log",
+      "sha256": "888a525f49390c3efce131ec4b4cb9e21b894903521af0dbc3aaab92f11a5153",
+      "bytes": 5331
+    },
+    {
+      "path": "summary.json",
+      "sha256": "1ebc832e00a7a66ed7d91ac394add6ff4ae37035c2f09a67b0dddb33966c9d40",
+      "bytes": 3830
+    }
+  ],
+  "privacy_scan": {
+    "output_count": 12,
+    "rules": [
+      "url_userinfo",
+      "credential_assignment",
+      "ipv4",
+      "ssh_alias",
+      "private_absolute_path"
+    ],
+    "findings": []
+  },
+  "raw_source_integrity": "All selected source files remain read-only and their recorded hashes were rechecked."
+}

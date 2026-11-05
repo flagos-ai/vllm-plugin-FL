@@ -1,0 +1,21 @@
+# Historical executed commands, with only task paths/container identifier redacted.
+# Source: run_copy_cards.sh (full original SHA/ranges in provenance.json).
+# These are records of completed invocations, not a request to rerun them.
+# <TASK_ROOT> replaces the original absolute host task directory.
+# <OWNED_CONTAINER> replaces the original task container name.
+# All other options below preserve the executed command form.
+
+# Physical 0; source loop iteration physical=0
+timeout 15s pt_smi > "<TASK_ROOT>/copy-card0-before.txt" 2>&1
+timeout --signal=TERM --kill-after=5s 65s docker exec "<OWNED_CONTAINER>" bash -lc "source /opt/sunrise-build/environment.sh; export TANG_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1; exec python -u <TASK_ROOT>/tensor_roundtrip.py --physical-device 0 --output-dir <TASK_ROOT>/copy-card0-r1 --timeout-seconds 45" > "<TASK_ROOT>/copy-card0.log" 2>&1
+timeout 15s pt_smi > "<TASK_ROOT>/copy-card0-after.txt" 2>&1
+
+# Physical 2; source loop iteration physical=2
+timeout 15s pt_smi > "<TASK_ROOT>/copy-card2-before.txt" 2>&1
+timeout --signal=TERM --kill-after=5s 65s docker exec "<OWNED_CONTAINER>" bash -lc "source /opt/sunrise-build/environment.sh; export TANG_VISIBLE_DEVICES=2 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1; exec python -u <TASK_ROOT>/tensor_roundtrip.py --physical-device 2 --output-dir <TASK_ROOT>/copy-card2-r1 --timeout-seconds 45" > "<TASK_ROOT>/copy-card2.log" 2>&1
+timeout 15s pt_smi > "<TASK_ROOT>/copy-card2-after.txt" 2>&1
+
+# Physical 4; source loop iteration physical=4
+timeout 15s pt_smi > "<TASK_ROOT>/copy-card4-before.txt" 2>&1
+timeout --signal=TERM --kill-after=5s 65s docker exec "<OWNED_CONTAINER>" bash -lc "source /opt/sunrise-build/environment.sh; export TANG_VISIBLE_DEVICES=4 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1; exec python -u <TASK_ROOT>/tensor_roundtrip.py --physical-device 4 --output-dir <TASK_ROOT>/copy-card4-r1 --timeout-seconds 45" > "<TASK_ROOT>/copy-card4.log" 2>&1
+timeout 15s pt_smi > "<TASK_ROOT>/copy-card4-after.txt" 2>&1

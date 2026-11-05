@@ -1,0 +1,107 @@
+{
+  "model": "<MODEL_ROOT>/Qwen3.6-27B",
+  "mode": "eager",
+  "served_model_name": "<SERVED_MODEL>",
+  "port": 48995,
+  "requested_configuration": {
+    "tensor_parallel_size": 1,
+    "max_model_len": 8192,
+    "max_num_seqs": 8,
+    "kv_cache_memory_bytes": 4294967296
+  },
+  "server_command": [
+    "<PYTHON_EXECUTABLE>",
+    "-m",
+    "vllm.entrypoints.cli.main",
+    "serve",
+    "<MODEL_ROOT>/Qwen3.6-27B",
+    "--served-model-name",
+    "<SERVED_MODEL>",
+    "--host",
+    "<LOCALHOST>",
+    "--port",
+    "48995",
+    "--tensor-parallel-size",
+    "1",
+    "--disable-custom-all-reduce",
+    "--max-model-len",
+    "8192",
+    "--max-num-batched-tokens",
+    "8192",
+    "--max-num-seqs",
+    "8",
+    "--gpu-memory-utilization",
+    "0.92",
+    "--kv-cache-memory-bytes",
+    "4294967296",
+    "--skip-mm-profiling",
+    "--cudagraph-metrics",
+    "--allowed-local-media-path",
+    "<CASE_ROOT>/images",
+    "--trust-remote-code",
+    "--enforce-eager"
+  ],
+  "server_log": "<RUN_ROOT>/server.log",
+  "reused_server": false,
+  "gate_source_sha256": {
+    "case_utils.py": "c8554aac662742a3f7aa1421044b017a2e60cece301fe92d5144b19e8a6bffd5",
+    "generate_images.py": "7251d0f01f1e8c605bd1df40e85e3d57a99010f289326806246e1a274742f84a",
+    "images/image_01.png": "4391e75143bee45b97ce0fa7a784fc929e29d17fddc3f6ad5842d9e16e1251c0",
+    "images/image_02.png": "8c06f3fca0eff7f564b87f05bcd918b3b082af3518906d20c5e0d331c105a561",
+    "images/image_03.png": "72b8c421ad39c3c39eb00417e5e4248e48db8026bc3534a8bc5b6016f93f6b5d",
+    "images/image_04.png": "3ff8052cf808cfda050cc80626cf9b6c627f001d153576ba2b5f4198fcf86a19",
+    "images/image_05.png": "197185d21a8fd09bc501381a5f0fac34be6799a4239b068435f8b039a1e15e5b",
+    "images/image_06.png": "9f80415980912348c1b2793eb48e6e05c6b1c90d66e7bbc056876ba650d844e4",
+    "images/image_07.png": "5ed527a8339091516c45fc0d0db82ab765db501d6857b6a294763efabbf437f3",
+    "images/image_08.png": "162dc14222db050f8f149b2601c742145612f26dc77af43e9311dcadd0169d6f",
+    "run_serve.sh": "8c00d35c2d2ee23eb9702cb88fb70ea74cab84e43eba9f260139c5c559acb702",
+    "run_serve_eager.sh": "b23fc53260331fb84fd02c6a9fa7c612892290eb43fbb9f5da7cd4f7903c363b",
+    "run_serve_graph.sh": "004ae208c2a9723a4fcf1d984ac423817f5df5983964a00d0af50d37ac1c6599",
+    "run_test.sh": "ecdb52f2e78a4918ab17f766c274e91e24dc174a29accd105eae17cd87bda3f7",
+    "test_image.py": "650ba67da5bd90834ddf4a2fa2aafd65cb41b02793881436cd214333ad5fa092",
+    "test_mix_text_image.py": "d69113a0069558a940bd1e45c230a4baff00c58467d261f72e9377d20f57f0fd",
+    "test_text.py": "a24193d43458cb699606bf1caeff3b45c28e4cf3bc9dc3583b67d19d99554b21"
+  },
+  "performance_policy": "Record request latency and token usage; no throughput or latency SLO is prescribed by the shared Gate",
+  "coverage": {
+    "shared_requests": 26,
+    "supplemental_long_prefill_requests": 1
+  },
+  "passed": true,
+  "server_ready_unix_seconds": 1793848698.9944627,
+  "runner_v2": true,
+  "effective_configuration": {
+    "tensor_parallel_size": 1,
+    "max_model_len": 8192,
+    "max_num_seqs": 8,
+    "kv_cache_memory_bytes": 4294967296,
+    "enforce_eager": true,
+    "use_v2_model_runner": true,
+    "compilation_mode": 0,
+    "compilation_backend": "eager",
+    "cudagraph_mode": "NONE",
+    "cudagraph_capture_sizes": []
+  },
+  "effective_config_evidence": "effective-configuration.json",
+  "kv_cache_capacity": {
+    "token_capacities": [
+      39996
+    ],
+    "required_context": 8192
+  },
+  "gate_start_log_offset": 278545,
+  "gate_returncode": 0,
+  "gate": {
+    "scenarios": 5,
+    "requests": 26,
+    "passed": true
+  },
+  "long_prefill": {
+    "passed": true,
+    "measured_prompt_tokens": 4118,
+    "target_prompt_tokens": 4096,
+    "report": "long-prefill.json"
+  },
+  "only_owned_cleanup_complete": true,
+  "reused_server_left_running": false
+}

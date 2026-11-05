@@ -1,0 +1,6 @@
+# Source basename: eager-current.log
+# Source SHA256: c433131f70ad1ccfa96fd33411e52ae49c4795fe0b7ba86035f7050aafefa2b5
+# Original one-based UTF-8 splitlines ranges: 26, 66
+# Redactions: process PID only.
+[source line 26] (EngineCore pid=<redacted>) INFO 11-05 03:04:24 [sunrise_worker.py:139] Using Sunrise Model Runner V2
+[source line 66] V2_PROOF_BEFORE [{"rank": 0, "runner": "SunriseV2ModelRunner", "runner_v2": true, "tensor_parallel_size": 1, "enforce_eager": true, "async_scheduling": true, "graph_mode": "NONE", "capture_sizes": [], "graphs": []}]

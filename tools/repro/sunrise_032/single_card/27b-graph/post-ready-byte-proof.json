@@ -1,0 +1,281 @@
+{
+  "source_log_sha256": "eb05b52c0ffe25c3953eb14ccdbcf06f075026c15ef8de0638474212a04800fa",
+  "source_log_bytes": 392940,
+  "gate_start_log_offset": 277752,
+  "offset_definition": "Raw source byte offset; zero-based start inclusive. Excerpt normalization never reuses this offset on sanitized text.",
+  "post_ready_tail_bytes": 115188,
+  "post_ready_tail_sha256": "d527ec6f9e243ec2f8e61d9a10b44cbcd9e24de22ab3322849d6dbca87e12f12",
+  "capture_finished_end_byte": 268965,
+  "application_ready_end_byte": 277602,
+  "capture_and_ready_before_boundary": true,
+  "native_full_metric_rows": 22,
+  "native_full_count_sum": 295,
+  "matches_summary_and_independent_verification": true,
+  "evidence_kind": "Native vLLM post-ready FULL execution metric table counts; not capture counts and not an additional PTPUGraph RPC/replay wrapper counter.",
+  "rows": [
+    {
+      "source_line_1_based": 1731,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        283223,
+        283371
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 19
+    },
+    {
+      "source_line_1_based": 1744,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        284765,
+        284913
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 44
+    },
+    {
+      "source_line_1_based": 1756,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        286159,
+        286307
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 44
+    },
+    {
+      "source_line_1_based": 1768,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        287553,
+        287701
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 43
+    },
+    {
+      "source_line_1_based": 1780,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        288947,
+        289095
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 44
+    },
+    {
+      "source_line_1_based": 1792,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        290341,
+        290489
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 44
+    },
+    {
+      "source_line_1_based": 1973,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        308350,
+        308498
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 31
+    },
+    {
+      "source_line_1_based": 2603,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        373127,
+        373275
+      ],
+      "num_tokens": 8,
+      "num_tokens_padded": 8,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2604,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        373275,
+        373423
+      ],
+      "num_tokens": 6,
+      "num_tokens_padded": 8,
+      "padding": 2,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2605,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        373423,
+        373571
+      ],
+      "num_tokens": 4,
+      "num_tokens_padded": 4,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2606,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        373571,
+        373719
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2623,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        375750,
+        375898
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 7
+    },
+    {
+      "source_line_1_based": 2664,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        380712,
+        380860
+      ],
+      "num_tokens": 3,
+      "num_tokens_padded": 4,
+      "padding": 1,
+      "mode": "FULL",
+      "count": 3
+    },
+    {
+      "source_line_1_based": 2667,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        381156,
+        381304
+      ],
+      "num_tokens": 8,
+      "num_tokens_padded": 8,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2668,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        381304,
+        381452
+      ],
+      "num_tokens": 4,
+      "num_tokens_padded": 4,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2669,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        381452,
+        381600
+      ],
+      "num_tokens": 2,
+      "num_tokens_padded": 2,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2670,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        381600,
+        381748
+      ],
+      "num_tokens": 1,
+      "num_tokens_padded": 1,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2707,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        385721,
+        385869
+      ],
+      "num_tokens": 3,
+      "num_tokens_padded": 4,
+      "padding": 1,
+      "mode": "FULL",
+      "count": 3
+    },
+    {
+      "source_line_1_based": 2708,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        385869,
+        386017
+      ],
+      "num_tokens": 2,
+      "num_tokens_padded": 2,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 2
+    },
+    {
+      "source_line_1_based": 2709,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        386017,
+        386165
+      ],
+      "num_tokens": 8,
+      "num_tokens_padded": 8,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2710,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        386165,
+        386313
+      ],
+      "num_tokens": 7,
+      "num_tokens_padded": 8,
+      "padding": 1,
+      "mode": "FULL",
+      "count": 1
+    },
+    {
+      "source_line_1_based": 2711,
+      "source_byte_range_start_inclusive_end_exclusive": [
+        386313,
+        386461
+      ],
+      "num_tokens": 4,
+      "num_tokens_padded": 4,
+      "padding": 0,
+      "mode": "FULL",
+      "count": 1
+    }
+  ]
+}

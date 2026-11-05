@@ -67,6 +67,8 @@ VLLM_PLUGIN_FL_VERSION="${VLLM_PLUGIN_FL_VERSION:-ffa2ee3eb3831f3873dd0966d12fc8
 
 # ---- Build options ----
 PLATFORM="${PLATFORM:-cuda}"
+SUNRISE_BASE_IMAGE="${SUNRISE_BASE_IMAGE:-harbor.baai.ac.cn/flagos-app/vllm0.24.0-sunrise-tangrt1.2.0:2.3.0-0.3.0}"
+SUNRISE_VLLM_VERSION="${SUNRISE_VLLM_VERSION:-0.32.0}"
 TARGET="dev"
 IMAGE_NAME="harbor.baai.ac.cn/flagscale/vllm-plugin-fl"
 IMAGE_TAG=""
@@ -96,7 +98,7 @@ Usage: $(basename "$0") [OPTIONS]
 Build the vllm-plugin-FL Docker image.
 
 OPTIONS:
-    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin (default: ${PLATFORM})
+    --platform PLATFORM    Platform to build: cuda, ascend, hygon, metax, musa, enflame, kunlunxin, sunrise (default: ${PLATFORM})
     --target TARGET        Build target: dev, ci, release (default: ${TARGET})
     --image-name NAME      Image name (default: ${IMAGE_NAME})
     --image-tag TAG        Image tag (default: auto-generated)
@@ -113,6 +115,11 @@ VERSIONS (override via environment variables):
     UBUNTU_VERSION       Ubuntu version (default: ${UBUNTU_VERSION})
   CUDA:
     CUDA_VERSION         CUDA version (default: ${CUDA_VERSION})
+  Sunrise:
+    SUNRISE_BASE_IMAGE   Sunrise vendor stack (default: ${SUNRISE_BASE_IMAGE})
+    SUNRISE_VLLM_VERSION vLLM empty version (default: ${SUNRISE_VLLM_VERSION})
+    SUNRISE_GIT_CONFIG   Optional git-only config file passed as a BuildKit secret
+    SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR Optional directory containing flaggems-vllm.bundle
   Ascend:
     CANN_VERSION         CANN version (default: ${CANN_VERSION})
     CANN_CHIP            CANN chip: 910b, a3 (default: ${CANN_CHIP})
@@ -333,6 +340,27 @@ elif [[ "${PLATFORM}" == "hygon" ]]; then
     if [[ -z "${IMAGE_TAG}" ]]; then
         IMAGE_TAG="v${HYGON_VLLM_VERSION}-hygon-${TARGET}"
     fi
+elif [[ "${PLATFORM}" == "sunrise" ]]; then
+    VLLM_VERSION="${SUNRISE_VLLM_VERSION}"
+    BUILD_CONTEXT="${SCRIPT_DIR}/.."
+    if [[ -n "${SUNRISE_GIT_CONFIG:-}" ]]; then
+        [[ -f "${SUNRISE_GIT_CONFIG}" ]] || err "SUNRISE_GIT_CONFIG file does not exist."
+        BUILD_SECRET_ARGS+=(--secret "id=git_config,src=${SUNRISE_GIT_CONFIG}")
+    fi
+    if [[ -n "${SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR:-}" ]]; then
+        [[ -d "${SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR}" ]] || err "SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR directory does not exist."
+        [[ -f "${SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR}/flaggems-vllm.bundle" ]] || err "SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR must contain flaggems-vllm.bundle."
+        BUILD_SECRET_ARGS+=(--build-context "flaggems_provider=${SUNRISE_FLAGGEMS_VLLM_BUNDLE_DIR}")
+    fi
+    BUILD_ARGS+=(
+        --build-arg "SUNRISE_BASE_IMAGE=${SUNRISE_BASE_IMAGE}"
+        --build-arg "VLLM_VERSION=${SUNRISE_VLLM_VERSION}"
+    )
+    [[ -z "${INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "INDEX_URL=${INDEX_URL}")
+    [[ -z "${EXTRA_INDEX_URL}" ]] || BUILD_ARGS+=(--build-arg "EXTRA_INDEX_URL=${EXTRA_INDEX_URL}")
+    if [[ -z "${IMAGE_TAG}" ]]; then
+        IMAGE_TAG="v${VLLM_VERSION}-sunrise-${TARGET}"
+    fi
 elif [[ "${PLATFORM}" == "metax" ]]; then
     PYTHON_VERSION="${METAX_PYTHON_VERSION}"
     VLLM_VERSION="${METAX_VLLM_VERSION}"
@@ -390,7 +418,7 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
         IMAGE_TAG="v${KUNLUNXIN_VLLM_VERSION}-kunlunxin-ci"
     fi
 else
-    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', or 'kunlunxin'."
+    err "Unknown platform '${PLATFORM}'. Must be 'cuda', 'ascend', 'hygon', 'metax', 'musa', 'enflame', 'kunlunxin', or 'sunrise'."
 fi
 
 FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
@@ -416,6 +444,9 @@ elif [[ "${PLATFORM}" == "metax" ]]; then
     msg "  MACA:           ${METAX_MACA_VERSION}"
     msg "  MetaX Python:   ${METAX_PYTHON_VERSION}"
     msg "  Base image:     ${METAX_BASE_IMAGE}"
+elif [[ "${PLATFORM}" == "sunrise" ]]; then
+    msg "  Base image:     ${SUNRISE_BASE_IMAGE}"
+    msg "  Runtime:        TangRT 1.2.0 / vendor PTPU / Python 3.10 compatibility build"
 elif [[ "${PLATFORM}" == "musa" ]]; then
     msg "  MUSA:           ${MUSA_VERSION}"
     msg "  MUSA base:      ${MUSA_BASE_IMAGE}"
@@ -433,7 +464,7 @@ elif [[ "${PLATFORM}" == "kunlunxin" ]]; then
     msg "  FlagCX:         ${KUNLUNXIN_FLAGCX_REF}"
     msg "  Plugin:         ${KUNLUNXIN_PLUGIN_FL_REF}"
 fi
-if [[ "${PLATFORM}" != "ascend" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
+if [[ "${PLATFORM}" != "ascend" && "${PLATFORM}" != "sunrise" && ! ( "${PLATFORM}" == "cuda" && "${TARGET}" == "ci" ) ]]; then
     msg "  Ubuntu:         ${UBUNTU_VERSION}"
     msg "  Python:         ${PYTHON_VERSION}"
 fi

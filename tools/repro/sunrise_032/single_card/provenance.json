@@ -1,0 +1,378 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-11-05T03:13:09.185867+00:00",
+  "publication_state": "reviewed_current_tp1_evidence",
+  "line_number_definition": "UTF-8 decoding followed by Python str.splitlines(); one-based ranges, including CR progress refreshes.",
+  "sources": [
+    {
+      "source_relative_path": "4b-eager-current/receipt.json",
+      "source_basename": "receipt.json",
+      "source_sha256": "404895cad305f2796ee5377d25ffb1664b9d6d05b5eaf3085d98a55362494a8e",
+      "source_bytes": 1607,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          64
+        ]
+      ],
+      "output": "eager/receipt.json",
+      "redactions": [
+        "Replace absolute model directory with <MODEL_ROOT>/Qwen3-4B; all proof/request/result fields retained."
+      ]
+    },
+    {
+      "source_relative_path": "eager-current.status",
+      "source_basename": "eager-current.status",
+      "source_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source_bytes": 2,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          1
+        ]
+      ],
+      "output": "validation-summary.json:outer_status",
+      "redactions": []
+    },
+    {
+      "source_relative_path": "eager-current.log",
+      "source_basename": "eager-current.log",
+      "source_sha256": "c433131f70ad1ccfa96fd33411e52ae49c4795fe0b7ba86035f7050aafefa2b5",
+      "source_bytes": 19439,
+      "source_line_ranges_1_based": [
+        [
+          26,
+          26
+        ],
+        [
+          66,
+          66
+        ]
+      ],
+      "output": "eager/ready-proof.log",
+      "redactions": [
+        "Replace process PID; select only runner/capture/ready-proof lines."
+      ]
+    },
+    {
+      "source_relative_path": "4b-graph-current/receipt.json",
+      "source_basename": "receipt.json",
+      "source_sha256": "619ea1a710d8da43e7626f32e740189b55cf7386a8fb0a7955496f84fcd82eff",
+      "source_bytes": 2790,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          92
+        ]
+      ],
+      "output": "graph/receipt.json",
+      "redactions": [
+        "Replace absolute model directory with <MODEL_ROOT>/Qwen3-4B; all proof/request/result fields retained."
+      ]
+    },
+    {
+      "source_relative_path": "graph-current.status",
+      "source_basename": "graph-current.status",
+      "source_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "source_bytes": 2,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          1
+        ]
+      ],
+      "output": "validation-summary.json:outer_status",
+      "redactions": []
+    },
+    {
+      "source_relative_path": "graph-current.log",
+      "source_basename": "graph-current.log",
+      "source_sha256": "9eeca29a974b5ba1b9aa9a849896ea568db3a2702d3ed3338ca849dd9040877d",
+      "source_bytes": 21602,
+      "source_line_ranges_1_based": [
+        [
+          24,
+          24
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          71,
+          71
+        ]
+      ],
+      "output": "graph/ready-proof.log",
+      "redactions": [
+        "Replace process PID; select only runner/capture/ready-proof lines."
+      ]
+    },
+    {
+      "source_relative_path": "packages-before-r2.json",
+      "source_basename": "packages-before-r2.json",
+      "source_sha256": "d8533fe5bc5a61984811bf62a44b1ac39e556fc3181e45cf3e3cb6ec40048c2d",
+      "source_bytes": 338,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          13
+        ]
+      ],
+      "output": "installation/packages-before-r2.json",
+      "redactions": []
+    },
+    {
+      "source_relative_path": "packages-after-r2.json",
+      "source_basename": "packages-after-r2.json",
+      "source_sha256": "7e7bbfcba373701eb562253a9d7938a9012cdce774aa33bb733e3b664e129956",
+      "source_bytes": 804,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          19
+        ]
+      ],
+      "output": "installation/packages-after-r2.json",
+      "redactions": []
+    },
+    {
+      "source_relative_path": "eager-current.before.txt",
+      "source_basename": "eager-current.before.txt",
+      "source_sha256": "12134fcf31d62f560e99bcc61e4deacacb5185fb2e179f94af269ba5191da7f9",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          3
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "output": "device-state.json",
+      "redactions": [
+        "Whitelist physical4 model/memory/utilization/ECC and no-listed-process flag. Omit PCI addresses, power, temperature and other device rows."
+      ]
+    },
+    {
+      "source_relative_path": "eager-current.after.txt",
+      "source_basename": "eager-current.after.txt",
+      "source_sha256": "2e6526014a9212593ad7c4d7d0b82de06a285701737ce4309ed66d9e60c1875e",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          3
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "output": "device-state.json",
+      "redactions": [
+        "Whitelist physical4 model/memory/utilization/ECC and no-listed-process flag. Omit PCI addresses, power, temperature and other device rows."
+      ]
+    },
+    {
+      "source_relative_path": "graph-current.before.txt",
+      "source_basename": "graph-current.before.txt",
+      "source_sha256": "045a4e3fb2e2be157fa1a21a24a4536ab22646e76045fc026e68214e7369c9a1",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          3
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "output": "device-state.json",
+      "redactions": [
+        "Whitelist physical4 model/memory/utilization/ECC and no-listed-process flag. Omit PCI addresses, power, temperature and other device rows."
+      ]
+    },
+    {
+      "source_relative_path": "graph-current.after.txt",
+      "source_basename": "graph-current.after.txt",
+      "source_sha256": "cb02560c9f04c0e58eb25b2b6641f657eedbe6ee94091c6ec67492960afd4ef1",
+      "source_bytes": 3973,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          3
+        ],
+        [
+          25,
+          26
+        ],
+        [
+          47,
+          47
+        ]
+      ],
+      "output": "device-state.json",
+      "redactions": [
+        "Whitelist physical4 model/memory/utilization/ECC and no-listed-process flag. Omit PCI addresses, power, temperature and other device rows."
+      ]
+    },
+    {
+      "source_relative_path": "inside_install_current_plugin_r2.sh",
+      "source_basename": "inside_install_current_plugin_r2.sh",
+      "source_sha256": "0278508be79f703d5de240f142e562c7bcbce3b999ca642b39bd72124d3dd140",
+      "source_bytes": 2108,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          40
+        ]
+      ],
+      "output": "installation/command-excerpt.txt",
+      "redactions": [
+        "Replace original absolute source/task roots. Omit unrelated script plumbing; retain installation flags and build-only autoload setting."
+      ],
+      "interpretation": "The after receipt is emitted only after version assertions and installed-file/source-file equality assertions in this script. This source script is not itself an installation exit-status log."
+    },
+    {
+      "source_relative_path": "smoke_single_card_v2.py",
+      "source_basename": "smoke_single_card_v2.py",
+      "source_sha256": "e0bb0b35491c6f448622cde983350900512a3f6bb2212fea677ea44ae6cd2671",
+      "source_bytes": 9934,
+      "source_line_ranges_1_based": [
+        [
+          31,
+          41
+        ],
+        [
+          44,
+          90
+        ],
+        [
+          187,
+          203
+        ],
+        [
+          216,
+          232
+        ]
+      ],
+      "output": "validation-summary.json:proof_method",
+      "redactions": [],
+      "interpretation": "ReplayCounter is installed after LLM construction/readiness, calls native graph.replay then increments; before counters zero, after counters are native replay calls during the five requests, not number of requests."
+    },
+    {
+      "source_relative_path": "run_single_validation_current.sh",
+      "source_basename": "run_single_validation_current.sh",
+      "source_sha256": "b773b83fde55dac4e5b76eeb46bd296c45b39970ebef35b2284929bb4d052dd5",
+      "source_bytes": 1918,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          34
+        ]
+      ],
+      "output": "validation-summary.json:run_wrapper",
+      "redactions": [],
+      "interpretation": "Source wrapper selects physical4, sets V2/FlagGems/PCCL/TA env before runtime, runs under480-second timeout, writes explicit outer status and takes before/after snapshots. Absolute task paths and unneeded environment are not republished."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "eager/receipt.json",
+      "sha256": "6033104fb6e5fd0cb3433b81136414bdf0f30a95703e467960465d0247b62bae",
+      "bytes": 1602
+    },
+    {
+      "path": "eager/ready-proof.log",
+      "sha256": "bc6672d4f5a8ef22f64ec997a0fa3f3ad22806a535e280bc27555e16a8b3ad6e",
+      "bytes": 556
+    },
+    {
+      "path": "graph/receipt.json",
+      "sha256": "b5a3afd37ace2a403ef2a7c6d09ee128300097d25ef85e9b413b092b2e3615c4",
+      "bytes": 2785
+    },
+    {
+      "path": "graph/ready-proof.log",
+      "sha256": "942ed161834f83d757e21f7a17893d0093095dead467ce4de891dbdc509b13a0",
+      "bytes": 1161
+    },
+    {
+      "path": "installation/packages-before-r2.json",
+      "sha256": "d8533fe5bc5a61984811bf62a44b1ac39e556fc3181e45cf3e3cb6ec40048c2d",
+      "bytes": 338
+    },
+    {
+      "path": "installation/packages-after-r2.json",
+      "sha256": "7e7bbfcba373701eb562253a9d7938a9012cdce774aa33bb733e3b664e129956",
+      "bytes": 804
+    },
+    {
+      "path": "device-state.json",
+      "sha256": "b7ae56c71723e58e9b7a6756585fae79ecafc5cdeddeb1d6a80150a4a5b60026",
+      "bytes": 1481
+    },
+    {
+      "path": "installation/command-excerpt.txt",
+      "sha256": "f26ed41aaf941df74e67dee71dddc43d046596e74a2680ecb04948678ad00210",
+      "bytes": 629
+    },
+    {
+      "path": "validation-summary.json",
+      "sha256": "0315f7c30d489a6493455eeb349ec038c5416f4d7de901ced12367b85dde7e26",
+      "bytes": 2461
+    },
+    {
+      "path": "README.zh-CN.md",
+      "sha256": "349dcebad0a9a0f0909ff0ef29e038587670eb08bd1aebe6718cdcf94a6c22c5",
+      "bytes": 4053
+    }
+  ],
+  "privacy_scan": {
+    "checked_output_count": 10,
+    "rules": [
+      "url_userinfo",
+      "credential_assignment",
+      "ipv4",
+      "ssh_alias",
+      "private_absolute_path"
+    ],
+    "findings": []
+  },
+  "scope": "Current 7e plugin overlay, physical4 TP1 only; archived TP2 failures remain unresolved; no reset/reboot.",
+  "executed_smoke_sha256": "e0bb0b35491c6f448622cde983350900512a3f6bb2212fea677ea44ae6cd2671",
+  "additional_published_files": [
+    {
+      "path": "smoke_single_card_v2.py",
+      "sha256": "e0bb0b35491c6f448622cde983350900512a3f6bb2212fea677ea44ae6cd2671",
+      "bytes": 9934
+    },
+    {
+      "path": "test_smoke_single_card_v2.py",
+      "sha256": "6725fa4d64b5697297acc6a3f83d14d373a0b8251a3b854fbf0dc126c5f3209f",
+      "bytes": 4650
+    },
+    {
+      "path": "offline-validation.json",
+      "sha256": "2da796908d11637cc3600ddee38c006ec352cebca37aac6ec23d712830f7358a",
+      "bytes": 392
+    }
+  ],
+  "editorial_note": "README and summary distinguish this turn pre-update TP1 metadata error from still-valid archived TP2 timeouts."
+}

@@ -152,7 +152,7 @@ def weak_ref_tensors(value: Any) -> Any:
 
 
 def _graph_capture_stream() -> Any:
-    if current_platform.device_type in ("musa", "npu"):
+    if current_platform.device_type in ("musa", "npu", "ptpu"):
         # Native accelerator contexts do not update vLLM's CUDA stream cache.
         # Read the active accelerator side stream directly during capture.
         return current_platform.torch_device_fn.current_stream()
@@ -422,4 +422,10 @@ class GraphWrapper:
                 entry.graph.replay()
         else:
             entry.graph.replay()
+        if current_platform.device_type == "ptpu" and self.is_debugging_mode:
+            logger.debug(
+                "Sunrise graph replay completed runtime_mode=%s batch_descriptor=%s",
+                self.runtime_mode.name,
+                entry.batch_descriptor,
+            )
         return entry.output

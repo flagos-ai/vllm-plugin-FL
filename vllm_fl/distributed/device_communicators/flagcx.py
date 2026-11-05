@@ -26,6 +26,7 @@ _flagcx_path = os.getenv('FLAGCX_PATH')
 if _flagcx_path and os.path.isdir(_flagcx_path):
     sys.path.append(_flagcx_path)
 
+_flagcx_wheel_api = False
 try:
     from plugin.interservice.flagcx_wrapper import (
         FLAGCXLibrary,
@@ -37,13 +38,31 @@ try:
     )
     _flagcx_available = True
 except (ImportError, ModuleNotFoundError):
-    _flagcx_available = False
-    FLAGCXLibrary = None
-    buffer_type = None
-    flagcxComm_t = None
-    flagcxDataTypeEnum = None
-    flagcxUniqueId = None
-    flagcxRedOpTypeEnum = None
+    try:
+        from vllm.platforms import current_platform
+
+        if current_platform.device_type != "ptpu":
+            raise ImportError("FlagCX wheel fallback is enabled only for Sunrise")
+        # FlagCX 0.14 wheels ship the ctypes wrapper as flagcx.api, with
+        # native lookup of the matching lib/libflagcx.so. No checkout is needed.
+        from flagcx.api import (
+            FLAGCXLibrary,
+            buffer_type,
+            flagcxComm_t,
+            flagcxDataTypeEnum,
+            flagcxUniqueId,
+            flagcxRedOpTypeEnum,
+        )
+        _flagcx_available = True
+        _flagcx_wheel_api = True
+    except (ImportError, ModuleNotFoundError):
+        _flagcx_available = False
+        FLAGCXLibrary = None
+        buffer_type = None
+        flagcxComm_t = None
+        flagcxDataTypeEnum = None
+        flagcxUniqueId = None
+        flagcxRedOpTypeEnum = None
 
 class PyFlagcxCommunicator:
     def __init__(
@@ -89,12 +108,12 @@ class PyFlagcxCommunicator:
             return
         try:
             ### TODO(lms): simplify it
-            if library_path is None:
+            if library_path is None and not _flagcx_wheel_api:
                 flagcx_path = os.getenv('FLAGCX_PATH')
                 library_path=os.path.join(flagcx_path, "build/lib/libflagcx.so")
-                self.flagcx = FLAGCXLibrary(library_path)
-            else:
-                self.flagcx = FLAGCXLibrary(library_path)
+            # The Sunrise wheel API resolves its packaged library for None;
+            # legacy checkouts and explicit overrides retain their own paths.
+            self.flagcx = FLAGCXLibrary(library_path)
         except Exception as exc:
             # disable because of missing NCCL library
             # e.g. in a non-GPU environment

@@ -48,6 +48,64 @@ from vllm_fl.utils import (
 logger = init_logger(__name__)
 
 
+def _configure_sunrise_compilation_defaults(vllm_config: "VllmConfig") -> None:
+    """Choose native PTPU decode graphs before vLLM finalizes capture sizes."""
+    from vllm.config import CompilationMode, CUDAGraphMode
+    from vllm.envs import VLLM_USE_BREAKABLE_CUDAGRAPH
+
+    model = vllm_config.model_config
+    compilation = vllm_config.compilation_config
+    if model is None:
+        return
+    if model.enforce_eager:
+        compilation.mode = CompilationMode.NONE
+        compilation.cudagraph_mode = CUDAGraphMode.NONE
+        return
+
+    if compilation.mode not in (None, CompilationMode.NONE):
+        raise NotImplementedError(
+            "Sunrise/PTPU supports compilation mode NONE with native Runner V2 "
+            "graphs; Dynamo/VLLM_COMPILE/Inductor model compilation is unsupported. "
+            "Set compilation_config.mode=0."
+        )
+    if compilation.mode is None and compilation.backend not in ("", "eager"):
+        raise NotImplementedError(
+            "Sunrise/PTPU model compilation backend is unsupported. Use "
+            "compilation_config.mode=0 for native PTPU execution."
+        )
+    compilation.mode = CompilationMode.NONE
+    if not compilation.backend:
+        compilation.backend = "eager"
+    if compilation.cudagraph_mode is None:
+        compilation.cudagraph_mode = (
+            CUDAGraphMode.NONE
+            if vllm_config.optimization_level == 0
+            else CUDAGraphMode.FULL_DECODE_ONLY
+        )
+    if compilation.cudagraph_mode not in (
+        CUDAGraphMode.NONE,
+        CUDAGraphMode.FULL_DECODE_ONLY,
+    ):
+        raise NotImplementedError(
+            "Sunrise/PTPU graphs support NONE or FULL_DECODE_ONLY; mixed FULL, "
+            "PIECEWISE and FULL_AND_PIECEWISE are unsupported."
+        )
+    if compilation.cudagraph_mode == CUDAGraphMode.NONE:
+        return
+    if VLLM_USE_BREAKABLE_CUDAGRAPH:
+        raise NotImplementedError(
+            "Sunrise/PTPU FULL_DECODE_ONLY requires VLLM_USE_BREAKABLE_CUDAGRAPH=0."
+        )
+    if vllm_config.parallel_config.use_ubatching:
+        raise NotImplementedError("Sunrise/PTPU graphs do not support ubatching")
+    if getattr(compilation, "cudagraph_mm_encoder", False):
+        raise NotImplementedError("Sunrise/PTPU encoder graphs are unsupported")
+    if compilation.use_inductor_graph_partition:
+        raise NotImplementedError(
+            "Sunrise/PTPU graphs do not support Inductor partitioning"
+        )
+
+
 def _configure_ascend_compilation(vllm_config: "VllmConfig") -> None:
     """Configure eager FX execution with ordinary Ascend FULL decode graphs.
 
@@ -169,8 +227,9 @@ class PlatformFL(Platform):
         else device_info.device_type
     )
     device_type = device_info.device_type
-    # Keep small torch.compile helpers on the native NPU execution path.
-    simple_compile_backend = "eager" if device_type == "npu" else "inductor"
+    # Keep standalone helpers on native device execution. The published
+    # torch_ptpu/torch 2.11 CPU stack registers no PTPU Inductor code generator.
+    simple_compile_backend = "eager" if device_type in ("npu", "ptpu") else "inductor"
     dispatch_key = device_info.dispatch_key
     torch_device_fn = device_info.torch_device_fn
     ray_device_key: str = "GPU"
@@ -313,23 +372,27 @@ class PlatformFL(Platform):
 
     @classmethod
     def import_ir_kernels(cls) -> None:
-        """Import IR kernel modules. OOT platforms override to import their own."""
+        """Import executable IR providers for the active device."""
+        if cls.device_type == "ptpu":
+            # The empty wheel has no CUDA vllm_c providers. Native IR ops use
+            # real PyTorch operations and retain enabled FlagGems dispatch.
+            import vllm.ir.ops  # noqa: F401
+
+            return
         import vllm.kernels  # noqa: F401
 
     @classmethod
     def apply_config_platform_defaults(cls, vllm_config: "VllmConfig") -> None:
-        """Install MetaX graph defaults before vLLM finalizes graph settings.
+        """Set native platform graph defaults before capture sizes are derived.
 
-        vLLM calls this right after CLI parsing, before the cudagraph capture
-        sizes / max graph size are derived from the graph mode. Setting the
-        defaults here keeps a bare serve (no ``--compilation-config``)
-        capturing graphs without fighting the final configuration checks.
-
-        Explicit user configuration wins: ``--enforce-eager`` /
-        ``-O0`` (``mode == NONE``) and an explicit ``cudagraph_mode`` are left
-        untouched. Rewriting a finalized ``NONE`` to ``PIECEWISE`` afterwards
-        would also trip vLLM's "piecewise requires VLLM_COMPILE" assertion.
+        Sunrise uses native decode graphs without model compilation and rejects
+        unsupported explicit modes. MetaX retains its piecewise graph defaults.
+        Setting defaults here preserves eager requests and explicit graph modes
+        before vLLM finalizes its compilation configuration.
         """
+        if cls.device_type == "ptpu":
+            _configure_sunrise_compilation_defaults(vllm_config)
+            return
         if cls.vendor_name != "metax":
             return
 
@@ -361,7 +424,15 @@ class PlatformFL(Platform):
         compilation_config.cudagraph_mode = CUDAGraphMode.PIECEWISE
         if not getattr(compilation_config, "cudagraph_capture_sizes", None):
             compilation_config.cudagraph_capture_sizes = [
-                1, 2, 4, 8, 16, 32, 64, 128, 256
+                1,
+                2,
+                4,
+                8,
+                16,
+                32,
+                64,
+                128,
+                256,
             ]
         if hasattr(compilation_config, "cudagraph_mm_encoder"):
             compilation_config.cudagraph_mm_encoder = False
@@ -487,7 +558,11 @@ class PlatformFL(Platform):
                 # Revalidate after changing MLA/KV-head semantics so DCP and TP
                 # constraints are checked against the dense architecture.
                 model_config.verify_with_parallel_config(parallel_config)
-        parallel_config.worker_cls = "vllm_fl.worker.worker.WorkerFL"
+        parallel_config.worker_cls = (
+            "vllm_fl.worker.sunrise_worker.SunriseWorker"
+            if cls.device_type == "ptpu"
+            else "vllm_fl.worker.worker.WorkerFL"
+        )
 
         scheduler_config = vllm_config.scheduler_config
         if (
@@ -809,6 +884,7 @@ class PlatformFL(Platform):
             "gcu",
             "enflame",
             "kunlunxin",
+            "sunrise",
         ]
 
     @classmethod
@@ -977,6 +1053,11 @@ class PlatformFL(Platform):
         """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs."""
         from vllm.config.compilation import CompilationMode
         from vllm.config.kernel import IrOpPriorityConfig
+
+        if cls.device_type == "ptpu":
+            # Select only providers registered by the empty/PTPU build; do not
+            # advertise NVIDIA extension kernels that cannot execute here.
+            return IrOpPriorityConfig.with_default(["native"])
 
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE

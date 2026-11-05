@@ -1,0 +1,622 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "text_concurrent_8",
+    "model_path": "<MODEL_ROOT>/Qwen3.6-27B",
+    "served_model_name": "<SERVED_MODEL>",
+    "port": "47245",
+    "concurrency": 8
+  },
+  "started_at": "2026-11-05T03:37:58.610679+00:00",
+  "finished_at": "2026-11-05T03:38:22.731869+00:00",
+  "input": [
+    {
+      "request_id": "text-01",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Compute 19 + 23. Reply with the number only."
+        }
+      ],
+      "required_terms": [
+        "42"
+      ]
+    },
+    {
+      "request_id": "text-02",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Name the capital of France. Reply with the city only."
+        }
+      ],
+      "required_terms": [
+        "paris"
+      ]
+    },
+    {
+      "request_id": "text-03",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Give the opposite of hot. Reply with one word."
+        }
+      ],
+      "required_terms": [
+        "cold"
+      ]
+    },
+    {
+      "request_id": "text-04",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "How many days are in one week? Reply with the number only."
+        }
+      ],
+      "required_terms": [
+        "7"
+      ]
+    },
+    {
+      "request_id": "text-05",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Give the chemical formula for water. Reply with the formula only."
+        }
+      ],
+      "required_terms": [
+        "h2o"
+      ]
+    },
+    {
+      "request_id": "text-06",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Name Earth's largest ocean. Reply with the ocean name only."
+        }
+      ],
+      "required_terms": [
+        "pacific"
+      ]
+    },
+    {
+      "request_id": "text-07",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Compute 5 multiplied by 6. Reply with the number only."
+        }
+      ],
+      "required_terms": [
+        "30"
+      ]
+    },
+    {
+      "request_id": "text-08",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What color results from mixing blue and yellow paint? Reply with one word."
+        }
+      ],
+      "required_terms": [
+        "green"
+      ]
+    }
+  ],
+  "output": [
+    {
+      "request_id": "text-01",
+      "kind": "text",
+      "latency_seconds": 23.899,
+      "text": "42",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-8813a40f3b560cc4",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "42",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 3,
+          "prompt_tokens": 27,
+          "total_tokens": 30,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-02",
+      "kind": "text",
+      "latency_seconds": 23.302,
+      "text": "Paris",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-8637a5a1890d8fa7",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Paris",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 24,
+          "total_tokens": 26,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-03",
+      "kind": "text",
+      "latency_seconds": 23.303,
+      "text": "Cold",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-80441359d4ac7a20",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Cold",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 23,
+          "total_tokens": 25,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-04",
+      "kind": "text",
+      "latency_seconds": 23.652,
+      "text": "7",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-86e4ef4b7e0929da",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "7",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 26,
+          "total_tokens": 28,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-05",
+      "kind": "text",
+      "latency_seconds": 24.112,
+      "text": "H₂O",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-b8b34f9a99183071",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "H₂O",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 4,
+          "prompt_tokens": 25,
+          "total_tokens": 29,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-06",
+      "kind": "text",
+      "latency_seconds": 23.891,
+      "text": "Pacific Ocean",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-aadae7a32ab90af5",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Pacific Ocean",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 3,
+          "prompt_tokens": 25,
+          "total_tokens": 28,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-07",
+      "kind": "text",
+      "latency_seconds": 23.895,
+      "text": "30",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-abc9c1db3865a1b3",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "30",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 3,
+          "prompt_tokens": 26,
+          "total_tokens": 29,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-08",
+      "kind": "text",
+      "latency_seconds": 23.651,
+      "text": "Green",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-b7594b274b3ce250",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Green",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849878,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-f22d8573",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 27,
+          "total_tokens": 29,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 8,
+    "passed_count": 8,
+    "failed_count": 0,
+    "passed": true
+  }
+}

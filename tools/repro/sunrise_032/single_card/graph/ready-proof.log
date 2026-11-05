@@ -1,0 +1,7 @@
+# Source basename: graph-current.log
+# Source SHA256: 9eeca29a974b5ba1b9aa9a849896ea568db3a2702d3ed3338ca849dd9040877d
+# Original one-based UTF-8 splitlines ranges: 24, 64, 71
+# Redactions: process PID only.
+[source line 24] (EngineCore pid=<redacted>) INFO 11-05 03:05:05 [sunrise_worker.py:139] Using Sunrise Model Runner V2
+[source line 64] (EngineCore pid=<redacted>) INFO 11-05 03:05:15 [model_runner.py:1127] Graph capturing finished in 1 secs, took 0.00 GiB
+[source line 71] V2_PROOF_BEFORE [{"rank": 0, "runner": "SunriseV2ModelRunner", "runner_v2": true, "tensor_parallel_size": 1, "enforce_eager": false, "async_scheduling": true, "graph_mode": "FULL_DECODE_ONLY", "capture_sizes": [1, 2], "graphs": [{"descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=2, num_reqs=2, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)", "native_type": "PTPUGraph", "replays": 0}, {"descriptor": "BatchExecutionDescriptor(cg_mode=<CUDAGraphMode.FULL: 2>, num_tokens=1, num_reqs=1, uniform_token_count=1, max_query_len=None, num_active_loras=0, num_ubatches=1)", "native_type": "PTPUGraph", "replays": 0}]}]

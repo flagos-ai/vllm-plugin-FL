@@ -1,0 +1,846 @@
+{
+  "schema_version": 1,
+  "purpose": "Selected sanitized evidence excerpts for a Draft PR; no new execution and no complete raw-log upload.",
+  "sources_are_original_local_file_bytes": true,
+  "original_local_evidence_preserved": true,
+  "scope": "Only the files enumerated here were exported.",
+  "claims_and_limits": {
+    "full_four_model_mode_gate_passed": false,
+    "reset_authorized": false,
+    "reset_performed": false,
+    "reset_recommendation": "A clean hardware/isolation state was recommended for further diagnosis. These records do not establish that reset is necessary or sufficient; it was not performed.",
+    "peer_dma_pollution": "A pending hypothesis only; there is no clean-hardware contrast establishing it as a cause.",
+    "ta1_result": "TA_CLOSE_GRAPH_MEMORY=1 was actually logged and ended with watchdog status124; no successful final synchronization is recorded.",
+    "ta_unset_context": {
+      "source_basename": "active-gate-state.md",
+      "source_sha256": "c5f05aaa23098836899a65a6307dac8cdbeb42c3b623f15c7991a816d167ea45",
+      "original_1based_line_ranges": [
+        [
+          38,
+          38
+        ]
+      ],
+      "selected_statement": "dockerSunriseenv/profilebase leaves TA_CLOSE_GRAPH_MEMORY UNSET; standalonegraphprobesunset.",
+      "evidence_kind": "existing operator narrative, not a runtime environment dump",
+      "redactions": [
+        "Only the two indicated narrative clauses are retained; private library/task paths and the rest of the paragraph omitted."
+      ]
+    }
+  },
+  "halt_record": {
+    "source_basename": "verification-halt.json",
+    "source_label": "Recorded verification halt decision",
+    "source_sha256": "82005d0bd6423c2760ff25dd1e8c16e2a27ceb02c23afb9c574437175694312c",
+    "original_1based_line_ranges": [
+      [
+        4,
+        4
+      ],
+      [
+        6,
+        6
+      ]
+    ],
+    "selected_json_pointers": [
+      "/reset_performed",
+      "/reset_authorized"
+    ]
+  },
+  "extracts": [
+    {
+      "file": "logs/27b-image-r1.json",
+      "kind": "selected_json_fields",
+      "sources": [
+        {
+          "source_basename": "text_single.json",
+          "source_label": "27B shared Gate text_single",
+          "source_sha256": "3a01ee1b0b36987ce8b68f97b539351f91de568ec9b038b58e65ca59864244ae",
+          "original_1based_line_ranges": [
+            [
+              4,
+              4
+            ],
+            [
+              8,
+              8
+            ],
+            [
+              96,
+              101
+            ]
+          ],
+          "selected_json_pointers": [
+            "/summary",
+            "/case/scenario",
+            "/case/concurrency"
+          ]
+        },
+        {
+          "source_basename": "text_concurrent_8.json",
+          "source_label": "27B shared Gate text_concurrent_8",
+          "source_sha256": "e71cc9ca6529500e03a9b6be4effdaded876aa8e0f977bea4a4e82d78acbd9d9",
+          "original_1based_line_ranges": [
+            [
+              4,
+              4
+            ],
+            [
+              8,
+              8
+            ],
+            [
+              616,
+              621
+            ]
+          ],
+          "selected_json_pointers": [
+            "/summary",
+            "/case/scenario",
+            "/case/concurrency"
+          ]
+        },
+        {
+          "source_basename": "image_single.json",
+          "source_label": "27B shared Gate image_single",
+          "source_sha256": "baa944c411c240455cf8a02a8a1d53f8ace2375209957b0030eaf4ae1e173f13",
+          "original_1based_line_ranges": [
+            [
+              4,
+              4
+            ],
+            [
+              8,
+              8
+            ],
+            [
+              42,
+              42
+            ],
+            [
+              45,
+              58
+            ],
+            [
+              63,
+              63
+            ],
+            [
+              89,
+              90
+            ],
+            [
+              104,
+              109
+            ]
+          ],
+          "selected_json_pointers": [
+            "/summary",
+            "/case/scenario",
+            "/case/concurrency",
+            "/output/0/request_id",
+            "/output/0/text",
+            "/output/0/passed",
+            "/output/0/checks",
+            "/output/0/response/choices/0/finish_reason",
+            "/output/0/response/usage/completion_tokens",
+            "/output/0/response/usage/prompt_tokens"
+          ]
+        },
+        {
+          "source_basename": "image_concurrent_8.json",
+          "source_label": "27B shared Gate image_concurrent_8",
+          "source_sha256": "b20881c5f0b3caf54d96e3d665bf6972fda396f6ffa3d989df934aa41dd64983",
+          "original_1based_line_ranges": [
+            [
+              4,
+              4
+            ],
+            [
+              8,
+              8
+            ],
+            [
+              348,
+              348
+            ],
+            [
+              351,
+              364
+            ],
+            [
+              369,
+              369
+            ],
+            [
+              395,
+              396
+            ],
+            [
+              472,
+              472
+            ],
+            [
+              475,
+              488
+            ],
+            [
+              493,
+              493
+            ],
+            [
+              519,
+              520
+            ],
+            [
+              658,
+              658
+            ],
+            [
+              661,
+              674
+            ],
+            [
+              679,
+              679
+            ],
+            [
+              705,
+              706
+            ],
+            [
+              720,
+              725
+            ]
+          ],
+          "selected_json_pointers": [
+            "/summary",
+            "/case/scenario",
+            "/case/concurrency",
+            "/output/2/request_id",
+            "/output/2/text",
+            "/output/2/passed",
+            "/output/2/checks",
+            "/output/2/response/choices/0/finish_reason",
+            "/output/2/response/usage/completion_tokens",
+            "/output/2/response/usage/prompt_tokens",
+            "/output/4/request_id",
+            "/output/4/text",
+            "/output/4/passed",
+            "/output/4/checks",
+            "/output/4/response/choices/0/finish_reason",
+            "/output/4/response/usage/completion_tokens",
+            "/output/4/response/usage/prompt_tokens",
+            "/output/7/request_id",
+            "/output/7/text",
+            "/output/7/passed",
+            "/output/7/checks",
+            "/output/7/response/choices/0/finish_reason",
+            "/output/7/response/usage/completion_tokens",
+            "/output/7/response/usage/prompt_tokens"
+          ]
+        },
+        {
+          "source_basename": "mixed_concurrent_8.json",
+          "source_label": "27B shared Gate mixed_concurrent_8",
+          "source_sha256": "4622b43ff9f9818b34114fa854a177a73c704f9ba970267bc6e72c1a0d3e0f06",
+          "original_1based_line_ranges": [
+            [
+              4,
+              4
+            ],
+            [
+              8,
+              8
+            ],
+            [
+              548,
+              548
+            ],
+            [
+              551,
+              564
+            ],
+            [
+              569,
+              569
+            ],
+            [
+              595,
+              596
+            ],
+            [
+              672,
+              677
+            ]
+          ],
+          "selected_json_pointers": [
+            "/summary",
+            "/case/scenario",
+            "/case/concurrency",
+            "/output/6/request_id",
+            "/output/6/text",
+            "/output/6/passed",
+            "/output/6/checks",
+            "/output/6/response/choices/0/finish_reason",
+            "/output/6/response/usage/completion_tokens",
+            "/output/6/response/usage/prompt_tokens"
+          ]
+        }
+      ],
+      "redactions": [
+        "Input messages, image locations, private model path, served endpoint/port, response IDs, timings and unrelated response metadata omitted.",
+        "Only directly selected scalar outcomes, checks and per-scenario summaries retained; totals are explicitly derived."
+      ],
+      "excerpt_sha256": "d33e64632636937b5303eda9cde3ebc30b58fef4945814686cdadfb06265994b",
+      "bytes": 10346
+    },
+    {
+      "file": "logs/27b-controls-r2.json",
+      "kind": "selected_json_fields",
+      "sources": [
+        {
+          "source_basename": "gate-27b-prefill-token-repro-r2.json",
+          "source_label": "27B controlled text and image responses",
+          "source_sha256": "dca974e4ac8dfa179ba119443aeec339d64c9367d94da645d883d4adb44474c3",
+          "original_1based_line_ranges": [
+            [
+              3,
+              3
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              23,
+              23
+            ],
+            [
+              25,
+              29
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              38,
+              38
+            ],
+            [
+              80,
+              80
+            ],
+            [
+              92,
+              92
+            ],
+            [
+              100,
+              100
+            ],
+            [
+              102,
+              110
+            ],
+            [
+              117,
+              117
+            ],
+            [
+              119,
+              119
+            ],
+            [
+              1197,
+              1197
+            ],
+            [
+              1209,
+              1209
+            ],
+            [
+              1217,
+              1217
+            ],
+            [
+              1219,
+              1227
+            ],
+            [
+              1234,
+              1234
+            ],
+            [
+              1236,
+              1236
+            ],
+            [
+              5354,
+              5354
+            ],
+            [
+              5366,
+              5366
+            ],
+            [
+              5374,
+              5374
+            ],
+            [
+              5376,
+              5385
+            ],
+            [
+              5392,
+              5392
+            ],
+            [
+              5394,
+              5394
+            ]
+          ],
+          "selected_json_pointers": [
+            "/0/name",
+            "/0/response/choices/0/message/content",
+            "/0/response/choices/0/finish_reason",
+            "/0/response/choices/0/token_ids",
+            "/0/response/usage/prompt_tokens",
+            "/0/response/usage/completion_tokens",
+            "/1/name",
+            "/1/response/choices/0/message/content",
+            "/1/response/choices/0/finish_reason",
+            "/1/response/choices/0/token_ids",
+            "/1/response/usage/prompt_tokens",
+            "/1/response/usage/completion_tokens",
+            "/2/name",
+            "/2/response/choices/0/message/content",
+            "/2/response/choices/0/finish_reason",
+            "/2/response/choices/0/token_ids",
+            "/2/response/usage/prompt_tokens",
+            "/2/response/usage/completion_tokens",
+            "/3/name",
+            "/3/response/choices/0/message/content",
+            "/3/response/choices/0/finish_reason",
+            "/3/response/choices/0/token_ids",
+            "/3/response/usage/prompt_tokens",
+            "/3/response/usage/completion_tokens"
+          ]
+        }
+      ],
+      "redactions": [
+        "Prompt bodies, prompt-token arrays, endpoints, model locations, response IDs and unrelated response metadata omitted.",
+        "Returned output token IDs are retained exactly; no clipping or replacement performed."
+      ],
+      "excerpt_sha256": "3a96143260710209c0d7984e0c0c7ff6e2794ed8fcbdd4031abfe76aed61c069",
+      "bytes": 4391
+    },
+    {
+      "file": "logs/tp2-model-graph-allgather.log",
+      "kind": "line_excerpt",
+      "sources": [
+        {
+          "source_basename": "graph-v2-tp2-pair23.log",
+          "source_label": "Original TP2 model graph attempt, recorded pair 2,3",
+          "source_sha256": "4f69eb1762052257716842855ca9f7b4cf7e361b845d5bce8a3321fec1183177",
+          "original_1based_line_ranges": [
+            [
+              38,
+              39
+            ],
+            [
+              111,
+              111
+            ],
+            [
+              113,
+              113
+            ],
+            [
+              120,
+              120
+            ],
+            [
+              653,
+              658
+            ],
+            [
+              719,
+              719
+            ]
+          ],
+          "line_number_example": {
+            "event": "AllGather watchdog",
+            "splitlines_1based": 654,
+            "lf_only_1based": 642
+          }
+        }
+      ],
+      "redactions": [
+        "Only the indicated original lines are included; omitted sections are not reconstructed.",
+        "PCI bus addresses and ephemeral thread IDs replaced with labelled placeholders."
+      ],
+      "excerpt_sha256": "6c75dc35d8dd23bedac84cc7bff2d8aec25bc13e91f95032b5119a7b84bec4b4",
+      "bytes": 3274
+    },
+    {
+      "file": "logs/tp2-extended-allreduce-unset.log",
+      "kind": "line_excerpt",
+      "sources": [
+        {
+          "source_basename": "comm-graph-extended.log",
+          "source_label": "Extended asynchronous BF16 collective probe",
+          "source_sha256": "cf7c65672d966102d20845c7321e4d68613b69fcb4b84cfff07939108744e164",
+          "original_1based_line_ranges": [
+            [
+              18,
+              27
+            ],
+            [
+              67,
+              83
+            ]
+          ]
+        },
+        {
+          "source_basename": "comm-graph-extended.status",
+          "source_label": "External watchdog exit status",
+          "source_sha256": "ca2ebdf97d7469496b1f4b78958f9dc8447efdcb623953fee7b6996b762f6fff",
+          "original_1based_line_ranges": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      ],
+      "redactions": [
+        "Only the indicated original lines are included; omitted sections are not reconstructed.",
+        "PCI bus addresses and ephemeral thread IDs replaced with labelled placeholders.",
+        "Raw stream handle integers replaced; unrelated environment is not included."
+      ],
+      "excerpt_sha256": "815ea043c7a6cac6b2023384086d153257f6f0123e2827a72479c8b18d271daa",
+      "bytes": 3060
+    },
+    {
+      "file": "logs/tp2-fresh-uuid-fence-allgather-unset.log",
+      "kind": "line_excerpt",
+      "sources": [
+        {
+          "source_basename": "comm-graph-stream-fence.log",
+          "source_label": "Fresh UUID stream-fence probe",
+          "source_sha256": "25bf20f4eec06cb90de0c52a18966e065be9606702f46d68cb43bc91c0968403",
+          "original_1based_line_ranges": [
+            [
+              1,
+              1
+            ],
+            [
+              19,
+              28
+            ],
+            [
+              72,
+              84
+            ]
+          ]
+        },
+        {
+          "source_basename": "comm-graph-stream-fence.status",
+          "source_label": "External watchdog exit status",
+          "source_sha256": "ca2ebdf97d7469496b1f4b78958f9dc8447efdcb623953fee7b6996b762f6fff",
+          "original_1based_line_ranges": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      ],
+      "redactions": [
+        "Only the indicated original lines are included; omitted sections are not reconstructed.",
+        "PCI bus addresses and ephemeral thread IDs replaced with labelled placeholders.",
+        "Private rendezvous path/PID replaced while retaining the exact UUID suffix; raw stream handles replaced."
+      ],
+      "excerpt_sha256": "8ea799909833f37f78892a4ebcdd7c464f9577a7fb283d396d193776f05a8cb9",
+      "bytes": 2940
+    },
+    {
+      "file": "logs/tp2-ta1-final-sync-timeout.log",
+      "kind": "line_excerpt",
+      "sources": [
+        {
+          "source_basename": "comm-graph-ta1.log",
+          "source_label": "TA_CLOSE_GRAPH_MEMORY=1 probe",
+          "source_sha256": "1922a90619d1d4101f0527b05f965e1603f014042f2ffd9d71dea8b71dc1be63",
+          "original_1based_line_ranges": [
+            [
+              1,
+              2
+            ],
+            [
+              20,
+              29
+            ],
+            [
+              68,
+              79
+            ]
+          ]
+        },
+        {
+          "source_basename": "comm-graph-ta1.status",
+          "source_label": "External watchdog exit status",
+          "source_sha256": "ca2ebdf97d7469496b1f4b78958f9dc8447efdcb623953fee7b6996b762f6fff",
+          "original_1based_line_ranges": [
+            [
+              1,
+              1
+            ]
+          ]
+        }
+      ],
+      "redactions": [
+        "Only the indicated original lines are included; omitted sections are not reconstructed.",
+        "PCI bus addresses and ephemeral thread IDs replaced with labelled placeholders.",
+        "Private rendezvous path/PID replaced while retaining the exact UUID suffix; raw stream handles replaced."
+      ],
+      "excerpt_sha256": "50f4fea6e094ee52071d079800bca9cfe7f49b7f1241da4cd05f68047a6ef564",
+      "bytes": 3003
+    },
+    {
+      "file": "logs/device-snapshot-1907.json",
+      "kind": "selected_json_fields",
+      "sources": [
+        {
+          "source_basename": "devices.txt",
+          "source_label": "Read-only device status at 19:07:34",
+          "source_sha256": "c8034254eb52164c3f7eb2e149a3e36c770ac962226c188aad8344a335d0e371",
+          "original_1based_line_ranges": [
+            [
+              1,
+              3
+            ],
+            [
+              9,
+              10
+            ],
+            [
+              13,
+              14
+            ],
+            [
+              17,
+              18
+            ],
+            [
+              21,
+              22
+            ],
+            [
+              25,
+              26
+            ],
+            [
+              29,
+              30
+            ],
+            [
+              33,
+              34
+            ],
+            [
+              37,
+              38
+            ],
+            [
+              43,
+              50
+            ]
+          ]
+        }
+      ],
+      "redactions": [
+        "Hostname, SSH connection information, PCI addresses, PIDs, process names, temperatures, clocks and power readings omitted.",
+        "Process table reduced to a per-device boolean; device model, allocation, utilization and ECC retained."
+      ],
+      "excerpt_sha256": "433e99580ddc13690936cc8164cee15fdcb923b866ed04c3616f27b86f1cf357",
+      "bytes": 3360
+    },
+    {
+      "file": "logs/35b-eager-control.json",
+      "kind": "selected_json_fields",
+      "sources": [
+        {
+          "source_basename": "summary.json",
+          "source_label": "35B eager Gate summary",
+          "source_sha256": "a7e9f45e47aadaa7996d726490f0d933d40bd9375a0f716915dc07fe7ad715da",
+          "original_1based_line_ranges": [
+            [
+              3,
+              3
+            ],
+            [
+              39,
+              39
+            ],
+            [
+              41,
+              41
+            ],
+            [
+              50,
+              54
+            ],
+            [
+              63,
+              74
+            ]
+          ],
+          "selected_json_pointers": [
+            "/mode",
+            "/passed",
+            "/runner_v2",
+            "/gate",
+            "/effective_configuration"
+          ]
+        },
+        {
+          "source_basename": "long-prefill.json",
+          "source_label": "35B supplemental long prefill",
+          "source_sha256": "374e7293729fab533fd4fcd81aa370ede80228cb8168da8e3663c322570e122a",
+          "original_1based_line_ranges": [
+            [
+              6,
+              6
+            ],
+            [
+              32,
+              32
+            ],
+            [
+              40,
+              40
+            ],
+            [
+              74,
+              74
+            ]
+          ],
+          "selected_json_pointers": [
+            "/passed",
+            "/measured_prompt_tokens",
+            "/response/choices/0/message/content",
+            "/response/choices/0/finish_reason"
+          ]
+        }
+      ],
+      "redactions": [
+        "Private model/server paths, endpoint/port, full prompt body, response IDs and unrelated response fields omitted.",
+        "Public model basename retained as the label."
+      ],
+      "excerpt_sha256": "5abb7c482e5bbfcf63c6142affa73fcd4b5722146f24dcaf06796172c7ea85bb",
+      "bytes": 2443
+    },
+    {
+      "file": "logs/environment.json",
+      "kind": "selected_json_fields",
+      "sources": [
+        {
+          "source_basename": "environment.json",
+          "source_label": "35B runtime package metadata",
+          "source_sha256": "0d785b29eb86be78f469d9f7c31bdb3c4f6d5ef556aaaa1cb308628fee872140",
+          "original_1based_line_ranges": [
+            [
+              2,
+              11
+            ]
+          ],
+          "selected_json_pointers": [
+            "/versions"
+          ]
+        },
+        {
+          "source_basename": "final-receipt.json",
+          "source_label": "Image/runtime receipt",
+          "source_sha256": "bd521b34c6b3041161a83fd0423dc1fbd869c6c0e61f727221af8ebc492bb7ed",
+          "original_1based_line_ranges": [
+            [
+              20,
+              20
+            ],
+            [
+              28,
+              28
+            ],
+            [
+              38,
+              47
+            ]
+          ],
+          "selected_json_pointers": [
+            "/runtime/versions",
+            "/runtime/compiler/version",
+            "/runtime/provider_identity/vcs_info/commit_id"
+          ]
+        },
+        {
+          "source_basename": "receipt.json",
+          "source_label": "Target Python CPU-compatibility receipt",
+          "source_sha256": "212b704609b5119e227f287777ee89fd7671352d82aaea717c0022fc9397a28e",
+          "original_1based_line_ranges": [
+            [
+              5,
+              5
+            ]
+          ],
+          "selected_json_pointers": [
+            "/python"
+          ]
+        }
+      ],
+      "redactions": [
+        "Only version numbers and the public provider commit retained; all paths, container names, host/device assignments, configured environment, URLs and other receipt fields omitted."
+      ],
+      "excerpt_sha256": "f4de25d0683ec145fd0e38e4cb61719ad7140b171d8aad86c2f85b9b830ea71e",
+      "bytes": 2229
+    },
+    {
+      "file": "logs/reset-tool-help.txt",
+      "kind": "line_excerpt",
+      "sources": [
+        {
+          "source_basename": "pt-smi-help-readonly.txt",
+          "source_label": "Historical read-only GPU tool help",
+          "source_sha256": "c6a1b7830a597ce59aa0c52296e0c570dfa7a21e27bb84ddd294c8cb47d90a94",
+          "original_1based_line_ranges": [
+            [
+              6,
+              7
+            ],
+            [
+              36,
+              38
+            ],
+            [
+              40,
+              41
+            ]
+          ]
+        }
+      ],
+      "redactions": [
+        "Only the indicated help lines are retained; unrelated help sections are omitted.",
+        "No text inside the selected help lines was changed. No complete executable reset command is included."
+      ],
+      "excerpt_sha256": "b86731252d2775d63ea2c23468e4d13ea53001598a49494bf4be4930eb346228",
+      "bytes": 1333
+    }
+  ],
+  "redaction_policy": [
+    "No credentials, SSH hosts/IPs, private absolute paths or unrelated environment exported.",
+    "Source basenames, full original SHA256 and original 1-based line ranges retained for audit.",
+    "JSON files are explicitly labelled field projections; line excerpts use L<n> to retain original line coordinates."
+  ],
+  "line_number_definition": "Original 1-based ranges are counted after decoding the unmodified source bytes as UTF-8 and calling str.splitlines(). This includes standalone carriage-return progress refresh boundaries, so ranges are not LF-only line numbers. In graph-v2-tp2-pair23.log the AllGather watchdog is splitlines line 654 and LF-only line 642. JSON sources contain no such progress-refresh records."
+}

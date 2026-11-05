@@ -1,0 +1,107 @@
+{
+  "sources": [
+    {
+      "output": "card0/roundtrip.jsonl",
+      "source_relative_path": "recheck-card0-r1/roundtrip.jsonl",
+      "source_sha256": "4bc5c5b98b4974ad7021cdb3ec28ec632fb16484888fe4a9efd1e3981dd20b99",
+      "source_bytes": 7987,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          12
+        ]
+      ],
+      "redactions": []
+    },
+    {
+      "output": "card0/summary.json",
+      "source_relative_path": "recheck-card0-r1/summary.json",
+      "source_sha256": "cc046e09cc91b1fd566c687f7d6c0e916d241c7ebf2802eae3c4ecc1416520ec",
+      "source_bytes": 574,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          15
+        ]
+      ],
+      "redactions": []
+    },
+    {
+      "source_relative_path": "recheck-card0.status",
+      "source_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "source_bytes": 2,
+      "published": "necessary selected state only"
+    },
+    {
+      "source_relative_path": "recheck-card0-before.txt",
+      "source_sha256": "39aec52328a4563883e71cf1187ac10d1a164d81f9d6946152165017bcc5d923",
+      "source_bytes": 3973,
+      "published": "necessary selected state only"
+    },
+    {
+      "source_relative_path": "recheck-card0-after.txt",
+      "source_sha256": "bc660a7353af39efb6fa722ddd74abadc6c38f07965e88a3dcb46a155e49ae19",
+      "source_bytes": 3973,
+      "published": "necessary selected state only"
+    },
+    {
+      "output": "card2/roundtrip.jsonl",
+      "source_relative_path": "recheck-card2-r1/roundtrip.jsonl",
+      "source_sha256": "6b25c928b308dcd5cdffec5831d8730a3a3bcaf26f4a9cf2ff1a686715278ca8",
+      "source_bytes": 7933,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          12
+        ]
+      ],
+      "redactions": []
+    },
+    {
+      "output": "card2/summary.json",
+      "source_relative_path": "recheck-card2-r1/summary.json",
+      "source_sha256": "e001fe5dd76cb5fe223737771ab51b67f50de1c32a826cbbdfce38545fa87a3f",
+      "source_bytes": 574,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          15
+        ]
+      ],
+      "redactions": []
+    },
+    {
+      "source_relative_path": "recheck-card2.status",
+      "source_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "source_bytes": 2,
+      "published": "necessary selected state only"
+    },
+    {
+      "source_relative_path": "recheck-card2-before.txt",
+      "source_sha256": "c8adbd2e8273a10040e530958fe1d39cf6c804682c7df86b5841ab855ef25a4f",
+      "source_bytes": 3973,
+      "published": "necessary selected state only"
+    },
+    {
+      "source_relative_path": "recheck-card2-after.txt",
+      "source_sha256": "33555e743f37e18776ec59e98cb318ec7f8a48c69dbb31d1588956b89a7ef083",
+      "source_bytes": 3973,
+      "published": "necessary selected state only"
+    },
+    {
+      "source_relative_path": "final-state.txt",
+      "source_sha256": "c12ee762cb366db07c9558ed9f6ca5c24ee0a3067b11d792ab56bab99b46df27",
+      "source_bytes": 4220,
+      "source_line_ranges_1_based": [
+        [
+          1,
+          53
+        ]
+      ],
+      "redactions": [
+        "Only time and eight GPU table rows retained; task container listing omitted."
+      ]
+    }
+  ],
+  "scope": "Final current-environment copy recheck only; raw receipts byte-identical; runtime pointers are not physical DRAM claims."
+}
