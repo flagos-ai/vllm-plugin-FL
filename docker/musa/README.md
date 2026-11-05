@@ -4,7 +4,7 @@ The MUSA CI image for the vLLM 0.24 line wraps the FlagOS-packaged Moore
 Threads stack:
 
 ```text
-harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base:08281629
+harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64@sha256:6f7c2209c76166c4033bf7693bf5164ed6aee96c1020307b1bd358993c69ac87
 ```
 
 The base provides MUSA 4.3.5, torch 2.9.0 + torch_musa 2.9.0, vLLM 0.24.0

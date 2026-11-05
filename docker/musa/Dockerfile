@@ -17,7 +17,7 @@
 # replaces any packaged plugin with the checked-out vllm-plugin-FL source.
 # The v0.20.2 image that wrapped Moore Threads' own registry image directly
 # is kept as Dockerfile.v0.20.2.
-ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/flagrelease-public/flagrelease_mthreads-gmi_vllm024plugin_base:08281629
+ARG MUSA_BASE_IMAGE=harbor.baai.ac.cn/plugin/musa-ph1.4.3.5-tree0.6.1a2-triton3.6.0-cxnone-plugin0.3.0-vllm0.24.0-cp310-pt290-x64@sha256:6f7c2209c76166c4033bf7693bf5164ed6aee96c1020307b1bd358993c69ac87
 
 # ---------- base stage ----------
 FROM ${MUSA_BASE_IMAGE} AS base
