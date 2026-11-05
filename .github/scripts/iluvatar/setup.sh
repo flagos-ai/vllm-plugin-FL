@@ -31,6 +31,7 @@ fi
 # upstream EMPTY vLLM so an older baked-in framework cannot pass silently.
 bash .github/scripts/iluvatar/install_vllm.sh
 python -m pip install --no-build-isolation --no-deps -e .
+python -m pip install "pytest-xdist>=3.0.0"
 
 python .github/scripts/install_flaggems_vllm.py
 

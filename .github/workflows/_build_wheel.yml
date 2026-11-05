@@ -62,7 +62,7 @@ jobs:
 
       - name: Verify wheel
         run: |
-          pip install --no-deps dist/*.whl
+          pip install dist/*.whl
           # Verify package metadata and file structure (full import requires flag_gems runtime)
           python -c "
           from importlib.metadata import metadata, files

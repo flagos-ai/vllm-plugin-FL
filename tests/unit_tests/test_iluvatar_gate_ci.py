@@ -21,6 +21,12 @@ def test_gate_workflow_is_required_for_iluvatar():
     assert gate["uses"] == "./.github/workflows/_iluvatar_gate.yml"
     assert "inputs.platform == 'iluvatar'" in gate["if"]
     assert "iluvatar-gates" in jobs["notify"]["needs"]
+    assert "functional" in jobs["notify"]["needs"]
+    assert "unit" not in jobs["notify"]["needs"]
+    assert gate["needs"] == ["setup", "benchmark"]
+    assert "!cancelled()" in gate["if"]
+    assert "needs.setup.result == 'success'" in gate["if"]
+    assert jobs["functional"]["uses"] == "./.github/workflows/_functional_test.yml"
     status = jobs["notify"]["with"]["status"]
     assert "needs.iluvatar-gates.result == 'success'" in status
     assert "inputs.platform != 'iluvatar'" in status
@@ -141,7 +147,8 @@ def test_iluvatar_is_discovered_and_uses_vendor_runners(monkeypatch):
     )
     platforms = json.loads(output)
     assert "iluvatar" in platforms
-    assert "cuda" in platforms
+    assert "nvidia" in platforms
+    assert "cuda" not in platforms
     config = yaml.safe_load((ROOT / ".github/configs/iluvatar.yml").read_text())
     assert config["runner_labels"] == ["iluvatar-cicd-vllm-plugin"]
     ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
