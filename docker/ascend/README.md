@@ -126,6 +126,13 @@ Registry manifest inspection confirmed that its config ID matches the
 validated local image recorded below. Pulling by this digest also succeeded;
 the pulled image is `linux/arm64` and its ID matches the validated build.
 
+The [platform registry](../../.github/configs/platforms.yml) enables Ascend
+for PR routing and manual, nightly and weekly discovery. The PR workflow
+runs the full selected stack by default: functional/unit, eight eager/graph
+E2E cases and the Ascend benchmark. Existing CI tier labels can narrow
+those stages. Workflow results are separate from the recorded hardware
+acceptance below.
+
 The platform workflow reads `ci_image` and passes it directly to the
 functional, unit, E2E and benchmark job containers. GitHub Actions starts
 that container before checkout and platform setup. The repository's build
