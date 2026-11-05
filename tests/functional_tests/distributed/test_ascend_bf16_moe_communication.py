@@ -69,15 +69,14 @@ def _run_case(args, group):
         * 0.02
     ).to(device, dtype)
     local = args.experts // world
-    dispatcher = (NpuMC2Dispatcher if args.mode == "mc2" else NpuAllToAllDispatcher)(
-        group,
-        args.experts,
-    )
-    routed = (
-        dispatcher.dispatch(x, ids, probs, mask)
-        if args.mode == "mc2"
-        else dispatcher.dispatch(x, ids, probs)
-    )
+    if args.mode == "mc2":
+        mc2_dispatcher = NpuMC2Dispatcher(group, args.experts)
+        routed = mc2_dispatcher.dispatch(x, ids, probs, mask)
+        dispatcher = mc2_dispatcher
+    else:
+        alltoall_dispatcher = NpuAllToAllDispatcher(group, args.experts)
+        routed = alltoall_dispatcher.dispatch(x, ids, probs)
+        dispatcher = alltoall_dispatcher
     assert routed.hidden_states.dtype == dtype and routed.pertoken_scale is None
     local_out = CachedOp("bf16_grouped_experts")(
         routed.hidden_states,
