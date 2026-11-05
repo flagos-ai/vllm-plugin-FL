@@ -1,0 +1,18 @@
+{
+  "source": "startup_log",
+  "model": "<MODEL_ROOT>/Qwen3.6-27B",
+  "served_model_name": "<SERVED_MODEL>",
+  "port": 48995,
+  "configuration": {
+    "tensor_parallel_size": 1,
+    "max_model_len": 8192,
+    "max_num_seqs": 8,
+    "kv_cache_memory_bytes": 4294967296,
+    "enforce_eager": true,
+    "use_v2_model_runner": true,
+    "compilation_mode": 0,
+    "compilation_backend": "eager",
+    "cudagraph_mode": "NONE",
+    "cudagraph_capture_sizes": []
+  }
+}

@@ -1,0 +1,678 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "mixed_concurrent_8",
+    "model_path": "<MODEL_ROOT>/Qwen3.6-27B",
+    "served_model_name": "<SERVED_MODEL>",
+    "port": "48995",
+    "concurrency": 8
+  },
+  "started_at": "2026-11-05T03:27:06.684850+00:00",
+  "finished_at": "2026-11-05T03:27:59.436959+00:00",
+  "input": [
+    {
+      "request_id": "text-01",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Compute 19 + 23. Reply with the number only."
+        }
+      ],
+      "required_terms": [
+        "42"
+      ]
+    },
+    {
+      "request_id": "text-02",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Name the capital of France. Reply with the city only."
+        }
+      ],
+      "required_terms": [
+        "paris"
+      ]
+    },
+    {
+      "request_id": "text-03",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Give the opposite of hot. Reply with one word."
+        }
+      ],
+      "required_terms": [
+        "cold"
+      ]
+    },
+    {
+      "request_id": "text-04",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "How many days are in one week? Reply with the number only."
+        }
+      ],
+      "required_terms": [
+        "7"
+      ]
+    },
+    {
+      "request_id": "image-01",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file://<CASE_ROOT>/images/image_01.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "<CASE_ROOT>/images/image_01.png",
+      "required_terms": [
+        "red",
+        "green",
+        "blue",
+        "yellow"
+      ]
+    },
+    {
+      "request_id": "image-02",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Name the four quadrant colors in this order: top-left, top-right, bottom-left, bottom-right. Reply with color names only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file://<CASE_ROOT>/images/image_02.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "<CASE_ROOT>/images/image_02.png",
+      "required_terms": [
+        "blue",
+        "yellow",
+        "red",
+        "green"
+      ]
+    },
+    {
+      "request_id": "image-03",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Name the three shapes from left to right. Reply with shape names only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file://<CASE_ROOT>/images/image_03.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "<CASE_ROOT>/images/image_03.png",
+      "required_terms": [
+        "circle",
+        "square",
+        "triangle"
+      ]
+    },
+    {
+      "request_id": "image-04",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "How many triangles are in the image? Reply with the number only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file://<CASE_ROOT>/images/image_04.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "<CASE_ROOT>/images/image_04.png",
+      "required_terms": [
+        "3"
+      ]
+    }
+  ],
+  "output": [
+    {
+      "request_id": "text-01",
+      "kind": "text",
+      "latency_seconds": 49.073,
+      "text": "42",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-a58d50870ce42fcb",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "42",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 3,
+          "prompt_tokens": 27,
+          "total_tokens": 30,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-02",
+      "kind": "text",
+      "latency_seconds": 47.586,
+      "text": "Paris",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-9a5de8621b38ab8a",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Paris",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 24,
+          "total_tokens": 26,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-03",
+      "kind": "text",
+      "latency_seconds": 48.296,
+      "text": "Cold",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-8e5a8b34e947af11",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Cold",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 23,
+          "total_tokens": 25,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "text-04",
+      "kind": "text",
+      "latency_seconds": 48.298,
+      "text": "7",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-91b04acd34b45c86",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "7",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 26,
+          "total_tokens": 28,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "image-01",
+      "kind": "image",
+      "latency_seconds": 52.686,
+      "text": "Red, Green, Blue, Yellow",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-a523d0182718053b",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Red, Green, Blue, Yellow",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 8,
+          "prompt_tokens": 201,
+          "total_tokens": 209,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "image-02",
+      "kind": "image",
+      "latency_seconds": 52.682,
+      "text": "blue, yellow, red, green",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-a6194c8b14dd0f8f",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "blue, yellow, red, green",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 8,
+          "prompt_tokens": 201,
+          "total_tokens": 209,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "image-03",
+      "kind": "image",
+      "latency_seconds": 51.214,
+      "text": "Circle, Square, Triangle",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-b8c7275ba1762f04",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Circle, Square, Triangle",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 6,
+          "prompt_tokens": 189,
+          "total_tokens": 195,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    },
+    {
+      "request_id": "image-04",
+      "kind": "image",
+      "latency_seconds": 48.297,
+      "text": "3",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-b0622cfdecda8017",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "3",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793849226,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 188,
+          "total_tokens": 190,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 8,
+    "passed_count": 8,
+    "failed_count": 0,
+    "passed": true
+  }
+}

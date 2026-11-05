@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "image_single",
+    "model_path": "<MODEL_ROOT>/Qwen3.6-27B",
+    "served_model_name": "<SERVED_MODEL>",
+    "port": "48995",
+    "concurrency": 1
+  },
+  "started_at": "2026-11-05T03:22:35.793083+00:00",
+  "finished_at": "2026-11-05T03:24:18.645642+00:00",
+  "input": [
+    {
+      "request_id": "image-05",
+      "kind": "image",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Read the two words. The second word has four letters. Copy every visible character exactly and reply with the text only."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "file://<CASE_ROOT>/images/image_05.png"
+              }
+            }
+          ]
+        }
+      ],
+      "image_path": "<CASE_ROOT>/images/image_05.png",
+      "required_terms": [
+        "hello",
+        "vllm"
+      ]
+    }
+  ],
+  "output": [
+    {
+      "request_id": "image-05",
+      "kind": "image",
+      "latency_seconds": 102.833,
+      "text": "HELLO\nVLLM",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-8fa4a61ca9b2e53b",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "HELLO\nVLLM",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793848955,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 7,
+          "prompt_tokens": 1062,
+          "total_tokens": 1069,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  }
+}

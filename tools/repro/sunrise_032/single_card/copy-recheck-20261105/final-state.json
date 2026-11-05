@@ -1,0 +1,71 @@
+{
+  "as_of": "2026-11-05T11:47:45+08:00",
+  "devices": [
+    {
+      "ordinal": 0,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0
+    },
+    {
+      "ordinal": 1,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "uncorrected_ecc": 0
+    },
+    {
+      "ordinal": 2,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0
+    },
+    {
+      "ordinal": 3,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "uncorrected_ecc": 0
+    },
+    {
+      "ordinal": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0
+    },
+    {
+      "ordinal": 5,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "uncorrected_ecc": 0
+    },
+    {
+      "ordinal": 6,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "1.535GiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "uncorrected_ecc": 0
+    },
+    {
+      "ordinal": 7,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "12.000KiB",
+      "memory_total": "62847MiB",
+      "utilization_percent": 8,
+      "uncorrected_ecc": 0
+    }
+  ],
+  "listed_gpu_processes": false,
+  "scope": "Read-only status table only; 0B/ECC0/no PID does not establish health or peer isolation. Existing residual rows remain; no reset/reboot performed."
+}
