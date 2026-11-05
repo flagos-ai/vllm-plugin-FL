@@ -1139,7 +1139,11 @@ class PlatformFL(Platform):
 
     @classmethod
     def get_default_ir_op_priority(cls, vllm_config: "VllmConfig"):
-        """Match CUDA's v0.28.0 IR-op defaults without hardcoding CUDA APIs.
+        """Match CUDA's IR-op defaults without hardcoding CUDA APIs.
+
+        The ``using_inductor`` rule mirrors ``CudaPlatform`` on the vLLM this
+        plugin targets, 0.32: native while codegen is active, otherwise
+        ``vllm_c`` where available.
 
         Empty-mode installs (``VLLM_TARGET_DEVICE=empty``, used by every
         non-CUDA backend) register ``native`` only, while vLLM asserts that
