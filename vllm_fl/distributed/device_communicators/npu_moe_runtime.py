@@ -58,7 +58,9 @@ class NpuMoERuntime:
                 "Unquantized ordinary MoE does not enable fused MC2"
             )
         if options.get("enable_mc2_hierarchy_comm", False):
-            raise NotImplementedError("Ordinary BF16 MoE does not enable hierarchical MC2")
+            raise NotImplementedError(
+                "Ordinary BF16 MoE does not enable hierarchical MC2"
+            )
         max_batched = config.scheduler_config.max_num_batched_tokens
         capture = config.compilation_config
         if options.get("enable_prefill_mc2", False):

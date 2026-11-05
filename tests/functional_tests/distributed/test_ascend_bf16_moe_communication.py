@@ -2,18 +2,37 @@
 """NPU-only component gate, launched with torchrun (no model required).
 
 Example: torchrun --nproc-per-node=8 <this-file> --mode alltoall --hidden 6144
-Run mc2 separately with --mode mc2. Cross-host launch uses the same CLI and
-normal torchrun rendezvous arguments. Every rank must enter both collectives.
+Or: torchrun --nproc-per-node=8 -m pytest <this-file> -q
+Cross-host launch uses normal torchrun rendezvous arguments. Plain pytest
+collects the cases and explicitly skips them without a multi-rank launcher.
 """
 
 import argparse
 import os
+from contextlib import contextmanager
 
+import pytest
 import torch
 import torch.distributed as dist
 
 
-def main():
+@contextmanager
+def _communication_group():
+    import torch_npu
+
+    torch_npu.npu.set_device(int(os.environ["LOCAL_RANK"]))
+    dist.init_process_group("hccl")
+    group = None
+    try:
+        group = dist.new_group(backend="hccl")
+        yield group
+    finally:
+        if group is not None:
+            dist.destroy_process_group(group)
+        dist.destroy_process_group()
+
+
+def _run_case(args, group):
     import torch_npu
 
     from vllm_fl.dispatch import CachedOp
@@ -22,16 +41,6 @@ def main():
         NpuMC2Dispatcher,
     )
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("mc2", "alltoall"), required=True)
-    parser.add_argument("--hidden", type=int, default=6144)
-    parser.add_argument("--experts", type=int, default=128)
-    parser.add_argument("--topk", type=int, default=4)
-    parser.add_argument("--rows", type=int, default=8)
-    parser.add_argument("--intermediate", type=int, default=16)
-    args = parser.parse_args()
-    torch_npu.npu.set_device(int(os.environ["LOCAL_RANK"]))
-    dist.init_process_group("hccl")
     rank, world = dist.get_rank(), dist.get_world_size()
     assert args.experts % world == 0 and world > 1
     device = torch.device("npu", torch_npu.npu.current_device())
@@ -60,7 +69,6 @@ def main():
         * 0.02
     ).to(device, dtype)
     local = args.experts // world
-    group = dist.new_group(backend="hccl")
     dispatcher = (NpuMC2Dispatcher if args.mode == "mc2" else NpuAllToAllDispatcher)(
         group,
         args.experts,
@@ -102,8 +110,46 @@ def main():
         flush=True,
     )
     dist.barrier()
-    dist.destroy_process_group(group)
-    dist.destroy_process_group()
+
+
+def main(argv=None, *, group=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("mc2", "alltoall"), required=True)
+    parser.add_argument("--hidden", type=int, default=6144)
+    parser.add_argument("--experts", type=int, default=128)
+    parser.add_argument("--topk", type=int, default=4)
+    parser.add_argument("--rows", type=int, default=8)
+    parser.add_argument("--intermediate", type=int, default=16)
+    args = parser.parse_args(argv)
+    if group is None:
+        with _communication_group() as group:
+            _run_case(args, group)
+    else:
+        _run_case(args, group)
+
+
+@pytest.fixture(scope="module")
+def communication_group():
+    if int(os.environ.get("WORLD_SIZE", "1")) < 2:
+        pytest.skip("requires torchrun with at least two NPU ranks")
+    from vllm.platforms import current_platform
+
+    if (
+        getattr(current_platform, "vendor_name", None) != "ascend"
+        or current_platform.device_type != "npu"
+    ):
+        pytest.skip("requires the Ascend FL platform")
+    pytest.importorskip("torch_npu")
+    with _communication_group() as group:
+        yield group
+
+
+@pytest.mark.gpu
+@pytest.mark.multi_gpu
+@pytest.mark.functional
+@pytest.mark.parametrize("mode", ("mc2", "alltoall"))
+def test_ascend_bf16_moe_communication(mode, communication_group):
+    main(["--mode", mode], group=communication_group)
 
 
 if __name__ == "__main__":

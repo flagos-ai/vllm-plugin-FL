@@ -22,12 +22,24 @@ def topk_softmax(topk_weights, topk_ids, token_expert_indices, gating_output, re
     return topk_weights, topk_ids
 
 
-def bf16_grouped_experts(hidden_states, w1, w2, *, group_list,
-                         group_list_type, activation="silu", alpha=None,
-                         beta=None, limit=None):
+def bf16_grouped_experts(
+    hidden_states,
+    w1,
+    w2,
+    *,
+    group_list,
+    group_list_type,
+    activation="silu",
+    alpha=None,
+    beta=None,
+    limit=None,
+):
     """rc1 unquantized MLP for already routed rows, with packaged NPU ops."""
-    if (hidden_states.dtype not in (torch.bfloat16, torch.float16)
-            or w1.dtype != hidden_states.dtype or w2.dtype != hidden_states.dtype):
+    if (
+        hidden_states.dtype not in (torch.bfloat16, torch.float16)
+        or w1.dtype != hidden_states.dtype
+        or w2.dtype != hidden_states.dtype
+    ):
         raise ValueError("Grouped experts require matching BF16/FP16 rows and weights")
     if hidden_states.ndim != 2 or w1.ndim != 3 or w2.ndim != 3:
         raise ValueError("Expected [rows,K] activations and [E,N,K] weights")
@@ -36,14 +48,24 @@ def bf16_grouped_experts(hidden_states, w1, w2, *, group_list,
     if hidden_states.shape[0] == 0:
         return hidden_states.new_empty((0, w2.shape[1]))
     gate_up = torch_npu.npu_grouped_matmul(
-        x=[hidden_states], weight=[w1.transpose(1, 2)], split_item=2,
-        group_list_type=group_list_type, group_type=0, group_list=group_list,
+        x=[hidden_states],
+        weight=[w1.transpose(1, 2)],
+        split_item=2,
+        group_list_type=group_list_type,
+        group_type=0,
+        group_list=group_list,
     )[0]
     if activation == "swigluoai_uninterleave":
         if limit is None or alpha is None or beta is None:
-            raise ValueError("Packed SwiGLU-OAI requires explicit alpha, beta and limit")
+            raise ValueError(
+                "Packed SwiGLU-OAI requires explicit alpha, beta and limit"
+            )
         activated = torch_npu.npu_clipped_swiglu(
-            gate_up, interleaved=False, alpha=alpha, bias=beta, limit=limit,
+            gate_up,
+            interleaved=False,
+            alpha=alpha,
+            bias=beta,
+            limit=limit,
         )
     elif activation == "silu":
         if alpha not in (None, 1.0) or beta not in (None, 0.0):
@@ -54,7 +76,10 @@ def bf16_grouped_experts(hidden_states, w1, w2, *, group_list,
         activated = torch_npu.npu_swiglu(gate_up)
     elif activation in ("gelu", "gelu_tanh"):
         gate, up = gate_up.chunk(2, dim=-1)
-        activated = F.gelu(gate, approximate="tanh" if activation == "gelu_tanh" else "none") * up
+        activated = (
+            F.gelu(gate, approximate="tanh" if activation == "gelu_tanh" else "none")
+            * up
+        )
     elif activation == "silu_no_mul":
         activated = F.silu(gate_up)
     elif activation == "gelu_no_mul":
@@ -62,8 +87,12 @@ def bf16_grouped_experts(hidden_states, w1, w2, *, group_list,
     else:
         raise NotImplementedError(f"Unsupported Ascend MoE activation: {activation}")
     return torch_npu.npu_grouped_matmul(
-        x=[activated], weight=[w2.transpose(1, 2)], split_item=2,
-        group_list_type=group_list_type, group_type=0, group_list=group_list,
+        x=[activated],
+        weight=[w2.transpose(1, 2)],
+        split_item=2,
+        group_list_type=group_list_type,
+        group_type=0,
+        group_list=group_list,
     )[0]
 
 
@@ -224,10 +253,16 @@ def topk_bias(logits, bias, topk, renormalize, scoring_func):
         raise ValueError(f"Unsupported scoring function: {scoring_func}")
     logits = logits.float()
     _, indices, _ = torch_npu.npu_moe_gating_top_k(
-        logits, k=topk, bias=None if bias is None else bias.float(),
-        k_group=1, group_count=1, group_select_mode=1, renorm=0,
+        logits,
+        k=topk,
+        bias=None if bias is None else bias.float(),
+        k_group=1,
+        group_count=1,
+        group_select_mode=1,
+        renorm=0,
         norm_type=0 if scoring_func == "softmax" else 1,
-        routed_scaling_factor=1.0, eps=1e-20,
+        routed_scaling_factor=1.0,
+        eps=1e-20,
     )
     # CANN sigmoid selection normalizes its returned values. Gather original
     # scores so the public renormalize=False contract remains exact as well.

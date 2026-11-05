@@ -211,6 +211,15 @@ def _patch_fused_moe_factory() -> None:
 
     native_factory = _fused_moe_layer.FusedMoE
 
+    from vllm.platforms import current_platform
+
+    model_namespaces = ("vllm.model_executor.models.",)
+    if (
+        getattr(current_platform, "vendor_name", None) == "ascend"
+        and current_platform.device_type == "npu"
+    ):
+        model_namespaces += ("vllm.models.",)
+
     # Model modules such as qwen3_next may execute
     # ``from vllm...fused_moe import FusedMoE`` during registry inspection,
     # before WorkerFL installs OOT operators.  Replacing only the defining
@@ -219,7 +228,7 @@ def _patch_fused_moe_factory() -> None:
     # do not touch unrelated callables that merely share the same name.
     patched_model_modules = 0
     for module_name, module in tuple(sys.modules.items()):
-        if not module_name.startswith(("vllm.model_executor.models.", "vllm.models.")):
+        if not module_name.startswith(model_namespaces):
             continue
         if getattr(module, "FusedMoE", None) is native_factory:
             setattr(module, "FusedMoE", FusedMoEFL)  # noqa F405

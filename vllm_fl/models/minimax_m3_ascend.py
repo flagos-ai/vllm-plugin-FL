@@ -28,9 +28,13 @@ class AscendGemmaRMSNorm(upstream.MiniMAXGemmaRMSNorm):
 
 
 def _sparse_forward(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-    index_q: torch.Tensor, index_k: torch.Tensor,
-    output: torch.Tensor, layer_name: str,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    index_q: torch.Tensor,
+    index_k: torch.Tensor,
+    output: torch.Tensor,
+    layer_name: str,
 ) -> None:
     context = get_forward_context()
     layer = context.no_compile_layers[layer_name]
@@ -39,16 +43,24 @@ def _sparse_forward(
         output.zero_()
         return
     layer._fl_kernels.insert_caches(
-        layer, k, v, index_k, slots[layer_name],
+        layer,
+        k,
+        v,
+        index_k,
+        slots[layer_name],
         slots[layer.indexer.index_cache.prefix],
     )
     layer._fl_kernels.attend(layer, q, index_q, output)
 
 
 def _sparse_forward_fake(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-    index_q: torch.Tensor, index_k: torch.Tensor,
-    output: torch.Tensor, layer_name: str,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    index_q: torch.Tensor,
+    index_k: torch.Tensor,
+    output: torch.Tensor,
+    layer_name: str,
 ) -> None:
     pass
 
@@ -80,8 +92,14 @@ class AscendMiniMaxM3SparseAttention(upstream.MiniMaxM3SparseAttention):
     def forward(self, positions, hidden_states):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v, index_q, index_k = qkv.split(
-            (self.q_size, self.kv_size, self.kv_size,
-             self.index_q_size, self.idx_head_dim), -1,
+            (
+                self.q_size,
+                self.kv_size,
+                self.kv_size,
+                self.index_q_size,
+                self.idx_head_dim,
+            ),
+            -1,
         )
         norm_rope = self._fl_kernels.norm_rope
         q = norm_rope(q, self.q_norm, positions, self.rotary_emb)
@@ -90,7 +108,13 @@ class AscendMiniMaxM3SparseAttention(upstream.MiniMaxM3SparseAttention):
         index_k = norm_rope(index_k, self.index_k_norm, positions, self.rotary_emb)
         output = torch.empty_like(q)
         torch.ops.vllm.fl_minimax_m3_sparse_forward(
-            q, k, v.contiguous(), index_q, index_k, output, self.layer_name,
+            q,
+            k,
+            v.contiguous(),
+            index_q,
+            index_k,
+            output,
+            self.layer_name,
         )
         return self.o_proj(output)[0]
 
@@ -131,18 +155,23 @@ class MiniMaxM3SparseForCausalLM(upstream.MiniMaxM3SparseForCausalLM):
         self.config = vllm_config.model_config.hf_text_config
         self.quant_config = None
         self.model = AscendMiniMaxM3Model(
-            vllm_config=vllm_config, prefix=upstream.maybe_prefix(prefix, "model"),
+            vllm_config=vllm_config,
+            prefix=upstream.maybe_prefix(prefix, "model"),
         )
         self.lm_head = upstream.ParallelLMHead(
-            self.config.vocab_size, self.config.hidden_size,
-            quant_config=None, prefix=upstream.maybe_prefix(prefix, "lm_head"),
+            self.config.vocab_size,
+            self.config.hidden_size,
+            quant_config=None,
+            prefix=upstream.maybe_prefix(prefix, "lm_head"),
         )
         self.logits_processor = upstream.LogitsProcessor(self.config.vocab_size)
 
 
 # The upstream VL wrapper creates its text backbone through ModelRegistry,
 # which resolves to our CausalLM entry; its vision and processor stay upstream.
-MiniMaxM3SparseForConditionalGeneration = upstream.MiniMaxM3SparseForConditionalGeneration
+MiniMaxM3SparseForConditionalGeneration = (
+    upstream.MiniMaxM3SparseForConditionalGeneration
+)
 
 add_fused_quantization_mapping(MiniMaxM3SparseForCausalLM)
 _register_sparse_op()
