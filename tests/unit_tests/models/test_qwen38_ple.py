@@ -427,6 +427,26 @@ def shared_publish_worker(rank, rendezvous, result_dir):
     assert len(retained) == 8
     buffer.close()
     buffer.close()
+    # Allocation failure must reach consumers before the ready barrier.
+    import os
+
+    truncate = os.ftruncate
+    if rank == 0:
+
+        def fail_allocation(*args):
+            raise OSError("injected producer allocation failure")
+
+        os.ftruncate = fail_allocation
+    try:
+        try:
+            Buffer(group, 17, 32, torch.bfloat16)
+        except RuntimeError as exc:
+            assert "allocation failed" in str(exc)
+        else:
+            raise AssertionError("allocation failure was not broadcast")
+    finally:
+        os.ftruncate = truncate
+
     Path(result_dir, f"rank{rank}.txt").write_text(f"{lookups}:8")
     dist.destroy_process_group()
 
@@ -964,3 +984,50 @@ def test_async_history_seed_padding_and_zero_length_requests():
     )
     assert meta.tolist() == [[-1, 99, 7], [-1, 99, 99]]
     assert following["a"][1] == 1 and following["b"][1] == 3
+
+
+@pytest.mark.parametrize(
+    "filename,classname",
+    [
+        ("host_lookup.py", "SharedNgramBuffer"),
+        ("shared_host_table.py", "SharedHostTable"),
+    ],
+)
+def test_shared_allocation_failure_closes_file_and_descriptor(
+    monkeypatch, tmp_path, filename, classname
+):
+    import os
+    import tempfile
+
+    spec = importlib.util.spec_from_file_location(
+        "qwen_allocation_failure_" + classname,
+        ROOT / "vllm_fl/models/qwen3_8_flash_next" / filename,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    real_create = tempfile.mkstemp
+    allocated = {}
+
+    def create(*args, **kwargs):
+        fd, path = real_create(dir=tmp_path)
+        allocated.update(fd=fd, path=path)
+        return fd, path
+
+    def fail(*args):
+        raise OSError("injected allocation failure")
+
+    monkeypatch.setattr(module.tempfile, "mkstemp", create)
+    monkeypatch.setattr(module.os, "ftruncate", fail)
+    group = SimpleNamespace(rank_in_group=0, world_size=1, ranks=[0], cpu_group=None)
+    try:
+        with pytest.raises(RuntimeError, match="allocation failed"):
+            getattr(module, classname)(group, 2, 4, torch.float32)
+        assert not Path(allocated["path"]).exists()
+        with pytest.raises(OSError):
+            os.fstat(allocated["fd"])
+    finally:
+        from contextlib import suppress
+
+        with suppress(OSError):
+            os.close(allocated["fd"])
+        Path(allocated["path"]).unlink(missing_ok=True)

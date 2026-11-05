@@ -22,6 +22,7 @@ class SharedHostTable:
             rows * width * torch.empty((), dtype=dtype, device="cpu").element_size()
         )
         payload = [None]
+        path = None
         if self.rank == 0:
             try:
                 space = os.statvfs("/dev/shm")
@@ -36,7 +37,13 @@ class SharedHostTable:
                     os.close(fd)
                 payload[0] = {"path": path}
             except Exception as error:
-                payload[0] = {"error": str(error)}
+                message = str(error)
+                if path is not None:
+                    try:
+                        os.unlink(path)
+                    except OSError as cleanup_error:
+                        message += f"; shared file cleanup failed: {cleanup_error}"
+                payload[0] = {"error": message}
         if group.world_size > 1:
             dist.broadcast_object_list(
                 payload, src=group.ranks[0], group=group.cpu_group

@@ -32,17 +32,34 @@ class SharedNgramBuffer:
             * embedding_dim
             * torch.empty((), dtype=dtype, device="cpu").element_size()
         )
-        path = None
+        path, error = None, None
+        payload = [None]
         if self.is_producer:
-            fd, path = tempfile.mkstemp(prefix="qwen38-ngram-", dir="/dev/shm")
-            os.ftruncate(fd, size)
-            os.close(fd)
-        payload = [path]
+            try:
+                fd, path = tempfile.mkstemp(prefix="qwen38-ngram-", dir="/dev/shm")
+                try:
+                    os.ftruncate(fd, size)
+                finally:
+                    os.close(fd)
+                payload[0] = {"path": path}
+            except Exception as failure:
+                message = str(failure)
+                error = failure
+                if path is not None:
+                    try:
+                        os.unlink(path)
+                    except OSError as cleanup_error:
+                        message += f"; shared file cleanup failed: {cleanup_error}"
+                payload[0] = {"error": message}
         if self.world_size > 1:
             dist.broadcast_object_list(
                 payload, src=group.ranks[0], group=group.cpu_group
             )
-        path = payload[0]
+        if "error" in payload[0]:
+            raise RuntimeError(
+                "Shared N-gram allocation failed: " + payload[0]["error"]
+            ) from error
+        path = payload[0]["path"]
         fd = os.open(path, os.O_RDWR)
         try:
             self._mapping = mmap.mmap(fd, size, access=mmap.ACCESS_WRITE)
