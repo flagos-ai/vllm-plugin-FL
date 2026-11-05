@@ -690,18 +690,6 @@ class ExecuteModelState(NamedTuple):
     slot_mappings: dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None
 
 
-def _fl_graph_capture(device, graph_capture_context=None):
-    """vLLM >= 0.32 dropped the graph_capture_context argument."""
-    if graph_capture_context is not None:
-        try:
-            return graph_capture(
-                device=device, graph_capture_context=graph_capture_context
-            )
-        except TypeError:
-            pass
-    return graph_capture(device=device)
-
-
 def _kv_cache_tensor_uses_new_layout(kv_cache_config: KVCacheConfig) -> bool:
     tensors = getattr(kv_cache_config, "kv_cache_tensors", None) or []
     return bool(tensors) and not hasattr(tensors[0], "shared_by")
@@ -7380,9 +7368,15 @@ class ModelRunnerFL(
             if current_platform.device_type == "musa":
                 cap_ctx = self._get_musa_graph_capture_context()
             set_cudagraph_capturing_enabled(True)
+            try:
+                graph_capture_cm = graph_capture(
+                    device=self.device, graph_capture_context=cap_ctx
+                )
+            except TypeError:
+                graph_capture_cm = graph_capture(device=self.device)
             with (
                 self._freeze_gc(),
-                _fl_graph_capture(self.device, cap_ctx),
+                graph_capture_cm,
             ):
                 torch.accelerator.synchronize()
                 torch.accelerator.empty_cache()
@@ -7594,9 +7588,15 @@ class ModelRunnerFL(
                 "Rank %d: Torch profiler disabled for CUDA graph capture", local_rank
             )
 
+        try:
+            graph_capture_cm = graph_capture(
+                device=self.device, graph_capture_context=cap_ctx
+            )
+        except TypeError:
+            graph_capture_cm = graph_capture(device=self.device)
         with (
             self._freeze_gc(),
-            _fl_graph_capture(self.device, cap_ctx),
+            graph_capture_cm,
         ):
             torch.accelerator.synchronize()
             torch.accelerator.empty_cache()
