@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "case": {
+    "scenario": "text_single",
+    "model_path": "<MODEL_ROOT>/Qwen3.6-27B",
+    "served_model_name": "<SERVED_MODEL>",
+    "port": "48995",
+    "concurrency": 1
+  },
+  "started_at": "2026-11-05T03:18:19.757679+00:00",
+  "finished_at": "2026-11-05T03:21:56.054217+00:00",
+  "input": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Introduce large language models (LLMs) in detail. Explain what they are, how training and inference work, typical capabilities, limitations, and responsible use. Write a coherent response of at least 256 characters. Do not repeat words or phrases unnecessarily."
+        }
+      ],
+      "required_terms": [
+        "large language model",
+        "training",
+        "inference",
+        "limitations"
+      ],
+      "min_length": 256,
+      "max_tokens": 512
+    }
+  ],
+  "output": [
+    {
+      "request_id": "text-llm-details",
+      "kind": "text",
+      "latency_seconds": 216.277,
+      "text": "Large language models are advanced artificial intelligence systems trained on vast datasets to understand and generate human-like text. They operate using deep learning architectures, primarily transformers, which allow them to process sequential data efficiently. During training, these models learn statistical patterns and relationships between words by predicting the next token in a sequence. This process requires immense computational power and diverse data sources to capture linguistic nuances, factual knowledge, and reasoning abilities.\n\nInference involves the model generating responses to user prompts based on its learned parameters. When a user inputs text, the model calculates probabilities for subsequent tokens, selecting the most likely continuation to form coherent sentences. Typical capabilities include translation, summarization, coding assistance, creative writing, and complex problem-solving. However, limitations persist, such as hallucinations where models fabricate information, bias inherited from training data, and a lack of true understanding or consciousness.\n\nResponsible use is critical to mitigate risks. Developers must implement safeguards against harmful content, ensure transparency about AI origins, and continuously monitor for biases. Users should verify critical information and avoid relying solely on LLMs for high-stakes decisions. By acknowledging both the power and the pitfalls of these technologies, society can harness their potential while minimizing adverse impacts. Ethical guidelines and robust evaluation frameworks are essential for sustainable integration into various industries, ensuring that innovation proceeds with caution and integrity.",
+      "checks": {
+        "non_empty": true,
+        "minimum_length": true,
+        "expected_semantics": true,
+        "expected_order": true,
+        "no_bang_triplet": true,
+        "no_mojibake": true,
+        "no_control_characters": true,
+        "no_long_character_run": true,
+        "no_repeated_word_run": true,
+        "no_repeated_phrase": true
+      },
+      "passed": true,
+      "response": {
+        "id": "chatcmpl-859eedf62dbe576e",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": null,
+            "message": {
+              "content": "Large language models are advanced artificial intelligence systems trained on vast datasets to understand and generate human-like text. They operate using deep learning architectures, primarily transformers, which allow them to process sequential data efficiently. During training, these models learn statistical patterns and relationships between words by predicting the next token in a sequence. This process requires immense computational power and diverse data sources to capture linguistic nuances, factual knowledge, and reasoning abilities.\n\nInference involves the model generating responses to user prompts based on its learned parameters. When a user inputs text, the model calculates probabilities for subsequent tokens, selecting the most likely continuation to form coherent sentences. Typical capabilities include translation, summarization, coding assistance, creative writing, and complex problem-solving. However, limitations persist, such as hallucinations where models fabricate information, bias inherited from training data, and a lack of true understanding or consciousness.\n\nResponsible use is critical to mitigate risks. Developers must implement safeguards against harmful content, ensure transparency about AI origins, and continuously monitor for biases. Users should verify critical information and avoid relying solely on LLMs for high-stakes decisions. By acknowledging both the power and the pitfalls of these technologies, society can harness their potential while minimizing adverse impacts. Ethical guidelines and robust evaluation frameworks are essential for sustainable integration into various industries, ensuring that innovation proceeds with caution and integrity.",
+              "refusal": null,
+              "role": "assistant",
+              "annotations": null,
+              "audio": null,
+              "function_call": null,
+              "tool_calls": null,
+              "reasoning": null
+            },
+            "stop_reason": null,
+            "token_ids": null,
+            "routed_experts": null
+          }
+        ],
+        "created": 1793848699,
+        "model": "<SERVED_MODEL>",
+        "object": "chat.completion",
+        "metadata": null,
+        "moderation": null,
+        "service_tier": null,
+        "system_fingerprint": "vllm-0.32.0-c5be8031",
+        "usage": {
+          "completion_tokens": 269,
+          "prompt_tokens": 65,
+          "total_tokens": 334,
+          "completion_tokens_details": null,
+          "prompt_tokens_details": null
+        },
+        "prompt_logprobs": null,
+        "prompt_token_ids": null,
+        "prompt_text": null,
+        "kv_transfer_params": null,
+        "ec_transfer_params": null,
+        "metrics": null
+      }
+    }
+  ],
+  "summary": {
+    "request_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "passed": true
+  }
+}

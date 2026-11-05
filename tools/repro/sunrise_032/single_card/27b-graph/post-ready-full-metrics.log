@@ -1,0 +1,29 @@
+# Source: server.log
+# Original SHA256: eb05b52c0ffe25c3953eb14ccdbcf06f075026c15ef8de0638474212a04800fa
+# Post-ready raw byte offset: 277752 (0-based start inclusive)
+# Original tail byte count: 115188
+# Original tail SHA256: d527ec6f9e243ec2f8e61d9a10b44cbcd9e24de22ab3322849d6dbca87e12f12
+# All 22 native FULL metric rows after this boundary; Count sum=295. Capture rows excluded.
+# Redaction: process PID only.
+[source line 1731; bytes 283223:283371)] (APIServer pid=<redacted>) INFO 11-05 03:37:01 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 19    |
+[source line 1744; bytes 284765:284913)] (APIServer pid=<redacted>) INFO 11-05 03:37:11 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 44    |
+[source line 1756; bytes 286159:286307)] (APIServer pid=<redacted>) INFO 11-05 03:37:21 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 44    |
+[source line 1768; bytes 287553:287701)] (APIServer pid=<redacted>) INFO 11-05 03:37:31 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 43    |
+[source line 1780; bytes 288947:289095)] (APIServer pid=<redacted>) INFO 11-05 03:37:41 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 44    |
+[source line 1792; bytes 290341:290489)] (APIServer pid=<redacted>) INFO 11-05 03:37:51 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 44    |
+[source line 1973; bytes 308350:308498)] (APIServer pid=<redacted>) INFO 11-05 03:38:01 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 31    |
+[source line 2603; bytes 373127:373275)] (APIServer pid=<redacted>) INFO 11-05 03:38:31 [compilation/cuda_graph.py:123] | 8               | 8             | 0            | FULL         | 1     |
+[source line 2604; bytes 373275:373423)] (APIServer pid=<redacted>) INFO 11-05 03:38:31 [compilation/cuda_graph.py:123] | 6               | 8             | 2            | FULL         | 1     |
+[source line 2605; bytes 373423:373571)] (APIServer pid=<redacted>) INFO 11-05 03:38:31 [compilation/cuda_graph.py:123] | 4               | 4             | 0            | FULL         | 1     |
+[source line 2606; bytes 373571:373719)] (APIServer pid=<redacted>) INFO 11-05 03:38:31 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 1     |
+[source line 2623; bytes 375750:375898)] (APIServer pid=<redacted>) INFO 11-05 03:39:01 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 7     |
+[source line 2664; bytes 380712:380860)] (APIServer pid=<redacted>) INFO 11-05 03:39:51 [compilation/cuda_graph.py:123] | 3               | 4             | 1            | FULL         | 3     |
+[source line 2667; bytes 381156:381304)] (APIServer pid=<redacted>) INFO 11-05 03:39:51 [compilation/cuda_graph.py:123] | 8               | 8             | 0            | FULL         | 1     |
+[source line 2668; bytes 381304:381452)] (APIServer pid=<redacted>) INFO 11-05 03:39:51 [compilation/cuda_graph.py:123] | 4               | 4             | 0            | FULL         | 1     |
+[source line 2669; bytes 381452:381600)] (APIServer pid=<redacted>) INFO 11-05 03:39:51 [compilation/cuda_graph.py:123] | 2               | 2             | 0            | FULL         | 1     |
+[source line 2670; bytes 381600:381748)] (APIServer pid=<redacted>) INFO 11-05 03:39:51 [compilation/cuda_graph.py:123] | 1               | 1             | 0            | FULL         | 1     |
+[source line 2707; bytes 385721:385869)] (APIServer pid=<redacted>) INFO 11-05 03:40:21 [compilation/cuda_graph.py:123] | 3               | 4             | 1            | FULL         | 3     |
+[source line 2708; bytes 385869:386017)] (APIServer pid=<redacted>) INFO 11-05 03:40:21 [compilation/cuda_graph.py:123] | 2               | 2             | 0            | FULL         | 2     |
+[source line 2709; bytes 386017:386165)] (APIServer pid=<redacted>) INFO 11-05 03:40:21 [compilation/cuda_graph.py:123] | 8               | 8             | 0            | FULL         | 1     |
+[source line 2710; bytes 386165:386313)] (APIServer pid=<redacted>) INFO 11-05 03:40:21 [compilation/cuda_graph.py:123] | 7               | 8             | 1            | FULL         | 1     |
+[source line 2711; bytes 386313:386461)] (APIServer pid=<redacted>) INFO 11-05 03:40:21 [compilation/cuda_graph.py:123] | 4               | 4             | 0            | FULL         | 1     |

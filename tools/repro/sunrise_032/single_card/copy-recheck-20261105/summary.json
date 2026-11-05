@@ -1,0 +1,37 @@
+{
+  "date": "2026-11-05",
+  "executed_script_sha256": "c9c96bf53575811c0bdadaf8dc64e9dfe1ed602c228bd558f43af23320738d0f",
+  "results": [
+    {
+      "mask": "0",
+      "comparisons": 9,
+      "exact": 4,
+      "different": 5,
+      "input_exact": 0,
+      "weight_exact": 4,
+      "outer_exit": 1,
+      "worker_exit": 0,
+      "timeout": false,
+      "first_bad_runtime_address": "0xfff3bd3c8",
+      "source_host_unchanged": true
+    },
+    {
+      "mask": "2",
+      "comparisons": 9,
+      "exact": 4,
+      "different": 5,
+      "input_exact": 0,
+      "weight_exact": 4,
+      "outer_exit": 1,
+      "worker_exit": 0,
+      "timeout": false,
+      "first_bad_runtime_address": "0xfff3bd3c8",
+      "source_host_unchanged": true
+    }
+  ],
+  "reset": false,
+  "reboot": false,
+  "new_graph_or_collective_test": false,
+  "root_cause_established": false,
+  "tp2_gate_complete": false
+}

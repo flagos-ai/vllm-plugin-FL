@@ -1,0 +1,780 @@
+{
+  "schema_version": 1,
+  "kind": "independent_offline_verification",
+  "verified_at_utc": "2026-11-05T03:37:12.385704+00:00",
+  "scope": "27B TP1 eager supplement only; ineligible for the standard four-scenario TP2 matrix",
+  "passed": true,
+  "tp2_matrix_eligible": false,
+  "strict_tp2_configuration_rejection": "Actual server configuration differs: tensor_parallel_size",
+  "input_directory": "<RUN_ROOT>",
+  "offline_only": true,
+  "gpu_or_http_used": false,
+  "raw_files_unchanged": true,
+  "physical_device_from_owned_launch_script": 4,
+  "outer_status": 0,
+  "observed_source_commit_in_media_path": "7e0a83b5abe39bd6e7796ec9ea957003a5ae0dc4",
+  "source_commit_limit": "The shared case source/image bytes match this Git commit exactly; this is not a separate installed-wheel attestation.",
+  "original_shared_source_files_verified": 17,
+  "original_shared_source_sha256": {
+    "case_utils.py": "c8554aac662742a3f7aa1421044b017a2e60cece301fe92d5144b19e8a6bffd5",
+    "generate_images.py": "7251d0f01f1e8c605bd1df40e85e3d57a99010f289326806246e1a274742f84a",
+    "images/image_01.png": "4391e75143bee45b97ce0fa7a784fc929e29d17fddc3f6ad5842d9e16e1251c0",
+    "images/image_02.png": "8c06f3fca0eff7f564b87f05bcd918b3b082af3518906d20c5e0d331c105a561",
+    "images/image_03.png": "72b8c421ad39c3c39eb00417e5e4248e48db8026bc3534a8bc5b6016f93f6b5d",
+    "images/image_04.png": "3ff8052cf808cfda050cc80626cf9b6c627f001d153576ba2b5f4198fcf86a19",
+    "images/image_05.png": "197185d21a8fd09bc501381a5f0fac34be6799a4239b068435f8b039a1e15e5b",
+    "images/image_06.png": "9f80415980912348c1b2793eb48e6e05c6b1c90d66e7bbc056876ba650d844e4",
+    "images/image_07.png": "5ed527a8339091516c45fc0d0db82ab765db501d6857b6a294763efabbf437f3",
+    "images/image_08.png": "162dc14222db050f8f149b2601c742145612f26dc77af43e9311dcadd0169d6f",
+    "run_serve.sh": "8c00d35c2d2ee23eb9702cb88fb70ea74cab84e43eba9f260139c5c559acb702",
+    "run_serve_eager.sh": "b23fc53260331fb84fd02c6a9fa7c612892290eb43fbb9f5da7cd4f7903c363b",
+    "run_serve_graph.sh": "004ae208c2a9723a4fcf1d984ac423817f5df5983964a00d0af50d37ac1c6599",
+    "run_test.sh": "ecdb52f2e78a4918ab17f766c274e91e24dc174a29accd105eae17cd87bda3f7",
+    "test_image.py": "650ba67da5bd90834ddf4a2fa2aafd65cb41b02793881436cd214333ad5fa092",
+    "test_mix_text_image.py": "d69113a0069558a940bd1e45c230a4baff00c58467d261f72e9377d20f57f0fd",
+    "test_text.py": "a24193d43458cb699606bf1caeff3b45c28e4cf3bc9dc3583b67d19d99554b21"
+  },
+  "runner_source_git_blob_sha256": "385e306cc916eb93cad780c5ffac212bdb505d17b0a61f8d6957c98b1f338ccb",
+  "actual_configuration_from_native_startup_log": {
+    "tensor_parallel_size": 1,
+    "max_model_len": 8192,
+    "max_num_seqs": 8,
+    "kv_cache_memory_bytes": 4294967296,
+    "enforce_eager": true,
+    "use_v2_model_runner": true,
+    "compilation_mode": 0,
+    "compilation_backend": "eager",
+    "cudagraph_mode": "NONE",
+    "cudagraph_capture_sizes": []
+  },
+  "kv_cache_capacity": {
+    "token_capacities": [
+      39996
+    ],
+    "required_context": 8192
+  },
+  "shared_scenarios": 5,
+  "shared_requests": 26,
+  "recomputed_shared_quality_assertions": 260,
+  "scenarios": [
+    {
+      "scenario": "image_concurrent_8",
+      "original_input_exact_match": true,
+      "requests": 8,
+      "all_original_checks_recomputed_passed": true,
+      "outputs": [
+        {
+          "request_id": "image-01",
+          "text": "Red, Green, Blue, Yellow",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 8,
+            "prompt_tokens": 201,
+            "total_tokens": 209,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-02",
+          "text": "blue, yellow, red, green",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 8,
+            "prompt_tokens": 201,
+            "total_tokens": 209,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-03",
+          "text": "Circle, Square, Triangle",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 189,
+            "total_tokens": 195,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-04",
+          "text": "3",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 188,
+            "total_tokens": 190,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-05",
+          "text": "yes",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 1050,
+            "total_tokens": 1052,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-06",
+          "text": "square",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 189,
+            "total_tokens": 191,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-07",
+          "text": "yellow",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 187,
+            "total_tokens": 189,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-08",
+          "text": "4",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 189,
+            "total_tokens": 191,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "image_single",
+      "original_input_exact_match": true,
+      "requests": 1,
+      "all_original_checks_recomputed_passed": true,
+      "outputs": [
+        {
+          "request_id": "image-05",
+          "text": "HELLO\nVLLM",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 7,
+            "prompt_tokens": 1062,
+            "total_tokens": 1069,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "mixed_concurrent_8",
+      "original_input_exact_match": true,
+      "requests": 8,
+      "all_original_checks_recomputed_passed": true,
+      "outputs": [
+        {
+          "request_id": "text-01",
+          "text": "42",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 27,
+            "total_tokens": 30,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-02",
+          "text": "Paris",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 24,
+            "total_tokens": 26,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-03",
+          "text": "Cold",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 23,
+            "total_tokens": 25,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-04",
+          "text": "7",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 26,
+            "total_tokens": 28,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-01",
+          "text": "Red, Green, Blue, Yellow",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 8,
+            "prompt_tokens": 201,
+            "total_tokens": 209,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-02",
+          "text": "blue, yellow, red, green",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 8,
+            "prompt_tokens": 201,
+            "total_tokens": 209,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-03",
+          "text": "Circle, Square, Triangle",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 189,
+            "total_tokens": 195,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "image-04",
+          "text": "3",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 188,
+            "total_tokens": 190,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "text_concurrent_8",
+      "original_input_exact_match": true,
+      "requests": 8,
+      "all_original_checks_recomputed_passed": true,
+      "outputs": [
+        {
+          "request_id": "text-01",
+          "text": "42",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 27,
+            "total_tokens": 30,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-02",
+          "text": "Paris",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 24,
+            "total_tokens": 26,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-03",
+          "text": "Cold",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 23,
+            "total_tokens": 25,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-04",
+          "text": "7",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 26,
+            "total_tokens": 28,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-05",
+          "text": "H₂O",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 4,
+            "prompt_tokens": 25,
+            "total_tokens": 29,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-06",
+          "text": "Pacific Ocean",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 25,
+            "total_tokens": 28,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-07",
+          "text": "30",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 26,
+            "total_tokens": 29,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        },
+        {
+          "request_id": "text-08",
+          "text": "Green",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 27,
+            "total_tokens": 29,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        }
+      ]
+    },
+    {
+      "scenario": "text_single",
+      "original_input_exact_match": true,
+      "requests": 1,
+      "all_original_checks_recomputed_passed": true,
+      "outputs": [
+        {
+          "request_id": "text-llm-details",
+          "text": "Large language models are advanced artificial intelligence systems trained on vast datasets to understand and generate human-like text. They operate using deep learning architectures, primarily transformers, which allow them to process sequential data efficiently. During training, these models learn statistical patterns and relationships between words by predicting the next token in a sequence. This process requires immense computational power and diverse data sources to capture linguistic nuances, factual knowledge, and reasoning abilities.\n\nInference involves the model generating responses to user prompts based on its learned parameters. When a user inputs text, the model calculates probabilities for subsequent tokens, selecting the most likely continuation to form coherent sentences. Typical capabilities include translation, summarization, coding assistance, creative writing, and complex problem-solving. However, limitations persist, such as hallucinations where models fabricate information, bias inherited from training data, and a lack of true understanding or consciousness.\n\nResponsible use is critical to mitigate risks. Developers must implement safeguards against harmful content, ensure transparency about AI origins, and continuously monitor for biases. Users should verify critical information and avoid relying solely on LLMs for high-stakes decisions. By acknowledging both the power and the pitfalls of these technologies, society can harness their potential while minimizing adverse impacts. Ethical guidelines and robust evaluation frameworks are essential for sustainable integration into various industries, ensuring that innovation proceeds with caution and integrity.",
+          "finish_reason": "stop",
+          "usage": {
+            "completion_tokens": 269,
+            "prompt_tokens": 65,
+            "total_tokens": 334,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "recomputed_checks": {
+            "non_empty": true,
+            "minimum_length": true,
+            "expected_semantics": true,
+            "expected_order": true,
+            "no_bang_triplet": true,
+            "no_mojibake": true,
+            "no_control_characters": true,
+            "no_long_character_run": true,
+            "no_repeated_word_run": true,
+            "no_repeated_phrase": true
+          }
+        }
+      ]
+    }
+  ],
+  "supplemental_long_prefill": {
+    "measured_prompt_tokens": 4118,
+    "target_prompt_tokens": 4096,
+    "text": "violet maple 42",
+    "finish_reason": "stop",
+    "recomputed_checks": {
+      "non_empty": true,
+      "minimum_length": true,
+      "expected_semantics": true,
+      "expected_order": true,
+      "no_bang_triplet": true,
+      "no_mojibake": true,
+      "no_control_characters": true,
+      "no_long_character_run": true,
+      "no_repeated_word_run": true,
+      "no_repeated_phrase": true
+    },
+    "record_count": 178
+  },
+  "response_system_fingerprints": [
+    "vllm-0.32.0-c5be8031"
+  ],
+  "only_owned_cleanup_complete": true,
+  "device_snapshots": {
+    "before": {
+      "physical_device": 4,
+      "memory_bytes": 0,
+      "utilization_percent": 0,
+      "ecc": 0,
+      "no_visible_running_processes": true
+    },
+    "after": {
+      "physical_device": 4,
+      "memory_bytes": 0,
+      "utilization_percent": 0,
+      "ecc": 0,
+      "no_visible_running_processes": true
+    }
+  },
+  "input_file_sha256": {
+    "gate-results\\27b-eager-tp1-supplement\\effective-configuration.json": "ea0aa13a3ad41849524796c99dd937fdbe67ad18bc6c187f11bdf402d28c3935",
+    "gate-results\\27b-eager-tp1-supplement\\gate.log": "cdd3ec6faefd629ddfe3be7157eb20ef012a29b19646fe38aa21b617b8ae128c",
+    "gate-results\\27b-eager-tp1-supplement\\long-prefill.json": "1ac489b6f33331f0a897f43fe3041c1b2becb61494792ca09b3d3234438a7e9d",
+    "gate-results\\27b-eager-tp1-supplement\\requests\\Qwen3.6-27B\\port-48995\\image_concurrent_8.json": "1f2832bd4195d0dc46253b5dcc2234b7c47349b94d477c26de501f97aed434dc",
+    "gate-results\\27b-eager-tp1-supplement\\requests\\Qwen3.6-27B\\port-48995\\image_single.json": "f0e901cda7a55e21fbbf59f4d47c8375508c197d3523ddebeead2170d54b00c3",
+    "gate-results\\27b-eager-tp1-supplement\\requests\\Qwen3.6-27B\\port-48995\\mixed_concurrent_8.json": "946119e8f3dd6b4daa8c30ae3d516e271098d057c593a2e19ad9f3b0a7d7af64",
+    "gate-results\\27b-eager-tp1-supplement\\requests\\Qwen3.6-27B\\port-48995\\text_concurrent_8.json": "abd97a95e998f291e27b5168dd613109a2082f63e663e50a46736e575d32dee0",
+    "gate-results\\27b-eager-tp1-supplement\\requests\\Qwen3.6-27B\\port-48995\\text_single.json": "5b3f94b7886bb9ded4e54483d6f13cff306d42135425c25c8172d93c6678b758",
+    "gate-results\\27b-eager-tp1-supplement\\server.log": "abc5e83f3840c9c98b3692bdad2d6ad0aa6352db0e2a8c6a78a2c242848d197e",
+    "gate-results\\27b-eager-tp1-supplement\\server.pid": "9c8dd327d0f259b6facd68100f664c432101f783d31ac9b78b6e9eaf9fa786b8",
+    "gate-results\\27b-eager-tp1-supplement\\summary.json": "eb30b324b923d81278ff29bd6ea79174759619d1b0e650f52671654e2657e0af",
+    "27b-eager-tp1.status": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "27b-eager-tp1.before.txt": "7cdbd7ae660d0aaa85f645766d067601c583038c26009a50be20a497fbc9e772",
+    "27b-eager-tp1.after.txt": "ae5fc3a7a84ecdb72935315c4944195b5115d519f449d2faa241e55087290172"
+  }
+}

@@ -15,7 +15,7 @@
 
 [前后设备快照](device-state.json)中，物理4在两次运行前后均为0B/0%、ECC0，进程表无列出GPU进程；这只是表面状态，不是全机或peer健康证明。本轮未执行设备reset、整机重启或驱动变更。
 
-本轮更新前的TP1 smoke曾在早期4f安装中因缺少编译器元数据字段失败；切换为7e已有修复后，本轮TP1验证通过。此前归档的TP2 collective超时是在已有该修复的2489/ed99代码上发生，仍是有效失败证据；本次TP1成功不能宣布TP2问题已修复。27B的完整TP1补充gate另行验证，35B BF16权重超出单卡容量，未尝试加载；标准TP2矩阵仍未通过。
+本轮更新前的TP1 smoke曾在早期4f安装中因缺少编译器元数据字段失败；切换为7e已有修复后，本轮TP1验证通过。此前归档的TP2 collective超时是在已有该修复的2489/ed99代码上发生，仍是有效失败证据；本次TP1成功不能宣布TP2问题已修复。27B的完整TP1补充gate已在[eager](27b-eager/README.zh-CN.md)与[graph](27b-graph/README.zh-CN.md)均通过26/26+4118-token；graph有295次请求期原生FULL执行。35B BF16权重超出单卡容量，未尝试加载；标准TP2矩阵仍未通过。今天[0/2最终纯拷贝复查](copy-recheck-20261105/README.zh-CN.md)仍失败，GPU验证已结束，未reset/reboot。
 
 [provenance.json](provenance.json)记录各明确选定源文件的SHA256、bytes、原始UTF-8 splitlines 1-based行范围、脱敏和转换；[SHA256SUMS](SHA256SUMS)覆盖本目录交付文件。仅替换绝对模型/任务路径及进程PID，不保留SSH/IP、主机名、凭据或完整环境。
 

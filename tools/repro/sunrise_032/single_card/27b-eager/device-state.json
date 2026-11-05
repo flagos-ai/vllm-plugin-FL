@@ -1,0 +1,29 @@
+{
+  "outer_status": 0,
+  "only_owned_cleanup_complete": true,
+  "snapshots": [
+    {
+      "moment": "before",
+      "source_header_time": "Thu Nov 05 11:07:13 2026",
+      "physical_device": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0,
+      "no_listed_gpu_processes": true
+    },
+    {
+      "moment": "after",
+      "source_header_time": "Thu Nov 05 11:31:15 2026",
+      "physical_device": 4,
+      "model": "SR-SUN-S2-X1-PCIE",
+      "memory_used": "0B",
+      "memory_total": "62847MiB",
+      "utilization_percent": 0,
+      "uncorrected_ecc": 0,
+      "no_listed_gpu_processes": true
+    }
+  ],
+  "scope": "Physical4 TP1 eager supplement; surface tables do not prove whole-machine or peer health."
+}
