@@ -48,6 +48,24 @@ def rotary_embedding_ascend(
     Returns:
         Tuple of (embedded_query, embedded_key)
     """
+    if query.dtype == torch.float32:
+        cos_selected = cos[position_ids].unsqueeze(1)
+        sin_selected = sin[position_ids].unsqueeze(1)
+        if rotary_interleaved:
+            cos_selected = cos_selected.repeat_interleave(2, dim=-1)
+            sin_selected = sin_selected.repeat_interleave(2, dim=-1)
+
+            def rotate(x):
+                return torch.stack((-x[..., 1::2], x[..., ::2]), dim=-1).flatten(-2)
+        else:
+            cos_selected = torch.cat((cos_selected, cos_selected), dim=-1)
+            sin_selected = torch.cat((sin_selected, sin_selected), dim=-1)
+
+            def rotate(x):
+                first, second = x.chunk(2, dim=-1)
+                return torch.cat((-second, first), dim=-1)
+        return tuple(x * cos_selected + rotate(x) * sin_selected for x in (query, key))
+
     import torch_npu
 
     # query/key shape: [num_tokens, num_heads, rotary_dim]

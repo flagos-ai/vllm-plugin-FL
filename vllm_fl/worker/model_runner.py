@@ -5595,7 +5595,14 @@ class ModelRunnerFL(
             cudagraph_mode.has_full_cudagraphs()
             and not self.parallel_config.use_ubatching
         ):
-            self.model = GraphWrapper(
+            wrapper_type = GraphWrapper
+            if self.use_ascend_attention and self.dtype == torch.float32:
+                from vllm_fl.dispatch.backends.vendor.ascend.impl.fp32_attention import (
+                    FP32GraphWrapper,
+                )
+
+                wrapper_type = FP32GraphWrapper
+            self.model = wrapper_type(
                 self.model, self.vllm_config, runtime_mode=CUDAGraphMode.FULL,
                 graph_runtime=self.graph_runtime,
             )
