@@ -276,6 +276,7 @@ def parent_registration(monkeypatch, musa_patch, vendor_modules):
     ]
     namespace = {
         "os": os,
+        "logger": Mock(),
         # The extracted hooks still call the unrelated MetaX installer.
         "_install_metax_compat": Mock(),
         "_arm_cpu_platform": lambda: None,
