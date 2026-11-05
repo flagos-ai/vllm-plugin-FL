@@ -55,7 +55,7 @@ def get_operator(name):
 def is_available(name):
     from vllm.platforms import current_platform
 
-    if not current_platform.is_cuda() or not use_flaggems_op(name):
+    if not (current_platform.is_cuda() or current_platform.is_cuda_alike()) or not use_flaggems_op(name):
         return False
     if name == "mla_prefill_backend":
         return is_available("flash_attn_varlen_func")
