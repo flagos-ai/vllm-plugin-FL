@@ -149,11 +149,11 @@ class NpuMoEPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
             ids = ids.narrow(0, start, rows)
             probabilities = probabilities.narrow(0, start, rows)
             if facts.use_mc2:
-                result = dispatcher.dispatch(
+                result = self._mc2.dispatch(
                     hidden, ids, probabilities, mask.narrow(0, start, rows)
                 )
             else:
-                result = dispatcher.dispatch(hidden, ids, probabilities)
+                result = self._alltoall.dispatch(hidden, ids, probabilities)
             raw_counts = result.group_list
             if result.group_list_type == 0:
                 counts = torch.cat((raw_counts[:1], raw_counts[1:] - raw_counts[:-1]))
