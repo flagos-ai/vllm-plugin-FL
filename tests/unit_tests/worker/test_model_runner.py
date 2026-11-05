@@ -12,15 +12,18 @@ Note: These tests require vllm >= 0.13.0 with full installation.
 """
 
 from importlib import import_module
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 import torch
 
-# =============================================================================
+# ======================================================================        )
+
+
 # Test Utilities - Check availability before importing
-# =============================================================================
+# ======================================================================        )
 
 
 def has_vllm_model_runner():
@@ -105,9 +108,62 @@ def test_propose_draft_token_ids_rejects_unsupported_method(method):
         )
 
 
-# =============================================================================
+@pytest.mark.parametrize("disable_full", [False, True])
+@pytest.mark.parametrize("dp_size", [1, 2])
+def test_full_graph_exclusion_survives_dp_redispatch(
+    monkeypatch, disable_full, dp_size
+):
+    from vllm.config import CUDAGraphMode
+
+    module = import_module("vllm_fl.worker.model_runner")
+
+    dispatcher = MagicMock()
+    mode = CUDAGraphMode.NONE if disable_full else CUDAGraphMode.FULL
+    dispatcher.dispatch.return_value = (mode, SimpleNamespace(num_tokens=1))
+    parallel = SimpleNamespace(data_parallel_size=dp_size, data_parallel_rank=0)
+    runner = SimpleNamespace(
+        _is_uniform_decode=module.ModelRunnerFL._is_uniform_decode,
+        uniform_decode_query_len=1,
+        model_config=SimpleNamespace(is_encoder_decoder=False),
+        input_batch=SimpleNamespace(lora_id_to_lora_request={}),
+        _pad_for_sequence_parallelism=lambda tokens: tokens,
+        cudagraph_dispatcher=dispatcher,
+        compilation_config=SimpleNamespace(
+            pass_config=SimpleNamespace(enable_sp=False)
+        ),
+        parallel_config=parallel,
+        vllm_config=SimpleNamespace(
+            parallel_config=parallel,
+            observability_config=SimpleNamespace(cudagraph_metrics=False),
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "coordinate_batch_across_dp",
+        lambda **kwargs: (False, torch.ones(dp_size, dtype=torch.int32), mode.value),
+    )
+    result = module.ModelRunnerFL._determine_batch_execution_and_padding(
+        runner,
+        num_tokens=1,
+        num_reqs=1,
+        num_scheduled_tokens_np=np.array([1]),
+        max_num_scheduled_tokens=1,
+        use_cascade_attn=False,
+        disable_full=disable_full,
+    )
+    assert result[0] == mode
+    assert dispatcher.dispatch.call_count == dp_size
+    for call in dispatcher.dispatch.call_args_list:
+        assert call.kwargs["invalid_modes"] == (
+            {CUDAGraphMode.FULL} if disable_full else None
+        )
+
+
+# ======================================================================        )
+
+
 # Layer 1: ExecuteModelState Data Structure Tests
-# =============================================================================
+# ======================================================================        )
 
 
 class TestExecuteModelState:
@@ -179,9 +235,11 @@ class TestExecuteModelState:
         assert torch.equal(logits, mock_logits)
 
 
-# =============================================================================
+# ======================================================================        )
+
+
 # Layer 2: _get_cumsum_and_arange Algorithm Tests
-# =============================================================================
+# ======================================================================        )
 
 
 class TestGetCumsumAndArange:
@@ -258,9 +316,11 @@ class TestGetCumsumAndArange:
         assert cu_num_tokens.dtype == np.int64
 
 
-# =============================================================================
+# ======================================================================        )
+
+
 # Layer 2: _get_positions Routing Tests
-# =============================================================================
+# ======================================================================        )
 
 
 class TestGetPositions:
@@ -317,3 +377,54 @@ class TestGetPositions:
         expected = mock_model_runner.mrope_positions.gpu[:, indices]
         assert result.shape == (3, 4)
         torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize("dense_hybrid", [False, True])
+def test_cache_initialization_preserves_native_and_dense_binding(
+    monkeypatch, dense_hybrid
+):
+    from contextlib import nullcontext
+
+    module = import_module("vllm_fl.worker.model_runner")
+    hybrid = import_module("vllm_fl.kv_cache.ascend.hybrid")
+    config = object()
+    caches = {"layer": torch.zeros(1), "mamba": torch.zeros(1)}
+    mapped = {"layer": torch.ones(1)}
+    native_allocator = MagicMock(return_value=dict(caches))
+    dense_allocator = MagicMock(return_value=dict(caches))
+    mapper = MagicMock(return_value=mapped)
+    binder = MagicMock()
+    monkeypatch.setattr(module, "allocate_kv_cache", native_allocator)
+    monkeypatch.setattr(hybrid, "allocate_dense_hybrid_cache", dense_allocator)
+    monkeypatch.setattr(module, "map_kv_caches_to_kernel_blocks", mapper)
+    monkeypatch.setattr(module, "bind_kv_cache", binder)
+    runner = SimpleNamespace(
+        use_ascend_hybrid_cache=dense_hybrid,
+        device=torch.device("cpu"),
+        cache_config=SimpleNamespace(
+            cache_dtype="auto", get_resolved_kv_cache_layout=lambda: "layout"
+        ),
+        attn_groups=[[]],
+        shared_kv_cache_layers={"shared": "layer"},
+        model_config=SimpleNamespace(hf_config=SimpleNamespace(model_type="test")),
+        speculative_config=None,
+        compilation_config=SimpleNamespace(static_forward_context={}),
+        kv_caches=[],
+    )
+    config = SimpleNamespace(kv_cache_groups=[])
+    result = module.ModelRunnerFL.initialize_kv_cache_tensors(
+        runner, config, [1], nullcontext()
+    )
+    assert result["shared"] is result["layer"]
+    if dense_hybrid:
+        dense_allocator.assert_called_once_with(
+            config, runner.device, [[]], [1], "auto"
+        )
+        native_allocator.assert_not_called()
+        mapper.assert_not_called()
+        assert binder.call_args.kwargs["layer_kv_caches"] is result
+    else:
+        native_allocator.assert_called_once_with(config, runner.device, "layout", [1])
+        dense_allocator.assert_not_called()
+        mapper.assert_called_once_with(result, [])
+        assert binder.call_args.kwargs["layer_kv_caches"] is mapped

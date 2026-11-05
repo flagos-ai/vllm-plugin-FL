@@ -24,6 +24,26 @@ env -u VLLM_VENDOR python -m uv pip install \
     --no-deps \
     -e .
 
+# The 0.32 base image predates the harness's xdist unit pass (-n N); the
+# other pytest plugins (cov/json-report/timeout) are already present.
+# pip, not uv: the image's pip index is a reachable mirror while uv ignores
+# pip.conf and dies connecting to files.pythonhosted.org on some runners.
+python -m pip install --break-system-packages "pytest-xdist>=3.0.0"
+
+# The dsw-hosted runners cap /dev/shm at ~64MB regardless of --ipc=host /
+# --shm-size (verified: both flags reach docker create yet df still shows
+# 63M). tmpfs charges 4KB per POSIX semaphore file, and the unit pass's 16
+# xdist workers x flag_gems' ~1k libentry locks exceed ~15.7K files. The
+# job container is privileged, so remount a private 32g tmpfs — but ONLY
+# when the inherited shm is too small for the burst; hosts with a real
+# large shm (a100 pool) are left untouched.
+shm_kb=$(df -k --output=avail /dev/shm | tail -1 | tr -d ' ')
+if [ "${shm_kb:-0}" -lt 1048576 ] 2>/dev/null; then
+    mount -t tmpfs -o size=32g,mode=1777 tmpfs /dev/shm
+    echo "remounted /dev/shm at 32g (inherited avail was ${shm_kb}KB)"
+    df -h /dev/shm | tail -1
+fi
+
 python -I -B "$HERE/stack.py"
 
 python - <<'PY'

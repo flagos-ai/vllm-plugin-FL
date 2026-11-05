@@ -150,3 +150,32 @@ This environment has neither Docker nor a Docker socket. A real v0.32.0 Enflame
 CI image must be built, published and verified before its digest can replace the
 old pin. The strict version gate remains intact; no nonexistent image tag or
 relaxed version assertion is introduced to conceal the failure.
+
+## Live-base merge and unit regression verification (2026-11-05 UTC)
+
+Merged live `0.5.0-dev` commit `4b3a76a19de52af9981237e860c2177e73b9ee68`,
+not the stale base SHA returned by the pull-request API. Resolved the runner,
+platform registry, and worker-test conflicts while preserving the vLLM 0.32
+allocation API and adding an Ascend dense-cache adapter. Allocation tests cover
+nonzero offsets, multiple layers, shared backing, and native versus dense binding.
+
+Baseline model-config tests now explicitly isolate inherited platform/device
+environment variables, with positive tests retaining environment inheritance.
+S60 graph overrides and eager/graph CI selection remain enabled under the new
+stage schema. Removed conflict markers already present in the upstream Qwen3
+0.6B eager/graph YAMLs; both load through `ModelConfig.load` with utilization 0.7.
+
+Observed verification:
+
+- Original Enflame `check.sh` and `setup.sh`: exit 0.
+- Original `tests/run.py --platform enflame --device s60 --scope unit`:
+  overall PASSED, including the parallel and serial unit stages, exit 0.
+- Evidence: `/workspace/pr675-ci/local-enflame-20261105T034644Z/summary.json`,
+  `unit.log`, and `test-results-enflame.xml` in that same directory.
+- Targeted allocation/binding tests: 31 passed, 1 NPU-dependent skip.
+- Model configuration regression tests: 12 passed.
+- Ruff checks, formatting checks, and staged diff whitespace/conflict checks pass.
+
+These are local unit and environment-gate observations, not a new hardware
+precision or end-to-end claim. Existing services were not stopped and no
+unrelated large-model precision runs were launched.

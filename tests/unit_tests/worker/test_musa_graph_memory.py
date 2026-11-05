@@ -103,6 +103,7 @@ def profile_factory():
         runner = NS(
             device=device + ":0",
             vllm_config=object(),
+            graph_runtime=None,
             _init_minimal_kv_cache_for_profiling=Mock(),
             _create_encoder_cudagraph_manager=lambda: encoder,
             cudagraph_dispatcher=NS(
@@ -508,6 +509,7 @@ def pool_lifecycle(monkeypatch):
         runner = NS(
             device=device + ":0",
             vllm_config=config,
+            graph_runtime=None,
             compilation_config=config.compilation_config,
             _init_minimal_kv_cache_for_profiling=Mock(),
             _create_encoder_cudagraph_manager=lambda: None,

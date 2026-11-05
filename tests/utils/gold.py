@@ -10,13 +10,13 @@ Supports two comparison modes:
 
 Gold files are stored as JSON alongside test directories::
 
-    tests/e2e_tests/inference/gold/qwen3_4b_tp2_cuda.json
+    tests/e2e_tests/inference/gold/qwen3_4b_tp2_nvidia.json
     tests/e2e_tests/serving/gold/qwen2_5_0.5b_ascend.json
 
 Gold file schema::
 
     {
-        "platform": "cuda",
+        "platform": "nvidia",
         "device": "a100",
         "entries": [
             {

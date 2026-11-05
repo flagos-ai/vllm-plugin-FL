@@ -42,13 +42,10 @@ device_overrides:
       compilation_config:
         custom_ops: ["none", "+SiluAndMul"]
     serve:
-      # Cold S60 compilation and graph capture can exceed 240 readiness polls.
-      # Keep the existing 120-minute CI job limit as the outer deadline.
       startup_retries: 360
 
 env_defaults:
   VLLM_PLUGINS: "fl"
-  TOPS_VISIBLE_DEVICES: "2,3"
   VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "99999"
   TORCH_GCU_ENABLE_INT64_AND_UINT64: "1"
   ENABLE_I64_CHECK: "0"
@@ -58,16 +55,34 @@ env_defaults:
 s60:
   name: "s60"
   tests:
-    # S60 cold-cache compilation and graph capture precede both model cases.
+    e2e:
+      pr:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+        serving:
+          qwen3_6:
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+      nightly:
+        inference:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 27b_tp2_graph
+        serving:
+          qwen3_6:
+            - 35b_a3b_tp2_eager
+            - 35b_a3b_tp2_graph
+        concurrent:
+          qwen3_6:
+            - 27b_tp2_eager
+            - 35b_a3b_tp2_eager
     timeouts:
       e2e:
         inference: 120
         serving: 120
-    e2e:
-      inference:
-        qwen3_6: ["27b_tp2_eager", "27b_tp2_graph"]
-      serving:
-        qwen3_6: ["35b_a3b_tp2_eager", "35b_a3b_tp2_graph"]
+        concurrent: 120
     functional:
       include: "*"
       exclude: []
@@ -75,5 +90,11 @@ s60:
       include: "*"
       exclude: []
     benchmark:
-      enabled: true
-      smoke: ["serve"]
+      pr:
+        enabled: true
+        types:
+          - serve
+      nightly:
+        enabled: true
+        types:
+          - serve

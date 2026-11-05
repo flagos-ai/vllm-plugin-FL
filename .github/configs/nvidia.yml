@@ -15,7 +15,7 @@
 # CUDA Hardware Configuration
 # This file defines CI/CD settings for CUDA-based testing
 
-platform: cuda
+platform: nvidia
 
 # Docker image for this hardware
 ci_image: harbor.baai.ac.cn/plugin/vllm-plugin-fl:v0.32.0-cuda-ci@sha256:02b65e788e4ce2352ff1f41099744c33e196707b36a2e68461f78bfbe799a884
@@ -29,14 +29,18 @@ runner_labels:
   - gpu-8
   - cuda130
 
-# Keep the default runner and exercise native CUDA and FlagGems paths on Hopper.
-# An empty device selects the existing platform defaults.
-unit_devices: ["", h20]
+# Exercise native CUDA and FlagGems paths on Hopper via the new
+# flagcicd-h20 runner; the default-runner unit pass already runs inside
+# the functional job, so no empty-device leg here.
+unit_devices: [h20]
 
 # Device-specific runner labels override the platform defaults for E2E jobs.
 device_runner_labels:
   h20:
-    - vllm-plugin-ci-h20
+    - self-hosted
+    - Linux
+    - X64
+    - flagcicd-h20
 
 # Runner labels for this hardware (Platform hosted)
 # runner_labels:
@@ -49,10 +53,17 @@ container_volumes:
 # Container options (hardware-specific settings)
 # FlagTune has no H20 candidates for some Qwen3.6 matmul shapes yet. Keep
 # FlagGems enabled and fall back to its default Triton configs.
+# --shm-size: the dsw-hosted h20 runner does not honor --ipc=host (the
+# container gets a private 64MB /dev/shm); tmpfs charges 4KB per POSIX
+# semaphore file, so the unit pass's 16 xdist workers x flag_gems' ~1k
+# libentry locks fill it and every worker dies with SemLock ENOSPC. Where
+# --ipc=host DOES apply, docker ignores --shm-size, so this is a no-op
+# there (mirrors iluvatar.yml's --shm-size=64g).
 container_options: >-
   --privileged
   --gpus all
   --ipc=host
+  --shm-size 64g
   --hostname vllm-plugin-fl
   --user root
   --env VLLM_PLUGINS=fl
