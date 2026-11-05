@@ -95,7 +95,15 @@ from vllm.v1.worker.startup_plan import (
     maybe_apply_startup_plan,
     maybe_save_startup_plan,
 )
-from vllm.v1.worker.utils import is_residual_scattered_for_sp, request_memory
+from vllm.v1.worker.utils import request_memory
+
+try:
+    from vllm.v1.worker.utils import is_residual_scattered_for_sp
+except ImportError:
+    # vLLM >= 0.32 removed sequence parallelism (PassConfig.enable_sp),
+    # so the residual tensor is never sharded across TP ranks.
+    def is_residual_scattered_for_sp(vllm_config, num_input_tokens: int) -> bool:
+        return False
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 from vllm.v1.worker.workspace import init_workspace_manager
 
@@ -246,7 +254,14 @@ class WorkerFL(WorkerBase):
         self.profiler: Any | None = None
         self.profiler_config = vllm_config.profiler_config
 
-        self.use_v2_model_runner = vllm_config.use_v2_model_runner
+        # NOTE(thead-port): ModelRunnerFL only implements vLLM's *v1* runner.
+        # vLLM >= 0.32 defaults vllm_config.use_v2_model_runner to True and the
+        # v2 runner needs mapped UVA/CUDA-view buffers, which a
+        # VLLM_TARGET_DEVICE=empty build cannot provide.
+        # VllmConfig.use_v2_model_runner is a read-only property; the v2
+        # runner is not implemented in vllm-plugin-FL, so disable it through
+        # VLLM_USE_V2_MODEL_RUNNER=0 (see CI env) and pin the worker flag here.
+        self.use_v2_model_runner = False
         # pending non-blocking PP send work from the previous iteration
         self._pp_send_work: list[Handle] = []
 
@@ -836,13 +851,13 @@ class WorkerFL(WorkerBase):
         with self._maybe_get_memory_pool_context(tag="kv_cache"):
             self.model_runner.initialize_kv_cache(kv_cache_config)
 
-        if self.model_config.enable_return_routed_experts:
+        if getattr(self.model_config, "enable_return_routed_experts", False):
             self.model_runner.init_routed_experts_capturer()
 
         # Build KV-zero metadata outside the CuMem pool so the bookkeeping
         # GPU tensors (seg_addrs, block-id buffers) use the standard PyTorch
         # allocator and are not discarded during sleep/wake cycles.
-        if kv_cache_config.needs_kv_cache_zeroing and hasattr(
+        if getattr(kv_cache_config, "needs_kv_cache_zeroing", False) and hasattr(
             self.model_runner, "_init_kv_zero_meta"
         ):
             self.model_runner._init_kv_zero_meta()
@@ -1246,7 +1261,7 @@ class WorkerFL(WorkerBase):
 
         if (
             parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
+            and getattr(compilation_config.pass_config, "enable_sp", False)
             and forward_pass
         ):
             # currently only supported by V1 GPUModelRunner
@@ -1581,7 +1596,19 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
-    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    try:
+        from vllm.model_executor.determinism.batch_invariant import (
+            init_batch_invariance,
+        )
+    except ImportError:
+        try:
+            from vllm.model_executor.layers.batch_invariant import (
+                init_batch_invariance,
+            )
+        except ImportError:  # vLLM >= 0.32 moved/removed the module
+
+            def init_batch_invariance(*args, **kwargs):
+                return None
 
     init_batch_invariance()
     override_envs_for_eplb(
