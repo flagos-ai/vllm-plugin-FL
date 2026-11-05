@@ -313,12 +313,11 @@ def register():
 
     vLLM 0.28 calls this entry point from
     ``resolve_current_platform_cls_qualname()`` inside a bare
-    ``except Exception: pass``, so optional patches are installed best-effort:
-    a patch module that only ships on some plugin revisions degrades to a debug
-    log instead of aborting platform registration.  Required steps -- the
-    vendor allocator bridge and the custom-ops registry -- are called directly:
-    masking their failures would leave the platform half installed, and the
-    MetaX/Kunlunxin tests assert those errors surface.
+    ``except Exception: pass``, so an escaping exception is not a traceback: it
+    silently pins ``current_platform`` to ``UnspecifiedPlatform`` for the life
+    of the process.  Optional patches are therefore installed best-effort.  The
+    one required step -- the vendor allocator bridge -- still surfaces, because
+    an unusable allocator cannot be papered over at registration time.
     """
     global _register_in_progress
     if _register_in_progress:
@@ -327,15 +326,26 @@ def register():
         # and register() itself can trigger a nested platform resolution).
         return _PLATFORM_QUALNAME
     _register_in_progress = True
+    required_failure = False
     try:
         _preload_platform_class()
         _run_best_effort(
             _install_xpu_device_guard,
             _install_fla_relocation_alias,
         )
-        # Required: an unusable vendor allocator bridge must surface to the
-        # caller instead of leaving a half-registered platform behind.
-        _init_vendor_device()
+        # The MUSA allocator bridge is a hard precondition: when the vendor
+        # patch cannot rebind torch.accelerator, the engine fails later with an
+        # opaque allocator assert, so that failure must reach the caller instead
+        # of degrading to a log line like the optional hooks do.
+        try:
+            _init_vendor_device()
+        except Exception as _vendor_exc:
+            if isinstance(_vendor_exc, RuntimeError) and (
+                "initialize MUSA accelerator allocator APIs" in str(_vendor_exc)
+            ):
+                required_failure = True
+                raise
+            logger.warning("[vllm_fl] vendor device hooks failed: %s", _vendor_exc)
 
         # PlatformFL is accelerator-shaped. For the standard FlagGems ARM target,
         # preserve vLLM's stock CPU platform and install kernels in register_model().
@@ -348,10 +358,8 @@ def register():
             logger.info("[vllm_fl] ARM64 CPU target -> vLLM CPU platform")
             return arm_cpu_platform
 
-        # Required: custom ops back every later kernel call, so a failure here
-        # is a hard error rather than an optional patch that can be skipped.
-        _patch_custom_ops()
         _run_best_effort(
+            _patch_custom_ops,
             _patch_flash_attn_import,
             _patch_transformers_compat,
         )
@@ -394,12 +402,13 @@ def register():
         _force_adopt_platform()
         return _PLATFORM_QUALNAME
     except Exception as _register_exc:
-        # Optional patches have already degraded to debug logs; whatever
-        # reaches this point is a required step (vendor allocator bridge or
-        # the ops registry).  Log it for diagnosability and let it surface --
-        # vLLM's callers must not end up with a half-registered platform.
         logger.warning("[vllm_fl] register() failed: %s", _register_exc)
-        raise
+        if required_failure:
+            raise
+        # Optional hooks have already degraded to log lines; report the
+        # platform anyway so a missing patch cannot pin current_platform to
+        # UnspecifiedPlatform for the life of the process.
+        return _PLATFORM_QUALNAME
     finally:
         _register_in_progress = False
 

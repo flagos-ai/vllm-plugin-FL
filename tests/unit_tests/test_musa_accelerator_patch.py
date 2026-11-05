@@ -329,14 +329,11 @@ def test_parent_cleanup_preserves_original_startup_error(
     startup_error = RuntimeError("engine startup failed before model construction")
     namespace["_patch_custom_ops"].side_effect = startup_error
 
-    # Registration can fail before model initialization; its allocator bridge
-    # must already be present so cleanup cannot replace the original error.
-    with pytest.raises(RuntimeError) as caught:
-        try:
-            namespace["register"]()
-        finally:
-            torch.accelerator.empty_cache()
-    assert caught.value is startup_error
+    # Registration degrades an optional ops-registry failure instead of
+    # aborting; the allocator bridge must already be installed so that the
+    # caller-side cleanup cannot replace the original error.
+    assert namespace["register"]() == "vllm_fl.platform.PlatformFL"
+    torch.accelerator.empty_cache()
     musa.empty_cache.assert_called_once_with()
     assert torch.accelerator.get_memory_info is musa.mem_get_info
     namespace["_patch_flash_attn_import"].assert_not_called()
