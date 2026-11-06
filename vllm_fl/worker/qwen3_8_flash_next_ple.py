@@ -142,7 +142,7 @@ class _AsyncNgramContext:
 
 
 class _HostInputBuffers:
-    def __init__(self, model, config, max_num_reqs, max_num_tokens, device):
+    def __init__(self, model, config, max_num_reqs, device):
         self.config = config
         self.context_len = int(config.ngram_size) - 1
         self.query_start_loc = torch.zeros(
@@ -187,7 +187,7 @@ class _HostInputBuffers:
             self.context.fill_(int(self.config.eos_token_id))
             self.context[:nreq].copy_(context)
         for layer in self.layers:
-            uva = getattr(getattr(layer, "ple_embedding", None), "_uva_lookup", None)
+            uva = getattr(layer.ple_embedding, "_uva_lookup", None)
             if uva is not None:
                 layer.prepare_host_lookup(
                     input_ids,
@@ -219,7 +219,6 @@ def _mrv1_prepare(runner):
             runner.get_model(),
             config,
             runner.max_num_reqs,
-            runner.max_num_tokens,
             runner.device,
         )
         runner._qwen38_host_inputs = buffers
@@ -260,10 +259,12 @@ def _mrv1_prepare(runner):
         runner.vllm_config.additional_config.get("qwen38_ple_cpu_metadata", False)
     )
     lookup_ids = runner.input_ids.gpu
+    lookup_mode = runner.vllm_config.additional_config.get(
+        "qwen38_ngram_mode", "sharded"
+    )
     if (
         use_cpu_metadata
-        and runner.vllm_config.additional_config.get("qwen38_ngram_mode", "sharded")
-        not in {"uva_broadcast", "uva_sharded", "uva_auto"}
+        and lookup_mode not in {"uva_broadcast", "uva_sharded", "uva_auto"}
         and runner.speculative_config is None
         and nreq > 0
         and not getattr(runner, "enable_prompt_embeds", False)
@@ -275,7 +276,7 @@ def _mrv1_prepare(runner):
         # Decode/draft IDs can be updated only on GPU, so retain that source.
         lookup_ids = runner.input_ids.cpu
     prepare_options = {"use_cpu_metadata": use_cpu_metadata}
-    if runner.vllm_config.additional_config.get("qwen38_ngram_mode", "sharded") in {
+    if lookup_mode in {
         "uva_broadcast",
         "uva_sharded",
         "uva_auto",

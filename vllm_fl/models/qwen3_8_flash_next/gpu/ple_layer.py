@@ -4,7 +4,6 @@
 
 import math
 from collections.abc import Iterable, Sequence
-from functools import wraps
 
 import torch
 import torch.nn.functional as F
@@ -28,11 +27,11 @@ from vllm.v1.attention.backends.utils import NULL_BLOCK_ID
 
 from ..common.hyperconnection import GroupedGemmaRMSNorm
 from ..common.ple import (
-    _PLE_LAYER_PRIME,
-    _SPLITMIX_GAMMA,
-    _nth_prime_after,
-    _splitmix64,
+    _PLE_HASH_BUFFER_NAMES,
     copy_ple_embedding_shard_,
+    initialize_ple_hash_buffers,
+    validate_ple_embedding_shard,
+    validate_ple_embedding_weights,
 )
 from ..common.short_conv_attn import (
     PleShortConvAttentionBackend,
@@ -52,52 +51,6 @@ class Qwen3_8FlashNextPLEGroupedNorm(GroupedGemmaRMSNorm):
     @property
     def eps(self) -> float:
         return self.variance_epsilon
-
-
-def validate_ple_embedding_weights(load_weights):
-    """Validate row coverage at the outermost model-loading boundary.
-
-    AutoWeightsLoader groups *adjacent* module prefixes, so one PLE table can
-    receive multiple calls as checkpoint files are streamed. Nested loaders
-    participate in the same transaction; a direct embedding call is also a
-    complete transaction. Only bookkeeping is retained, never checkpoint tensors.
-    """
-
-    @wraps(load_weights)
-    def checked_load(model, weights, *args, **kwargs):
-        owners = [
-            module
-            for module in model.modules()
-            if (
-                isinstance(module, Qwen3_8FlashNextNGramEmbedding)
-                or getattr(module, "_uva_lookup", None) is not None
-            )
-            and getattr(module, "_ple_embedding_load_state", None) is None
-        ]
-        for module in owners:
-            module._ple_embedding_load_state = {
-                "shards": set(),
-                "full": False,
-                "buffers": set(),
-            }
-        try:
-            loaded = load_weights(model, weights, *args, **kwargs)
-            for module in owners:
-                if getattr(module, "_uva_lookup", None) is not None:
-                    module._finish_host_lookup_loading()
-                    continue
-                seen = module._ple_embedding_load_state["shards"]
-                missing = sorted(module._required_embedding_shards() - seen)
-                if seen and missing:
-                    raise ValueError(
-                        f"Missing PLE embedding shards for this TP rank: {missing}"
-                    )
-            return loaded
-        finally:
-            for module in owners:
-                del module._ple_embedding_load_state
-
-    return checked_load
 
 
 class Qwen3_8FlashNextNGramEmbedding(nn.Module):
@@ -132,46 +85,13 @@ class Qwen3_8FlashNextNGramEmbedding(nn.Module):
         if self.split_ngram_parts <= 0:
             raise ValueError("split_ngram_parts must be positive")
 
-        max_multiplier = ((1 << 63) - 1) // self.unigram_vocab_size
-        half_bound = max(1, max_multiplier // 2)
-        seed = int(getattr(config, "seed", 1234))
-        base_seed = seed + _PLE_LAYER_PRIME * ple_dense_layer_id
-        multipliers = []
-        for index in range(self.ngram_size):
-            value = base_seed + _SPLITMIX_GAMMA * (index + 1)
-            multipliers.append(2 * (_splitmix64(value) % half_bound) + 1)
-        self.register_buffer(
-            "layer_multipliers",
-            torch.tensor(multipliers, dtype=torch.long),
-            persistent=True,
+        padded_vocab_size = initialize_ple_hash_buffers(
+            self, config, ple_dense_layer_id
         )
-
-        ngram_vocab_size_base = int(config.ngram_vocab_size_base)
-        sizes: list[int] = []
-        offsets: list[int] = []
-        offset = 0
-        for local_head in range(self.ngram_heads):
-            global_head = ple_dense_layer_id * self.ngram_heads + local_head
-            size = _nth_prime_after(ngram_vocab_size_base - 1, global_head + 1)
-            sizes.append(size)
-            offsets.append(offset)
-            offset += size
-        self.register_buffer(
-            "ngram_heads_vocab_sizes",
-            torch.tensor(sizes, dtype=torch.long),
-            persistent=True,
-        )
-        self.register_buffer(
-            "ngram_heads_offsets",
-            torch.tensor(offsets, dtype=torch.long),
-            persistent=True,
-        )
-        divisor = int(config.make_ngram_vocab_size_divisible_by)
-        padded_vocab_size = ((offset + divisor - 1) // divisor) * divisor
         self.ngram_embedding = VocabParallelEmbedding(
             padded_vocab_size,
             self.head_dim,
-            padding_size=divisor,
+            padding_size=int(config.make_ngram_vocab_size_divisible_by),
             prefix=f"{prefix}.ngram_embedding",
         )
         self.register_buffer(
@@ -275,9 +195,7 @@ class Qwen3_8FlashNextNGramEmbedding(nn.Module):
         """Load hash buffers and checkpoint-split embedding rows."""
 
         persistent_buffers = {
-            "layer_multipliers": self.layer_multipliers,
-            "ngram_heads_offsets": self.ngram_heads_offsets,
-            "ngram_heads_vocab_sizes": self.ngram_heads_vocab_sizes,
+            name: getattr(self, name) for name in _PLE_HASH_BUFFER_NAMES
         }
         loaded: set[str] = set()
         regular_weights: list[tuple[str, torch.Tensor]] = []
@@ -319,21 +237,9 @@ class Qwen3_8FlashNextNGramEmbedding(nn.Module):
                         f"split_ngram_parts={self.split_ngram_parts}"
                     )
                 embedding = self.ngram_embedding
-                shard_size = (
-                    embedding.org_vocab_size + self.split_ngram_parts - 1
-                ) // self.split_ngram_parts
-                checkpoint_start = shard_index * shard_size
-                expected_rows = max(
-                    0,
-                    min(shard_size, embedding.org_vocab_size - checkpoint_start),
+                checkpoint_start = validate_ple_embedding_shard(
+                    embedding, loaded_weight, shard_index, self.split_ngram_parts
                 )
-                expected_shape = (expected_rows, embedding.embedding_dim)
-                if tuple(loaded_weight.shape) != expected_shape:
-                    raise ValueError(
-                        f"Shape mismatch for PLE embedding shard {shard_index}: "
-                        f"expected {expected_shape}, got "
-                        f"{tuple(loaded_weight.shape)}"
-                    )
                 copy_ple_embedding_shard_(
                     embedding.weight.data,
                     loaded_weight,

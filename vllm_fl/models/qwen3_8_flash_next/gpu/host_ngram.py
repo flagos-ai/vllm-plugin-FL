@@ -17,11 +17,11 @@ from vllm.distributed import (
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
 from ..common.ple import (
-    _PLE_LAYER_PRIME,
-    _SPLITMIX_GAMMA,
-    _nth_prime_after,
-    _splitmix64,
+    _PLE_HASH_BUFFER_NAMES,
     copy_ple_embedding_shard_,
+    initialize_ple_hash_buffers,
+    validate_ple_embedding_shard,
+    validate_ple_embedding_weights,
 )
 from vllm_fl.models.qwen3_8_flash_next.config import Qwen3_8FlashNextTextConfig
 
@@ -210,34 +210,10 @@ class HostNGramEmbedding(nn.Module):
                 self._shared_lookup = SharedNgramBuffer(
                     group, max_total_tokens, embedding_dim, params_dtype
                 )
-        bound = max(1, (((1 << 63) - 1) // self.unigram_vocab_size) // 2)
-        seed = (
-            int(getattr(config, "seed", 1234)) + _PLE_LAYER_PRIME * ple_dense_layer_id
+        self._host_buffer_names = _PLE_HASH_BUFFER_NAMES
+        padded_vocab_size = initialize_ple_hash_buffers(
+            self, config, ple_dense_layer_id, device="cpu"
         )
-        multipliers = [
-            2 * (_splitmix64(seed + _SPLITMIX_GAMMA * (i + 1)) % bound) + 1
-            for i in range(self.ngram_size)
-        ]
-        sizes, offsets, total = [], [], 0
-        for local_head in range(self.ngram_heads):
-            global_head = ple_dense_layer_id * self.ngram_heads + local_head
-            size = _nth_prime_after(
-                int(config.ngram_vocab_size_base) - 1, global_head + 1
-            )
-            sizes.append(size)
-            offsets.append(total)
-            total += size
-        self._host_buffer_names = (
-            "layer_multipliers",
-            "ngram_heads_vocab_sizes",
-            "ngram_heads_offsets",
-        )
-        for name, values in zip(self._host_buffer_names, (multipliers, sizes, offsets)):
-            self.register_buffer(
-                name, torch.tensor(values, dtype=torch.int64, device="cpu")
-            )
-        divisor = int(config.make_ngram_vocab_size_divisible_by)
-        padded_vocab_size = ((total + divisor - 1) // divisor) * divisor
         device = torch.empty(0).device
         if uva_mode:
             from .uva_ngram import UvaNgramLookup
@@ -297,6 +273,25 @@ class HostNGramEmbedding(nn.Module):
         finally:
             self._buffers.update(host)
 
+    def _host_hash_inputs(self, input_ids, query_start_loc, ngram_context, capacity):
+        starts = query_start_loc.detach().to(device="cpu", dtype=torch.int64)
+        nreq, actual = starts.numel() - 1, int(starts[-1])
+        if nreq > self.max_num_reqs or not 0 <= actual <= capacity:
+            raise ValueError("PLE request/token count exceeds fixed buffers")
+        ids = input_ids[:actual].detach().to(device="cpu", dtype=torch.int64)
+        context = ngram_context[:nreq].detach().to(device="cpu", dtype=torch.int64)
+        hashed = compute_ngram_ids_cpu(
+            ids,
+            starts,
+            context,
+            multipliers=self.layer_multipliers,
+            vocab_sizes=self.ngram_heads_vocab_sizes,
+            vocab_offsets=self.ngram_heads_offsets,
+            heads_per_ngram=self.heads_per_ngram,
+            eos_token_id=self.eos_token_id,
+        )
+        return hashed, actual
+
     def prepare_host_lookup(
         self,
         input_ids: torch.Tensor,
@@ -335,26 +330,13 @@ class HostNGramEmbedding(nn.Module):
             # previous asynchronous H2D copy is still reading it.
             self._copy_event.synchronize()
         self.prepared_embeddings.zero_()
-        if self._shared_lookup is not None and not dummy:
+        actual = 0
+        shared = self._shared_lookup is not None
+        if shared and not dummy:
 
             def produce(rows):
-                starts = query_start_loc.detach().to(device="cpu", dtype=torch.int64)
-                nreq, actual = starts.numel() - 1, int(starts[-1])
-                if nreq > self.max_num_reqs or not 0 <= actual <= capacity:
-                    raise ValueError("PLE request/token count exceeds fixed buffers")
-                ids = input_ids[:actual].detach().to(device="cpu", dtype=torch.int64)
-                context = (
-                    ngram_context[:nreq].detach().to(device="cpu", dtype=torch.int64)
-                )
-                hashed = compute_ngram_ids_cpu(
-                    ids,
-                    starts,
-                    context,
-                    multipliers=self.layer_multipliers,
-                    vocab_sizes=self.ngram_heads_vocab_sizes,
-                    vocab_offsets=self.ngram_heads_offsets,
-                    heads_per_ngram=self.heads_per_ngram,
-                    eos_token_id=self.eos_token_id,
+                hashed, actual = self._host_hash_inputs(
+                    input_ids, query_start_loc, ngram_context, capacity
                 )
                 if actual:
                     torch.index_select(
@@ -366,42 +348,13 @@ class HostNGramEmbedding(nn.Module):
                 return actual
 
             actual = self._shared_lookup.exchange(
-                produce,
-                self._host_stage.reshape(-1, self.embedding_dim),
-                capacity,
+                produce, self._host_stage.reshape(-1, self.embedding_dim), capacity
             )
             if actual:
-                target = self.prepared_embeddings[:actual]
-                target.copy_(
-                    self._host_stage[:actual].reshape(actual, self.embedding_dim),
-                    non_blocking=True,
-                )
-                if target.device.type != "cpu":
-                    if self._copy_event is None:
-                        self._copy_event = torch.get_device_module(
-                            target.device.type
-                        ).Event()
-                    self._copy_event.record()
-            self._prepared = True
-            self._prepared_capacity = capacity
-            return
-        if not dummy:
-            starts = query_start_loc.detach().to(device="cpu", dtype=torch.int64)
-            nreq = starts.numel() - 1
-            actual = int(starts[-1])
-            if nreq > self.max_num_reqs or actual > capacity or actual < 0:
-                raise ValueError("PLE request/token count exceeds its fixed buffers")
-            ids = input_ids[:actual].detach().to(device="cpu", dtype=torch.int64)
-            context = ngram_context[:nreq].detach().to(device="cpu", dtype=torch.int64)
-            hashed = compute_ngram_ids_cpu(
-                ids,
-                starts,
-                context,
-                multipliers=self.layer_multipliers,
-                vocab_sizes=self.ngram_heads_vocab_sizes,
-                vocab_offsets=self.ngram_heads_offsets,
-                heads_per_ngram=self.heads_per_ngram,
-                eos_token_id=self.eos_token_id,
+                source = self._host_stage[:actual].reshape(actual, self.embedding_dim)
+        elif not dummy:
+            hashed, actual = self._host_hash_inputs(
+                input_ids, query_start_loc, ngram_context, capacity
             )
             if actual:
                 shard = self.ngram_embedding.shard_indices
@@ -411,18 +364,16 @@ class HostNGramEmbedding(nn.Module):
                 stage = self._host_stage[:actual].reshape(-1, self.head_dim)
                 torch.index_select(self.ngram_embedding.weight, 0, safe, out=stage)
                 stage.masked_fill_(~owned.unsqueeze(-1), 0)
-                target = self.prepared_embeddings[:actual]
-                target.copy_(
-                    stage.reshape(actual, self.embedding_dim), non_blocking=True
-                )
-                if target.device.type != "cpu":
-                    if self._copy_event is None:
-                        self._copy_event = torch.get_device_module(
-                            target.device
-                        ).Event()
-                    self._copy_event.record()
-                if self.tp_size > 1:
-                    target.copy_(tensor_model_parallel_all_reduce(target))
+                source = stage.reshape(actual, self.embedding_dim)
+        if actual:
+            target = self.prepared_embeddings[:actual]
+            target.copy_(source, non_blocking=True)
+            if target.device.type != "cpu":
+                if self._copy_event is None:
+                    self._copy_event = torch.get_device_module(target.device).Event()
+                self._copy_event.record()
+            if not shared and self.tp_size > 1:
+                target.copy_(tensor_model_parallel_all_reduce(target))
         self._prepared = True
         self._prepared_capacity = capacity
 
@@ -443,39 +394,9 @@ class HostNGramEmbedding(nn.Module):
             raise ValueError("PLE forward exceeds its prepared token capacity")
         return self.prepared_embeddings[:count]
 
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        """Participate in the outer checkpoint-loading transaction.
-
-        Native loaders may revisit this embedding for separate file groups.
-        Direct calls own a complete transaction; model calls retain coverage
-        until the existing outermost PLE validation boundary.
-        """
-        uva = getattr(self, "_uva_lookup", None)
-        own = (
-            uva is not None and getattr(self, "_ple_embedding_load_state", None) is None
-        )
-        if own:
-            self._ple_embedding_load_state = {
-                "shards": set(),
-                "full": False,
-                "buffers": set(),
-            }
-        try:
-            loaded = self._load_weight_fragments(weights)
-            if own:
-                self._finish_host_lookup_loading()
-            return loaded
-        finally:
-            if own:
-                del self._ple_embedding_load_state
-
     def _finish_host_lookup_loading(self):
         state = self._ple_embedding_load_state
-        expected = {
-            "layer_multipliers",
-            "ngram_heads_vocab_sizes",
-            "ngram_heads_offsets",
-        }
+        expected = set(_PLE_HASH_BUFFER_NAMES)
         if (
             state["shards"] != set(range(self.split_ngram_parts))
             or not expected <= state["buffers"]
@@ -487,15 +408,12 @@ class HostNGramEmbedding(nn.Module):
             self.ngram_heads_offsets,
         )
 
-    def _load_weight_fragments(
-        self, weights: Iterable[tuple[str, torch.Tensor]]
-    ) -> set[str]:
-        """Load one streamed group, retaining only coverage metadata."""
+    @validate_ple_embedding_weights
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        """Load hash buffers and shards within the PLE coverage transaction."""
 
         persistent_buffers = {
-            "layer_multipliers": self.layer_multipliers,
-            "ngram_heads_offsets": self.ngram_heads_offsets,
-            "ngram_heads_vocab_sizes": self.ngram_heads_vocab_sizes,
+            name: getattr(self, name) for name in _PLE_HASH_BUFFER_NAMES
         }
         loaded: set[str] = set()
         state = getattr(self, "_ple_embedding_load_state", None)
@@ -534,21 +452,9 @@ class HostNGramEmbedding(nn.Module):
                     raise ValueError(f"Duplicate PLE checkpoint shard {shard_index}")
                 seen_shards.add(shard_index)
                 embedding = self.ngram_embedding
-                shard_size = (
-                    embedding.org_vocab_size + self.split_ngram_parts - 1
-                ) // self.split_ngram_parts
-                checkpoint_start = shard_index * shard_size
-                expected_rows = max(
-                    0,
-                    min(shard_size, embedding.org_vocab_size - checkpoint_start),
+                checkpoint_start = validate_ple_embedding_shard(
+                    embedding, loaded_weight, shard_index, self.split_ngram_parts
                 )
-                expected_shape = (expected_rows, embedding.embedding_dim)
-                if tuple(loaded_weight.shape) != expected_shape:
-                    raise ValueError(
-                        f"Shape mismatch for PLE embedding shard {shard_index}: "
-                        f"expected {expected_shape}, got "
-                        f"{tuple(loaded_weight.shape)}"
-                    )
                 if (
                     self._shared_lookup is not None
                     or getattr(self, "_uva_lookup", None) is not None

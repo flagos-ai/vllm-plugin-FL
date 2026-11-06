@@ -41,10 +41,11 @@ def spec_decode_counts(query_lengths, is_prefilling, num_spec):
 
 
 def _uses_ple(runner):
+    if not is_metax():
+        return False
     config = runner.model_config.hf_text_config
     return bool(
-        is_metax()
-        and getattr(config, "supports_qwen38_ngram_context", False)
+        getattr(config, "supports_qwen38_ngram_context", False)
         and getattr(config, "ple_layer_ids", ())
     )
 
@@ -80,7 +81,7 @@ def install_qwen38_runner_hooks(runner_cls):
 
                 install_qwen38_mtp_runtime_compat()
         result = original_init(self, *args, **kwargs)
-        if is_metax() and _uses_ple(self):
+        if _uses_ple(self):
             install_sampling_contract(self.input_batch)
         return result
 
@@ -88,8 +89,7 @@ def install_qwen38_runner_hooks(runner_cls):
     def model_kwargs(self, *args, **kwargs):
         result = original_kwargs(self, *args, **kwargs)
         if _uses_ple(self):
-            if is_metax():
-                install_sampling_contract(self.input_batch)
+            install_sampling_contract(self.input_batch)
             result.update(_mrv1_prepare(self))
         return result
 
@@ -147,9 +147,10 @@ def install_qwen38_runner_hooks(runner_cls):
         @wraps(original_dispatch)
         def dispatch(self, *args, **kwargs):
             # Native KV setup can replace InputBatch after runner construction.
-            if is_metax() and _uses_ple(self):
+            uses_ple = _uses_ple(self)
+            if uses_ple:
                 install_sampling_contract(self.input_batch)
-            if _uses_ple(self) and getattr(self, "_qwen38_dummy_tokens", None) is None:
+            if uses_ple and getattr(self, "_qwen38_dummy_tokens", None) is None:
                 nreq = kwargs.get("num_reqs", args[1] if len(args) > 1 else 0)
                 batch = self.input_batch
                 if np.any(
